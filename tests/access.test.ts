@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
+import { availablePort, captureOutput, stopChild, waitForHealth, type TestChild } from './testServer'
 
 /**
  * Integration tests for the canvas access model, run against the REAL server:
@@ -12,11 +13,11 @@ import WebSocket from 'ws'
  * No mocks — this is the same surface a self-hoster exposes to the internet.
  */
 
-const PORT = 4977
-const BASE = `http://localhost:${PORT}`
+let port = 0
+let base = ''
 const ROOT = process.cwd() // vitest runs from the repo root
 
-let server: ChildProcess
+let server: TestChild
 let dataDir: string
 
 /** Minimal cookie-jar client: better-auth drives everything through cookies. */
@@ -28,7 +29,7 @@ class Client {
   }
 
   async req(pathname: string, init: RequestInit = {}): Promise<Response> {
-    const res = await fetch(BASE + pathname, {
+    const res = await fetch(base + pathname, {
       ...init,
       headers: { 'Content-Type': 'application/json', Cookie: this.header(), ...init.headers },
       redirect: 'manual',
@@ -66,7 +67,7 @@ class Client {
   /** join a canvas room over WS; resolves with how the server answered */
   joinWs(canvasId: string): Promise<{ kind: 'init' } | { kind: 'closed'; code: number }> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://localhost:${PORT}/ws`, { headers: { Cookie: this.header() } })
+      const ws = new WebSocket(`ws://localhost:${port}/ws`, { headers: { Cookie: this.header() } })
       const timer = setTimeout(() => {
         ws.terminate()
         reject(new Error('ws join timed out'))
@@ -91,27 +92,19 @@ class Client {
 }
 
 beforeAll(async () => {
+  port = await availablePort()
+  base = `http://127.0.0.1:${port}`
   dataDir = mkdtempSync(path.join(tmpdir(), 'doop-test-'))
   server = spawn(path.join(ROOT, 'node_modules', '.bin', 'tsx'), [path.join(ROOT, 'server', 'index.ts')], {
     cwd: dataDir, // PGlite persists to <cwd>/data — isolated per run
-    env: { ...process.env, PORT: String(PORT), NODE_ENV: undefined as unknown as string },
-    stdio: 'ignore',
+    env: { ...process.env, PORT: String(port), NODE_ENV: undefined as unknown as string },
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
-  const deadline = Date.now() + 60_000
-  for (;;) {
-    try {
-      const res = await fetch(`${BASE}/healthz`)
-      if (res.ok) break
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) throw new Error('server did not boot within 60s')
-    await new Promise((r) => setTimeout(r, 500))
-  }
+  await waitForHealth(server, `${base}/healthz`, captureOutput(server))
 }, 70_000)
 
-afterAll(() => {
-  server?.kill()
+afterAll(async () => {
+  await stopChild(server)
   rmSync(dataDir, { recursive: true, force: true })
 })
 
@@ -124,8 +117,8 @@ describe('canvas access model', () => {
   let invitedId: string
 
   it('rejects unauthenticated API and MCP calls', async () => {
-    expect((await fetch(`${BASE}/api/canvases`)).status).toBe(401)
-    const mcp = await fetch(`${BASE}/mcp`, { method: 'POST', body: '{}' })
+    expect((await fetch(`${base}/api/canvases`)).status).toBe(401)
+    const mcp = await fetch(`${base}/mcp`, { method: 'POST', body: '{}' })
     expect(mcp.status).toBe(401)
     expect(mcp.headers.get('www-authenticate')).toContain('oauth-protected-resource')
   })
