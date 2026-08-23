@@ -142,6 +142,18 @@ describe('canvas access model', () => {
     frameId = frame.id
   })
 
+  it('rejects non-numeric frame geometry on create', async () => {
+    const res = await owner.post(`/api/canvases/${canvasId}/frames`, { name: 'Invalid', width: '640' })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects null frame values on update', async () => {
+    const res = await owner.patch(`/api/frames/${frameId}`, { x: null })
+    expect(res.status).toBe(400)
+    const current = await (await owner.get(`/api/canvases/${canvasId}`)).json()
+    expect(current.frames.find((f: { id: string }) => f.id === frameId)?.x).toBe(120)
+  })
+
   it('is private by default: non-owners are blocked everywhere', async () => {
     expect((await stranger.get(`/api/canvases/${canvasId}`)).status).toBe(403)
     expect((await stranger.post(`/api/canvases/${canvasId}/frames`, { name: 'x' })).status).toBe(403)

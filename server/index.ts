@@ -7,6 +7,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
+import { z } from 'zod'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas } from './access.ts'
@@ -31,6 +32,15 @@ import { colorFor } from '../shared/types.ts'
 import type { ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = Number(process.env.PORT || 4400)
+
+const frameNumbers = {
+  x: z.number().finite().optional(),
+  y: z.number().finite().optional(),
+  width: z.number().finite().optional(),
+  height: z.number().finite().optional(),
+}
+const createFrameBody = z.object({ name: z.string().optional(), html: z.string().optional(), ...frameNumbers })
+const updateFrameBody = z.object({ name: z.string().optional(), html: z.string().optional(), ...frameNumbers })
 
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
@@ -709,21 +719,23 @@ app.post(
 
 app.post('/api/canvases/:id/frames', (req, res) => {
   if (!requireCanvas(req, res, req.params.id)) return
-  const { name, x, y, width, height, html } = req.body ?? {}
+  const parsed = createFrameBody.safeParse(req.body ?? {})
+  if (!parsed.success)
+    return res.status(400).json({ error: 'invalid frame payload', fields: parsed.error.flatten().fieldErrors })
+  const { name, x, y, width, height, html } = parsed.data
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const frame = actions.createFrame(req.params.id, { name: String(name || 'Frame'), x, y, width, height, html }, actor)
+  const frame = actions.createFrame(req.params.id, { name: name || 'Frame', x, y, width, height, html }, actor)
   if (!frame) return res.status(404).json({ error: 'canvas not found' })
   res.json(frame)
 })
 
 app.patch('/api/frames/:id', (req, res) => {
   if (!requireFrame(req, res, req.params.id)) return
-  const { actor: _ignored, ...patch } = req.body ?? {}
+  const parsed = updateFrameBody.safeParse(req.body ?? {})
+  if (!parsed.success)
+    return res.status(400).json({ error: 'invalid frame payload', fields: parsed.error.flatten().fieldErrors })
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const allowed = ['name', 'x', 'y', 'width', 'height', 'html'] as const
-  const clean: Record<string, unknown> = {}
-  for (const k of allowed) if (patch[k] !== undefined) clean[k] = patch[k]
-  const frame = actions.updateFrame(req.params.id, clean, actor)
+  const frame = actions.updateFrame(req.params.id, parsed.data, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
   res.json(frame)
 })
