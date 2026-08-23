@@ -48,19 +48,22 @@ export function Onboarding() {
   }, [tasks, presences])
 
   useEffect(() => {
-    setProgress((prev) => {
-      const next: Progress = {
-        ...prev,
-        watched: prev.watched || live.watched,
-        connected: prev.connected || live.connected,
-        tasked: prev.tasked || live.tasked,
-      }
-      if (next.watched !== prev.watched || next.connected !== prev.connected || next.tasked !== prev.tasked) {
-        save(next)
-        return next
-      }
-      return prev
-    })
+    const timer = window.setTimeout(() => {
+      setProgress((prev) => {
+        const next: Progress = {
+          ...prev,
+          watched: prev.watched || live.watched,
+          connected: prev.connected || live.connected,
+          tasked: prev.tasked || live.tasked,
+        }
+        if (next.watched !== prev.watched || next.connected !== prev.connected || next.tasked !== prev.tasked) {
+          save(next)
+          return next
+        }
+        return prev
+      })
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [live.watched, live.connected, live.tasked])
 
   if (progress.dismissed) return null

@@ -25,7 +25,7 @@ export function Inspector({ frame }: { frame: Frame }) {
       setDraft(frame.html)
       setSaveState('idle')
     }
-  }, [frame.id])
+  }, [frame.id, frame.html])
 
   /* pull in remote html updates unless the user is typing */
   useEffect(() => {
@@ -33,7 +33,7 @@ export function Inspector({ frame }: { frame: Frame }) {
       setDraft(frame.html)
       setSaveState('idle')
     }
-  }, [frame.html])
+  }, [draft, frame.html])
 
   function onHtmlChange(value: string) {
     setDraft(value)
@@ -149,29 +149,26 @@ export function Inspector({ frame }: { frame: Frame }) {
 }
 
 function NumberlessInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
-  const [draft, setDraft] = useState(value)
-  useEffect(() => setDraft(value), [value])
   return (
     <input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => draft !== value && onCommit(draft)}
+      key={value}
+      defaultValue={value}
+      onBlur={(e) => e.currentTarget.value !== value && onCommit(e.currentTarget.value)}
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
     />
   )
 }
 
 function NumInput({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
-  const [draft, setDraft] = useState(String(value))
-  useEffect(() => setDraft(String(value)), [value])
   return (
     <input
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        const n = Math.round(Number(draft))
+      key={value}
+      defaultValue={String(value)}
+      onBlur={(e) => {
+        const input = e.currentTarget
+        const n = Math.round(Number(input.value))
         if (!Number.isNaN(n) && n !== value) onCommit(n)
-        else setDraft(String(value))
+        else input.value = String(value)
       }}
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
     />

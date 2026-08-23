@@ -330,8 +330,18 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
 
   /* deselecting the frame ends the edit session */
   useEffect(() => {
-    if (!selected && editing) exitEdit()
-  }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (selected || !editing) return
+    const id = window.requestAnimationFrame(() => {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: false }, '*')
+      setEditing(false)
+      setActiveHit(null)
+      setComposing(false)
+      activeSelRef.current = null
+      setSuspendPost(true)
+      window.setTimeout(() => setSuspendPost(false), 500)
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [selected, editing])
 
   /* When zoomed past 100%, render the iframe k× larger and counter-scale it,
      with a matching CSS zoom inside — same layout, k× the raster density, so

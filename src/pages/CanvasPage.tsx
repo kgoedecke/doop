@@ -64,7 +64,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       select(null)
       clearHistory()
     }
-  }, [canvasId])
+  }, [canvasId, select])
 
   /* broadcast which frame I'm focused on */
   useEffect(() => {

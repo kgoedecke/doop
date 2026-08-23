@@ -12,8 +12,7 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      /* pre-existing patterns; tighten to error once the effects are refactored */
-      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/set-state-in-effect': 'error',
     },
   },
   {

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../lib/store'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
@@ -64,16 +64,6 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     }
   }, [])
 
-  /* zoom-to-fit once the canvas arrives — unless the URL deep-links a frame */
-  useEffect(() => {
-    if (!canvas || fitted.current) return
-    fitted.current = true
-    const focusId = new URLSearchParams(location.search).get('frame')
-    const target = focusId ? canvas.frames.find((f) => f.id === focusId) : null
-    if (target) focusFrame(target)
-    else fit()
-  }, [canvas])
-
   /* a fly-to request (prompt bar): glide the camera to the frame instead of
      snapping, so the new design streams in on-screen with a bit of drama.
      The request object stays in the store; only a NEW request re-runs this. */
@@ -110,23 +100,26 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   }, [flyTo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* center one frame in the viewport and select it (shared frame links) */
-  function focusFrame(f: { id: string; x: number; y: number; width: number; height: number }) {
-    const el = ref.current
-    if (!el) return
-    const pad = 80
-    const zoom = Math.min(
-      MAX_ZOOM,
-      Math.max(MIN_ZOOM, Math.min((el.clientWidth - pad * 2) / f.width, (el.clientHeight - pad * 2) / f.height, 1)),
-    )
-    setViewport({
-      x: (el.clientWidth - f.width * zoom) / 2 - f.x * zoom,
-      y: (el.clientHeight - f.height * zoom) / 2 - f.y * zoom,
-      zoom,
-    })
-    select(f.id)
-  }
+  const focusFrame = useCallback(
+    (f: { id: string; x: number; y: number; width: number; height: number }) => {
+      const el = ref.current
+      if (!el) return
+      const pad = 80
+      const zoom = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, Math.min((el.clientWidth - pad * 2) / f.width, (el.clientHeight - pad * 2) / f.height, 1)),
+      )
+      setViewport({
+        x: (el.clientWidth - f.width * zoom) / 2 - f.x * zoom,
+        y: (el.clientHeight - f.height * zoom) / 2 - f.y * zoom,
+        zoom,
+      })
+      select(f.id)
+    },
+    [select, setViewport],
+  )
 
-  function fit() {
+  const fit = useCallback(() => {
     const el = ref.current
     const c = useStore.getState().canvas
     if (!el || !c) return
@@ -151,7 +144,17 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
       y: (h - (maxY - minY) * zoom) / 2 - minY * zoom,
       zoom,
     })
-  }
+  }, [setViewport])
+
+  /* zoom-to-fit once the canvas arrives — unless the URL deep-links a frame */
+  useEffect(() => {
+    if (!canvas || fitted.current) return
+    fitted.current = true
+    const focusId = new URLSearchParams(location.search).get('frame')
+    const target = focusId ? canvas.frames.find((f) => f.id === focusId) : null
+    if (target) focusFrame(target)
+    else fit()
+  }, [canvas, fit, focusFrame])
 
   /* wheel: pan / pinch-zoom — needs a non-passive listener. Trackpads fire
      wheel events faster than the display refreshes, so deltas accumulate and
