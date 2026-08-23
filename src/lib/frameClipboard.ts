@@ -19,14 +19,43 @@ export function copyFrame(frame: Frame) {
   localStorage.setItem(CLIP_KEY, JSON.stringify(clip))
 }
 
-export function hasFrameClip(): boolean {
-  return !!localStorage.getItem(CLIP_KEY)
+function readFrameClip(): FrameClip | null {
+  const raw = localStorage.getItem(CLIP_KEY)
+  if (!raw) return null
+
+  try {
+    const clip: unknown = JSON.parse(raw)
+    if (
+      !clip ||
+      typeof clip !== 'object' ||
+      !('name' in clip) ||
+      typeof clip.name !== 'string' ||
+      !('html' in clip) ||
+      typeof clip.html !== 'string' ||
+      !('width' in clip) ||
+      typeof clip.width !== 'number' ||
+      !Number.isFinite(clip.width) ||
+      clip.width <= 0 ||
+      !('height' in clip) ||
+      typeof clip.height !== 'number' ||
+      !Number.isFinite(clip.height) ||
+      clip.height <= 0
+    ) {
+      throw new Error('invalid frame clipboard data')
+    }
+    return clip as FrameClip
+  } catch {
+    localStorage.removeItem(CLIP_KEY)
+    return null
+  }
 }
 
-function createFromClip(canvasId: string, x: number, y: number) {
-  const raw = localStorage.getItem(CLIP_KEY)
-  if (!raw) return
-  const clip: FrameClip = JSON.parse(raw)
+export function hasFrameClip(): boolean {
+  return readFrameClip() !== null
+}
+
+function createFromClip(canvasId: string, x: number, y: number, clip = readFrameClip()) {
+  if (!clip) return
   api
     .createFrame(canvasId, {
       name: clip.name,
@@ -57,14 +86,14 @@ export function pasteFrameAtScreen(canvasId: string, clientX: number, clientY: n
 
 /** Paste centered in the current view (keyboard ⌘V). */
 export function pasteFrameCentered(canvasId: string) {
-  const raw = localStorage.getItem(CLIP_KEY)
-  if (!raw) return
-  const clip: FrameClip = JSON.parse(raw)
+  const clip = readFrameClip()
+  if (!clip) return
   const vp = useStore.getState().viewport
   createFromClip(
     canvasId,
     (window.innerWidth / 2 - vp.x) / vp.zoom - clip.width / 2,
     (window.innerHeight / 2 - vp.y) / vp.zoom - clip.height / 2,
+    clip,
   )
 }
 
