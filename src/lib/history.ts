@@ -69,9 +69,13 @@ export function recordCreate(frame: Frame) {
 }
 
 /** Delete a frame through the API, remembering enough to bring it back. */
-export function deleteFrameTracked(frame: Frame) {
-  push({ type: 'delete', frameId: frame.id, snapshot: snapshot(frame) })
-  api.deleteFrame(frame.id).catch(console.error)
+export async function deleteFrameTracked(frame: Frame) {
+  try {
+    await api.deleteFrame(frame.id)
+    push({ type: 'delete', frameId: frame.id, snapshot: snapshot(frame) })
+  } catch (err) {
+    console.error('delete failed', err)
+  }
 }
 
 /* undoing a delete recreates the frame under a fresh server id — every
