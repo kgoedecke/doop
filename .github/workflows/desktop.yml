@@ -1,0 +1,36 @@
+# Builds the desktop shell (unsigned) so shell changes are validated in CI.
+# Product changes never require a desktop build — the shell loads the hosted
+# site — so this only runs when desktop/ itself changes, or on demand.
+name: Desktop
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - run: npm ci
+        working-directory: desktop
+      # .app only: unsigned (ad-hoc), dmg packaging is left to local/signed
+      # release builds where a Developer ID is available
+      - run: npx tauri build --bundles app
+        working-directory: desktop
+      - name: Zip app bundle
+        run: ditto -c -k --keepParent desktop/src-tauri/target/release/bundle/macos/doop.app doop-macos-unsigned.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doop-macos-unsigned
+          path: doop-macos-unsigned.zip

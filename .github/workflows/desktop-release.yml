@@ -1,0 +1,66 @@
+# Builds the distributable desktop DMG (universal: Apple Silicon + Intel).
+# - Tag `desktop-v*` → builds and attaches the DMG to a GitHub Release.
+# - Manual dispatch → builds and uploads the DMG as a workflow artifact.
+# - PRs touching this file → same as dispatch, so the pipeline stays validated.
+#
+# Signing + notarization happen automatically once the APPLE_* repo secrets
+# exist (see desktop/README.md). Until then the DMG is unsigned: it works,
+# but downloaders must approve it in System Settings → Privacy & Security.
+name: Desktop Release
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+  pull_request:
+    paths: ['.github/workflows/desktop-release.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  dmg-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - run: npm ci
+        working-directory: desktop
+      - name: Build DMG (signed + notarized when APPLE_* secrets are set)
+        working-directory: desktop
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # unset secrets take precedence over none at all: tauri treats an
+          # empty env var as configured and fails, so drop the empty ones
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
+          if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "::warning::APPLE_* secrets not set — building an UNSIGNED dmg (System Settings → Open Anyway required)"
+          fi
+          npx tauri build --target universal-apple-darwin --bundles dmg
+      - name: Attach DMG to release
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+      - name: Upload DMG artifact
+        if: "!startsWith(github.ref, 'refs/tags/desktop-v')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: doop-dmg
+          path: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
