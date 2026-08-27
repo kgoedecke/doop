@@ -23,16 +23,14 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
-      - run: npm ci
+      - run: bun install --frozen-lockfile
         working-directory: desktop
       - name: Build DMG (signed + notarized when APPLE_* secrets are set)
         working-directory: desktop
@@ -52,7 +50,7 @@ jobs:
           if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
             echo "::warning::APPLE_* secrets not set — building an UNSIGNED dmg (System Settings → Open Anyway required)"
           fi
-          npx tauri build --target universal-apple-darwin --bundles dmg
+          bunx tauri build --target universal-apple-darwin --bundles dmg
       - name: Attach DMG to release
         if: startsWith(github.ref, 'refs/tags/desktop-v')
         uses: softprops/action-gh-release@v2

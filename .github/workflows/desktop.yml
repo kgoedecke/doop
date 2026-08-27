@@ -15,18 +15,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
-      - run: npm ci
+      - run: bun install --frozen-lockfile
         working-directory: desktop
       # .app only: unsigned (ad-hoc), dmg packaging is left to local/signed
       # release builds where a Developer ID is available
-      - run: npx tauri build --bundles app
+      - run: bunx tauri build --bundles app
         working-directory: desktop
       - name: Zip app bundle
         run: ditto -c -k --keepParent desktop/src-tauri/target/release/bundle/macos/doop.app doop-macos-unsigned.zip

@@ -9,7 +9,7 @@ The released DMG talks to the hosted service at doop.design. Self-hosting
 your own doop instance? Build a shell for it without patching anything:
 
 ```sh
-DOOP_APP_URL=https://doop.example.com npm run build
+DOOP_APP_URL=https://doop.example.com bun run build
 ```
 
 The URL is baked in at compile time (`src-tauri/src/main.rs`); the in-shell
@@ -22,19 +22,19 @@ in the `init` message).
 
 ## Develop
 
-Requires the [Rust toolchain](https://rustup.rs) plus this directory's npm deps:
+Requires the [Rust toolchain](https://rustup.rs) plus this directory's deps (via [bun](https://bun.sh)):
 
 ```sh
-npm install
-npm run dev    # opens the shell against the local vite server (localhost:4300)
+bun install
+bun run dev    # opens the shell against the local vite server (localhost:4300)
 ```
 
-`npm run dev` expects `npm run dev` in the repo root to be running.
+`bun run dev` expects the dev server in the repo root to be running.
 
 ## Build
 
 ```sh
-npm run build  # .app + .dmg in src-tauri/target/release/bundle/
+bun run build  # .app + .dmg in src-tauri/target/release/bundle/
 ```
 
 CI (`.github/workflows/desktop.yml`) builds an unsigned .app on every PR that
