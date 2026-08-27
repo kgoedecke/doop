@@ -1,6 +1,6 @@
 [package]
 name = "doop-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop shell for doop — a thin webview over the hosted app"
 edition = "2021"
 

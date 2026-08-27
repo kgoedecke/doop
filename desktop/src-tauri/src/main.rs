@@ -38,7 +38,14 @@ fn main() {
                     None => format!("www.{host}"),
                 });
             }
+            // Marks every page loaded in the shell so the app's analytics can
+            // tell desktop sessions from browser ones (src/lib/posthog.ts).
+            let desktop_marker = format!(
+                "window.__DOOP_DESKTOP__ = '{}';",
+                app.package_info().version
+            );
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(entry.parse()?))
+                .initialization_script(&desktop_marker)
                 .title("doop")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)

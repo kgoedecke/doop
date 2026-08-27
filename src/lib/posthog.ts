@@ -60,6 +60,16 @@ if (!key) {
     disable_session_recording: localStorage.getItem(NO_REPLAY_KEY) === '1',
     defaults: '2026-05-30',
   })
+
+  /* The desktop shell injects window.__DOOP_DESKTOP__ = "<shell version>"
+     before any page script runs (desktop/src-tauri/src/main.rs). Register it
+     as super properties so every event and recording from the shell is
+     segmentable in PostHog. The webview's storage is isolated from the
+     user's browsers, so the flag can never leak onto ordinary web sessions. */
+  const desktopVersion = (window as { __DOOP_DESKTOP__?: unknown }).__DOOP_DESKTOP__
+  if (typeof desktopVersion === 'string') {
+    posthog.register({ desktop_app: true, desktop_app_version: desktopVersion })
+  }
 }
 
 /** Call on every identify: stops replay for internal accounts, (re)starts it
