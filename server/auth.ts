@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { eq, inArray, or, isNull, ne, and, sql } from 'drizzle-orm'
 import { admin, mcp } from 'better-auth/plugins'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
@@ -29,6 +30,12 @@ export const PUBLIC_ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:43
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
   .split(',')
   .map((s) => s.trim().toLowerCase())
+  .filter(Boolean)
+
+/** Empty means public signup; otherwise only exact email domains may register. */
+const SIGNUP_EMAIL_DOMAINS = (process.env.SIGNUP_EMAIL_DOMAINS || '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase().replace(/^@/, ''))
   .filter(Boolean)
 
 /**
@@ -118,6 +125,18 @@ function buildAuth() {
           return origin ? [origin] : []
         },
     database: drizzleAdapter(db, { provider: 'pg', schema: authSchema }),
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== '/sign-up/email' || !SIGNUP_EMAIL_DOMAINS.length) return
+        const email = typeof ctx.body?.email === 'string' ? ctx.body.email.toLowerCase() : ''
+        const domain = email.slice(email.lastIndexOf('@') + 1)
+        if (!SIGNUP_EMAIL_DOMAINS.includes(domain)) {
+          throw new APIError('BAD_REQUEST', {
+            message: `Sign up is restricted to ${SIGNUP_EMAIL_DOMAINS.map((d) => `@${d}`).join(', ')} email addresses.`,
+          })
+        }
+      }),
+    },
     /* Verification is enforced only when an SMTP mailer is configured —
        without one (dev, tiny self-hosts) signup stays open and every email
        is printed to the server log instead, links included — and only when

@@ -228,6 +228,10 @@ With SMTP configured (`SMTP_HOST` etc. — see [.env.example](.env.example)), si
 verification and "forgot password" sends real reset links. Without it, signup stays open and every
 email is printed to the server log, links included — the flows still work in development.
 
+Set `SIGNUP_EMAIL_DOMAINS=jointhetroops.com` to restrict new accounts to one email domain, or use a
+comma-separated list for several domains. Matching is case-insensitive and exact; existing accounts
+are unaffected. Leave it unset to keep public signup open.
+
 Set `REQUIRE_EMAIL_VERIFICATION=false` to let people in before they verify — the link is still
 emailed, it just stops gating sign-in. Admin promotion is deliberately not part of that trade:
 `ADMIN_EMAILS` only ever promotes a verified address (see below).
