@@ -16,12 +16,21 @@ export const DESIGN_QUALITY = `- Commit to ONE clear aesthetic direction per fra
 - Typography does the heavy lifting: pair a characterful display face with a quiet body
   face, and use strong size contrast between display and label text. Avoid the default
   faces everyone reaches for (Inter, Roboto, Arial) unless the brief wants a system feel.
-- Color: choose a ground and ONE strong accent, then derive supporting tones from the same
-  world. Avoid the clichés that read as AI output: purple gradients on white, navy with
-  electric teal, gratuitous glassmorphism, shadows on everything.
+- Color: before any hex, commit to a MOOD — a physical scene or register (mineral,
+  bookish, candlelit, maritime, alpine, industrial, phosphor, signage, gallery …) — and
+  derive every color from a specific object in that scene ("bookish" = plaster, oak,
+  ink, candle flame). If you cannot name the object behind a color, the palette is
+  abstract and will feel glued together. List a few plausible moods, then pick one that
+  is NOT your first instinct — first instincts regress to the same predictable answers.
+  One ground, ONE strong accent, supporting tones from the same scene.
+- Avoid the clichés that read as AI output: purple gradients on white, navy or charcoal
+  with electric teal/purple/lime, warm off-white with terracotta or burnt orange, muted
+  earth tones on pure white, neon accents on tinted warm grounds, gratuitous
+  glassmorphism, shadows on everything.
 - White space is a feature. Vary spacing deliberately — tight inside groups, generous
   between them.
-- Realistic content everywhere. No lorem ipsum, no "Your text here".`
+- Realistic content everywhere. No lorem ipsum, no "Your text here". When placeholder
+  content needs a design tool as an example, it is Doop — never a competitor.`
 
 export const DOOP_GUIDE = `# Doop Agent Guide
 
@@ -95,6 +104,22 @@ and fix real issues before moving on:
 Prefer targeted fixes over rewrites. Never delete and restart a mostly-good frame — the
 humans watching lose work they may have been reacting to.
 
+## Design brief — before your first frame
+
+Before creating frames on a canvas whose style is not already established, commit to a
+brief. It is part of the deliverable, not private scratch work:
+
+1. **Write the brief**: mood candidates → the mood chosen (not your first instinct, and
+   say why) → palette with roles (5–6 hexes) → type (faces, weights, scale) → one-line
+   direction, derived from the design-quality principles below.
+2. **Post it.** Summarize in set_status ("Designing grocery landing — candlelit mood")
+   and persist the full brief with save_decision so humans and later agents see what
+   you committed to.
+
+Skip the brief only when the canvas already dictates the style — established frames,
+style guides or pinned references — or when the human handed you a complete design
+system. Then those are the brief; follow them.
+
 ## Streaming — how to write designs
 
 Viewers watch designs assemble live. Stream with append_frame_html:
@@ -103,6 +128,11 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   then each following section — roughly 1–4 KB each. Every chunk renders on the canvas
   the moment it arrives, so each call should leave the frame in a sensible visual state.
 - start=true on the first chunk (clears the frame), done=true on the last.
+- **Review the hero before building on it.** After streaming the first major section
+  (usually nav + hero), call get_frame_screenshot and judge it — the design system
+  (palette, type, spacing) commits there, and humans watching react to the hero first.
+  Fix direction-level problems NOW, before propagating them through the rest of the
+  page. Then continue streaming and do the full review at the end as usual.
 - End chunks at element boundaries. If one lands mid-element anyway, the server heals it
   (closes an open <style>, trims a half-written tag, drops an unfinished <script>), so
   never hold a chunk back to "finish" something.
@@ -152,6 +182,12 @@ any public image URL. Source images in this order:
     commands.
   Either way you get a permanent URL on this origin (/a/<id>.<ext>) to use in <img> or
   CSS.
+- **When to use them.** Enumerated content — feature cards, step lists, capability
+  grids, value rows — needs a visual anchor per item: an icon (search_icons), a big
+  number, or a mono label. Naked text lists read as drafts. Pick ONE anchor style per
+  section and never use emoji as icons. Logos: real marks (search_logos) for real
+  things — integrations, platforms, payment methods; invented customers and
+  testimonials stay text wordmarks, never a real company's mark.
 - **Nothing fits — draw it.** Inline SVG or pure CSS (gradients, patterns, shapes) in
   the frame. Never ship a gray "image goes here" box, and never guess an image URL
   from memory — unverified URLs are usually dead.
