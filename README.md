@@ -7,6 +7,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-2D5FE0" alt="License: AGPL-3.0"></a>
   <a href="https://doop.design"><img src="https://img.shields.io/badge/cloud-doop.design-E5533C" alt="Doop Cloud"></a>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-1C1A15" alt="PRs welcome"></a>
+  <a href="https://discord.com/invite/3AUfXjgVe"><img src="https://img.shields.io/badge/chat-Discord-5865F2" alt="Discord"></a>
 </p>
 
 **Doop is the open-source alternative to [Paper.design](https://paper.design) — a multiplayer
