@@ -1,6 +1,6 @@
 import { betterAuth } from 'better-auth'
 import { eq, inArray, or, isNull, ne, and, sql } from 'drizzle-orm'
-import { admin, mcp } from 'better-auth/plugins'
+import { admin, mcp, genericOAuth } from 'better-auth/plugins'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
@@ -96,7 +96,82 @@ export async function syncAdmins(): Promise<void> {
   }
 }
 
+interface OidcConfig {
+  issuer: string
+  clientId: string
+  clientSecret: string
+  scopes: string[]
+  providerName: string
+}
+
+/**
+ * Env-gated SSO against an external OIDC provider (Zitadel, Okta, Authentik,
+ * Keycloak, ...). All three of OIDC_ISSUER/OIDC_CLIENT_ID/OIDC_CLIENT_SECRET
+ * must be set together to enable it — a partial set is almost certainly a
+ * misconfiguration, not a valid state, so it throws rather than silently
+ * running with SSO half-on.
+ */
+export function loadOidcConfig(): OidcConfig | null {
+  const { OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_SCOPES, OIDC_PROVIDER_NAME } = process.env
+  const setCount = [OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET].filter(Boolean).length
+  if (setCount === 0) return null
+  if (setCount < 3) {
+    throw new Error('OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET must all be set together to enable SSO')
+  }
+  return {
+    issuer: OIDC_ISSUER!,
+    clientId: OIDC_CLIENT_ID!,
+    clientSecret: OIDC_CLIENT_SECRET!,
+    scopes: (OIDC_SCOPES || 'openid email profile').split(/[,\s]+/).filter(Boolean),
+    providerName: OIDC_PROVIDER_NAME || 'SSO',
+  }
+}
+
+/** What the login page is allowed to know: whether SSO exists and what to call it. Never the secret. */
+export function oidcPublicConfig(): { enabled: boolean; displayName?: string } {
+  const config = loadOidcConfig()
+  return config ? { enabled: true, displayName: config.providerName } : { enabled: false }
+}
+
+/**
+ * better-auth's account-linking gate requires the LOCAL user row to already
+ * be emailVerified before it will link an incoming OAuth sign-in to it —
+ * the IdP's own emailVerified claim alone is not enough (see
+ * link-account.mjs's requireLocalEmailVerified, which defaults true and, per
+ * its own deprecation note, is headed toward becoming unconditional). On an
+ * instance with no SMTP configured, no local account can ever verify on its
+ * own (see mailerConfigured in mailer.ts), so without this, an existing
+ * password user could never link their account to SSO — exactly the
+ * migration this feature exists to support.
+ *
+ * Used as the OIDC provider's mapProfileToUser, which runs before that gate:
+ * if the IdP marks this email verified and a local, still-unverified account
+ * already holds it, the IdP has already proven ownership — mark the local
+ * account verified too, so the gate's own default (matching, verified email)
+ * decides the outcome. Also runs the same admin-promotion check syncAdmins
+ * and afterEmailVerification already run at the moment a user verifies,
+ * since this is exactly that moment for anyone in ADMIN_EMAILS.
+ */
+async function linkVerifiedOidcEmail(profile: {
+  email?: unknown
+  email_verified?: unknown
+}): Promise<Record<string, never>> {
+  const email = typeof profile.email === 'string' ? profile.email.toLowerCase() : undefined
+  if (email && profile.email_verified === true) {
+    const [existing] = await db
+      .select({ id: authSchema.user.id, email: authSchema.user.email })
+      .from(authSchema.user)
+      .where(and(eq(sql`lower(${authSchema.user.email})`, email), eq(authSchema.user.emailVerified, false)))
+    if (existing) {
+      await db.update(authSchema.user).set({ emailVerified: true }).where(eq(authSchema.user.id, existing.id))
+      if (mayPromote({ email: existing.email, emailVerified: true })) await promote(existing.id, existing.email)
+    }
+  }
+  return {}
+}
+
 function buildAuth() {
+  const oidc = loadOidcConfig()
   if (!process.env.BETTER_AUTH_SECRET && process.env.NODE_ENV === 'production') {
     throw new Error('BETTER_AUTH_SECRET must be set in production')
   }
@@ -174,7 +249,37 @@ function buildAuth() {
     /* admin: role/ban/impersonate. 15 minutes rather than the default hour —
        an expired impersonation session doesn't revert to the admin, it signs
        them out entirely, so the window should be short and re-entered. */
-    plugins: [mcp({ loginPage: '/' }), admin({ impersonationSessionDuration: 15 * 60 })],
+    /* genericOAuth: SSO against an external OIDC provider, absent unless
+       loadOidcConfig() finds a full config. discoveryUrl resolves the
+       authorize/token endpoints lazily at sign-in time, so an unreachable
+       issuer surfaces there rather than at boot.
+       Account linking (see linkVerifiedOidcEmail below): better-auth's own
+       default linking gate requires BOTH the IdP's email_verified claim AND
+       the local user row already being emailVerified — the second half is
+       unreachable on an SMTP-less instance, where no local account ever
+       verifies on its own. mapProfileToUser flips that local flag first,
+       so the gate's own default (matching, IdP-verified email) is what
+       actually decides linking, as intended. */
+    plugins: [
+      mcp({ loginPage: '/' }),
+      admin({ impersonationSessionDuration: 15 * 60 }),
+      ...(oidc
+        ? [
+            genericOAuth({
+              config: [
+                {
+                  providerId: 'oidc',
+                  clientId: oidc.clientId,
+                  clientSecret: oidc.clientSecret,
+                  discoveryUrl: `${oidc.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`,
+                  scopes: oidc.scopes,
+                  mapProfileToUser: linkVerifiedOidcEmail,
+                },
+              ],
+            }),
+          ]
+        : []),
+    ],
   })
 }
 

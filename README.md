@@ -255,6 +255,21 @@ so a privileged read there would give every agent holding an admin's token the r
 instance. View-as sessions cannot write, cannot connect agents, and record who is behind
 them in `session.impersonated_by`.
 
+### SSO (OIDC)
+
+Optional login against an external OIDC provider (Zitadel, Okta, Authentik, Keycloak,
+etc.), alongside email/password — not a replacement for it. Set `OIDC_ISSUER`,
+`OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` together to enable it; a partial set refuses
+to boot rather than run with SSO half-configured. `OIDC_SCOPES` (default
+`openid email profile`) and `OIDC_PROVIDER_NAME` (default `SSO`, shown on the login
+button — e.g. `Zitadel`) are optional. Signing in via SSO links to an existing
+email/password account when the emails match and the provider marks the email
+verified — same trust model `ADMIN_EMAILS` already uses, and this works even
+on an instance with no SMTP configured, where a local account could otherwise
+never verify on its own.
+
+Env: see the OIDC block in [.env.example](.env.example).
+
 ## Agent auth (MCP OAuth)
 
 The `/mcp` endpoint requires OAuth. Adding the server in Claude Code / Codex triggers

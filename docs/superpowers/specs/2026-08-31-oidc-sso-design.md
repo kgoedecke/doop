@@ -32,17 +32,17 @@ Use `genericOAuth`, single provider entry (`id: 'oidc'`).
 
 ## Configuration
 
-| Env var | Required | Purpose |
-|---|---|---|
-| `OIDC_ISSUER` | yes (as a set) | Base issuer URL; `${OIDC_ISSUER}/.well-known/openid-configuration` is used for discovery |
-| `OIDC_CLIENT_ID` | yes (as a set) | OAuth client id registered with the IdP |
-| `OIDC_CLIENT_SECRET` | yes (as a set) | OAuth client secret |
-| `OIDC_SCOPES` | no | Space- or comma-separated scopes; default `openid email profile` |
-| `OIDC_PROVIDER_NAME` | no | Display name for the login button, e.g. `Zitadel`; default `SSO` |
+| Env var              | Required       | Purpose                                                                                  |
+| -------------------- | -------------- | ---------------------------------------------------------------------------------------- |
+| `OIDC_ISSUER`        | yes (as a set) | Base issuer URL; `${OIDC_ISSUER}/.well-known/openid-configuration` is used for discovery |
+| `OIDC_CLIENT_ID`     | yes (as a set) | OAuth client id registered with the IdP                                                  |
+| `OIDC_CLIENT_SECRET` | yes (as a set) | OAuth client secret                                                                      |
+| `OIDC_SCOPES`        | no             | Space- or comma-separated scopes; default `openid email profile`                         |
+| `OIDC_PROVIDER_NAME` | no             | Display name for the login button, e.g. `Zitadel`; default `SSO`                         |
 
 "Required as a set": if none of `OIDC_ISSUER` / `OIDC_CLIENT_ID` /
 `OIDC_CLIENT_SECRET` are set, SSO is simply absent - zero behavior change
-for existing installs. If *some but not all three* are set, that's a
+for existing installs. If _some but not all three_ are set, that's a
 misconfiguration and the server throws at boot, same severity as the
 existing `BETTER_AUTH_SECRET` production check in `server/auth.ts`.
 
@@ -67,7 +67,7 @@ trust model `ADMIN_EMAILS`/`mayPromote()` already uses for
    is constructed.
 
 3. **New public endpoint**, `GET /api/oidc-config` -> `{ enabled: boolean,
-   displayName?: string }`. Needed because the client is a static bundle
+displayName?: string }`. Needed because the client is a static bundle
    shared across self-hosted deployments - it cannot know at build time
    whether SSO is configured for a given deploy, so it asks at runtime.
    Same fetch-based pattern as the existing `accountExists()` check in
