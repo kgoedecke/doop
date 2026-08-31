@@ -33,6 +33,7 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run format:check
+      - run: bun run doc-lint
       - run: bun run build
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files

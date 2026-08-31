@@ -15,6 +15,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "doc-lint": "node scripts/doc-lint.mjs",
     "prepare": "husky || true"
   },
   "lint-staged": {
