@@ -142,6 +142,7 @@ export const tasks = pgTable(
     owner: text('owner'),
     color: text('color').notNull(),
     status: text('status').notNull(),
+    brief: text('brief'),
     startedAt: bigint('started_at', { mode: 'number' }).notNull(),
     endedAt: bigint('ended_at', { mode: 'number' }),
     auto: boolean('auto').notNull().default(false),

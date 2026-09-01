@@ -623,6 +623,8 @@ export function endAgentTasks(canvasId: string, agentName: string) {
 /* object — queuedBy set, agentName empty until claimed.               */
 /* ------------------------------------------------------------------ */
 
+const LABEL_CHARS = 200
+
 export function addQueuedCard(
   canvasId: string,
   title: string,
@@ -631,7 +633,8 @@ export function addQueuedCard(
   attachments?: unknown,
   fromUserId?: string,
 ): AgentTask | undefined {
-  const clean = title.trim().slice(0, 200)
+  const brief = title.trim()
+  const clean = brief.length > LABEL_CHARS ? `${brief.slice(0, LABEL_CHARS - 1)}…` : brief
   if (!clean || !store.getCanvas(canvasId)) return undefined
   const pipeline = normalizePipeline(agents)
   /* reference-image frame ids: only frames that actually live on this canvas */
@@ -644,7 +647,7 @@ export function addQueuedCard(
     (t) =>
       t.queuedBy === from &&
       !t.endedAt &&
-      t.status === clean &&
+      (t.brief ?? t.status) === brief &&
       pipelineOf(t).join(',') === pipeline.join(',') &&
       (t.attachments ?? []).join(',') === refs.join(','),
   )
@@ -654,6 +657,7 @@ export function addQueuedCard(
     agentName: '',
     color: colorFor(from),
     status: clean,
+    ...(brief !== clean ? { brief } : {}),
     startedAt: Date.now(),
     queuedBy: from,
     ...(fromUserId ? { queuedByUserId: fromUserId } : {}),

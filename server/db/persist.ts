@@ -296,6 +296,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     owner: task.owner ?? null,
     color: task.color,
     status: task.status,
+    brief: task.brief ?? null,
     startedAt: task.startedAt,
     endedAt: task.endedAt ?? null,
     auto: task.auto ?? false,
@@ -317,6 +318,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
         set: {
           endedAt: row.endedAt,
           status: row.status,
+          brief: row.brief,
           agentName: row.agentName,
           color: row.color,
           claimedAt: row.claimedAt,
@@ -540,6 +542,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.owner != null ? { owner: row.owner } : {}),
       color: row.color,
       status: row.status,
+      ...(row.brief != null ? { brief: row.brief } : {}),
       startedAt: row.startedAt,
       ...(endedAt !== undefined ? { endedAt } : {}),
       ...(row.auto ? { auto: true } : {}),
