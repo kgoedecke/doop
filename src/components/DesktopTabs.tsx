@@ -50,7 +50,7 @@ export function DesktopTabs({ path }: { path: string }) {
       <div
         role="tablist"
         aria-label="Open canvases"
-        className="flex min-w-0 items-end overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {tabs.map((tab) => {
           const on = tab.id === activeId
