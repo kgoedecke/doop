@@ -264,9 +264,12 @@ to boot rather than run with SSO half-configured. `OIDC_SCOPES` (default
 `openid email profile`) and `OIDC_PROVIDER_NAME` (default `SSO`, shown on the login
 button — e.g. `Zitadel`) are optional. Signing in via SSO links to an existing
 email/password account when the emails match and the provider marks the email
-verified — same trust model `ADMIN_EMAILS` already uses, and this works even
-on an instance with no SMTP configured, where a local account could otherwise
-never verify on its own.
+verified, and this works even on an instance with no SMTP configured, where a
+local account could otherwise never verify on its own. SSO alone never grants
+the admin role, even for an address listed in `ADMIN_EMAILS` — an IdP is not
+trusted as an admin-promotion source, only as an email-ownership check;
+promotion still requires the normal `ADMIN_EMAILS` path (verified signup, or
+`syncAdmins` at boot for an account SSO has since verified).
 
 Env: see the OIDC block in [.env.example](.env.example).
 

@@ -148,9 +148,18 @@ export function oidcPublicConfig(): { enabled: boolean; displayName?: string } {
  * if the IdP marks this email verified and a local, still-unverified account
  * already holds it, the IdP has already proven ownership — mark the local
  * account verified too, so the gate's own default (matching, verified email)
- * decides the outcome. Also runs the same admin-promotion check syncAdmins
- * and afterEmailVerification already run at the moment a user verifies,
- * since this is exactly that moment for anyone in ADMIN_EMAILS.
+ * decides the outcome.
+ *
+ * Deliberately does NOT run the ADMIN_EMAILS promotion check here, unlike
+ * syncAdmins and afterEmailVerification: any configured IdP would otherwise
+ * become a trust root for the admin role, which is exactly what mayPromote
+ * exists to prevent (a public/open-registration IdP can assert
+ * email_verified for an address it never confirmed ownership of just as
+ * cheaply as a stranger typing it into a password signup). It also runs
+ * before better-auth's own linking gate, so a grant here would persist even
+ * if the sign-in then fails to link. Promotion for an SSO-linked ADMIN_EMAILS
+ * account still happens — once, safely — the next time syncAdmins runs at
+ * boot, since this handler leaves emailVerified true.
  */
 async function linkVerifiedOidcEmail(profile: {
   email?: unknown
@@ -159,12 +168,11 @@ async function linkVerifiedOidcEmail(profile: {
   const email = typeof profile.email === 'string' ? profile.email.toLowerCase() : undefined
   if (email && profile.email_verified === true) {
     const [existing] = await db
-      .select({ id: authSchema.user.id, email: authSchema.user.email })
+      .select({ id: authSchema.user.id })
       .from(authSchema.user)
       .where(and(eq(sql`lower(${authSchema.user.email})`, email), eq(authSchema.user.emailVerified, false)))
     if (existing) {
       await db.update(authSchema.user).set({ emailVerified: true }).where(eq(authSchema.user.id, existing.id))
-      if (mayPromote({ email: existing.email, emailVerified: true })) await promote(existing.id, existing.email)
     }
   }
   return {}
@@ -250,9 +258,12 @@ function buildAuth() {
        an expired impersonation session doesn't revert to the admin, it signs
        them out entirely, so the window should be short and re-entered. */
     /* genericOAuth: SSO against an external OIDC provider, absent unless
-       loadOidcConfig() finds a full config. discoveryUrl resolves the
-       authorize/token endpoints lazily at sign-in time, so an unreachable
-       issuer surfaces there rather than at boot.
+       loadOidcConfig() finds a full config. As of better-auth 1.6.26,
+       discoveryUrl resolves the authorize/token endpoints at sign-in time
+       rather than at plugin registration, so an unreachable issuer tends to
+       surface there rather than at boot — an implementation detail of this
+       version, not a documented contract, so don't rely on it.
+       pkce: true because some IdPs reject a non-PKCE authorization code flow.
        Account linking (see linkVerifiedOidcEmail below): better-auth's own
        default linking gate requires BOTH the IdP's email_verified claim AND
        the local user row already being emailVerified — the second half is
@@ -273,6 +284,7 @@ function buildAuth() {
                   clientSecret: oidc.clientSecret,
                   discoveryUrl: `${oidc.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`,
                   scopes: oidc.scopes,
+                  pkce: true,
                   mapProfileToUser: linkVerifiedOidcEmail,
                 },
               ],

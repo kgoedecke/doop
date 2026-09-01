@@ -1,5 +1,6 @@
 import { createServer, type Server as HttpServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { generateKeyPairSync, sign as cryptoSign, type KeyObject } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
@@ -7,11 +8,12 @@ import { Client, startServer, type Server } from './harness.ts'
  * Drives the real callback leg of an OIDC sign-in against better-auth's
  * actual code (no mocking of doop or better-auth) - only the third-party
  * IdP is faked, which is unavoidable without a real Zitadel/Okta/etc to
- * point at. better-auth's default getUserInfo decodes the id_token JWT via
- * jose's decodeJwt (confirmed in node_modules/better-auth/dist/plugins/
- * generic-oauth/routes.mjs) without verifying its signature, so an
- * unsigned, self-issued token is sufficient here - this is testing doop's
- * account-linking logic, not JWT cryptography.
+ * point at. The fake IdP signs its ID tokens (RS256) and publishes a
+ * jwks_uri, matching what a spec-compliant OIDC discovery document always
+ * includes - so this exercises the same shape of token a real IdP produces,
+ * rather than the unsigned `alg: none` case that better-auth's own
+ * decodeJwt-based getUserInfo (see node_modules/better-auth/dist/plugins/
+ * generic-oauth/routes.mjs) currently accepts either way.
  *
  * This exists to prove server/auth.ts's linkVerifiedOidcEmail: better-auth's
  * own account-linking gate requires the LOCAL user to already be
@@ -21,9 +23,18 @@ import { Client, startServer, type Server } from './harness.ts'
  * test below fails with an "account_not_linked" redirect.
  */
 
-function fakeIdToken(claims: Record<string, unknown>): string {
-  const segment = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url')
-  return `${segment({ alg: 'none', typ: 'JWT' })}.${segment(claims)}.`
+const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+const jwk = publicKey.export({ format: 'jwk' }) as Record<string, unknown>
+const KID = 'test-key-1'
+
+function base64url(input: Buffer | string): string {
+  return Buffer.from(input).toString('base64url')
+}
+
+function fakeIdToken(claims: Record<string, unknown>, key: KeyObject): string {
+  const headerAndPayload = `${base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: KID }))}.${base64url(JSON.stringify(claims))}`
+  const signature = cryptoSign('RSA-SHA256', Buffer.from(headerAndPayload), key)
+  return `${headerAndPayload}.${base64url(signature)}`
 }
 
 function startFakeIdp(codeToClaims: Map<string, Record<string, unknown>>): Promise<HttpServer> {
@@ -38,8 +49,14 @@ function startFakeIdp(codeToClaims: Map<string, Record<string, unknown>>): Promi
             issuer: `http://localhost:${port}`,
             authorization_endpoint: `http://localhost:${port}/authorize`,
             token_endpoint: `http://localhost:${port}/token`,
+            jwks_uri: `http://localhost:${port}/jwks`,
           }),
         )
+        return
+      }
+      if (url.pathname === '/jwks') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ keys: [{ ...jwk, kid: KID, use: 'sig', alg: 'RS256' }] }))
         return
       }
       if (url.pathname === '/token' && req.method === 'POST') {
@@ -54,7 +71,7 @@ function startFakeIdp(codeToClaims: Map<string, Record<string, unknown>>): Promi
               access_token: 'fake-access-token',
               token_type: 'Bearer',
               expires_in: 3600,
-              id_token: fakeIdToken(claims),
+              id_token: fakeIdToken(claims, privateKey),
             }),
           )
         })
