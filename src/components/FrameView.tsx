@@ -246,6 +246,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
 
   /* source view + composer prefill for the element toolbar */
   const [codeView, setCodeView] = useState<string | null>(null)
+  const [codeCopied, setCodeCopied] = useState(false)
   const [composePrefill, setComposePrefill] = useState('')
   const codeReq = useRef(0)
 
@@ -720,9 +721,13 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                               variant="inverse"
                               size="sm"
                               className="absolute right-2 top-[7px] rounded-md bg-white/[0.12] px-[9px] py-[3px] text-[11px] hover:bg-white/[0.22]"
-                              onClick={() => navigator.clipboard.writeText(codeView)}
+                              onClick={() => {
+                                navigator.clipboard.writeText(codeView)
+                                setCodeCopied(true)
+                                window.setTimeout(() => setCodeCopied(false), 1500)
+                              }}
                             >
-                              Copy
+                              {codeCopied ? 'Copied!' : 'Copy'}
                             </Button>
                             <pre className="max-h-[260px] overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-[#d9e2ec] [font-family:ui-monospace,monospace] [word-break:break-word]">
                               {codeView}
