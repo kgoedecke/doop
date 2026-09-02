@@ -198,6 +198,8 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     }
 
     function onWheel(e: WheelEvent) {
+      /* let overlays with their own scrollbar scroll instead of panning */
+      if ((e.target as Element | null)?.closest('[data-stage-scroll]')) return
       e.preventDefault()
       if (e.ctrlKey || e.metaKey) {
         const rect = el!.getBoundingClientRect()
