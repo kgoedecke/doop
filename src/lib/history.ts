@@ -125,71 +125,57 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
   useStore.getState().select(f.id)
 }
 
-/* every member of a group is attempted even if one fails — the frames are
-   independent, so a single bad request should not strand the rest */
-async function applyAll(entries: Entry[], apply: (e: Entry) => Promise<void>) {
-  const results = await Promise.allSettled(entries.map(apply))
-  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-  if (failed) throw failed.reason
-}
-
-async function applyUndo(e: Entry): Promise<void> {
+/* Apply an entry and report which of its members took effect. A group's
+   frames are independent, so every member is attempted even if one fails;
+   the survivors are what the opposite stack gets, so a partially failed
+   group can still be reversed. Failed members are dropped, exactly as a
+   failed single entry is: the frame is gone or the canvas moved on. */
+async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null> {
   if (e.type === 'group') {
-    await applyAll(e.entries, applyUndo)
-  } else if (e.type === 'update') {
-    useStore.getState().patchFrameLocal(e.frameId, e.before)
-    await api.updateFrame(e.frameId, e.before)
-  } else if (e.type === 'create') {
-    await api.deleteFrame(e.frameId)
-  } else {
-    await recreate(e)
+    const results = await Promise.allSettled(e.entries.map((child) => apply(child, direction)))
+    const ok = results.flatMap((r) => (r.status === 'fulfilled' && r.value ? [r.value] : []))
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failed) console.error(`${direction} failed for ${e.entries.length - ok.length} frame(s)`, failed.reason)
+    return ok.length === 0 ? null : ok.length === 1 ? ok[0] : { type: 'group', entries: ok }
   }
-}
-
-async function applyRedo(e: Entry): Promise<void> {
-  if (e.type === 'group') {
-    await applyAll(e.entries, applyRedo)
-  } else if (e.type === 'update') {
-    useStore.getState().patchFrameLocal(e.frameId, e.after)
-    await api.updateFrame(e.frameId, e.after)
-  } else if (e.type === 'create') {
+  const forward = direction === 'redo'
+  if (e.type === 'update') {
+    const patch = forward ? e.after : e.before
+    useStore.getState().patchFrameLocal(e.frameId, patch)
+    await api.updateFrame(e.frameId, patch)
+  } else if ((e.type === 'create') === forward) {
     await recreate(e)
   } else {
     await api.deleteFrame(e.frameId)
   }
+  return e
 }
 
-export async function undo() {
+async function step(direction: 'undo' | 'redo') {
   if (busy) return
-  const e = undoStack.pop()
+  const [from, to] = direction === 'undo' ? [undoStack, redoStack] : [redoStack, undoStack]
+  const e = from.pop()
   if (!e) return
   busy = true
   try {
     await inflight
-    await applyUndo(e)
-    redoStack.push(e)
-    posthog.capture('canvas_undo')
+    const applied = await apply(e, direction)
+    if (applied) {
+      to.push(applied)
+      posthog.capture(direction === 'undo' ? 'canvas_undo' : 'canvas_redo')
+    }
   } catch (err) {
     /* the frame is gone or the canvas moved on — drop the entry */
-    console.error('undo failed', err)
+    console.error(`${direction} failed`, err)
   } finally {
     busy = false
   }
 }
 
-export async function redo() {
-  if (busy) return
-  const e = redoStack.pop()
-  if (!e) return
-  busy = true
-  try {
-    await inflight
-    await applyRedo(e)
-    undoStack.push(e)
-    posthog.capture('canvas_redo')
-  } catch (err) {
-    console.error('redo failed', err)
-  } finally {
-    busy = false
-  }
+export function undo() {
+  return step('undo')
+}
+
+export function redo() {
+  return step('redo')
 }

@@ -4,7 +4,7 @@ import type { Canvas, Frame } from '../shared/types'
 /* the history module talks to the server and analytics — stub both so the
    undo stack can be exercised as pure bookkeeping */
 const api = {
-  updateFrame: vi.fn(async () => ({})),
+  updateFrame: vi.fn(async (_id: string, _patch: object) => ({})),
   deleteFrame: vi.fn(async () => ({})),
   createFrame: vi.fn(async (_canvasId: string, rest: Partial<Frame>) => ({ ...frame('new'), ...rest, id: 'new' })),
 }
@@ -132,13 +132,23 @@ describe('review follow-ups', () => {
     expect(order).toEqual(['save', 'undo'])
   })
 
-  it('a failing member of a group does not stop the others', async () => {
+  it('a failing member of a group does not stop the others, and the survivors stay redoable', async () => {
     history.recordUpdates([
       { frameId: 'a', before: { x: 0 }, after: { x: 1 } },
       { frameId: 'b', before: { x: 0 }, after: { x: 1 } },
     ])
-    api.updateFrame.mockRejectedValueOnce(new Error('boom'))
+    api.updateFrame.mockImplementationOnce(async (id: string) => {
+      if (id === 'a') throw new Error('boom')
+      return {}
+    })
     await history.undo()
     expect(api.updateFrame).toHaveBeenCalledTimes(2)
+    /* only b was undone, so only b comes back on redo */
+    await history.redo()
+    expect(api.updateFrame).toHaveBeenCalledTimes(3)
+    expect(api.updateFrame).toHaveBeenLastCalledWith('b', { x: 1 })
+    /* and that redo is itself undoable */
+    await history.undo()
+    expect(api.updateFrame).toHaveBeenLastCalledWith('b', { x: 0 })
   })
 })
