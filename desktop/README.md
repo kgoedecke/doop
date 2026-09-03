@@ -48,9 +48,14 @@ Intel) DMG:
 - push a tag `desktop-v*` → DMG attached to a GitHub Release
 - manual dispatch → DMG as a workflow artifact
 
+Versions are bumped by release-please: commits touching `desktop/` open a
+"chore(desktop): release x.y.z" PR that updates `package.json`,
+`src-tauri/tauri.conf.json`, `Cargo.toml` and `Cargo.lock` together, plus
+`desktop/CHANGELOG.md`. Merging it does not tag — push the tag by hand:
+
 ```sh
-# bump "version" in src-tauri/tauri.conf.json and package.json first
-git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+# after the release PR is merged
+git tag desktop-v0.1.3 && git push origin desktop-v0.1.3
 ```
 
 Until the `APPLE_*` secrets exist the DMG is **unsigned**: it runs, but
