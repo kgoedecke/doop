@@ -68,7 +68,7 @@ export function AccountMenu() {
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
-          <a href="/blog" target="_blank" rel="noopener noreferrer">
+          <a href="/docs" target="_blank" rel="noopener noreferrer">
             <IconHelp /> Help &amp; docs
           </a>
         </DropdownMenuItem>
