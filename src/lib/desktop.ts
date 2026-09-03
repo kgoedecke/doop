@@ -121,9 +121,26 @@ export function closeTab(id: string, currentPath: string) {
   }
 }
 
+/** Close every tab except one — the kept tab becomes the current page.
+ *  Takes the current path like closeTab, so keeping the tab you're on adds
+ *  no history entry (Back would otherwise land on the same canvas). */
+export function closeOtherTabs(id: string, currentPath: string) {
+  const keep = useTabs.getState().tabs.find((t) => t.id === id)
+  if (!keep) return
+  setTabs([keep])
+  if (currentPath !== `/c/${id}`) navigate(`/c/${id}`)
+}
+
+export function closeAllTabs() {
+  setTabs([])
+  navigate('/')
+}
+
 /* ---------- external links ---------- */
 
-function openExternal(url: string): boolean {
+/** Hand a URL to the system browser via the shell's opener IPC. False on
+ *  pre-0.1.2 shells (no IPC) and in plain browsers. */
+export function openExternal(url: string): boolean {
   const open = shellWindow.__TAURI__?.opener?.openUrl
   if (typeof open !== 'function') return false
   open(url).catch(console.error)
