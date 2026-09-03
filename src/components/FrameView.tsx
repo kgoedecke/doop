@@ -249,6 +249,16 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   const [codeCopied, setCodeCopied] = useState(false)
   const [composePrefill, setComposePrefill] = useState('')
   const codeReq = useRef(0)
+  const copyTimer = useRef<number | null>(null)
+
+  /* the "Copied!" label belongs to the block that was open — drop it when that changes */
+  function clearCopied() {
+    if (copyTimer.current) {
+      window.clearTimeout(copyTimer.current)
+      copyTimer.current = null
+    }
+    setCodeCopied(false)
+  }
 
   function requestCode(selector: string) {
     codeReq.current += 1
@@ -263,6 +273,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     setProbe(null)
     setComposing(false)
     setComposePrefill('')
+    clearCopied()
     setCodeView(null)
     setOpenThread(null)
   }
@@ -699,7 +710,14 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                           <Button
                             variant="inverse"
                             className={EL_TOOLBAR_BTN}
-                            onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
+                            onClick={() => {
+                              if (codeView === null) {
+                                requestCode(anchor.selector)
+                              } else {
+                                clearCopied()
+                                setCodeView(null)
+                              }
+                            }}
                           >
                             {'</>'} Code
                           </Button>
@@ -721,10 +739,18 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                               variant="inverse"
                               size="sm"
                               className="absolute right-2 top-[7px] rounded-md bg-white/[0.12] px-[9px] py-[3px] text-[11px] hover:bg-white/[0.22]"
-                              onClick={() => {
-                                navigator.clipboard.writeText(codeView)
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(codeView)
+                                } catch {
+                                  return
+                                }
+                                clearCopied()
                                 setCodeCopied(true)
-                                window.setTimeout(() => setCodeCopied(false), 1500)
+                                copyTimer.current = window.setTimeout(() => {
+                                  copyTimer.current = null
+                                  setCodeCopied(false)
+                                }, 1500)
                               }}
                             >
                               {codeCopied ? 'Copied!' : 'Copy'}
