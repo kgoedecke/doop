@@ -4,7 +4,6 @@ import { connect, disconnect, sendWs } from '../lib/ws'
 import {
   api,
   ApiError,
-  type CanvasMember,
   type DiscoveredSite,
   type GithubConnectionInfo,
   type InstallationRepo,
@@ -24,6 +23,7 @@ import { LimitWall } from '../components/TeamAllowance'
 import { PromptBar } from '../components/PromptBar'
 import { WorkingNow } from '../components/WorkingNow'
 import { Onboarding } from '../components/Onboarding'
+import { ShareModal } from '../components/ShareModal'
 import { BrainIcon } from '../components/BrainIcon'
 import { getIdentity, setName } from '../lib/identity'
 import { copyFrame, duplicateFrame, hasFrameClip, pasteFrameCentered, pasteImagesCentered } from '../lib/frameClipboard'
@@ -34,7 +34,7 @@ import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet'
-import { GithubIcon, XIcon } from '../components/ui/icons'
+import { GithubIcon } from '../components/ui/icons'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
@@ -479,9 +479,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
 
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
-      {showShare && (
+      {showShare && canvas && (
         <ShareModal
-          canvasId={canvasId}
+          key={canvas.id}
+          canvas={canvas}
+          onChange={(patch) => {
+            const current = useStore.getState().canvas
+            if (current?.id === canvasId) useStore.getState().setCanvas({ ...current, ...patch })
+          }}
           onClose={() => setShowShare(false)}
           onCopied={() => {
             setShowShare(false)
@@ -1083,151 +1088,6 @@ function RenameSelfModal({ current, onClose }: { current: string; onClose: () =>
             {busy ? 'Saving…' : 'Save name'}
           </Button>
         </ModalActions>
-      </>
-    </Modal>
-  )
-}
-
-/* Share modal, Figma-style: invite doop accounts to collaborate, or turn on
-   link sharing. Canvases are private by default — only the owner and invited
-   members get in until the link toggle is flipped. */
-function ShareModal({ canvasId, onClose, onCopied }: { canvasId: string; onClose: () => void; onCopied: () => void }) {
-  const canvas = useStore((s) => s.canvas)
-  const { data: session } = authClient.useSession()
-  const meId = session?.user?.id
-  const isOwner = !!canvas?.ownerId && canvas.ownerId === meId
-  const linkEdits = canvas?.linkAccess === 'edit'
-  const [people, setPeople] = useState<CanvasMember[] | null>(null)
-  const [email, setEmail] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .listMembers(canvasId)
-      .then(setPeople)
-      .catch(() => setPeople([]))
-  }, [canvasId])
-
-  async function invite() {
-    const clean = email.trim()
-    if (!clean || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const m = await api.inviteMember(canvasId, clean)
-      setPeople((p) => (p?.some((x) => x.userId === m.userId) ? p : [...(p ?? []), m]))
-      if (canvas && !canvas.memberIds?.includes(m.userId)) {
-        useStore.getState().setCanvas({ ...canvas, memberIds: [...(canvas.memberIds ?? []), m.userId] })
-      }
-      setEmail('')
-    } catch (e) {
-      setError(e instanceof ApiError ? String(e.body.error ?? 'invite failed') : 'invite failed')
-    }
-    setBusy(false)
-  }
-
-  function remove(userId: string) {
-    api.removeMember(canvasId, userId).catch(console.error)
-    setPeople((p) => p?.filter((x) => x.userId !== userId) ?? null)
-    if (canvas) {
-      useStore.getState().setCanvas({ ...canvas, memberIds: canvas.memberIds?.filter((id) => id !== userId) })
-    }
-    /* removing yourself = leaving the canvas */
-    if (userId === meId && !isOwner) navigate('/')
-  }
-
-  function toggleLink(next: boolean) {
-    if (!canvas) return
-    const linkAccess = next ? 'edit' : 'none'
-    api.setLinkAccess(canvas.id, linkAccess).catch(console.error)
-    useStore.getState().setCanvas({ ...canvas, linkAccess })
-  }
-
-  async function copy() {
-    await navigator.clipboard.writeText(location.href)
-    posthog.capture('canvas_link_shared')
-    onCopied()
-  }
-
-  return (
-    <Modal size="sm" onClose={onClose}>
-      <>
-        <div className="flex items-start justify-between gap-3">
-          <ModalTitle className="min-w-0">Share “{canvas?.name ?? 'canvas'}”</ModalTitle>
-          <Button variant="ghost" size="icon" className="size-10" aria-label="Close sharing" onClick={onClose}>
-            <XIcon />
-          </Button>
-        </div>
-        {isOwner && (
-          <>
-            <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row">
-              <Input
-                className="flex-1 rounded-[10px] bg-paper focus:ring-0"
-                autoFocus
-                placeholder="Invite by email (doop account)"
-                value={email}
-                disabled={busy}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && invite()}
-              />
-              <Button variant="primary" className="justify-center" disabled={busy || !email.trim()} onClick={invite}>
-                Invite
-              </Button>
-            </div>
-            {error && <p className="mx-[2px] mt-2 text-[12px] text-accent-ink">{error}</p>}
-          </>
-        )}
-        <div className="mt-[14px] mb-1 flex max-h-[40vh] flex-col gap-[2px] overflow-y-auto">
-          {(people ?? []).map((p) => (
-            <div key={p.userId} className="flex items-center gap-2.5 px-[2px] py-1.5">
-              <Avatar name={p.name} className="size-7 flex-none border-0 text-xs" />
-              <span className="flex min-w-0 flex-1 flex-col leading-[1.3]">
-                <b className="overflow-hidden whitespace-nowrap text-ellipsis text-[13px] font-semibold">
-                  {p.name}
-                  {p.userId === meId ? ' (you)' : ''}
-                </b>
-                <span className="overflow-hidden whitespace-nowrap text-ellipsis text-[12px] text-ink-faint">
-                  {p.email}
-                </span>
-              </span>
-              {p.owner ? (
-                <span className="flex-none text-[12px] text-ink-faint">Owner</span>
-              ) : isOwner || p.userId === meId ? (
-                <Button
-                  variant="bare"
-                  size="icon-sm"
-                  className="flex-none text-[13px] hover:bg-accent-ink/10 hover:text-accent-ink"
-                  title={p.userId === meId ? 'Leave this canvas' : 'Remove'}
-                  onClick={() => remove(p.userId)}
-                >
-                  ✕
-                </Button>
-              ) : (
-                <span className="flex-none text-[12px] text-ink-faint">Can edit</span>
-              )}
-            </div>
-          ))}
-          {people === null && <p className="text-[12px] text-ink-faint">Loading…</p>}
-        </div>
-        <div className="mt-2.5 flex flex-col items-stretch justify-between gap-2.5 border-t border-line-soft pt-3.5 sm:flex-row sm:items-center">
-          {isOwner ? (
-            <label
-              className="relative flex cursor-pointer items-center gap-2 text-[13px] font-medium text-ink"
-              title="Off = only you and invited people can open this canvas"
-            >
-              <Checkbox checked={linkEdits} onChange={(e) => toggleLink(e.target.checked)} />
-              Anyone with the link can edit
-            </label>
-          ) : (
-            <span className="text-xs text-ink-faint">
-              {linkEdits ? 'Anyone with the link can edit' : 'Invite-only canvas'}
-            </span>
-          )}
-          <Button className="justify-center" onClick={copy}>
-            ⧉ Copy link
-          </Button>
-        </div>
       </>
     </Modal>
   )
