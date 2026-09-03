@@ -687,6 +687,19 @@ app.post('/api/canvases', (req, res) => {
   res.json(store.createCanvas(name, req.user!.id))
 })
 
+app.post('/api/canvases/:id/duplicate', async (req, res) => {
+  const source = store.getCanvas(req.params.id)
+  if (!source) return res.status(404).json({ error: 'not found' })
+  if (!hasDurableCanvasAccess(req.user!.id, source)) return res.status(403).json({ error: 'access denied' })
+  try {
+    const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name)
+    res.json(copy)
+  } catch (error) {
+    console.error('[canvas] duplicate failed', error)
+    res.status(500).json({ error: 'could not duplicate canvas' })
+  }
+})
+
 app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id)
   if (c) res.json(c)
