@@ -227,6 +227,8 @@ export const useStore = create<State>((set, get) => ({
         /* losing the primary promotes the last surviving member, so a group
            never sits selected with nothing driving the Inspector/presence */
         selectedId: s.selectedId === frameId ? (selectedIds[selectedIds.length - 1] ?? null) : s.selectedId,
+        /* an open Inspector must not silently retarget onto the promoted frame */
+        inspectorOpen: s.selectedId === frameId ? false : s.inspectorOpen,
         ctxMenu: s.ctxMenu?.frameId === frameId ? null : s.ctxMenu,
       }
     }),

@@ -114,6 +114,14 @@ describe('review follow-ups', () => {
     expect(useStore.getState().selectedId).toBe('b')
   })
 
+  it('an open Inspector closes when its frame is deleted out from under it', () => {
+    useStore.getState().selectMany(['a', 'b'])
+    useStore.getState().setInspectorOpen(true)
+    useStore.getState().removeFrame('b')
+    expect(useStore.getState().selectedId).toBe('a')
+    expect(useStore.getState().inspectorOpen).toBe(false)
+  })
+
   it('undo waits for in-flight drag saves before writing the inverse', async () => {
     const order: string[] = []
     let release!: () => void

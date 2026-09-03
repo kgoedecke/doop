@@ -91,6 +91,9 @@ interface HoverHit {
    this component — memo holds as long as the frame and raster are unchanged. */
 export const FrameView = memo(function FrameView({ frame, raster }: { frame: Frame; raster: number }) {
   const selected = useStore((s) => s.selectedIds.includes(frame.id))
+  /* space held: the shield stays up even in edit mode, so the press reaches
+     the Stage and pans instead of vanishing into the editable iframe */
+  const panMode = useStore((s) => s.panMode)
   const select = useStore((s) => s.select)
   const flash = useStore((s) => s.flashes[frame.id])
   const stream = useStore((s) => s.streams[frame.id])
@@ -596,7 +599,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
             )}
             {/* shield keeps pointer events on the canvas, not the iframe;
             lifted while editing so clicks land in the editable document */}
-            {!editing && <div className="absolute inset-0" />}
+            {(!editing || panMode) && <div className="absolute inset-0" />}
             {hover && !editing && !dragging && (
               <div
                 className="pointer-events-none absolute z-[3] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1.5px/var(--zoom,1))_#3c82f6]"
