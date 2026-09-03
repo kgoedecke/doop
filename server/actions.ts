@@ -463,12 +463,9 @@ export function replyToComment(
   from: string,
   fromUserId?: string,
 ): ElementComment | undefined {
-  const parent = findComment(commentId)
-  if (!parent) return undefined
-  const root = parent.parentId ? findComment(parent.parentId) : parent
-  if (!root || root.resolvedAt) return undefined
-  const frame = store.getFrame(root.frameId)
-  if (!frame) return undefined
+  const open = openThread(commentId)
+  if (!open) return undefined
+  const { root, frame } = open
   return postComment(
     frame,
     { selector: root.selector, snippet: root.snippet, parentId: root.id },
@@ -476,6 +473,19 @@ export function replyToComment(
     from,
     fromUserId,
   )
+}
+
+/** The root and frame a reply to this comment would land on, or undefined
+ *  when the thread is resolved or its frame is gone — checked before any
+ *  metering so a rejected reply never costs a resident task. */
+export function openThread(commentId: string): { root: ElementComment; frame: Frame } | undefined {
+  const parent = findComment(commentId)
+  if (!parent) return undefined
+  const root = parent.parentId ? findComment(parent.parentId) : parent
+  if (!root || root.resolvedAt) return undefined
+  const frame = store.getFrame(root.frameId)
+  if (!frame) return undefined
+  return { root, frame }
 }
 
 function postComment(

@@ -649,8 +649,10 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                               .replyComment(c.id, text)
                               .then(() => posthog.capture('element_comment_replied'))
                               .catch((err) => {
+                                /* the wall explains a hit limit; anything else
+                                   surfaces in the thread so the draft survives */
                                 if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
-                                else console.error(err)
+                                throw err
                               })
                           }
                           onResolve={() => {
@@ -859,20 +861,27 @@ function CommentThread({
 }: {
   /** root comment first, then its replies oldest → newest */
   thread: ElementComment[]
-  onReply: (text: string) => void
+  /** rejects when the reply did not land — the draft is kept for a retry */
+  onReply: (text: string) => Promise<unknown>
   onResolve: () => void
   onRetry: (commentId: string) => void
 }) {
   const [reply, setReply] = useState('')
+  const [sending, setSending] = useState(false)
+  const [failed, setFailed] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
   /* a long conversation opens (and grows) scrolled to its newest message */
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
   }, [thread.length])
   const send = () => {
-    if (!reply.trim()) return
+    if (!reply.trim() || sending) return
+    setSending(true)
+    setFailed(false)
     onReply(reply)
-    setReply('')
+      .then(() => setReply(''))
+      .catch(() => setFailed(true))
+      .finally(() => setSending(false))
   }
   const mentioned = mentionedRole(reply)
   return (
@@ -917,6 +926,11 @@ function CommentThread({
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
         }}
       />
+      {failed && (
+        <div className="mt-1 text-[11px] leading-[1.4] text-accent-ink">
+          That reply did not go through — it may be resolved already. Try again.
+        </div>
+      )}
       <div className="mt-1.5 flex items-center gap-1.5">
         <Button
           variant="ghost"
@@ -938,10 +952,10 @@ function CommentThread({
           variant="solid"
           size="pill"
           className={cn('px-3 py-[4px] text-xs', !mentioned && 'ml-auto')}
-          disabled={!reply.trim()}
+          disabled={!reply.trim() || sending}
           onClick={send}
         >
-          Reply
+          {sending ? 'Posting…' : 'Reply'}
         </Button>
       </div>
     </div>

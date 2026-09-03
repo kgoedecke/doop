@@ -82,6 +82,15 @@ describe('replying to a comment', () => {
     expect(actions.takeAgentCommentsFor(CANVAS, AGENT, 'alice').map((c) => c.id)).toEqual([reply.id])
   })
 
+  it('reports whether a thread can take a reply before anything is metered', () => {
+    const parent = root()
+    const reply = actions.replyToComment(parent.id, 'Agreed', 'bob')!
+    expect(actions.openThread(reply.id)?.root.id).toBe(parent.id)
+    actions.resolveComment(parent.id, 'alice')
+    expect(actions.openThread(reply.id)).toBeUndefined()
+    expect(actions.openThread('missing')).toBeUndefined()
+  })
+
   it('refuses replies on a resolved thread or with empty text', () => {
     const parent = root()
     expect(actions.replyToComment(parent.id, '   ', 'bob')).toBeUndefined()

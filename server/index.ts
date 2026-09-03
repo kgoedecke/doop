@@ -1177,6 +1177,9 @@ app.post('/api/comments/:id/replies', async (req, res) => {
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId)) return
   const text = String(req.body?.text ?? '')
+  if (!text.trim() || !actions.openThread(req.params.id)) {
+    return res.status(404).json({ error: 'thread resolved or empty text' })
+  }
   /* same rule as a fresh comment: only an @mention costs a resident task */
   if (mentionedRole(text)) {
     const gate = await allowance.consumeResidentTask(req.user!.id)
@@ -1185,7 +1188,7 @@ app.post('/api/comments/:id/replies', async (req, res) => {
     }
   }
   const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
-  if (!reply) return res.status(404).json({ error: 'thread resolved or empty text' })
+  if (!reply) return res.status(409).json({ error: 'thread resolved meanwhile' })
   res.json(reply)
 })
 

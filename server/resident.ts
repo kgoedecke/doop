@@ -318,9 +318,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               const fname = store.getFrame(c.frameId)?.name ?? 'unknown frame'
               /* a reply carries the conversation it answers, so "make it
                  bigger" reads against what was said before */
-              const earlier = actions
-                .commentThread(c)
-                .filter((x) => x.at < c.at)
+              const history = actions.commentThread(c)
+              const earlier = history
+                .slice(
+                  0,
+                  history.findIndex((x) => x.id === c.id),
+                )
                 .map((x) => `    ${x.from}: "${x.text}"`)
                 .join('\n')
               const thread = earlier ? `\n  earlier in this thread:\n${earlier}` : ''
