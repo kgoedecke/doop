@@ -1190,8 +1190,13 @@ app.post('/api/comments/:id/replies', async (req, res) => {
   }
   const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
   if (!reply) {
-    /* the thread closed while the meter was being written: give the task back */
-    if (gate) await allowance.refundResidentTask(gate, req.user!.id)
+    /* the thread closed while the meter was being written: give the task
+       back — a failed refund is logged, never turned into a 500 */
+    if (gate) {
+      await allowance.refundResidentTask(gate, req.user!.id).catch((err) => {
+        console.error(`[comments] could not refund a resident task for ${req.user!.id}:`, err)
+      })
+    }
     return res.status(409).json({ error: 'thread resolved meanwhile' })
   }
   res.json(reply)

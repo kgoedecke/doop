@@ -876,10 +876,12 @@ function CommentThread({
   }, [thread.length])
   const send = () => {
     if (!reply.trim() || sending) return
+    const submitted = reply
     setSending(true)
     setFailed(false)
-    onReply(reply)
-      .then(() => setReply(''))
+    onReply(submitted)
+      /* only clear what was sent — text typed meanwhile is a new draft */
+      .then(() => setReply((current) => (current === submitted ? '' : current)))
       .catch(() => setFailed(true))
       .finally(() => setSending(false))
   }
