@@ -1181,14 +1181,19 @@ app.post('/api/comments/:id/replies', async (req, res) => {
     return res.status(404).json({ error: 'thread resolved or empty text' })
   }
   /* same rule as a fresh comment: only an @mention costs a resident task */
+  let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
   if (mentionedRole(text)) {
-    const gate = await allowance.consumeResidentTask(req.user!.id)
+    gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
   const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
-  if (!reply) return res.status(409).json({ error: 'thread resolved meanwhile' })
+  if (!reply) {
+    /* the thread closed while the meter was being written: give the task back */
+    if (gate) await allowance.refundResidentTask(gate, req.user!.id)
+    return res.status(409).json({ error: 'thread resolved meanwhile' })
+  }
   res.json(reply)
 })
 

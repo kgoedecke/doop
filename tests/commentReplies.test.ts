@@ -66,6 +66,14 @@ describe('replying to a comment', () => {
     expect(actions.commentThread(reply).map((c) => c.text)).toEqual(['Too small', 'Agreed'])
   })
 
+  it('gives every message a distinct timestamp so order survives a reload', () => {
+    const parent = root()
+    const first = actions.replyToComment(parent.id, 'one', 'bob')!
+    const second = actions.replyToComment(parent.id, 'two', 'carol')!
+    expect(first.at).toBeGreaterThan(parent.at)
+    expect(second.at).toBeGreaterThan(first.at)
+  })
+
   it('re-roots a reply to a reply, keeping threads one level deep', () => {
     const parent = root()
     const first = actions.replyToComment(parent.id, 'Agreed', 'bob')!

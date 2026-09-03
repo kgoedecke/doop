@@ -499,6 +499,10 @@ function postComment(
   if (!clean) return undefined
   /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it up */
   const mentioned = mentionedRole(clean)
+  const list = commentLog.get(frame.canvasId) ?? []
+  /* strictly increasing per canvas: thread order is reconstructed from `at`
+     after a restart, so two messages must never share a timestamp */
+  const at = Math.max(Date.now(), (list[0]?.at ?? 0) + 1)
   const comment: ElementComment = {
     id: nanoid(8),
     canvasId: frame.canvasId,
@@ -508,11 +512,10 @@ function postComment(
     from,
     ...(fromUserId ? { fromUserId } : {}),
     text: clean,
-    at: Date.now(),
+    at,
     ...(mentioned ? { forAgent: true, targetAgent: mentioned.name } : {}),
     ...(anchor.parentId ? { parentId: anchor.parentId } : {}),
   }
-  const list = commentLog.get(frame.canvasId) ?? []
   list.unshift(comment)
   if (list.length > 100) list.length = 100
   commentLog.set(frame.canvasId, list)
