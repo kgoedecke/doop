@@ -7,7 +7,7 @@ import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
-import { recordCreate, recordUpdate } from '../lib/history'
+import { recordCreate, recordUpdate, recordUpdates } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { FrameContextMenu } from './FrameContextMenu'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
@@ -79,6 +79,8 @@ interface ProbeHit {
   rect: { x: number; y: number; width: number; height: number }
 }
 
+type DragRect = { id: string; x: number; y: number; width: number; height: number }
+
 interface HoverHit {
   tag: string
   rect: { x: number; y: number; width: number; height: number }
@@ -88,7 +90,7 @@ interface HoverHit {
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
    this component — memo holds as long as the frame and raster are unchanged. */
 export const FrameView = memo(function FrameView({ frame, raster }: { frame: Frame; raster: number }) {
-  const selected = useStore((s) => s.selectedId === frame.id)
+  const selected = useStore((s) => s.selectedIds.includes(frame.id))
   const select = useStore((s) => s.select)
   const flash = useStore((s) => s.flashes[frame.id])
   const stream = useStore((s) => s.streams[frame.id])
@@ -108,41 +110,71 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
      lands in the store — otherwise a stale post would morph the edit away */
   const [suspendPost, setSuspendPost] = useState(false)
 
-  const sendDrag = useRef(
-    throttle((f: { id: string; x: number; y: number; width: number; height: number }) => {
-      sendWs({ type: 'frame:drag', frameId: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
-    }, 50),
-  ).current
+  /* one throttle per frame, so a group drag broadcasts every member —
+     a single throttle would keep only the last frame written each tick */
+  const dragSenders = useRef(new Map<string, (f: DragRect) => void>()).current
+  function sendDrag(id: string, f: DragRect) {
+    let send = dragSenders.get(id)
+    if (!send) {
+      send = throttle((r: DragRect) => {
+        sendWs({ type: 'frame:drag', frameId: r.id, x: r.x, y: r.y, width: r.width, height: r.height })
+      }, 50)
+      dragSenders.set(id, send)
+    }
+    send(f)
+  }
 
   function startDrag(e: React.PointerEvent, mode: 'move' | 'resize', probeOnClick = false, panelOnClick = false) {
     if (e.button !== 0) return
+    /* space held: let the event reach the Stage, which pans */
+    if (useStore.getState().panMode) return
     e.stopPropagation()
     e.preventDefault()
-    select(frame.id)
+    /* ⌥⇧-drag duplicates: the moment the drag is real, leave a copy of the
+       frame at its origin and keep dragging this one — same net effect as
+       Figma's "drag off a duplicate", without retargeting the drag */
+    const duplicating = mode === 'move' && e.altKey && e.shiftKey
+    /* plain ⇧-click adds to (or drops from) the selection; a dropped frame
+       does not start a drag */
+    if (mode === 'move' && e.shiftKey && !e.altKey) {
+      useStore.getState().toggleSelect(frame.id)
+      if (!useStore.getState().selectedIds.includes(frame.id)) return
+    } else if (!useStore.getState().selectedIds.includes(frame.id)) {
+      /* clicking a frame already in a group keeps the group — the drag
+         moves all of them */
+      select(frame.id)
+    }
     setDragging(true)
     clearHover()
     const start = { x: e.clientX, y: e.clientY }
     const off = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY }
     const orig = { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
     let moved = false
-    /* ⌥⇧-drag duplicates: the moment the drag is real, leave a copy of the
-       frame at its origin and keep dragging this one — same net effect as
-       Figma's "drag off a duplicate", without retargeting the drag */
-    const duplicating = mode === 'move' && e.altKey && e.shiftKey
     let dupDropped = false
     if (duplicating) setDuping(true)
+    /* a move carries every selected frame along; a resize is this frame only */
+    const frames = useStore.getState().canvas?.frames ?? []
+    const selectedIds = mode === 'move' ? useStore.getState().selectedIds : [frame.id]
+    const group = frames
+      .filter((f) => selectedIds.includes(f.id))
+      .map((f) => ({ id: f.id, orig: { x: f.x, y: f.y, width: f.width, height: f.height } }))
+    const groupIds = new Set(group.map((g) => g.id))
 
     function onMove(ev: PointerEvent) {
       if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 4) moved = true
       if (duplicating && moved && !dupDropped) {
         dupDropped = true
-        api
-          .createFrame(frame.canvasId, { name: frame.name, html: frame.html, ...orig })
-          .then((f) => {
-            posthog.capture('frame_duplicated', { via: 'drag' })
-            recordCreate(f)
-          })
-          .catch(console.error)
+        for (const g of group) {
+          const src = frames.find((f) => f.id === g.id)
+          if (!src) continue
+          api
+            .createFrame(src.canvasId, { name: src.name, html: src.html, ...g.orig })
+            .then((f) => {
+              posthog.capture('frame_duplicated', { via: 'drag' })
+              recordCreate(f)
+            })
+            .catch(console.error)
+        }
       }
       const zoom = useStore.getState().viewport.zoom
       const dx = (ev.clientX - start.x) / zoom
@@ -155,14 +187,26 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
               width: Math.max(120, Math.round(orig.width + dx)),
               height: Math.max(80, Math.round(orig.height + dy)),
             }
-      /* edges pull onto neighbouring frames' edges/centers; ⌥ drags free */
-      const others = useStore.getState().canvas?.frames.filter((f) => f.id !== frame.id) ?? []
+      /* edges pull onto neighbouring frames' edges/centers; ⌥ drags free.
+         Frames riding along in the group are not neighbours. */
+      const others = useStore.getState().canvas?.frames.filter((f) => !groupIds.has(f.id)) ?? []
       const snapped = ev.altKey ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom)
       useStore.getState().setSnapGuides(snapped.guides)
-      const patch = mode === 'move' ? { x: snapped.x, y: snapped.y } : { width: snapped.width, height: snapped.height }
-      useStore.getState().patchFrameLocal(frame.id, patch)
-      const f = useStore.getState().canvas?.frames.find((x) => x.id === frame.id)
-      if (f) sendDrag({ id: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
+      if (mode === 'move') {
+        /* the snapped delta of the dragged frame moves the whole group */
+        const sdx = snapped.x - orig.x
+        const sdy = snapped.y - orig.y
+        for (const g of group) {
+          useStore.getState().patchFrameLocal(g.id, { x: g.orig.x + sdx, y: g.orig.y + sdy })
+        }
+      } else {
+        useStore.getState().patchFrameLocal(frame.id, { width: snapped.width, height: snapped.height })
+      }
+      const live = useStore.getState().canvas?.frames ?? []
+      for (const g of group) {
+        const f = live.find((x) => x.id === g.id)
+        if (f) sendDrag(f.id, { id: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
+      }
     }
     function onUp() {
       window.removeEventListener('pointermove', onMove)
@@ -170,11 +214,17 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       setDragging(false)
       if (duplicating) setDuping(false)
       useStore.getState().setSnapGuides([])
-      const f = useStore.getState().canvas?.frames.find((x) => x.id === frame.id)
-      if (f) {
-        api.updateFrame(f.id, { x: f.x, y: f.y, width: f.width, height: f.height }).catch(console.error)
-        recordUpdate(f.id, orig, { x: f.x, y: f.y, width: f.width, height: f.height })
+      const live = useStore.getState().canvas?.frames ?? []
+      const updates: { frameId: string; before: typeof orig; after: typeof orig }[] = []
+      for (const g of group) {
+        const f = live.find((x) => x.id === g.id)
+        if (!f) continue
+        const after = { x: f.x, y: f.y, width: f.width, height: f.height }
+        api.updateFrame(f.id, after).catch(console.error)
+        updates.push({ frameId: f.id, before: g.orig, after })
       }
+      if (updates.length === 1) recordUpdate(updates[0].frameId, updates[0].before, updates[0].after)
+      else recordUpdates(updates)
       /* a click (no drag) on the frame surface targets the element under
          the cursor: probe it and show the element toolbar */
       if (!moved && probeOnClick) probeAt(off.x, off.y)
@@ -417,8 +467,9 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         /* deferPanel: when this right-click is what selects the frame, the
            Inspector waits until the menu closes — it must not slide in
            underneath the menu the user just opened */
-        const alreadySelected = store.selectedId === frame.id
-        select(frame.id)
+        const alreadySelected = store.selectedIds.includes(frame.id)
+        /* a right-click inside a group keeps the group, so Delete takes all */
+        if (!alreadySelected) select(frame.id)
         closePopovers()
         store.openCtxMenu({ frameId: frame.id, deferPanel: !alreadySelected })
       }}

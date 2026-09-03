@@ -38,7 +38,14 @@ interface State {
   /** which tab the side panel shows — in the store so a Memory-suggestion
    *  toast anywhere in the app can jump straight to the Memory tab */
   panelTab: 'tasks' | 'activity' | 'memory'
+  /** every selected frame, in selection order — marquee and ⇧-click build
+   *  this up; a plain click collapses it to one */
+  selectedIds: string[]
+  /** the primary selection (the last frame added) — what the Inspector,
+   *  presence, and the flow overlay follow */
   selectedId: string | null
+  /** space bar held: the stage pans on drag instead of drawing a marquee */
+  panMode: boolean
   /** the Inspector panel is showing — opened by clicking a frame's name, not
    *  by mere selection, so clicking around a frame doesn't slide the panel in */
   inspectorOpen: boolean
@@ -99,6 +106,11 @@ interface State {
   allowanceChanged(): void
   requestFlyTo(frameId: string): void
   select(id: string | null): void
+  /** ⇧-click: add the frame to the selection, or drop it if already in */
+  toggleSelect(id: string): void
+  /** marquee: replace the selection with these frames */
+  selectMany(ids: string[]): void
+  setPanMode(v: boolean): void
   setInspectorOpen(v: boolean): void
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
@@ -122,7 +134,9 @@ export const useStore = create<State>((set, get) => ({
   limitWall: false,
   allowanceVersion: 0,
   flyTo: null,
+  selectedIds: [],
   selectedId: null,
+  panMode: false,
   inspectorOpen: false,
   ctxMenu: null,
   viewport: { x: 0, y: 0, zoom: 1 },
@@ -208,6 +222,7 @@ export const useStore = create<State>((set, get) => ({
       if (!s.canvas) return {}
       return {
         canvas: { ...s.canvas, frames: s.canvas.frames.filter((f) => f.id !== frameId) },
+        selectedIds: s.selectedIds.filter((id) => id !== frameId),
         selectedId: s.selectedId === frameId ? null : s.selectedId,
         ctxMenu: s.ctxMenu?.frameId === frameId ? null : s.ctxMenu,
       }
@@ -256,7 +271,24 @@ export const useStore = create<State>((set, get) => ({
      panel must not follow surface clicks, paste, or undo onto another frame.
      Re-selecting the same frame keeps an open panel open. */
   select: (selectedId) =>
-    set((s) => (s.selectedId === selectedId ? { selectedId } : { selectedId, inspectorOpen: false })),
+    set((s) => {
+      const selectedIds = selectedId ? [selectedId] : []
+      return s.selectedId === selectedId
+        ? { selectedId, selectedIds }
+        : { selectedId, selectedIds, inspectorOpen: false }
+    }),
+  toggleSelect: (id) =>
+    set((s) => {
+      const selectedIds = s.selectedIds.includes(id) ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id]
+      const selectedId = selectedIds[selectedIds.length - 1] ?? null
+      return selectedId === s.selectedId ? { selectedIds } : { selectedIds, selectedId, inspectorOpen: false }
+    }),
+  selectMany: (ids) =>
+    set((s) => {
+      const selectedId = ids[ids.length - 1] ?? null
+      return selectedId === s.selectedId ? { selectedIds: ids } : { selectedIds: ids, selectedId, inspectorOpen: false }
+    }),
+  setPanMode: (panMode) => set({ panMode }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
   closeCtxMenu: () => set({ ctxMenu: null }),
