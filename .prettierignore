@@ -3,3 +3,5 @@ node_modules/
 package-lock.json
 bun.lock
 CHANGELOG.md
+desktop/src-tauri/tauri.conf.json
+desktop/CHANGELOG.md
