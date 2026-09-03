@@ -316,7 +316,15 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           comments
             .map((c) => {
               const fname = store.getFrame(c.frameId)?.name ?? 'unknown frame'
-              return `- ${c.from} on frame ${c.frameId} "${fname}", element ${c.selector}\n  element HTML at comment time: ${c.snippet}\n  comment: "${c.text}"`
+              /* a reply carries the conversation it answers, so "make it
+                 bigger" reads against what was said before */
+              const earlier = actions
+                .commentThread(c)
+                .filter((x) => x.at < c.at)
+                .map((x) => `    ${x.from}: "${x.text}"`)
+                .join('\n')
+              const thread = earlier ? `\n  earlier in this thread:\n${earlier}` : ''
+              return `- ${c.from} on frame ${c.frameId} "${fname}", element ${c.selector}\n  element HTML at comment time: ${c.snippet}${thread}\n  comment: "${c.text}"`
             })
             .join('\n'),
       )
