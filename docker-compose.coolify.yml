@@ -1,0 +1,88 @@
+# Production deployment for Coolify. Configure the required variables in the
+# Coolify environment and deploy this file instead of docker-compose.yml.
+services:
+  doop:
+    build:
+      context: .
+      args:
+        VITE_POSTHOG_KEY: ${VITE_POSTHOG_KEY:-}
+        VITE_POSTHOG_HOST: ${VITE_POSTHOG_HOST:-}
+        VITE_POSTHOG_INTERNAL_DOMAINS: ${VITE_POSTHOG_INTERNAL_DOMAINS:-}
+    environment:
+      DATABASE_URL: postgres://doop:${POSTGRES_PASSWORD:?}@db:5432/doop
+
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+      SIGNUP_EMAIL_DOMAINS: ${SIGNUP_EMAIL_DOMAINS:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-}
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-}
+
+      BUCKET: ${BUCKET:?}
+      ACCESS_KEY_ID: ${ACCESS_KEY_ID:?}
+      SECRET_ACCESS_KEY: ${SECRET_ACCESS_KEY:?}
+      ENDPOINT: ${ENDPOINT:?}
+      REGION: ${REGION:-auto}
+
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-2587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-true}
+
+      DOOP_AGENT_PROVIDER: ${DOOP_AGENT_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
+      AZURE_OPENAI_REASONING_EFFORT: ${AZURE_OPENAI_REASONING_EFFORT:-}
+      RESIDENT_TASK_LIMIT: ${RESIDENT_TASK_LIMIT:-0}
+      DOOP_AGENT_MODEL: ${DOOP_AGENT_MODEL:-}
+      DOOP_DISTILL_MODEL: ${DOOP_DISTILL_MODEL:-}
+      DOOP_AGENT_OPENAI_MODEL: ${DOOP_AGENT_OPENAI_MODEL:-gpt-5.6-terra}
+      DOOP_AGENT_OPENAI_EFFORT: ${DOOP_AGENT_OPENAI_EFFORT:-medium}
+      CHATGPT_CONNECT_DISABLED: ${CHATGPT_CONNECT_DISABLED:-1}
+
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+      BRANDFETCH_CLIENT_ID: ${BRANDFETCH_CLIENT_ID:-}
+      CONTEXT_DEV_API_KEY: ${CONTEXT_DEV_API_KEY:-}
+
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+
+      VITE_POSTHOG_KEY: ${VITE_POSTHOG_KEY:-}
+      POSTHOG_INGEST_HOST: ${POSTHOG_INGEST_HOST:-}
+      POSTHOG_ASSETS_HOST: ${POSTHOG_ASSETS_HOST:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: doop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: doop
+    volumes:
+      - doop-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U doop']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  doop-pg:
