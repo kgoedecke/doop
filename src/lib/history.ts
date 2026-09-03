@@ -142,7 +142,14 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
   if (e.type === 'update') {
     const patch = forward ? e.after : e.before
     useStore.getState().patchFrameLocal(e.frameId, patch)
-    await api.updateFrame(e.frameId, patch)
+    try {
+      await api.updateFrame(e.frameId, patch)
+    } catch (err) {
+      /* the server kept the old value — put the local copy back in step
+         with it rather than leave a client-only position behind */
+      useStore.getState().patchFrameLocal(e.frameId, forward ? e.before : e.after)
+      throw err
+    }
   } else if ((e.type === 'create') === forward) {
     await recreate(e)
   } else {

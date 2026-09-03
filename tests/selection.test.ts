@@ -151,6 +151,10 @@ describe('review follow-ups', () => {
     })
     await history.undo()
     expect(api.updateFrame).toHaveBeenCalledTimes(2)
+    /* a's rejected undo is rolled back locally so it matches the server */
+    const frames = useStore.getState().canvas!.frames
+    expect(frames.find((f) => f.id === 'a')!.x).toBe(1)
+    expect(frames.find((f) => f.id === 'b')!.x).toBe(0)
     /* only b was undone, so only b comes back on redo */
     await history.redo()
     expect(api.updateFrame).toHaveBeenCalledTimes(3)
