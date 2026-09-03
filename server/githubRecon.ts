@@ -1,38 +1,41 @@
-import { pickModel } from './agentModel.ts'
+import { ModelAuthError, type AgentModel } from './agentModel.ts'
 import type { TurnBlock } from './openaiAgent.ts'
 import { createAsset } from './assets.ts'
 import * as actions from './actions.ts'
+import { store } from './store.ts'
 import {
   fetchRepoBinary,
   fetchRepoFile,
   fetchTreePaths,
-  placeholderHtml,
+  getConnection,
+  githubFrameMarker,
+  markSynced,
   wrapGeneratedHtml,
+  wrapRepoHtml,
   type GithubConnection,
-  type RepoScreen,
 } from './github.ts'
-import type { Actor } from '../shared/types.ts'
+import type { Actor, AgentTask, Frame, RepoScreenRef } from '../shared/types.ts'
 
 /**
- * Reconstruction: the agent-designed lane of the GitHub import. A screen that
- * only exists as code (a Next page, a story) is imported as an outline frame
- * immediately; this pass then reads the screen's source closure from the
- * repo, has the model rewrite it into ONE self-contained HTML document, and
- * morphs it into the outline in place — people watching the canvas see the
- * sketch fill in. Runs only when a model is available (the requester's
- * connected account, else the server's agent tier); with no model the
- * outline simply stays, which is the honest fallback.
+ * The GitHub import's runner: the resident Doop agent hands every repo card
+ * it claims to runRepoCards. A design-system card distills the repo's theme
+ * into a pinned canvas guideline; a sketch card reads one screen's source
+ * closure from the repo, has the model rewrite it into ONE self-contained
+ * HTML document, and lands it as a properly sized frame next to its siblings
+ * from the same import. Nothing exists on the canvas until a card finishes,
+ * so a failed card leaves no debris — it waits on the board for a retry.
  *
- * This is still the one-time, code-only contract: everything the model sees
- * comes from the repository. Nothing here touches the live site.
+ * This is the one-time, code-only contract: everything the model sees comes
+ * from the repository. Nothing here touches the live site.
  */
 
 /** Bounded source closure: the screen's file, its resolvable local imports
  *  (depth-first, small), and the styling context that shapes every screen. */
 const MAX_CLOSURE_FILES = 10
 const MAX_CLOSURE_BYTES = 80_000
-const MAX_RECONSTRUCTIONS_PER_IMPORT = 12
-const RECON_CONCURRENCY = 2
+/** sketches from one claim that design at the same time — steady progress
+ *  without hammering the model or the GitHub API */
+const SKETCH_CONCURRENCY = 2
 const MODEL_MAX_TOKENS = 32_000
 const MAX_REQUEST_ROUNDS = 2
 const REVIEW_ROUNDS = 1
@@ -84,7 +87,7 @@ const IMPORT_RE = /import\s[^'"]*?['"]([^'"]+)['"]|from\s+['"]([^'"]+)['"]/g
 /** Collect the screen's bounded source closure as prompt-ready sections. */
 export async function collectClosure(
   conn: GithubConnection,
-  screen: RepoScreen,
+  screen: RepoScreenRef,
   paths: string[],
 ): Promise<{ path: string; text: string }[]> {
   const pathSet = new Set(paths)
@@ -159,7 +162,7 @@ Use request_files for this — batch what you need; you have a couple of rounds.
 
 Then produce a single COMPLETE, self-contained HTML document that faithfully renders this screen:
 - Translate the component structure and its styling into real inline <style> CSS, using the palette, fonts and tokens you found — not defaults, not guesses.
-- The document is exactly 1280px wide. Choose the natural height for the content and declare it as the LAST line of your output, an HTML comment: <!-- doop-height: 900 -->
+- The document's width is given in the request. Choose the natural height for the content and declare it as the LAST line of your output, an HTML comment: <!-- doop-height: 900 -->
 - Dynamic data (user names, table rows, dates) gets realistic, specific placeholder values — never lorem ipsum or "Item 1". Static marketing copy comes from the source, verbatim.
 - Reproduce the ENTIRE page top to bottom — every section the source renders (hero, features, FAQ, footer, all of it). A truncated page is a failed reconstruction; declare the true height.
 - No <script> tags, no external CSS or JS. Google Fonts via <link> are allowed when the source names a font (check _document/layout for font loading).
@@ -223,11 +226,7 @@ Rules the agents must follow verbatim belong here; keep it under 350 lines. No c
 
 /** Distill the repo's design system into style-guide markdown. Reuses the
  *  same seeding logic as screen closures but aimed at the system files. */
-export async function extractDesignSystem(
-  conn: GithubConnection,
-  paths: string[],
-  model: NonNullable<Awaited<ReturnType<typeof pickModel>>>,
-): Promise<string> {
+export async function extractDesignSystem(conn: GithubConnection, paths: string[], model: AgentModel): Promise<string> {
   const seeds = [
     'package.json',
     ...paths.filter((p) => !p.includes('node_modules') && /(^|\/)tailwind\.config\.[jt]s$/.test(p)).slice(0, 1),
@@ -346,212 +345,328 @@ export async function resolveRepoAssets(conn: GithubConnection, html: string, pa
   return html.replace(REPO_REF_RE, (_full, pre, p, post) => pre + (urls.get(p) ?? TRANSPARENT_PX) + post)
 }
 
-/** Reconstruct the given outline frames in the background. Fire-and-forget
- *  from the import route — every failure lands in the frame itself (the
- *  outline flips to a 'failed' note) and in the log, never in the response. */
-export function scheduleReconstructions(
-  conn: GithubConnection,
-  jobs: { frameId: string; screen: RepoScreen }[],
-  requester: Actor,
-  payerId: string,
-  opts: { designSystem?: boolean } = {},
-): void {
-  if (!jobs.length && !opts.designSystem) return
-  void (async () => {
-    const model = await pickModel(payerId)
-    if (!model) return /* no model — outlines stay, which the copy reflects */
-    /* The sketching is the Doop Agent's work, and it should look like it:
-       an agent actor gives it live presence, a task entry ("is working
-       on…") on the board/feed, and frame edits attributed to Doop instead
-       of the human who clicked Import. */
-    const actor = actions.resolveActor({ name: 'Doop', kind: 'agent', owner: requester.name })
-    const paths = await fetchTreePaths(conn)
+/* ------------------------------------------------------------------ */
+/* Frame placement                                                     */
+
+const PAGE_W = 1280
+const COMPONENT_W = 640
+const STATIC_H = 900
+const GAP = 80
+/** how wide a repo's import grid grows before a new row starts */
+const ROW_WIDTH = 3200
+
+/** Where the next frame from this connection goes: frames flow in rows
+ *  from the import's origin — right of the row's last frame while it fits,
+ *  else a fresh row under everything the connection has landed so far. The
+ *  grid is derived from the frames on the canvas, not remembered, so it
+ *  survives restarts and frames finishing in any order. */
+export function nextRepoFramePosition(
+  frames: Pick<Frame, 'x' | 'y' | 'width' | 'height' | 'html'>[],
+  connectionId: string,
+  width: number,
+): { x: number; y: number } {
+  const siblings = frames.filter((f) => githubFrameMarker(f.html)?.connectionId === connectionId)
+  if (!siblings.length) {
+    const rightmost = frames.reduce((right, f) => Math.max(right, f.x + f.width), 0)
+    return { x: frames.length ? rightmost + GAP : 120, y: 120 }
+  }
+  const originX = Math.min(...siblings.map((f) => f.x))
+  const rowY = Math.max(...siblings.map((f) => f.y))
+  const rowRight = Math.max(...siblings.filter((f) => f.y === rowY).map((f) => f.x + f.width))
+  if (rowRight + GAP + width <= originX + ROW_WIDTH) return { x: rowRight + GAP, y: rowY }
+  const bottom = Math.max(...siblings.map((f) => f.y + f.height))
+  return { x: originX, y: bottom + GAP }
+}
+
+function isCompact(screen: RepoScreenRef): boolean {
+  return screen.kind === 'component' || screen.kind === 'story'
+}
+
+/** Slug of the guideline a repo's design-system card writes. */
+export function designSystemSlug(repo: string): string {
+  return `${repo
+    .split('/')
+    .pop()!
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')}-design-system`
+}
+
+/* ------------------------------------------------------------------ */
+/* The runner                                                          */
+
+type RepoCard = AgentTask & { payload: NonNullable<AgentTask['payload']> }
+
+function isRepoCard(card: AgentTask): card is RepoCard {
+  return (card.kind === 'sketch' || card.kind === 'design-system') && !!card.payload
+}
+
+/** Why a card failed, in words a human can act on from the board. */
+function failureReason(err: unknown): string {
+  if (err instanceof ModelAuthError)
+    return 'The connected model account turned down the request. Reconnect it in Settings, then retry.'
+  const message = err instanceof Error ? err.message : 'unknown error'
+  return `Doop could not finish this: ${message.slice(0, 200)}. Retry when you are ready.`
+}
+
+/** A billing/auth failure is account-wide — one card proving it is enough;
+ *  the rest fail with the same reason without another model call each. The
+ *  server tier rewraps ModelAuthError with its own wording (cause kept), so
+ *  the cause chain is checked, not just the top error. */
+function isAccountError(err: unknown): boolean {
+  for (let e = err, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) {
+    if (e instanceof ModelAuthError) return true
+    if (/credit|billing|quota|api key|credentials|unauthorized|401|403/i.test(e.message)) return true
+  }
+  return false
+}
+
+/**
+ * Work the repo cards one claim handed over. The sweep already resolved the
+ * model (the requester's account, else the server tier) and claimed the
+ * cards, so every outcome here is a card outcome: advanced on success,
+ * failed with a reason otherwise. Design-system cards run first — the guide
+ * they pin grounds the sketches — then sketches, a couple at a time.
+ */
+export async function runRepoCards(
+  canvasId: string,
+  cards: AgentTask[],
+  model: AgentModel,
+  actor: Actor,
+): Promise<void> {
+  const repoCards = cards.filter(isRepoCard)
+  const byConnection = new Map<string, RepoCard[]>()
+  for (const card of repoCards) {
+    const list = byConnection.get(card.payload.connectionId) ?? []
+    list.push(card)
+    byConnection.set(card.payload.connectionId, list)
+  }
+  for (const card of cards) {
+    if (!isRepoCard(card)) actions.failCard(canvasId, card.id, 'This card lost its repository details. Import again.')
+  }
+
+  for (const [connectionId, group] of byConnection) {
+    const repo = group[0]!.payload.repo
+    const conn = await getConnection(canvasId, connectionId)
+    if (!conn) {
+      const reason = `The connection to ${repo} was removed. Reconnect the repository and import again.`
+      for (const card of group) actions.failCard(canvasId, card.id, reason)
+      continue
+    }
+    let paths: string[]
+    try {
+      paths = await fetchTreePaths(conn)
+    } catch (err) {
+      for (const card of group) actions.failCard(canvasId, card.id, failureReason(err))
+      continue
+    }
+
+    /* an account-wide failure (auth, billing, quota) anywhere in the group
+       fails every card still waiting with the same reason — no card repeats
+       a request the account already turned down */
+    let accountDead: string | undefined
 
     /* the design system first: it becomes a pinned canvas guideline every
        agent follows, and it grounds the sketches below */
-    let designSystemMd = ''
-    if (opts.designSystem) {
-      try {
-        actions.setAgentStatus(conn.canvasId, actor, `Reading ${conn.repo}’s design system — theme, tokens, type`)
-        designSystemMd = await extractDesignSystem(conn, paths, model)
-        const slug = `${conn.repo
-          .split('/')
-          .pop()!
-          .toLowerCase()
-          .replace(/[^a-z0-9-]+/g, '-')}-design-system`
-        actions.setGuideline(conn.canvasId, slug, designSystemMd, actor, undefined, `${conn.repo} design system`)
-      } catch (err) {
-        console.error(`[github-recon] design system extraction for ${conn.repo} failed`, err)
-      }
-    }
-
-    const queue = jobs.slice(0, MAX_RECONSTRUCTIONS_PER_IMPORT)
-    if (!queue.length) {
-      actions.setAgentStatus(conn.canvasId, actor, '')
-      return
-    }
-    const plural = queue.length === 1 ? 'screen' : 'screens'
-    actions.setAgentStatus(
-      conn.canvasId,
-      actor,
-      `Sketching ${queue.length} ${plural} from ${conn.repo} — reading source, designing frames`,
-    )
-    console.log(`[github-recon] ${queue.length} screen(s) from ${conn.repo} on ${model.label}`)
-
-    /* a billing/auth failure is account-wide — one screen proving it is
-       enough; the rest flip to the actionable 'failed' card without another
-       model call each */
-    const failedCard = (job: { frameId: string; screen: RepoScreen }) =>
-      placeholderHtml(conn, job.screen, 'failed', { canvasId: conn.canvasId, frameId: job.frameId })
-    let accountDead = false
-    const isAccountError = (err: unknown) =>
-      err instanceof Error && /credit|billing|quota|api key|unauthorized|401|403/i.test(err.message)
-
-    async function runOne(job: { frameId: string; screen: RepoScreen }) {
+    for (const card of group.filter((c) => c.kind === 'design-system')) {
       if (accountDead) {
-        actions.updateFrame(job.frameId, { html: failedCard(job) }, actor)
-        return
+        actions.failCard(canvasId, card.id, accountDead)
+        continue
       }
       try {
-        const closure = await collectClosure(conn, job.screen, paths)
-        if (!closure.length) throw new Error('no readable source')
-        const source = closure.map((f) => `===== ${f.path} =====\n${f.text}`).join('\n\n')
-        const componentBrief =
-          job.screen.kind === 'component' || job.screen.kind === 'story'
-            ? `This is a COMPONENT, not a page: present it as an isolated library card — a quiet neutral backdrop, the component rendered at natural size, and its key variants/states side by side when the source defines them. Keep the card compact.\n\n`
-            : ''
-        const systemContext = designSystemMd
-          ? `The product's design system, distilled from this repo (follow it exactly):\n${designSystemMd}\n\n`
-          : ''
-        const messages: Parameters<NonNullable<typeof model>['run']>[0]['messages'] = [
-          {
-            role: 'user',
-            content:
-              `Screen: ${job.screen.title} (route ${job.screen.route}) from ${conn.repo}.\n\n` +
-              componentBrief +
-              systemContext +
-              `Repository file tree (investigate with request_files):\n${treeExcerpt(paths, job.screen.sourcePath)}\n\n${source}`,
-          },
-        ]
-        /* the investigation loop: the model reads the tree and pulls the
-           theme/locale/component files it needs before designing */
-        const pathSet = new Set(paths)
-        let requestedBudget = MAX_REQUESTED_BYTES
-        let result = null as Awaited<ReturnType<NonNullable<typeof model>['run']>> | null
-        for (let round = 0; round <= MAX_REQUEST_ROUNDS; round++) {
-          result = await model!.run({
-            system: [{ text: SYSTEM_PROMPT, cache: true }],
-            tools: round < MAX_REQUEST_ROUNDS ? [REQUEST_FILES_TOOL] : [],
-            messages,
-            maxTokens: MODEL_MAX_TOKENS,
-          })
-          if (result.stop_reason !== 'tool_use') break
-          const calls = result.content.filter((b) => b.type === 'tool_use')
-          messages.push({ role: 'assistant', content: result.content })
-          const results = []
-          for (const call of calls) {
-            const wanted = (
-              Array.isArray((call.input as { paths?: unknown })?.paths)
-                ? ((call.input as { paths: unknown[] }).paths as unknown[])
-                : []
-            )
-              .map(String)
-              .filter((p) => pathSet.has(p))
-              .slice(0, MAX_REQUESTED_FILES)
-            const sections: string[] = []
-            for (const p of wanted) {
-              if (requestedBudget <= 0) break
-              try {
-                let text = await fetchRepoFile(conn, p)
-                if (text.length > requestedBudget) text = text.slice(0, requestedBudget) + '\n/* …truncated… */'
-                requestedBudget -= text.length
-                sections.push(`===== ${p} =====\n${text}`)
-              } catch {
-                sections.push(`===== ${p} =====\n/* unreadable */`)
-              }
-            }
-            results.push({
-              type: 'tool_result' as const,
-              tool_use_id: call.id,
-              content: sections.join('\n\n') || 'none of those paths exist in the tree',
-            })
-          }
-          messages.push({ role: 'user', content: results })
-        }
-        const { html, height } = extractHtml((result?.content ?? []) as { type: string; text?: string }[])
-        const withAssets = await resolveRepoAssets(conn, html, pathSet)
-        let frame = actions.updateFrame(
-          job.frameId,
-          { html: wrapGeneratedHtml(withAssets, conn, job.screen), height },
-          actor,
-        )
-
-        /* Doop's own doctrine: never ship without looking. Render the draft,
-           show the model its own output, and let it fix what is visibly
-           wrong — the single biggest quality lever short of executing the
-           app. Draft stays on the canvas while the fix round runs. */
-        for (let round = 0; frame && round < REVIEW_ROUNDS; round++) {
-          try {
-            const { renderFrame } = await import('./screenshot.ts')
-            const shot = await renderFrame(frame, frame.height > 4000 ? 0.7 : 1, {
-              type: 'jpeg',
-              quality: 72,
-              maxHeight: 8000,
-            })
-            messages.push({ role: 'assistant', content: (result?.content ?? []) as TurnBlock[] })
-            messages.push({
-              role: 'user',
-              content: [
-                {
-                  type: 'image',
-                  source: { type: 'base64', media_type: 'image/jpeg', data: shot.toString('base64') },
-                },
-                {
-                  type: 'text',
-                  text: 'This is YOUR reconstruction, rendered. Judge it against the source you read like a senior designer: wrong palette or fonts, broken or overlapping layout, clipped or missing sections, dead empty areas, images that did not resolve. Then output the corrected COMPLETE document — same rules, full page, ending with the height comment. If it is genuinely faithful already, output the document unchanged.',
-                },
-              ],
-            })
-            const fixed = await model!.run({
-              system: [{ text: SYSTEM_PROMPT, cache: true }],
-              tools: [],
-              messages,
-              maxTokens: MODEL_MAX_TOKENS,
-            })
-            result = fixed
-            const redo = extractHtml(fixed.content as { type: string; text?: string }[])
-            const redoAssets = await resolveRepoAssets(conn, redo.html, pathSet)
-            frame = actions.updateFrame(
-              job.frameId,
-              { html: wrapGeneratedHtml(redoAssets, conn, job.screen), height: redo.height },
-              actor,
-            )
-          } catch (err) {
-            console.error(`[github-recon] review round for ${job.screen.route} failed — keeping the draft`, err)
-            break
-          }
-        }
+        actions.setAgentStatus(canvasId, actor, `Reading ${repo}’s design system — theme, tokens, type`)
+        const md = await extractDesignSystem(conn, paths, model)
+        actions.setGuideline(canvasId, designSystemSlug(repo), md, actor, undefined, `${repo} design system`)
+        actions.advanceCard(canvasId, card.id, actor)
       } catch (err) {
-        console.error(`[github-recon] ${job.screen.route} failed`, err)
-        if (isAccountError(err)) accountDead = true
-        actions.updateFrame(job.frameId, { html: failedCard(job) }, actor)
+        console.error(`[github-recon] design system extraction for ${repo} failed`, err)
+        const reason = failureReason(err)
+        if (isAccountError(err)) accountDead = reason
+        actions.failCard(canvasId, card.id, reason)
       }
     }
 
-    /* small worker pool: steady progress on the canvas without hammering
-       the model or the GitHub API */
-    /* a model turn can outlast the presence TTL — keep Doop visibly in the
-       room for as long as the pass is actually alive */
-    const heartbeat = setInterval(() => actions.heartbeatAgent(conn.canvasId, actor), 15_000)
-    try {
-      const workers = Array.from({ length: Math.min(RECON_CONCURRENCY, queue.length) }, async () => {
-        for (let job = queue.shift(); job; job = queue.shift()) await runOne(job)
-      })
-      await Promise.all(workers)
-    } finally {
-      clearInterval(heartbeat)
-      actions.setAgentStatus(conn.canvasId, actor, '')
+    const queue = group.filter((c) => c.kind === 'sketch' && c.payload.screen)
+    if (!queue.length) continue
+    console.log(`[github-recon] ${queue.length} screen(s) from ${repo} on ${model.label}`)
+    const worker = async () => {
+      for (let card = queue.shift(); card; card = queue.shift()) {
+        if (accountDead) {
+          actions.failCard(canvasId, card.id, accountDead)
+          continue
+        }
+        const screen = card.payload.screen!
+        try {
+          actions.setAgentStatus(
+            canvasId,
+            actor,
+            screen.source === 'static'
+              ? `Importing ${screen.title} from ${repo}`
+              : `Sketching ${screen.title} from ${repo}`,
+          )
+          await sketchScreen(canvasId, conn, screen, paths, model, actor)
+          markSynced(conn.id)
+          actions.advanceCard(canvasId, card.id, actor)
+        } catch (err) {
+          console.error(`[github-recon] ${screen.route} failed`, err)
+          const reason = failureReason(err)
+          if (isAccountError(err)) accountDead = reason
+          actions.failCard(canvasId, card.id, reason)
+        }
+      }
     }
-    console.log(`[github-recon] ${conn.repo} done`)
-  })().catch((err) => console.error('[github-recon] pass failed', err))
+    await Promise.all(Array.from({ length: Math.min(SKETCH_CONCURRENCY, queue.length) }, worker))
+    console.log(`[github-recon] ${repo} done`)
+  }
+}
+
+/** Land one frame for a screen at the connection's next grid slot. */
+function placeRepoFrame(
+  canvasId: string,
+  conn: GithubConnection,
+  screen: RepoScreenRef,
+  html: string,
+  width: number,
+  height: number,
+  actor: Actor,
+): Frame {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) throw new Error('canvas not found')
+  const at = nextRepoFramePosition(canvas.frames, conn.id, width)
+  const frame = actions.createFrame(canvasId, { name: screen.title.slice(0, 80), ...at, width, height, html }, actor)
+  if (!frame) throw new Error('canvas not found')
+  return frame
+}
+
+/** One screen, source to frame. Repo HTML lands as-is; code is designed by
+ *  the model, rendered, reviewed once by the model, and fixed. */
+async function sketchScreen(
+  canvasId: string,
+  conn: GithubConnection,
+  screen: RepoScreenRef,
+  paths: string[],
+  model: AgentModel,
+  actor: Actor,
+): Promise<void> {
+  if (screen.source === 'static') {
+    const html = wrapRepoHtml(await fetchRepoFile(conn, screen.sourcePath), conn, screen)
+    placeRepoFrame(canvasId, conn, screen, html, PAGE_W, STATIC_H, actor)
+    return
+  }
+
+  const width = isCompact(screen) ? COMPONENT_W : PAGE_W
+  const closure = await collectClosure(conn, screen, paths)
+  if (!closure.length) throw new Error('no readable source')
+  const source = closure.map((f) => `===== ${f.path} =====\n${f.text}`).join('\n\n')
+  const componentBrief = isCompact(screen)
+    ? `This is a COMPONENT, not a page: present it as an isolated library card — a quiet neutral backdrop, the component rendered at natural size, and its key variants/states side by side when the source defines them. Keep the card compact.\n\n`
+    : ''
+  const designSystemMd = store.getGuidelines(canvasId).find((g) => g.name === designSystemSlug(conn.repo))?.markdown
+  const systemContext = designSystemMd
+    ? `The product's design system, distilled from this repo (follow it exactly):\n${designSystemMd}\n\n`
+    : ''
+  const messages: Parameters<AgentModel['run']>[0]['messages'] = [
+    {
+      role: 'user',
+      content:
+        `Screen: ${screen.title} (route ${screen.route}) from ${conn.repo}. The document is exactly ${width}px wide.\n\n` +
+        componentBrief +
+        systemContext +
+        `Repository file tree (investigate with request_files):\n${treeExcerpt(paths, screen.sourcePath)}\n\n${source}`,
+    },
+  ]
+  /* the investigation loop: the model reads the tree and pulls the
+     theme/locale/component files it needs before designing */
+  const pathSet = new Set(paths)
+  let requestedBudget = MAX_REQUESTED_BYTES
+  let result: Awaited<ReturnType<AgentModel['run']>> | null = null
+  for (let round = 0; round <= MAX_REQUEST_ROUNDS; round++) {
+    result = await model.run({
+      system: [{ text: SYSTEM_PROMPT, cache: true }],
+      tools: round < MAX_REQUEST_ROUNDS ? [REQUEST_FILES_TOOL] : [],
+      messages,
+      maxTokens: MODEL_MAX_TOKENS,
+    })
+    if (result.stop_reason !== 'tool_use') break
+    const calls = result.content.filter((b) => b.type === 'tool_use')
+    messages.push({ role: 'assistant', content: result.content })
+    const results = []
+    for (const call of calls) {
+      const wanted = (
+        Array.isArray((call.input as { paths?: unknown })?.paths)
+          ? ((call.input as { paths: unknown[] }).paths as unknown[])
+          : []
+      )
+        .map(String)
+        .filter((p) => pathSet.has(p))
+        .slice(0, MAX_REQUESTED_FILES)
+      const sections: string[] = []
+      for (const p of wanted) {
+        if (requestedBudget <= 0) break
+        try {
+          let text = await fetchRepoFile(conn, p)
+          if (text.length > requestedBudget) text = text.slice(0, requestedBudget) + '\n/* …truncated… */'
+          requestedBudget -= text.length
+          sections.push(`===== ${p} =====\n${text}`)
+        } catch {
+          sections.push(`===== ${p} =====\n/* unreadable */`)
+        }
+      }
+      results.push({
+        type: 'tool_result' as const,
+        tool_use_id: call.id,
+        content: sections.join('\n\n') || 'none of those paths exist in the tree',
+      })
+    }
+    messages.push({ role: 'user', content: results })
+  }
+  const { html, height } = extractHtml((result?.content ?? []) as { type: string; text?: string }[])
+  const withAssets = await resolveRepoAssets(conn, html, pathSet)
+  let frame = placeRepoFrame(canvasId, conn, screen, wrapGeneratedHtml(withAssets, conn, screen), width, height, actor)
+
+  /* Doop's own doctrine: never ship without looking. Render the draft,
+     show the model its own output, and let it fix what is visibly
+     wrong — the single biggest quality lever short of executing the
+     app. Draft stays on the canvas while the fix round runs. */
+  for (let round = 0; round < REVIEW_ROUNDS; round++) {
+    try {
+      const { renderFrame } = await import('./screenshot.ts')
+      const shot = await renderFrame(frame, frame.height > 4000 ? 0.7 : 1, {
+        type: 'jpeg',
+        quality: 72,
+        maxHeight: 8000,
+      })
+      messages.push({ role: 'assistant', content: (result?.content ?? []) as TurnBlock[] })
+      messages.push({
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/jpeg', data: shot.toString('base64') },
+          },
+          {
+            type: 'text',
+            text: 'This is YOUR reconstruction, rendered. Judge it against the source you read like a senior designer: wrong palette or fonts, broken or overlapping layout, clipped or missing sections, dead empty areas, images that did not resolve. Then output the corrected COMPLETE document — same rules, full page, ending with the height comment. If it is genuinely faithful already, output the document unchanged.',
+          },
+        ],
+      })
+      const fixed = await model.run({
+        system: [{ text: SYSTEM_PROMPT, cache: true }],
+        tools: [],
+        messages,
+        maxTokens: MODEL_MAX_TOKENS,
+      })
+      result = fixed
+      const redo = extractHtml(fixed.content as { type: string; text?: string }[])
+      const redoAssets = await resolveRepoAssets(conn, redo.html, pathSet)
+      frame =
+        actions.updateFrame(
+          frame.id,
+          { html: wrapGeneratedHtml(redoAssets, conn, screen), height: redo.height },
+          actor,
+        ) ?? frame
+    } catch (err) {
+      console.error(`[github-recon] review round for ${screen.route} failed — keeping the draft`, err)
+      break
+    }
+  }
 }

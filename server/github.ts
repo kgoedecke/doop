@@ -2,20 +2,19 @@ import { nanoid } from 'nanoid'
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { githubConnections } from './db/schema.ts'
-import * as actions from './actions.ts'
 import { sanitizeSnapshotHtml } from './ingest.ts'
 import * as githubApp from './githubApp.ts'
-import type { Actor, Frame } from '../shared/types.ts'
+import type { Frame } from '../shared/types.ts'
 
 /**
  * GitHub repo as an import source — a ONE-TIME, CODE-ONLY job: connect a
  * repo (GitHub App install or fine-grained PAT), let doop enumerate its
- * screens from framework routing conventions, and land the selected ones on
- * the canvas. Repo HTML imports directly; screens that only exist as code
- * land as outline frames, which the reconstruction pass (githubRecon.ts)
- * designs from their source when a model is available. Nothing in this flow
- * touches the live site — capturing deployed pages belongs to the website
- * importer, and logged-in screens to the design-sync snippet.
+ * screens from framework routing conventions, and queue the selected ones as
+ * cards on the board. The resident Doop agent works the cards one by one
+ * (server/githubRecon.ts): repo HTML lands as-is, and a screen that only
+ * exists as code is designed from its source. Nothing in this flow touches
+ * the live site — capturing deployed pages belongs to the website importer,
+ * and logged-in screens to the design-sync snippet.
  *
  * Provenance follows the design-sync pattern: a marker meta stamped into the
  * frame HTML (`doop-github-screen`), no frame column. The marker carries the
@@ -388,7 +387,6 @@ export async function fetchRepoFile(conn: GithubConnection, path: string): Promi
 /* Marker + frame HTML                                                 */
 
 const GITHUB_META = 'doop-github-screen'
-const PLACEHOLDER_META = 'doop-github-placeholder'
 
 /** Same lockdown the importer and ingest stamp on their snapshots. */
 const SNAPSHOT_CSP = [
@@ -467,72 +465,10 @@ export function wrapGeneratedHtml(
   return injectHead(sanitizeSnapshotHtml(html), inject)
 }
 
-/** The stand-in frame for a screen that only exists as code. When the agent
- *  is about to reconstruct it, the copy says so ('sketching'); otherwise it
- *  is a plain outline, and a failed run gets an honest note. */
-/* same env read as server/auth.ts — not imported, so the pure parts of this
-   module stay loadable without pulling the auth stack into unit tests */
-const PUBLIC_ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
-
-export function placeholderHtml(
-  conn: Pick<GithubConnection, 'id' | 'repo'>,
-  screen: { kind: ScreenKind; route: string; sourcePath: string; title: string },
-  state: 'plain' | 'sketching' | 'failed' = 'plain',
-  /** the frame's own address, once it exists — makes the agent prompt a
-   *  concrete deep link instead of a description */
-  link?: { canvasId: string; frameId: string },
-): string {
-  const reason =
-    state === 'sketching'
-      ? 'Doop is reading this screen’s source and sketching it here — give it a moment.'
-      : state === 'failed'
-        ? 'Doop couldn’t design this screen this time. Two ways to get it done:'
-        : screen.kind === 'story'
-          ? 'A Storybook story, imported as an outline — the repo holds its code.'
-          : 'Imported as an outline — the repo holds this screen’s code.'
-  /* Every resting state (plain outline or failed run) shows the two ways
-     forward: a ready-made prompt for people who drive their own agent over
-     MCP (that agent usually has the repo checked out — the best builder),
-     and connecting a model account so the Doop Agent handles it. Only the
-     transient 'sketching' card stays quiet. */
-  const prompt = link
-    ? `“On Doop, complete the import of ${PUBLIC_ORIGIN}/c/${encodeURIComponent(link.canvasId)}?frame=${encodeURIComponent(link.frameId)} — this screen’s source is ${escapeHtml(screen.sourcePath)} in ${escapeHtml(conn.repo)}; design the frame from that code.”`
-    : `“On my Doop canvas, design the outline frames imported from ${escapeHtml(conn.repo)} — read each screen’s source (the frame lists its file path) and design a faithful version in place.”`
-  const waysForward =
-    state === 'sketching'
-      ? ''
-      : `<p style="margin-top:14px"><b style="color:#444">Use your own agent</b> — with this repo checked out, prompt it:</p>` +
-        `<p style="margin-top:8px;font-family:ui-monospace,monospace;font-size:11.5px;background:#f7f7f8;border:1px solid #eee;border-radius:8px;padding:10px 12px;text-align:left">` +
-        prompt +
-        `</p>` +
-        `<p style="margin-top:12px"><b style="color:#444">Or connect your ChatGPT subscription</b> in Settings — the Doop Agent then sketches screens like this${state === 'failed' ? ' (delete this frame and re-import to retry)' : ' automatically'}.</p>`
-  return (
-    '<!doctype html>\n<html><head>' +
-    markerMeta(conn.id, screen) +
-    `<meta name="${PLACEHOLDER_META}" content="1">` +
-    `<meta http-equiv="Content-Security-Policy" content="${SNAPSHOT_CSP}">` +
-    '<style>*{margin:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;height:100vh;display:grid;place-items:center;background:repeating-linear-gradient(45deg,#fafafa,#fafafa 12px,#f4f4f5 12px,#f4f4f5 24px);color:#555}main{text-align:center;max-width:520px;padding:32px;background:#fff;border:1px dashed #ccc;border-radius:12px}h1{font-size:18px;margin-bottom:6px}code{font-size:12px;color:#888}p{font-size:13px;line-height:1.5;color:#777;margin-top:10px}</style>' +
-    `</head><body><main><h1>${escapeHtml(screen.title)}</h1><code>${escapeHtml(screen.sourcePath || screen.route)}</code><p>${reason}</p>${waysForward}</main></body></html>`
-  )
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
 /* ------------------------------------------------------------------ */
 /* Import + resync                                                     */
 
 const MAX_IMPORT_SCREENS = 40
-const DEFAULT_W = 1280
-const DEFAULT_H = 900
-
-export interface GithubImportResult {
-  frames: Frame[]
-  failures: { route: string; error: string }[]
-  /** outline frames awaiting the reconstruction pass (server-side only) */
-  pending: { frameId: string; screen: RepoScreen }[]
-}
 
 /** A screen's identity across analyze → import → resync. */
 function screenIdentity(s: { kind: string; route: string; sourcePath: string }): string {
@@ -569,109 +505,13 @@ export function matchSelection(manifest: RepoScreen[], raw: unknown): { screens:
   return { screens, rejected }
 }
 
-/** Import the selected screens — a one-time, code-only job: repo HTML lands
- *  directly; screens that only exist as code land as outline frames, listed
- *  in `pending` so the caller can hand them to the reconstruction pass
- *  (githubRecon.ts) when a model is available — `sketch` says whether one
- *  is, which the outline copy reflects. Nothing here touches the live site —
- *  that is the website importer's territory. The manifest is recomputed and
- *  the selection resolved against it — see matchSelection. */
-export async function importScreens(
-  conn: GithubConnection,
-  canvas: { id: string; frames: Frame[] },
-  rawSelection: unknown,
-  actor: Actor,
-  options: { sketch?: boolean } = {},
-): Promise<GithubImportResult> {
-  const manifest = await analyzeConnection(conn)
-  const { screens: selection, rejected } = matchSelection(manifest.screens, rawSelection)
-
-  /* same grid the site importer uses: 3 columns to the right of everything */
-  const rightmost = canvas.frames.reduce((right, f) => Math.max(right, f.x + f.width), 0)
-  const startX = canvas.frames.length ? rightmost + 80 : 120
-  const columns = 3
-  let column = 0
-  let y = 120
-  let rowHeight = 0
-
-  const frames: Frame[] = []
-  const failures: { route: string; error: string }[] = rejected.map((route) => ({
-    route,
-    error: 'not in the repository manifest — re-run the screen scan',
-  }))
-
-  const place = (name: string, html: string, width: number, height: number): Frame | undefined => {
-    const frame = actions.createFrame(
-      canvas.id,
-      { name: name.slice(0, 80), x: startX + column * (DEFAULT_W + 80), y, width, height, html },
-      actor,
-    )
-    if (!frame) return undefined
-    rowHeight = Math.max(rowHeight, height)
-    column++
-    if (column === columns) {
-      column = 0
-      y += rowHeight + 80
-      rowHeight = 0
-    }
-    return frame
-  }
-
-  const pending: { frameId: string; screen: RepoScreen }[] = []
-  for (const screen of selection) {
-    try {
-      let html: string
-      const compact = screen.kind === 'component' || screen.kind === 'story'
-      const width = compact ? 640 : DEFAULT_W
-      let height = DEFAULT_H
-      const name = screen.title
-      let outline = false
-      if (screen.source === 'static') {
-        html = wrapRepoHtml(await fetchRepoFile(conn, screen.sourcePath), conn, screen)
-      } else {
-        html = placeholderHtml(conn, screen, options.sketch ? 'sketching' : 'plain')
-        height = compact ? 420 : 800
-        outline = true
-      }
-      const frame = place(name, html, width, height)
-      if (frame && outline) {
-        /* the frame's id exists only now — re-render the outline so its
-           agent prompt deep-links to this exact frame */
-        actions.updateFrame(
-          frame.id,
-          {
-            html: placeholderHtml(conn, screen, options.sketch ? 'sketching' : 'plain', {
-              canvasId: canvas.id,
-              frameId: frame.id,
-            }),
-          },
-          actor,
-        )
-        if (options.sketch) pending.push({ frameId: frame.id, screen })
-      }
-      if (!frame) {
-        failures.push({ route: screen.route, error: 'canvas not found' })
-        continue
-      }
-      frames.push(frame)
-    } catch (e) {
-      /* the lane failed — keep the screen's place in the map */
-      const frame = place(screen.title, placeholderHtml(conn, screen), DEFAULT_W, 800)
-      if (frame) frames.push(frame)
-      failures.push({ route: screen.route, error: e instanceof Error ? e.message : 'import failed' })
-    }
-  }
-
+/** A card from this connection just landed a frame — the modal's "last
+ *  synced" reads it. Fire-and-forget. */
+export function markSynced(connectionId: string): void {
   db.update(githubConnections)
     .set({ lastSyncedAt: Date.now() })
-    .where(eq(githubConnections.id, conn.id))
+    .where(eq(githubConnections.id, connectionId))
     .catch((err: unknown) => console.error('[github] lastSyncedAt write failed', err))
-
-  return { frames, failures, pending }
-}
-
-export function isGithubPlaceholderHtml(html: string): boolean {
-  return html.includes(`name="${PLACEHOLDER_META}"`)
 }
 
 /** Frames imported by a connection, for the import modal's per-repo count. */

@@ -16,6 +16,8 @@ import type {
   GuidelineDoc,
   MemoryProposal,
   MemoryReference,
+  RepoCardKind,
+  RepoCardPayload,
   TaskFeedback,
 } from '../../shared/types.ts'
 
@@ -358,6 +360,17 @@ export function deleteFrame(frameId: string) {
   swallow(db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId)))
 }
 
+/** A structured card's kind + payload, or nothing when the row is a prompt
+ *  card or its payload no longer parses (the card then reads as a plain one). */
+function repoCardFields(kind: string | null, payload: string | null): Pick<AgentTask, 'kind' | 'payload'> {
+  if (!kind || !payload) return {}
+  try {
+    return { kind: kind as RepoCardKind, payload: JSON.parse(payload) as RepoCardPayload }
+  } catch {
+    return {}
+  }
+}
+
 export function saveTask(canvasId: string, task: AgentTask) {
   const row = {
     id: task.id,
@@ -377,6 +390,8 @@ export function saveTask(canvasId: string, task: AgentTask) {
     pipeline: task.pipeline?.join(',') ?? null,
     stage: task.stage ?? null,
     attachments: task.attachments?.join(',') ?? null,
+    kind: task.kind ?? null,
+    payload: task.payload ? JSON.stringify(task.payload) : null,
   }
   swallow(
     db
@@ -592,11 +607,14 @@ export async function hydrate(): Promise<Hydrated> {
   const tasks = new Map<string, AgentTask[]>()
   for (const row of taskRows) {
     const list = tasks.get(row.canvasId) ?? []
-    if (list.length >= LOG_CAP) continue
     /* A task still open across a restart belongs to an agent that's gone.
        Ordinary status tasks close; claimed board cards pause in a visible
        failed state and require a human retry. */
     const isOpenCard = row.queuedBy != null && row.endedAt == null
+    /* the cap bounds history, never open work: an unfinished card older than
+       the newest hundred rows still belongs on the board (same rule as
+       actions.trimTaskLog keeps in memory) */
+    if (list.length >= LOG_CAP && !isOpenCard) continue
     const endedAt = isOpenCard ? undefined : (row.endedAt ?? now)
     const interruptedCard = isOpenCard && !!row.agentName
     const failedAt = row.failedAt ?? (interruptedCard ? now : undefined)
@@ -622,6 +640,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.pipeline ? { pipeline: row.pipeline.split(',').filter(Boolean) } : {}),
       ...(row.stage != null ? { stage: row.stage } : {}),
       ...(row.attachments ? { attachments: row.attachments.split(',').filter(Boolean) } : {}),
+      ...repoCardFields(row.kind, row.payload),
     })
     tasks.set(row.canvasId, list)
   }

@@ -15,6 +15,9 @@ import type {
   GuidelineDoc,
   MemoryProposal,
   MemoryReference,
+  RepoCardKind,
+  RepoCardPayload,
+  RepoScreenRef,
   ServerMessage,
   TaskFeedback,
 } from '../shared/types.ts'
@@ -734,8 +737,7 @@ export function addQueuedCard(
     ...(refs.length > 0 ? { attachments: refs } : {}),
   }
   list.unshift(card)
-  if (list.length > 100) list.length = 100
-  taskLog.set(canvasId, list)
+  taskLog.set(canvasId, trimTaskLog(list))
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
   logActivity(
@@ -746,6 +748,111 @@ export function addQueuedCard(
   /* the resident agents pick queued cards up instantly (no-op without a key) */
   import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
   return card
+}
+
+const TASK_LOG_CAP = 100
+
+/** Keep the task log at its cap without losing open work: the oldest FINISHED
+ *  tasks go first, so a bulk import can never push a queued, claimed or
+ *  failed card off the board. Open cards past the cap are kept as well. */
+export function trimTaskLog(list: AgentTask[]): AgentTask[] {
+  if (list.length <= TASK_LOG_CAP) return list
+  const isOpen = (t: AgentTask) => !!t.queuedBy && !t.endedAt
+  let room = TASK_LOG_CAP - list.filter(isOpen).length
+  const kept: AgentTask[] = []
+  for (const t of list) {
+    if (isOpen(t)) kept.push(t)
+    else if (room > 0) {
+      kept.push(t)
+      room--
+    }
+  }
+  list.length = 0
+  list.push(...kept)
+  return list
+}
+
+/** One repo import as board cards: the design-system extraction first (it
+ *  becomes the guide the sketches follow), then one sketch card per selected
+ *  screen. Structured cards — the resident runner dispatches them straight to
+ *  the GitHub sketch runner (server/githubRecon.ts) instead of the chat agent.
+ *  A screen already queued or in flight from the same connection is not
+ *  queued twice. Returns the cards, oldest first. */
+export interface RepoImportInput {
+  connectionId: string
+  repo: string
+  screens: RepoScreenRef[]
+  designSystem: boolean
+}
+
+/** What an import would queue, after removing screens already waiting or in
+ *  flight from the same connection. Pure — the route checks this BEFORE
+ *  spending the requester's allowance, so a no-op re-import costs nothing. */
+export function planRepoCards(
+  canvasId: string,
+  input: RepoImportInput,
+): { kind: RepoCardKind; title: string; payload: RepoCardPayload }[] {
+  if (!store.getCanvas(canvasId)) return []
+  const list = taskLog.get(canvasId) ?? []
+  const open = list.filter((t) => t.queuedBy && !t.endedAt && t.payload?.connectionId === input.connectionId)
+  const importId = nanoid(8)
+  const base = { connectionId: input.connectionId, repo: input.repo, importId }
+  const wanted: { kind: RepoCardKind; title: string; payload: RepoCardPayload }[] = []
+  if (input.designSystem && !open.some((t) => t.kind === 'design-system'))
+    wanted.push({ kind: 'design-system', title: `Design system of ${input.repo}`, payload: base })
+  for (const screen of input.screens) {
+    const queued = open.some(
+      (t) =>
+        t.kind === 'sketch' &&
+        t.payload?.screen?.sourcePath === screen.sourcePath &&
+        t.payload.screen.kind === screen.kind,
+    )
+    if (!queued) wanted.push({ kind: 'sketch', title: screen.title, payload: { ...base, screen } })
+  }
+  return wanted
+}
+
+export function addRepoCards(canvasId: string, input: RepoImportInput, from: string, fromUserId: string): AgentTask[] {
+  const wanted = planRepoCards(canvasId, input)
+  if (!wanted.length) return []
+  const list = taskLog.get(canvasId) ?? []
+  const actor = resolveActor({ name: from, kind: 'user' })
+  const cards: AgentTask[] = []
+  /* startedAt orders the queue (oldest first); a shared timestamp would leave
+     the order to Map iteration, so each card sits one tick after the last */
+  const at = Date.now()
+  wanted.forEach((w, i) => {
+    const card: AgentTask = {
+      id: nanoid(8),
+      agentName: '',
+      color: colorFor(from),
+      status: w.title.slice(0, 200),
+      startedAt: at + i,
+      queuedBy: from,
+      queuedByUserId: fromUserId,
+      pipeline: [DEFAULT_ROLE_ID],
+      stage: 0,
+      kind: w.kind,
+      payload: w.payload,
+    }
+    list.unshift(card)
+    persist.saveTask(canvasId, card)
+    broadcast(canvasId, { type: 'task', task: card })
+    cards.push(card)
+  })
+  taskLog.set(canvasId, trimTaskLog(list))
+  if (cards.length) {
+    const sketches = cards.filter((c) => c.kind === 'sketch').length
+    const what = [
+      cards.some((c) => c.kind === 'design-system') ? 'the design system' : '',
+      sketches ? `${sketches} ${sketches === 1 ? 'screen' : 'screens'}` : '',
+    ]
+      .filter(Boolean)
+      .join(' and ')
+    logActivity(canvasId, actor, `queued ${what} from ${input.repo} for ${roleName(DEFAULT_ROLE_ID)}`)
+    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+  }
+  return cards
 }
 
 /** Cards waiting on THIS agent's stage, claimed by it. A card at another

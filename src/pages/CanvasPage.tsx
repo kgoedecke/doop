@@ -19,7 +19,7 @@ import { Board } from '../components/Board'
 import { Inspector } from '../components/Inspector'
 import { ActivityPanel } from '../components/ActivityPanel'
 import { ConnectModal } from '../components/ConnectModal'
-import { LimitWall } from '../components/TeamAllowance'
+import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
 import { PromptBar } from '../components/PromptBar'
 import { WorkingNow } from '../components/WorkingNow'
 import { Onboarding } from '../components/Onboarding'
@@ -519,13 +519,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             setShowImport(false)
             setView('canvas')
             select(frameIds[0] ?? null)
-            const imported =
-              frameIds.length === 0
-                ? 'Doop is importing the design system — watch the canvas'
-                : frameIds.length === 1
-                  ? '1 item imported'
-                  : `${frameIds.length} items imported`
+            const imported = frameIds.length === 1 ? '1 item imported' : `${frameIds.length} items imported`
             showToast(failedCount ? `${imported} · ${failedCount} failed` : imported)
+          }}
+          onQueued={(cardCount) => {
+            setShowImport(false)
+            setGhInstallPass(null)
+            setView('board')
+            showToast(`${cardCount} ${cardCount === 1 ? 'card' : 'cards'} queued — Doop is on it`)
           }}
         />
       )}
@@ -547,12 +548,15 @@ function ImportModal({
   installError,
   onClose,
   onDone,
+  onQueued,
 }: {
   canvasId: string
   installPass: string | null
   installError: string | null
   onClose: () => void
   onDone: (frameIds: string[], failedCount: number) => void
+  /** a repo import queues cards on the board instead of landing frames */
+  onQueued: (cardCount: number) => void
 }) {
   const [url, setUrl] = useState('')
   const [wholeSite, setWholeSite] = useState(false)
@@ -674,22 +678,27 @@ function ImportModal({
     const screens = repoReview.manifest.screens.filter((s) => repoSelected.has(screenKey(s)))
     try {
       const result = await api.importGithubScreens(canvasId, repoReview.connection.id, screens, extractSystem)
-      if (!result.frames.length && screens.length) {
-        const reason = result.failures[0]?.error
-        setError(reason ? `No screens could be imported — ${reason}` : 'No screens could be imported')
+      if (!result.cards.length) {
+        setError(
+          result.rejected.length
+            ? 'Those screens are no longer in the repository — re-run the scan'
+            : 'Everything you picked is already on the board',
+        )
         setBusy(null)
         return
       }
       posthog.capture('github_screens_imported', {
         requested_count: screens.length,
-        imported_count: result.frames.length,
-        failed_count: result.failures.length,
+        queued_count: result.cards.length,
+        rejected_count: result.rejected.length,
       })
-      onDone(
-        result.frames.map((frame) => frame.id),
-        result.failures.length,
-      )
+      onQueued(result.cards.length)
     } catch (e) {
+      if (isResidentLimit(e)) {
+        useStore.getState().setLimitWall(true)
+        onClose()
+        return
+      }
       setError(errorMessage(e, 'repository import failed'))
       setBusy(null)
     }
@@ -725,8 +734,9 @@ function ImportModal({
             </div>
             <ModalLede>
               {repoReview.manifest.framework ? `A ${repoReview.manifest.framework} app. ` : ''}Doop distills the repo's
-              design system into a style guide pinned to this canvas — every agent follows it from then on. Components
-              come along as sketched library cards; whole pages are optional.
+              design system into a style guide pinned to this canvas — every agent follows it from then on. Each
+              component or page you pick becomes a card on the board: Doop sketches it from the source and lands it as a
+              frame. Whole pages are optional.
             </ModalLede>
             <CheckboxCard
               checked={extractSystem}
@@ -738,11 +748,6 @@ function ImportModal({
             <div className="mt-4 flex items-center justify-between px-[2px] pb-[9px]">
               <b className="text-[12px] text-ink-soft">
                 {repoSelected.size} of {visibleScreens.length} selected
-                {repoSelected.size > 12 && (
-                  <span className="ml-2 font-normal text-ink-faint">
-                    — Doop sketches 12 per import; the rest stay outlines
-                  </span>
-                )}
               </b>
               <span className="flex gap-3">
                 <Button

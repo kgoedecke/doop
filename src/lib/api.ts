@@ -74,9 +74,12 @@ export interface RepoManifest {
   truncated: boolean
 }
 
+/** An import queues board cards — nothing lands on the canvas until the
+ *  Doop Agent finishes each one. `rejected` lists selections the server no
+ *  longer finds in the repo manifest. */
 export interface GithubImportResult {
-  frames: Frame[]
-  failures: { route: string; error: string }[]
+  cards: string[]
+  rejected: string[]
 }
 
 export interface DiscoveredPage {

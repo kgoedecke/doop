@@ -29,8 +29,6 @@ import {
 import * as ingest from './ingest.ts'
 import * as github from './github.ts'
 import * as githubApp from './githubApp.ts'
-import { scheduleReconstructions } from './githubRecon.ts'
-import { pickModel } from './agentModel.ts'
 import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
@@ -987,30 +985,54 @@ app.post('/api/canvases/:id/github/:connId/analyze', async (req, res) => {
   }
 })
 
+/* one import at a time per repo connection — see the route */
+const connectionLocks = new Map<string, Promise<unknown>>()
+async function withConnectionLock<T>(connectionId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = connectionLocks.get(connectionId) ?? Promise.resolve()
+  const run = previous.then(fn, fn)
+  const tail = run.catch(() => {})
+  connectionLocks.set(connectionId, tail)
+  try {
+    return await run
+  } finally {
+    if (connectionLocks.get(connectionId) === tail) connectionLocks.delete(connectionId)
+  }
+}
+
 app.post('/api/canvases/:id/github/:connId/import', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
   const conn = await github.getConnection(c.id, req.params.connId)
   if (!conn) return res.status(404).json({ error: 'connection not found' })
   if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
+  /* design-system-only import is the headline flow now — screens optional */
+  const designSystem = req.body?.design_system !== false
+  const rawScreens = Array.isArray(req.body?.screens) ? (req.body.screens as unknown[]) : []
+  if (!rawScreens.length && !designSystem)
+    return res.status(400).json({ error: 'pick components or screens, or enable the design-system extraction' })
   try {
-    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-    /* code-only screens get agent reconstruction when a model can run it —
-       the requester's own account, else the server tier (same resolution as
-       every other agent task, billed to the same person) */
-    const sketch = !!(await pickModel(req.user!.id))
-    const designSystem = sketch && req.body?.design_system !== false
-    /* design-system-only import is the headline flow now — screens optional */
-    const rawScreens = Array.isArray(req.body?.screens) ? (req.body.screens as unknown[]) : []
-    if (!rawScreens.length && !designSystem)
-      return res.status(400).json({ error: 'pick components or screens, or enable the design-system extraction' })
-    let result: { frames: unknown[]; failures: unknown[] } = { frames: [], failures: [] }
-    let pending: Parameters<typeof scheduleReconstructions>[1] = []
-    if (rawScreens.length) {
-      ;({ pending, ...result } = await github.importScreens(conn, c, rawScreens, actor, { sketch }))
-    }
-    scheduleReconstructions(conn, pending, actor, req.user!.id, { designSystem })
-    res.json(result)
+    /* the selection is resolved against a manifest computed right now — see
+       matchSelection for why the client never dictates paths */
+    const { screens, rejected } = rawScreens.length
+      ? github.matchSelection((await github.analyzeConnection(conn)).screens, rawScreens)
+      : { screens: [], rejected: [] }
+    const input = { connectionId: conn.id, repo: conn.repo, screens, designSystem }
+    /* plan → gate → queue runs one import at a time per connection, so two
+       overlapping imports of the same screens cannot both pass the plan and
+       both pay while only one queues */
+    const outcome = await withConnectionLock(conn.id, async () => {
+      /* nothing new to queue (all rejected, or already on the board) costs nothing */
+      if (!actions.planRepoCards(c.id, input).length) return { cards: [] as string[] }
+      /* the import is the Doop Agent's work, card by card — same gate as a card
+         typed on the board: a free task, or the requester's own model account */
+      const gate = await allowance.consumeResidentTask(req.user!.id)
+      if (!gate.ok) return { limit: gate }
+      const cards = actions.addRepoCards(c.id, input, req.user!.name, req.user!.id)
+      return { cards: cards.map((card) => card.id) }
+    })
+    if (outcome.limit)
+      return res.status(403).json({ error: 'resident_limit', used: outcome.limit.used, limit: outcome.limit.limit })
+    res.json({ cards: outcome.cards, rejected })
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'import failed' })
   }

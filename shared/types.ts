@@ -181,6 +181,33 @@ export interface AgentTask {
   attachments?: string[]
   /** index into pipeline of the stage that is queued or running right now */
   stage?: number
+  /** structured board cards the resident runner dispatches on, instead of
+   *  handing the title to the chat agent. Absent on prompt cards. */
+  kind?: RepoCardKind
+  payload?: RepoCardPayload
+}
+
+export type RepoCardKind = 'sketch' | 'design-system'
+
+/** A screen of a connected GitHub repository, as the import manifest lists it. */
+export interface RepoScreenRef {
+  kind: 'page' | 'story' | 'component' | 'static'
+  route: string
+  sourcePath: string
+  title: string
+  /** where the pixels come from: repo HTML, or the agent's sketch of the code */
+  source: 'static' | 'placeholder'
+}
+
+/** What a repo card carries: enough to run it from any process, later. The
+ *  connection is looked up by id at run time, so no credential is ever here. */
+export interface RepoCardPayload {
+  connectionId: string
+  repo: string
+  /** one import = one click; groups the cards it queued on the board */
+  importId: string
+  /** the screen to sketch — absent on a design-system card */
+  screen?: RepoScreenRef
 }
 
 /** Human feedback left on an agent task: an open request on the canvas that ANY
