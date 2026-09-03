@@ -9,6 +9,7 @@ import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import { recordCreate, recordUpdate } from '../lib/history'
 import { snapFrame } from '../lib/snap'
+import { gesture } from '../lib/gesture'
 import { FrameContextMenu } from './FrameContextMenu'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName } from '../../shared/agents'
@@ -124,6 +125,11 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     const start = { x: e.clientX, y: e.clientY }
     const off = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY }
     const orig = { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+    /* the drag's baseline: finger position and frame rect the deltas are
+       measured from. Starts at pointer-down, and re-anchors while a pinch
+       owns the finger so the drag resumes from where the finger is (and at
+       the zoom it is now) rather than jumping by the pinch's displacement */
+    let base = { x: start.x, y: start.y, rect: orig }
     let moved = false
     /* ⌥⇧-drag duplicates: the moment the drag is real, leave a copy of the
        frame at its origin and keep dragging this one — same net effect as
@@ -133,6 +139,13 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     if (duplicating) setDuping(true)
 
     function onMove(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return
+      /* a second finger turns the gesture into a pinch: the frame stays put */
+      if (gesture.pinching) {
+        const cur = useStore.getState().canvas?.frames.find((x) => x.id === frame.id)
+        base = { x: ev.clientX, y: ev.clientY, rect: cur ? { ...cur } : base.rect }
+        return
+      }
       if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 4) moved = true
       if (duplicating && moved && !dupDropped) {
         dupDropped = true
@@ -145,15 +158,16 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
           .catch(console.error)
       }
       const zoom = useStore.getState().viewport.zoom
-      const dx = (ev.clientX - start.x) / zoom
-      const dy = (ev.clientY - start.y) / zoom
+      const dx = (ev.clientX - base.x) / zoom
+      const dy = (ev.clientY - base.y) / zoom
+      const from = base.rect
       const raw =
         mode === 'move'
-          ? { ...orig, x: Math.round(orig.x + dx), y: Math.round(orig.y + dy) }
+          ? { ...from, x: Math.round(from.x + dx), y: Math.round(from.y + dy) }
           : {
-              ...orig,
-              width: Math.max(120, Math.round(orig.width + dx)),
-              height: Math.max(80, Math.round(orig.height + dy)),
+              ...from,
+              width: Math.max(120, Math.round(from.width + dx)),
+              height: Math.max(80, Math.round(from.height + dy)),
             }
       /* edges pull onto neighbouring frames' edges/centers; ⌥ drags free */
       const others = useStore.getState().canvas?.frames.filter((f) => f.id !== frame.id) ?? []

@@ -9,6 +9,7 @@ import { Cursors } from './Cursors'
 import { SnapGuides } from './SnapGuides'
 import { MOD_KEY } from '../lib/keys'
 import { cn } from '../lib/utils'
+import { gesture } from '../lib/gesture'
 import { hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
 import { MenuHint } from './ui/menu'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
@@ -217,6 +218,70 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     }
   }, [])
 
+  /* touch: a two-finger pinch zooms around the fingers' midpoint and pans
+     with it. iOS never maps a pinch onto ctrl+wheel the way desktop browsers
+     do, so it needs its own listener — on touch events rather than pointers,
+     because frames swallow pointerdown to start their own drag and a pinch
+     must win regardless of what the fingers landed on. */
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let prev: { dist: number; x: number; y: number } | null = null
+
+    function pinchOf(touches: TouchList) {
+      const rect = el!.getBoundingClientRect()
+      const [a, b] = [touches[0], touches[1]]
+      return {
+        dist: Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY),
+        x: (a.clientX + b.clientX) / 2 - rect.left,
+        y: (a.clientY + b.clientY) / 2 - rect.top,
+      }
+    }
+    function onStart(e: TouchEvent) {
+      if (e.touches.length < 2) return
+      e.preventDefault()
+      prev = pinchOf(e.touches)
+      gesture.pinching = true
+    }
+    function onMove(e: TouchEvent) {
+      if (!prev || e.touches.length < 2) return
+      e.preventDefault()
+      const cur = pinchOf(e.touches)
+      const vp = useStore.getState().viewport
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * (cur.dist / Math.max(1, prev.dist))))
+      const scale = zoom / vp.zoom
+      /* the world point under the previous midpoint stays under the new one */
+      useStore.getState().setViewport({
+        x: cur.x - (prev.x - vp.x) * scale,
+        y: cur.y - (prev.y - vp.y) * scale,
+        zoom,
+      })
+      prev = cur
+    }
+    function onEnd(e: TouchEvent) {
+      /* three fingers down and one lifts: the pair that remains may not be
+         the pair being tracked, so measure it afresh instead of comparing
+         it against the old pair's spread */
+      if (e.touches.length >= 2) {
+        prev = pinchOf(e.touches)
+        return
+      }
+      prev = null
+      gesture.pinching = false
+    }
+    el.addEventListener('touchstart', onStart, { passive: false })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd)
+    el.addEventListener('touchcancel', onEnd)
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
+      gesture.pinching = false
+    }
+  }, [])
+
   /* ⌘0 → 100%, ⌘+ / ⌘− → step zoom, all pivoting on the view center —
      preventDefault keeps the browser's own page zoom out of it */
   useEffect(() => {
@@ -271,10 +336,14 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     let moved = false
 
     function onMove(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return
       const dx = ev.clientX - last.x
       const dy = ev.clientY - last.y
       if (Math.abs(dx) + Math.abs(dy) > 2) moved = true
       last = { x: ev.clientX, y: ev.clientY }
+      /* a pinch owns the viewport while it lasts; keep tracking the finger
+         so the pan resumes from where it is, not from where the pinch began */
+      if (gesture.pinching) return
       const vp = useStore.getState().viewport
       useStore.getState().setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy })
     }
