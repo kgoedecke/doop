@@ -452,6 +452,7 @@ export function saveComment(c: ElementComment) {
     failureReason: c.failureReason ?? null,
     resolvedBy: c.resolvedBy ?? null,
     resolvedAt: c.resolvedAt ?? null,
+    parentId: c.parentId ?? null,
   }
   swallow(
     db
@@ -684,6 +685,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(failureReason !== undefined ? { failureReason } : {}),
       ...(row.resolvedBy != null ? { resolvedBy: row.resolvedBy } : {}),
       ...(row.resolvedAt != null ? { resolvedAt: row.resolvedAt } : {}),
+      ...(row.parentId != null ? { parentId: row.parentId } : {}),
     })
     comments.set(row.canvasId, list)
   }

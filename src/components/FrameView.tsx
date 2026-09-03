@@ -226,7 +226,9 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   }, [runtimeReady, html, editing, suspendPost])
 
   /* ---- element comments ---- */
-  const comments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id && !c.resolvedAt)
+  const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
+  /* only thread roots get a pin; replies live inside the root's popover */
+  const comments = frameComments.filter((c) => !c.parentId && !c.resolvedAt)
   const [probe, setProbe] = useState<ProbeHit | null>(null)
   /* element selected for text editing inside the iframe (edit mode only) */
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
@@ -623,17 +625,20 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                   const pos = pinPos[c.id]
                   if (!pos) return null
                   const open = openThread === c.id
+                  const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
+                  const thread = [c, ...replies.sort((a, b) => a.at - b.at)]
+                  /* the pin reflects the newest agent request in the thread */
+                  const agentItem = [...thread].reverse().find((x) => x.forAgent && !x.resolvedAt)
+                  const working = agentItem?.claimedBy && !agentItem.failedAt
                   return (
                     <div
                       key={c.id}
                       className={cn(
                         'pointer-events-auto absolute z-[4] grid h-[26px] w-[26px] cursor-pointer place-items-center rounded-[50%_50%_50%_4px] border-2 border-white text-[13px] text-white [transform:translate(-50%,-50%)_scale(min(calc(1/var(--zoom,1)),2.4))] animate-[chip-in_0.25s_ease]',
-                        c.failedAt
+                        agentItem?.failedAt
                           ? 'bg-accent-ink! font-extrabold shadow-[0_0_0_3px_rgba(208,52,31,0.2),var(--shadow-card)]'
                           : 'shadow-card',
-                        !c.failedAt &&
-                          c.claimedBy &&
-                          !c.resolvedAt &&
+                        working &&
                           "after:absolute after:-inset-1.5 after:rounded-[inherit] after:border-2 after:border-current after:opacity-50 after:content-[''] after:[animation:stream-pulse_1.1s_ease-in-out_infinite]",
                       )}
                       style={{
@@ -647,12 +652,23 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                         setComposing(false)
                         setOpenThread(open ? null : c.id)
                       }}
-                      title={`${c.from}: ${c.text}`}
+                      title={`${c.from}: ${c.text}${thread.length > 1 ? ` (${thread.length - 1} replies)` : ''}`}
                     >
-                      {c.failedAt ? '!' : c.claimedBy && !c.resolvedAt ? '✦' : '💬'}
+                      {agentItem?.failedAt ? '!' : working ? '✦' : '💬'}
                       {open && (
                         <CommentThread
-                          comment={c}
+                          thread={thread}
+                          onReply={(text) =>
+                            api
+                              .replyComment(c.id, text)
+                              .then(() => posthog.capture('element_comment_replied'))
+                              .catch((err) => {
+                                /* the wall explains a hit limit; anything else
+                                   surfaces in the thread so the draft survives */
+                                if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
+                                throw err
+                              })
+                          }
                           onResolve={() => {
                             api
                               .resolveComment(c.id)
@@ -660,8 +676,8 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                               .catch(console.error)
                             setOpenThread(null)
                           }}
-                          onRetry={() =>
-                            api.retryComment(c.id).catch((err) => {
+                          onRetry={(id) =>
+                            api.retryComment(id).catch((err) => {
                               if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
                               else console.error(err)
                             })
@@ -842,44 +858,96 @@ function CommentComposer({
   )
 }
 
+/** Where an @agent request in the thread stands, or null for a human note. */
+function agentStatus(c: ElementComment): string | null {
+  const target = c.targetAgent ?? roleName(DEFAULT_ROLE_ID)
+  if (c.failedAt) return `${target} stopped`
+  if (c.resolvedAt) return c.forAgent ? `✓ ${c.resolvedBy ?? target}` : null
+  if (c.claimedBy) return `✦ ${c.claimedBy} is on it`
+  return c.forAgent ? `✦ waiting for ${target}` : null
+}
+
 function CommentThread({
-  comment,
+  thread,
+  onReply,
   onResolve,
   onRetry,
 }: {
-  comment: ElementComment
+  /** root comment first, then its replies oldest → newest */
+  thread: ElementComment[]
+  /** rejects when the reply did not land — the draft is kept for a retry */
+  onReply: (text: string) => Promise<unknown>
   onResolve: () => void
-  onRetry: () => void
+  onRetry: (commentId: string) => void
 }) {
-  const target = comment.targetAgent ?? roleName(DEFAULT_ROLE_ID)
-  const status = comment.failedAt
-    ? `${target} stopped`
-    : comment.claimedBy && !comment.resolvedAt
-      ? `✦ ${comment.claimedBy} is on it`
-      : comment.forAgent
-        ? `✦ waiting for ${target}`
-        : null
+  const [reply, setReply] = useState('')
+  const [sending, setSending] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+  /* a long conversation opens (and grows) scrolled to its newest message */
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
+  }, [thread.length])
+  const send = () => {
+    if (!reply.trim() || sending) return
+    const submitted = reply
+    setSending(true)
+    setFailed(false)
+    onReply(submitted)
+      /* only clear what was sent — text typed meanwhile is a new draft */
+      .then(() => setReply((current) => (current === submitted ? '' : current)))
+      .catch(() => setFailed(true))
+      .finally(() => setSending(false))
+  }
+  const mentioned = mentionedRole(reply)
   return (
     <div
-      className="absolute top-[calc(100%_+_8px)] left-1/2 w-[230px] -translate-x-1/2 cursor-default rounded-[10px] border border-line bg-surface p-2.5 text-left shadow-pop animate-[chip-in_0.18s_ease]"
+      className="absolute top-[calc(100%_+_8px)] left-1/2 w-[250px] -translate-x-1/2 cursor-default rounded-[10px] border border-line bg-surface p-2.5 text-left shadow-pop animate-[chip-in_0.18s_ease]"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between gap-2 text-[12px]">
-        <b style={{ color: colorFor(comment.from) }}>{comment.from}</b>
-        {status && <span className="whitespace-nowrap text-[11px] font-semibold text-brand">{status}</span>}
+      <div ref={listRef} className="-mx-1 max-h-[240px] overflow-y-auto px-1">
+        {thread.map((c, i) => {
+          const status = agentStatus(c)
+          return (
+            <div key={c.id} className={cn(i > 0 && 'mt-2 border-t border-line-soft pt-2')}>
+              <div className="flex items-center justify-between gap-2 text-[12px]">
+                <b style={{ color: colorFor(c.from) }}>{c.from}</b>
+                {status && <span className="whitespace-nowrap text-[11px] font-semibold text-brand">{status}</span>}
+              </div>
+              <div className="mt-1 break-words text-[13px] leading-[1.45] text-ink">{c.text}</div>
+              {c.failedAt ? (
+                <div className="mt-1 flex items-center gap-2 text-[11px] leading-[1.4] text-accent-ink">
+                  <span>{c.failureReason ?? 'The agent did not finish.'}</span>
+                  <Button
+                    variant="danger-solid"
+                    size="pill"
+                    className="shrink-0 px-[9px] py-[3px] text-[11px]"
+                    onClick={() => onRetry(c.id)}
+                  >
+                    ↻ Retry
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
       </div>
-      <div className="mt-1.5 mb-2 break-words text-[13px] leading-[1.45] text-ink">{comment.text}</div>
-      {comment.failedAt ? (
-        <div className="-mt-0.5 mb-2 text-[11px] leading-[1.4] text-accent-ink">
-          {comment.failureReason ?? 'The agent did not finish.'}
+      <Textarea
+        variant="bare"
+        className="mt-2 min-h-[38px] md:text-[13px]"
+        value={reply}
+        placeholder="Reply… (@doop to ask the agent)"
+        onChange={(e) => setReply(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
+        }}
+      />
+      {failed && (
+        <div className="mt-1 text-[11px] leading-[1.4] text-accent-ink">
+          That reply did not go through — it may be resolved already. Try again.
         </div>
-      ) : null}
-      <div className="flex items-center gap-1.5">
-        {comment.failedAt ? (
-          <Button variant="danger-solid" size="pill" className="px-[11px] py-[5px]" onClick={onRetry}>
-            ↻ Retry
-          </Button>
-        ) : null}
+      )}
+      <div className="mt-1.5 flex items-center gap-1.5">
         <Button
           variant="ghost"
           size="pill"
@@ -887,6 +955,23 @@ function CommentThread({
           onClick={onResolve}
         >
           ✓ Resolve
+        </Button>
+        {mentioned && (
+          <span
+            className="ml-auto truncate text-[11px] font-semibold text-brand"
+            title={`${mentioned.name} will pick this up`}
+          >
+            {mentioned.emoji} {mentioned.name}
+          </span>
+        )}
+        <Button
+          variant="solid"
+          size="pill"
+          className={cn('px-3 py-[4px] text-xs', !mentioned && 'ml-auto')}
+          disabled={!reply.trim() || sending}
+          onClick={send}
+        >
+          {sending ? 'Posting…' : 'Reply'}
         </Button>
       </div>
     </div>

@@ -201,6 +201,7 @@ export const comments = pgTable(
     failureReason: text('failure_reason'),
     resolvedBy: text('resolved_by'),
     resolvedAt: bigint('resolved_at', { mode: 'number' }),
+    parentId: text('parent_id'),
   },
   (t) => [index('comments_canvas_idx').on(t.canvasId)],
 )

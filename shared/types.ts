@@ -236,6 +236,9 @@ export interface ElementComment {
   failureReason?: string
   resolvedBy?: string
   resolvedAt?: number
+  /** set on a reply: the root comment of its thread. Replies inherit the
+   *  root's anchor and are listed under its pin instead of getting their own */
+  parentId?: string
 }
 
 export interface ActivityItem {

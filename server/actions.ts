@@ -444,35 +444,91 @@ export function addElementComment(
   from: string,
   fromUserId?: string,
 ): ElementComment | undefined {
-  const clean = input.text.trim()
-  if (!clean) return undefined
   const frame = store.getFrame(frameId)
   if (!frame) return undefined
+  return postComment(
+    frame,
+    { selector: String(input.selector ?? '').slice(0, 300), snippet: String(input.snippet ?? '').slice(0, 400) },
+    input.text,
+    from,
+    fromUserId,
+  )
+}
+
+/** Reply inside a thread: the reply inherits the root comment's element so an
+ *  @mention in it gives the agent the same anchor the conversation is about. */
+export function replyToComment(
+  commentId: string,
+  text: string,
+  from: string,
+  fromUserId?: string,
+): ElementComment | undefined {
+  const open = openThread(commentId)
+  if (!open) return undefined
+  const { root, frame } = open
+  return postComment(
+    frame,
+    { selector: root.selector, snippet: root.snippet, parentId: root.id },
+    text,
+    from,
+    fromUserId,
+  )
+}
+
+/** The root and frame a reply to this comment would land on, or undefined
+ *  when the thread is resolved or its frame is gone — checked before any
+ *  metering so a rejected reply never costs a resident task. */
+export function openThread(commentId: string): { root: ElementComment; frame: Frame } | undefined {
+  const parent = findComment(commentId)
+  if (!parent) return undefined
+  const root = parent.parentId ? findComment(parent.parentId) : parent
+  if (!root || root.resolvedAt) return undefined
+  const frame = store.getFrame(root.frameId)
+  if (!frame) return undefined
+  return { root, frame }
+}
+
+function postComment(
+  frame: Frame,
+  anchor: { selector: string; snippet: string; parentId?: string },
+  text: string,
+  from: string,
+  fromUserId?: string,
+): ElementComment | undefined {
+  const clean = text.trim()
+  if (!clean) return undefined
   /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it up */
   const mentioned = mentionedRole(clean)
+  const list = commentLog.get(frame.canvasId) ?? []
+  /* strictly increasing per canvas: thread order is reconstructed from `at`
+     after a restart, so two messages must never share a timestamp */
+  const at = Math.max(Date.now(), (list[0]?.at ?? 0) + 1)
   const comment: ElementComment = {
     id: nanoid(8),
     canvasId: frame.canvasId,
-    frameId,
-    selector: String(input.selector ?? '').slice(0, 300),
-    snippet: String(input.snippet ?? '').slice(0, 400),
+    frameId: frame.id,
+    selector: anchor.selector,
+    snippet: anchor.snippet,
     from,
     ...(fromUserId ? { fromUserId } : {}),
     text: clean,
-    at: Date.now(),
+    at,
     ...(mentioned ? { forAgent: true, targetAgent: mentioned.name } : {}),
+    ...(anchor.parentId ? { parentId: anchor.parentId } : {}),
   }
-  const list = commentLog.get(frame.canvasId) ?? []
   list.unshift(comment)
   if (list.length > 100) list.length = 100
   commentLog.set(frame.canvasId, list)
   persist.saveComment(comment)
   broadcast(frame.canvasId, { type: 'comment', comment })
+  const excerpt = clean.length > 80 ? clean.slice(0, 77) + '…' : clean
   logActivity(
     frame.canvasId,
     resolveActor({ name: from, kind: 'user' }),
-    `commented on an element in “${frame.name}”: “${clean.length > 80 ? clean.slice(0, 77) + '…' : clean}”`,
-    frameId,
+    anchor.parentId
+      ? `replied to a comment in “${frame.name}”: “${excerpt}”`
+      : `commented on an element in “${frame.name}”: “${excerpt}”`,
+    frame.id,
   )
   if (comment.forAgent) {
     /* @Doop mention: the resident agent picks it up instantly (no-op without
@@ -480,6 +536,17 @@ export function addElementComment(
     import('./resident.ts').then((r) => r.onFeedback(frame.canvasId)).catch(() => {})
   }
   return comment
+}
+
+/** The whole conversation a comment belongs to, oldest first. */
+export function commentThread(comment: ElementComment): ElementComment[] {
+  const rootId = comment.parentId ?? comment.id
+  /* the log is newest-first; reverse before the (stable) sort so replies
+     posted within the same millisecond keep their arrival order */
+  return [...(commentLog.get(comment.canvasId) ?? [])]
+    .reverse()
+    .filter((c) => c.id === rootId || c.parentId === rootId)
+    .sort((a, b) => a.at - b.at)
 }
 
 /** Open comments @mentioning this agent, claimed by it. */
@@ -538,20 +605,25 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
     const c = list.find((x) => x.id === commentId)
     if (!c) continue
     if (c.resolvedAt) return c
-    c.resolvedBy = by
-    c.resolvedAt = Date.now()
-    persist.saveComment(c)
-    broadcast(canvasId, { type: 'comment', comment: c })
-    /* a resolved @agent comment was an instruction that got carried out —
-       capture it as a decision (plain human-to-human notes are not) */
-    if (c.forAgent) {
-      captureDecision(canvasId, {
-        text: c.text,
-        source: 'comment',
-        frameId: c.frameId,
-        from: c.from,
-        agentName: c.claimedBy ?? (by !== c.from ? by : undefined),
-      })
+    /* resolving the root closes its whole thread: an open reply under a
+       resolved pin would be invisible yet still queued for an agent */
+    const closing = c.parentId ? [c] : list.filter((x) => x.id === c.id || (x.parentId === c.id && !x.resolvedAt))
+    for (const item of closing) {
+      item.resolvedBy = by
+      item.resolvedAt = Date.now()
+      persist.saveComment(item)
+      broadcast(canvasId, { type: 'comment', comment: item })
+      /* a resolved @agent comment was an instruction that got carried out —
+         capture it as a decision (plain human-to-human notes are not) */
+      if (item.forAgent) {
+        captureDecision(canvasId, {
+          text: item.text,
+          source: 'comment',
+          frameId: item.frameId,
+          from: item.from,
+          agentName: item.claimedBy ?? (by !== item.from ? by : undefined),
+        })
+      }
     }
     return c
   }

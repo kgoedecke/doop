@@ -295,6 +295,8 @@ export const api = {
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
   addComment: (frameId: string, input: { selector: string; snippet: string; text: string }) =>
     req(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
+  replyComment: (commentId: string, text: string) =>
+    req(`/api/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ text }) }),
   resolveComment: (commentId: string) => req(`/api/comments/${commentId}/resolve`, { method: 'POST' }),
   retryComment: (commentId: string) => req(`/api/comments/${commentId}/retry`, { method: 'POST' }),
   retryTaskFeedback: (feedbackId: string) => req(`/api/feedback/${feedbackId}/retry`, { method: 'POST' }),

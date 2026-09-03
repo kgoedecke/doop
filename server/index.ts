@@ -1172,6 +1172,36 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   res.json(comment)
 })
 
+app.post('/api/comments/:id/replies', async (req, res) => {
+  const found = actions.findComment(req.params.id)
+  if (!found) return res.status(404).json({ error: 'comment not found' })
+  if (!requireCanvas(req, res, found.canvasId)) return
+  const text = String(req.body?.text ?? '')
+  if (!text.trim() || !actions.openThread(req.params.id)) {
+    return res.status(404).json({ error: 'thread resolved or empty text' })
+  }
+  /* same rule as a fresh comment: only an @mention costs a resident task */
+  let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
+  if (mentionedRole(text)) {
+    gate = await allowance.consumeResidentTask(req.user!.id)
+    if (!gate.ok) {
+      return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+    }
+  }
+  const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
+  if (!reply) {
+    /* the thread closed while the meter was being written: give the task
+       back — a failed refund is logged, never turned into a 500 */
+    if (gate) {
+      await allowance.refundResidentTask(gate, req.user!.id).catch((err) => {
+        console.error(`[comments] could not refund a resident task for ${req.user!.id}:`, err)
+      })
+    }
+    return res.status(409).json({ error: 'thread resolved meanwhile' })
+  }
+  res.json(reply)
+})
+
 app.post('/api/comments/:id/resolve', (req, res) => {
   const found = actions.findComment(req.params.id)
   if (!found) return res.status(404).json({ error: 'comment not found' })
