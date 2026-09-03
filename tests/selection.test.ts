@@ -59,10 +59,12 @@ describe('multi-selection in the store', () => {
     expect(useStore.getState().selectedId).toBeNull()
   })
 
-  it('removing a frame drops it from the selection', () => {
+  it('removing a frame drops it from the selection and promotes a survivor', () => {
     useStore.getState().selectMany(['a', 'b'])
     useStore.getState().removeFrame('b')
     expect(useStore.getState().selectedIds).toEqual(['a'])
+    expect(useStore.getState().selectedId).toBe('a')
+    useStore.getState().removeFrame('a')
     expect(useStore.getState().selectedId).toBeNull()
   })
 
@@ -101,5 +103,42 @@ describe('grouped history', () => {
     expect(api.createFrame).toHaveBeenCalledTimes(2)
     expect(api.createFrame).toHaveBeenCalledWith('c1', expect.objectContaining({ name: 'a' }))
     expect(api.createFrame).toHaveBeenCalledWith('c1', expect.objectContaining({ name: 'b' }))
+  })
+})
+
+describe('review follow-ups', () => {
+  it('deleting the primary frame promotes the last surviving member', () => {
+    useStore.getState().selectMany(['a', 'b', 'c'])
+    useStore.getState().removeFrame('c')
+    expect(useStore.getState().selectedIds).toEqual(['a', 'b'])
+    expect(useStore.getState().selectedId).toBe('b')
+  })
+
+  it('undo waits for in-flight drag saves before writing the inverse', async () => {
+    const order: string[] = []
+    let release!: () => void
+    const pending = new Promise<void>((r) => (release = r)).then(() => order.push('save'))
+    history.trackSave(pending)
+    history.recordUpdate('a', { x: 0 }, { x: 10 })
+    api.updateFrame.mockImplementationOnce(async () => {
+      order.push('undo')
+      return {}
+    })
+    const undone = history.undo()
+    await Promise.resolve()
+    expect(order).toEqual([])
+    release()
+    await undone
+    expect(order).toEqual(['save', 'undo'])
+  })
+
+  it('a failing member of a group does not stop the others', async () => {
+    history.recordUpdates([
+      { frameId: 'a', before: { x: 0 }, after: { x: 1 } },
+      { frameId: 'b', before: { x: 0 }, after: { x: 1 } },
+    ])
+    api.updateFrame.mockRejectedValueOnce(new Error('boom'))
+    await history.undo()
+    expect(api.updateFrame).toHaveBeenCalledTimes(2)
   })
 })

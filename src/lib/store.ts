@@ -220,10 +220,13 @@ export const useStore = create<State>((set, get) => ({
   removeFrame: (frameId) =>
     set((s) => {
       if (!s.canvas) return {}
+      const selectedIds = s.selectedIds.filter((id) => id !== frameId)
       return {
         canvas: { ...s.canvas, frames: s.canvas.frames.filter((f) => f.id !== frameId) },
-        selectedIds: s.selectedIds.filter((id) => id !== frameId),
-        selectedId: s.selectedId === frameId ? null : s.selectedId,
+        selectedIds,
+        /* losing the primary promotes the last surviving member, so a group
+           never sits selected with nothing driving the Inspector/presence */
+        selectedId: s.selectedId === frameId ? (selectedIds[selectedIds.length - 1] ?? null) : s.selectedId,
         ctxMenu: s.ctxMenu?.frameId === frameId ? null : s.ctxMenu,
       }
     }),

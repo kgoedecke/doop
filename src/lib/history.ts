@@ -26,6 +26,13 @@ const COALESCE_MS = 1500
 let undoStack: Entry[] = []
 let redoStack: Entry[] = []
 let busy = false
+/* saves still in flight from a drag: undo/redo wait for them so the inverse
+   write never lands before (and gets overwritten by) the original */
+let inflight: Promise<unknown> = Promise.resolve()
+
+export function trackSave(p: Promise<unknown>) {
+  inflight = inflight.then(() => p.catch(() => undefined))
+}
 
 export function clearHistory() {
   undoStack = []
@@ -118,9 +125,17 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
   useStore.getState().select(f.id)
 }
 
+/* every member of a group is attempted even if one fails — the frames are
+   independent, so a single bad request should not strand the rest */
+async function applyAll(entries: Entry[], apply: (e: Entry) => Promise<void>) {
+  const results = await Promise.allSettled(entries.map(apply))
+  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (failed) throw failed.reason
+}
+
 async function applyUndo(e: Entry): Promise<void> {
   if (e.type === 'group') {
-    for (const child of [...e.entries].reverse()) await applyUndo(child)
+    await applyAll(e.entries, applyUndo)
   } else if (e.type === 'update') {
     useStore.getState().patchFrameLocal(e.frameId, e.before)
     await api.updateFrame(e.frameId, e.before)
@@ -133,7 +148,7 @@ async function applyUndo(e: Entry): Promise<void> {
 
 async function applyRedo(e: Entry): Promise<void> {
   if (e.type === 'group') {
-    for (const child of e.entries) await applyRedo(child)
+    await applyAll(e.entries, applyRedo)
   } else if (e.type === 'update') {
     useStore.getState().patchFrameLocal(e.frameId, e.after)
     await api.updateFrame(e.frameId, e.after)
@@ -150,6 +165,7 @@ export async function undo() {
   if (!e) return
   busy = true
   try {
+    await inflight
     await applyUndo(e)
     redoStack.push(e)
     posthog.capture('canvas_undo')
@@ -167,6 +183,7 @@ export async function redo() {
   if (!e) return
   busy = true
   try {
+    await inflight
     await applyRedo(e)
     undoStack.push(e)
     posthog.capture('canvas_redo')

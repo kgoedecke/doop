@@ -7,7 +7,7 @@ import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
-import { recordCreate, recordUpdate, recordUpdates } from '../lib/history'
+import { recordCreate, recordUpdate, recordUpdates, trackSave } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { FrameContextMenu } from './FrameContextMenu'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
@@ -220,7 +220,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         const f = live.find((x) => x.id === g.id)
         if (!f) continue
         const after = { x: f.x, y: f.y, width: f.width, height: f.height }
-        api.updateFrame(f.id, after).catch(console.error)
+        trackSave(api.updateFrame(f.id, after).catch(console.error))
         updates.push({ frameId: f.id, before: g.orig, after })
       }
       if (updates.length === 1) recordUpdate(updates[0].frameId, updates[0].before, updates[0].after)
