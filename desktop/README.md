@@ -54,8 +54,8 @@ Versions are bumped by release-please: commits touching `desktop/` open a
 `desktop/CHANGELOG.md`. Merging it does not tag — push the tag by hand:
 
 ```sh
-# after the release PR is merged
-git tag desktop-v0.1.3 && git push origin desktop-v0.1.3
+# after the release PR is merged; X.Y.Z is the version that PR set in desktop/package.json
+git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z
 ```
 
 Until the `APPLE_*` secrets exist the DMG is **unsigned**: it runs, but
