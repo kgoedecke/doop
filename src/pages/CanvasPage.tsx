@@ -27,7 +27,7 @@ import { ShareModal } from '../components/ShareModal'
 import { BrainIcon } from '../components/BrainIcon'
 import { getIdentity, setName } from '../lib/identity'
 import { copyFrame, duplicateFrame, hasFrameClip, pasteFrameCentered, pasteImagesCentered } from '../lib/frameClipboard'
-import { clearHistory, deleteFrameTracked, recordCreate, redo, undo } from '../lib/history'
+import { clearHistory, deleteFramesTracked, recordCreate, redo, undo } from '../lib/history'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
@@ -132,10 +132,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const sel = useStore.getState().selectedId
-      if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
+      const selectedIds = useStore.getState().selectedIds
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length) {
         e.preventDefault()
-        const frame = useStore.getState().canvas?.frames.find((f) => f.id === sel)
-        if (frame) deleteFrameTracked(frame)
+        const frames = useStore.getState().canvas?.frames.filter((f) => selectedIds.includes(f.id)) ?? []
+        deleteFramesTracked(frames)
       }
       if (e.key === 'Escape') select(null)
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
