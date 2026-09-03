@@ -647,7 +647,8 @@ export function addQueuedCard(
     (t) =>
       t.queuedBy === from &&
       !t.endedAt &&
-      (t.brief ?? t.status) === brief &&
+      /* legacy cards predate `brief`: their status is the old `slice(0, LABEL_CHARS)` */
+      (t.brief != null ? t.brief === brief : t.status === brief.slice(0, LABEL_CHARS)) &&
       pipelineOf(t).join(',') === pipeline.join(',') &&
       (t.attachments ?? []).join(',') === refs.join(','),
   )
