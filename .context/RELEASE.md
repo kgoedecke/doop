@@ -1,8 +1,24 @@
 # RELEASE - doop
 
+## Versioning (release-please)
+
+`.github/workflows/release-please.yml` runs on every push to `main` and keeps a release PR open
+per package, driven by conventional commits (`release-please-config.json`,
+`.release-please-manifest.json`):
+
+- `.` (the web app) -> "chore(main): release x.y.z" bumps `package.json` + `CHANGELOG.md`;
+  merging it creates the `vX.Y.Z` tag and a GitHub Release. Tag + notes only - nothing is built
+  or deployed from it.
+- `desktop/` -> "chore(desktop): release x.y.z" bumps `desktop/package.json`,
+  `src-tauri/tauri.conf.json`, `Cargo.toml`, `Cargo.lock` + `desktop/CHANGELOG.md`. It does NOT
+  tag: the `desktop-v*` tag is pushed by hand after merging (next section).
+
+Both packages are 0.x, so breaking changes bump the minor, not the major. With the default
+`GITHUB_TOKEN` the release PR gets no CI run; a `RELEASE_PLEASE_TOKEN` PAT secret fixes that.
+
 ## Self-hosted server (Docker)
 
-No versioned release/tag pipeline for the server app itself. Self-hosting is
+No container release pipeline for the server app. Self-hosting is
 `docker compose up` (`docker-compose.yml` + `Dockerfile`) - builds the app image locally, runs it
 on port 4400 alongside a `postgres:16-alpine` container, and applies DB migrations at boot
 (`server/db/index.ts`). CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
@@ -21,8 +37,8 @@ Driven by `.github/workflows/desktop-release.yml`:
   `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` repo secrets exist (see
   `desktop/README.md`). Without them the DMG is unsigned - it still works, but downloaders must
   approve it via System Settings -> Privacy & Security.
-- Desktop app version is tracked separately in `desktop/package.json` (currently ahead of the root
-  `package.json` version) - bump both when cutting a desktop release, and tag as `desktop-vX.Y.Z`.
+- Desktop app version is tracked separately from the root `package.json` and bumped by
+  release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
 
 ## Other workflows
 

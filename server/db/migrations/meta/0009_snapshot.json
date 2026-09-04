@@ -1,6 +1,6 @@
 {
-  "id": "ab4fb165-fe80-4701-ad38-2b9a4c25d94d",
-  "prevId": "aeded106-b024-4321-92fc-ab20dd5dfc07",
+  "id": "a11c9849-2dd2-4674-968a-746f28f79a7d",
+  "prevId": "3949da29-5c25-46e8-beeb-9cda1cfdbb0f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -399,6 +399,12 @@
         "resolved_at": {
           "name": "resolved_at",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -1572,6 +1578,18 @@
         },
         "queued_by_user_id": {
           "name": "queued_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload": {
+          "name": "payload",
           "type": "text",
           "primaryKey": false,
           "notNull": false

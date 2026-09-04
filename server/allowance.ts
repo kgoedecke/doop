@@ -98,3 +98,14 @@ export async function consumeResidentTask(userId: string): Promise<Allowance & {
   if (!applied) return { ...current, used: current.limit, ok: false }
   return { ...current, used: applied.used, ok: true }
 }
+
+/** Give back a task that was spent but never turned into work — the thread
+ *  closed or its frame vanished between metering and the write. Only a
+ *  metered spend (not a byo-model pass) is returned, never below zero. */
+export async function refundResidentTask(gate: Allowance & { ok: boolean }, userId: string): Promise<void> {
+  if (!gate.ok || gate.byoModel) return
+  await db
+    .update(residentUsage)
+    .set({ used: sql`greatest(${residentUsage.used} - 1, 0)`, updatedAt: Date.now() })
+    .where(eq(residentUsage.userId, userId))
+}

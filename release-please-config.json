@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bump-minor-pre-major": true,
+  "include-v-in-tag": true,
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "refactor", "section": "Refactors", "hidden": true },
+    { "type": "chore", "section": "Chores", "hidden": true },
+    { "type": "ci", "section": "CI", "hidden": true },
+    { "type": "build", "section": "Build", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "style", "section": "Style", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "doop",
+      "include-component-in-tag": false,
+      "exclude-paths": ["desktop"]
+    },
+    "desktop": {
+      "release-type": "node",
+      "package-name": "doop-desktop",
+      "component": "desktop",
+      "include-component-in-tag": true,
+      "skip-github-release": true,
+      "extra-files": [
+        { "type": "json", "path": "src-tauri/tauri.conf.json", "jsonpath": "$.version" },
+        { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" },
+        { "type": "toml", "path": "src-tauri/Cargo.lock", "jsonpath": "$.package[?(@.name=='doop-desktop')].version" }
+      ]
+    }
+  }
+}

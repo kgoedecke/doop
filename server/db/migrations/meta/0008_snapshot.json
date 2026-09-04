@@ -1,6 +1,6 @@
 {
-  "id": "ab4fb165-fe80-4701-ad38-2b9a4c25d94d",
-  "prevId": "aeded106-b024-4321-92fc-ab20dd5dfc07",
+  "id": "3949da29-5c25-46e8-beeb-9cda1cfdbb0f",
+  "prevId": "ab4fb165-fe80-4701-ad38-2b9a4c25d94d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -399,6 +399,12 @@
         "resolved_at": {
           "name": "resolved_at",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_id": {
+          "name": "parent_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }

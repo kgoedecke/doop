@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  detectFramework,
-  detectScreens,
-  githubFrameMarker,
-  isGithubPlaceholderHtml,
-  matchSelection,
-  placeholderHtml,
-  wrapRepoHtml,
-} from '../server/github.ts'
+import { detectFramework, detectScreens, githubFrameMarker, matchSelection, wrapRepoHtml } from '../server/github.ts'
 
 /**
  * The GitHub import source's pure core: screen enumeration from framework
@@ -106,18 +98,6 @@ describe('provenance marker', () => {
     expect(html).not.toContain('onload')
     expect(html).toContain('Content-Security-Policy')
     expect(html).toContain('https://raw.githubusercontent.com/acme/app/main/public/')
-    expect(isGithubPlaceholderHtml(html)).toBe(false)
-  })
-
-  it('marks placeholders as such, still carrying the screen marker', () => {
-    const html = placeholderHtml(conn, {
-      kind: 'page',
-      route: '/dashboard',
-      sourcePath: 'app/dashboard/page.tsx',
-      title: 'Dashboard',
-    })
-    expect(isGithubPlaceholderHtml(html)).toBe(true)
-    expect(githubFrameMarker(html)?.route).toBe('/dashboard')
   })
 
   it('returns undefined for unmarked frames', () => {

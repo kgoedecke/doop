@@ -9,6 +9,7 @@ import { Cursors } from './Cursors'
 import { SnapGuides } from './SnapGuides'
 import { MOD_KEY } from '../lib/keys'
 import { cn } from '../lib/utils'
+import { gesture } from '../lib/gesture'
 import { hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
 import { MenuHint } from './ui/menu'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
@@ -27,7 +28,10 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   const setViewport = useStore((s) => s.setViewport)
   const canvas = useStore((s) => s.canvas)
   const select = useStore((s) => s.select)
+  const panMode = useStore((s) => s.panMode)
   const [panning, setPanning] = useState(false)
+  /* the selection rectangle being dragged out, in world coordinates */
+  const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   /* where the background menu opened, so Paste drops the frame there */
   const bgAt = useRef({ x: 0, y: 0 })
   /* iframe oversampling factor — bumped only once the zoom settles */
@@ -217,6 +221,70 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     }
   }, [])
 
+  /* touch: a two-finger pinch zooms around the fingers' midpoint and pans
+     with it. iOS never maps a pinch onto ctrl+wheel the way desktop browsers
+     do, so it needs its own listener — on touch events rather than pointers,
+     because frames swallow pointerdown to start their own drag and a pinch
+     must win regardless of what the fingers landed on. */
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let prev: { dist: number; x: number; y: number } | null = null
+
+    function pinchOf(touches: TouchList) {
+      const rect = el!.getBoundingClientRect()
+      const [a, b] = [touches[0], touches[1]]
+      return {
+        dist: Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY),
+        x: (a.clientX + b.clientX) / 2 - rect.left,
+        y: (a.clientY + b.clientY) / 2 - rect.top,
+      }
+    }
+    function onStart(e: TouchEvent) {
+      if (e.touches.length < 2) return
+      e.preventDefault()
+      prev = pinchOf(e.touches)
+      gesture.pinching = true
+    }
+    function onMove(e: TouchEvent) {
+      if (!prev || e.touches.length < 2) return
+      e.preventDefault()
+      const cur = pinchOf(e.touches)
+      const vp = useStore.getState().viewport
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * (cur.dist / Math.max(1, prev.dist))))
+      const scale = zoom / vp.zoom
+      /* the world point under the previous midpoint stays under the new one */
+      useStore.getState().setViewport({
+        x: cur.x - (prev.x - vp.x) * scale,
+        y: cur.y - (prev.y - vp.y) * scale,
+        zoom,
+      })
+      prev = cur
+    }
+    function onEnd(e: TouchEvent) {
+      /* three fingers down and one lifts: the pair that remains may not be
+         the pair being tracked, so measure it afresh instead of comparing
+         it against the old pair's spread */
+      if (e.touches.length >= 2) {
+        prev = pinchOf(e.touches)
+        return
+      }
+      prev = null
+      gesture.pinching = false
+    }
+    el.addEventListener('touchstart', onStart, { passive: false })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd)
+    el.addEventListener('touchcancel', onEnd)
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
+      gesture.pinching = false
+    }
+  }, [])
+
   /* ⌘0 → 100%, ⌘+ / ⌘− → step zoom, all pivoting on the view center —
      preventDefault keeps the browser's own page zoom out of it */
   useEffect(() => {
@@ -260,21 +328,61 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     }
   }
 
+  /* space bar → pan mode: the stage drags the viewport instead of drawing a
+     marquee, and frames let the press fall through to it. Held-space repeats
+     must not re-trigger, and typing in a field is never a pan. */
+  useEffect(() => {
+    function isTyping(e: KeyboardEvent) {
+      const t = e.target as HTMLElement
+      return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
+    }
+    function onDown(e: KeyboardEvent) {
+      if (e.key !== ' ' || isTyping(e)) return
+      e.preventDefault()
+      if (!useStore.getState().panMode) useStore.getState().setPanMode(true)
+    }
+    function onUp(e: KeyboardEvent) {
+      if (e.key === ' ') useStore.getState().setPanMode(false)
+    }
+    const reset = () => useStore.getState().setPanMode(false)
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    window.addEventListener('blur', reset)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', reset)
+      reset()
+    }
+  }, [])
+
   function onPointerDown(e: React.PointerEvent) {
-    /* pan on background drag or middle mouse anywhere */
     const isBackground = e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('world')
-    if (!isBackground && e.button !== 1) return
-    if (e.button !== 0 && e.button !== 1) return
+    /* pan: middle mouse anywhere, space-drag anywhere, or a finger on the
+       background (touch has no space bar, and one-finger pan is how phones
+       move around) */
+    const pan = e.button === 1 || (e.button === 0 && (useStore.getState().panMode || e.pointerType === 'touch'))
+    if (pan) return startPan(e, isBackground)
+    /* left drag on the background draws a selection marquee */
+    if (e.button !== 0 || !isBackground) return
+    startMarquee(e)
+  }
+
+  function startPan(e: React.PointerEvent, isBackground: boolean) {
     e.currentTarget.setPointerCapture(e.pointerId)
     setPanning(true)
     let last = { x: e.clientX, y: e.clientY }
     let moved = false
 
     function onMove(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return
       const dx = ev.clientX - last.x
       const dy = ev.clientY - last.y
       if (Math.abs(dx) + Math.abs(dy) > 2) moved = true
       last = { x: ev.clientX, y: ev.clientY }
+      /* a pinch owns the viewport while it lasts; keep tracking the finger
+         so the pan resumes from where it is, not from where the pinch began */
+      if (gesture.pinching) return
       const vp = useStore.getState().viewport
       useStore.getState().setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy })
     }
@@ -282,7 +390,49 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       setPanning(false)
-      if (!moved) select(null)
+      if (!moved && isBackground) select(null)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  function startMarquee(e: React.PointerEvent) {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const origin = toWorld(e.clientX, e.clientY)
+    /* ⇧-marquee adds to what is already selected */
+    const keep = e.shiftKey ? useStore.getState().selectedIds : []
+    let moved = false
+
+    function onMove(ev: PointerEvent) {
+      const cur = toWorld(ev.clientX, ev.clientY)
+      const zoom = useStore.getState().viewport.zoom
+      if (Math.abs(cur.x - origin.x) * zoom + Math.abs(cur.y - origin.y) * zoom > 3) moved = true
+      if (!moved) return
+      const rect = {
+        x: Math.min(origin.x, cur.x),
+        y: Math.min(origin.y, cur.y),
+        width: Math.abs(cur.x - origin.x),
+        height: Math.abs(cur.y - origin.y),
+      }
+      setMarquee(rect)
+      const frames = useStore.getState().canvas?.frames ?? []
+      const hits = frames
+        .filter(
+          (f) =>
+            f.x < rect.x + rect.width &&
+            f.x + f.width > rect.x &&
+            f.y < rect.y + rect.height &&
+            f.y + f.height > rect.y,
+        )
+        .map((f) => f.id)
+      useStore.getState().selectMany([...keep, ...hits.filter((id) => !keep.includes(id))])
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setMarquee(null)
+      /* a plain click on empty canvas clears the selection */
+      if (!moved && !e.shiftKey) select(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -302,7 +452,14 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
             /* `stage` is a behaviour hook, not a style: frameClipboard.ts queries
            `.stage` to map screen coordinates into the canvas. No CSS is
            attached to it — everything visual is in the utilities beside it. */
-            className={cn('stage absolute inset-0 touch-none', panning ? 'cursor-grabbing' : 'cursor-default')}
+            className={cn(
+              'stage absolute inset-0 touch-none',
+              panning
+                ? 'cursor-grabbing! [&_*]:cursor-grabbing!'
+                : panMode
+                  ? 'cursor-grab! [&_*]:cursor-grab!'
+                  : 'cursor-default',
+            )}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onContextMenu={(e) => {
@@ -333,6 +490,12 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
               <FlowOverlay />
               <SnapGuides />
               <Cursors />
+              {marquee && (
+                <div
+                  className="pointer-events-none absolute bg-brand/10 [box-shadow:inset_0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
+                  style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }}
+                />
+              )}
             </div>
           </div>
         </ContextMenuTrigger>

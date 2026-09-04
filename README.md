@@ -10,7 +10,7 @@
   <a href="https://discord.com/invite/3AUfXjgVe"><img src="https://img.shields.io/badge/chat-Discord-5865F2" alt="Discord"></a>
 </p>
 
-**Doop is the open-source alternative to [Paper.design](https://paper.design) — a multiplayer
+**[Doop](https://doop.design/?utm_source=github) is the open-source alternative to [Paper.design](https://paper.design) — a multiplayer
 design canvas for humans _and_ AI agents.** Every design lives on a shareable **Canvas**
 (`/c/<id>`) holding **Frames** — artboards that render real HTML in sandboxed iframes. People edit
 in the browser; AI agents edit through the built-in **MCP server**, streaming their designs in
