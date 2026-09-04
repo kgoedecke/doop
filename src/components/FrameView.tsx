@@ -11,6 +11,7 @@ import { recordCreate, recordUpdate, recordUpdates, trackSave } from '../lib/his
 import { snapFrame } from '../lib/snap'
 import { gesture } from '../lib/gesture'
 import { FrameContextMenu } from './FrameContextMenu'
+import { CodePanel } from './CodePanel'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
@@ -315,19 +316,8 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
 
   /* source view + composer prefill for the element toolbar */
   const [codeView, setCodeView] = useState<string | null>(null)
-  const [codeCopied, setCodeCopied] = useState(false)
   const [composePrefill, setComposePrefill] = useState('')
   const codeReq = useRef(0)
-  const copyTimer = useRef<number | null>(null)
-
-  /* the "Copied!" label belongs to the block that was open — drop it when that changes */
-  function clearCopied() {
-    if (copyTimer.current) {
-      window.clearTimeout(copyTimer.current)
-      copyTimer.current = null
-    }
-    setCodeCopied(false)
-  }
 
   function requestCode(selector: string) {
     codeReq.current += 1
@@ -342,7 +332,6 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     setProbe(null)
     setComposing(false)
     setComposePrefill('')
-    clearCopied()
     setCodeView(null)
     setOpenThread(null)
   }
@@ -794,14 +783,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                           <Button
                             variant="inverse"
                             className={EL_TOOLBAR_BTN}
-                            onClick={() => {
-                              if (codeView === null) {
-                                requestCode(anchor.selector)
-                              } else {
-                                clearCopied()
-                                setCodeView(null)
-                              }
-                            }}
+                            onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
                           >
                             {'</>'} Code
                           </Button>
@@ -817,33 +799,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                             </Button>
                           )}
                         </div>
-                        {codeView !== null && (
-                          <div className="relative mt-1.5 w-[440px] max-w-[80vw] rounded-[10px] bg-ink px-3 py-2.5 shadow-pop animate-[chip-in_0.18s_ease]">
-                            <Button
-                              variant="inverse"
-                              size="sm"
-                              className="absolute right-2 top-[7px] rounded-md bg-white/[0.12] px-[9px] py-[3px] text-[11px] hover:bg-white/[0.22]"
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(codeView)
-                                } catch {
-                                  return
-                                }
-                                clearCopied()
-                                setCodeCopied(true)
-                                copyTimer.current = window.setTimeout(() => {
-                                  copyTimer.current = null
-                                  setCodeCopied(false)
-                                }, 1500)
-                              }}
-                            >
-                              {codeCopied ? 'Copied!' : 'Copy'}
-                            </Button>
-                            <pre className="max-h-[260px] overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-[#d9e2ec] [font-family:ui-monospace,monospace] [word-break:break-word]">
-                              {codeView}
-                            </pre>
-                          </div>
-                        )}
+                        {codeView !== null && <CodePanel key={anchor.selector} code={codeView} />}
                       </>
                     ) : (
                       <CommentComposer
