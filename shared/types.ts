@@ -166,7 +166,6 @@ export interface AgentTask {
   endedAt?: number
   /** inferred by the server from frame edits (agent never called set_status) */
   auto?: boolean
-  brief?: string
   /** human who queued this as a board card */
   queuedBy?: string
   /** account id of that human — decides which model credential runs the card */

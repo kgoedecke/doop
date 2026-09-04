@@ -327,7 +327,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                     `Call screenshot_frame on each BEFORE designing and build from what you see. ` +
                     `They are source material — leave them as they are and deliver in a separate frame.`
                   : ''
-              return `- from ${c.queuedBy}: "${c.brief ?? c.status}"${route}${refs}`
+              return `- from ${c.queuedBy}: "${c.status}"${route}${refs}`
             })
             .join('\n'),
       )
@@ -356,7 +356,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     }
     const workText = [
       ...items.map((item) => item.text),
-      ...cards.map((card) => card.brief ?? card.status),
+      ...cards.map((card) => card.status),
       ...comments.map((comment) => comment.text),
     ].join('\n')
     const urls = referencedUrls(workText)

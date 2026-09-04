@@ -34,7 +34,10 @@ const colHeadCls = 'mb-3.5 flex items-baseline gap-2 border-b border-line pb-3'
 const colHeadH2Cls = 'font-display text-[12px] font-[750] uppercase tracking-[0.14em]'
 const countCls = 'font-mono text-[11px] text-ink-faint'
 const cardBase = 'group relative px-4 py-3.5'
-const cardH3Cls = 'break-words pr-4 font-display text-[14.5px] font-[650] leading-[1.35] tracking-[-0.01em]'
+/* mirrors MAX_CARD_CHARS in server/actions.ts */
+const MAX_CARD_CHARS = 4_000
+const cardH3Cls =
+  'line-clamp-8 break-words pr-4 font-display text-[14.5px] font-[650] leading-[1.35] tracking-[-0.01em]'
 const metaCls =
   'mt-[9px] flex flex-wrap items-center gap-1.5 text-[12px] text-ink-faint [&_b]:font-[650] [&_b]:text-ink-soft'
 /* the ✕ on a card: always reachable on touch, revealed on hover elsewhere */
@@ -327,6 +330,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                   variant="bare"
                   className="min-h-[54px] md:text-[13.5px]"
                   value={draft}
+                  maxLength={MAX_CARD_CHARS}
                   placeholder="What should an agent work on?"
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {

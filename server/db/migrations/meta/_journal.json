@@ -71,13 +71,6 @@
       "when": 1788474725138,
       "tag": "0009_repo_cards",
       "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1788258108235,
-      "tag": "0010_card_brief",
-      "breakpoints": true
     }
   ]
 }
