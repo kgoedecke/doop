@@ -11,7 +11,7 @@ import { store } from './store.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
-import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN } from './auth.ts'
+import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN, oidcPublicConfig } from './auth.ts'
 import { adminRouter } from './admin.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
@@ -29,8 +29,6 @@ import {
 import * as ingest from './ingest.ts'
 import * as github from './github.ts'
 import * as githubApp from './githubApp.ts'
-import { scheduleReconstructions } from './githubRecon.ts'
-import { pickModel } from './agentModel.ts'
 import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
@@ -453,6 +451,13 @@ app.post('/api/account-exists', async (req, res) => {
   res.json({ exists: !!row })
 })
 
+/* Public: is SSO configured, and what should the login button say? Static
+   build shared across self-hosted deploys can't know this at build time —
+   see server/auth.ts oidcPublicConfig for what's safe to expose here. */
+app.get('/api/oidc-config', (req, res) => {
+  res.json(oidcPublicConfig())
+})
+
 /* ------------------------------------------------------------------ */
 /* Design sync ingest: the doop-sync snippet on a foreign origin posts */
 /* DOM snapshots here. The canvas-scoped write-only secret in the path */
@@ -678,6 +683,19 @@ app.get('/api/canvases', (req, res) =>
 app.post('/api/canvases', (req, res) => {
   const name = String(req.body?.name || 'Untitled canvas')
   res.json(store.createCanvas(name, req.user!.id))
+})
+
+app.post('/api/canvases/:id/duplicate', async (req, res) => {
+  const source = store.getCanvas(req.params.id)
+  if (!source) return res.status(404).json({ error: 'not found' })
+  if (!hasDurableCanvasAccess(req.user!.id, source)) return res.status(403).json({ error: 'access denied' })
+  try {
+    const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name)
+    res.json(copy)
+  } catch (error) {
+    console.error('[canvas] duplicate failed', error)
+    res.status(500).json({ error: 'could not duplicate canvas' })
+  }
 })
 
 app.get('/api/canvases/:id', (req, res) => {
@@ -967,30 +985,54 @@ app.post('/api/canvases/:id/github/:connId/analyze', async (req, res) => {
   }
 })
 
+/* one import at a time per repo connection — see the route */
+const connectionLocks = new Map<string, Promise<unknown>>()
+async function withConnectionLock<T>(connectionId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = connectionLocks.get(connectionId) ?? Promise.resolve()
+  const run = previous.then(fn, fn)
+  const tail = run.catch(() => {})
+  connectionLocks.set(connectionId, tail)
+  try {
+    return await run
+  } finally {
+    if (connectionLocks.get(connectionId) === tail) connectionLocks.delete(connectionId)
+  }
+}
+
 app.post('/api/canvases/:id/github/:connId/import', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
   const conn = await github.getConnection(c.id, req.params.connId)
   if (!conn) return res.status(404).json({ error: 'connection not found' })
   if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
+  /* design-system-only import is the headline flow now — screens optional */
+  const designSystem = req.body?.design_system !== false
+  const rawScreens = Array.isArray(req.body?.screens) ? (req.body.screens as unknown[]) : []
+  if (!rawScreens.length && !designSystem)
+    return res.status(400).json({ error: 'pick components or screens, or enable the design-system extraction' })
   try {
-    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-    /* code-only screens get agent reconstruction when a model can run it —
-       the requester's own account, else the server tier (same resolution as
-       every other agent task, billed to the same person) */
-    const sketch = !!(await pickModel(req.user!.id))
-    const designSystem = sketch && req.body?.design_system !== false
-    /* design-system-only import is the headline flow now — screens optional */
-    const rawScreens = Array.isArray(req.body?.screens) ? (req.body.screens as unknown[]) : []
-    if (!rawScreens.length && !designSystem)
-      return res.status(400).json({ error: 'pick components or screens, or enable the design-system extraction' })
-    let result: { frames: unknown[]; failures: unknown[] } = { frames: [], failures: [] }
-    let pending: Parameters<typeof scheduleReconstructions>[1] = []
-    if (rawScreens.length) {
-      ;({ pending, ...result } = await github.importScreens(conn, c, rawScreens, actor, { sketch }))
-    }
-    scheduleReconstructions(conn, pending, actor, req.user!.id, { designSystem })
-    res.json(result)
+    /* the selection is resolved against a manifest computed right now — see
+       matchSelection for why the client never dictates paths */
+    const { screens, rejected } = rawScreens.length
+      ? github.matchSelection((await github.analyzeConnection(conn)).screens, rawScreens)
+      : { screens: [], rejected: [] }
+    const input = { connectionId: conn.id, repo: conn.repo, screens, designSystem }
+    /* plan → gate → queue runs one import at a time per connection, so two
+       overlapping imports of the same screens cannot both pass the plan and
+       both pay while only one queues */
+    const outcome = await withConnectionLock(conn.id, async () => {
+      /* nothing new to queue (all rejected, or already on the board) costs nothing */
+      if (!actions.planRepoCards(c.id, input).length) return { cards: [] as string[] }
+      /* the import is the Doop Agent's work, card by card — same gate as a card
+         typed on the board: a free task, or the requester's own model account */
+      const gate = await allowance.consumeResidentTask(req.user!.id)
+      if (!gate.ok) return { limit: gate }
+      const cards = actions.addRepoCards(c.id, input, req.user!.name, req.user!.id)
+      return { cards: cards.map((card) => card.id) }
+    })
+    if (outcome.limit)
+      return res.status(403).json({ error: 'resident_limit', used: outcome.limit.used, limit: outcome.limit.limit })
+    res.json({ cards: outcome.cards, rejected })
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'import failed' })
   }
@@ -1150,6 +1192,36 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   )
   if (!comment) return res.status(404).json({ error: 'frame not found or empty text' })
   res.json(comment)
+})
+
+app.post('/api/comments/:id/replies', async (req, res) => {
+  const found = actions.findComment(req.params.id)
+  if (!found) return res.status(404).json({ error: 'comment not found' })
+  if (!requireCanvas(req, res, found.canvasId)) return
+  const text = String(req.body?.text ?? '')
+  if (!text.trim() || !actions.openThread(req.params.id)) {
+    return res.status(404).json({ error: 'thread resolved or empty text' })
+  }
+  /* same rule as a fresh comment: only an @mention costs a resident task */
+  let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
+  if (mentionedRole(text)) {
+    gate = await allowance.consumeResidentTask(req.user!.id)
+    if (!gate.ok) {
+      return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+    }
+  }
+  const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
+  if (!reply) {
+    /* the thread closed while the meter was being written: give the task
+       back — a failed refund is logged, never turned into a 500 */
+    if (gate) {
+      await allowance.refundResidentTask(gate, req.user!.id).catch((err) => {
+        console.error(`[comments] could not refund a resident task for ${req.user!.id}:`, err)
+      })
+    }
+    return res.status(409).json({ error: 'thread resolved meanwhile' })
+  }
+  res.json(reply)
 })
 
 app.post('/api/comments/:id/resolve', (req, res) => {

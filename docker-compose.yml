@@ -10,6 +10,7 @@ services:
       DATABASE_URL: postgres://doop:doop@db:5432/doop
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me-please-not-for-production}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:4400}
+      SIGNUP_EMAIL_DOMAINS: ${SIGNUP_EMAIL_DOMAINS:-}
       # optional — see .env.example for everything else (SMTP, ANTHROPIC_API_KEY, …)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CONTEXT_DEV_API_KEY: ${CONTEXT_DEV_API_KEY:-}

@@ -18,6 +18,8 @@ export interface Server {
   port: number
   /** PGlite lives here; pass it back to startServer to reboot the same database */
   dataDir: string
+  /** Resolves after the child process exits; useful before reopening its data directory. */
+  stopped: Promise<void>
   stop(opts?: { keepData?: boolean }): void
 }
 
@@ -33,6 +35,7 @@ export async function startServer(port: number, env: Record<string, string> = {}
     },
   )
   const base = `http://localhost:${port}`
+  const stopped = new Promise<void>((resolve) => proc.once('exit', () => resolve()))
   const deadline = Date.now() + 60_000
   for (;;) {
     try {
@@ -48,6 +51,7 @@ export async function startServer(port: number, env: Record<string, string> = {}
     base,
     port,
     dataDir,
+    stopped,
     stop({ keepData }: { keepData?: boolean } = {}) {
       proc.kill()
       if (!keepData) rmSync(dataDir, { recursive: true, force: true })

@@ -1,0 +1,41 @@
+# Cuts releases from conventional commits on main.
+#
+# On every push to main, release-please opens (or refreshes) a "chore(main):
+# release x.y.z" PR that bumps package.json, updates CHANGELOG.md, and lists
+# the feat/fix commits since the last release. Merging that PR creates the
+# `vX.Y.Z` tag and a GitHub Release with those notes. Tag + notes only —
+# nothing is built or deployed from it.
+#
+# The desktop shell is a second package (desktop/): commits touching it get
+# their own "chore(desktop): release x.y.z" PR that bumps the version in
+# package.json, tauri.conf.json, Cargo.toml and Cargo.lock together, plus
+# desktop/CHANGELOG.md. That PR does NOT tag (skip-github-release): push the
+# `desktop-vX.Y.Z` tag by hand after merging, which runs desktop-release.yml
+# and attaches the signed DMG (see desktop/README.md).
+#
+# Token: with the default GITHUB_TOKEN, the release PR's own CI run will not
+# trigger (GitHub suppresses workflows on events created by that token). Add a
+# RELEASE_PLEASE_TOKEN repo secret (a fine-grained PAT with contents + pull
+# requests read/write on this repo) to get CI on the release PR.
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

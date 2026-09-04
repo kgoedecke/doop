@@ -72,6 +72,46 @@ class Store {
     return canvas
   }
 
+  /** Copy reusable design content into a new private canvas. Collaboration,
+   * activity, tasks and external connections belong to the source only. */
+  async duplicateCanvas(id: string, ownerId: string, by: string): Promise<Canvas | undefined> {
+    const source = this.canvases.get(id)
+    if (!source) return undefined
+    const now = Date.now()
+    const canvasId = nanoid(10)
+    const frameIds = new Map(source.frames.map((frame) => [frame.id, nanoid(10)]))
+    const frames = source.frames.map((frame) => ({
+      ...frame,
+      id: frameIds.get(frame.id)!,
+      canvasId,
+      createdAt: now,
+      updatedAt: now,
+      updatedBy: by,
+    }))
+    const guidelines = source.guidelines?.map((doc) => ({ ...doc, updatedAt: now, updatedBy: by }))
+    const references = source.references?.map((ref) => ({
+      ...ref,
+      id: nanoid(10),
+      frameId: frameIds.get(ref.frameId) ?? ref.frameId,
+      pinnedBy: by,
+      pinnedAt: now,
+    }))
+    const canvas: Canvas = {
+      id: canvasId,
+      name: `${source.name} copy`,
+      ownerId,
+      createdAt: now,
+      updatedAt: now,
+      frames,
+      ...(guidelines?.length ? { guidelines } : {}),
+      ...(references?.length ? { references } : {}),
+    }
+    await persist.saveCanvasCopy(canvas)
+    this.canvases.set(canvas.id, canvas)
+    for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
+    return canvas
+  }
+
   getCanvas(id: string) {
     return this.canvases.get(id)
   }

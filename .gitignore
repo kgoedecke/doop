@@ -6,3 +6,9 @@ desktop/src-tauri/gen
 .DS_Store
 .env*
 !.env.example
+
+# .claude/ is committed (skills, slash commands, settings.json define the
+# agent contract for this repo). Only the per-contributor and per-session
+# files are ignored.
+.claude/settings.local.json
+.claude/.current-tool

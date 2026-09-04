@@ -7,8 +7,9 @@ import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
-import { recordCreate, recordUpdate } from '../lib/history'
+import { recordCreate, recordUpdate, recordUpdates, trackSave } from '../lib/history'
 import { snapFrame } from '../lib/snap'
+import { gesture } from '../lib/gesture'
 import { FrameContextMenu } from './FrameContextMenu'
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName } from '../../shared/agents'
@@ -79,6 +80,8 @@ interface ProbeHit {
   rect: { x: number; y: number; width: number; height: number }
 }
 
+type DragRect = { id: string; x: number; y: number; width: number; height: number }
+
 interface HoverHit {
   tag: string
   rect: { x: number; y: number; width: number; height: number }
@@ -88,7 +91,10 @@ interface HoverHit {
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
    this component — memo holds as long as the frame and raster are unchanged. */
 export const FrameView = memo(function FrameView({ frame, raster }: { frame: Frame; raster: number }) {
-  const selected = useStore((s) => s.selectedId === frame.id)
+  const selected = useStore((s) => s.selectedIds.includes(frame.id))
+  /* space held: the shield stays up even in edit mode, so the press reaches
+     the Stage and pans instead of vanishing into the editable iframe */
+  const panMode = useStore((s) => s.panMode)
   const select = useStore((s) => s.select)
   const flash = useStore((s) => s.flashes[frame.id])
   const stream = useStore((s) => s.streams[frame.id])
@@ -108,61 +114,116 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
      lands in the store — otherwise a stale post would morph the edit away */
   const [suspendPost, setSuspendPost] = useState(false)
 
-  const sendDrag = useRef(
-    throttle((f: { id: string; x: number; y: number; width: number; height: number }) => {
-      sendWs({ type: 'frame:drag', frameId: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
-    }, 50),
-  ).current
+  /* one throttle per frame, so a group drag broadcasts every member —
+     a single throttle would keep only the last frame written each tick */
+  const dragSenders = useRef(new Map<string, (f: DragRect) => void>()).current
+  function sendDrag(id: string, f: DragRect) {
+    let send = dragSenders.get(id)
+    if (!send) {
+      send = throttle((r: DragRect) => {
+        sendWs({ type: 'frame:drag', frameId: r.id, x: r.x, y: r.y, width: r.width, height: r.height })
+      }, 50)
+      dragSenders.set(id, send)
+    }
+    send(f)
+  }
 
   function startDrag(e: React.PointerEvent, mode: 'move' | 'resize', probeOnClick = false, panelOnClick = false) {
     if (e.button !== 0) return
+    /* space held: let the event reach the Stage, which pans */
+    if (useStore.getState().panMode) return
     e.stopPropagation()
     e.preventDefault()
-    select(frame.id)
+    /* ⌥⇧-drag duplicates: the moment the drag is real, leave a copy of the
+       frame at its origin and keep dragging this one — same net effect as
+       Figma's "drag off a duplicate", without retargeting the drag */
+    const duplicating = mode === 'move' && e.altKey && e.shiftKey
+    /* plain ⇧-click adds to (or drops from) the selection; a dropped frame
+       does not start a drag */
+    if (mode === 'move' && e.shiftKey && !e.altKey) {
+      useStore.getState().toggleSelect(frame.id)
+      if (!useStore.getState().selectedIds.includes(frame.id)) return
+    } else if (!useStore.getState().selectedIds.includes(frame.id)) {
+      /* clicking a frame already in a group keeps the group — the drag
+         moves all of them */
+      select(frame.id)
+    }
     setDragging(true)
     clearHover()
     const start = { x: e.clientX, y: e.clientY }
     const off = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY }
     const orig = { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+    /* the drag's baseline: finger position and frame rect the deltas are
+       measured from. Starts at pointer-down, and re-anchors while a pinch
+       owns the finger so the drag resumes from where the finger is (and at
+       the zoom it is now) rather than jumping by the pinch's displacement */
+    let base = { x: start.x, y: start.y, rect: orig }
     let moved = false
-    /* ⌥⇧-drag duplicates: the moment the drag is real, leave a copy of the
-       frame at its origin and keep dragging this one — same net effect as
-       Figma's "drag off a duplicate", without retargeting the drag */
-    const duplicating = mode === 'move' && e.altKey && e.shiftKey
     let dupDropped = false
     if (duplicating) setDuping(true)
+    /* a move carries every selected frame along; a resize is this frame only */
+    const frames = useStore.getState().canvas?.frames ?? []
+    const selectedIds = mode === 'move' ? useStore.getState().selectedIds : [frame.id]
+    const group = frames
+      .filter((f) => selectedIds.includes(f.id))
+      .map((f) => ({ id: f.id, orig: { x: f.x, y: f.y, width: f.width, height: f.height } }))
+    const groupIds = new Set(group.map((g) => g.id))
 
     function onMove(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return
+      /* a second finger turns the gesture into a pinch: the frame stays put */
+      if (gesture.pinching) {
+        const cur = useStore.getState().canvas?.frames.find((x) => x.id === frame.id)
+        base = { x: ev.clientX, y: ev.clientY, rect: cur ? { ...cur } : base.rect }
+        return
+      }
       if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 4) moved = true
       if (duplicating && moved && !dupDropped) {
         dupDropped = true
-        api
-          .createFrame(frame.canvasId, { name: frame.name, html: frame.html, ...orig })
-          .then((f) => {
-            posthog.capture('frame_duplicated', { via: 'drag' })
-            recordCreate(f)
-          })
-          .catch(console.error)
+        for (const g of group) {
+          const src = frames.find((f) => f.id === g.id)
+          if (!src) continue
+          api
+            .createFrame(src.canvasId, { name: src.name, html: src.html, ...g.orig })
+            .then((f) => {
+              posthog.capture('frame_duplicated', { via: 'drag' })
+              recordCreate(f)
+            })
+            .catch(console.error)
+        }
       }
       const zoom = useStore.getState().viewport.zoom
-      const dx = (ev.clientX - start.x) / zoom
-      const dy = (ev.clientY - start.y) / zoom
+      const dx = (ev.clientX - base.x) / zoom
+      const dy = (ev.clientY - base.y) / zoom
+      const from = base.rect
       const raw =
         mode === 'move'
-          ? { ...orig, x: Math.round(orig.x + dx), y: Math.round(orig.y + dy) }
+          ? { ...from, x: Math.round(from.x + dx), y: Math.round(from.y + dy) }
           : {
-              ...orig,
-              width: Math.max(120, Math.round(orig.width + dx)),
-              height: Math.max(80, Math.round(orig.height + dy)),
+              ...from,
+              width: Math.max(120, Math.round(from.width + dx)),
+              height: Math.max(80, Math.round(from.height + dy)),
             }
-      /* edges pull onto neighbouring frames' edges/centers; ⌥ drags free */
-      const others = useStore.getState().canvas?.frames.filter((f) => f.id !== frame.id) ?? []
+      /* edges pull onto neighbouring frames' edges/centers; ⌥ drags free.
+         Frames riding along in the group are not neighbours. */
+      const others = useStore.getState().canvas?.frames.filter((f) => !groupIds.has(f.id)) ?? []
       const snapped = ev.altKey ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom)
       useStore.getState().setSnapGuides(snapped.guides)
-      const patch = mode === 'move' ? { x: snapped.x, y: snapped.y } : { width: snapped.width, height: snapped.height }
-      useStore.getState().patchFrameLocal(frame.id, patch)
-      const f = useStore.getState().canvas?.frames.find((x) => x.id === frame.id)
-      if (f) sendDrag({ id: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
+      if (mode === 'move') {
+        /* the snapped delta of the dragged frame moves the whole group */
+        const sdx = snapped.x - orig.x
+        const sdy = snapped.y - orig.y
+        for (const g of group) {
+          useStore.getState().patchFrameLocal(g.id, { x: g.orig.x + sdx, y: g.orig.y + sdy })
+        }
+      } else {
+        useStore.getState().patchFrameLocal(frame.id, { width: snapped.width, height: snapped.height })
+      }
+      const live = useStore.getState().canvas?.frames ?? []
+      for (const g of group) {
+        const f = live.find((x) => x.id === g.id)
+        if (f) sendDrag(f.id, { id: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
+      }
     }
     function onUp() {
       window.removeEventListener('pointermove', onMove)
@@ -170,11 +231,17 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       setDragging(false)
       if (duplicating) setDuping(false)
       useStore.getState().setSnapGuides([])
-      const f = useStore.getState().canvas?.frames.find((x) => x.id === frame.id)
-      if (f) {
-        api.updateFrame(f.id, { x: f.x, y: f.y, width: f.width, height: f.height }).catch(console.error)
-        recordUpdate(f.id, orig, { x: f.x, y: f.y, width: f.width, height: f.height })
+      const live = useStore.getState().canvas?.frames ?? []
+      const updates: { frameId: string; before: typeof orig; after: typeof orig }[] = []
+      for (const g of group) {
+        const f = live.find((x) => x.id === g.id)
+        if (!f) continue
+        const after = { x: f.x, y: f.y, width: f.width, height: f.height }
+        trackSave(api.updateFrame(f.id, after).catch(console.error))
+        updates.push({ frameId: f.id, before: g.orig, after })
       }
+      if (updates.length === 1) recordUpdate(updates[0].frameId, updates[0].before, updates[0].after)
+      else recordUpdates(updates)
       /* a click (no drag) on the frame surface targets the element under
          the cursor: probe it and show the element toolbar */
       if (!moved && probeOnClick) probeAt(off.x, off.y)
@@ -212,7 +279,9 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   }, [runtimeReady, html, editing, suspendPost])
 
   /* ---- element comments ---- */
-  const comments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id && !c.resolvedAt)
+  const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
+  /* only thread roots get a pin; replies live inside the root's popover */
+  const comments = frameComments.filter((c) => !c.parentId && !c.resolvedAt)
   const [probe, setProbe] = useState<ProbeHit | null>(null)
   /* element selected for text editing inside the iframe (edit mode only) */
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
@@ -417,8 +486,9 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         /* deferPanel: when this right-click is what selects the frame, the
            Inspector waits until the menu closes — it must not slide in
            underneath the menu the user just opened */
-        const alreadySelected = store.selectedId === frame.id
-        select(frame.id)
+        const alreadySelected = store.selectedIds.includes(frame.id)
+        /* a right-click inside a group keeps the group, so Delete takes all */
+        if (!alreadySelected) select(frame.id)
         closePopovers()
         store.openCtxMenu({ frameId: frame.id, deferPanel: !alreadySelected })
       }}
@@ -545,7 +615,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
             )}
             {/* shield keeps pointer events on the canvas, not the iframe;
             lifted while editing so clicks land in the editable document */}
-            {!editing && <div className="absolute inset-0" />}
+            {(!editing || panMode) && <div className="absolute inset-0" />}
             {hover && !editing && !dragging && (
               <div
                 className="pointer-events-none absolute z-[3] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1.5px/var(--zoom,1))_#3c82f6]"
@@ -609,17 +679,20 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                   const pos = pinPos[c.id]
                   if (!pos) return null
                   const open = openThread === c.id
+                  const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
+                  const thread = [c, ...replies.sort((a, b) => a.at - b.at)]
+                  /* the pin reflects the newest agent request in the thread */
+                  const agentItem = [...thread].reverse().find((x) => x.forAgent && !x.resolvedAt)
+                  const working = agentItem?.claimedBy && !agentItem.failedAt
                   return (
                     <div
                       key={c.id}
                       className={cn(
                         'pointer-events-auto absolute z-[4] grid h-[26px] w-[26px] cursor-pointer place-items-center rounded-[50%_50%_50%_4px] border-2 border-white text-[13px] text-white [transform:translate(-50%,-50%)_scale(min(calc(1/var(--zoom,1)),2.4))] animate-[chip-in_0.25s_ease]',
-                        c.failedAt
+                        agentItem?.failedAt
                           ? 'bg-accent-ink! font-extrabold shadow-[0_0_0_3px_rgba(208,52,31,0.2),var(--shadow-card)]'
                           : 'shadow-card',
-                        !c.failedAt &&
-                          c.claimedBy &&
-                          !c.resolvedAt &&
+                        working &&
                           "after:absolute after:-inset-1.5 after:rounded-[inherit] after:border-2 after:border-current after:opacity-50 after:content-[''] after:[animation:stream-pulse_1.1s_ease-in-out_infinite]",
                       )}
                       style={{
@@ -633,12 +706,23 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                         setComposing(false)
                         setOpenThread(open ? null : c.id)
                       }}
-                      title={`${c.from}: ${c.text}`}
+                      title={`${c.from}: ${c.text}${thread.length > 1 ? ` (${thread.length - 1} replies)` : ''}`}
                     >
-                      {c.failedAt ? '!' : c.claimedBy && !c.resolvedAt ? '✦' : '💬'}
+                      {agentItem?.failedAt ? '!' : working ? '✦' : '💬'}
                       {open && (
                         <CommentThread
-                          comment={c}
+                          thread={thread}
+                          onReply={(text) =>
+                            api
+                              .replyComment(c.id, text)
+                              .then(() => posthog.capture('element_comment_replied'))
+                              .catch((err) => {
+                                /* the wall explains a hit limit; anything else
+                                   surfaces in the thread so the draft survives */
+                                if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
+                                throw err
+                              })
+                          }
                           onResolve={() => {
                             api
                               .resolveComment(c.id)
@@ -646,8 +730,8 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                               .catch(console.error)
                             setOpenThread(null)
                           }}
-                          onRetry={() =>
-                            api.retryComment(c.id).catch((err) => {
+                          onRetry={(id) =>
+                            api.retryComment(id).catch((err) => {
                               if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
                               else console.error(err)
                             })
@@ -828,44 +912,96 @@ function CommentComposer({
   )
 }
 
+/** Where an @agent request in the thread stands, or null for a human note. */
+function agentStatus(c: ElementComment): string | null {
+  const target = c.targetAgent ?? roleName(DEFAULT_ROLE_ID)
+  if (c.failedAt) return `${target} stopped`
+  if (c.resolvedAt) return c.forAgent ? `✓ ${c.resolvedBy ?? target}` : null
+  if (c.claimedBy) return `✦ ${c.claimedBy} is on it`
+  return c.forAgent ? `✦ waiting for ${target}` : null
+}
+
 function CommentThread({
-  comment,
+  thread,
+  onReply,
   onResolve,
   onRetry,
 }: {
-  comment: ElementComment
+  /** root comment first, then its replies oldest → newest */
+  thread: ElementComment[]
+  /** rejects when the reply did not land — the draft is kept for a retry */
+  onReply: (text: string) => Promise<unknown>
   onResolve: () => void
-  onRetry: () => void
+  onRetry: (commentId: string) => void
 }) {
-  const target = comment.targetAgent ?? roleName(DEFAULT_ROLE_ID)
-  const status = comment.failedAt
-    ? `${target} stopped`
-    : comment.claimedBy && !comment.resolvedAt
-      ? `✦ ${comment.claimedBy} is on it`
-      : comment.forAgent
-        ? `✦ waiting for ${target}`
-        : null
+  const [reply, setReply] = useState('')
+  const [sending, setSending] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+  /* a long conversation opens (and grows) scrolled to its newest message */
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
+  }, [thread.length])
+  const send = () => {
+    if (!reply.trim() || sending) return
+    const submitted = reply
+    setSending(true)
+    setFailed(false)
+    onReply(submitted)
+      /* only clear what was sent — text typed meanwhile is a new draft */
+      .then(() => setReply((current) => (current === submitted ? '' : current)))
+      .catch(() => setFailed(true))
+      .finally(() => setSending(false))
+  }
+  const mentioned = mentionedRole(reply)
   return (
     <div
-      className="absolute top-[calc(100%_+_8px)] left-1/2 w-[230px] -translate-x-1/2 cursor-default rounded-[10px] border border-line bg-surface p-2.5 text-left shadow-pop animate-[chip-in_0.18s_ease]"
+      className="absolute top-[calc(100%_+_8px)] left-1/2 w-[250px] -translate-x-1/2 cursor-default rounded-[10px] border border-line bg-surface p-2.5 text-left shadow-pop animate-[chip-in_0.18s_ease]"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between gap-2 text-[12px]">
-        <b style={{ color: colorFor(comment.from) }}>{comment.from}</b>
-        {status && <span className="whitespace-nowrap text-[11px] font-semibold text-brand">{status}</span>}
+      <div ref={listRef} className="-mx-1 max-h-[240px] overflow-y-auto px-1">
+        {thread.map((c, i) => {
+          const status = agentStatus(c)
+          return (
+            <div key={c.id} className={cn(i > 0 && 'mt-2 border-t border-line-soft pt-2')}>
+              <div className="flex items-center justify-between gap-2 text-[12px]">
+                <b style={{ color: colorFor(c.from) }}>{c.from}</b>
+                {status && <span className="whitespace-nowrap text-[11px] font-semibold text-brand">{status}</span>}
+              </div>
+              <div className="mt-1 break-words text-[13px] leading-[1.45] text-ink">{c.text}</div>
+              {c.failedAt ? (
+                <div className="mt-1 flex items-center gap-2 text-[11px] leading-[1.4] text-accent-ink">
+                  <span>{c.failureReason ?? 'The agent did not finish.'}</span>
+                  <Button
+                    variant="danger-solid"
+                    size="pill"
+                    className="shrink-0 px-[9px] py-[3px] text-[11px]"
+                    onClick={() => onRetry(c.id)}
+                  >
+                    ↻ Retry
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
       </div>
-      <div className="mt-1.5 mb-2 break-words text-[13px] leading-[1.45] text-ink">{comment.text}</div>
-      {comment.failedAt ? (
-        <div className="-mt-0.5 mb-2 text-[11px] leading-[1.4] text-accent-ink">
-          {comment.failureReason ?? 'The agent did not finish.'}
+      <Textarea
+        variant="bare"
+        className="mt-2 min-h-[38px] md:text-[13px]"
+        value={reply}
+        placeholder="Reply… (@doop to ask the agent)"
+        onChange={(e) => setReply(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
+        }}
+      />
+      {failed && (
+        <div className="mt-1 text-[11px] leading-[1.4] text-accent-ink">
+          That reply did not go through — it may be resolved already. Try again.
         </div>
-      ) : null}
-      <div className="flex items-center gap-1.5">
-        {comment.failedAt ? (
-          <Button variant="danger-solid" size="pill" className="px-[11px] py-[5px]" onClick={onRetry}>
-            ↻ Retry
-          </Button>
-        ) : null}
+      )}
+      <div className="mt-1.5 flex items-center gap-1.5">
         <Button
           variant="ghost"
           size="pill"
@@ -873,6 +1009,23 @@ function CommentThread({
           onClick={onResolve}
         >
           ✓ Resolve
+        </Button>
+        {mentioned && (
+          <span
+            className="ml-auto truncate text-[11px] font-semibold text-brand"
+            title={`${mentioned.name} will pick this up`}
+          >
+            {mentioned.emoji} {mentioned.name}
+          </span>
+        )}
+        <Button
+          variant="solid"
+          size="pill"
+          className={cn('px-3 py-[4px] text-xs', !mentioned && 'ml-auto')}
+          disabled={!reply.trim() || sending}
+          onClick={send}
+        >
+          {sending ? 'Posting…' : 'Reply'}
         </Button>
       </div>
     </div>

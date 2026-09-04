@@ -157,6 +157,10 @@ export const tasks = pgTable(
     attachments: text('attachments'),
     /** account id of the human who queued the card — picks the model credential */
     queuedByUserId: text('queued_by_user_id'),
+    /** structured cards ('sketch', 'design-system'); null for prompt cards */
+    kind: text('kind'),
+    /** JSON payload of a structured card — what its runner needs, never a secret */
+    payload: text('payload'),
   },
   (t) => [index('tasks_canvas_idx').on(t.canvasId)],
 )
@@ -202,6 +206,7 @@ export const comments = pgTable(
     failureReason: text('failure_reason'),
     resolvedBy: text('resolved_by'),
     resolvedAt: bigint('resolved_at', { mode: 'number' }),
+    parentId: text('parent_id'),
   },
   (t) => [index('comments_canvas_idx').on(t.canvasId)],
 )

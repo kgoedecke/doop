@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CanvasMeta } from '../../shared/types'
+import type { Canvas, CanvasMeta } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { api, type HomeActivity } from '../lib/api'
 import { authClient } from '../lib/auth'
@@ -7,6 +7,7 @@ import { navigate } from '../App'
 import { Logo } from '../components/Logo'
 import { timeAgo } from '../lib/time'
 import { AgentIcon } from '../components/AgentIcon'
+import { ShareModal } from '../components/ShareModal'
 import { AccountMenu, ConnectCard, IconGrid, IconList, IconShare, IconUser } from '../components/DashShell'
 import { posthog } from '../lib/posthog'
 import { closeTab, openCanvasTab, pruneTabs } from '../lib/desktop'
@@ -19,6 +20,16 @@ import { Skeleton } from '../components/ui/skeleton'
 import { Dot } from '../components/ui/dot'
 import { Wordmark } from '../components/ui/wordmark'
 import { SegmentedIconItem, SegmentedIcons } from '../components/ui/segmented'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu'
+import { CopyIcon, MoreHorizontalIcon, ShareIcon, TrashIcon } from '../components/ui/icons'
+import { ConfirmDialog } from '../components/ui/alert-dialog'
+import { Toast } from '../components/ui/toast'
 import {
   DashContent,
   DashHeader,
@@ -49,6 +60,10 @@ export function Home() {
   const [scope, setScope] = useState<Scope>('all')
   const [query, setQuery] = useState('')
   const [view, setView] = useState<'grid' | 'list'>('grid')
+  const [shareCanvas, setShareCanvas] = useState<Canvas | null>(null)
+  const [deleteCanvas, setDeleteCanvas] = useState<CanvasMeta | null>(null)
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
   /* a clock the render can read: an agent that just worked shows as live, and
      the relative times stay honest without a reload */
   const [now, setNow] = useState(0)
@@ -85,6 +100,36 @@ export function Home() {
     const canvas = await api.createCanvas('Untitled canvas')
     posthog.capture('canvas_created')
     open(canvas.id, canvas.name)
+  }
+
+  async function duplicate(canvas: CanvasMeta) {
+    if (duplicatingId) return
+    setDuplicatingId(canvas.id)
+    try {
+      const copy = await api.duplicateCanvas(canvas.id)
+      posthog.capture('canvas_duplicated')
+      reload()
+      open(copy.id, copy.name)
+    } catch (error) {
+      console.error(error)
+      showToast('Couldn’t duplicate canvas')
+    } finally {
+      setDuplicatingId(null)
+    }
+  }
+
+  async function share(canvas: CanvasMeta) {
+    try {
+      setShareCanvas(await api.getCanvas(canvas.id))
+    } catch (error) {
+      console.error(error)
+      showToast('Couldn’t open sharing')
+    }
+  }
+
+  function showToast(message: string) {
+    setToast(message)
+    window.setTimeout(() => setToast(null), 2400)
   }
 
   /* Figma-style in the desktop shell: the canvas gets its own tab and Home
@@ -352,47 +397,74 @@ export function Home() {
                       <Skeleton key={i} index={i} className={cn(cardCls, 'min-h-[230px] border-solid')} />
                     ))}
                   {visible.map((c) => (
-                    <button key={c.id} className={cn(cardCls, 'group')} onClick={() => open(c.id, c.name)}>
-                      <div className="relative grid aspect-[16/10] place-items-center overflow-hidden border-b border-line-soft [background:radial-gradient(circle,var(--dot)_1px,transparent_1px)_0_0/18px_18px,var(--paper-deep)]">
-                        <Preview canvas={c} />
-                        <AgentStack canvas={c} />
-                        {c.ownerId && !c.shared && <DeleteButton onDelete={() => remove(c.id, reload)} />}
-                      </div>
-                      <div className="px-3 pb-3 pt-2.5">
-                        <div className="truncate font-display text-[13.5px] font-semibold">{c.name}</div>
-                        <div className="mt-[5px] flex items-center gap-1.5 text-[11.5px] text-ink-faint">
-                          <Meta canvas={c} onClaim={reload} />
+                    <div key={c.id} className={cn(cardCls, 'group relative')}>
+                      <button
+                        className="block w-full border-0 bg-transparent text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+                        onClick={() => open(c.id, c.name)}
+                      >
+                        <div className="relative grid aspect-[16/10] place-items-center overflow-hidden border-b border-line-soft [background:radial-gradient(circle,var(--dot)_1px,transparent_1px)_0_0/18px_18px,var(--paper-deep)]">
+                          <Preview canvas={c} />
+                          <AgentStack canvas={c} />
                         </div>
-                      </div>
-                    </button>
+                        <div className="px-3 pb-3 pt-2.5">
+                          <div className="truncate font-display text-[13.5px] font-semibold">{c.name}</div>
+                          <div className="mt-[5px] flex items-center gap-1.5 text-[11.5px] text-ink-faint">
+                            <Meta canvas={c} onClaim={reload} />
+                          </div>
+                        </div>
+                      </button>
+                      <CanvasActions
+                        canvas={c}
+                        duplicating={duplicatingId === c.id}
+                        onShare={() => share(c)}
+                        onDuplicate={() => duplicate(c)}
+                        onDelete={c.ownerId && !c.shared ? () => setDeleteCanvas(c) : undefined}
+                      />
+                    </div>
                   ))}
                 </div>
               ) : (
                 <div className="mt-4 overflow-hidden rounded-[14px] border border-line bg-surface shadow-card">
                   {visible.map((c) => (
-                    <button
+                    <div
                       key={c.id}
-                      className="flex w-full items-center gap-2.5 border-0 border-b border-line-soft bg-transparent px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-paper md:gap-[13px] md:px-3.5 md:py-[9px]"
-                      onClick={() => open(c.id, c.name)}
+                      className="group flex w-full items-center border-b border-line-soft transition-colors last:border-b-0 hover:bg-paper"
                     >
-                      <span className="grid h-9 w-[58px] flex-none place-items-center overflow-hidden rounded-[7px] border border-line-soft bg-paper-deep">
-                        <Preview canvas={c} blankSize="text-[9px]" />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate font-display text-[13.5px] font-semibold">{c.name}</span>
-                      <span className="hidden w-[82px] flex-none text-xs text-ink-faint sm:block">
-                        {c.frameCount} frame{c.frameCount === 1 ? '' : 's'}
-                      </span>
-                      <span className="hidden w-[62px] flex-none gap-[3px] xs:flex">
-                        {(c.agents ?? []).slice(0, 3).map((a) => (
-                          <i key={a.name} style={{ color: colorFor(a.name) }}>
-                            <AgentIcon name={a.name} size={11} />
-                          </i>
-                        ))}
-                      </span>
-                      <span className="w-auto flex-none text-right text-xs text-ink-faint md:w-[66px]">
-                        {timeAgo(c.updatedAt)}
-                      </span>
-                    </button>
+                      <button
+                        className="flex min-w-0 flex-1 items-center gap-2.5 border-0 bg-transparent px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:gap-[13px] md:px-3.5 md:py-[9px]"
+                        onClick={() => open(c.id, c.name)}
+                      >
+                        <span className="grid h-9 w-[58px] flex-none place-items-center overflow-hidden rounded-[7px] border border-line-soft bg-paper-deep">
+                          <Preview canvas={c} blankSize="text-[9px]" />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate font-display text-[13.5px] font-semibold">
+                          {c.name}
+                        </span>
+                        <span className="hidden w-[82px] flex-none text-xs text-ink-faint sm:block">
+                          {c.frameCount} frame{c.frameCount === 1 ? '' : 's'}
+                        </span>
+                        <span className="hidden w-[62px] flex-none gap-[3px] xs:flex">
+                          {(c.agents ?? []).slice(0, 3).map((a) => (
+                            <i key={a.name} style={{ color: colorFor(a.name) }}>
+                              <AgentIcon name={a.name} size={11} />
+                            </i>
+                          ))}
+                        </span>
+                        <span className="w-auto flex-none text-right text-xs text-ink-faint md:w-[66px]">
+                          {timeAgo(c.updatedAt)}
+                        </span>
+                      </button>
+                      <div className="mr-3 flex-none md:mr-3.5">
+                        <CanvasActions
+                          canvas={c}
+                          compact
+                          duplicating={duplicatingId === c.id}
+                          onShare={() => share(c)}
+                          onDuplicate={() => duplicate(c)}
+                          onDelete={c.ownerId && !c.shared ? () => setDeleteCanvas(c) : undefined}
+                        />
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -400,6 +472,31 @@ export function Home() {
           )}
         </DashContent>
       </DashMain>
+      {shareCanvas && (
+        <ShareModal
+          key={shareCanvas.id}
+          canvas={shareCanvas}
+          onChange={(patch) => setShareCanvas((current) => (current ? { ...current, ...patch } : null))}
+          onClose={() => setShareCanvas(null)}
+          onCopied={() => {
+            setShareCanvas(null)
+            showToast('Canvas link copied')
+          }}
+        />
+      )}
+      <ConfirmDialog
+        open={!!deleteCanvas}
+        onOpenChange={(open) => !open && setDeleteCanvas(null)}
+        title={`Delete “${deleteCanvas?.name ?? 'canvas'}”?`}
+        description="This permanently deletes the canvas and everything in it. This can’t be undone."
+        confirmLabel="Delete canvas"
+        destructive
+        onConfirm={() => {
+          if (deleteCanvas) remove(deleteCanvas.id, reload)
+          setDeleteCanvas(null)
+        }}
+      />
+      {toast && <Toast>{toast}</Toast>}
     </DashLayout>
   )
 }
@@ -514,28 +611,53 @@ function NavItem({
   )
 }
 
-function DeleteButton({ onDelete }: { onDelete: () => void }) {
-  const [armed, setArmed] = useState(false)
-  useEffect(() => {
-    if (!armed) return
-    const t = window.setTimeout(() => setArmed(false), 2600)
-    return () => window.clearTimeout(t)
-  }, [armed])
+function CanvasActions({
+  canvas,
+  compact = false,
+  duplicating,
+  onShare,
+  onDuplicate,
+  onDelete,
+}: {
+  canvas: CanvasMeta
+  compact?: boolean
+  duplicating: boolean
+  onShare: () => void
+  onDuplicate: () => void
+  onDelete?: () => void
+}) {
   return (
-    <span
-      role="button"
-      className={cn(
-        'absolute right-2 top-2 grid h-10 min-w-10 cursor-pointer place-items-center rounded-full bg-ink/75 px-[7px] text-xs font-bold text-white opacity-100 transition-[opacity,background] md:h-6 md:min-w-6 md:opacity-0 md:group-hover:opacity-100',
-        armed ? 'bg-brand text-[11px] opacity-100' : 'hover:bg-ink',
-      )}
-      title={armed ? 'Click again to permanently delete this canvas' : 'Delete canvas'}
-      onClick={(e) => {
-        e.stopPropagation()
-        if (armed) onDelete()
-        else setArmed(true)
-      }}
-    >
-      {armed ? 'Delete?' : '✕'}
-    </span>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Actions for ${canvas.name}`}
+          className={cn(
+            'grid cursor-pointer place-items-center rounded-full transition-[opacity,background,color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
+            compact
+              ? 'size-8 flex-none text-ink-faint hover:bg-paper-deep hover:text-ink'
+              : 'absolute right-2 top-2 size-10 bg-ink/75 text-white opacity-100 hover:bg-ink md:size-7 md:opacity-0 md:group-hover:opacity-100 md:data-[state=open]:opacity-100',
+          )}
+        >
+          <MoreHorizontalIcon className="size-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-[190px]">
+        <DropdownMenuItem onSelect={onShare}>
+          <ShareIcon className="size-4" /> Share
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={duplicating} onSelect={onDuplicate}>
+          <CopyIcon className="size-4" /> {duplicating ? 'Duplicating…' : 'Duplicate'}
+        </DropdownMenuItem>
+        {onDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem tone="danger" onSelect={onDelete}>
+              <TrashIcon className="size-4" /> Delete
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -4,17 +4,17 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 
-/* Doop's modal: a hard-shadowed card on a dimmed canvas. Built on Radix so it
-   brings a focus trap, Escape and scroll-locking with it — the hand-rolled
-   backdrop divs it replaces had none of that. Call sites mount it
-   conditionally, so `open` defaults to true and `onClose` is the only
-   dismissal wiring they need. */
+/* Doop's modal: a hairline card lifted on the soft pop shadow, over a dimmed
+   canvas. Built on Radix so it brings a focus trap, Escape and scroll-locking
+   with it — the hand-rolled backdrop divs it replaces had none of that. Call
+   sites mount it conditionally, so `open` defaults to true and `onClose` is
+   the only dismissal wiring they need. */
 const modalVariants = cva(
   [
     'fixed left-1/2 top-1/2 z-[60] w-full -translate-x-1/2 -translate-y-1/2 overflow-y-auto',
-    'rounded-[14px] border border-ink bg-surface p-5 text-ink shadow-[4px_4px_0_rgba(18,18,23,0.9)]',
+    'rounded-[14px] border border-line bg-surface p-5 text-ink shadow-pop',
     'animate-[modal-in_0.2s_cubic-bezier(0.2,0.9,0.3,1.2)] outline-none',
-    'max-h-[calc(100dvh-24px)] sm:max-h-[calc(100vh-96px)] sm:rounded-[16px] sm:p-7 sm:shadow-[8px_8px_0_rgba(18,18,23,0.9)]',
+    'max-h-[calc(100dvh-24px)] sm:max-h-[calc(100vh-96px)] sm:rounded-[16px] sm:p-7',
   ],
   {
     variants: {

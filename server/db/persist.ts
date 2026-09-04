@@ -16,6 +16,8 @@ import type {
   GuidelineDoc,
   MemoryProposal,
   MemoryReference,
+  RepoCardKind,
+  RepoCardPayload,
   TaskFeedback,
 } from '../../shared/types.ts'
 
@@ -46,6 +48,76 @@ export function saveCanvas(c: Canvas) {
         set: { name: c.name, ownerId: c.ownerId ?? null, linkAccess: c.linkAccess ?? null, updatedAt: c.updatedAt },
       }),
   )
+}
+
+/** Persist a newly duplicated canvas as one unit. Unlike ordinary live edits,
+ * duplication must not report success until every copied row is durable. */
+export async function saveCanvasCopy(c: Canvas): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.insert(t.canvases).values({
+      id: c.id,
+      name: c.name,
+      ownerId: c.ownerId ?? null,
+      linkAccess: c.linkAccess ?? null,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    })
+
+    if (c.frames.length) {
+      await tx.insert(t.frames).values(
+        c.frames.map((frame) => ({
+          id: frame.id,
+          canvasId: frame.canvasId,
+          name: frame.name,
+          x: frame.x,
+          y: frame.y,
+          width: frame.width,
+          height: frame.height,
+          html: frame.html,
+          createdAt: frame.createdAt,
+          updatedAt: frame.updatedAt,
+          updatedBy: frame.updatedBy,
+          demo: frame.demo ?? null,
+        })),
+      )
+    }
+
+    if (c.guidelines?.length) {
+      await tx.insert(t.guidelines).values(
+        c.guidelines.map((doc) => ({
+          canvasId: c.id,
+          name: doc.name,
+          markdown: doc.markdown,
+          title: doc.title ?? null,
+          updatedAt: doc.updatedAt,
+          updatedBy: doc.updatedBy,
+          x: doc.x ?? null,
+          y: doc.y ?? null,
+        })),
+      )
+    }
+
+    if (c.references?.length) {
+      await tx.insert(t.memoryReferences).values(
+        c.references.map((ref) => ({
+          id: ref.id,
+          canvasId: c.id,
+          frameId: ref.frameId,
+          title: ref.title,
+          html: ref.html,
+          width: ref.width,
+          height: ref.height,
+          pinnedBy: ref.pinnedBy,
+          pinnedAt: ref.pinnedAt,
+        })),
+      )
+    }
+
+    const refs = c.frames.flatMap((frame) =>
+      [...extractAssetIds(frame.html)].map((assetId) => ({ assetId, frameId: frame.id })),
+    )
+    if (refs.length) await tx.insert(t.assetRefs).values(refs)
+  })
 }
 
 export function saveMember(canvasId: string, userId: string, addedBy: string, addedAt: number) {
@@ -288,6 +360,17 @@ export function deleteFrame(frameId: string) {
   swallow(db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId)))
 }
 
+/** A structured card's kind + payload, or nothing when the row is a prompt
+ *  card or its payload no longer parses (the card then reads as a plain one). */
+function repoCardFields(kind: string | null, payload: string | null): Pick<AgentTask, 'kind' | 'payload'> {
+  if (!kind || !payload) return {}
+  try {
+    return { kind: kind as RepoCardKind, payload: JSON.parse(payload) as RepoCardPayload }
+  } catch {
+    return {}
+  }
+}
+
 export function saveTask(canvasId: string, task: AgentTask) {
   const row = {
     id: task.id,
@@ -308,6 +391,8 @@ export function saveTask(canvasId: string, task: AgentTask) {
     pipeline: task.pipeline?.join(',') ?? null,
     stage: task.stage ?? null,
     attachments: task.attachments?.join(',') ?? null,
+    kind: task.kind ?? null,
+    payload: task.payload ? JSON.stringify(task.payload) : null,
   }
   swallow(
     db
@@ -384,6 +469,7 @@ export function saveComment(c: ElementComment) {
     failureReason: c.failureReason ?? null,
     resolvedBy: c.resolvedBy ?? null,
     resolvedAt: c.resolvedAt ?? null,
+    parentId: c.parentId ?? null,
   }
   swallow(
     db
@@ -523,11 +609,14 @@ export async function hydrate(): Promise<Hydrated> {
   const tasks = new Map<string, AgentTask[]>()
   for (const row of taskRows) {
     const list = tasks.get(row.canvasId) ?? []
-    if (list.length >= LOG_CAP) continue
     /* A task still open across a restart belongs to an agent that's gone.
        Ordinary status tasks close; claimed board cards pause in a visible
        failed state and require a human retry. */
     const isOpenCard = row.queuedBy != null && row.endedAt == null
+    /* the cap bounds history, never open work: an unfinished card older than
+       the newest hundred rows still belongs on the board (same rule as
+       actions.trimTaskLog keeps in memory) */
+    if (list.length >= LOG_CAP && !isOpenCard) continue
     const endedAt = isOpenCard ? undefined : (row.endedAt ?? now)
     const interruptedCard = isOpenCard && !!row.agentName
     const failedAt = row.failedAt ?? (interruptedCard ? now : undefined)
@@ -554,6 +643,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.pipeline ? { pipeline: row.pipeline.split(',').filter(Boolean) } : {}),
       ...(row.stage != null ? { stage: row.stage } : {}),
       ...(row.attachments ? { attachments: row.attachments.split(',').filter(Boolean) } : {}),
+      ...repoCardFields(row.kind, row.payload),
     })
     tasks.set(row.canvasId, list)
   }
@@ -617,6 +707,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(failureReason !== undefined ? { failureReason } : {}),
       ...(row.resolvedBy != null ? { resolvedBy: row.resolvedBy } : {}),
       ...(row.resolvedAt != null ? { resolvedAt: row.resolvedAt } : {}),
+      ...(row.parentId != null ? { parentId: row.parentId } : {}),
     })
     comments.set(row.canvasId, list)
   }

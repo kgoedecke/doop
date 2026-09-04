@@ -15,6 +15,9 @@ import type {
   GuidelineDoc,
   MemoryProposal,
   MemoryReference,
+  RepoCardKind,
+  RepoCardPayload,
+  RepoScreenRef,
   ServerMessage,
   TaskFeedback,
 } from '../shared/types.ts'
@@ -444,35 +447,91 @@ export function addElementComment(
   from: string,
   fromUserId?: string,
 ): ElementComment | undefined {
-  const clean = input.text.trim()
-  if (!clean) return undefined
   const frame = store.getFrame(frameId)
   if (!frame) return undefined
+  return postComment(
+    frame,
+    { selector: String(input.selector ?? '').slice(0, 300), snippet: String(input.snippet ?? '').slice(0, 400) },
+    input.text,
+    from,
+    fromUserId,
+  )
+}
+
+/** Reply inside a thread: the reply inherits the root comment's element so an
+ *  @mention in it gives the agent the same anchor the conversation is about. */
+export function replyToComment(
+  commentId: string,
+  text: string,
+  from: string,
+  fromUserId?: string,
+): ElementComment | undefined {
+  const open = openThread(commentId)
+  if (!open) return undefined
+  const { root, frame } = open
+  return postComment(
+    frame,
+    { selector: root.selector, snippet: root.snippet, parentId: root.id },
+    text,
+    from,
+    fromUserId,
+  )
+}
+
+/** The root and frame a reply to this comment would land on, or undefined
+ *  when the thread is resolved or its frame is gone — checked before any
+ *  metering so a rejected reply never costs a resident task. */
+export function openThread(commentId: string): { root: ElementComment; frame: Frame } | undefined {
+  const parent = findComment(commentId)
+  if (!parent) return undefined
+  const root = parent.parentId ? findComment(parent.parentId) : parent
+  if (!root || root.resolvedAt) return undefined
+  const frame = store.getFrame(root.frameId)
+  if (!frame) return undefined
+  return { root, frame }
+}
+
+function postComment(
+  frame: Frame,
+  anchor: { selector: string; snippet: string; parentId?: string },
+  text: string,
+  from: string,
+  fromUserId?: string,
+): ElementComment | undefined {
+  const clean = text.trim()
+  if (!clean) return undefined
   /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it up */
   const mentioned = mentionedRole(clean)
+  const list = commentLog.get(frame.canvasId) ?? []
+  /* strictly increasing per canvas: thread order is reconstructed from `at`
+     after a restart, so two messages must never share a timestamp */
+  const at = Math.max(Date.now(), (list[0]?.at ?? 0) + 1)
   const comment: ElementComment = {
     id: nanoid(8),
     canvasId: frame.canvasId,
-    frameId,
-    selector: String(input.selector ?? '').slice(0, 300),
-    snippet: String(input.snippet ?? '').slice(0, 400),
+    frameId: frame.id,
+    selector: anchor.selector,
+    snippet: anchor.snippet,
     from,
     ...(fromUserId ? { fromUserId } : {}),
     text: clean,
-    at: Date.now(),
+    at,
     ...(mentioned ? { forAgent: true, targetAgent: mentioned.name } : {}),
+    ...(anchor.parentId ? { parentId: anchor.parentId } : {}),
   }
-  const list = commentLog.get(frame.canvasId) ?? []
   list.unshift(comment)
   if (list.length > 100) list.length = 100
   commentLog.set(frame.canvasId, list)
   persist.saveComment(comment)
   broadcast(frame.canvasId, { type: 'comment', comment })
+  const excerpt = clean.length > 80 ? clean.slice(0, 77) + '…' : clean
   logActivity(
     frame.canvasId,
     resolveActor({ name: from, kind: 'user' }),
-    `commented on an element in “${frame.name}”: “${clean.length > 80 ? clean.slice(0, 77) + '…' : clean}”`,
-    frameId,
+    anchor.parentId
+      ? `replied to a comment in “${frame.name}”: “${excerpt}”`
+      : `commented on an element in “${frame.name}”: “${excerpt}”`,
+    frame.id,
   )
   if (comment.forAgent) {
     /* @Doop mention: the resident agent picks it up instantly (no-op without
@@ -480,6 +539,17 @@ export function addElementComment(
     import('./resident.ts').then((r) => r.onFeedback(frame.canvasId)).catch(() => {})
   }
   return comment
+}
+
+/** The whole conversation a comment belongs to, oldest first. */
+export function commentThread(comment: ElementComment): ElementComment[] {
+  const rootId = comment.parentId ?? comment.id
+  /* the log is newest-first; reverse before the (stable) sort so replies
+     posted within the same millisecond keep their arrival order */
+  return [...(commentLog.get(comment.canvasId) ?? [])]
+    .reverse()
+    .filter((c) => c.id === rootId || c.parentId === rootId)
+    .sort((a, b) => a.at - b.at)
 }
 
 /** Open comments @mentioning this agent, claimed by it. */
@@ -538,20 +608,25 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
     const c = list.find((x) => x.id === commentId)
     if (!c) continue
     if (c.resolvedAt) return c
-    c.resolvedBy = by
-    c.resolvedAt = Date.now()
-    persist.saveComment(c)
-    broadcast(canvasId, { type: 'comment', comment: c })
-    /* a resolved @agent comment was an instruction that got carried out —
-       capture it as a decision (plain human-to-human notes are not) */
-    if (c.forAgent) {
-      captureDecision(canvasId, {
-        text: c.text,
-        source: 'comment',
-        frameId: c.frameId,
-        from: c.from,
-        agentName: c.claimedBy ?? (by !== c.from ? by : undefined),
-      })
+    /* resolving the root closes its whole thread: an open reply under a
+       resolved pin would be invisible yet still queued for an agent */
+    const closing = c.parentId ? [c] : list.filter((x) => x.id === c.id || (x.parentId === c.id && !x.resolvedAt))
+    for (const item of closing) {
+      item.resolvedBy = by
+      item.resolvedAt = Date.now()
+      persist.saveComment(item)
+      broadcast(canvasId, { type: 'comment', comment: item })
+      /* a resolved @agent comment was an instruction that got carried out —
+         capture it as a decision (plain human-to-human notes are not) */
+      if (item.forAgent) {
+        captureDecision(canvasId, {
+          text: item.text,
+          source: 'comment',
+          frameId: item.frameId,
+          from: item.from,
+          agentName: item.claimedBy ?? (by !== item.from ? by : undefined),
+        })
+      }
     }
     return c
   }
@@ -667,8 +742,7 @@ export function addQueuedCard(
     ...(refs.length > 0 ? { attachments: refs } : {}),
   }
   list.unshift(card)
-  if (list.length > 100) list.length = 100
-  taskLog.set(canvasId, list)
+  taskLog.set(canvasId, trimTaskLog(list))
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
   logActivity(
@@ -679,6 +753,111 @@ export function addQueuedCard(
   /* the resident agents pick queued cards up instantly (no-op without a key) */
   import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
   return card
+}
+
+const TASK_LOG_CAP = 100
+
+/** Keep the task log at its cap without losing open work: the oldest FINISHED
+ *  tasks go first, so a bulk import can never push a queued, claimed or
+ *  failed card off the board. Open cards past the cap are kept as well. */
+export function trimTaskLog(list: AgentTask[]): AgentTask[] {
+  if (list.length <= TASK_LOG_CAP) return list
+  const isOpen = (t: AgentTask) => !!t.queuedBy && !t.endedAt
+  let room = TASK_LOG_CAP - list.filter(isOpen).length
+  const kept: AgentTask[] = []
+  for (const t of list) {
+    if (isOpen(t)) kept.push(t)
+    else if (room > 0) {
+      kept.push(t)
+      room--
+    }
+  }
+  list.length = 0
+  list.push(...kept)
+  return list
+}
+
+/** One repo import as board cards: the design-system extraction first (it
+ *  becomes the guide the sketches follow), then one sketch card per selected
+ *  screen. Structured cards — the resident runner dispatches them straight to
+ *  the GitHub sketch runner (server/githubRecon.ts) instead of the chat agent.
+ *  A screen already queued or in flight from the same connection is not
+ *  queued twice. Returns the cards, oldest first. */
+export interface RepoImportInput {
+  connectionId: string
+  repo: string
+  screens: RepoScreenRef[]
+  designSystem: boolean
+}
+
+/** What an import would queue, after removing screens already waiting or in
+ *  flight from the same connection. Pure — the route checks this BEFORE
+ *  spending the requester's allowance, so a no-op re-import costs nothing. */
+export function planRepoCards(
+  canvasId: string,
+  input: RepoImportInput,
+): { kind: RepoCardKind; title: string; payload: RepoCardPayload }[] {
+  if (!store.getCanvas(canvasId)) return []
+  const list = taskLog.get(canvasId) ?? []
+  const open = list.filter((t) => t.queuedBy && !t.endedAt && t.payload?.connectionId === input.connectionId)
+  const importId = nanoid(8)
+  const base = { connectionId: input.connectionId, repo: input.repo, importId }
+  const wanted: { kind: RepoCardKind; title: string; payload: RepoCardPayload }[] = []
+  if (input.designSystem && !open.some((t) => t.kind === 'design-system'))
+    wanted.push({ kind: 'design-system', title: `Design system of ${input.repo}`, payload: base })
+  for (const screen of input.screens) {
+    const queued = open.some(
+      (t) =>
+        t.kind === 'sketch' &&
+        t.payload?.screen?.sourcePath === screen.sourcePath &&
+        t.payload.screen.kind === screen.kind,
+    )
+    if (!queued) wanted.push({ kind: 'sketch', title: screen.title, payload: { ...base, screen } })
+  }
+  return wanted
+}
+
+export function addRepoCards(canvasId: string, input: RepoImportInput, from: string, fromUserId: string): AgentTask[] {
+  const wanted = planRepoCards(canvasId, input)
+  if (!wanted.length) return []
+  const list = taskLog.get(canvasId) ?? []
+  const actor = resolveActor({ name: from, kind: 'user' })
+  const cards: AgentTask[] = []
+  /* startedAt orders the queue (oldest first); a shared timestamp would leave
+     the order to Map iteration, so each card sits one tick after the last */
+  const at = Date.now()
+  wanted.forEach((w, i) => {
+    const card: AgentTask = {
+      id: nanoid(8),
+      agentName: '',
+      color: colorFor(from),
+      status: w.title.slice(0, 200),
+      startedAt: at + i,
+      queuedBy: from,
+      queuedByUserId: fromUserId,
+      pipeline: [DEFAULT_ROLE_ID],
+      stage: 0,
+      kind: w.kind,
+      payload: w.payload,
+    }
+    list.unshift(card)
+    persist.saveTask(canvasId, card)
+    broadcast(canvasId, { type: 'task', task: card })
+    cards.push(card)
+  })
+  taskLog.set(canvasId, trimTaskLog(list))
+  if (cards.length) {
+    const sketches = cards.filter((c) => c.kind === 'sketch').length
+    const what = [
+      cards.some((c) => c.kind === 'design-system') ? 'the design system' : '',
+      sketches ? `${sketches} ${sketches === 1 ? 'screen' : 'screens'}` : '',
+    ]
+      .filter(Boolean)
+      .join(' and ')
+    logActivity(canvasId, actor, `queued ${what} from ${input.repo} for ${roleName(DEFAULT_ROLE_ID)}`)
+    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+  }
+  return cards
 }
 
 /** Cards waiting on THIS agent's stage, claimed by it. A card at another

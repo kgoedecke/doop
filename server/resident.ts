@@ -16,6 +16,7 @@ import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from '
 import type { Frame } from '../shared/types.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
+import { runRepoCards } from './githubRecon.ts'
 
 /**
  * The resident design team: a server-side Claude tool loop, run once per
@@ -227,16 +228,37 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      shows up in presence. */
   const claimed = actions.takeFeedbackFor(canvasId, role.name, payer)
   const comments = actions.takeAgentCommentsFor(canvasId, role.name, payer)
-  const cards = actions.takeQueuedCardsFor(canvasId, role.name, payer)
-  if (claimed.length === 0 && comments.length === 0 && cards.length === 0) {
+  const allCards = actions.takeQueuedCardsFor(canvasId, role.name, payer)
+  if (claimed.length === 0 && comments.length === 0 && allCards.length === 0) {
     /* nothing actually claimable for this payer — do not re-pick them */
     stalled.add(payer)
     return 'no-model'
   }
+  /* structured repo cards (the GitHub import) have their own runner with
+     repo-reading tools; only prompt cards go through the chat loop below */
+  const repoCards = allCards.filter((c) => c.kind)
+  const cards = allCards.filter((c) => !c.kind)
 
   /* presence otherwise only refreshes on tool activity, and the sweep's TTL
      is shorter than a big generation turn */
   const heartbeat = setInterval(() => actions.heartbeatAgent(canvasId, actor), 15_000)
+
+  if (repoCards.length > 0) {
+    try {
+      await runRepoCards(canvasId, repoCards, model, actor)
+    } catch (err) {
+      /* the runner fails cards one by one; this is the backstop for a
+         failure outside any card, so none stays claimed forever */
+      console.error('[resident] repo cards errored', err)
+      for (const c of repoCards)
+        actions.failCard(canvasId, c.id, 'Doop hit a snag before finishing. Retry when you are ready.')
+    }
+    if (claimed.length === 0 && comments.length === 0 && cards.length === 0) {
+      clearInterval(heartbeat)
+      actions.setAgentStatus(canvasId, actor, '')
+      return 'ran'
+    }
+  }
 
   try {
     const tasks = actions.getTasks(canvasId)
@@ -316,7 +338,18 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           comments
             .map((c) => {
               const fname = store.getFrame(c.frameId)?.name ?? 'unknown frame'
-              return `- ${c.from} on frame ${c.frameId} "${fname}", element ${c.selector}\n  element HTML at comment time: ${c.snippet}\n  comment: "${c.text}"`
+              /* a reply carries the conversation it answers, so "make it
+                 bigger" reads against what was said before */
+              const history = actions.commentThread(c)
+              const earlier = history
+                .slice(
+                  0,
+                  history.findIndex((x) => x.id === c.id),
+                )
+                .map((x) => `    ${x.from}: "${x.text}"`)
+                .join('\n')
+              const thread = earlier ? `\n  earlier in this thread:\n${earlier}` : ''
+              return `- ${c.from} on frame ${c.frameId} "${fname}", element ${c.selector}\n  element HTML at comment time: ${c.snippet}${thread}\n  comment: "${c.text}"`
             })
             .join('\n'),
       )

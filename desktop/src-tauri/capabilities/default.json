@@ -1,13 +1,14 @@
 {
   "$schema": "gen/schemas/desktop-schema.json",
   "identifier": "shell",
-  "description": "Lets the hosted app use the shell's IPC: window dragging for the custom tab strip (core:default) and opening external links in the system browser (opener). Remote IPC is scoped to the production origin; self-hosters overriding DOOP_APP_URL must add their origin here. In dev the devUrl origin counts as local, so no entry is needed for it.",
+  "description": "Lets the hosted app use the shell's IPC: window dragging for the custom tab strip (core:default covers the double-click zoom but not start_dragging, which data-tauri-drag-region invokes on mousedown, so that one is granted explicitly) and opening external links in the system browser (opener). Remote IPC is scoped to the production origin; self-hosters overriding DOOP_APP_URL must add their origin here. In dev the devUrl origin counts as local, so no entry is needed for it.",
   "windows": ["main"],
   "remote": {
     "urls": ["https://doop.design", "https://www.doop.design"]
   },
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://**" }, { "url": "http://**" }]

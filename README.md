@@ -4,13 +4,13 @@
 
 <p align="center">
   <a href="https://github.com/kgoedecke/doop/actions/workflows/ci.yml"><img src="https://github.com/kgoedecke/doop/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-2D5FE0" alt="License: AGPL-3.0"></a>
-  <a href="https://doop.design"><img src="https://img.shields.io/badge/cloud-doop.design-E5533C" alt="Doop Cloud"></a>
-  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-1C1A15" alt="PRs welcome"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-111110" alt="License: AGPL-3.0"></a>
+  <a href="https://doop.design"><img src="https://img.shields.io/badge/cloud-doop.design-2743EE" alt="Doop Cloud"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-111110" alt="PRs welcome"></a>
   <a href="https://discord.com/invite/3AUfXjgVe"><img src="https://img.shields.io/badge/chat-Discord-5865F2" alt="Discord"></a>
 </p>
 
-**Doop is the open-source alternative to [Paper.design](https://paper.design) — a multiplayer
+**[Doop](https://doop.design/?utm_source=github) is the open-source alternative to [Paper.design](https://paper.design) — a multiplayer
 design canvas for humans _and_ AI agents.** Every design lives on a shareable **Canvas**
 (`/c/<id>`) holding **Frames** — artboards that render real HTML in sandboxed iframes. People edit
 in the browser; AI agents edit through the built-in **MCP server**, streaming their designs in
@@ -231,6 +231,10 @@ With SMTP configured (`SMTP_HOST` etc. — see [.env.example](.env.example)), si
 verification and "forgot password" sends real reset links. Without it, signup stays open and every
 email is printed to the server log, links included — the flows still work in development.
 
+Set `SIGNUP_EMAIL_DOMAINS=jointhetroops.com` to restrict new accounts to one email domain, or use a
+comma-separated list for several domains. Matching is case-insensitive and exact; existing accounts
+are unaffected. Leave it unset to keep public signup open.
+
 Set `REQUIRE_EMAIL_VERIFICATION=false` to let people in before they verify — the link is still
 emailed, it just stops gating sign-in. Admin promotion is deliberately not part of that trade:
 `ADMIN_EMAILS` only ever promotes a verified address (see below).
@@ -256,6 +260,24 @@ canvas access itself: the gate in [`server/access.ts`](server/access.ts) is shar
 so a privileged read there would give every agent holding an admin's token the run of the
 instance. View-as sessions cannot write, cannot connect agents, and record who is behind
 them in `session.impersonated_by`.
+
+### SSO (OIDC)
+
+Optional login against an external OIDC provider (Zitadel, Okta, Authentik, Keycloak,
+etc.), alongside email/password — not a replacement for it. Set `OIDC_ISSUER`,
+`OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` together to enable it; a partial set refuses
+to boot rather than run with SSO half-configured. `OIDC_SCOPES` (default
+`openid email profile`) and `OIDC_PROVIDER_NAME` (default `SSO`, shown on the login
+button — e.g. `Zitadel`) are optional. Signing in via SSO links to an existing
+email/password account when the emails match and the provider marks the email
+verified, and this works even on an instance with no SMTP configured, where a
+local account could otherwise never verify on its own. SSO alone never grants
+the admin role, even for an address listed in `ADMIN_EMAILS` — an IdP is not
+trusted as an admin-promotion source, only as an email-ownership check;
+promotion still requires the normal `ADMIN_EMAILS` path (verified signup, or
+`syncAdmins` at boot for an account SSO has since verified).
+
+Env: see the OIDC block in [.env.example](.env.example).
 
 ## Agent auth (MCP OAuth)
 

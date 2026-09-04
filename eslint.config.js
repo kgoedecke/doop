@@ -30,6 +30,16 @@ export default tseslint.config(
     },
   },
   {
+    /* repo maintenance scripts: plain ESM run directly by node, so they get
+       node globals rather than the browser set */
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      globals: Object.fromEntries(
+        'process console Buffer URL setTimeout clearTimeout'.split(' ').map((g) => [g, 'readonly']),
+      ),
+    },
+  },
+  {
     /* the embeddable snippet: plain browser JS shipped as-is, no bundling —
        ES5-flavoured on purpose so it runs wherever the host app does */
     files: ['public/**/*.js'],
