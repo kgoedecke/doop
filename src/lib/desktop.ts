@@ -12,6 +12,7 @@ export type CanvasTab = { id: string; name: string }
 
 type ShellWindow = Window & {
   __DOOP_DESKTOP__?: unknown
+  __DOOP_DESKTOP_PLATFORM__?: unknown
   __TAURI__?: { opener?: { openUrl?: (url: string) => Promise<void> } }
 }
 
@@ -21,9 +22,28 @@ export function isDesktopShell(): boolean {
   return typeof shellWindow.__DOOP_DESKTOP__ === 'string'
 }
 
+export function getDesktopPlatform(): 'macos' | 'windows' | 'linux' | 'other' {
+  const p = shellWindow.__DOOP_DESKTOP_PLATFORM__
+  if (typeof p === 'string') {
+    if (p === 'macos' || p === 'darwin') return 'macos'
+    if (p === 'windows') return 'windows'
+    if (p === 'linux') return 'linux'
+  }
+  if (typeof navigator !== 'undefined') {
+    const nav = navigator as { userAgentData?: { platform?: string } }
+    const platform = nav.userAgentData?.platform || navigator.platform || navigator.userAgent || ''
+    if (/mac/i.test(platform)) return 'macos'
+    if (/win/i.test(platform)) return 'windows'
+    if (/linux/i.test(platform)) return 'linux'
+  }
+  return 'other'
+}
+
 /** The overlay title bar (traffic lights floating over the page) arrived
- *  with shell 0.1.2; older shells keep a native title bar and need no inset. */
+ *  with shell 0.1.2; older shells keep a native title bar and need no inset.
+ *  Traffic lights are macOS-only — Windows shells use standard window framing. */
 export function hasInsetTrafficLights(): boolean {
+  if (getDesktopPlatform() !== 'macos') return false
   const v = shellWindow.__DOOP_DESKTOP__
   if (typeof v !== 'string') return false
   const [maj = 0, min = 0, pat = 0] = v.split('.').map((n) => parseInt(n, 10) || 0)

@@ -70,8 +70,13 @@ if (!key) {
      segmentable in PostHog. The webview's storage is isolated from the
      user's browsers, so the flag can never leak onto ordinary web sessions. */
   const desktopVersion = (window as { __DOOP_DESKTOP__?: unknown }).__DOOP_DESKTOP__
+  const desktopPlatform = (window as { __DOOP_DESKTOP_PLATFORM__?: unknown }).__DOOP_DESKTOP_PLATFORM__
   if (typeof desktopVersion === 'string') {
-    posthog.register({ desktop_app: true, desktop_app_version: desktopVersion })
+    posthog.register({
+      desktop_app: true,
+      desktop_app_version: desktopVersion,
+      ...(typeof desktopPlatform === 'string' ? { desktop_app_platform: desktopPlatform } : {}),
+    })
   }
 }
 

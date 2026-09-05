@@ -124,8 +124,9 @@ fn main() {
             // tab strip; the version lets the app adapt to shell capabilities
             // (traffic-light inset arrived with the overlay title bar, 0.1.2).
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}';",
-                app.package_info().version
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}';",
+                app.package_info().version,
+                std::env::consts::OS
             );
             let builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::External(entry.parse()?))
