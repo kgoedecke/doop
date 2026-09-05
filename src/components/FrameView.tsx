@@ -23,6 +23,7 @@ import { Tooltip } from './ui/tooltip'
 import { GithubIcon, SyncIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
+import { formatHtml } from '../lib/formatHtml'
 
 /* Counter-scale contract: chrome that keeps constant on-screen size divides
    by the `--zoom` variable the Stage publishes (capped at 2.4× when zoomed
@@ -390,7 +391,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         setActiveHit(hit)
       }
       if (ev.data?.type === 'doop:code-result' && ev.data.reqId === codeReq.current) {
-        setCodeView(typeof ev.data.html === 'string' ? ev.data.html : null)
+        setCodeView(typeof ev.data.html === 'string' ? formatHtml(ev.data.html) : null)
       }
       if (ev.data?.type === 'doop:located' && typeof ev.data.reqId === 'string') {
         if (ev.data.reqId === '__probe__') {

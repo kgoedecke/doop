@@ -22,7 +22,10 @@ export function CodePanel({ code }: { code: string }) {
       >
         {copied ? 'Copied!' : 'Copy'}
       </Button>
-      <pre className="max-h-[260px] overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-[#d9e2ec] [font-family:ui-monospace,monospace] [word-break:break-word]">
+      <pre
+        data-stage-scroll
+        className="max-h-[260px] overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-[#d9e2ec] [font-family:ui-monospace,monospace] [word-break:break-word]"
+      >
         {code}
       </pre>
     </div>
