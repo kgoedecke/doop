@@ -74,9 +74,12 @@ export interface RepoManifest {
   truncated: boolean
 }
 
+/** An import queues board cards — nothing lands on the canvas until the
+ *  Doop Agent finishes each one. `rejected` lists selections the server no
+ *  longer finds in the repo manifest. */
 export interface GithubImportResult {
-  frames: Frame[]
-  failures: { route: string; error: string }[]
+  cards: string[]
+  rejected: string[]
 }
 
 export interface DiscoveredPage {
@@ -171,9 +174,11 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listCanvases: () => req<CanvasMeta[]>('/api/canvases'),
+  getCanvas: (id: string) => req<Canvas>(`/api/canvases/${id}`),
   deleteCanvas: (id: string) => req(`/api/canvases/${id}`, { method: 'DELETE' }),
   homeActivity: () => req<HomeActivity[]>('/api/home/activity'),
   createCanvas: (name: string) => req<Canvas>('/api/canvases', { method: 'POST', body: JSON.stringify({ name }) }),
+  duplicateCanvas: (id: string) => req<Canvas>(`/api/canvases/${id}/duplicate`, { method: 'POST' }),
   claimCanvas: (id: string) => req(`/api/canvases/${id}/claim`, { method: 'POST' }),
   renameCanvas: (id: string, name: string) =>
     req('/api/canvases/' + id, { method: 'PATCH', body: JSON.stringify({ name, actor: actor() }) }),
@@ -293,6 +298,8 @@ export const api = {
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
   addComment: (frameId: string, input: { selector: string; snippet: string; text: string }) =>
     req(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
+  replyComment: (commentId: string, text: string) =>
+    req(`/api/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ text }) }),
   resolveComment: (commentId: string) => req(`/api/comments/${commentId}/resolve`, { method: 'POST' }),
   retryComment: (commentId: string) => req(`/api/comments/${commentId}/retry`, { method: 'POST' }),
   retryTaskFeedback: (feedbackId: string) => req(`/api/feedback/${feedbackId}/retry`, { method: 'POST' }),

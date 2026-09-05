@@ -4,7 +4,6 @@ import { connect, disconnect, sendWs } from '../lib/ws'
 import {
   api,
   ApiError,
-  type CanvasMember,
   type DiscoveredSite,
   type GithubConnectionInfo,
   type InstallationRepo,
@@ -20,21 +19,22 @@ import { Board } from '../components/Board'
 import { Inspector } from '../components/Inspector'
 import { ActivityPanel } from '../components/ActivityPanel'
 import { ConnectModal } from '../components/ConnectModal'
-import { LimitWall } from '../components/TeamAllowance'
+import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
 import { PromptBar } from '../components/PromptBar'
 import { WorkingNow } from '../components/WorkingNow'
 import { Onboarding } from '../components/Onboarding'
+import { ShareModal } from '../components/ShareModal'
 import { BrainIcon } from '../components/BrainIcon'
 import { getIdentity, setName } from '../lib/identity'
 import { copyFrame, duplicateFrame, hasFrameClip, pasteFrameCentered, pasteImagesCentered } from '../lib/frameClipboard'
-import { clearHistory, deleteFrameTracked, recordCreate, redo, undo } from '../lib/history'
+import { clearHistory, deleteFramesTracked, recordCreate, redo, undo } from '../lib/history'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet'
-import { GithubIcon, XIcon } from '../components/ui/icons'
+import { GithubIcon } from '../components/ui/icons'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
@@ -132,10 +132,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const sel = useStore.getState().selectedId
-      if ((e.key === 'Delete' || e.key === 'Backspace') && sel) {
+      const selectedIds = useStore.getState().selectedIds
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length) {
         e.preventDefault()
-        const frame = useStore.getState().canvas?.frames.find((f) => f.id === sel)
-        if (frame) deleteFrameTracked(frame)
+        const frames = useStore.getState().canvas?.frames.filter((f) => selectedIds.includes(f.id)) ?? []
+        deleteFramesTracked(frames)
       }
       if (e.key === 'Escape') select(null)
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
@@ -479,9 +480,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
 
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
-      {showShare && (
+      {showShare && canvas && (
         <ShareModal
-          canvasId={canvasId}
+          key={canvas.id}
+          canvas={canvas}
+          onChange={(patch) => {
+            const current = useStore.getState().canvas
+            if (current?.id === canvasId) useStore.getState().setCanvas({ ...current, ...patch })
+          }}
           onClose={() => setShowShare(false)}
           onCopied={() => {
             setShowShare(false)
@@ -513,13 +519,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             setShowImport(false)
             setView('canvas')
             select(frameIds[0] ?? null)
-            const imported =
-              frameIds.length === 0
-                ? 'Doop is importing the design system — watch the canvas'
-                : frameIds.length === 1
-                  ? '1 item imported'
-                  : `${frameIds.length} items imported`
+            const imported = frameIds.length === 1 ? '1 item imported' : `${frameIds.length} items imported`
             showToast(failedCount ? `${imported} · ${failedCount} failed` : imported)
+          }}
+          onQueued={(cardCount) => {
+            setShowImport(false)
+            setGhInstallPass(null)
+            setView('board')
+            showToast(`${cardCount} ${cardCount === 1 ? 'card' : 'cards'} queued — Doop is on it`)
           }}
         />
       )}
@@ -541,12 +548,15 @@ function ImportModal({
   installError,
   onClose,
   onDone,
+  onQueued,
 }: {
   canvasId: string
   installPass: string | null
   installError: string | null
   onClose: () => void
   onDone: (frameIds: string[], failedCount: number) => void
+  /** a repo import queues cards on the board instead of landing frames */
+  onQueued: (cardCount: number) => void
 }) {
   const [url, setUrl] = useState('')
   const [wholeSite, setWholeSite] = useState(false)
@@ -668,22 +678,27 @@ function ImportModal({
     const screens = repoReview.manifest.screens.filter((s) => repoSelected.has(screenKey(s)))
     try {
       const result = await api.importGithubScreens(canvasId, repoReview.connection.id, screens, extractSystem)
-      if (!result.frames.length && screens.length) {
-        const reason = result.failures[0]?.error
-        setError(reason ? `No screens could be imported — ${reason}` : 'No screens could be imported')
+      if (!result.cards.length) {
+        setError(
+          result.rejected.length
+            ? 'Those screens are no longer in the repository — re-run the scan'
+            : 'Everything you picked is already on the board',
+        )
         setBusy(null)
         return
       }
       posthog.capture('github_screens_imported', {
         requested_count: screens.length,
-        imported_count: result.frames.length,
-        failed_count: result.failures.length,
+        queued_count: result.cards.length,
+        rejected_count: result.rejected.length,
       })
-      onDone(
-        result.frames.map((frame) => frame.id),
-        result.failures.length,
-      )
+      onQueued(result.cards.length)
     } catch (e) {
+      if (isResidentLimit(e)) {
+        useStore.getState().setLimitWall(true)
+        onClose()
+        return
+      }
       setError(errorMessage(e, 'repository import failed'))
       setBusy(null)
     }
@@ -719,8 +734,9 @@ function ImportModal({
             </div>
             <ModalLede>
               {repoReview.manifest.framework ? `A ${repoReview.manifest.framework} app. ` : ''}Doop distills the repo's
-              design system into a style guide pinned to this canvas — every agent follows it from then on. Components
-              come along as sketched library cards; whole pages are optional.
+              design system into a style guide pinned to this canvas — every agent follows it from then on. Each
+              component or page you pick becomes a card on the board: Doop sketches it from the source and lands it as a
+              frame. Whole pages are optional.
             </ModalLede>
             <CheckboxCard
               checked={extractSystem}
@@ -732,11 +748,6 @@ function ImportModal({
             <div className="mt-4 flex items-center justify-between px-[2px] pb-[9px]">
               <b className="text-[12px] text-ink-soft">
                 {repoSelected.size} of {visibleScreens.length} selected
-                {repoSelected.size > 12 && (
-                  <span className="ml-2 font-normal text-ink-faint">
-                    — Doop sketches 12 per import; the rest stay outlines
-                  </span>
-                )}
               </b>
               <span className="flex gap-3">
                 <Button
@@ -1083,151 +1094,6 @@ function RenameSelfModal({ current, onClose }: { current: string; onClose: () =>
             {busy ? 'Saving…' : 'Save name'}
           </Button>
         </ModalActions>
-      </>
-    </Modal>
-  )
-}
-
-/* Share modal, Figma-style: invite doop accounts to collaborate, or turn on
-   link sharing. Canvases are private by default — only the owner and invited
-   members get in until the link toggle is flipped. */
-function ShareModal({ canvasId, onClose, onCopied }: { canvasId: string; onClose: () => void; onCopied: () => void }) {
-  const canvas = useStore((s) => s.canvas)
-  const { data: session } = authClient.useSession()
-  const meId = session?.user?.id
-  const isOwner = !!canvas?.ownerId && canvas.ownerId === meId
-  const linkEdits = canvas?.linkAccess === 'edit'
-  const [people, setPeople] = useState<CanvasMember[] | null>(null)
-  const [email, setEmail] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .listMembers(canvasId)
-      .then(setPeople)
-      .catch(() => setPeople([]))
-  }, [canvasId])
-
-  async function invite() {
-    const clean = email.trim()
-    if (!clean || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const m = await api.inviteMember(canvasId, clean)
-      setPeople((p) => (p?.some((x) => x.userId === m.userId) ? p : [...(p ?? []), m]))
-      if (canvas && !canvas.memberIds?.includes(m.userId)) {
-        useStore.getState().setCanvas({ ...canvas, memberIds: [...(canvas.memberIds ?? []), m.userId] })
-      }
-      setEmail('')
-    } catch (e) {
-      setError(e instanceof ApiError ? String(e.body.error ?? 'invite failed') : 'invite failed')
-    }
-    setBusy(false)
-  }
-
-  function remove(userId: string) {
-    api.removeMember(canvasId, userId).catch(console.error)
-    setPeople((p) => p?.filter((x) => x.userId !== userId) ?? null)
-    if (canvas) {
-      useStore.getState().setCanvas({ ...canvas, memberIds: canvas.memberIds?.filter((id) => id !== userId) })
-    }
-    /* removing yourself = leaving the canvas */
-    if (userId === meId && !isOwner) navigate('/')
-  }
-
-  function toggleLink(next: boolean) {
-    if (!canvas) return
-    const linkAccess = next ? 'edit' : 'none'
-    api.setLinkAccess(canvas.id, linkAccess).catch(console.error)
-    useStore.getState().setCanvas({ ...canvas, linkAccess })
-  }
-
-  async function copy() {
-    await navigator.clipboard.writeText(location.href)
-    posthog.capture('canvas_link_shared')
-    onCopied()
-  }
-
-  return (
-    <Modal size="sm" onClose={onClose}>
-      <>
-        <div className="flex items-start justify-between gap-3">
-          <ModalTitle className="min-w-0">Share “{canvas?.name ?? 'canvas'}”</ModalTitle>
-          <Button variant="ghost" size="icon" className="size-10" aria-label="Close sharing" onClick={onClose}>
-            <XIcon />
-          </Button>
-        </div>
-        {isOwner && (
-          <>
-            <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row">
-              <Input
-                className="flex-1 rounded-[10px] bg-paper focus:ring-0"
-                autoFocus
-                placeholder="Invite by email (doop account)"
-                value={email}
-                disabled={busy}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && invite()}
-              />
-              <Button variant="primary" className="justify-center" disabled={busy || !email.trim()} onClick={invite}>
-                Invite
-              </Button>
-            </div>
-            {error && <p className="mx-[2px] mt-2 text-[12px] text-accent-ink">{error}</p>}
-          </>
-        )}
-        <div className="mt-[14px] mb-1 flex max-h-[40vh] flex-col gap-[2px] overflow-y-auto">
-          {(people ?? []).map((p) => (
-            <div key={p.userId} className="flex items-center gap-2.5 px-[2px] py-1.5">
-              <Avatar name={p.name} className="size-7 flex-none border-0 text-xs" />
-              <span className="flex min-w-0 flex-1 flex-col leading-[1.3]">
-                <b className="overflow-hidden whitespace-nowrap text-ellipsis text-[13px] font-semibold">
-                  {p.name}
-                  {p.userId === meId ? ' (you)' : ''}
-                </b>
-                <span className="overflow-hidden whitespace-nowrap text-ellipsis text-[12px] text-ink-faint">
-                  {p.email}
-                </span>
-              </span>
-              {p.owner ? (
-                <span className="flex-none text-[12px] text-ink-faint">Owner</span>
-              ) : isOwner || p.userId === meId ? (
-                <Button
-                  variant="bare"
-                  size="icon-sm"
-                  className="flex-none text-[13px] hover:bg-accent-ink/10 hover:text-accent-ink"
-                  title={p.userId === meId ? 'Leave this canvas' : 'Remove'}
-                  onClick={() => remove(p.userId)}
-                >
-                  ✕
-                </Button>
-              ) : (
-                <span className="flex-none text-[12px] text-ink-faint">Can edit</span>
-              )}
-            </div>
-          ))}
-          {people === null && <p className="text-[12px] text-ink-faint">Loading…</p>}
-        </div>
-        <div className="mt-2.5 flex flex-col items-stretch justify-between gap-2.5 border-t border-line-soft pt-3.5 sm:flex-row sm:items-center">
-          {isOwner ? (
-            <label
-              className="relative flex cursor-pointer items-center gap-2 text-[13px] font-medium text-ink"
-              title="Off = only you and invited people can open this canvas"
-            >
-              <Checkbox checked={linkEdits} onChange={(e) => toggleLink(e.target.checked)} />
-              Anyone with the link can edit
-            </label>
-          ) : (
-            <span className="text-xs text-ink-faint">
-              {linkEdits ? 'Anyone with the link can edit' : 'Invite-only canvas'}
-            </span>
-          )}
-          <Button className="justify-center" onClick={copy}>
-            ⧉ Copy link
-          </Button>
-        </div>
       </>
     </Modal>
   )

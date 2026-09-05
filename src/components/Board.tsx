@@ -34,7 +34,10 @@ const colHeadCls = 'mb-3.5 flex items-baseline gap-2 border-b border-line pb-3'
 const colHeadH2Cls = 'font-display text-[12px] font-[750] uppercase tracking-[0.14em]'
 const countCls = 'font-mono text-[11px] text-ink-faint'
 const cardBase = 'group relative px-4 py-3.5'
-const cardH3Cls = 'break-words pr-4 font-display text-[14.5px] font-[650] leading-[1.35] tracking-[-0.01em]'
+/* mirrors MAX_CARD_CHARS in server/actions.ts */
+const MAX_CARD_CHARS = 4_000
+const cardH3Cls =
+  'line-clamp-8 break-words pr-4 font-display text-[14.5px] font-[650] leading-[1.35] tracking-[-0.01em]'
 const metaCls =
   'mt-[9px] flex flex-wrap items-center gap-1.5 text-[12px] text-ink-faint [&_b]:font-[650] [&_b]:text-ink-soft'
 /* the ✕ on a card: always reachable on touch, revealed on hover elsewhere */
@@ -52,6 +55,30 @@ const stepPhaseCls: Record<string, string> = {
 
 function pipelineOf(t: AgentTask): string[] {
   return t.pipeline?.length ? t.pipeline : [DEFAULT_ROLE_ID]
+}
+
+/** The repo a structured card came from — the GitHub import's cards wear it
+ *  so a dozen of them read as one import, not as spam. */
+function RepoTag({ task }: { task: AgentTask }) {
+  if (!task.payload) return null
+  return (
+    <span className="inline-flex max-w-full items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10.5px] text-ink-faint">
+      ⎇ {task.payload.repo}
+      {task.kind === 'design-system' ? ' · design system' : task.payload.screen ? ` · ${task.payload.screen.kind}` : ''}
+    </span>
+  )
+}
+
+/** Queued cards from one import (same click on the same repo), oldest first. */
+function groupImports(queued: AgentTask[]): { key: string; cards: AgentTask[] }[] {
+  const groups: { key: string; cards: AgentTask[] }[] = []
+  for (const t of queued) {
+    const key = t.payload?.importId ? `import:${t.payload.importId}` : t.id
+    const group = groups.find((g) => g.key === key)
+    if (group) group.cards.push(t)
+    else groups.push({ key, cards: [t] })
+  }
+  return groups
 }
 
 /** The pipeline of a card with its current position marked. */
@@ -207,7 +234,13 @@ export function Board({ canvasId }: { canvasId: string }) {
                   ✕
                 </Button>
                 <h3 className={cardH3Cls}>{t.status}</h3>
-                <Trail task={t} state="queued" />
+                {t.payload ? (
+                  <div className="mt-1.5">
+                    <RepoTag task={t} />
+                  </div>
+                ) : (
+                  <Trail task={t} state="queued" />
+                )}
                 <div className={metaCls}>
                   <b>Attempt stopped</b>
                   {t.agentName ? <span> · {t.agentName}</span> : null}
@@ -231,26 +264,57 @@ export function Board({ canvasId }: { canvasId: string }) {
                 </Button>
               </Card>
             ))}
-            {queued.map((t) => (
-              <Card key={t.id} className={cn(cardBase, 'bg-surface')}>
-                <Button
-                  variant="bare"
-                  className={dismissCls}
-                  title="Remove this card"
-                  onClick={() => api.completeCard(canvasId, t.id).catch(console.error)}
-                >
-                  ✕
-                </Button>
-                <h3 className={cardH3Cls}>{t.status}</h3>
-                <Trail task={t} state="queued" />
-                <div className={metaCls}>
-                  <b>{t.queuedBy}</b> · {timeAgo(t.startedAt)}
-                </div>
-                <div className="mt-[9px] font-mono text-[11px] text-ink-faint">
-                  ✦ waiting for {roleName(pipelineOf(t)[t.stage ?? 0])}
-                </div>
-              </Card>
-            ))}
+            {groupImports(queued).map(({ key, cards }) => {
+              const t = cards[0]!
+              const isImport = cards.length > 1 || !!t.payload
+              return (
+                <Card key={key} className={cn(cardBase, 'bg-surface')}>
+                  <Button
+                    variant="bare"
+                    className={dismissCls}
+                    title={cards.length > 1 ? 'Remove these cards' : 'Remove this card'}
+                    onClick={() => Promise.all(cards.map((c) => api.completeCard(canvasId, c.id))).catch(console.error)}
+                  >
+                    ✕
+                  </Button>
+                  {isImport ? (
+                    <>
+                      <h3 className={cardH3Cls}>
+                        {cards.length === 1 ? t.status : `${cards.length} cards from ${t.payload?.repo}`}
+                      </h3>
+                      {cards.length === 1 ? (
+                        <div className="mt-1.5">
+                          <RepoTag task={t} />
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {cards.map((c) => (
+                            <span
+                              key={c.id}
+                              className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink-soft"
+                              title={c.payload?.screen?.route}
+                            >
+                              {c.kind === 'design-system' ? '✦ design system' : c.status}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <h3 className={cardH3Cls}>{t.status}</h3>
+                      <Trail task={t} state="queued" />
+                    </>
+                  )}
+                  <div className={metaCls}>
+                    <b>{t.queuedBy}</b> · {timeAgo(t.startedAt)}
+                  </div>
+                  <div className="mt-[9px] font-mono text-[11px] text-ink-faint">
+                    ✦ waiting for {roleName(pipelineOf(t)[t.stage ?? 0])}
+                  </div>
+                </Card>
+              )
+            })}
             {draft === null ? (
               <Button
                 variant="ghost"
@@ -266,6 +330,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                   variant="bare"
                   className="min-h-[54px] md:text-[13.5px]"
                   value={draft}
+                  maxLength={MAX_CARD_CHARS}
                   placeholder="What should an agent work on?"
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
@@ -357,7 +422,13 @@ export function Board({ canvasId }: { canvasId: string }) {
                 className={cn(cardBase, 'border-brand bg-surface shadow-[0_0_0_1px_var(--brand),var(--shadow-card)]')}
               >
                 <h3 className={cardH3Cls}>{t.status}</h3>
-                {t.queuedBy && <Trail task={t} state="working" />}
+                {t.payload ? (
+                  <div className="mt-1.5">
+                    <RepoTag task={t} />
+                  </div>
+                ) : (
+                  t.queuedBy && <Trail task={t} state="working" />
+                )}
                 <div className={metaCls}>
                   <Dot
                     size="sm"
@@ -388,6 +459,11 @@ export function Board({ canvasId }: { canvasId: string }) {
                 <h3 className="break-words pr-4 font-display text-[13.5px] font-semibold leading-[1.35] tracking-[-0.01em] text-ink-soft">
                   {t.status}
                 </h3>
+                {t.payload && (
+                  <div className="mt-1">
+                    <RepoTag task={t} />
+                  </div>
+                )}
                 {t.queuedBy && pipelineOf(t).length > 1 && <Trail task={t} state="done" />}
                 <div className={metaCls}>
                   <span className="font-[750] text-[#1e7a4c]">✓</span> {t.agentName || t.queuedBy}

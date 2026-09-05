@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { extractHtml, resolveImport, treeExcerpt } from '../server/githubRecon.ts'
+import {
+  designSystemSlug,
+  extractHtml,
+  nextRepoFramePosition,
+  resolveImport,
+  treeExcerpt,
+} from '../server/githubRecon.ts'
+import { wrapGeneratedHtml } from '../server/github.ts'
 
 /** The reconstruction pass's pure core: import resolution against a repo
  *  tree, and pulling the HTML document (+ declared height) out of a model
@@ -81,5 +88,52 @@ describe('repo asset references', () => {
   it('extractHtml raises the height ceiling for full pages', () => {
     const { height } = extractHtml([{ type: 'text', text: '<!doctype html><p>x</p>\n<!-- doop-height: 6600 -->' }])
     expect(height).toBe(6600)
+  })
+})
+
+describe('nextRepoFramePosition', () => {
+  const CONN = 'conn-1'
+  const marked = (x: number, y: number, width: number, height: number, conn = CONN) => ({
+    x,
+    y,
+    width,
+    height,
+    html: wrapGeneratedHtml(
+      '<html><head></head><body>x</body></html>',
+      { id: conn, repo: 'a/b', branch: 'main' },
+      {
+        kind: 'component',
+        route: 'src/Button.tsx',
+        sourcePath: 'src/Button.tsx',
+      },
+    ),
+  })
+  const plain = (x: number, y: number, width: number, height: number) => ({ x, y, width, height, html: '<p/>' })
+
+  it('starts the import right of everything on the canvas, or at the origin on an empty one', () => {
+    expect(nextRepoFramePosition([], CONN, 640)).toEqual({ x: 120, y: 120 })
+    expect(nextRepoFramePosition([plain(100, 300, 1000, 500)], CONN, 640)).toEqual({ x: 1180, y: 120 })
+  })
+
+  it('flows siblings into the current row while it fits, then wraps under everything', () => {
+    const frames = [plain(100, 300, 1000, 500), marked(1180, 120, 640, 420)]
+    expect(nextRepoFramePosition(frames, CONN, 640)).toEqual({ x: 1900, y: 120 })
+    const fullRow = [
+      marked(120, 120, 1280, 900),
+      marked(1480, 120, 1280, 700),
+      /* a taller frame in the row decides where the next row starts */
+    ]
+    expect(nextRepoFramePosition(fullRow, CONN, 1280)).toEqual({ x: 120, y: 1100 })
+  })
+
+  it('only counts frames from the same connection as siblings', () => {
+    const frames = [marked(120, 120, 640, 420, 'other-conn')]
+    expect(nextRepoFramePosition(frames, CONN, 640)).toEqual({ x: 840, y: 120 })
+  })
+})
+
+describe('designSystemSlug', () => {
+  it('names the guide after the repository', () => {
+    expect(designSystemSlug('acme/Web.App')).toBe('web-app-design-system')
   })
 })
