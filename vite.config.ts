@@ -20,6 +20,9 @@ export default defineConfig({
   },
   server: {
     port: webPort,
+    watch: {
+      ignored: ['**/desktop/src-tauri/target/**'],
+    },
     /* the doop-sync snippet posts to /ingest from foreign origins; vite
        answers CORS preflights itself before the proxy, so its default
        same-origin policy would block what the express server (prod) allows */

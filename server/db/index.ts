@@ -35,6 +35,14 @@ export async function initDb(): Promise<void> {
     const { drizzle } = await import('drizzle-orm/pglite')
     const dir = path.join(process.cwd(), 'data', 'pg')
     fs.mkdirSync(dir, { recursive: true }) // PGlite's own mkdir isn't recursive
+    const pidFile = path.join(dir, 'postmaster.pid')
+    if (fs.existsSync(pidFile)) {
+      try {
+        fs.unlinkSync(pidFile)
+      } catch {
+        /* ignore if already removed or inaccessible */
+      }
+    }
     const client = new PGlite(dir)
     const pgliteDb = drizzle(client, { schema })
     const { migrate } = await import('drizzle-orm/pglite/migrator')

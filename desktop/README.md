@@ -5,8 +5,9 @@ A thin [Tauri](https://tauri.app) shell around the hosted app. It loads
 every deploy is instantly "in" the desktop app and the binary only
 needs a new release when the shell itself changes (icon, menu, Tauri bump).
 
-The released DMG talks to the hosted service at doop.design. Self-hosting
-your own doop instance? Build a shell for it without patching anything:
+The released installers (macOS DMG and Windows NSIS setup) talk to the hosted
+service at doop.design. Self-hosting your own doop instance? Build a shell for
+it without patching anything:
 
 ```sh
 DOOP_APP_URL=https://doop.example.com bun run build
@@ -34,19 +35,19 @@ bun run dev    # opens the shell against the local vite server (localhost:4300)
 ## Build
 
 ```sh
-bun run build  # .app + .dmg in src-tauri/target/release/bundle/
+bun run build  # macOS: .app + .dmg; Windows: NSIS .exe in src-tauri/target/release/bundle/
 ```
 
-CI (`.github/workflows/desktop.yml`) builds an unsigned .app on every PR that
-touches `desktop/`, and on manual dispatch.
+CI (`.github/workflows/desktop.yml`) builds an unsigned macOS .app and Windows
+NSIS installer on every PR that touches `desktop/`, and on manual dispatch.
 
-## Releasing a DMG
+## Releasing Desktop Installers
 
 `.github/workflows/desktop-release.yml` builds a universal (Apple Silicon +
-Intel) DMG:
+Intel) DMG for macOS and an NSIS installer for Windows:
 
-- push a tag `desktop-v*` → DMG attached to a GitHub Release
-- manual dispatch → DMG as a workflow artifact
+- push a tag `desktop-v*` → DMG and Windows installer attached to a GitHub Release
+- manual dispatch → DMG and Windows installer as workflow artifacts
 
 Versions are bumped by release-please: commits touching `desktop/` open a
 "chore(desktop): release x.y.z" PR that updates `package.json`,
