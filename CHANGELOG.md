@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0](https://github.com/kgoedecke/doop/compare/v0.2.0...v0.3.0) (2026-09-05)
+
+
+### Features
+
+* **canvas:** marquee selection, shift-click multi-select and space-to-pan ([#141](https://github.com/kgoedecke/doop/issues/141)) ([1b1a5f6](https://github.com/kgoedecke/doop/commit/1b1a5f65f5a153abfb8d03f2eb7aea3926fa33aa))
+* **comments:** reply inside an element comment thread ([#140](https://github.com/kgoedecke/doop/issues/140)) ([cd7e6ee](https://github.com/kgoedecke/doop/commit/cd7e6eef3b3385f296d4ccbbee28988b8fe0cb6d))
+* **github:** queue repo imports as board cards instead of outline frames ([#138](https://github.com/kgoedecke/doop/issues/138)) ([e495537](https://github.com/kgoedecke/doop/commit/e495537d07fb516e1e8dbff34a4a80f017319789))
+
+
+### Bug Fixes
+
+* **cards:** stop truncating a queued card's prompt at 200 chars ([#88](https://github.com/kgoedecke/doop/issues/88)) ([dbc9f31](https://github.com/kgoedecke/doop/commit/dbc9f3173d29625364e2779ad85ca8741e76db03))
+* correct contrast on tag chip and rules new button ([#111](https://github.com/kgoedecke/doop/issues/111)) ([86a42f1](https://github.com/kgoedecke/doop/commit/86a42f1d20b18393306121c8b417f252cca69609))
+* **dash:** point Help & docs at /docs instead of /blog ([#142](https://github.com/kgoedecke/doop/issues/142)) ([503ac68](https://github.com/kgoedecke/doop/commit/503ac68df68020d75b16b99f7bf30fd254ed521c))
+* **dash:** point Help & docs at the hosted docs site ([396ccba](https://github.com/kgoedecke/doop/commit/396ccba5e01977da7a5ccf71a5304740f5df71bf))
+* **frame:** confirm the code block copy ([#93](https://github.com/kgoedecke/doop/issues/93)) ([fc1f3fa](https://github.com/kgoedecke/doop/commit/fc1f3fa75a121b3eb4bc4c93e220982afdbfb512))
+* **stage:** pinch to zoom on touch screens ([#137](https://github.com/kgoedecke/doop/issues/137)) ([c91d60c](https://github.com/kgoedecke/doop/commit/c91d60cf0cc91c7fbef6c6e679293965c00343da))
+
 ## [0.2.0](https://github.com/kgoedecke/doop/compare/v0.1.0...v0.2.0) (2026-09-03)
 
 

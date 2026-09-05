@@ -1,7 +1,7 @@
 {
   "name": "doop-desktop",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
