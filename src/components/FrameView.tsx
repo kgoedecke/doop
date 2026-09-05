@@ -754,7 +754,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                     {!composing ? (
                       <>
                         <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop animate-[chip-in_0.18s_ease]">
-                          <span className="px-[3px] text-[11px] font-bold text-brand [font-family:ui-monospace,monospace]">
+                          <span className="rounded-[5px] bg-white/[0.14] px-[5px] py-px text-[11px] font-bold text-white [font-family:ui-monospace,monospace]">
                             {anchor.tag}
                           </span>
                           <Button

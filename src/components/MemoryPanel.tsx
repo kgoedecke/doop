@@ -136,8 +136,9 @@ export function MemoryPanel() {
       <ListSection>
         <span>Rules</span>
         <Button
+          variant="solid"
           size="sm"
-          className="flex-none border-ink bg-ink text-[11.5px] font-bold text-white shadow-none hover:translate-x-0 hover:translate-y-0 hover:shadow-none"
+          className="flex-none text-[11.5px] font-bold"
           onClick={() => setOpenGuide('')}
         >
           + New
