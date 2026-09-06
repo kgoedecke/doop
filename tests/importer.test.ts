@@ -297,6 +297,64 @@ describe('webpage capture', () => {
     expect(page.close).toHaveBeenCalledOnce()
   })
 
+  it('inlines a single stylesheet that fits the total style budget', async () => {
+    contextMocks.configured.mockReturnValue(true)
+    contextMocks.scrape.mockResolvedValue({
+      html: '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body>From Context</body></html>',
+      finalUrl: 'https://example.com/final',
+      title: 'Context title',
+      description: '',
+    })
+    /* One big bundled sheet is how real sites ship CSS; it used to be turned
+       away by a per-sheet cap stricter than the budget it fits inside. */
+    const bundled = `body { color: red } ${'/* padding */'.repeat(60_000)}`
+    publicUrlMocks.fetchPinned.mockResolvedValue(new Response(bundled, { headers: { 'content-type': 'text/css' } }))
+    const page = stubPage({
+      finalUrl: 'about:blank',
+      contextPath: true,
+      snapshot: {
+        sheets: ['https://example.com/app.css'],
+        title: 'Context title',
+        height: 777,
+        html: '<html><head></head><body>From Context</body></html>',
+      },
+    })
+
+    const imported = await importPage('https://example.com')
+
+    expect(bundled.length).toBeGreaterThan(600_000)
+    expect(imported.html).toContain('body { color: red }')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('blames its own budget, not the site, when a stylesheet is oversized', async () => {
+    contextMocks.configured.mockReturnValue(true)
+    contextMocks.scrape.mockResolvedValue({
+      html: '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body>From Context</body></html>',
+      finalUrl: 'https://example.com/final',
+      title: 'Context title',
+      description: '',
+    })
+    publicUrlMocks.fetchPinned.mockResolvedValue(
+      new Response('body { color: red }', {
+        headers: { 'content-type': 'text/css', 'content-length': '2500000' },
+      }),
+    )
+    const page = stubPage({
+      finalUrl: 'about:blank',
+      contextPath: true,
+      snapshot: {
+        sheets: ['https://example.com/app.css'],
+        title: 'Context title',
+        height: 777,
+        html: '<html><head></head><body>From Context</body></html>',
+      },
+    })
+
+    await expect(importPage('https://example.com')).rejects.toThrow('per-stylesheet import limit')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
   it('returns a bounded screenshot and text preview when requested', async () => {
     const screenshot = Buffer.from('agent-preview')
     const page = stubPage({
