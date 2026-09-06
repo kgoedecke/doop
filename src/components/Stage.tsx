@@ -108,6 +108,9 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     const DURATION = 700
     const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
     let raf = requestAnimationFrame(function step(now: number) {
+      /* Presentation cancels this camera request, rather than pausing it:
+         closing must retain the exact viewport at entry, with no delayed
+         glide or snap. A new request after closing can navigate normally. */
       if (useStore.getState().presentedFrameId) return
       const k = ease(Math.min(1, (now - start) / DURATION))
       setViewport({
