@@ -29,8 +29,10 @@ const VIEWPORT_WIDTH = 1280
 const MAX_HEIGHT = 6000
 const MAX_PREVIEW_HEIGHT = 4000
 const MAX_PREVIEW_TEXT_CHARS = 6000
-const MAX_SHEET_BYTES = 600_000
 const MAX_TOTAL_BYTES = 2_000_000
+/* A single sheet may use the whole style budget: real sites ship one big
+   bundled stylesheet, and a stricter per-sheet cap rejected pages that fit. */
+const MAX_SHEET_BYTES = MAX_TOTAL_BYTES
 const MAX_DISCOVERY_BYTES = 2_000_000
 const MAX_SITEMAPS = 12
 const DISCOVERY_CONCURRENCY = 6
@@ -398,11 +400,18 @@ export async function importSitePages(rawUrls: string[], concurrency = 3): Promi
 interface CapturedCss {
   css: string
   complete: boolean
+  /* Why a sheet came back incomplete. 'limit' is Doop refusing an oversized
+     sheet; 'fetch' is the sheet itself being unreachable. The two need
+     different words in the error — blaming the site for our own budget sends
+     people debugging the wrong end. */
+  reason?: 'limit' | 'fetch'
 }
+
+const formatMb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1).replace(/\.0$/, '')} MB`
 
 /** Fetch a stylesheet, resolve depth-1 @imports, absolutize its url() refs. */
 async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
-  if (depth > 1) return { css: '', complete: false }
+  if (depth > 1) return { css: '', complete: false, reason: 'limit' }
   let url: URL
   let res: Response | undefined
   let css: string
@@ -416,27 +425,29 @@ async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
       })
       if (res.status < 300 || res.status >= 400) break
       const location = res.headers.get('location')
-      if (!location) return { css: '', complete: false }
+      if (!location) return { css: '', complete: false, reason: 'fetch' }
       url = parsePublicHttpUrl(new URL(location, url).href)
       res = undefined
     }
-    if (!res?.ok) return { css: '', complete: false }
-    if (res.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') return { css: '', complete: false }
+    if (!res?.ok) return { css: '', complete: false, reason: 'fetch' }
+    if (res.headers.get('cf-mitigated')?.toLowerCase() === 'challenge')
+      return { css: '', complete: false, reason: 'fetch' }
     const contentType = res.headers.get('content-type') ?? ''
     if (contentType && !/text\/css|text\/plain|application\/octet-stream/i.test(contentType)) {
-      return { css: '', complete: false }
+      return { css: '', complete: false, reason: 'fetch' }
     }
     const bounded = await readTextBounded(res, MAX_SHEET_BYTES)
-    if (bounded === null) return { css: '', complete: false }
+    if (bounded === null) return { css: '', complete: false, reason: 'limit' }
     css = bounded
   } catch {
-    return { css: '', complete: false }
+    return { css: '', complete: false, reason: 'fetch' }
   }
 
   let complete = true
+  let reason: CapturedCss['reason']
   const imports = [...css.matchAll(/@import\s+(?:url\()?\s*['"]?([^'")\s]+)['"]?\s*\)?[^;]*;/g)]
   for (const [index, m] of imports.entries()) {
-    let child: CapturedCss = { css: '', complete: false }
+    let child: CapturedCss = { css: '', complete: false, reason: 'limit' }
     if (index < MAX_CSS_IMPORTS) {
       try {
         child = await fetchCss(new URL(m[1], url).href, depth + 1)
@@ -444,13 +455,17 @@ async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
         /* dead import */
       }
     }
-    if (!child.complete) complete = false
+    if (!child.complete) {
+      complete = false
+      reason ??= child.reason
+    }
     /* Imports beyond the bounded fetch budget are removed rather than left
        active in the snapshot for a later browser to fetch. */
     css = css.replace(m[0], child.css)
     if (css.length > MAX_SHEET_BYTES) {
       css = css.slice(0, MAX_SHEET_BYTES)
       complete = false
+      reason ??= 'limit'
     }
   }
   /* relative url(...) inside the sheet must resolve against the SHEET's URL,
@@ -462,7 +477,7 @@ async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
       return _all
     }
   })
-  return { css, complete }
+  return { css, complete, reason }
 }
 
 export interface ImportedPage {
@@ -612,11 +627,15 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       const captured = await fetchCss(sheet)
       if (!captured.complete) {
         throw new WebsiteCaptureUnavailableError(
-          'The webpage HTML was captured, but one or more stylesheets could not be fully loaded',
+          captured.reason === 'limit'
+            ? `This page has a stylesheet larger than Doop's ${formatMb(MAX_SHEET_BYTES)} per-stylesheet import limit`
+            : 'The webpage HTML was captured, but one or more stylesheets could not be fully loaded',
         )
       }
       if (css.length + captured.css.length + 1 > MAX_TOTAL_BYTES) {
-        throw new WebsiteCaptureUnavailableError('The webpage styles are too large to import safely')
+        throw new WebsiteCaptureUnavailableError(
+          `This page's stylesheets add up to more than Doop's ${formatMb(MAX_TOTAL_BYTES)} import limit`,
+        )
       }
       css += captured.css + '\n'
     }
