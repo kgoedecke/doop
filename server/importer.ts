@@ -400,18 +400,19 @@ export async function importSitePages(rawUrls: string[], concurrency = 3): Promi
 interface CapturedCss {
   css: string
   complete: boolean
-  /* Why a sheet came back incomplete. 'limit' is Doop refusing an oversized
-     sheet; 'fetch' is the sheet itself being unreachable. The two need
-     different words in the error — blaming the site for our own budget sends
-     people debugging the wrong end. */
-  reason?: 'limit' | 'fetch'
+  /* Why a sheet came back incomplete, so the error can name the real cause.
+     'oversized' is strictly a size limit and is the ONLY reason that may claim
+     a sheet is too big — dropped @imports and unreachable sheets are
+     'incomplete', because telling someone their CSS is over 2 MB when it isn't
+     sends them debugging the wrong end. */
+  reason?: 'oversized' | 'incomplete'
 }
 
 const formatMb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1).replace(/\.0$/, '')} MB`
 
 /** Fetch a stylesheet, resolve depth-1 @imports, absolutize its url() refs. */
 async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
-  if (depth > 1) return { css: '', complete: false, reason: 'limit' }
+  if (depth > 1) return { css: '', complete: false, reason: 'incomplete' }
   let url: URL
   let res: Response | undefined
   let css: string
@@ -425,29 +426,29 @@ async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
       })
       if (res.status < 300 || res.status >= 400) break
       const location = res.headers.get('location')
-      if (!location) return { css: '', complete: false, reason: 'fetch' }
+      if (!location) return { css: '', complete: false, reason: 'incomplete' }
       url = parsePublicHttpUrl(new URL(location, url).href)
       res = undefined
     }
-    if (!res?.ok) return { css: '', complete: false, reason: 'fetch' }
+    if (!res?.ok) return { css: '', complete: false, reason: 'incomplete' }
     if (res.headers.get('cf-mitigated')?.toLowerCase() === 'challenge')
-      return { css: '', complete: false, reason: 'fetch' }
+      return { css: '', complete: false, reason: 'incomplete' }
     const contentType = res.headers.get('content-type') ?? ''
     if (contentType && !/text\/css|text\/plain|application\/octet-stream/i.test(contentType)) {
-      return { css: '', complete: false, reason: 'fetch' }
+      return { css: '', complete: false, reason: 'incomplete' }
     }
     const bounded = await readTextBounded(res, MAX_SHEET_BYTES)
-    if (bounded === null) return { css: '', complete: false, reason: 'limit' }
+    if (bounded === null) return { css: '', complete: false, reason: 'oversized' }
     css = bounded
   } catch {
-    return { css: '', complete: false, reason: 'fetch' }
+    return { css: '', complete: false, reason: 'incomplete' }
   }
 
   let complete = true
   let reason: CapturedCss['reason']
   const imports = [...css.matchAll(/@import\s+(?:url\()?\s*['"]?([^'")\s]+)['"]?\s*\)?[^;]*;/g)]
   for (const [index, m] of imports.entries()) {
-    let child: CapturedCss = { css: '', complete: false, reason: 'limit' }
+    let child: CapturedCss = { css: '', complete: false, reason: 'incomplete' }
     if (index < MAX_CSS_IMPORTS) {
       try {
         child = await fetchCss(new URL(m[1], url).href, depth + 1)
@@ -465,7 +466,7 @@ async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
     if (css.length > MAX_SHEET_BYTES) {
       css = css.slice(0, MAX_SHEET_BYTES)
       complete = false
-      reason ??= 'limit'
+      reason ??= 'oversized'
     }
   }
   /* relative url(...) inside the sheet must resolve against the SHEET's URL,
@@ -627,7 +628,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       const captured = await fetchCss(sheet)
       if (!captured.complete) {
         throw new WebsiteCaptureUnavailableError(
-          captured.reason === 'limit'
+          captured.reason === 'oversized'
             ? `This page has a stylesheet larger than Doop's ${formatMb(MAX_SHEET_BYTES)} per-stylesheet import limit`
             : 'The webpage HTML was captured, but one or more stylesheets could not be fully loaded',
         )

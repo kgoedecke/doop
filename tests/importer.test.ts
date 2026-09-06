@@ -355,6 +355,44 @@ describe('webpage capture', () => {
     expect(page.close).toHaveBeenCalledOnce()
   })
 
+  it('does not call a small stylesheet oversized when a nested @import is dropped', async () => {
+    contextMocks.configured.mockReturnValue(true)
+    contextMocks.scrape.mockResolvedValue({
+      html: '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body>From Context</body></html>',
+      finalUrl: 'https://example.com/final',
+      title: 'Context title',
+      description: '',
+    })
+    /* app.css → mid.css → deep.css. The third level is past the supported
+       import depth, so the capture is incomplete — but nothing here is big,
+       and the error must not claim a size limit. */
+    publicUrlMocks.fetchPinned
+      .mockResolvedValueOnce(new Response("@import url('/mid.css');", { headers: { 'content-type': 'text/css' } }))
+      .mockResolvedValueOnce(new Response("@import url('/deep.css');", { headers: { 'content-type': 'text/css' } }))
+    const page = stubPage({
+      finalUrl: 'about:blank',
+      contextPath: true,
+      snapshot: {
+        sheets: ['https://example.com/app.css'],
+        title: 'Context title',
+        height: 777,
+        html: '<html><head></head><body>From Context</body></html>',
+      },
+    })
+
+    let message = ''
+    try {
+      await importPage('https://example.com')
+    } catch (thrown) {
+      message = (thrown as Error).message
+    }
+
+    expect(message).toContain('could not be fully loaded')
+    expect(message).not.toContain('import limit')
+    expect(publicUrlMocks.fetchPinned).toHaveBeenCalledTimes(2)
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
   it('returns a bounded screenshot and text preview when requested', async () => {
     const screenshot = Buffer.from('agent-preview')
     const page = stubPage({
