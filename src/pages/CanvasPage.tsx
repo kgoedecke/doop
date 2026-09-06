@@ -15,6 +15,7 @@ import { navigate } from '../App'
 import { Logo } from '../components/Logo'
 import { ensureTab } from '../lib/desktop'
 import { Stage } from '../components/Stage'
+import { FramePresentation } from '../components/FramePresentation'
 import { Board } from '../components/Board'
 import { Inspector } from '../components/Inspector'
 import { ActivityPanel } from '../components/ActivityPanel'
@@ -129,6 +130,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   /* frame keyboard shortcuts: delete, copy/paste/duplicate, undo/redo */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (useStore.getState().presentedFrameId) return
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const sel = useStore.getState().selectedId
@@ -170,6 +172,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
      without a permission prompt. */
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
+      if (useStore.getState().presentedFrameId) return
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
@@ -478,6 +481,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
         </>
       )}
 
+      <FramePresentation />
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
       {showShare && canvas && (

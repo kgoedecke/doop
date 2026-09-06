@@ -555,6 +555,20 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
               </Tooltip>
             )}
             <span className="overflow-hidden text-ellipsis">{frame.name}</span>
+            <Tooltip label="Present frame">
+              <Button
+                variant="bare"
+                size="icon-sm"
+                className="size-5"
+                aria-label={`Present ${frame.name}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => useStore.getState().presentFrame(frame.id)}
+              >
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="m5 3 8 5-8 5V3Z" stroke="currentColor" strokeLinejoin="round" />
+                </svg>
+              </Button>
+            </Tooltip>
             <span className="flex gap-1">
               {stream && (
                 <span className={EDITOR_CHIP} style={{ background: stream.color }}>

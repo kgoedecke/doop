@@ -108,6 +108,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     const DURATION = 700
     const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
     let raf = requestAnimationFrame(function step(now: number) {
+      if (useStore.getState().presentedFrameId) return
       const k = ease(Math.min(1, (now - start) / DURATION))
       setViewport({
         x: from.x + (target.x - from.x) * k,
@@ -303,6 +304,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
       })
     }
     function onKey(e: KeyboardEvent) {
+      if (useStore.getState().presentedFrameId) return
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
@@ -337,6 +339,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
       return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
     }
     function onDown(e: KeyboardEvent) {
+      if (useStore.getState().presentedFrameId) return
       if (e.key !== ' ' || isTyping(e)) return
       e.preventDefault()
       if (!useStore.getState().panMode) useStore.getState().setPanMode(true)

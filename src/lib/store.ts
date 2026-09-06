@@ -52,6 +52,8 @@ interface State {
   /** open frame context menu; deferPanel hides the Inspector until it closes
    *  (right-click selecting a frame must not slide a panel in under the menu) */
   ctxMenu: { frameId: string; deferPanel: boolean } | null
+  /** frame shown in the presentation overlay; the canvas stays mounted */
+  presentedFrameId: string | null
   viewport: Viewport
   /** live alignment guide lines while a frame drag is snapped to a neighbour */
   snapGuides: SnapGuide[]
@@ -114,6 +116,7 @@ interface State {
   setInspectorOpen(v: boolean): void
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
+  presentFrame(id: string | null): void
   setViewport(v: Viewport): void
   setSnapGuides(guides: SnapGuide[]): void
   flash(frameId: string, color: string): void
@@ -139,6 +142,7 @@ export const useStore = create<State>((set, get) => ({
   panMode: false,
   inspectorOpen: false,
   ctxMenu: null,
+  presentedFrameId: null,
   viewport: { x: 0, y: 0, zoom: 1 },
   snapGuides: [],
   connected: false,
@@ -146,7 +150,11 @@ export const useStore = create<State>((set, get) => ({
   flashes: {},
   streams: {},
 
-  setCanvas: (canvas) => set({ canvas }),
+  setCanvas: (canvas) =>
+    set((s) => ({
+      canvas,
+      presentedFrameId: canvas?.frames.some((f) => f.id === s.presentedFrameId) ? s.presentedFrameId : null,
+    })),
   setConnected: (connected) => set({ connected }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) => set({ presences: Object.fromEntries(list.map((p) => [p.clientId, p])) }),
@@ -230,6 +238,7 @@ export const useStore = create<State>((set, get) => ({
         /* an open Inspector must not silently retarget onto the promoted frame */
         inspectorOpen: s.selectedId === frameId ? false : s.inspectorOpen,
         ctxMenu: s.ctxMenu?.frameId === frameId ? null : s.ctxMenu,
+        presentedFrameId: s.presentedFrameId === frameId ? null : s.presentedFrameId,
       }
     }),
   renameCanvasLocal: (name) => set((s) => (s.canvas ? { canvas: { ...s.canvas, name } } : {})),
@@ -297,7 +306,13 @@ export const useStore = create<State>((set, get) => ({
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
   closeCtxMenu: () => set({ ctxMenu: null }),
-  setViewport: (viewport) => set({ viewport }),
+  presentFrame: (id) =>
+    set((s) => ({
+      presentedFrameId: s.canvas?.frames.some((f) => f.id === id) ? id : null,
+      panMode: false,
+    })),
+  /* Freeze pending wheel ticks and agent camera requests as well as input. */
+  setViewport: (viewport) => set((s) => (s.presentedFrameId ? s : { viewport })),
   /* fires on every pointermove during a drag — skip the no-op transitions
      so unsnapped drags don't render the (empty) guide layer each frame */
   setSnapGuides: (snapGuides) =>

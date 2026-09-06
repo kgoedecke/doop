@@ -23,6 +23,8 @@ const modalVariants = cva(
         md: 'max-w-[min(520px,calc(100vw-24px))]',
         lg: 'max-w-[min(620px,calc(100vw-24px))] sm:max-w-[660px]',
         xl: 'max-w-[min(760px,calc(100vw-24px))]',
+        fullscreen:
+          'inset-0 h-dvh max-h-none max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 p-0 animate-none sm:max-h-none sm:rounded-none sm:p-0',
       },
     },
     defaultVariants: { size: 'md' },

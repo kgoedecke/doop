@@ -20,6 +20,8 @@ export function FrameContextMenu({ frame, at }: { frame: Frame; at: MutableRefOb
   }
   return (
     <ContextMenuContent>
+      <ContextMenuItem onSelect={() => useStore.getState().presentFrame(frame.id)}>Present frame</ContextMenuItem>
+      <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => copyFrame(frame)}>
         Copy
         <MenuHint>{MOD_KEY}C</MenuHint>

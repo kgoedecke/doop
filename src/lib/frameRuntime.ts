@@ -255,6 +255,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   })
 
   document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') parent.postMessage({ type: 'doop:frame-esc' }, '*')
     if (editing && ev.key === 'Escape') {
       setEdit(false)
       parent.postMessage({ type: 'doop:edit-esc' }, '*')
