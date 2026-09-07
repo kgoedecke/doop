@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { ANTHROPIC_TIMEOUT_MS } from './anthropicTimeout.ts'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
 
@@ -22,7 +23,7 @@ let client: Anthropic | null = null
 
 function getClient(): Anthropic | null {
   if (!process.env.ANTHROPIC_API_KEY) return null
-  if (!client) client = new Anthropic()
+  if (!client) client = new Anthropic({ timeout: ANTHROPIC_TIMEOUT_MS })
   return client
 }
 

@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { ANTHROPIC_TIMEOUT_MS } from './anthropicTimeout.ts'
 import { getAccount, withFreshToken } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
 import { modelFor, ModelAuthError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
@@ -64,7 +65,7 @@ function anthropicTier(): AgentModel | null {
     )
     return null
   }
-  if (!anthropic) anthropic = new Anthropic()
+  if (!anthropic) anthropic = new Anthropic({ timeout: ANTHROPIC_TIMEOUT_MS })
   const client = anthropic
   return {
     provider: 'anthropic',
