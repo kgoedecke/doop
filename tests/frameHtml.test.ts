@@ -60,4 +60,39 @@ describe('escaped HTML never reaches a frame', () => {
     await client.post(`/api/frames/${id}/append`, { html_chunk: doc.slice(30), done: true })
     expect(await htmlOf(id)).toBe(doc)
   })
+
+  it('accepts a source edit only when the expected HTML still matches', async () => {
+    const id = await newFrame('guarded inspector')
+    const before = '<p>Original</p>'
+    await client.patch(`/api/frames/${id}`, { html: before })
+    const ok = await client.patch(`/api/frames/${id}`, {
+      expectedHtml: before,
+      html: '<p style="color:red">Original</p>',
+    })
+    expect(ok.status).toBe(200)
+    const stale = await client.patch(`/api/frames/${id}`, {
+      expectedHtml: before,
+      html: '<p>Stale draft</p>',
+      name: 'stale',
+    })
+    expect(stale.status).toBe(409)
+    expect(await htmlOf(id)).toBe('<p style="color:red">Original</p>')
+    const canvas = await (await client.get(`/api/canvases/${canvasId}`)).json()
+    expect(canvas.frames.find((f: { id: string }) => f.id === id).name).toBe('guarded inspector')
+  })
+
+  it('rejects malformed preconditions and keeps legacy edits working', async () => {
+    const id = await newFrame('guard format')
+    expect((await client.patch(`/api/frames/${id}`, { expectedHtml: 42, html: '<p>Bad</p>' })).status).toBe(400)
+    expect((await client.patch(`/api/frames/${id}`, { html: '<p>Legacy</p>' })).status).toBe(200)
+    expect(await htmlOf(id)).toBe('<p>Legacy</p>')
+  })
+
+  it('checks authorization before disclosing a stale-source conflict', async () => {
+    const id = await newFrame('private inspector')
+    const stranger = new Client(server)
+    await stranger.signUp('inspector-outsider@test.dev', 'Outsider')
+    const response = await stranger.patch(`/api/frames/${id}`, { expectedHtml: 'wrong', html: '<p>No</p>' })
+    expect(response.status).toBe(403)
+  })
 })

@@ -258,8 +258,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ...input, actor: actor() }),
     }),
-  updateFrame: (frameId: string, patch: Partial<Frame>) =>
-    req<Frame>('/api/frames/' + frameId, { method: 'PATCH', body: JSON.stringify({ ...patch, actor: actor() }) }),
+  updateFrame: (frameId: string, patch: Partial<Frame>, expectedHtml?: string) =>
+    req<Frame>('/api/frames/' + frameId, {
+      method: 'PATCH',
+      body: JSON.stringify({ ...patch, expectedHtml, actor: actor() }),
+    }),
   deleteFrame: (frameId: string) =>
     req('/api/frames/' + frameId, { method: 'DELETE', body: JSON.stringify({ actor: actor() }) }),
   sendTaskFeedback: (taskId: string, text: string) =>

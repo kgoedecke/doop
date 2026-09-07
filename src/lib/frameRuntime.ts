@@ -1,3 +1,5 @@
+import { DESIGN_PROPERTY_KEYS } from './designProperties'
+
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
  * via postMessage and the runtime morphs the live DOM to match — only changed
@@ -118,6 +120,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* nearest ancestor (incl. self) that directly contains visible text */
   function candidate(start) {
     var el = start && start.nodeType === 3 ? start.parentElement : start
+    if (el && el.closest('[data-doop-locked]')) return null
     while (el && el !== document.body && el !== document.documentElement) {
       if (hasOwnText(el)) return el
       el = el.parentElement
@@ -207,7 +210,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   function postEdited() {
-    parent.postMessage({ type: 'doop:edited', html: serialize() }, '*')
+    parent.postMessage({ type: 'doop:edited', html: serialize(), editing: editing }, '*')
     /* typing can move/grow the element — keep the parent's toolbar anchored */
     if (editing && activeEl) postActive()
   }
@@ -330,6 +333,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   window.addEventListener('message', function (ev) {
+    if (ev.source !== parent) return
     var d = ev.data
     if (!d) return
     if (d.type === 'doop:html' && typeof d.html === 'string' && !editing) render(d.html)
@@ -342,6 +346,21 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:code') {
       parent.postMessage({ type: 'doop:code-result', reqId: d.reqId, html: elementCode(d.selector) }, '*')
+    }
+    if (d.type === 'doop:inspect-style') {
+      var inspection = null
+      try {
+        var matches = typeof d.selector === 'string' ? document.querySelectorAll(d.selector) : []
+        var inspected = matches.length === 1 ? matches[0] : null
+        if (inspected && document.body.contains(inspected)) {
+          var computed = getComputedStyle(inspected)
+          var values = {}
+          var keys = ${JSON.stringify(DESIGN_PROPERTY_KEYS)}
+          for (var ki = 0; ki < keys.length; ki++) values[keys[ki]] = computed.getPropertyValue(keys[ki])
+          inspection = { selector: d.selector, styles: values, rect: designRect(inspected) }
+        }
+      } catch (e) { /* invalid or stale selector */ }
+      parent.postMessage({ type: 'doop:style-result', reqId: d.reqId, inspection: inspection }, '*')
     }
     if (d.type === 'doop:locate') {
       var found = null
