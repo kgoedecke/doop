@@ -248,7 +248,10 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       if (!moved && probeOnClick) probeAt(off.x, off.y)
       else if (moved) closePopovers()
       /* a click (no drag) on the frame name opens the details panel */
-      if (!moved && panelOnClick) useStore.getState().setInspectorOpen(true)
+      if (!moved && panelOnClick) {
+        closePopovers()
+        useStore.getState().setInspectorOpen(true)
+      }
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -469,6 +472,16 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   useEffect(() => {
     if (!selected && editing) exitEdit()
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const exportAnchor = editing ? activeHit : probe
+  useEffect(() => {
+    const s = useStore.getState()
+    s.setSelectedElement(
+      frame.id,
+      selected && exportAnchor ? { rect: exportAnchor.rect, label: exportAnchor.tag } : null,
+    )
+    return () => s.setSelectedElement(frame.id, null)
+  }, [frame.id, selected, exportAnchor])
 
   /* When zoomed past 100%, render the iframe k× larger and counter-scale it,
      with a matching CSS zoom inside — same layout, k× the raster density, so

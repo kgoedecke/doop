@@ -107,7 +107,7 @@ export function Inspector({
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3.5 py-2.5">
         <span className="mr-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Export</span>
-        <Button className={exportBtn} onClick={() => useStore.getState().openExport(frame.id)}>
+        <Button className={exportBtn} onClick={() => useStore.getState().openExport()}>
           Export…
         </Button>
         <Button

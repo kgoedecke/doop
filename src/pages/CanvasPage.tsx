@@ -311,7 +311,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             variant="ghost"
             disabled={!selectedId}
             onClick={() => useStore.getState().openExport()}
-            title="Export selected frames"
+            title="Export current selection"
           >
             Export
           </Button>

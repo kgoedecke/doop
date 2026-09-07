@@ -53,6 +53,7 @@ interface State {
   /** Frame IDs captured when opening the export dialog. */
   exportFrameIds: string[] | null
   exportElement: ElementExport | null
+  selectedElement: (ElementExport & { frameId: string }) | null
   /** open frame context menu; deferPanel hides the Inspector until it closes
    *  (right-click selecting a frame must not slide a panel in under the menu) */
   ctxMenu: { frameId: string; deferPanel: boolean } | null
@@ -116,6 +117,7 @@ interface State {
   selectMany(ids: string[]): void
   setPanMode(v: boolean): void
   setInspectorOpen(v: boolean): void
+  setSelectedElement(frameId: string, element: ElementExport | null): void
   openExport(frameId?: string): void
   openElementExport(frameId: string, element: ElementExport): void
   closeExport(): void
@@ -147,6 +149,7 @@ export const useStore = create<State>((set, get) => ({
   inspectorOpen: false,
   exportFrameIds: null,
   exportElement: null,
+  selectedElement: null,
   ctxMenu: null,
   viewport: { x: 0, y: 0, zoom: 1 },
   snapGuides: [],
@@ -155,7 +158,8 @@ export const useStore = create<State>((set, get) => ({
   flashes: {},
   streams: {},
 
-  setCanvas: (canvas) => set({ canvas, ...(!canvas ? { exportFrameIds: null, exportElement: null } : {}) }),
+  setCanvas: (canvas) =>
+    set({ canvas, ...(!canvas ? { exportFrameIds: null, exportElement: null, selectedElement: null } : {}) }),
   setConnected: (connected) => set({ connected }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) => set({ presences: Object.fromEntries(list.map((p) => [p.clientId, p])) }),
@@ -232,6 +236,7 @@ export const useStore = create<State>((set, get) => ({
       const selectedIds = s.selectedIds.filter((id) => id !== frameId)
       return {
         canvas: { ...s.canvas, frames: s.canvas.frames.filter((f) => f.id !== frameId) },
+        selectedElement: s.selectedElement?.frameId === frameId ? null : s.selectedElement,
         selectedIds,
         /* losing the primary promotes the last surviving member, so a group
            never sits selected with nothing driving the Inspector/presence */
@@ -288,28 +293,43 @@ export const useStore = create<State>((set, get) => ({
     set((s) => {
       const selectedIds = selectedId ? [selectedId] : []
       return s.selectedId === selectedId
-        ? { selectedId, selectedIds }
-        : { selectedId, selectedIds, inspectorOpen: false }
+        ? { selectedId, selectedIds, selectedElement: null }
+        : { selectedId, selectedIds, inspectorOpen: false, selectedElement: null }
     }),
   toggleSelect: (id) =>
     set((s) => {
       const selectedIds = s.selectedIds.includes(id) ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id]
       const selectedId = selectedIds[selectedIds.length - 1] ?? null
-      return selectedId === s.selectedId ? { selectedIds } : { selectedIds, selectedId, inspectorOpen: false }
+      return selectedId === s.selectedId
+        ? { selectedIds, selectedElement: null }
+        : { selectedIds, selectedId, inspectorOpen: false, selectedElement: null }
     }),
   selectMany: (ids) =>
     set((s) => {
       const selectedId = ids[ids.length - 1] ?? null
-      return selectedId === s.selectedId ? { selectedIds: ids } : { selectedIds: ids, selectedId, inspectorOpen: false }
+      return selectedId === s.selectedId
+        ? { selectedIds: ids, selectedElement: null }
+        : { selectedIds: ids, selectedId, inspectorOpen: false, selectedElement: null }
     }),
   setPanMode: (panMode) => set({ panMode }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
+  setSelectedElement: (frameId, element) =>
+    set((s) => {
+      if (element && s.selectedIds.length === 1 && s.selectedId === frameId) {
+        return { selectedElement: { ...element, frameId } }
+      }
+      return s.selectedElement?.frameId === frameId ? { selectedElement: null } : s
+    }),
   openExport: (frameId) =>
     set((s) => {
       const ids = frameId && !s.selectedIds.includes(frameId) ? [frameId] : s.selectedIds
       const exportFrameIds = ids.filter((id) => s.canvas?.frames.some((f) => f.id === id))
-      return { exportFrameIds: exportFrameIds.length ? exportFrameIds : null, exportElement: null }
+      const element =
+        !frameId && exportFrameIds.length === 1 && s.selectedElement?.frameId === exportFrameIds[0]
+          ? s.selectedElement
+          : null
+      return { exportFrameIds: exportFrameIds.length ? exportFrameIds : null, exportElement: element }
     }),
   openElementExport: (frameId, element) =>
     set((s) =>
