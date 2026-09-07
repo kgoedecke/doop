@@ -23,6 +23,13 @@ import { Tooltip } from './ui/tooltip'
 import { GithubIcon, SyncIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
+import {
+  saveDesignPatch,
+  selectDesignElement,
+  selectDesignFrame,
+  useDesignEditor,
+  type ElementInspection,
+} from '../lib/designEditor'
 
 /* Counter-scale contract: chrome that keeps constant on-screen size divides
    by the `--zoom` variable the Stage publishes (capped at 2.4× when zoomed
@@ -93,6 +100,8 @@ interface HoverHit {
    this component — memo holds as long as the frame and raster are unchanged. */
 export const FrameView = memo(function FrameView({ frame, raster }: { frame: Frame; raster: number }) {
   const selected = useStore((s) => s.selectedIds.includes(frame.id))
+  const designSelection = useDesignEditor((s) => (s.selection?.frameId === frame.id ? s.selection : null))
+  const designInspection = useDesignEditor((s) => (s.selection?.frameId === frame.id ? s.inspection : null))
   /* space held: the shield stays up even in edit mode, so the press reaches
      the Stage and pans instead of vanishing into the editable iframe */
   const panMode = useStore((s) => s.panMode)
@@ -248,7 +257,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       if (!moved && probeOnClick) probeAt(off.x, off.y)
       else if (moved) closePopovers()
       /* a click (no drag) on the frame name opens the details panel */
-      if (!moved && panelOnClick) useStore.getState().setInspectorOpen(true)
+      if (!moved && panelOnClick) selectDesignFrame(frame.id)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -278,6 +287,50 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     if (!runtimeReady || editing || suspendPost) return
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html }, '*')
   }, [runtimeReady, html, editing, suspendPost])
+
+  /* The parent owns source edits. This bridge only reads the sandbox; both
+     the window and request identity must match before accepting a reply. */
+  useEffect(() => {
+    if (!runtimeReady || !designSelection || editing) return
+    const reqId = crypto.randomUUID()
+    const selector = designSelection.selector
+    function request() {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'doop:inspect-style', reqId, selector }, '*')
+    }
+    function receive(ev: MessageEvent) {
+      if (
+        ev.source !== iframeRef.current?.contentWindow ||
+        ev.data?.type !== 'doop:style-result' ||
+        ev.data.reqId !== reqId
+      )
+        return
+      const current = useDesignEditor.getState().selection
+      if (current?.frameId !== frame.id || current.selector !== selector) return
+      const info = ev.data.inspection as ElementInspection | null
+      if (!info) {
+        useDesignEditor.setState({ inspection: null })
+        return
+      }
+      if (
+        info.selector !== selector ||
+        !info.styles ||
+        typeof info.styles !== 'object' ||
+        !info.rect ||
+        !Object.values(info.rect).every((value) => typeof value === 'number' && Number.isFinite(value)) ||
+        !Object.values(info.styles).every((value) => typeof value === 'string' && value.length < 20000)
+      )
+        return
+      useDesignEditor.setState({ inspection: info })
+    }
+    window.addEventListener('message', receive)
+    request()
+    // Stylesheets and web fonts may settle after the initial morph.
+    const timer = window.setTimeout(request, 500)
+    return () => {
+      window.removeEventListener('message', receive)
+      window.clearTimeout(timer)
+    }
+  }, [runtimeReady, html, designSelection, editing, raster, frame.id])
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
@@ -369,8 +422,15 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
-      if (ev.data?.type === 'doop:probe-result' && ev.data.reqId === probeReq.current) {
+      if (
+        ev.data?.type === 'doop:probe-result' &&
+        ev.data.reqId === probeReq.current &&
+        useDesignEditor.getState().inlineFrameId !== frame.id
+      ) {
         setProbe(ev.data.hit ?? null)
+        if (ev.data.hit?.selector && useStore.getState().selectedId === frame.id && useStore.getState().inspectorOpen) {
+          selectDesignElement(frame.id, ev.data.hit.selector)
+        }
       }
       if (ev.data?.type === 'doop:hover-result' && ev.data.reqId === hoverReq.current) {
         const hit = (ev.data.hit ?? null) as HoverHit | null
@@ -430,6 +490,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
 
   function enterEdit() {
     select(frame.id)
+    useDesignEditor.setState({ selection: null, inspection: null, inlineFrameId: frame.id })
     closePopovers()
     clearHover()
     setEditing(true)
@@ -449,11 +510,16 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
-      if (ev.data?.type === 'doop:edited' && typeof ev.data.html === 'string') {
-        const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
-        useStore.getState().patchFrameLocal(frame.id, { html: ev.data.html })
-        api.updateFrame(frame.id, { html: ev.data.html }).catch(console.error)
-        if (before !== undefined) recordUpdate(frame.id, { html: before }, { html: ev.data.html })
+      if (
+        ev.data?.type === 'doop:edited' &&
+        typeof ev.data.html === 'string' &&
+        useDesignEditor.getState().inlineFrameId === frame.id
+      ) {
+        const done = ev.data.editing === false
+        void saveDesignPatch(frame.id, { html: ev.data.html }).finally(() => {
+          if (done && useDesignEditor.getState().inlineFrameId === frame.id)
+            useDesignEditor.setState({ inlineFrameId: null })
+        })
       }
       if (ev.data?.type === 'doop:edit-esc') {
         setEditing(false)
@@ -469,6 +535,17 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   useEffect(() => {
     if (!selected && editing) exitEdit()
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (designSelection && editing) exitEdit()
+  }, [designSelection, editing])
+
+  useEffect(
+    () => () => {
+      if (useDesignEditor.getState().inlineFrameId === frame.id) useDesignEditor.setState({ inlineFrameId: null })
+    },
+    [frame.id],
+  )
 
   /* When zoomed past 100%, render the iframe k× larger and counter-scale it,
      with a matching CSS zoom inside — same layout, k× the raster density, so
@@ -640,6 +717,18 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                 style={{ left: probe.rect.x, top: probe.rect.y, width: probe.rect.width, height: probe.rect.height }}
               />
             )}
+            {designSelection && designInspection && selected && !editing && !dragging && (
+              <div
+                data-testid="design-selection-outline"
+                className="pointer-events-none absolute z-[4] shadow-[inset_0_0_0_calc(1.5px/var(--zoom,1))_var(--brand)]"
+                style={{
+                  left: designInspection.rect.x,
+                  top: designInspection.rect.y,
+                  width: designInspection.rect.width,
+                  height: designInspection.rect.height,
+                }}
+              />
+            )}
             {flash && (
               <div
                 className="pointer-events-none absolute -inset-px rounded-[6px] animate-[frame-flash_1.2s_ease-out_forwards]"
@@ -779,6 +868,13 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                             }}
                           >
                             ✦ Ask AI
+                          </Button>
+                          <Button
+                            variant="inverse"
+                            className={EL_TOOLBAR_BTN}
+                            onClick={() => selectDesignElement(frame.id, anchor.selector)}
+                          >
+                            Design
                           </Button>
                           <Button
                             variant="inverse"

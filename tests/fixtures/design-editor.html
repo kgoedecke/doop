@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --accent: #2743ee;
+        --space: 24px;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #fbfaf7;
+        color: #1e252b;
+      }
+      #page {
+        padding: 36px 48px;
+      }
+      #navigation {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 72px;
+      }
+      .wordmark {
+        font-size: 22px;
+        font-weight: 750;
+        letter-spacing: -1px;
+      }
+      nav {
+        display: flex;
+        gap: 24px;
+        font-size: 12px;
+        color: #657079;
+      }
+      #hero {
+        display: grid;
+        grid-template-columns: 1.3fr 1fr;
+        gap: 40px;
+        align-items: center;
+      }
+      .eyebrow {
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+      #hero-title {
+        font-size: 52px;
+        line-height: 1.06;
+        letter-spacing: -2px;
+        margin: 18px 0;
+        font-weight: 600;
+      }
+      #description {
+        font-size: 14px;
+        color: #6b7276;
+        line-height: 1.7;
+        max-width: 320px;
+        margin: 0 0 28px;
+      }
+      #cta {
+        padding: 14px 20px;
+        border-radius: 8px;
+        background: var(--accent);
+        color: white;
+        border: 0;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      #art {
+        height: 320px;
+        padding: var(--space);
+        border-radius: 32px;
+        background: linear-gradient(145deg, #d9dfed, #e9eee9);
+        position: relative;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+      }
+      .orb {
+        width: 190px;
+        height: 190px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 30% 25%, #b9c2ff, #576ede 55%, #243278);
+        box-shadow:
+          0 25px 35px rgba(43, 58, 129, 0.22),
+          inset -12px -15px 25px rgba(32, 38, 110, 0.2);
+      }
+      #art-label {
+        position: absolute;
+        bottom: 22px;
+        left: 24px;
+        font-size: 10px;
+        letter-spacing: 1px;
+        color: #4a5679;
+      }
+      #features {
+        display: flex;
+        gap: 24px;
+        padding-top: 45px;
+        margin-top: 55px;
+        border-top: 1px solid #dfdfda;
+      }
+      .feature {
+        flex: 1;
+      }
+      .feature h2 {
+        font-size: 13px;
+        margin: 0 0 8px;
+      }
+      .feature p {
+        font-size: 11px;
+        color: #71777c;
+        line-height: 1.6;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="page" data-doop-name="Landing page">
+      <header id="navigation" data-doop-name="Navigation">
+        <span class="wordmark">orbit®</span>
+        <nav><span>Our approach</span><span>Work</span><span>Get in touch ↗</span></nav>
+      </header>
+      <section id="hero" data-doop-name="Hero · grid layout">
+        <div id="copy" data-doop-name="Hero copy">
+          <span class="eyebrow">A little space for big ideas</span>
+          <h1 id="hero-title" data-doop-name="Headline">Make room<br />for possibility.</h1>
+          <p id="description" data-doop-name="Description">
+            Thoughtful tools for teams who see things differently. Bring your next idea into focus.
+          </p>
+          <button id="cta" data-doop-name="Primary button">Explore the studio ↗</button>
+        </div>
+        <div id="art" data-doop-name="Gradient artwork">
+          <div class="orb" data-doop-name="Orb · shadows"></div>
+          <span id="art-label">ROOM TO EXPLORE / 001</span>
+        </div>
+      </section>
+      <section id="features" data-doop-name="Features · auto layout">
+        <article class="feature">
+          <h2>Start with curiosity</h2>
+          <p>Good questions open new doors.</p>
+        </article>
+        <article class="feature">
+          <h2>Make it tangible</h2>
+          <p>Give your ideas a place to take shape.</p>
+        </article>
+        <article class="feature">
+          <h2>Build it together</h2>
+          <p>The best work leaves room for others.</p>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

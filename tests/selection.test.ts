@@ -107,6 +107,34 @@ describe('grouped history', () => {
 })
 
 describe('review follow-ups', () => {
+  it('keeps separate inspector changes as separate undo steps', async () => {
+    history.recordUpdate('a', { x: 0 }, { x: 10 }, false)
+    history.recordUpdate('a', { x: 10 }, { x: 20 }, false)
+    await history.undo()
+    expect(api.updateFrame).toHaveBeenLastCalledWith('a', { x: 10 })
+    await history.undo()
+    expect(api.updateFrame).toHaveBeenLastCalledWith('a', { x: 0 })
+  })
+
+  it('waits for a successful inspector save to be recorded before undoing it', async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    }).then(() => history.recordUpdate('a', { x: 0 }, { x: 10 }, false))
+    history.trackSave(pending)
+    const undone = history.undo()
+    release()
+    await undone
+    expect(api.updateFrame).toHaveBeenLastCalledWith('a', { x: 0 })
+  })
+
+  it('does not replace newer HTML when undoing a source edit', async () => {
+    history.recordUpdate('a', { html: 'before' }, { html: 'my edit' }, false)
+    useStore.getState().patchFrameLocal('a', { html: 'remote edit' })
+    await history.undo()
+    expect(api.updateFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().canvas!.frames[0].html).toBe('remote edit')
+  })
   it('deleting the primary frame promotes the last surviving member', () => {
     useStore.getState().selectMany(['a', 'b', 'c'])
     useStore.getState().removeFrame('c')

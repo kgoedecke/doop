@@ -17,6 +17,8 @@ import { ensureTab } from '../lib/desktop'
 import { Stage } from '../components/Stage'
 import { Board } from '../components/Board'
 import { Inspector } from '../components/Inspector'
+import { LayersPanel } from '../components/LayersPanel'
+import { useDesignEditor, commitDesignEdit } from '../lib/designEditor'
 import { ActivityPanel } from '../components/ActivityPanel'
 import { ConnectModal } from '../components/ConnectModal'
 import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
@@ -78,7 +80,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const selectedId = useStore((s) => s.selectedId)
   const select = useStore((s) => s.select)
   const isMobile = useIsMobile()
-  const [showActivity, setShowActivity] = useState(() => !window.matchMedia('(max-width: 900px)').matches)
+  const [showActivity, setShowActivity] = useState(false)
+  const [showMobileLayers, setShowMobileLayers] = useState(false)
+  const layersOpen = useDesignEditor((s) => s.layersOpen)
   const [view, setView] = useState<'canvas' | 'board'>('canvas')
   const [showConnect, setShowConnect] = useState(false)
   const [showShare, setShowShare] = useState(false)
@@ -130,15 +134,36 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return
       const sel = useStore.getState().selectedId
       const selectedIds = useStore.getState().selectedIds
+      const element = useDesignEditor.getState().selection
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'Backslash') {
+        e.preventDefault()
+        const open = useDesignEditor.getState().layersOpen || useStore.getState().inspectorOpen
+        useDesignEditor.getState().setLayersOpen(!open)
+        useStore.getState().setInspectorOpen(!open && !!sel)
+        return
+      }
+      if (
+        element &&
+        (e.key === 'Delete' || e.key === 'Backspace' || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd'))
+      ) {
+        e.preventDefault()
+        void commitDesignEdit(element.frameId, element.selector, {
+          type: e.key.toLowerCase() === 'd' ? 'duplicate' : 'delete',
+        })
+        return
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length) {
         e.preventDefault()
         const frames = useStore.getState().canvas?.frames.filter((f) => selectedIds.includes(f.id)) ?? []
         deleteFramesTracked(frames)
       }
-      if (e.key === 'Escape') select(null)
+      if (e.key === 'Escape') {
+        if (element) useDesignEditor.setState({ selection: null, inspection: null })
+        else select(null)
+      }
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) redo()
@@ -236,6 +261,12 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   /* the panel only shows when a frame-name click (or deep link) opened it —
      selecting a frame by clicking its surface must not slide it in */
   const inspectorOpen = useStore((s) => s.inspectorOpen)
+  useEffect(() => {
+    if (inspectorOpen) {
+      setShowActivity(false)
+      setShowMobileLayers(false)
+    }
+  }, [inspectorOpen])
   /* a right-click that selected the frame keeps the Inspector out until the
      context menu closes — it would slide in right under the open menu */
   const deferPanel = useStore((s) => !!s.ctxMenu?.deferPanel)
@@ -298,7 +329,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               />
             ))}
           </div>
-          <Button variant="ghost" onClick={() => setShowActivity((v) => !v)}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              useStore.getState().setInspectorOpen(false)
+              setShowActivity((v) => !v)
+            }}
+          >
             Activity
           </Button>
           <Button variant="ghost" onClick={() => setShowImport(true)} title="Import a live web page as a frame">
@@ -348,7 +385,39 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           <Board canvasId={canvasId} />
         ) : (
           <>
-            <Stage onAddFrame={addFrame} />
+            <div
+              className="absolute inset-y-0"
+              style={{
+                left: !isMobile && layersOpen ? 272 : 0,
+                right: !isMobile && ((inspectorOpen && selectedFrame) || showActivity) ? 328 : 0,
+              }}
+            >
+              <Stage onAddFrame={addFrame} />
+              <WorkingNow />
+              <PromptBar canvasId={canvasId} />
+              {!inspectorOpen && <Onboarding />}
+            </div>
+            {!isMobile && layersOpen && (
+              <LayersPanel onClose={() => useDesignEditor.getState().setLayersOpen(false)} onAddFrame={addFrame} />
+            )}
+            {(isMobile || !layersOpen) && (
+              <Button
+                className="absolute left-3 top-3 z-[35] h-9 bg-surface"
+                aria-label="Open layers"
+                onClick={() => (isMobile ? setShowMobileLayers(true) : useDesignEditor.getState().setLayersOpen(true))}
+              >
+                ▤ Layers
+              </Button>
+            )}
+            {selectedFrame && !inspectorOpen && !showActivity && (
+              <Button
+                className="absolute right-3 top-3 z-[35] h-9 bg-surface"
+                aria-label="Open inspector"
+                onClick={() => useStore.getState().setInspectorOpen(true)}
+              >
+                Design ⇤
+              </Button>
+            )}
             <div
               className={cn(
                 'pointer-events-none absolute top-3 right-3 z-30 flex flex-col items-end gap-2 transition-[right] duration-150 ease-[ease] [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2',
@@ -397,17 +466,24 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 </Button>
               )}
             </div>
-            <WorkingNow />
-            <PromptBar canvasId={canvasId} />
-            <Onboarding />
             {!isMobile && selectedFrame && inspectorOpen && !deferPanel && <Inspector frame={selectedFrame} />}
-            {!isMobile && showActivity && <ActivityPanel onClose={() => setShowActivity(false)} />}
+            {!isMobile && showActivity && !inspectorOpen && <ActivityPanel onClose={() => setShowActivity(false)} />}
           </>
         )}
       </div>
 
       {isMobile && (
         <>
+          <Sheet open={showMobileLayers} onOpenChange={setShowMobileLayers}>
+            <SheetContent
+              side="left"
+              showCloseButton={false}
+              className="w-[min(320px,90vw)] gap-0 border-line bg-surface p-0"
+            >
+              <SheetTitle className="sr-only">Canvas layers</SheetTitle>
+              <LayersPanel surface="inline" onClose={() => setShowMobileLayers(false)} onAddFrame={addFrame} />
+            </SheetContent>
+          </Sheet>
           <Sheet open={showMobileActions} onOpenChange={setShowMobileActions}>
             <SheetContent
               side="bottom"
@@ -453,7 +529,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           <Sheet
             open={!!selectedFrame && inspectorOpen && !deferPanel}
             onOpenChange={(open) => {
-              if (!open) select(null)
+              if (!open) useStore.getState().setInspectorOpen(false)
             }}
           >
             <SheetContent

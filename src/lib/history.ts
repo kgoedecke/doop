@@ -63,12 +63,13 @@ function updateEntry(frameId: string, before: Patch, after: Patch): UpdateEntry 
   return { type: 'update', frameId, before: b, after: a, at: Date.now() }
 }
 
-export function recordUpdate(frameId: string, before: Patch, after: Patch) {
+export function recordUpdate(frameId: string, before: Patch, after: Patch, coalesce = true) {
   const entry = updateEntry(frameId, before, after)
   if (!entry) return
   const keys = Object.keys(entry.after) as (keyof Patch)[]
   const top = undoStack[undoStack.length - 1]
   if (
+    coalesce &&
     top?.type === 'update' &&
     top.frameId === frameId &&
     Date.now() - top.at < COALESCE_MS &&
@@ -141,9 +142,15 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
   const forward = direction === 'redo'
   if (e.type === 'update') {
     const patch = forward ? e.after : e.before
+    const expectedHtml = patch.html === undefined ? undefined : forward ? e.before.html : e.after.html
+    const current = useStore.getState().canvas?.frames.find((f) => f.id === e.frameId)
+    if (expectedHtml !== undefined && current && current.html !== expectedHtml) {
+      throw new Error('The frame changed since this edit. Undo was skipped to preserve newer work.')
+    }
     useStore.getState().patchFrameLocal(e.frameId, patch)
     try {
-      await api.updateFrame(e.frameId, patch)
+      if (expectedHtml !== undefined) await api.updateFrame(e.frameId, patch, expectedHtml)
+      else await api.updateFrame(e.frameId, patch)
     } catch (err) {
       /* the server kept the old value — put the local copy back in step
          with it rather than leave a client-only position behind */
@@ -160,12 +167,13 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
 
 async function step(direction: 'undo' | 'redo') {
   if (busy) return
-  const [from, to] = direction === 'undo' ? [undoStack, redoStack] : [redoStack, undoStack]
-  const e = from.pop()
-  if (!e) return
   busy = true
   try {
     await inflight
+    // Successful inspector saves enter history only after the server accepts them.
+    const [from, to] = direction === 'undo' ? [undoStack, redoStack] : [redoStack, undoStack]
+    const e = from.pop()
+    if (!e) return
     const applied = await apply(e, direction)
     if (applied) {
       to.push(applied)

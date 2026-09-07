@@ -145,7 +145,7 @@ export function Onboarding() {
         <SheetTrigger asChild>
           <Button
             variant="ghost"
-            className="absolute left-3 top-3 z-30 h-10 gap-2 rounded-full bg-surface px-3 text-xs font-semibold shadow-card"
+            className="absolute left-[110px] top-3 z-30 h-10 gap-2 rounded-full bg-surface px-3 text-xs font-semibold shadow-card"
           >
             <span className="text-brand">✦</span> Getting started
             <span className="font-mono text-[10px] text-ink-faint">{done}/3</span>

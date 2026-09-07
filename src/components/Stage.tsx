@@ -14,6 +14,7 @@ import { hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
 import { MenuHint } from './ui/menu'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
 import { Toolbar, ToolbarButton, ToolbarDivider, ToolbarValue } from './ui/toolbar'
+import { useDesignEditor } from '../lib/designEditor'
 
 const MIN_ZOOM = 0.08
 const MAX_ZOOM = 3
@@ -37,6 +38,34 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   /* iframe oversampling factor — bumped only once the zoom settles */
   const [raster, setRaster] = useState(1)
   const fitted = useRef(false)
+
+  // Opening a rail changes the usable canvas. Keep its visual center and
+  // scale down on shrink so the focused design stays clear of the panels.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let width = el.clientWidth
+    let height = el.clientHeight
+    const observer = new ResizeObserver(() => {
+      const nextWidth = el.clientWidth
+      const nextHeight = el.clientHeight
+      if (width && height && nextWidth && nextHeight && (width !== nextWidth || height !== nextHeight)) {
+        const vp = useStore.getState().viewport
+        const scale = Math.min(1, nextWidth / width, nextHeight / height)
+        const zoom = Math.max(MIN_ZOOM, vp.zoom * scale)
+        const ratio = zoom / vp.zoom
+        setViewport({
+          x: nextWidth / 2 - (width / 2 - vp.x) * ratio,
+          y: nextHeight / 2 - (height / 2 - vp.y) * ratio,
+          zoom,
+        })
+      }
+      width = nextWidth
+      height = nextHeight
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [setViewport])
 
   /* Viewport → DOM without React: no component subscribes to the viewport, so
      pan/zoom never renders anything. A store subscription writes the world
@@ -161,6 +190,32 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     setViewport({
       x: (w - (maxX - minX) * zoom) / 2 - minX * zoom,
       y: (h - (maxY - minY) * zoom) / 2 - minY * zoom,
+      zoom,
+    })
+  }
+
+  function fitSelection() {
+    const el = ref.current
+    const state = useStore.getState()
+    const frames = state.canvas?.frames.filter((frame) => state.selectedIds.includes(frame.id)) ?? []
+    if (!el || !frames.length) return
+    const editor = useDesignEditor.getState()
+    const rect = editor.inspection?.selector === editor.selection?.selector ? editor.inspection?.rect : null
+    const boxes =
+      rect && frames.length === 1
+        ? [{ x: frames[0].x + rect.x, y: frames[0].y + rect.y, width: rect.width, height: rect.height }]
+        : frames
+    const x = Math.min(...boxes.map((box) => box.x))
+    const y = Math.min(...boxes.map((box) => box.y))
+    const width = Math.max(...boxes.map((box) => box.x + box.width)) - x
+    const height = Math.max(...boxes.map((box) => box.y + box.height)) - y
+    const zoom = Math.max(
+      MIN_ZOOM,
+      Math.min(MAX_ZOOM, (el.clientWidth - 100) / Math.max(1, width), (el.clientHeight - 160) / Math.max(1, height)),
+    )
+    setViewport({
+      x: (el.clientWidth - width * zoom) / 2 - x * zoom,
+      y: (el.clientHeight - height * zoom) / 2 - y * zoom,
       zoom,
     })
   }
@@ -303,9 +358,16 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
       })
     }
     function onKey(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
       const t = e.target as HTMLElement
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && e.shiftKey && ['Digit0', 'Digit1', 'Digit2'].includes(e.code)) {
+        e.preventDefault()
+        if (e.code === 'Digit1') fit()
+        else if (e.code === 'Digit2') fitSelection()
+        else zoomTo(1)
+        return
+      }
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
       if (e.key !== '0' && e.key !== '=' && e.key !== '+' && e.key !== '-') return
       /* '+' arrives as ⇧= on most layouts; any other shifted combo isn't ours */
       if (e.shiftKey && e.key !== '+') return
@@ -334,7 +396,13 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   useEffect(() => {
     function isTyping(e: KeyboardEvent) {
       const t = e.target as HTMLElement
-      return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
+      return (
+        t.tagName === 'INPUT' ||
+        t.tagName === 'TEXTAREA' ||
+        t.tagName === 'SELECT' ||
+        !!t.closest('[role="tree"], [data-slot="panel"]') ||
+        t.isContentEditable
+      )
     }
     function onDown(e: KeyboardEvent) {
       if (e.key !== ' ' || isTyping(e)) return
@@ -525,7 +593,12 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
             +
           </ToolbarButton>
           <ToolbarDivider />
-          <ToolbarButton onClick={fit}>Fit</ToolbarButton>
+          <ToolbarButton onClick={fit} title="Fit all frames (Shift+1)">
+            Fit
+          </ToolbarButton>
+          <ToolbarButton onClick={fitSelection} title="Zoom to selection (Shift+2)">
+            Selection
+          </ToolbarButton>
         </Toolbar>
 
         {canvas && (

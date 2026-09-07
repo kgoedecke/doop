@@ -151,7 +151,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   }
 
   return (
-    <div className="absolute bottom-[68px] left-1/2 z-30 flex w-[min(560px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-2 max-md:bottom-[calc(76px+env(safe-area-inset-bottom))] max-md:w-[calc(100vw-16px)] max-md:gap-1.5">
+    <div className="absolute bottom-[68px] left-1/2 z-30 flex w-[min(560px,calc(100%-24px))] -translate-x-1/2 flex-col gap-2 max-md:bottom-[calc(76px+env(safe-area-inset-bottom))] max-md:w-[calc(100%-16px)] max-md:gap-1.5">
       {attachments.length > 0 && (
         <div className="flex gap-2 px-0.5">
           {attachments.map((a) => (

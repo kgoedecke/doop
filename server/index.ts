@@ -1143,7 +1143,18 @@ app.post('/api/canvases/:id/frames', (req, res) => {
 
 app.patch('/api/frames/:id', (req, res) => {
   if (!requireFrame(req, res, req.params.id)) return
-  const { actor: _ignored, ...patch } = req.body ?? {}
+  const { actor: _ignored, expectedHtml, ...patch } = req.body ?? {}
+  // The synchronous compare and update form one operation in the room store.
+  // Older clients keep their existing behavior by omitting this precondition.
+  if (expectedHtml !== undefined) {
+    if (typeof expectedHtml !== 'string') return res.status(400).json({ error: 'expectedHtml must be a string' })
+    if (store.getFrame(req.params.id)?.html !== expectedHtml) {
+      return res.status(409).json({
+        error:
+          'This frame changed in another session. Your edit was not saved. Review the latest design and try again.',
+      })
+    }
+  }
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
   const allowed = ['name', 'x', 'y', 'width', 'height', 'html'] as const
   const clean: Record<string, unknown> = {}
