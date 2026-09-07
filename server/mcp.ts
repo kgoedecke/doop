@@ -34,6 +34,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. Never inline images as data: URIs.
 - Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
 - Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
+- Comments: call get_comments to read element-pinned comments and replies on a canvas, optionally filtered by frame. This does not claim feedback or resolve comments.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.`
 
@@ -565,6 +566,35 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       if (!canvasFor(canvas_id)) return noCanvas(canvas_id)
       actions.setAgentStatus(canvas_id, actorFrom(agent_name), status)
       return withFeedback(text({ ok: true, status: status.trim() || null }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'get_comments',
+    {
+      description:
+        'Read element-pinned comments and replies on a canvas, newest first, including author, text, frame, CSS selector, HTML snippet, parentId thread links, and claim/failure/resolution metadata. Includes resolved comments by default so complete conversations remain readable; set include_resolved to false for unresolved comments only. Returns the retained comment history (up to 100 entries per canvas), not an archive. Reading does not claim feedback or comments, or mark them resolved.',
+      annotations: { readOnlyHint: true },
+      inputSchema: {
+        canvas_id: z.string(),
+        frame_id: z.string().optional().describe('Only comments on this frame; it must belong to the canvas.'),
+        include_resolved: z.boolean().default(true).describe('Include resolved comments and replies. Default true.'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ canvas_id, frame_id, include_resolved, agent_name }) => {
+      if (!canvasFor(canvas_id)) return noCanvas(canvas_id)
+      if (frame_id !== undefined) {
+        const frame = frameFor(frame_id)
+        if (!frame || frame.canvasId !== canvas_id) return noFrame(frame_id)
+      }
+      arrive(canvas_id, agent_name)
+      const comments = actions
+        .getComments(canvas_id)
+        .filter((comment) => frame_id === undefined || comment.frameId === frame_id)
+        .filter((comment) => include_resolved || comment.resolvedAt === undefined)
+      // Deliberately omit withFeedback: inspecting comments must not claim work.
+      return text(comments)
     },
   )
 
