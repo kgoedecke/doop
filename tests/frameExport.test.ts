@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unzipSync } from 'fflate'
 import type { Frame } from '../shared/types'
-import { exportFileNames, exportSelectionBounds, exportSizeError, parseExportScale } from '../shared/frameExport'
+import {
+  exportFileNames,
+  exportSelectionBounds,
+  exportSizeError,
+  parseExportScale,
+  clipExportRegion,
+  parseExportCrop,
+} from '../shared/frameExport'
 import { prepareFrameExport } from '../src/lib/frameExport'
 
 const frame = (id: string, over: Partial<Frame> = {}) =>
@@ -125,5 +132,37 @@ describe('export downloads', () => {
     expect(bitmap.close).toHaveBeenCalledTimes(2)
     expect(canvas.width).toBe(0)
     expect(canvas.height).toBe(0)
+  })
+})
+
+describe('element export', () => {
+  it('clips fractional and partially outside element bounds to the visible frame', () => {
+    expect(clipExportRegion(frame('a'), { x: -12.5, y: 20.2, width: 90, height: 100 })).toEqual({
+      x: 0,
+      y: 20,
+      width: 78,
+      height: 80,
+    })
+    expect(parseExportCrop('10,20,50,30', frame('a'))).toEqual({ x: 10, y: 20, width: 50, height: 30 })
+    expect(parseExportCrop(undefined, frame('a'))).toBeUndefined()
+    for (const value of ['1,2,3', ',2,3,4', 'NaN,0,1,1', '0,0,-1,1', '300,0,20,20', ['0,0,1,1']]) {
+      expect(() => parseExportCrop(value, frame('a'))).toThrow()
+    }
+  })
+  it('requests only the crop and measures its output independently of the whole frame', async () => {
+    const fetcher = vi.fn().mockResolvedValue(imageResponse())
+    vi.stubGlobal('fetch', fetcher)
+    const result = await prepareFrameExport(
+      [frame('a', { width: 10000, height: 10000 })],
+      {
+        ...options,
+        crop: { x: 10, y: 20, width: 50, height: 30 },
+      },
+      new AbortController().signal,
+    )
+    expect(result.blob.type).toBe('image/png')
+    const query = new URL(fetcher.mock.calls[0][0], 'https://example.test').searchParams
+    expect(query.get('crop')).toBe('10,20,50,30')
+    expect(query.get('scale')).toBe('2')
   })
 })

@@ -123,3 +123,16 @@ it('renders fractional and high-density images with distinct cache entries', asy
   }
   expect(mocks.renderFrame).toHaveBeenCalledTimes(3)
 })
+
+it('keeps crops distinct from full frames and dashboard previews in the render cache', async () => {
+  const f = frame()
+  const crop = { x: 20, y: 30, width: 40, height: 50 }
+  await getImage(f, req({ ext: 'jpg', crop, preview: true }))
+  expect(mocks.renderFrame).toHaveBeenLastCalledWith(f, 1, { type: 'jpeg', quality: 90, clip: crop })
+  expect(mocks.getObject).not.toHaveBeenCalled()
+  await getImage(f, req({ ext: 'jpg', crop }))
+  expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+  await getImage(f, req({ ext: 'jpg' }))
+  await getImage(f, req({ ext: 'jpg', crop: { ...crop, x: 21 } }))
+  expect(mocks.renderFrame).toHaveBeenCalledTimes(3)
+})

@@ -12,6 +12,7 @@ import type {
   Presence,
   TaskFeedback,
 } from '../../shared/types'
+import type { ElementExport } from '../../shared/frameExport'
 import type { SnapGuide } from './snap'
 
 export interface Viewport {
@@ -51,6 +52,7 @@ interface State {
   inspectorOpen: boolean
   /** Frame IDs captured when opening the export dialog. */
   exportFrameIds: string[] | null
+  exportElement: ElementExport | null
   /** open frame context menu; deferPanel hides the Inspector until it closes
    *  (right-click selecting a frame must not slide a panel in under the menu) */
   ctxMenu: { frameId: string; deferPanel: boolean } | null
@@ -115,6 +117,7 @@ interface State {
   setPanMode(v: boolean): void
   setInspectorOpen(v: boolean): void
   openExport(frameId?: string): void
+  openElementExport(frameId: string, element: ElementExport): void
   closeExport(): void
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
@@ -143,6 +146,7 @@ export const useStore = create<State>((set, get) => ({
   panMode: false,
   inspectorOpen: false,
   exportFrameIds: null,
+  exportElement: null,
   ctxMenu: null,
   viewport: { x: 0, y: 0, zoom: 1 },
   snapGuides: [],
@@ -151,7 +155,7 @@ export const useStore = create<State>((set, get) => ({
   flashes: {},
   streams: {},
 
-  setCanvas: (canvas) => set({ canvas, ...(!canvas ? { exportFrameIds: null } : {}) }),
+  setCanvas: (canvas) => set({ canvas, ...(!canvas ? { exportFrameIds: null, exportElement: null } : {}) }),
   setConnected: (connected) => set({ connected }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) => set({ presences: Object.fromEntries(list.map((p) => [p.clientId, p])) }),
@@ -305,9 +309,15 @@ export const useStore = create<State>((set, get) => ({
     set((s) => {
       const ids = frameId && !s.selectedIds.includes(frameId) ? [frameId] : s.selectedIds
       const exportFrameIds = ids.filter((id) => s.canvas?.frames.some((f) => f.id === id))
-      return { exportFrameIds: exportFrameIds.length ? exportFrameIds : null }
+      return { exportFrameIds: exportFrameIds.length ? exportFrameIds : null, exportElement: null }
     }),
-  closeExport: () => set({ exportFrameIds: null }),
+  openElementExport: (frameId, element) =>
+    set((s) =>
+      s.canvas?.frames.some((f) => f.id === frameId)
+        ? { exportFrameIds: [frameId], exportElement: element }
+        : { exportFrameIds: null, exportElement: null },
+    ),
+  closeExport: () => set({ exportFrameIds: null, exportElement: null }),
   closeCtxMenu: () => set({ ctxMenu: null }),
   setViewport: (viewport) => set({ viewport }),
   /* fires on every pointermove during a drag — skip the no-op transitions

@@ -787,6 +787,16 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                           >
                             {'</>'} Code
                           </Button>
+                          <Button
+                            variant="inverse"
+                            className={EL_TOOLBAR_BTN}
+                            title="Export selected element"
+                            onClick={() =>
+                              useStore.getState().openElementExport(frame.id, { rect: anchor.rect, label: anchor.tag })
+                            }
+                          >
+                            Export
+                          </Button>
                           {!editing && canEdit && anchor.text !== '' && (
                             <Button
                               variant="inverse"

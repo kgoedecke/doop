@@ -180,3 +180,16 @@ describe('export selection', () => {
     expect(useStore.getState().exportFrameIds).toBeNull()
   })
 })
+
+it('element export targets one frame and resets when whole frames are exported', () => {
+  const s = useStore.getState()
+  s.selectMany(['a', 'b'])
+  const element = { label: 'h1', rect: { x: 10, y: 20, width: 80, height: 30 } }
+  s.openElementExport('b', element)
+  expect(useStore.getState().exportFrameIds).toEqual(['b'])
+  expect(useStore.getState().exportElement).toEqual(element)
+  s.openExport()
+  expect(useStore.getState().exportFrameIds).toEqual(['a', 'b'])
+  expect(useStore.getState().exportElement).toBeNull()
+  s.closeExport()
+})

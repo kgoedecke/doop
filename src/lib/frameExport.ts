@@ -5,6 +5,7 @@ import {
   exportSizeError,
   exportSelectionBounds,
   exportDimensions,
+  clipExportRegion,
   type ExportOptions,
 } from '../../shared/frameExport'
 
@@ -18,8 +19,10 @@ export async function prepareFrameExport(
 ): Promise<{ blob: Blob; name: string }> {
   if (!frames.length) throw new Error('Select at least one frame to export.')
   if (frames.length > 100) throw new Error('Export up to 100 frames at a time.')
+  if (options.crop && frames.length !== 1) throw new Error('Select one frame when exporting an element.')
+  const crop = options.crop ? clipExportRegion(frames[0], options.crop) : undefined
   for (const frame of frames) {
-    const error = exportSizeError(frame, options.scale)
+    const error = exportSizeError(crop ?? frame, options.scale)
     if (error) throw new Error(`${frame.name}: ${error}`)
   }
   const combined = options.mode === 'combined' && frames.length > 1
@@ -47,6 +50,7 @@ export async function prepareFrameExport(
     for (const [index, frame] of frames.entries()) {
       signal.throwIfAborted()
       const query = new URLSearchParams({ scale: String(options.scale), quality: String(options.quality) })
+      if (crop) query.set('crop', [crop.x, crop.y, crop.width, crop.height].join(','))
       // Composite lossless sources; apply JPG quality once, to the final image.
       const sourceFormat = combined ? 'png' : options.format
       const response = await fetch(`/i/${encodeURIComponent(frame.id)}.${sourceFormat}?${query}`, {

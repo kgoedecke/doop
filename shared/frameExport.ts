@@ -8,6 +8,7 @@ export interface ExportOptions {
   scale: ExportScale
   quality: number
   mode?: 'separate' | 'combined'
+  crop?: ExportRect
 }
 
 export function parseExportScale(value: unknown): ExportScale {
@@ -59,4 +60,38 @@ export function exportSelectionBounds(frames: Pick<Frame, 'x' | 'y' | 'width' | 
     width: Math.ceil(Math.max(...frames.map((f) => f.x + f.width)) - x),
     height: Math.ceil(Math.max(...frames.map((f) => f.y + f.height)) - y),
   }
+}
+
+export interface ExportRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ElementExport {
+  rect: ExportRect
+  label: string
+}
+
+/** Clamp to the visible frame and align outward to whole design pixels. */
+export function clipExportRegion(frame: Pick<Frame, 'width' | 'height'>, rect: ExportRect): ExportRect {
+  if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) {
+    throw new Error('Invalid export region.')
+  }
+  const x = Math.max(0, Math.floor(rect.x))
+  const y = Math.max(0, Math.floor(rect.y))
+  const right = Math.min(Math.round(frame.width), Math.ceil(rect.x + rect.width))
+  const bottom = Math.min(Math.round(frame.height), Math.ceil(rect.y + rect.height))
+  if (right <= x || bottom <= y) throw new Error('The selected area is outside the frame.')
+  return { x, y, width: right - x, height: bottom - y }
+}
+
+export function parseExportCrop(value: unknown, frame: Pick<Frame, 'width' | 'height'>): ExportRect | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') throw new Error('Invalid export region.')
+  const parts = value.split(',')
+  if (parts.length !== 4 || parts.some((part) => !part.trim())) throw new Error('Invalid export region.')
+  const [x, y, width, height] = parts.map(Number)
+  return clipExportRegion(frame, { x, y, width, height })
 }

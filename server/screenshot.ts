@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
+import type { ExportRect } from '../shared/frameExport.ts'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 
@@ -340,7 +341,7 @@ export async function renderFrame(
   frame: Frame,
   /* output pixel density — fractional values downscale huge frames */
   scale: number = 1,
-  opts: { type?: 'png' | 'jpeg'; quality?: number; maxHeight?: number } = {},
+  opts: { type?: 'png' | 'jpeg'; quality?: number; maxHeight?: number; clip?: ExportRect } = {},
 ): Promise<Buffer> {
   const loaded = await loadFramePage(frame)
   const { page } = loaded
@@ -352,9 +353,10 @@ export async function renderFrame(
     })
     const type = opts.type ?? 'png'
     const clip =
-      opts.maxHeight && frame.height > opts.maxHeight
+      opts.clip ??
+      (opts.maxHeight && frame.height > opts.maxHeight
         ? { x: 0, y: 0, width: Math.round(frame.width), height: Math.round(opts.maxHeight) }
-        : undefined
+        : undefined)
     const buf = await page.screenshot({
       type,
       ...(type === 'jpeg' ? { quality: opts.quality ?? 90 } : {}),

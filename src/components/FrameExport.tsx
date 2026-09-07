@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import {
   EXPORT_SCALES,
   exportDimensions,
+  clipExportRegion,
   exportSelectionBounds,
   exportFileNames,
   exportSizeError,
   type ExportFormat,
+  type ExportRect,
   type ExportScale,
 } from '../../shared/frameExport'
 import { downloadExport, prepareFrameExport } from '../lib/frameExport'
@@ -25,6 +27,8 @@ const selectClass =
 function ExportDialog({ ids }: { ids: string[] }) {
   const close = useStore((s) => s.closeExport)
   const [frames] = useState(() => useStore.getState().canvas?.frames.filter((f) => ids.includes(f.id)) ?? [])
+  const [element] = useState(() => useStore.getState().exportElement)
+  const [scope, setScope] = useState<'element' | 'frame'>(element ? 'element' : 'frame')
   const [format, setFormat] = useState<ExportFormat>('png')
   const [scale, setScale] = useState<ExportScale>(2)
   const [mode, setMode] = useState<'separate' | 'combined'>('separate')
@@ -34,19 +38,31 @@ function ExportDialog({ ids }: { ids: string[] }) {
   const [error, setError] = useState<string | null>(null)
   const controller = useRef<AbortController | null>(null)
   useEffect(() => () => controller.current?.abort(), [])
-  const names = exportFileNames(frames, format)
-  const tooLarge = frames.find((f) => exportSizeError(f, scale))
+  let crop: ExportRect | undefined
+  let cropError: string | null = null
+  if (scope === 'element' && element && frames[0]) {
+    try {
+      crop = clipExportRegion(frames[0], element.rect)
+    } catch (e) {
+      cropError = e instanceof Error ? e.message : 'Invalid export region.'
+    }
+  }
+  const exportFrames = crop ? frames.map((frame) => ({ ...frame, name: `${frame.name} - ${element!.label}` })) : frames
+  const names = exportFileNames(exportFrames, format)
+  const tooLarge = frames.find((f) => exportSizeError(crop ?? f, scale))
   const combined = mode === 'combined' && frames.length > 1
   const bounds = exportSelectionBounds(frames)
   const combinedSize = exportDimensions(bounds, scale)
   const sizeError =
     (combined && exportSizeError(bounds, scale)) ||
-    (tooLarge ? `${tooLarge.name}: ${exportSizeError(tooLarge, scale)}` : null)
-  const selectionError = !frames.length
-    ? 'Select at least one frame to export.'
-    : frames.length > 100
-      ? 'Export up to 100 frames at a time.'
-      : null
+    (tooLarge ? `${tooLarge.name}: ${exportSizeError(crop ?? tooLarge, scale)}` : null)
+  const selectionError =
+    cropError ||
+    (!frames.length
+      ? 'Select at least one frame to export.'
+      : frames.length > 100
+        ? 'Export up to 100 frames at a time.'
+        : null)
 
   async function startExport() {
     if (controller.current) return
@@ -56,7 +72,12 @@ function ExportDialog({ ids }: { ids: string[] }) {
     setCompleted(0)
     setError(null)
     try {
-      const file = await prepareFrameExport(frames, { format, scale, quality, mode }, run.signal, setCompleted)
+      const file = await prepareFrameExport(
+        exportFrames,
+        { format, scale, quality, mode, crop },
+        run.signal,
+        setCompleted,
+      )
       if (run.signal.aborted) return
       downloadExport(file.blob, file.name)
       close()
@@ -83,13 +104,30 @@ function ExportDialog({ ids }: { ids: string[] }) {
         close()
       }}
     >
-      <ModalTitle>{frames.length === 1 ? 'Export frame' : 'Export selection'}</ModalTitle>
+      <ModalTitle>
+        {scope === 'element' ? 'Export element' : frames.length === 1 ? 'Export frame' : 'Export selection'}
+      </ModalTitle>
       <ModalLede>
-        {frames.length === 1
-          ? 'Download an image at the size you need.'
-          : 'Export each frame separately or keep their canvas layout in one image.'}
+        {element
+          ? 'Crop the selected element as it appears in the frame, or export the whole frame.'
+          : frames.length === 1
+            ? 'Download an image at the size you need.'
+            : 'Export each frame separately or keep their canvas layout in one image.'}
       </ModalLede>
       <fieldset disabled={busy} className="mt-5 grid grid-cols-2 gap-3">
+        {element && (
+          <Field label="Area" htmlFor="export-scope" className="col-span-2">
+            <select
+              id="export-scope"
+              className={selectClass}
+              value={scope}
+              onChange={(e) => setScope(e.target.value as 'element' | 'frame')}
+            >
+              <option value="element">Selected element ({element.label})</option>
+              <option value="frame">Whole frame</option>
+            </select>
+          </Field>
+        )}
         {frames.length > 1 && (
           <Field label="Export as" htmlFor="export-mode" className="col-span-2">
             <select
@@ -161,7 +199,7 @@ function ExportDialog({ ids }: { ids: string[] }) {
           aria-label="Files to export"
         >
           {frames.map((frame, index) => {
-            const size = exportDimensions(frame, scale)
+            const size = exportDimensions(crop ?? frame, scale)
             return (
               <li key={frame.id} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
                 <span className="min-w-0 truncate" title={names[index]}>
