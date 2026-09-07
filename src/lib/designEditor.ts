@@ -12,6 +12,8 @@ export interface ElementSelection {
   fallback?: { selector: string; identity: string }
 }
 export interface ElementInspection {
+  /** Source and viewport that produced these measured bounds. */
+  rendered?: { html: string; width: number; height: number }
   selector: string
   styles: Record<string, string>
   rect: { x: number; y: number; width: number; height: number }

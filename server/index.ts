@@ -9,6 +9,7 @@ import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
 import { getImage } from './previews.ts'
+import { parseExportScale, exportSizeError, parseExportCrop } from '../shared/frameExport.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
 import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN, oidcPublicConfig } from './auth.ts'
@@ -293,11 +294,24 @@ app.get('/i/:id.:ext', async (req, res) => {
   const frame = store.getFrame(id)
   if (!frame) return res.status(404).end()
 
+  const scale = parseExportScale(req.query.scale)
+  let crop: ReturnType<typeof parseExportCrop>
+  try {
+    crop = parseExportCrop(req.query.crop, frame)
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid export region.' })
+  }
+  if (crop || !(ext === 'jpg' && req.query.preview !== undefined)) {
+    const error = exportSizeError(crop ?? frame, scale)
+    if (error) return res.status(400).json({ error })
+  }
+
   let result: Awaited<ReturnType<typeof getImage>>
   try {
     result = await getImage(frame, {
       ext,
-      scale: req.query.scale === '2' ? 2 : 1,
+      scale,
+      crop,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
       preview: req.query.preview !== undefined,

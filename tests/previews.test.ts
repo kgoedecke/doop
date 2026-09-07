@@ -114,3 +114,25 @@ describe('getImage', () => {
     expect(r.status === 'ok' && r.buf.toString()).toBe('stored')
   })
 })
+
+it('renders fractional and high-density images with distinct cache entries', async () => {
+  const f = frame()
+  for (const scale of [0.5, 3, 4] as const) {
+    await getImage(f, req({ ext: 'png', scale }))
+    expect(mocks.renderFrame).toHaveBeenLastCalledWith(f, scale, expect.objectContaining({ type: 'png' }))
+  }
+  expect(mocks.renderFrame).toHaveBeenCalledTimes(3)
+})
+
+it('keeps crops distinct from full frames and dashboard previews in the render cache', async () => {
+  const f = frame()
+  const crop = { x: 20, y: 30, width: 40, height: 50 }
+  await getImage(f, req({ ext: 'jpg', crop, preview: true }))
+  expect(mocks.renderFrame).toHaveBeenLastCalledWith(f, 1, { type: 'jpeg', quality: 90, clip: crop })
+  expect(mocks.getObject).not.toHaveBeenCalled()
+  await getImage(f, req({ ext: 'jpg', crop }))
+  expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+  await getImage(f, req({ ext: 'jpg' }))
+  await getImage(f, req({ ext: 'jpg', crop: { ...crop, x: 21 } }))
+  expect(mocks.renderFrame).toHaveBeenCalledTimes(3)
+})

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Frame } from '../../shared/types'
+import { useExportSelectionReady } from '../lib/exportSelection'
 import { useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { deleteFrameTracked } from '../lib/history'
@@ -499,14 +500,12 @@ function HtmlEditor({ frame }: { frame: Frame }) {
 }
 
 function ExportSection({ frame }: { frame: Frame }) {
+  const exportReady = useExportSelectionReady()
   const [copied, setCopied] = useState(false)
   return (
     <DesignSection id="export" title="Export">
-      <Button asChild size="sm">
-        <a href={`/i/${frame.id}.png?scale=2&download`}>PNG · 2×</a>
-      </Button>
-      <Button asChild size="sm">
-        <a href={`/i/${frame.id}.jpg?scale=2&download`}>JPG · 2×</a>
+      <Button size="sm" disabled={!exportReady} onClick={() => useStore.getState().openExport()}>
+        Export selection…
       </Button>
       <Button
         size="sm"

@@ -17,6 +17,7 @@ import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName } from '../../sha
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { cn } from '@/lib/utils'
+import { useExportSelectionReady } from '../lib/exportSelection'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Tooltip } from './ui/tooltip'
@@ -24,6 +25,7 @@ import { GithubIcon, SyncIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import {
+  currentSourceElement,
   saveDesignPatch,
   selectDesignElement,
   selectDesignFrame,
@@ -100,6 +102,8 @@ interface HoverHit {
    this component — memo holds as long as the frame and raster are unchanged. */
 export const FrameView = memo(function FrameView({ frame, raster }: { frame: Frame; raster: number }) {
   const selected = useStore((s) => s.selectedIds.includes(frame.id))
+  const exportReady = useExportSelectionReady()
+  const inspectorOpen = useStore((s) => s.inspectorOpen)
   const designSelection = useDesignEditor((s) => (s.selection?.frameId === frame.id ? s.selection : null))
   const designInspection = useDesignEditor((s) => (s.selection?.frameId === frame.id ? s.inspection : null))
   /* space held: the shield stays up even in edit mode, so the press reaches
@@ -257,7 +261,10 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       if (!moved && probeOnClick) probeAt(off.x, off.y)
       else if (moved) closePopovers()
       /* a click (no drag) on the frame name opens the details panel */
-      if (!moved && panelOnClick) selectDesignFrame(frame.id)
+      if (!moved && panelOnClick) {
+        closePopovers()
+        selectDesignFrame(frame.id)
+      }
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -320,7 +327,9 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         !Object.values(info.styles).every((value) => typeof value === 'string' && value.length < 20000)
       )
         return
-      useDesignEditor.setState({ inspection: info })
+      useDesignEditor.setState({
+        inspection: { ...info, rendered: { html, width: frame.width, height: frame.height } },
+      })
     }
     window.addEventListener('message', receive)
     request()
@@ -330,7 +339,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       window.removeEventListener('message', receive)
       window.clearTimeout(timer)
     }
-  }, [runtimeReady, html, designSelection, editing, raster, frame.id])
+  }, [runtimeReady, html, designSelection, editing, raster, frame.id, frame.width, frame.height])
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
@@ -546,6 +555,39 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     },
     [frame.id],
   )
+
+  useEffect(() => {
+    const s = useStore.getState()
+    // The layer navigator and inspector take precedence over an older click probe.
+    const source = designSelection ? currentSourceElement(frame.html, designSelection) : null
+    const inspected =
+      designSelection &&
+      designInspection?.selector === designSelection.selector &&
+      source &&
+      designInspection.rendered?.html === frame.html &&
+      designInspection.rendered.width === frame.width &&
+      designInspection.rendered.height === frame.height
+        ? { rect: designInspection.rect, label: source.tagName.toLowerCase() }
+        : null
+    const hit = editing ? activeHit : !inspectorOpen ? probe : null
+    s.setSelectedElement(
+      frame.id,
+      selected ? (designSelection ? inspected : hit ? { rect: hit.rect, label: hit.tag } : null) : null,
+    )
+    return () => s.setSelectedElement(frame.id, null)
+  }, [
+    frame.id,
+    frame.html,
+    frame.width,
+    frame.height,
+    selected,
+    designSelection,
+    designInspection,
+    editing,
+    activeHit,
+    inspectorOpen,
+    probe,
+  ])
 
   /* When zoomed past 100%, render the iframe k× larger and counter-scale it,
      with a matching CSS zoom inside — same layout, k× the raster density, so
@@ -896,6 +938,17 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                             onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
                           >
                             {'</>'} Code
+                          </Button>
+                          <Button
+                            variant="inverse"
+                            className={EL_TOOLBAR_BTN}
+                            title="Export selected element"
+                            disabled={!exportReady}
+                            onClick={() =>
+                              useStore.getState().openElementExport(frame.id, { rect: anchor.rect, label: anchor.tag })
+                            }
+                          >
+                            Export
                           </Button>
                           {!editing && canEdit && anchor.text !== '' && (
                             <Button

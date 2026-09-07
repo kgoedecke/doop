@@ -17,6 +17,8 @@ import { ensureTab } from '../lib/desktop'
 import { Stage } from '../components/Stage'
 import { FramePresentation } from '../components/FramePresentation'
 import { Board } from '../components/Board'
+import { useExportSelectionReady } from '../lib/exportSelection'
+import { FrameExport } from '../components/FrameExport'
 import { Inspector } from '../components/Inspector'
 import { LayersPanel } from '../components/LayersPanel'
 import { useDesignEditor, commitDesignEdit } from '../lib/designEditor'
@@ -83,6 +85,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const isMobile = useIsMobile()
   const [showActivity, setShowActivity] = useState(false)
   const [showMobileLayers, setShowMobileLayers] = useState(false)
+  const exportReady = useExportSelectionReady()
   const layersOpen = useDesignEditor((s) => s.layersOpen)
   const [view, setView] = useState<'canvas' | 'board'>('canvas')
   const [showConnect, setShowConnect] = useState(false)
@@ -134,7 +137,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   /* frame keyboard shortcuts: delete, copy/paste/duplicate, undo/redo */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (useStore.getState().presentedFrameId) return
+      if (useStore.getState().presentedFrameId || useStore.getState().exportFrameIds) return
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return
       const sel = useStore.getState().selectedId
@@ -199,6 +202,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     function onPaste(e: ClipboardEvent) {
       if (useStore.getState().presentedFrameId) return
       const t = e.target as HTMLElement
+      if (useStore.getState().exportFrameIds) return
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
       if (images.length) {
@@ -343,6 +347,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           </Button>
           <Button variant="ghost" onClick={() => setShowImport(true)} title="Import a live web page as a frame">
             ⤓ Import
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={!exportReady}
+            onClick={() => useStore.getState().openExport()}
+            title="Export current selection"
+          >
+            Export
           </Button>
           <Button onClick={() => setShowShare(true)}>Share</Button>
           <Button
@@ -501,6 +513,17 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <div className="grid gap-2 p-4">
                 <Button
                   variant="ghost"
+                  className="h-11 justify-start px-4"
+                  disabled={!exportReady}
+                  onClick={() => {
+                    setShowMobileActions(false)
+                    useStore.getState().openExport()
+                  }}
+                >
+                  Export selection…
+                </Button>
+                <Button
+                  variant="ghost"
                   className="h-11 justify-start border-line bg-surface px-4"
                   onClick={() => {
                     setShowMobileActions(false)
@@ -558,6 +581,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       )}
 
       <FramePresentation />
+      <FrameExport />
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
       {showShare && canvas && (

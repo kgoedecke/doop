@@ -46,11 +46,8 @@ export function FrameContextMenu({ frame, at }: { frame: Frame; at: MutableRefOb
       <ContextMenuItem onSelect={() => navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=2`)}>
         Copy image URL
       </ContextMenuItem>
-      <ContextMenuItem asChild>
-        <a href={`/i/${frame.id}.png?scale=2&download`}>Download PNG</a>
-      </ContextMenuItem>
-      <ContextMenuItem asChild>
-        <a href={`/i/${frame.id}.jpg?scale=2&download`}>Download JPG</a>
+      <ContextMenuItem onSelect={() => useStore.getState().openExport(frame.id)}>
+        {groupSize > 1 ? `Export ${groupSize} frames…` : 'Export frame…'}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem

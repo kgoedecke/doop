@@ -1,3 +1,4 @@
+import type { ExportScale, ExportRect } from '../shared/frameExport.ts'
 import type { Frame } from '../shared/types.ts'
 import * as thumbs from './thumbs.ts'
 
@@ -32,7 +33,8 @@ const RENDERS_PER_MIN = 12
 
 export interface ImageRequest {
   ext: 'png' | 'jpg'
-  scale: 1 | 2
+  scale: ExportScale
+  crop?: ExportRect
   quality: number
   /** dashboard-card variant: small, clipped, jpeg, persisted. Only
    *  meaningful for jpg — a png?preview would serve jpeg bytes under an
@@ -47,8 +49,9 @@ export type ImageResult = { status: 'ok'; buf: Buffer } | { status: 'rate-limite
 
 /** May reject when the render itself fails — the caller owns the 500. */
 export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageResult> {
-  const preview = req.preview && req.ext === 'jpg'
-  const key = `${frame.id}:${req.ext}:${req.scale}:${req.ext === 'jpg' ? req.quality : ''}:${preview ? 'p' : ''}`
+  const preview = req.preview && req.ext === 'jpg' && !req.crop
+  const cropKey = req.crop ? [req.crop.x, req.crop.y, req.crop.width, req.crop.height].join(',') : ''
+  const key = `${cropKey}:${frame.id}:${req.ext}:${req.scale}:${req.ext === 'jpg' ? req.quality : ''}:${preview ? 'p' : ''}`
   const cached = imgCache.get(key)
   let pending =
     cached && cached.updatedAt === frame.updatedAt && Date.now() - cached.at < IMG_CACHE_MS ? cached.buf : null
@@ -70,7 +73,11 @@ export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageRe
       ? /* renders AND persists — the next cold start serves from storage */
         thumbs.create(frame)
       : loadScreenshot().then(({ renderFrame }) =>
-          renderFrame(frame, req.scale, { type: req.ext === 'jpg' ? 'jpeg' : 'png', quality: req.quality }),
+          renderFrame(frame, req.scale, {
+            type: req.ext === 'jpg' ? 'jpeg' : 'png',
+            quality: req.quality,
+            ...(req.crop ? { clip: req.crop } : {}),
+          }),
         )
     remember(key, pending, frame.updatedAt)
   }
