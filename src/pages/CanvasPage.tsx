@@ -16,6 +16,7 @@ import { Logo } from '../components/Logo'
 import { ensureTab } from '../lib/desktop'
 import { Stage } from '../components/Stage'
 import { Board } from '../components/Board'
+import { FrameExport } from '../components/FrameExport'
 import { Inspector } from '../components/Inspector'
 import { ActivityPanel } from '../components/ActivityPanel'
 import { ConnectModal } from '../components/ConnectModal'
@@ -130,6 +131,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement
+      if (useStore.getState().exportFrameIds) return
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const sel = useStore.getState().selectedId
       const selectedIds = useStore.getState().selectedIds
@@ -171,6 +173,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       const t = e.target as HTMLElement
+      if (useStore.getState().exportFrameIds) return
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
       if (images.length) {
@@ -304,6 +307,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           <Button variant="ghost" onClick={() => setShowImport(true)} title="Import a live web page as a frame">
             ⤓ Import
           </Button>
+          <Button
+            variant="ghost"
+            disabled={!selectedId}
+            onClick={() => useStore.getState().openExport()}
+            title="Export selected frames"
+          >
+            Export
+          </Button>
           <Button onClick={() => setShowShare(true)}>Share</Button>
           <Button
             variant="primary"
@@ -422,6 +433,17 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <div className="grid gap-2 p-4">
                 <Button
                   variant="ghost"
+                  className="h-11 justify-start px-4"
+                  disabled={!selectedId}
+                  onClick={() => {
+                    setShowMobileActions(false)
+                    useStore.getState().openExport()
+                  }}
+                >
+                  Export selection…
+                </Button>
+                <Button
+                  variant="ghost"
                   className="h-11 justify-start border-line bg-surface px-4"
                   onClick={() => {
                     setShowMobileActions(false)
@@ -478,6 +500,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
         </>
       )}
 
+      <FrameExport />
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
       {showShare && canvas && (

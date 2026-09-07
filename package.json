@@ -47,6 +47,7 @@
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "express": "^4.19.2",
+    "fflate": "^0.8.3",
     "nanoid": "^5.0.7",
     "nodemailer": "^9.0.5",
     "pg": "^8.22.0",

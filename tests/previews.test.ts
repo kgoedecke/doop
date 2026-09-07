@@ -114,3 +114,12 @@ describe('getImage', () => {
     expect(r.status === 'ok' && r.buf.toString()).toBe('stored')
   })
 })
+
+it('renders fractional and high-density images with distinct cache entries', async () => {
+  const f = frame()
+  for (const scale of [0.5, 3, 4] as const) {
+    await getImage(f, req({ ext: 'png', scale }))
+    expect(mocks.renderFrame).toHaveBeenLastCalledWith(f, scale, expect.objectContaining({ type: 'png' }))
+  }
+  expect(mocks.renderFrame).toHaveBeenCalledTimes(3)
+})

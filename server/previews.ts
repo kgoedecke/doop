@@ -1,3 +1,4 @@
+import type { ExportScale } from '../shared/frameExport.ts'
 import type { Frame } from '../shared/types.ts'
 import * as thumbs from './thumbs.ts'
 
@@ -32,7 +33,7 @@ const RENDERS_PER_MIN = 12
 
 export interface ImageRequest {
   ext: 'png' | 'jpg'
-  scale: 1 | 2
+  scale: ExportScale
   quality: number
   /** dashboard-card variant: small, clipped, jpeg, persisted. Only
    *  meaningful for jpg — a png?preview would serve jpeg bytes under an

@@ -107,11 +107,8 @@ export function Inspector({
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3.5 py-2.5">
         <span className="mr-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Export</span>
-        <Button asChild className={exportBtn} title="Download as PNG (2×)">
-          <a href={`/i/${frame.id}.png?scale=2&download`}>PNG</a>
-        </Button>
-        <Button asChild className={exportBtn} title="Download as JPG (2×)">
-          <a href={`/i/${frame.id}.jpg?scale=2&download`}>JPG</a>
+        <Button className={exportBtn} onClick={() => useStore.getState().openExport(frame.id)}>
+          Export…
         </Button>
         <Button
           className={exportBtn}

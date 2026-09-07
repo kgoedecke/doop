@@ -164,3 +164,19 @@ describe('review follow-ups', () => {
     expect(api.updateFrame).toHaveBeenLastCalledWith('b', { x: 0 })
   })
 })
+
+describe('export selection', () => {
+  it('exports the group when invoked within it, or the target outside it', () => {
+    const s = useStore.getState()
+    s.selectMany(['a', 'b'])
+    s.openExport('a')
+    expect(useStore.getState().exportFrameIds).toEqual(['a', 'b'])
+    s.openExport('c')
+    expect(useStore.getState().exportFrameIds).toEqual(['c'])
+    s.openExport()
+    s.select('c')
+    expect(useStore.getState().exportFrameIds).toEqual(['a', 'b'])
+    s.setCanvas(null)
+    expect(useStore.getState().exportFrameIds).toBeNull()
+  })
+})
