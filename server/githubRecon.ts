@@ -200,16 +200,41 @@ export function treeExcerpt(paths: string[], sourcePath: string): string {
     .join('\n')
 }
 
+/* Root tags the model can hand back as a bare component fragment (no
+   <!doctype>, no <html>) — component recon asks for exactly this. */
+const FRAGMENT_ROOTS = ['div', 'main', 'section', 'article', 'style', 'header', 'footer', 'nav', 'form', 'table', 'ul']
+
+/** Turn whatever the model returned into a full document string: a
+ *  `<!doctype>` document as-is, a bare `<html>` document with a doctype
+ *  added, or a component fragment wrapped in a minimal document. `undefined`
+ *  when none of those appear anywhere in `raw`. */
+function normalizeToDocument(raw: string): string | undefined {
+  const doctypeAt = raw.search(/<!doctype/i)
+  if (doctypeAt !== -1) return raw.slice(doctypeAt)
+
+  const htmlAt = raw.search(/<html[\s>]/i)
+  if (htmlAt !== -1) return `<!doctype html>\n${raw.slice(htmlAt)}`
+
+  const fragment = raw.match(new RegExp(`<(?:${FRAGMENT_ROOTS.join('|')})[\\s>]`, 'i'))
+  if (fragment?.index !== undefined) {
+    return `<!doctype html><html><body>\n${raw.slice(fragment.index)}\n</body></html>`
+  }
+
+  return undefined
+}
+
 export function extractHtml(blocks: { type: string; text?: string }[]): { html: string; height: number } {
   const text = blocks
     .filter((b) => b.type === 'text' && b.text)
     .map((b) => b.text)
     .join('\n')
-  const fenced = text.match(/```(?:html)?\s*([\s\S]*?)```/)
-  let html = (fenced ? fenced[1]! : text).trim()
-  const start = html.search(/<!doctype/i)
-  if (start === -1) throw new Error('the model returned no HTML document')
-  html = html.slice(start)
+  /* the language tag after the opening fence (html, xml, or none) is
+     optional and discarded either way — only the fenced body is kept, an
+     unclosed fence falls through to searching the whole text below */
+  const fenced = text.match(/```(?:[a-zA-Z]*)\s*([\s\S]*?)```/)
+  const raw = (fenced ? fenced[1]! : text).trim()
+  const html = normalizeToDocument(raw)
+  if (!html) throw new Error('the model returned no HTML document')
   const height = Math.min(8000, Math.max(480, Number(html.match(/doop-height:\s*(\d+)/)?.[1]) || 900))
   return { html, height }
 }
