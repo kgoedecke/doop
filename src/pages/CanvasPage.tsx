@@ -268,12 +268,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   /* the panel only shows when a frame-name click (or deep link) opened it —
      selecting a frame by clicking its surface must not slide it in */
   const inspectorOpen = useStore((s) => s.inspectorOpen)
+  /* on a phone the panels are sheets, so opening one dismisses the others;
+     on a wide screen the Inspector is a small panel beside the Activity
+     rail and the two stay open together */
   useEffect(() => {
-    if (inspectorOpen) {
+    if (inspectorOpen && isMobile) {
       setShowActivity(false)
       setShowMobileLayers(false)
     }
-  }, [inspectorOpen])
+  }, [inspectorOpen, isMobile])
   /* a right-click that selected the frame keeps the Inspector out until the
      context menu closes — it would slide in right under the open menu */
   const deferPanel = useStore((s) => !!s.ctxMenu?.deferPanel)
@@ -339,7 +342,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           <Button
             variant="ghost"
             onClick={() => {
-              useStore.getState().setInspectorOpen(false)
+              if (isMobile) useStore.getState().setInspectorOpen(false)
               setShowActivity((v) => !v)
             }}
           >
@@ -403,8 +406,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             <div
               className="absolute inset-y-0"
               style={{
-                left: !isMobile && layersOpen ? 272 : 0,
-                right: !isMobile && ((inspectorOpen && selectedFrame) || showActivity) ? 328 : 0,
+                left: !isMobile && layersOpen ? 284 : 0,
+                /* the Activity rail takes a 300px column; the Inspector is a
+                   small bottom-aligned panel that sits beside it, so each
+                   reserves its own width and they stack left of the stage */
+                right: isMobile
+                  ? 0
+                  : (showActivity ? 328 : 0) + (inspectorOpen && selectedFrame && !deferPanel ? 244 : 0),
               }}
             >
               <Stage onAddFrame={addFrame} />
@@ -424,9 +432,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 ▤ Layers
               </Button>
             )}
-            {selectedFrame && !inspectorOpen && !showActivity && (
+            {selectedFrame && !inspectorOpen && (
               <Button
-                className="absolute right-3 top-3 z-[35] h-9 bg-surface"
+                className={cn('absolute bottom-3 z-[35] h-9 bg-surface', showActivity ? 'right-[324px]' : 'right-3')}
                 aria-label="Open inspector"
                 onClick={() => useStore.getState().setInspectorOpen(true)}
               >
@@ -481,8 +489,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 </Button>
               )}
             </div>
-            {!isMobile && selectedFrame && inspectorOpen && !deferPanel && <Inspector frame={selectedFrame} />}
-            {!isMobile && showActivity && !inspectorOpen && <ActivityPanel onClose={() => setShowActivity(false)} />}
+            {!isMobile && selectedFrame && inspectorOpen && !deferPanel && (
+              <Inspector frame={selectedFrame} beside={showActivity} />
+            )}
+            {!isMobile && showActivity && <ActivityPanel onClose={() => setShowActivity(false)} />}
           </>
         )}
       </div>

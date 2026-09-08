@@ -227,7 +227,7 @@ export function LayersPanel({
     <Panel
       aria-label="Layer navigator"
       surface={surface}
-      className={cn(surface === 'floating' && 'left-3 inset-y-3 w-[248px]')}
+      className={cn(surface === 'floating' && 'left-3 inset-y-3 w-[260px]')}
     >
       <PanelHeader className="px-3 py-2">
         <div className="flex gap-1" role="tablist" aria-label="Navigator view">

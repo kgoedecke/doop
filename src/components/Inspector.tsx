@@ -22,7 +22,16 @@ import {
 import { DesignInput, DesignSection, PropertyField, SmallAction } from './design/Controls'
 import { PaintStack } from './design/PaintStack'
 
-export function Inspector({ frame, surface = 'floating' }: { frame: Frame; surface?: 'floating' | 'inline' }) {
+export function Inspector({
+  frame,
+  surface = 'floating',
+  beside = false,
+}: {
+  frame: Frame
+  surface?: 'floating' | 'inline'
+  /* true while the Activity rail is open: the panel shifts left to sit beside it */
+  beside?: boolean
+}) {
   const [tab, setTab] = useState<'design' | 'html'>('design')
   const [search, setSearch] = useState('')
   const selection = useDesignEditor((s) => s.selection)
@@ -90,7 +99,12 @@ export function Inspector({ frame, surface = 'floating' }: { frame: Frame; surfa
     <Panel
       surface={surface}
       aria-label="Design inspector"
-      className={cn(surface === 'floating' && 'right-3 inset-y-3 w-[304px]')}
+      /* a small styling panel, not a full rail: bottom-aligned, sized to its
+         content, and only as tall as the stage allows before its body scrolls */
+      className={cn(
+        surface === 'floating' && 'bottom-3 max-h-[calc(100%-24px)] w-[232px] rounded-[12px]',
+        surface === 'floating' && (beside ? 'right-[324px]' : 'right-3'),
+      )}
     >
       <PanelHeader className="py-2">
         <div className="flex gap-1" role="tablist" aria-label="Inspector view">
