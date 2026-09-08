@@ -4,15 +4,58 @@ import { useStore } from '../lib/store'
 import { commitDesignEdit, selectDesignElement, selectDesignFrame, useDesignEditor } from '../lib/designEditor'
 import { flattenLayers, parseDesign, readLayers, type DesignLayer } from '../lib/designDocument'
 import { cn } from '@/lib/utils'
-import { Panel, PanelBody, PanelClose, PanelHeader } from './ui/panel'
+import { Panel, PanelBody, PanelClose, PanelHeader, PanelTab, PanelTabs } from './ui/panel'
 import { Button } from './ui/button'
-import { ChevronRightIcon } from './ui/icons'
-import { DesignInput } from './design/Controls'
+import {
+  BoxIcon,
+  ChevronRightIcon,
+  CollapseAllIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FrameIcon,
+  ImageIcon,
+  LockIcon,
+  PanelLeftIcon,
+  PlusIcon,
+  SearchIcon,
+  TargetIcon,
+  TextIcon,
+  UnlockIcon,
+  VectorIcon,
+} from './ui/icons'
+import { DesignInput, Kbd } from './design/Controls'
 
 interface FrameTree {
   frame: Frame
   layers: DesignLayer[]
   truncated: boolean
+}
+
+/* A tree row: 25px, hairline-free, the selected element fills brand blue and
+   the selected frame just turns its text blue — the frame is the container,
+   the element is the thing being edited. */
+const rowClass =
+  'group flex h-[25px] cursor-default items-center gap-1 rounded-md pr-1 text-[12.5px] outline-none focus-visible:ring-1 focus-visible:ring-brand max-md:h-9'
+const actionClass =
+  'grid size-[18px] shrink-0 place-items-center rounded text-current opacity-80 hover:opacity-100 disabled:opacity-30'
+const headerActionClass =
+  'grid size-5 shrink-0 place-items-center rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink disabled:opacity-30'
+
+function LayerGlyph({ layer, className }: { layer: DesignLayer; className?: string }) {
+  const Icon = layer.image ? ImageIcon : layer.text.trim() ? TextIcon : layer.tag === 'svg' ? VectorIcon : BoxIcon
+  return <Icon className={cn('size-[13px]', className)} strokeWidth={1.9} />
+}
+
+/** `aside.rail` reads as tag + a quiet class; plain names stay as they are. */
+function LayerName({ name }: { name: string }) {
+  const match = name.match(/^([a-z][a-z0-9-]*)([.#][\w.-]+)$/i)
+  if (!match) return <>{name}</>
+  return (
+    <>
+      {match[1]}
+      <span className="opacity-60">{match[2]}</span>
+    </>
+  )
 }
 
 export function LayersPanel({
@@ -122,8 +165,6 @@ export function LayersPanel({
       )
     }
   }
-  const actionClass =
-    'grid size-6 shrink-0 place-items-center rounded text-[11px] text-ink-faint hover:bg-paper-deep hover:text-ink disabled:opacity-30'
 
   function renderLayer(frameId: string, layer: DesignLayer): React.ReactNode {
     if (!matches(layer)) return null
@@ -141,11 +182,11 @@ export function LayersPanel({
           tabIndex={active ? 0 : -1}
           data-layer-selector={layer.selector}
           className={cn(
-            'group flex h-8 cursor-default items-center gap-1 rounded-md pr-1 outline-none focus-visible:ring-1 focus-visible:ring-brand max-md:h-10',
-            active ? 'bg-brand/10 text-accent-ink' : 'text-ink-soft hover:bg-paper',
+            rowClass,
+            active ? 'bg-brand text-white' : 'text-ink hover:bg-paper-deep',
             layer.hidden && 'opacity-50',
           )}
-          style={{ paddingLeft: Math.min(layer.depth + 1, 9) * 12 + 4 }}
+          style={{ paddingLeft: Math.min(layer.depth + 1, 9) * 16 + 6 }}
           onClick={() => selectLayer(frameId, layer.selector)}
           onDoubleClick={() => useStore.getState().requestFlyTo(frameId)}
           onKeyDown={(e) =>
@@ -162,23 +203,28 @@ export function LayersPanel({
             type="button"
             tabIndex={-1}
             aria-label={`${expanded ? 'Collapse' : 'Expand'} ${layer.name}`}
-            className={cn('grid size-4 shrink-0 place-items-center', !layer.children.length && 'invisible')}
+            className={cn(
+              'grid size-3.5 shrink-0 place-items-center',
+              active ? 'text-white/85' : 'text-ink-faint',
+              !layer.children.length && 'invisible',
+            )}
             onClick={(e) => {
               e.stopPropagation()
               toggle(key)
             }}
           >
-            <ChevronRightIcon className={cn('size-3 transition-transform', expanded && 'rotate-90')} />
+            <ChevronRightIcon className={cn('size-[11px] transition-transform', expanded && 'rotate-90')} />
           </button>
-          <span className="w-4 shrink-0 text-center font-mono text-[11px] text-ink-faint">
-            {layer.image ? '▧' : layer.text.trim() ? 'T' : layer.tag === 'svg' ? '◇' : '▤'}
+          <span className={cn('grid size-4 shrink-0 place-items-center', active ? 'text-white/85' : 'text-ink-faint')}>
+            <LayerGlyph layer={layer} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-[11px]" title={layer.name}>
-            {layer.name}
+          <span className="min-w-0 flex-1 truncate" title={layer.name}>
+            <LayerName name={layer.name} />
           </span>
           <div
             className={cn(
-              'flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100',
+              'flex gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100',
+              active ? 'text-white' : 'text-ink-faint',
               (active || layer.locked || layer.hidden) && 'opacity-100',
             )}
           >
@@ -192,7 +238,7 @@ export function LayersPanel({
                 void commitDesignEdit(frameId, layer.selector, { type: 'visibility' })
               }}
             >
-              {layer.hidden ? '◌' : '◉'}
+              {layer.hidden ? <EyeOffIcon className="size-[13px]" /> : <EyeIcon className="size-[13px]" />}
             </button>
             <button
               type="button"
@@ -204,7 +250,7 @@ export function LayersPanel({
                 void commitDesignEdit(frameId, layer.selector, { type: 'lock' })
               }}
             >
-              {layer.locked ? '▣' : '▫'}
+              {layer.locked ? <LockIcon className="size-3" /> : <UnlockIcon className="size-3" />}
             </button>
           </div>
         </div>
@@ -229,70 +275,71 @@ export function LayersPanel({
       surface={surface}
       className={cn(surface === 'floating' && 'left-3 inset-y-3 w-[260px]')}
     >
-      <PanelHeader className="px-3 py-2">
-        <div className="flex gap-1" role="tablist" aria-label="Navigator view">
+      <PanelHeader className="px-3 py-[11px]">
+        <PanelTabs role="tablist" aria-label="Navigator view">
           {(['layers', 'assets'] as const).map((value) => (
-            <button
-              type="button"
+            <PanelTab
               key={value}
+              value={value}
               role="tab"
               aria-selected={tab === value}
-              className={cn(
-                'rounded-md px-2.5 py-1.5 text-[11px]',
-                tab === value ? 'bg-paper-deep text-ink' : 'text-ink-faint',
-              )}
+              data-state={tab === value ? 'active' : 'inactive'}
               onClick={() => setTab(value)}
             >
               {value}
-            </button>
+            </PanelTab>
           ))}
-        </div>
+        </PanelTabs>
         <PanelClose label="Collapse layers" onClick={onClose}>
-          ⇤
+          <PanelLeftIcon className="size-[13px]" strokeWidth={1.9} />
         </PanelClose>
       </PanelHeader>
-      <div className="border-b border-line-soft px-3 py-3">
+      <label className="mx-3 mt-2.5 mb-1 flex h-8 items-center gap-2 rounded-lg border border-line bg-paper px-2.5 text-[12.5px] text-ink-faint focus-within:border-ink">
+        <SearchIcon className="size-[13px] shrink-0" strokeWidth={1.9} />
         <input
           aria-label="Search layers and assets"
-          placeholder={tab === 'layers' ? 'Search layers…' : 'Search images…'}
+          placeholder={tab === 'layers' ? 'Search layers' : 'Search images'}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 w-full rounded-md border border-line-soft bg-paper/70 px-2.5 text-[11px] outline-none focus:border-brand max-md:h-10"
+          className="min-w-0 flex-1 bg-transparent text-ink outline-none placeholder:text-ink-faint"
         />
-      </div>
+      </label>
       <PanelBody>
         {tab === 'layers' ? (
           <>
-            <div className="flex items-center justify-between px-3 py-2.5">
-              <span className="font-mono text-[10px] uppercase tracking-wider text-ink-faint">Frames</span>
-              <div className="flex gap-1">
+            <div className="flex items-center justify-between py-1.5 pr-3 pl-3.5">
+              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">
+                Frames · {trees.length}
+              </span>
+              <div className="flex gap-0.5">
                 <button
                   type="button"
                   aria-label="Collapse all layers"
                   title="Collapse all layers"
-                  className={actionClass}
+                  className={headerActionClass}
                   onClick={() => setOpen(new Set())}
                 >
-                  ⊟
+                  <CollapseAllIcon className="size-3" strokeWidth={1.9} />
                 </button>
                 <button
                   type="button"
                   aria-label="Add frame"
                   title="Add frame"
-                  className={actionClass}
+                  className={headerActionClass}
                   onClick={onAddFrame}
                 >
-                  +
+                  <PlusIcon className="size-3" strokeWidth={1.9} />
                 </button>
               </div>
             </div>
-            <div role="tree" aria-label="Canvas layers" className="px-1.5 pb-4">
+            <div role="tree" aria-label="Canvas layers" className="px-2 pb-4">
               {visibleTrees.map(({ frame, layers, truncated }, index) => {
                 const key = `frame:${frame.id}`
                 const expanded = !!needle || open.has(key)
                 const active = selectedId === frame.id && !selection
+                const holds = selectedId === frame.id && !!selection
                 return (
-                  <div key={frame.id}>
+                  <div key={frame.id} className={index > 0 ? 'mt-1.5' : undefined}>
                     <div
                       role="treeitem"
                       aria-label={frame.name}
@@ -301,8 +348,13 @@ export function LayersPanel({
                       aria-selected={active}
                       tabIndex={active || (index === 0 && !selection) ? 0 : -1}
                       className={cn(
-                        'group flex h-9 cursor-default items-center gap-1 rounded-md px-1.5 outline-none focus-visible:ring-1 focus-visible:ring-brand',
-                        active ? 'bg-brand/10 text-accent-ink' : 'hover:bg-paper',
+                        rowClass,
+                        'h-[26px] pl-1.5 font-semibold',
+                        active
+                          ? 'bg-brand/[0.08] text-brand'
+                          : holds
+                            ? 'text-brand hover:bg-paper-deep'
+                            : 'hover:bg-paper-deep',
                       )}
                       onClick={() => {
                         selectDesignFrame(frame.id)
@@ -323,24 +375,35 @@ export function LayersPanel({
                         type="button"
                         tabIndex={-1}
                         aria-label={`${expanded ? 'Collapse' : 'Expand'} ${frame.name}`}
-                        className="grid size-4 shrink-0 place-items-center"
+                        className={cn(
+                          'grid size-3.5 shrink-0 place-items-center',
+                          active || holds ? 'text-brand' : 'text-ink-faint',
+                        )}
                         onClick={(e) => {
                           e.stopPropagation()
                           toggle(key)
                         }}
                       >
-                        <ChevronRightIcon className={cn('size-3 transition-transform', expanded && 'rotate-90')} />
+                        <ChevronRightIcon className={cn('size-[11px] transition-transform', expanded && 'rotate-90')} />
                       </button>
-                      <span className="w-4 shrink-0 text-center font-mono text-xs text-ink-faint">#</span>
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={frame.name}>
+                      <span
+                        className={cn(
+                          'grid size-4 shrink-0 place-items-center',
+                          active || holds ? 'text-brand' : 'text-ink-faint',
+                        )}
+                      >
+                        <FrameIcon className="size-[13px]" strokeWidth={1.9} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate" title={frame.name}>
                         {frame.name}
                       </span>
                       <button
                         type="button"
                         aria-label={`Zoom to ${frame.name}`}
+                        title="Zoom to frame"
                         className={cn(
                           actionClass,
-                          'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100',
+                          'text-ink-faint opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100',
                         )}
                         onClick={(e) => {
                           e.stopPropagation()
@@ -348,7 +411,7 @@ export function LayersPanel({
                           useStore.getState().requestFlyTo(frame.id)
                         }}
                       >
-                        ⌖
+                        <TargetIcon className="size-[13px]" strokeWidth={1.9} />
                       </button>
                     </div>
                     {expanded && (
@@ -374,7 +437,7 @@ export function LayersPanel({
         ) : (
           <div className="space-y-4 p-3">
             <div>
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+              <p className="mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">
                 Insert into selection
               </p>
               <div className="flex gap-2">
@@ -419,7 +482,7 @@ export function LayersPanel({
               </Button>
             </div>
             <div className="border-t border-line-soft pt-3">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
+              <p className="mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">
                 Images in this canvas · {assets.length}
               </p>
               <div className="grid grid-cols-2 gap-2">
@@ -442,8 +505,13 @@ export function LayersPanel({
           </div>
         )}
       </PanelBody>
-      <footer className="border-t border-line-soft px-3 py-2.5 text-[10px] text-ink-faint">
-        {trees.length} frames <span className="float-right">⇧1 Fit all · ⇧2 Selection</span>
+      <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-line-soft px-3 py-[9px] font-mono text-[10px] tracking-[0.04em] whitespace-nowrap text-ink-faint">
+        <span>
+          {trees.length} {trees.length === 1 ? 'frame' : 'frames'}
+        </span>
+        <span>
+          <Kbd>Shift 1</Kbd> fit &nbsp;·&nbsp; <Kbd>Shift 2</Kbd> selection
+        </span>
       </footer>
     </Panel>
   )

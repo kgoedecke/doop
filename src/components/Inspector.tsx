@@ -5,7 +5,7 @@ import { useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { deleteFrameTracked } from '../lib/history'
 import { cn } from '@/lib/utils'
-import { Panel, PanelBody, PanelClose, PanelHeader } from './ui/panel'
+import { Panel, PanelBody, PanelClose, PanelHeader, PanelTab, PanelTabs } from './ui/panel'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { DESIGN_SECTIONS, DESIGN_PROPERTIES } from '../lib/designProperties'
@@ -19,7 +19,20 @@ import {
   selectDesignFrame,
   useDesignEditor,
 } from '../lib/designEditor'
-import { DesignInput, DesignSection, PropertyField, SmallAction } from './design/Controls'
+import { DesignInput, DesignSection, FieldRow, PropertyField, SmallAction } from './design/Controls'
+import {
+  ArrowUpIcon,
+  BoxIcon,
+  CopyIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FrameIcon,
+  ImageIcon,
+  LockIcon,
+  TextIcon,
+  VectorIcon,
+  XIcon,
+} from './ui/icons'
 import { PaintStack } from './design/PaintStack'
 
 export function Inspector({
@@ -106,26 +119,23 @@ export function Inspector({
         surface === 'floating' && (beside ? 'right-[324px]' : 'right-3'),
       )}
     >
-      <PanelHeader className="py-2">
-        <div className="flex gap-1" role="tablist" aria-label="Inspector view">
+      <PanelHeader className="px-3 py-2">
+        <PanelTabs role="tablist" aria-label="Inspector view">
           {(['design', 'html'] as const).map((value) => (
-            <button
+            <PanelTab
               key={value}
-              type="button"
+              value={value}
               role="tab"
               aria-selected={tab === value}
-              className={cn(
-                'rounded-md px-2.5 py-1.5 text-[11px] uppercase tracking-wider',
-                tab === value ? 'bg-paper-deep text-ink' : 'text-ink-faint',
-              )}
+              data-state={tab === value ? 'active' : 'inactive'}
               onClick={() => setTab(value)}
             >
               {value}
-            </button>
+            </PanelTab>
           ))}
-        </div>
+        </PanelTabs>
         <PanelClose label="Collapse inspector" onClick={() => useStore.getState().setInspectorOpen(false)}>
-          ⇥
+          <XIcon className="size-3" strokeWidth={2.4} />
         </PanelClose>
       </PanelHeader>
       <PanelBody>
@@ -133,36 +143,44 @@ export function Inspector({
           <HtmlEditor key={frame.id} frame={frame} />
         ) : (
           <>
-            <div className="border-b border-line-soft px-3.5 py-3">
-              <button
-                className="mb-1 block max-w-full truncate text-[10px] text-ink-faint hover:text-ink"
-                onClick={() => selectDesignFrame(frame.id)}
-              >
-                {frame.name}
-              </button>
+            <div className="border-b border-line-soft px-3 py-2.5">
+              {element && (
+                <button
+                  className="mb-1 block max-w-full truncate font-mono text-[10px] tracking-[0.04em] text-ink-faint hover:text-ink"
+                  onClick={() => selectDesignFrame(frame.id)}
+                >
+                  {frame.name}
+                </button>
+              )}
               <div className="flex items-center gap-2">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-paper-deep font-mono text-xs text-ink-soft">
-                  {element ? (textLayer ? 'T' : isImage ? '▧' : '◇') : '#'}
+                <span className="grid size-5 shrink-0 place-items-center rounded-[5px] bg-paper-deep text-ink-soft">
+                  <LayerIcon element={element} textLayer={textLayer} isImage={isImage} isVector={isVector} />
                 </span>
-                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+                <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">
                   {element ? layerName(element) : selection ? 'Layer unavailable' : frame.name}
+                  {element?.parentElement && element !== element.ownerDocument.body && (
+                    <span className="ml-1.5 font-mono text-[9.5px] font-normal tracking-[0.02em] text-ink-faint">
+                      in {layerName(element.parentElement)}
+                    </span>
+                  )}
                 </span>
                 {element?.parentElement && element !== element.ownerDocument.body && (
                   <Button
                     variant="bare"
                     size="icon-sm"
+                    className="size-6 text-ink-faint"
                     aria-label="Select parent layer"
                     title="Select parent layer"
                     onClick={() => selectDesignElement(frame.id, designSelector(element.parentElement!))}
                   >
-                    ↑
+                    <ArrowUpIcon className="size-3" strokeWidth={1.9} />
                   </Button>
                 )}
               </div>
               {element && (
                 <input
                   aria-label="Find property"
-                  className="mt-3 h-8 w-full rounded-md border border-line-soft bg-paper/70 px-2.5 text-[11px] outline-none focus:border-brand"
+                  className="mt-2.5 h-[30px] w-full rounded-lg border border-line bg-paper px-2.5 text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-ink"
                   placeholder="Find a property…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -197,7 +215,7 @@ export function Inspector({
                   className="min-w-0 border-0 p-0 disabled:opacity-60"
                 >
                   {search ? (
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 p-3.5">
+                    <div className="flex flex-col gap-1 p-3">
                       {filtered.length ? (
                         filtered.map((field) => (
                           <PropertyField
@@ -209,14 +227,13 @@ export function Inspector({
                           />
                         ))
                       ) : (
-                        <p className="col-span-2 text-xs text-ink-faint">No matching properties.</p>
+                        <p className="text-xs text-ink-faint">No matching properties.</p>
                       )}
                     </div>
                   ) : (
                     <>
                       <DesignSection id="layer" title="Layer" defaultOpen>
-                        <div className="col-span-2">
-                          <label className="mb-1 block text-[10px] text-ink-soft">Name</label>
+                        <FieldRow label="Name">
                           <DesignInput
                             label="Layer name"
                             value={layerName(element)}
@@ -224,10 +241,9 @@ export function Inspector({
                               void commitDesignEdit(frame.id, selection.selector, { type: 'rename', name })
                             }
                           />
-                        </div>
+                        </FieldRow>
                         {hasText && !element.children.length && (
-                          <div className="col-span-2">
-                            <label className="mb-1 block text-[10px] text-ink-soft">Content</label>
+                          <FieldRow label="Content">
                             <DesignInput
                               label="Text content"
                               value={element.textContent || ''}
@@ -236,23 +252,30 @@ export function Inspector({
                                 void commitDesignEdit(frame.id, selection.selector, { type: 'text', text })
                               }
                             />
-                          </div>
+                          </FieldRow>
                         )}
-                        <div className="col-span-2 flex gap-1">
+                        <div className="mt-1 flex gap-1">
                           <SmallAction
                             onClick={() => void commitDesignEdit(frame.id, selection.selector, { type: 'visibility' })}
                           >
+                            {element.style.display === 'none' ? (
+                              <EyeOffIcon className="size-3" />
+                            ) : (
+                              <EyeIcon className="size-3" />
+                            )}
                             {element.style.display === 'none' ? 'Show' : 'Hide'}
                           </SmallAction>
                           <SmallAction
                             onClick={() => void commitDesignEdit(frame.id, selection.selector, { type: 'lock' })}
                           >
+                            <LockIcon className="size-3" />
                             Lock
                           </SmallAction>
                           <SmallAction
                             disabled={element === element.ownerDocument.body}
                             onClick={() => void commitDesignEdit(frame.id, selection.selector, { type: 'duplicate' })}
                           >
+                            <CopyIcon className="size-3" />
                             Duplicate
                           </SmallAction>
                         </div>
@@ -286,8 +309,7 @@ export function Inspector({
                           )}
                           {section.id === 'image' && element.tagName === 'IMG' && (
                             <>
-                              <div className="col-span-2">
-                                <label className="mb-1 block text-[10px] text-ink-soft">Source</label>
+                              <FieldRow label="Source">
                                 <DesignInput
                                   label="Image source"
                                   value={element.getAttribute('src') || ''}
@@ -295,9 +317,8 @@ export function Inspector({
                                     void commitDesignEdit(frame.id, selection.selector, { type: 'image', src })
                                   }
                                 />
-                              </div>
-                              <div className="col-span-2">
-                                <label className="mb-1 block text-[10px] text-ink-soft">Alt text</label>
+                              </FieldRow>
+                              <FieldRow label="Alt text">
                                 <DesignInput
                                   label="Image alt text"
                                   value={element.getAttribute('alt') || ''}
@@ -309,7 +330,7 @@ export function Inspector({
                                     })
                                   }
                                 />
-                              </div>
+                              </FieldRow>
                             </>
                           )}
                           {section.fields.map((field) => (
@@ -335,12 +356,12 @@ export function Inspector({
                             />
                           ),
                         )}
-                        <p className="col-span-2 text-[10px] leading-relaxed text-ink-faint">
+                        <p className="text-[10px] leading-relaxed text-ink-faint">
                           CSS units, calc() and var() are supported. Reset a field to use its original style.
                         </p>
                       </DesignSection>
                       {element !== element.ownerDocument.body && (
-                        <div className="flex gap-1 border-b border-line-soft p-3">
+                        <div className="flex gap-1 border-b border-line-soft px-3 py-2.5">
                           <SmallAction
                             onClick={() =>
                               void commitDesignEdit(frame.id, selection.selector, { type: 'reorder', direction: 'up' })
@@ -376,13 +397,13 @@ export function Inspector({
           </>
         )}
       </PanelBody>
-      <footer className="shrink-0 border-t border-line-soft px-3.5 py-2.5">
+      <footer className="shrink-0 border-t border-line-soft px-3 py-[9px]">
         {error ? (
           <p role="alert" className="text-[11px] leading-relaxed text-accent-ink">
             {error}
           </p>
         ) : (
-          <p role="status" className="font-mono text-[10px] text-ink-faint">
+          <p role="status" className="font-mono text-[10px] tracking-[0.02em] text-ink-faint">
             {busy
               ? 'Saving…'
               : stream
@@ -390,7 +411,7 @@ export function Inspector({
                 : saved
                   ? 'Saved ✓'
                   : element
-                    ? `${element.tagName.toLowerCase()} · edits save automatically`
+                    ? `${element.tagName.toLowerCase()} · saves automatically`
                     : 'Select a layer to edit its style'}
           </p>
         )}
@@ -420,17 +441,15 @@ function FrameProperties({ frame }: { frame: Frame }) {
   return (
     <fieldset disabled={busy} className="min-w-0">
       <DesignSection id="frame" title="Frame" defaultOpen>
-        <div className="col-span-2">
-          <label className="mb-1 block text-[10px] text-ink-soft">Name</label>
+        <FieldRow label="Name">
           <DesignInput
             label="Frame name"
             value={frame.name}
             onCommit={(name) => name.trim() && void saveDesignPatch(frame.id, { name: name.trim() })}
           />
-        </div>
+        </FieldRow>
         {(['x', 'y', 'width', 'height'] as const).map((key) => (
-          <div key={key}>
-            <label className="mb-1 block text-[10px] capitalize text-ink-soft">{key}</label>
+          <FieldRow key={key} label={key} className="capitalize">
             <DesignInput
               label={`Frame ${key}`}
               value={String(frame[key])}
@@ -445,9 +464,9 @@ function FrameProperties({ frame }: { frame: Frame }) {
                 })
               }}
             />
-          </div>
+          </FieldRow>
         ))}
-        <Button className="col-span-2 mt-1" onClick={() => selectDesignElement(frame.id, 'body')}>
+        <Button size="sm" className="mt-1" onClick={() => selectDesignElement(frame.id, 'body')}>
           Edit frame contents
         </Button>
       </DesignSection>
@@ -544,9 +563,24 @@ function ExportSection({ frame }: { frame: Frame }) {
       >
         {copied ? 'Copied ✓' : 'Copy image URL'}
       </Button>
-      <Button variant="bare-danger" size="sm" className="col-span-2" onClick={() => deleteFrameTracked(frame)}>
+      <Button variant="bare-danger" size="sm" onClick={() => deleteFrameTracked(frame)}>
         Delete frame
       </Button>
     </DesignSection>
   )
+}
+
+function LayerIcon({
+  element,
+  textLayer,
+  isImage,
+  isVector,
+}: {
+  element: Element | null
+  textLayer: boolean
+  isImage: boolean
+  isVector: boolean
+}) {
+  const Icon = !element ? FrameIcon : textLayer ? TextIcon : isImage ? ImageIcon : isVector ? VectorIcon : BoxIcon
+  return <Icon className="size-3" strokeWidth={1.9} />
 }

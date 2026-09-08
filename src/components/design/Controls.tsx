@@ -3,10 +3,46 @@ import { cn } from '@/lib/utils'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
+import { ResetIcon } from '../ui/icons'
 import type { DesignProperty } from '../../lib/designProperties'
 
+/* The styling panel speaks in the chrome voice: 24px mono fields on a hairline,
+   labels to the left of their control, one property per row. */
 export const selectClass =
-  'h-8 w-full min-w-0 rounded-md border border-line bg-surface px-2 text-[11px] text-ink outline-none focus:border-brand focus:ring-1 focus:ring-brand disabled:opacity-50 max-md:h-10'
+  'h-6 w-full min-w-0 rounded-md border border-line bg-surface px-[7px] font-mono text-[11px] text-ink outline-none focus:border-ink disabled:opacity-50 max-md:h-9'
+
+const fieldClass = 'h-6 min-w-0 rounded-md border-line px-[7px] font-mono text-[11px] focus:border-ink max-md:h-9'
+
+/** Panel-level shortcut chip: `Esc`, `Shift 1`. */
+export function Kbd({ children }: { children: ReactNode }) {
+  return (
+    <kbd className="inline-block rounded-[5px] border border-line bg-paper px-1 font-mono text-[9.5px] font-normal leading-[15px] text-ink-soft">
+      {children}
+    </kbd>
+  )
+}
+
+/** Label on the left, control on the right — the row every property uses. */
+export function FieldRow({
+  label,
+  htmlFor,
+  className,
+  children,
+}: {
+  label: ReactNode
+  htmlFor?: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div className={cn('grid min-h-[26px] grid-cols-[58px_1fr] items-center gap-1.5', className)}>
+      <label htmlFor={htmlFor} className="truncate text-[11px] text-ink-soft">
+        {label}
+      </label>
+      <div className="flex min-w-0 items-center gap-1">{children}</div>
+    </div>
+  )
+}
 
 export function DesignSection({
   id,
@@ -42,12 +78,12 @@ export function DesignSection({
     >
       <CollapsibleTrigger
         aria-label={title}
-        className="group flex w-full items-center gap-2 px-3.5 py-3 text-left text-xs font-semibold text-ink hover:bg-paper/60"
+        className="group flex h-9 w-full items-center gap-2 px-3 text-left text-[11.5px] font-bold text-ink hover:bg-paper/60"
       >
         {title}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="grid grid-cols-2 gap-x-2 gap-y-2.5 px-3.5 pb-3.5">{children}</div>
+        <div className="flex flex-col gap-1 px-3 pb-3">{children}</div>
       </CollapsibleContent>
     </Collapsible>
   )
@@ -119,9 +155,9 @@ export function DesignInput({
     },
   }
   return multiline ? (
-    <textarea {...props} className={cn(selectClass, 'h-20 resize-y py-2 font-mono leading-relaxed', className)} />
+    <textarea {...props} className={cn(selectClass, 'h-16 resize-y py-1.5 leading-relaxed', className)} />
   ) : (
-    <Input {...props} inputSize="sm" className={cn('h-8 min-w-0 font-mono text-[11px] max-md:h-10', className)} />
+    <Input {...props} variant="mono" inputSize="sm" className={cn(fieldClass, className)} />
   )
 }
 
@@ -152,68 +188,61 @@ export function PropertyField({
   const id = useId()
   const value = authored || computed
   return (
-    <div className={cn('min-w-0', field.wide && 'col-span-2')}>
-      <div className="mb-1 flex h-4 items-center justify-between gap-1">
-        <label htmlFor={id} className="truncate text-[10px] text-ink-soft">
-          {field.label}
-        </label>
-        {authored && (
-          <button
-            type="button"
-            className="rounded px-1 text-[10px] text-ink-faint hover:bg-paper-deep hover:text-ink"
-            aria-label={`Reset ${field.label}`}
-            title="Remove inline override"
-            onClick={() => onCommit(field.key, '')}
-          >
-            ↺
-          </button>
-        )}
-      </div>
-      <div className="flex min-w-0 gap-1.5">
-        {field.color && (
-          <input
-            type="color"
-            aria-label={`Pick ${field.label}`}
-            defaultValue={toHex(computed || authored)}
-            key={computed || authored}
-            className="h-8 w-8 shrink-0 cursor-pointer rounded-md border border-line bg-surface p-0.5 max-md:h-10 max-md:w-10"
-            onBlur={(e) => {
-              if (e.target.value !== toHex(computed || authored)) onCommit(field.key, e.target.value)
-            }}
-          />
-        )}
-        {field.options ? (
-          <select
-            id={id}
-            aria-label={field.label}
-            className={selectClass}
-            value={value}
-            onChange={(e) => onCommit(field.key, e.target.value)}
-          >
-            {!field.options.includes(value) && <option value={value}>{value || 'Default'}</option>}
-            {field.options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <DesignInput
-            id={id}
-            label={field.label}
-            value={value}
-            placeholder="Default"
-            onCommit={(next) => onCommit(field.key, next)}
-          />
-        )}
-      </div>
-    </div>
+    <FieldRow label={field.label} htmlFor={id}>
+      {field.color && (
+        <input
+          type="color"
+          aria-label={`Pick ${field.label}`}
+          defaultValue={toHex(computed || authored)}
+          key={computed || authored}
+          className="size-6 shrink-0 cursor-pointer rounded-md border border-line bg-surface p-0.5 max-md:size-9"
+          onBlur={(e) => {
+            if (e.target.value !== toHex(computed || authored)) onCommit(field.key, e.target.value)
+          }}
+        />
+      )}
+      {field.options ? (
+        <select
+          id={id}
+          aria-label={field.label}
+          className={selectClass}
+          value={value}
+          onChange={(e) => onCommit(field.key, e.target.value)}
+        >
+          {!field.options.includes(value) && <option value={value}>{value || 'Default'}</option>}
+          {field.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <DesignInput
+          id={id}
+          label={field.label}
+          value={value}
+          placeholder="Default"
+          onCommit={(next) => onCommit(field.key, next)}
+        />
+      )}
+      {authored && (
+        <button
+          type="button"
+          className="grid size-5 shrink-0 place-items-center rounded text-ink-faint hover:bg-paper-deep hover:text-ink"
+          aria-label={`Reset ${field.label}`}
+          title="Remove inline override"
+          onClick={() => onCommit(field.key, '')}
+        >
+          <ResetIcon className="size-3" />
+        </button>
+      )}
+    </FieldRow>
   )
 }
 
-export function SmallAction({ children, ...props }: React.ComponentProps<typeof Button>) {
+export function SmallAction({ children, className, ...props }: React.ComponentProps<typeof Button>) {
   return (
-    <Button variant="ghost" size="sm" className="min-h-8 flex-1 px-2 text-[11px]" {...props}>
+    <Button size="sm" className={cn('h-7 flex-1 gap-1.5 px-2 text-[11px]', className)} {...props}>
       {children}
     </Button>
   )
