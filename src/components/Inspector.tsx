@@ -21,6 +21,7 @@ import {
 } from '../lib/designEditor'
 import { DesignInput, DesignSection, FieldRow, PropertyField, SmallAction } from './design/Controls'
 import {
+  ArrowDownIcon,
   ArrowUpIcon,
   BoxIcon,
   CopyIcon,
@@ -30,6 +31,7 @@ import {
   ImageIcon,
   LockIcon,
   TextIcon,
+  TrashIcon,
   VectorIcon,
   XIcon,
 } from './ui/icons'
@@ -119,7 +121,7 @@ export function Inspector({
         surface === 'floating' && (beside ? 'right-[324px]' : 'right-3'),
       )}
     >
-      <PanelHeader className="px-3 py-2">
+      <PanelHeader>
         <div className="flex min-w-0 gap-0.5" role="tablist" aria-label="Inspector view">
           {(['design', 'html'] as const).map((value) => (
             <button
@@ -141,7 +143,7 @@ export function Inspector({
           <XIcon className="size-3" strokeWidth={2.4} />
         </PanelClose>
       </PanelHeader>
-      <PanelBody>
+      <PanelBody className="overflow-x-hidden">
         {tab === 'html' ? (
           <HtmlEditor key={frame.id} frame={frame} />
         ) : (
@@ -364,15 +366,18 @@ export function Inspector({
                         </p>
                       </DesignSection>
                       {element !== element.ownerDocument.body && (
-                        <div className="flex gap-1 border-b border-line-soft px-3 py-2.5">
+                        <div className="flex items-center gap-1 border-b border-line-soft px-3 py-2.5">
                           <SmallAction
+                            title="Move layer up"
                             onClick={() =>
                               void commitDesignEdit(frame.id, selection.selector, { type: 'reorder', direction: 'up' })
                             }
                           >
-                            Move up
+                            <ArrowUpIcon className="size-3" />
+                            Up
                           </SmallAction>
                           <SmallAction
+                            title="Move layer down"
                             onClick={() =>
                               void commitDesignEdit(frame.id, selection.selector, {
                                 type: 'reorder',
@@ -380,14 +385,17 @@ export function Inspector({
                               })
                             }
                           >
-                            Move down
+                            <ArrowDownIcon className="size-3" />
+                            Down
                           </SmallAction>
                           <Button
                             variant="bare-danger"
-                            size="sm"
+                            size="icon-sm"
+                            aria-label="Delete layer"
+                            title="Delete layer"
                             onClick={() => void commitDesignEdit(frame.id, selection.selector, { type: 'delete' })}
                           >
-                            Delete layer
+                            <TrashIcon className="size-3.5" />
                           </Button>
                         </div>
                       )}
@@ -396,7 +404,7 @@ export function Inspector({
                 </fieldset>
               </>
             )}
-            <ExportSection frame={frame} />
+            <ExportSection frame={frame} frameOnly={!selection} />
           </>
         )}
       </PanelBody>
@@ -535,37 +543,44 @@ function HtmlEditor({ frame }: { frame: Frame }) {
   )
 }
 
-function ExportSection({ frame }: { frame: Frame }) {
+/* Pin and the image URL are about the frame, so they only show while the
+   frame itself is selected — with a layer selected they would silently act
+   on something other than what the panel is editing. */
+function ExportSection({ frame, frameOnly }: { frame: Frame; frameOnly: boolean }) {
   const exportReady = useExportSelectionReady()
   const [copied, setCopied] = useState(false)
   return (
     <DesignSection id="export" title="Export">
       <Button size="sm" disabled={!exportReady} onClick={() => useStore.getState().openExport()}>
-        Export selection…
+        {frameOnly ? 'Export frame…' : 'Export selection…'}
       </Button>
-      <Button
-        size="sm"
-        onClick={() =>
-          api
-            .pinReference(frame.canvasId, frame.id)
-            .catch((err: Error) => useDesignEditor.setState({ error: err.message }))
-        }
-      >
-        Pin to memory
-      </Button>
-      <Button
-        size="sm"
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=2`)
-            setCopied(true)
-          } catch {
-            useDesignEditor.setState({ error: 'Could not copy the image URL.' })
-          }
-        }}
-      >
-        {copied ? 'Copied ✓' : 'Copy image URL'}
-      </Button>
+      {frameOnly && (
+        <>
+          <Button
+            size="sm"
+            onClick={() =>
+              api
+                .pinReference(frame.canvasId, frame.id)
+                .catch((err: Error) => useDesignEditor.setState({ error: err.message }))
+            }
+          >
+            Pin to memory
+          </Button>
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=2`)
+                setCopied(true)
+              } catch {
+                useDesignEditor.setState({ error: 'Could not copy the image URL.' })
+              }
+            }}
+          >
+            {copied ? 'Copied ✓' : 'Copy image URL'}
+          </Button>
+        </>
+      )}
       <Button variant="bare-danger" size="sm" onClick={() => deleteFrameTracked(frame)}>
         Delete frame
       </Button>

@@ -216,6 +216,8 @@ export function PropertyField({
             </option>
           ))}
         </select>
+      ) : field.unit ? (
+        <UnitInput id={id} field={field} value={value} onCommit={(next) => onCommit(field.key, next)} />
       ) : (
         <DesignInput
           id={id}
@@ -237,6 +239,42 @@ export function PropertyField({
         </button>
       )}
     </FieldRow>
+  )
+}
+
+/** `236` in the field, `px` as a quiet suffix — the unit is not part of the
+ * text. A bare number typed in gets the unit back on commit; anything else
+ * (`auto`, `100%`, `calc(...)`) passes through untouched. */
+function UnitInput({
+  id,
+  field,
+  value,
+  onCommit,
+}: {
+  id: string
+  field: DesignProperty
+  value: string
+  onCommit(value: string): void
+}) {
+  const unit = field.unit!
+  const match = value.match(new RegExp(`^(-?(?:\\d+\\.?\\d*|\\.\\d+))${unit}$`))
+  const shown = match ? match[1] : value
+  return (
+    <div className="relative min-w-0 flex-1">
+      <DesignInput
+        id={id}
+        label={field.label}
+        value={shown}
+        placeholder="Default"
+        className={cn((match || !value) && 'pr-7')}
+        onCommit={(next) => onCommit(/^-?(?:\d+\.?\d*|\.\d+)$/.test(next.trim()) ? `${next.trim()}${unit}` : next)}
+      />
+      {(match || !value) && (
+        <span className="pointer-events-none absolute top-1/2 right-[7px] -translate-y-1/2 font-mono text-[9.5px] text-ink-faint">
+          {unit}
+        </span>
+      )}
+    </div>
   )
 }
 

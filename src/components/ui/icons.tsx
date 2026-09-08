@@ -236,3 +236,11 @@ export function ResetIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+export function ArrowDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M12 5v14m0 0 6-6m-6 6-6-6" />
+    </svg>
+  )
+}

@@ -275,7 +275,7 @@ export function LayersPanel({
       surface={surface}
       className={cn(surface === 'floating' && 'left-3 inset-y-3 w-[260px]')}
     >
-      <PanelHeader className="px-3 py-[11px]">
+      <PanelHeader>
         <div className="flex min-w-0 gap-0.5" role="tablist" aria-label="Navigator view">
           {(['layers', 'assets'] as const).map((value) => (
             <button

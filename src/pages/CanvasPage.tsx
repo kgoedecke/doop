@@ -398,7 +398,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
         </div>
       </div>
 
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden [background:radial-gradient(circle,var(--dot)_1.2px,transparent_1.2px)_0_0/26px_26px,var(--paper)]">
         {view === 'board' ? (
           <Board canvasId={canvasId} />
         ) : (

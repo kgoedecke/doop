@@ -602,9 +602,6 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
           <ToolbarButton onClick={fit} title="Fit all frames (Shift+1)">
             Fit
           </ToolbarButton>
-          <ToolbarButton onClick={fitSelection} title="Zoom to selection (Shift+2)">
-            Selection
-          </ToolbarButton>
         </Toolbar>
 
         {canvas && (
