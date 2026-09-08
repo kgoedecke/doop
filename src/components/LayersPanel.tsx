@@ -4,7 +4,7 @@ import { useStore } from '../lib/store'
 import { commitDesignEdit, selectDesignElement, selectDesignFrame, useDesignEditor } from '../lib/designEditor'
 import { flattenLayers, parseDesign, readLayers, type DesignLayer } from '../lib/designDocument'
 import { cn } from '@/lib/utils'
-import { Panel, PanelBody, PanelClose, PanelHeader, PanelTab, PanelTabs } from './ui/panel'
+import { Panel, PanelBody, PanelClose, PanelHeader } from './ui/panel'
 import { Button } from './ui/button'
 import {
   BoxIcon,
@@ -276,20 +276,23 @@ export function LayersPanel({
       className={cn(surface === 'floating' && 'left-3 inset-y-3 w-[260px]')}
     >
       <PanelHeader className="px-3 py-[11px]">
-        <PanelTabs role="tablist" aria-label="Navigator view">
+        <div className="flex min-w-0 gap-0.5" role="tablist" aria-label="Navigator view">
           {(['layers', 'assets'] as const).map((value) => (
-            <PanelTab
+            <button
               key={value}
-              value={value}
+              type="button"
               role="tab"
               aria-selected={tab === value}
-              data-state={tab === value ? 'active' : 'inactive'}
+              className={cn(
+                'rounded-sm px-2 py-[3px] font-mono text-[11px] font-medium uppercase tracking-[0.09em] transition-colors',
+                tab === value ? 'bg-paper-deep text-ink' : 'text-ink-faint hover:text-ink',
+              )}
               onClick={() => setTab(value)}
             >
               {value}
-            </PanelTab>
+            </button>
           ))}
-        </PanelTabs>
+        </div>
         <PanelClose label="Collapse layers" onClick={onClose}>
           <PanelLeftIcon className="size-[13px]" strokeWidth={1.9} />
         </PanelClose>

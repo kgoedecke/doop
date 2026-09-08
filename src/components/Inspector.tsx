@@ -5,7 +5,7 @@ import { useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { deleteFrameTracked } from '../lib/history'
 import { cn } from '@/lib/utils'
-import { Panel, PanelBody, PanelClose, PanelHeader, PanelTab, PanelTabs } from './ui/panel'
+import { Panel, PanelBody, PanelClose, PanelHeader } from './ui/panel'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { DESIGN_SECTIONS, DESIGN_PROPERTIES } from '../lib/designProperties'
@@ -120,20 +120,23 @@ export function Inspector({
       )}
     >
       <PanelHeader className="px-3 py-2">
-        <PanelTabs role="tablist" aria-label="Inspector view">
+        <div className="flex min-w-0 gap-0.5" role="tablist" aria-label="Inspector view">
           {(['design', 'html'] as const).map((value) => (
-            <PanelTab
+            <button
               key={value}
-              value={value}
+              type="button"
               role="tab"
               aria-selected={tab === value}
-              data-state={tab === value ? 'active' : 'inactive'}
+              className={cn(
+                'rounded-sm px-2 py-[3px] font-mono text-[11px] font-medium uppercase tracking-[0.09em] transition-colors',
+                tab === value ? 'bg-paper-deep text-ink' : 'text-ink-faint hover:text-ink',
+              )}
               onClick={() => setTab(value)}
             >
               {value}
-            </PanelTab>
+            </button>
           ))}
-        </PanelTabs>
+        </div>
         <PanelClose label="Collapse inspector" onClick={() => useStore.getState().setInspectorOpen(false)}>
           <XIcon className="size-3" strokeWidth={2.4} />
         </PanelClose>
