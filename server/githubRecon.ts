@@ -200,14 +200,14 @@ export function treeExcerpt(paths: string[], sourcePath: string): string {
     .join('\n')
 }
 
-/* Root tags the model can hand back as a bare component fragment (no
-   <!doctype>, no <html>) — component recon asks for exactly this. */
-const FRAGMENT_ROOTS = ['div', 'main', 'section', 'article', 'style', 'header', 'footer', 'nav', 'form', 'table', 'ul']
+/** A line that begins with a tag — where a bare fragment starts. Commentary
+ *  lines never begin with `<`, so a tag mentioned mid-sentence is skipped. */
+const FRAGMENT_START = /^[ \t]*<[a-z][a-z0-9-]*[\s>/]/im
 
 /** Turn whatever the model returned into a full document string: a
  *  `<!doctype>` document as-is, a bare `<html>` document with a doctype
  *  added, or a component fragment wrapped in a minimal document. `undefined`
- *  when none of those appear anywhere in `raw`. */
+ *  when none of those appear in `raw`. */
 function normalizeToDocument(raw: string): string | undefined {
   const doctypeAt = raw.search(/<!doctype/i)
   if (doctypeAt !== -1) return raw.slice(doctypeAt)
@@ -215,9 +215,10 @@ function normalizeToDocument(raw: string): string | undefined {
   const htmlAt = raw.search(/<html[\s>]/i)
   if (htmlAt !== -1) return `<!doctype html>\n${raw.slice(htmlAt)}`
 
-  const fragment = raw.match(new RegExp(`<(?:${FRAGMENT_ROOTS.join('|')})[\\s>]`, 'i'))
-  if (fragment?.index !== undefined) {
-    return `<!doctype html><html><body>\n${raw.slice(fragment.index)}\n</body></html>`
+  const fragmentAt = raw.search(FRAGMENT_START)
+  if (fragmentAt !== -1) {
+    /* the empty <head> is where wrapGeneratedHtml injects the marker and CSP */
+    return `<!doctype html><html><head></head><body>\n${raw.slice(fragmentAt).trimStart()}\n</body></html>`
   }
 
   return undefined
@@ -228,10 +229,7 @@ export function extractHtml(blocks: { type: string; text?: string }[]): { html: 
     .filter((b) => b.type === 'text' && b.text)
     .map((b) => b.text)
     .join('\n')
-  /* the language tag after the opening fence (html, xml, or none) is
-     optional and discarded either way — only the fenced body is kept, an
-     unclosed fence falls through to searching the whole text below */
-  const fenced = text.match(/```(?:[a-zA-Z]*)\s*([\s\S]*?)```/)
+  const fenced = text.match(/```(?:html)?\s*([\s\S]*?)```/)
   const raw = (fenced ? fenced[1]! : text).trim()
   const html = normalizeToDocument(raw)
   if (!html) throw new Error('the model returned no HTML document')

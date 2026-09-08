@@ -89,6 +89,24 @@ describe('extractHtml', () => {
     expect(html).toContain('<style>.a { color: red; }</style>')
   })
 
+  it('wraps any element as a fragment, not just a fixed list', () => {
+    const { html } = extractHtml([{ type: 'text', text: '<button class="primary">Save</button>' }])
+    expect(html).toContain('<body>\n<button class="primary">Save</button>\n</body>')
+  })
+
+  it('gives a wrapped fragment a <head> so the frame wrapper has somewhere to inject', () => {
+    const { html } = extractHtml([{ type: 'text', text: '<div>x</div>' }])
+    expect(html).toContain('<head></head>')
+  })
+
+  it('starts a fragment at the first line that begins with a tag, skipping tags mentioned in prose', () => {
+    const { html } = extractHtml([
+      { type: 'text', text: 'I used a <div> wrapper for the layout:\n\n  <section class="card">real</section>' },
+    ])
+    expect(html).toContain('<body>\n<section class="card">real</section>\n</body>')
+    expect(html).not.toContain('wrapper for the layout')
+  })
+
   it('prefers an explicit doctype over a fragment tag that appears earlier in the same text', () => {
     const { html } = extractHtml([
       { type: 'text', text: 'Explanation with a <div> mention.\n<!doctype html><main>real doc</main>' },
