@@ -20,9 +20,17 @@ import type { Page } from 'puppeteer-core'
  *  selector set must not be able to hold the import open. */
 export const PRUNE_DEADLINE_MS = 5_000
 
+export interface PrunedPage {
+  css: string
+  /** The document serialised in the same pass the CSS was pruned against, so
+   *  the rules kept and the markup shipped agree whatever page scripts did
+   *  since the earlier snapshot. */
+  html: string
+}
+
 /** Runs INSIDE the captured page via page.evaluate, so it must be
  *  self-contained: no closure over module scope, no imports. */
-export function pruneCssInDocument(rawCss: string, deadlineMs: number): string {
+export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPage {
   const deadline = performance.now() + deadlineMs
 
   /* Pseudo-classes and pseudo-elements describe state, not structure. Strip
@@ -69,28 +77,31 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): string {
   ;(document.head ?? document.documentElement).appendChild(style)
   try {
     const sheet = style.sheet
-    if (!sheet) return rawCss
-    return Array.from(sheet.cssRules)
-      .map(keep)
-      .filter((text): text is string => text !== null)
-      .join('\n')
+    const css = sheet
+      ? Array.from(sheet.cssRules)
+          .map(keep)
+          .filter((text): text is string => text !== null)
+          .join('\n')
+      : rawCss
+    style.remove()
+    return { css, html: document.documentElement.outerHTML }
   } finally {
     style.remove()
   }
 }
 
-/** Prune `css` against the DOM currently loaded in `page`. Falls back to the
- *  unpruned sheet if the page cannot run the pruner: an oversized import is
- *  still an import. */
-export async function pruneUnusedCss(page: Page, css: string): Promise<string> {
+/** Prune `css` against the DOM currently loaded in `page` and serialise that
+ *  DOM. Returns null if the page cannot run the pruner, so the caller can fall
+ *  back to the unpruned sheet: an oversized import is still an import. */
+export async function pruneUnusedCss(page: Page, css: string): Promise<PrunedPage | null> {
   try {
     /* tsx/esbuild annotates nested functions with __name; page.evaluate
        serialises the function source, so the helper must exist in the page.
        Same shim as inspectFrame in screenshot.ts. */
     await page.evaluate('globalThis.__name = (target) => target')
     const pruned = await page.evaluate(pruneCssInDocument, css, PRUNE_DEADLINE_MS)
-    return typeof pruned === 'string' ? pruned : css
+    return typeof pruned?.css === 'string' && typeof pruned.html === 'string' ? pruned : null
   } catch {
-    return css
+    return null
   }
 }

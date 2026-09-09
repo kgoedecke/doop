@@ -624,8 +624,10 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       }
       css += captured.css + '\n'
     }
+    let html = snap.html
     if (css.trim()) {
-      css = await pruneUnusedCss(page, css)
+      const pruned = await pruneUnusedCss(page, css)
+      if (pruned) ({ css, html } = pruned)
       if (Buffer.byteLength(css) > MAX_CSS_BYTES) throw new WebsiteCaptureUnavailableError(CSS_PRUNED_OVERSIZED_MESSAGE)
     }
 
@@ -646,7 +648,6 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       `<meta http-equiv="Content-Security-Policy" content="${IMPORT_CSP}">` +
       `<base href="${documentBase.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` +
       (css.trim() ? `<style data-doop-import>\n${css.replace(/<\/style/gi, '<\\/style')}\n</style>` : '')
-    let html = snap.html
     const headMatch = html.match(/<head[^>]*>/i)
     if (headMatch) html = html.replace(headMatch[0], headMatch[0] + inject)
     else html = inject + html

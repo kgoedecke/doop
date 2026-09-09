@@ -10,20 +10,23 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
   let browser: Browser
   let page: Page
 
+  /* Launching Chromium on a loaded CI runner can take longer than vitest's
+     default 10 s hook timeout. */
   beforeAll(async () => {
     browser = await getBrowser()
     page = await browser.newPage()
     await page.setContent(
       '<!doctype html><html><head></head><body><div class="used"><ul><li>one</li></ul><a href="#">link</a></div></body></html>',
     )
-  })
+  }, 60_000)
 
   afterAll(async () => {
     await page?.close()
     await browser?.close()
   })
 
-  const prune = (css: string, deadlineMs = PRUNE_DEADLINE_MS) => page.evaluate(pruneCssInDocument, css, deadlineMs)
+  const prune = async (css: string, deadlineMs = PRUNE_DEADLINE_MS) =>
+    (await page.evaluate(pruneCssInDocument, css, deadlineMs)).css
 
   it('keeps rules whose selectors match and drops the rest', async () => {
     const pruned = await prune('.used { color: red } .unused { color: blue } body { margin: 0 }')
@@ -72,6 +75,13 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
 
     expect(pruned).toContain('.used')
     expect(pruned).toContain('.unused')
+  })
+
+  it('serialises the document it pruned against', async () => {
+    const { html } = await page.evaluate(pruneCssInDocument, '.used { color: red }', PRUNE_DEADLINE_MS)
+
+    expect(html).toContain('<div class="used">')
+    expect(html).not.toContain('<style>')
   })
 
   it('keeps at-rules that have no selector to test', async () => {
