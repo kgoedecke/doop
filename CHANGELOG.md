@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.3.0](https://github.com/kgoedecke/doop/compare/v0.2.0...v0.3.0) (2026-09-09)
+
+
+### Features
+
+* **agents:** demand real logos via search_logos instead of placeholders ([#149](https://github.com/kgoedecke/doop/issues/149)) ([1051c5e](https://github.com/kgoedecke/doop/commit/1051c5e3396d32ddf095bc9b3794d8195860f680))
+* **canvas:** marquee selection, shift-click multi-select and space-to-pan ([#141](https://github.com/kgoedecke/doop/issues/141)) ([1b1a5f6](https://github.com/kgoedecke/doop/commit/1b1a5f65f5a153abfb8d03f2eb7aea3926fa33aa))
+* **comments:** reply inside an element comment thread ([#140](https://github.com/kgoedecke/doop/issues/140)) ([cd7e6ee](https://github.com/kgoedecke/doop/commit/cd7e6eef3b3385f296d4ccbbee28988b8fe0cb6d))
+* **community:** gallery of published designs to preview and copy ([#147](https://github.com/kgoedecke/doop/issues/147)) ([83a2773](https://github.com/kgoedecke/doop/commit/83a27733afb9c856922da1af8e6e75d0470bbba7))
+* **desktop:** add Windows application support ([#112](https://github.com/kgoedecke/doop/issues/112)) ([2899cc3](https://github.com/kgoedecke/doop/commit/2899cc3c9d5fad5fee82529f78ae5a4f73a5eb61))
+* **github:** queue repo imports as board cards instead of outline frames ([#138](https://github.com/kgoedecke/doop/issues/138)) ([e495537](https://github.com/kgoedecke/doop/commit/e495537d07fb516e1e8dbff34a4a80f017319789))
+* **importer:** drop [@font-face](https://github.com/font-face) blocks the page never uses ([#126](https://github.com/kgoedecke/doop/issues/126)) ([9dc4230](https://github.com/kgoedecke/doop/commit/9dc4230439d5ed63d66be85082afa187ab6785f2))
+* **importer:** prune CSS the captured page does not use ([#125](https://github.com/kgoedecke/doop/issues/125)) ([1f03123](https://github.com/kgoedecke/doop/commit/1f03123f179a75816131308e9ef33bed893769a7))
+* **mcp:** add read-only access to canvas comments ([#117](https://github.com/kgoedecke/doop/issues/117)) ([bbb174e](https://github.com/kgoedecke/doop/commit/bbb174e24c06f1bf4d6ba4e5c384b452a5eb3204))
+* **ui:** doop mark for agents and coloured crew badges on the board ([#144](https://github.com/kgoedecke/doop/issues/144)) ([1fd46f4](https://github.com/kgoedecke/doop/commit/1fd46f4d0325abd08aedee9e1ed6a6b1753aa75c))
+
+
+### Bug Fixes
+
+* **agent:** stream Anthropic turns so long recon runs are not refused ([#130](https://github.com/kgoedecke/doop/issues/130)) ([bd48e16](https://github.com/kgoedecke/doop/commit/bd48e163d950897845ebb2c3909b8e921e492a5f))
+* **canvas:** copy, paste and duplicate the whole selection ([#146](https://github.com/kgoedecke/doop/issues/146)) ([238dd70](https://github.com/kgoedecke/doop/commit/238dd70dc34aadaf0fcad1ce0f6a4fed2f537b91))
+* **canvas:** satisfy strict TypeScript and lint in the multi-frame clipboard port ([9061782](https://github.com/kgoedecke/doop/commit/9061782bdac5a78e73ce2aba84e561e9dfe227a1))
+* **cards:** stop truncating a queued card's prompt at 200 chars ([#88](https://github.com/kgoedecke/doop/issues/88)) ([dbc9f31](https://github.com/kgoedecke/doop/commit/dbc9f3173d29625364e2779ad85ca8741e76db03))
+* **community:** size modal preview tiles to the clipped thumbnail, not the frame ([#148](https://github.com/kgoedecke/doop/issues/148)) ([97ffab9](https://github.com/kgoedecke/doop/commit/97ffab9712f7023c741dbf298ea3318ce130b227))
+* correct contrast on tag chip and rules new button ([#111](https://github.com/kgoedecke/doop/issues/111)) ([86a42f1](https://github.com/kgoedecke/doop/commit/86a42f1d20b18393306121c8b417f252cca69609))
+* **dash:** point Help & docs at /docs instead of /blog ([#142](https://github.com/kgoedecke/doop/issues/142)) ([503ac68](https://github.com/kgoedecke/doop/commit/503ac68df68020d75b16b99f7bf30fd254ed521c))
+* **dash:** point Help & docs at the hosted docs site ([396ccba](https://github.com/kgoedecke/doop/commit/396ccba5e01977da7a5ccf71a5304740f5df71bf))
+* **frame:** confirm the code block copy ([#93](https://github.com/kgoedecke/doop/issues/93)) ([fc1f3fa](https://github.com/kgoedecke/doop/commit/fc1f3fa75a121b3eb4bc4c93e220982afdbfb512))
+* **frame:** make the code view scrollable ([#94](https://github.com/kgoedecke/doop/issues/94)) ([dcacb21](https://github.com/kgoedecke/doop/commit/dcacb21c4c0c9b691a9013e21d34bb58485f21a0))
+* **importer:** allow bigger stylesheets ([#114](https://github.com/kgoedecke/doop/issues/114)) ([009e7be](https://github.com/kgoedecke/doop/commit/009e7be81668f1ee4a1ff7dc3a0cd9a1618861a8))
+* **importer:** keep [@font-face](https://github.com/font-face) blocks when the font shorthand uses var() ([#129](https://github.com/kgoedecke/doop/issues/129)) ([76e9343](https://github.com/kgoedecke/doop/commit/76e9343226210bf5f64ea5abb01329faee24bf8c))
+* make extractHtml accept html without doctype and component fragments ([#119](https://github.com/kgoedecke/doop/issues/119)) ([22a8a8a](https://github.com/kgoedecke/doop/commit/22a8a8a42d8b6be1251adb4134164e89c44156e8))
+* **stage:** pinch to zoom on touch screens ([#137](https://github.com/kgoedecke/doop/issues/137)) ([c91d60c](https://github.com/kgoedecke/doop/commit/c91d60cf0cc91c7fbef6c6e679293965c00343da))
+* **ui:** default the codex mark to black instead of the presence colour ([cf030d9](https://github.com/kgoedecke/doop/commit/cf030d998dceb41156bf2559943e8feaf57c4bfa))
+
 ## [0.2.0](https://github.com/kgoedecke/doop/compare/v0.1.0...v0.2.0) (2026-09-03)
 
 
