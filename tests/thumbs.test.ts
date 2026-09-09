@@ -55,7 +55,7 @@ describe('thumbs', () => {
     expect(mocks.renderFrame).toHaveBeenCalledTimes(3)
 
     /* finishing one admits exactly one waiter — never a burst */
-    resolvers[0](Buffer.from('x'))
+    resolvers[0]!(Buffer.from('x'))
     await tick()
     expect(mocks.renderFrame).toHaveBeenCalledTimes(4)
 
@@ -72,7 +72,7 @@ describe('thumbs', () => {
     const p = thumbs.create(frame('purged-mid-render'))
     await tick()
     thumbs.purge('purged-mid-render')
-    resolvers[0](Buffer.from('late'))
+    resolvers[0]!(Buffer.from('late'))
     await p
     await tick()
     expect(mocks.putObject).not.toHaveBeenCalled()
@@ -84,7 +84,7 @@ describe('thumbs', () => {
     mocks.putObject.mockImplementation(() => new Promise<void>((r) => (finishPut = r)))
     const p = thumbs.create(frame('purged-during-put'))
     await tick()
-    resolvers[0](Buffer.from('x'))
+    resolvers[0]!(Buffer.from('x'))
     await tick() /* now inside putObject */
     thumbs.purge('purged-during-put')
     finishPut()

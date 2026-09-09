@@ -126,23 +126,25 @@ export async function uploadImageFrames(
   const cx = (window.innerWidth / 2 - vp.x) / vp.zoom
   const cy = (window.innerHeight / 2 - vp.y) / vp.zoom
   const totalW = scaled.reduce((sum, s) => sum + s.width, 0) + IMAGE_ROW_GAP * (scaled.length - 1)
-  const xs: number[] = []
   let x = cx - totalW / 2
-  for (const s of scaled) {
-    xs.push(x)
-    x += s.width + IMAGE_ROW_GAP
-  }
+  const placed = scaled.map((size) => {
+    const slot = { ...size, x }
+    x += size.width + IMAGE_ROW_GAP
+    return slot
+  })
   return Promise.all(
     files.map(async (file, i) => {
+      const slot = placed[i]
+      if (!slot) throw new Error('image slot missing')
       const { url } = await api.uploadAsset(canvasId, file)
       const name = file.name.replace(/\.[a-z0-9]+$/i, '').trim() || fallbackName
       return api.createFrame(canvasId, {
         name,
         html: imageFrameHtml(url, name),
-        width: scaled[i].width,
-        height: scaled[i].height,
-        x: Math.round(xs[i]),
-        y: Math.round(cy - scaled[i].height / 2),
+        width: slot.width,
+        height: slot.height,
+        x: Math.round(slot.x),
+        y: Math.round(cy - slot.height / 2),
       })
     }),
   )
@@ -152,7 +154,8 @@ export async function pasteImagesCentered(canvasId: string, files: File[]) {
   const frames = await uploadImageFrames(canvasId, files)
   posthog.capture('image_pasted', { count: frames.length })
   frames.forEach(recordCreate)
-  useStore.getState().select(frames[frames.length - 1].id)
+  const last = frames[frames.length - 1]
+  if (last) useStore.getState().select(last.id)
 }
 
 export function duplicateFrame(frame: Frame) {

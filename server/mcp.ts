@@ -1279,8 +1279,9 @@ export async function handleMcpRequest(req: Request, res: Response) {
   const server = buildMcpServer(owner, session.userId ?? undefined)
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
   res.on('close', () => {
-    transport.close()
-    server.close()
+    /* the client is gone; there is nobody left to report a close failure to */
+    void transport.close()
+    void server.close()
   })
   try {
     await server.connect(transport)

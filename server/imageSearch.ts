@@ -57,17 +57,22 @@ export async function searchPhotos(
   })
   if (!res.ok) throw new Error(`photo search failed: HTTP ${res.status}`)
   const body = (await res.json()) as { photos?: PexelsPhoto[] }
-  return (body.photos ?? [])
-    .filter((p) => p.src?.large && p.src?.tiny)
-    .map((p) => ({
-      image_url: p.src.large,
-      thumb_url: p.src.tiny,
-      alt: p.alt || '',
-      photographer: p.photographer,
-      width: p.width,
-      height: p.height,
-      avg_color: p.avg_color || '',
-    }))
+  return (body.photos ?? []).flatMap((p) => {
+    const image_url = p.src?.large
+    const thumb_url = p.src?.tiny
+    if (!image_url || !thumb_url) return []
+    return [
+      {
+        image_url,
+        thumb_url,
+        alt: p.alt || '',
+        photographer: p.photographer,
+        width: p.width,
+        height: p.height,
+        avg_color: p.avg_color || '',
+      },
+    ]
+  })
 }
 
 /** Fetch a photo thumbnail for an image content block. Returns null on any

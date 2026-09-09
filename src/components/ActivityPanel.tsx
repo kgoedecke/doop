@@ -137,17 +137,19 @@ const agentTag =
 function TaskGroup({ list }: { list: AgentTask[] }) {
   const [shown, setShown] = useState(TASKS_SHOWN_INITIALLY)
   const hidden = list.length - shown
+  const latest = list[0]
+  if (!latest) return null
 
   return (
     <div className="border-t border-line-soft pt-2.5 pb-0.5 first:border-t-0">
       <div className="flex items-center gap-2 px-4 pt-1 pb-1.5 text-[12.5px] font-bold">
-        <Dot shape="square" style={{ background: list[0].color }} />
+        <Dot shape="square" style={{ background: latest.color }} />
         <span>
-          <AgentIcon name={list[0].agentName} /> {list[0].agentName}
-          {list[0].owner && <span className="ml-1.5 text-[11px] font-medium text-ink-faint">for {list[0].owner}</span>}
-          {list[0].failedAt ? (
+          <AgentIcon name={latest.agentName} /> {latest.agentName}
+          {latest.owner && <span className="ml-1.5 text-[11px] font-medium text-ink-faint">for {latest.owner}</span>}
+          {latest.failedAt ? (
             <span className={cn(agentTag, 'font-semibold tracking-[0.08em]')}>needs retry</span>
-          ) : !list[0].endedAt ? (
+          ) : !latest.endedAt ? (
             <span className={cn(agentTag, 'font-medium tracking-[0.1em]')}>working</span>
           ) : null}
         </span>
@@ -294,7 +296,7 @@ function TaskRow({ task }: { task: AgentTask }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
+              if (e.key === 'Enter') void submit()
               if (e.key === 'Escape') setReplying(false)
             }}
             onBlur={() => (draft.trim() ? submit() : setReplying(false))}

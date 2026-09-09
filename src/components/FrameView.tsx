@@ -241,7 +241,8 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         trackSave(api.updateFrame(f.id, after).catch(console.error))
         updates.push({ frameId: f.id, before: g.orig, after })
       }
-      if (updates.length === 1) recordUpdate(updates[0].frameId, updates[0].before, updates[0].after)
+      const [only, ...more] = updates
+      if (only && !more.length) recordUpdate(only.frameId, only.before, only.after)
       else recordUpdates(updates)
       /* a click (no drag) on the frame surface targets the element under
          the cursor: probe it and show the element toolbar */
@@ -465,8 +466,11 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     return () => window.removeEventListener('message', onMsg)
   }, [frame.id])
 
-  /* deselecting the frame ends the edit session */
+  /* deselecting the frame ends the edit session. Selection lives in the
+     store and the iframe has to be told, so this is a sync with an external
+     system rather than derived state. */
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     if (!selected && editing) exitEdit()
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 

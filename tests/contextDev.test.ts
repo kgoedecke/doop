@@ -38,7 +38,7 @@ describe('Context.dev rendered HTML client', () => {
     const captured = await scrapeContextWebsiteHtml('https://example.com/pricing', request)
 
     expect(request).toHaveBeenCalledOnce()
-    const [input, init] = request.mock.calls[0]
+    const [input, init] = request.mock.calls[0]!
     const endpoint = new URL(String(input))
     expect(`${endpoint.origin}${endpoint.pathname}`).toBe('https://api.context.dev/v1/web/scrape/html')
     expect(Object.fromEntries(endpoint.searchParams)).toEqual({
@@ -164,7 +164,7 @@ describe('Context.dev rendered HTML client', () => {
 
     const urls = await scrapeContextSitemap('https://example.com/start', 2, request)
 
-    const [input, init] = request.mock.calls[0]
+    const [input, init] = request.mock.calls[0]!
     const endpoint = new URL(String(input))
     expect(`${endpoint.origin}${endpoint.pathname}`).toBe('https://api.context.dev/v1/web/scrape/sitemap')
     expect(Object.fromEntries(endpoint.searchParams)).toEqual({

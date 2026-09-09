@@ -119,7 +119,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       select(null)
       clearHistory()
     }
-  }, [canvasId])
+  }, [canvasId, select])
 
   /* broadcast which frame I'm focused on */
   useEffect(() => {
@@ -141,13 +141,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (e.key === 'Escape') select(null)
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
-        if (e.shiftKey) redo()
-        else undo()
+        if (e.shiftKey) void redo()
+        else void undo()
         return
       }
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'y') {
         e.preventDefault()
-        redo()
+        void redo()
         return
       }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
@@ -893,8 +893,8 @@ function ImportModal({
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    if (wholeSite) discover()
-                    else runSinglePage()
+                    if (wholeSite) void discover()
+                    else void runSinglePage()
                   }
                   if (e.key === 'Escape' && !busy) onClose()
                 }}
@@ -1064,10 +1064,16 @@ function RenameSelfModal({ current, onClose }: { current: string; onClose: () =>
   function save() {
     if (!clean || clean === current || busy) return onClose()
     setBusy(true)
-    authClient.updateUser({ name: clean }).then(() => {
-      setName(clean)
-      location.reload()
-    })
+    authClient.updateUser({ name: clean }).then(
+      () => {
+        setName(clean)
+        location.reload()
+      },
+      (err: unknown) => {
+        console.error(err)
+        setBusy(false)
+      },
+    )
   }
 
   return (

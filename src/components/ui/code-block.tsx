@@ -33,9 +33,10 @@ function CodeBlock({
           density === 'rail' ? 'right-[5px] top-[5px]' : 'right-2 top-2',
         )}
         onClick={() => {
-          navigator.clipboard.writeText(text)
-          setCopied(true)
-          window.setTimeout(() => setCopied(false), 1500)
+          navigator.clipboard.writeText(text).then(() => {
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1500)
+          }, console.error)
         }}
       >
         {copied ? '✓' : 'copy'}

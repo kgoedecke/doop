@@ -336,7 +336,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
-                      submit()
+                      void submit()
                     }
                     if (e.key === 'Escape') setDraft(null)
                   }}

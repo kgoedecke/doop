@@ -219,7 +219,7 @@ export function prepareContextHtmlForRendering(html: string, finalUrl: string): 
   const originalBase = html.match(/<base\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i)
   let resolvedBase = safeFinalUrl
   if (originalBase) {
-    const rawHref = (originalBase[1] ?? originalBase[2] ?? originalBase[3])
+    const rawHref = (originalBase[1] ?? originalBase[2] ?? originalBase[3] ?? '')
       .replace(/&amp;/gi, '&')
       .replace(/&#0*38;|&#x0*26;/gi, '&')
     try {

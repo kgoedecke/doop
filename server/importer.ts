@@ -102,7 +102,7 @@ function decodeEntities(value: string): string {
   const named: Record<string, string> = { amp: '&', apos: "'", gt: '>', lt: '<', quot: '"', nbsp: ' ' }
   return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (all, entity: string) => {
     if (entity[0] === '#') {
-      const hex = entity[1].toLowerCase() === 'x'
+      const hex = entity[1]?.toLowerCase() === 'x'
       const parsed = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10)
       return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff ? String.fromCodePoint(parsed) : all
     }
@@ -124,7 +124,7 @@ export function parseHtmlPage(html: string, pageUrl: URL): { title: string; link
   const baseHref = html.match(/<base\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i)
   let base = pageUrl
   try {
-    if (baseHref) base = new URL(baseHref[1] ?? baseHref[2] ?? baseHref[3], pageUrl)
+    if (baseHref) base = new URL(baseHref[1] ?? baseHref[2] ?? baseHref[3] ?? '', pageUrl)
   } catch {
     /* malformed base; ordinary document-relative resolution is safer */
   }
@@ -132,7 +132,7 @@ export function parseHtmlPage(html: string, pageUrl: URL): { title: string; link
   const hrefs = html.matchAll(/<a\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi)
   for (const match of hrefs) {
     try {
-      links.push(new URL(decodeEntities(match[1] ?? match[2] ?? match[3]), base).href)
+      links.push(new URL(decodeEntities(match[1] ?? match[2] ?? match[3] ?? ''), base).href)
     } catch {
       /* malformed link */
     }
@@ -143,7 +143,7 @@ export function parseHtmlPage(html: string, pageUrl: URL): { title: string; link
 export function parseSitemap(xml: string): { index: boolean; urls: string[] } {
   const urls: string[] = []
   for (const match of xml.matchAll(/<loc\b[^>]*>([\s\S]*?)<\/loc>/gi)) {
-    let value = match[1].trim()
+    let value = (match[1] ?? '').trim()
     if (value.startsWith('<![CDATA[') && value.endsWith(']]>')) value = value.slice(9, -3)
     value = decodeEntities(value.trim())
     if (value) urls.push(value)
@@ -241,7 +241,7 @@ async function sitemapPages(site: URL): Promise<string[]> {
   const sitemapQueue = [`${site.origin}/sitemap.xml`]
   const robots = await fetchSiteText(`${site.origin}/robots.txt`, site)
   if (robots) {
-    for (const match of robots.text.matchAll(/^\s*sitemap:\s*(\S+)\s*$/gim)) sitemapQueue.push(match[1])
+    for (const [, url] of robots.text.matchAll(/^\s*sitemap:\s*(\S+)\s*$/gim)) if (url) sitemapQueue.push(url)
   }
 
   const seen = new Set<string>()
@@ -386,8 +386,8 @@ export async function importSitePages(rawUrls: string[], concurrency = 3): Promi
   async function worker() {
     for (;;) {
       const index = cursor++
-      if (index >= rawUrls.length) return
       const url = rawUrls[index]
+      if (url === undefined) return
       try {
         results[index] = { url, page: await importPage(url) }
       } catch (error) {
@@ -447,7 +447,7 @@ async function fetchCss(sheetUrl: string, budget: number, depth = 0): Promise<Ca
     if (index >= MAX_CSS_IMPORTS) return UNREACHABLE
     let child: CapturedCss
     try {
-      child = await fetchCss(new URL(m[1], url).href, budget - Buffer.byteLength(css), depth + 1)
+      child = await fetchCss(new URL(m[1] ?? '', url).href, budget - Buffer.byteLength(css), depth + 1)
     } catch {
       child = UNREACHABLE
     }

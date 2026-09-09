@@ -64,8 +64,8 @@ describe('Anthropic messages -> OpenAI Responses input', () => {
     expect(output?.output).toContain('frame rendered')
     const message = items.find((i) => i.type === 'message' && i.role === 'user')
     const parts = (message?.content ?? []) as { type: string; image_url?: string }[]
-    expect(parts[0].type).toBe('input_image')
-    expect(parts[0].image_url).toBe('data:image/png;base64,AAAA')
+    expect(parts[0]?.type).toBe('input_image')
+    expect(parts[0]?.image_url).toBe('data:image/png;base64,AAAA')
     /* images come after the output they belong to */
     expect(items.indexOf(output!)).toBeLessThan(items.indexOf(message!))
   })
@@ -88,9 +88,9 @@ describe('Anthropic messages -> OpenAI Responses input', () => {
         input_schema: { type: 'object', properties: { frame_id: { type: 'string' } }, required: ['frame_id'] },
       },
     ]) as { type: string; name: string; parameters: unknown }[]
-    expect(tools[0].type).toBe('function')
-    expect(tools[0].name).toBe('screenshot_frame')
-    expect(tools[0].parameters).toEqual({
+    expect(tools[0]?.type).toBe('function')
+    expect(tools[0]?.name).toBe('screenshot_frame')
+    expect(tools[0]?.parameters).toEqual({
       type: 'object',
       properties: { frame_id: { type: 'string' } },
       required: ['frame_id'],

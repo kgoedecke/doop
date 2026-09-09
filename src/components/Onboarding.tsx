@@ -57,35 +57,32 @@ export function Onboarding() {
     return { watched: demoDone, connected: agentHere || agentWorked, tasked: agentWorked }
   }, [tasks, presences])
 
-  useEffect(() => {
-    setProgress((prev) => {
-      const next: Progress = {
-        ...prev,
-        watched: prev.watched || live.watched,
-        connected: prev.connected || live.connected,
-        tasked: prev.tasked || live.tasked,
-      }
-      if (next.watched !== prev.watched || next.connected !== prev.connected || next.tasked !== prev.tasked) {
-        save(next)
-        return next
-      }
-      return prev
-    })
-  }, [live.watched, live.connected, live.tasked])
+  /* a step, once seen live, stays done: fold the live signals into the
+     stored progress as they light up */
+  const next: Progress = {
+    ...progress,
+    watched: progress.watched || live.watched,
+    connected: progress.connected || live.connected,
+    tasked: progress.tasked || live.tasked,
+  }
+  if (next.watched !== progress.watched || next.connected !== progress.connected || next.tasked !== progress.tasked) {
+    setProgress(next)
+  }
+
+  useEffect(() => save(progress), [progress])
 
   if (progress.dismissed) return null
   const allDone = progress.watched && progress.connected && progress.tasked
 
   function dismiss() {
-    const next = { ...progress, dismissed: true }
-    save(next)
-    setProgress(next)
+    setProgress({ ...progress, dismissed: true })
   }
 
   function copy(text: string, which: string) {
-    navigator.clipboard.writeText(text)
-    setCopied(which)
-    window.setTimeout(() => setCopied(null), 1500)
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(which)
+      window.setTimeout(() => setCopied(null), 1500)
+    }, console.error)
   }
 
   const mcpCmd = `claude mcp add --transport http doop "${location.origin}/mcp"`

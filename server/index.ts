@@ -110,7 +110,10 @@ process.on('unhandledRejection', (reason) => {
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.once(sig, () => {
     setTimeout(() => process.exit(0), 1500).unref()
-    persist.flush((id) => store.getFrame(id)).finally(() => process.exit(0))
+    persist
+      .flush((id) => store.getFrame(id))
+      .catch((err) => console.error('flush on shutdown failed', err))
+      .finally(() => process.exit(0))
   })
 }
 
@@ -424,7 +427,7 @@ app.put('/u/:token', async (req, res) => {
    plugin adds are refused by default rather than discovered later. */
 const MCP_OAUTH_PATHS = /^\/api\/auth\/(mcp\/|oauth2\/(authorize|consent|token))/
 const VIEW_AS_ALLOWED = /^\/api\/auth\/(sign-out|admin\/stop-impersonating)$/
-app.all('/api/auth/*', async (req, res) => {
+app.all('/api/auth/*', async (req, res, next) => {
   const restricted = MCP_OAUTH_PATHS.test(req.path) || (req.method !== 'GET' && !VIEW_AS_ALLOWED.test(req.path))
   if (restricted) {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
@@ -432,7 +435,7 @@ app.all('/api/auth/*', async (req, res) => {
       return res.status(403).json({ error: 'viewing as another user — read only' })
     }
   }
-  toNodeHandler(auth)(req, res)
+  toNodeHandler(auth)(req, res).catch(next)
 })
 
 app.use(express.json({ limit: '10mb' }))
@@ -1285,7 +1288,8 @@ app.post('/api/canvases/:id/import', async (req, res) => {
       }
       /* Validate the whole batch before consuming a slot or opening Chromium. */
       const validated = requested.map((url) => assertPublicHttpUrl(url))
-      if (validated.some((url) => !isSameSiteUrl(url, validated[0]))) {
+      const [first, ...rest] = validated
+      if (first && rest.some((url) => !isSameSiteUrl(url, first))) {
         return res.status(400).json({ error: 'all selected pages must belong to the same website' })
       }
       const urls = [...new Set(validated.map((url) => url.href))]

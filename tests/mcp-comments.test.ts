@@ -261,8 +261,8 @@ describe('get_comments MCP tool', () => {
       expect(takeComments).not.toHaveBeenCalled()
       expect(resolve).not.toHaveBeenCalled()
       expect(stored).toEqual(before)
-      expect(stored[0].claimedBy).toBeUndefined()
-      expect(stored[0].resolvedAt).toBeUndefined()
+      expect(stored[0]?.claimedBy).toBeUndefined()
+      expect(stored[0]?.resolvedAt).toBeUndefined()
     } finally {
       await close()
     }
@@ -276,7 +276,7 @@ describe('get_comments MCP tool', () => {
     try {
       await callComments(client, { canvas_id: CANVAS.id, agent_name: 'Claude' })
       expect(heartbeat).toHaveBeenCalledTimes(1)
-      expect(heartbeat.mock.calls[0][0]).toBe(CANVAS.id)
+      expect(heartbeat.mock.calls[0]?.[0]).toBe(CANVAS.id)
       expect(takeFeedback).not.toHaveBeenCalled()
 
       heartbeat.mockClear()

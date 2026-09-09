@@ -340,5 +340,6 @@ export const CURSOR_PALETTE = [
 export function colorFor(key: string): string {
   let h = 0
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0
-  return CURSOR_PALETTE[h % CURSOR_PALETTE.length]
+  /* the modulo keeps the index in range */
+  return CURSOR_PALETTE[h % CURSOR_PALETTE.length]!
 }
