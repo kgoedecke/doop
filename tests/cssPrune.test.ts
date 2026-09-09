@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Browser, Page } from 'puppeteer-core'
-import { pruneCssInDocument } from '../server/cssPrune.ts'
+import { PRUNE_DEADLINE_MS, pruneCssInDocument } from '../server/cssPrune.ts'
 import { findBrowserPath, getBrowser } from '../server/screenshot.ts'
 
 /* The pruner runs inside Chromium and leans on its CSS parser, so it is
@@ -23,7 +23,7 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
     await browser?.close()
   })
 
-  const prune = (css: string) => page.evaluate(pruneCssInDocument, css)
+  const prune = (css: string, deadlineMs = PRUNE_DEADLINE_MS) => page.evaluate(pruneCssInDocument, css, deadlineMs)
 
   it('keeps rules whose selectors match and drops the rest', async () => {
     const pruned = await prune('.used { color: red } .unused { color: blue } body { margin: 0 }')
@@ -65,6 +65,13 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
     expect(pruned).not.toContain('@media print')
     expect(pruned).not.toContain('@layer base')
     expect(pruned).not.toContain('.unused')
+  })
+
+  it('keeps everything it has not examined once the deadline passes', async () => {
+    const pruned = await prune('.used { color: red } .unused { color: blue }', 0)
+
+    expect(pruned).toContain('.used')
+    expect(pruned).toContain('.unused')
   })
 
   it('keeps at-rules that have no selector to test', async () => {

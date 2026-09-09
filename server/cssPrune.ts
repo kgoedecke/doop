@@ -14,9 +14,17 @@ import type { Page } from 'puppeteer-core'
  * what we keep and what Chromium understands.
  */
 
+/** Pruning is a size optimisation, never a correctness requirement, so it
+ *  gets a fixed slice of time. Past the deadline every remaining rule is
+ *  kept as-is: the page and its CSS are attacker-controlled, and a pathological
+ *  selector set must not be able to hold the import open. */
+export const PRUNE_DEADLINE_MS = 5_000
+
 /** Runs INSIDE the captured page via page.evaluate, so it must be
  *  self-contained: no closure over module scope, no imports. */
-export function pruneCssInDocument(rawCss: string): string {
+export function pruneCssInDocument(rawCss: string, deadlineMs: number): string {
+  const deadline = performance.now() + deadlineMs
+
   /* Pseudo-classes and pseudo-elements describe state, not structure. Strip
      them so `a:hover::before` keeps its rule when any `a` exists. Functional
      pseudos (:not, :is, :nth-child…) are stripped too, which only widens the
@@ -38,6 +46,7 @@ export function pruneCssInDocument(rawCss: string): string {
     'cssRules' in rule && !(rule instanceof CSSStyleRule) && !(rule instanceof CSSKeyframesRule)
 
   const keep = (rule: CSSRule): string | null => {
+    if (performance.now() > deadline) return rule.cssText
     if (rule instanceof CSSStyleRule) return used(rule.selectorText) ? rule.cssText : null
     if (isGrouping(rule)) {
       /* @media, @supports, @layer, @container, @scope… keep the wrapper only
@@ -79,7 +88,7 @@ export async function pruneUnusedCss(page: Page, css: string): Promise<string> {
        serialises the function source, so the helper must exist in the page.
        Same shim as inspectFrame in screenshot.ts. */
     await page.evaluate('globalThis.__name = (target) => target')
-    const pruned = await page.evaluate(pruneCssInDocument, css)
+    const pruned = await page.evaluate(pruneCssInDocument, css, PRUNE_DEADLINE_MS)
     return typeof pruned === 'string' ? pruned : css
   } catch {
     return css
