@@ -68,7 +68,7 @@
 
   var SETTLE_MS = 2500 // let data land and skeletons resolve before capturing
   var MIN_RESEND_MS = 30000 // floor between uploads of the same route (matches the server's)
-  var MAX_BYTES = 2400000 // server rejects above 2.5 MB — stay under
+  var MAX_BYTES = 2400000 // server rejects above 3 MB — stay under
   var MAX_ASSET_BYTES = 200000 // per-file cap for inlined fonts/images
   var ENDPOINT = HOST.replace(/\/$/, '') + '/ingest/' + KEY
 

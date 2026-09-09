@@ -1,11 +1,11 @@
 import { parsePublicHttpUrl } from './publicUrl.ts'
 import { WebsiteCaptureUnavailableError } from './websiteAccess.ts'
+import { MAX_FRAME_HTML_BYTES } from './limits.ts'
 
 const CONTEXT_HTML_ENDPOINT = 'https://api.context.dev/v1/web/scrape/html'
 const CONTEXT_SITEMAP_ENDPOINT = 'https://api.context.dev/v1/web/scrape/sitemap'
 const CONTEXT_TIMEOUT_MS = 45_000
 const MAX_ERROR_MESSAGE_CHARS = 240
-const MAX_CONTEXT_HTML_CHARS = 3_000_000
 
 export interface ContextWebsiteHtml {
   html: string
@@ -113,7 +113,7 @@ export async function scrapeContextWebsiteHtml(
   if (body.success !== true || typeof body.html !== 'string' || !body.html.trim()) {
     throw new WebsiteCaptureUnavailableError('Context.dev returned no webpage HTML')
   }
-  if (body.html.length > MAX_CONTEXT_HTML_CHARS) {
+  if (body.html.length > MAX_FRAME_HTML_BYTES) {
     throw new WebsiteCaptureUnavailableError('Context.dev returned webpage HTML that is too large to import safely')
   }
   if (body.type !== 'html') {
