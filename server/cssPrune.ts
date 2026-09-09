@@ -54,7 +54,7 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
     'cssRules' in rule && !(rule instanceof CSSStyleRule) && !(rule instanceof CSSKeyframesRule)
 
   const keep = (rule: CSSRule): string | null => {
-    if (performance.now() > deadline) return rule.cssText
+    if (performance.now() >= deadline) return rule.cssText
     if (rule instanceof CSSStyleRule) return used(rule.selectorText) ? rule.cssText : null
     if (isGrouping(rule)) {
       /* @media, @supports, @layer, @container, @scope… keep the wrapper only
