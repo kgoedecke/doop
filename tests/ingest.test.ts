@@ -242,7 +242,7 @@ describe('design sync ingest', () => {
       })
     expect((await post({ page: 'not-rooted', html: '<p>x</p>' })).status).toBe(400)
     expect((await post({ page: '/x' })).status).toBe(400)
-    expect((await post({ page: '/big', html: '<p>' + 'x'.repeat(2_600_000) + '</p>' })).status).toBe(413)
+    expect((await post({ page: '/big', html: '<p>' + 'x'.repeat(3_100_000) + '</p>' })).status).toBe(413)
   })
 
   it('link-edit visitors can edit frames but cannot touch sync keys', async () => {

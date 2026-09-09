@@ -22,9 +22,10 @@ import {
  *  here so Home and Settings cannot drift apart. */
 
 export function initials(name?: string): string {
-  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean)
-  if (!parts.length) return '·'
-  const letters = parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]
+  const [first, ...rest] = (name ?? '').trim().split(/\s+/).filter(Boolean)
+  if (!first) return '·'
+  const last = rest[rest.length - 1]
+  const letters = last ? first.slice(0, 1) + last.slice(0, 1) : first.slice(0, 2)
   return letters.toUpperCase()
 }
 

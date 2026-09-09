@@ -120,12 +120,14 @@ fn main() {
                 });
             }
             // Marks every page loaded in the shell so the app can tell desktop
-            // sessions from browser ones (src/lib/posthog.ts) and render the
+            // sessions from browser ones (src/lib/shell.ts) and render the
             // tab strip; the version lets the app adapt to shell capabilities
-            // (traffic-light inset arrived with the overlay title bar, 0.1.2).
+            // (traffic-light inset arrived with the overlay title bar, 0.1.2)
+            // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}';",
-                app.package_info().version
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}';",
+                app.package_info().version,
+                std::env::consts::OS
             );
             let builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::External(entry.parse()?))

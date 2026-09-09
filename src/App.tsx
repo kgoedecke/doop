@@ -12,7 +12,8 @@ import { adminApi } from './lib/api'
 import { Button } from './components/ui/button'
 import { AuthScreen } from './components/ui/screen'
 import { DesktopTabs, ShellDragBar } from './components/DesktopTabs'
-import { isDesktopShell, setTabsUser } from './lib/desktop'
+import { setTabsUser } from './lib/desktop'
+import { isDesktopShell } from './lib/shell'
 
 export function navigate(path: string) {
   history.pushState(null, '', path)
@@ -110,9 +111,9 @@ export function App() {
      session back and reloads. */
   if (path.startsWith('/admin') && (!me || returningToAdmin)) return <div className="auth-page" />
 
-  const canvasMatch = path.match(/^\/c\/([^/]+)/)
-  const page = canvasMatch ? (
-    <CanvasPage canvasId={canvasMatch[1]} key={canvasMatch[1]} />
+  const canvasId = path.match(/^\/c\/([^/]+)/)?.[1]
+  const page = canvasId ? (
+    <CanvasPage canvasId={canvasId} key={canvasId} />
   ) : path.startsWith('/admin') ? (
     <Admin />
   ) : path.startsWith('/settings') ? (

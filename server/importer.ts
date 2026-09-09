@@ -14,6 +14,13 @@ import {
   parsePublicHttpUrl,
 } from './publicUrl.ts'
 import { navigateWebsitePage, WebsiteCaptureUnavailableError } from './websiteAccess.ts'
+import { pruneUnusedCss } from './cssPrune.ts'
+import {
+  MAX_DISCOVERY_BYTES,
+  MAX_FRAME_HTML_BYTES,
+  MAX_IMPORT_CSS_BYTES,
+  MAX_IMPORT_CSS_FETCH_BYTES,
+} from './limits.ts'
 
 /**
  * Website importer: discover a bounded set of same-site pages, or acquire one
@@ -29,9 +36,6 @@ const VIEWPORT_WIDTH = 1280
 const MAX_HEIGHT = 6000
 const MAX_PREVIEW_HEIGHT = 4000
 const MAX_PREVIEW_TEXT_CHARS = 6000
-const MAX_SHEET_BYTES = 600_000
-const MAX_TOTAL_BYTES = 2_000_000
-const MAX_DISCOVERY_BYTES = 2_000_000
 const MAX_SITEMAPS = 12
 const DISCOVERY_CONCURRENCY = 6
 const MAX_CSS_IMPORTS = 16
@@ -98,7 +102,7 @@ function decodeEntities(value: string): string {
   const named: Record<string, string> = { amp: '&', apos: "'", gt: '>', lt: '<', quot: '"', nbsp: ' ' }
   return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (all, entity: string) => {
     if (entity[0] === '#') {
-      const hex = entity[1].toLowerCase() === 'x'
+      const hex = entity[1]?.toLowerCase() === 'x'
       const parsed = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10)
       return Number.isFinite(parsed) && parsed >= 0 && parsed <= 0x10ffff ? String.fromCodePoint(parsed) : all
     }
@@ -120,7 +124,7 @@ export function parseHtmlPage(html: string, pageUrl: URL): { title: string; link
   const baseHref = html.match(/<base\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/i)
   let base = pageUrl
   try {
-    if (baseHref) base = new URL(baseHref[1] ?? baseHref[2] ?? baseHref[3], pageUrl)
+    if (baseHref) base = new URL(baseHref[1] ?? baseHref[2] ?? baseHref[3] ?? '', pageUrl)
   } catch {
     /* malformed base; ordinary document-relative resolution is safer */
   }
@@ -128,7 +132,7 @@ export function parseHtmlPage(html: string, pageUrl: URL): { title: string; link
   const hrefs = html.matchAll(/<a\b[^>]*\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi)
   for (const match of hrefs) {
     try {
-      links.push(new URL(decodeEntities(match[1] ?? match[2] ?? match[3]), base).href)
+      links.push(new URL(decodeEntities(match[1] ?? match[2] ?? match[3] ?? ''), base).href)
     } catch {
       /* malformed link */
     }
@@ -139,7 +143,7 @@ export function parseHtmlPage(html: string, pageUrl: URL): { title: string; link
 export function parseSitemap(xml: string): { index: boolean; urls: string[] } {
   const urls: string[] = []
   for (const match of xml.matchAll(/<loc\b[^>]*>([\s\S]*?)<\/loc>/gi)) {
-    let value = match[1].trim()
+    let value = (match[1] ?? '').trim()
     if (value.startsWith('<![CDATA[') && value.endsWith(']]>')) value = value.slice(9, -3)
     value = decodeEntities(value.trim())
     if (value) urls.push(value)
@@ -237,7 +241,7 @@ async function sitemapPages(site: URL): Promise<string[]> {
   const sitemapQueue = [`${site.origin}/sitemap.xml`]
   const robots = await fetchSiteText(`${site.origin}/robots.txt`, site)
   if (robots) {
-    for (const match of robots.text.matchAll(/^\s*sitemap:\s*(\S+)\s*$/gim)) sitemapQueue.push(match[1])
+    for (const [, url] of robots.text.matchAll(/^\s*sitemap:\s*(\S+)\s*$/gim)) if (url) sitemapQueue.push(url)
   }
 
   const seen = new Set<string>()
@@ -382,8 +386,8 @@ export async function importSitePages(rawUrls: string[], concurrency = 3): Promi
   async function worker() {
     for (;;) {
       const index = cursor++
-      if (index >= rawUrls.length) return
       const url = rawUrls[index]
+      if (url === undefined) return
       try {
         results[index] = { url, page: await importPage(url) }
       } catch (error) {
@@ -395,14 +399,21 @@ export async function importSitePages(rawUrls: string[], concurrency = 3): Promi
   return results
 }
 
-interface CapturedCss {
-  css: string
-  complete: boolean
-}
+type CapturedCss = { ok: true; css: string } | { ok: false; reason: 'oversized' | 'unreachable' }
 
-/** Fetch a stylesheet, resolve depth-1 @imports, absolutize its url() refs. */
-async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
-  if (depth > 1) return { css: '', complete: false }
+const OVERSIZED: CapturedCss = { ok: false, reason: 'oversized' }
+const UNREACHABLE: CapturedCss = { ok: false, reason: 'unreachable' }
+
+const CSS_OVERSIZED_MESSAGE = `This page's stylesheets are larger than Doop's ${MAX_IMPORT_CSS_FETCH_BYTES / 1_000_000} MB import limit`
+const CSS_PRUNED_OVERSIZED_MESSAGE = `This page needs more than Doop's ${MAX_IMPORT_CSS_BYTES / 1_000_000} MB CSS import limit even after unused styles are removed`
+const CSS_UNREACHABLE_MESSAGE = 'The webpage HTML was captured, but one or more stylesheets could not be fully loaded'
+
+/** Fetch a stylesheet within the bytes still available for the page's CSS,
+ *  resolve depth-1 @imports against the same budget, absolutize its url() refs.
+ *  Fetching stops at the first failure: the import cannot succeed anyway, and
+ *  the budget bounds how much an untrusted host can make us download. */
+async function fetchCss(sheetUrl: string, budget: number, depth = 0): Promise<CapturedCss> {
+  if (depth > 1) return UNREACHABLE
   let url: URL
   let res: Response | undefined
   let css: string
@@ -416,42 +427,35 @@ async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
       })
       if (res.status < 300 || res.status >= 400) break
       const location = res.headers.get('location')
-      if (!location) return { css: '', complete: false }
+      if (!location) return UNREACHABLE
       url = parsePublicHttpUrl(new URL(location, url).href)
       res = undefined
     }
-    if (!res?.ok) return { css: '', complete: false }
-    if (res.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') return { css: '', complete: false }
+    if (!res?.ok) return UNREACHABLE
+    if (res.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') return UNREACHABLE
     const contentType = res.headers.get('content-type') ?? ''
-    if (contentType && !/text\/css|text\/plain|application\/octet-stream/i.test(contentType)) {
-      return { css: '', complete: false }
-    }
-    const bounded = await readTextBounded(res, MAX_SHEET_BYTES)
-    if (bounded === null) return { css: '', complete: false }
+    if (contentType && !/text\/css|text\/plain|application\/octet-stream/i.test(contentType)) return UNREACHABLE
+    const bounded = await readTextBounded(res, budget)
+    if (bounded === null) return OVERSIZED
     css = bounded
   } catch {
-    return { css: '', complete: false }
+    return UNREACHABLE
   }
 
-  let complete = true
   const imports = [...css.matchAll(/@import\s+(?:url\()?\s*['"]?([^'")\s]+)['"]?\s*\)?[^;]*;/g)]
   for (const [index, m] of imports.entries()) {
-    let child: CapturedCss = { css: '', complete: false }
-    if (index < MAX_CSS_IMPORTS) {
-      try {
-        child = await fetchCss(new URL(m[1], url).href, depth + 1)
-      } catch {
-        /* dead import */
-      }
+    if (index >= MAX_CSS_IMPORTS) return UNREACHABLE
+    let child: CapturedCss
+    try {
+      child = await fetchCss(new URL(m[1] ?? '', url).href, budget - Buffer.byteLength(css), depth + 1)
+    } catch {
+      child = UNREACHABLE
     }
-    if (!child.complete) complete = false
-    /* Imports beyond the bounded fetch budget are removed rather than left
-       active in the snapshot for a later browser to fetch. */
+    if (!child.ok) return child
+    /* Inline the import rather than leave it active in the snapshot for a
+       later browser to fetch. */
     css = css.replace(m[0], child.css)
-    if (css.length > MAX_SHEET_BYTES) {
-      css = css.slice(0, MAX_SHEET_BYTES)
-      complete = false
-    }
+    if (Buffer.byteLength(css) > budget) return OVERSIZED
   }
   /* relative url(...) inside the sheet must resolve against the SHEET's URL,
      not the document base */
@@ -462,7 +466,7 @@ async function fetchCss(sheetUrl: string, depth = 0): Promise<CapturedCss> {
       return _all
     }
   })
-  return { css, complete }
+  return { ok: true, css }
 }
 
 export interface ImportedPage {
@@ -609,16 +613,20 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
 
     let css = ''
     for (const sheet of snap.sheets) {
-      const captured = await fetchCss(sheet)
-      if (!captured.complete) {
+      const captured = await fetchCss(sheet, MAX_IMPORT_CSS_FETCH_BYTES - Buffer.byteLength(css))
+      if (!captured.ok) {
         throw new WebsiteCaptureUnavailableError(
-          'The webpage HTML was captured, but one or more stylesheets could not be fully loaded',
+          captured.reason === 'oversized' ? CSS_OVERSIZED_MESSAGE : CSS_UNREACHABLE_MESSAGE,
         )
       }
-      if (css.length + captured.css.length + 1 > MAX_TOTAL_BYTES) {
-        throw new WebsiteCaptureUnavailableError('The webpage styles are too large to import safely')
-      }
       css += captured.css + '\n'
+    }
+    let html = snap.html
+    if (css.trim()) {
+      const pruned = await pruneUnusedCss(page, css)
+      if (pruned) ({ css, html } = pruned)
+      if (Buffer.byteLength(css) > MAX_IMPORT_CSS_BYTES)
+        throw new WebsiteCaptureUnavailableError(CSS_PRUNED_OVERSIZED_MESSAGE)
     }
 
     /* Scrolling/lazy loading can trigger a delayed navigation. Re-check the
@@ -638,13 +646,12 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
       `<meta http-equiv="Content-Security-Policy" content="${IMPORT_CSP}">` +
       `<base href="${documentBase.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">` +
       (css.trim() ? `<style data-doop-import>\n${css.replace(/<\/style/gi, '<\\/style')}\n</style>` : '')
-    let html = snap.html
     const headMatch = html.match(/<head[^>]*>/i)
     if (headMatch) html = html.replace(headMatch[0], headMatch[0] + inject)
     else html = inject + html
     html = '<!doctype html>\n' + html
 
-    if (html.length > MAX_TOTAL_BYTES * 1.5) {
+    if (Buffer.byteLength(html) > MAX_FRAME_HTML_BYTES) {
       throw new WebsiteCaptureUnavailableError('The captured webpage is too large to import safely')
     }
 

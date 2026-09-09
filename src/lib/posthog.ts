@@ -18,6 +18,7 @@ import 'posthog-js/dist/web-vitals'
    it must be compiled in or the no-external build can never show it. */
 import 'posthog-js/dist/conversations'
 import posthog from 'posthog-js/dist/module.no-external'
+import { desktopPlatform, isDesktopShell, shellVersion } from './shell'
 
 const key = import.meta.env.VITE_POSTHOG_KEY
 /* Default to the same-origin relay (server/index.ts); VITE_POSTHOG_HOST is an
@@ -64,14 +65,17 @@ if (!key) {
     defaults: '2026-05-30',
   })
 
-  /* The desktop shell injects window.__DOOP_DESKTOP__ = "<shell version>"
-     before any page script runs (desktop/src-tauri/src/main.rs). Register it
-     as super properties so every event and recording from the shell is
-     segmentable in PostHog. The webview's storage is isolated from the
-     user's browsers, so the flag can never leak onto ordinary web sessions. */
-  const desktopVersion = (window as { __DOOP_DESKTOP__?: unknown }).__DOOP_DESKTOP__
-  if (typeof desktopVersion === 'string') {
-    posthog.register({ desktop_app: true, desktop_app_version: desktopVersion })
+  /* The desktop shell marks every page it loads (src/lib/shell.ts). Register
+     the shell version and platform as super properties so every event and
+     recording from the shell is segmentable in PostHog. The webview's
+     storage is isolated from the user's browsers, so the flag can never
+     leak onto ordinary web sessions. */
+  if (isDesktopShell()) {
+    posthog.register({
+      desktop_app: true,
+      desktop_app_version: shellVersion(),
+      desktop_app_platform: desktopPlatform(),
+    })
   }
 }
 

@@ -126,7 +126,7 @@ describe('public Chromium request guard', () => {
       'https://rebind.example/',
       expect.objectContaining({ redirect: 'manual', headers: { accept: 'text/html' } }),
     )
-    const response = request.respond.mock.calls[0][0]
+    const response = request.respond.mock.calls[0]![0]
     expect(response.headers).not.toHaveProperty('content-encoding')
     expect(response.headers).not.toHaveProperty('content-length')
     expect(response.headers['set-cookie']).toEqual(['first=1; Path=/', 'second=2; Path=/'])

@@ -17,16 +17,18 @@ import * as storage from './storage.ts'
 
 export const MAX_ASSET_BYTES = 5 * 1024 * 1024
 
-const MIME_EXT: Record<string, string> = {
+const MIME_EXT = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
   'image/gif': 'gif',
   'image/svg+xml': 'svg',
-}
+} as const
+
+type AssetMime = keyof typeof MIME_EXT
 
 /* trust the bytes, not the sender: content sniffing decides the type */
-function sniffMime(buf: Buffer): string | undefined {
+function sniffMime(buf: Buffer): AssetMime | undefined {
   if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
   if (buf.length >= 6 && buf.toString('latin1', 0, 4) === 'GIF8') return 'image/gif'
@@ -85,7 +87,7 @@ export function endTicketUpload(token: string, success: boolean): void {
 /** Asset ids referenced by a piece of frame HTML (/a/<id>.<ext> URLs). */
 export function extractAssetIds(html: string): Set<string> {
   const ids = new Set<string>()
-  for (const m of html.matchAll(/\/a\/([A-Za-z0-9_-]+)\.[a-z0-9]+/g)) ids.add(m[1])
+  for (const [, id] of html.matchAll(/\/a\/([A-Za-z0-9_-]+)\.[a-z0-9]+/g)) if (id) ids.add(id)
   return ids
 }
 

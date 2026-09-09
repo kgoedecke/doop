@@ -86,8 +86,9 @@ export function recordUpdate(frameId: string, before: Patch, after: Patch) {
 /** Several frames moved together (a group drag): one undo step. */
 export function recordUpdates(items: { frameId: string; before: Patch; after: Patch }[]) {
   const entries = items.map((i) => updateEntry(i.frameId, i.before, i.after)).filter((e): e is UpdateEntry => !!e)
-  if (entries.length === 1) push(entries[0])
-  else if (entries.length) push({ type: 'group', entries })
+  const [first, ...rest] = entries
+  if (!first) return
+  push(rest.length ? { type: 'group', entries } : first)
 }
 
 export function recordCreate(frame: Frame) {
@@ -101,9 +102,10 @@ export function deleteFrameTracked(frame: Frame) {
 
 /** Delete several frames as one undo step. */
 export function deleteFramesTracked(frames: Frame[]) {
-  if (!frames.length) return
   const entries: Entry[] = frames.map((f) => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) }))
-  push(entries.length === 1 ? entries[0] : { type: 'group', entries })
+  const [first, ...rest] = entries
+  if (!first) return
+  push(rest.length ? { type: 'group', entries } : first)
   for (const f of frames) api.deleteFrame(f.id).catch(console.error)
 }
 
@@ -136,7 +138,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     const ok = results.flatMap((r) => (r.status === 'fulfilled' && r.value ? [r.value] : []))
     const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
     if (failed) console.error(`${direction} failed for ${e.entries.length - ok.length} frame(s)`, failed.reason)
-    return ok.length === 0 ? null : ok.length === 1 ? ok[0] : { type: 'group', entries: ok }
+    const [first, ...rest] = ok
+    if (!first) return null
+    return rest.length ? { type: 'group', entries: ok } : first
   }
   const forward = direction === 'redo'
   if (e.type === 'update') {

@@ -77,6 +77,16 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
   email_is_missing: "Your identity provider didn't share an email address — doop needs one to sign you in.",
 }
 
+/* A failure inside the IdP round trip (the browser has already left and
+   come back) redirects here with ?error=<code> rather than throwing where
+   ssoSignIn's own res.error check could see it — that check only ever
+   catches failures of the *initiating* request (e.g. unknown providerId). */
+function ssoErrorFromUrl(): string | null {
+  const code = new URLSearchParams(location.search).get('error')
+  if (!code) return null
+  return SSO_ERROR_MESSAGES[code] ?? 'SSO sign-in failed — try again or use email/password.'
+}
+
 /* Where the SSO redirect should land, mirroring resumeOAuthFlow() below —
    but handed to the server as callbackURL rather than navigated to
    directly. The browser leaves for the IdP and returns already carrying a
@@ -118,7 +128,7 @@ export function AuthPage() {
   const [name, setNameField] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(ssoErrorFromUrl)
   /* informational state (not an error): "check your email" and friends */
   const [notice, setNotice] = useState<string | null>(null)
   /* signin failed on an unverified email — offer a resend */
@@ -136,15 +146,9 @@ export function AuthPage() {
     setUnverified(false)
   }
 
-  /* A failure inside the IdP round trip (the browser has already left and
-     come back) redirects here with ?error=<code> rather than throwing where
-     ssoSignIn's own res.error check could see it — that check only ever
-     catches failures of the *initiating* request (e.g. unknown providerId). */
+  /* the SSO error code has been shown; keep it out of the address bar */
   useEffect(() => {
-    const ssoError = new URLSearchParams(location.search).get('error')
-    if (!ssoError) return
-    setError(SSO_ERROR_MESSAGES[ssoError] ?? 'SSO sign-in failed — try again or use email/password.')
-    history.replaceState(null, '', location.pathname)
+    if (ssoErrorFromUrl()) history.replaceState(null, '', location.pathname)
   }, [])
 
   async function ssoSignIn() {
@@ -203,7 +207,7 @@ export function AuthPage() {
       }
       const res =
         mode === 'signup'
-          ? await authClient.signUp.email({ name: name.trim() || email.split('@')[0], email, password })
+          ? await authClient.signUp.email({ name: name.trim() || email.split('@')[0] || email, email, password })
           : await authClient.signIn.email({ email, password })
       if (res.error) {
         if (mode === 'signin' && res.error.code === 'EMAIL_NOT_VERIFIED') {

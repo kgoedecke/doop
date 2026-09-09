@@ -33,12 +33,16 @@ import {
   parseHtmlPage,
   parseSitemap,
 } from '../server/importer.ts'
+import { PRUNE_WAIT_MS } from '../server/cssPrune.ts'
 
 interface PageStubOptions {
   finalUrl?: string
   preview?: { description: string; text: string; pageHeight: number; hasVisualContent?: boolean }
   screenshot?: Buffer
   snapshot?: { baseUrl?: string; sheets: string[]; title: string; height: number; html: string }
+  /** What the in-page CSS pruner hands back; echoes the fetched CSS and the
+   *  snapshot HTML by default. */
+  prune?: (css: string) => { css: string; html?: string }
   /** Context.dev captures render with scripts disabled, so importPage skips
    *  the scroll-walk evaluate — the stub's call sequence must match. */
   contextPath?: boolean
@@ -57,6 +61,13 @@ function stubPage(options: PageStubOptions = {}) {
       html: '<html><head></head><body>Captured</body></html>',
     },
   )
+  if (options.snapshot?.sheets.length) {
+    evaluate.mockResolvedValueOnce(undefined) // __name shim
+    evaluate.mockImplementationOnce(async (_pruner: unknown, css: string) => {
+      const pruned = options.prune?.(css)
+      return { css: pruned?.css ?? css, html: pruned?.html ?? options.snapshot?.html }
+    })
+  }
   if (options.preview) evaluate.mockResolvedValueOnce(options.preview)
   const page = {
     setViewport: vi.fn().mockResolvedValue(undefined),
@@ -234,7 +245,10 @@ describe('webpage capture', () => {
     expect(browserMocks.openIsolatedPage).not.toHaveBeenCalled()
   })
 
-  it('rejects captured HTML when every external stylesheet is blocked', async () => {
+  const css = (body: string) => new Response(body, { headers: { 'content-type': 'text/css' } })
+  const blocked = (status = 200) =>
+    new Response('<html>challenge</html>', { status, headers: { 'content-type': 'text/html' } })
+  const stubContextPageWithSheets = (sheets: string[], prune?: (css: string) => { css: string; html?: string }) => {
     contextMocks.configured.mockReturnValue(true)
     contextMocks.scrape.mockResolvedValue({
       html: '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body>From Context</body></html>',
@@ -242,19 +256,22 @@ describe('webpage capture', () => {
       title: 'Context title',
       description: '',
     })
-    publicUrlMocks.fetchPinned.mockResolvedValue(
-      new Response('<html>challenge</html>', { headers: { 'content-type': 'text/html' } }),
-    )
-    const page = stubPage({
+    return stubPage({
       finalUrl: 'about:blank',
       contextPath: true,
       snapshot: {
-        sheets: ['https://example.com/app.css'],
+        sheets,
         title: 'Context title',
         height: 777,
         html: '<html><head></head><body>From Context</body></html>',
       },
+      prune,
     })
+  }
+
+  it('rejects captured HTML when every external stylesheet is blocked', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(blocked())
+    const page = stubContextPageWithSheets(['https://example.com/app.css'])
 
     await expect(importPage('https://example.com')).rejects.toThrow('stylesheets could not be fully loaded')
 
@@ -266,33 +283,143 @@ describe('webpage capture', () => {
   })
 
   it('rejects a partial stylesheet capture instead of accepting a materially unstyled page', async () => {
-    contextMocks.configured.mockReturnValue(true)
-    contextMocks.scrape.mockResolvedValue({
-      html: '<html><head></head><body>From Context</body></html>',
-      finalUrl: 'https://example.com/final',
-      title: 'Context title',
-      description: '',
-    })
     publicUrlMocks.fetchPinned
-      .mockResolvedValueOnce(
-        new Response('html { box-sizing: border-box }', { headers: { 'content-type': 'text/css' } }),
-      )
-      .mockResolvedValueOnce(
-        new Response('<html>challenge</html>', { status: 403, headers: { 'content-type': 'text/html' } }),
-      )
-    const page = stubPage({
-      finalUrl: 'about:blank',
-      contextPath: true,
-      snapshot: {
-        sheets: ['https://example.com/reset.css', 'https://example.com/app.css'],
-        title: 'Context title',
-        height: 777,
-        html: '<html><head></head><body>From Context</body></html>',
-      },
-    })
+      .mockResolvedValueOnce(css('html { box-sizing: border-box }'))
+      .mockResolvedValueOnce(blocked(403))
+    const page = stubContextPageWithSheets(['https://example.com/reset.css', 'https://example.com/app.css'])
 
     await expect(importPage('https://example.com')).rejects.toThrow('stylesheets could not be fully loaded')
 
+    expect(publicUrlMocks.fetchPinned).toHaveBeenCalledTimes(2)
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('inlines a single stylesheet that uses most of the page CSS budget', async () => {
+    /* One big bundled sheet is how real sites ship CSS; a per-sheet cap below
+       the page budget used to turn it away. */
+    const bundled = `body { color: red } ${'/* padding */'.repeat(120_000)}`
+    publicUrlMocks.fetchPinned.mockResolvedValue(css(bundled))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'])
+
+    const imported = await importPage('https://example.com')
+
+    expect(bundled.length).toBeGreaterThan(1_500_000)
+    expect(imported.html).toContain('body { color: red }')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('blames its own budget, not the site, when a declared stylesheet size exceeds it', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(
+      new Response('body { color: red }', { headers: { 'content-type': 'text/css', 'content-length': '9000000' } }),
+    )
+    const page = stubContextPageWithSheets(['https://example.com/app.css'])
+
+    await expect(importPage('https://example.com')).rejects.toThrow('8 MB import limit')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('stops reading a streamed stylesheet without content-length once it passes the budget', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(css('x'.repeat(8_100_000)))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'])
+
+    await expect(importPage('https://example.com')).rejects.toThrow('8 MB import limit')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('charges every sheet against one page budget', async () => {
+    publicUrlMocks.fetchPinned
+      .mockResolvedValueOnce(css('a'.repeat(4_200_000)))
+      .mockResolvedValueOnce(css('b'.repeat(4_200_000)))
+    const page = stubContextPageWithSheets(['https://example.com/vendor.css', 'https://example.com/app.css'])
+
+    await expect(importPage('https://example.com')).rejects.toThrow('8 MB import limit')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('inlines only the CSS the page actually uses', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(css('body { color: red } .unused { color: blue }'))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'], () => ({ css: 'body { color: red }' }))
+
+    const imported = await importPage('https://example.com')
+
+    expect(imported.html).toContain('body { color: red }')
+    expect(imported.html).not.toContain('.unused')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('ships the markup serialised in the same pass the CSS was pruned against', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(css('body { color: red }'))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'], (fetched) => ({
+      css: fetched,
+      html: '<html><head></head><body>After page scripts ran</body></html>',
+    }))
+
+    const imported = await importPage('https://example.com')
+
+    expect(imported.html).toContain('After page scripts ran')
+    expect(imported.html).not.toContain('From Context')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('ships the unpruned CSS when the pruning pass does not come back in time', async () => {
+    vi.useFakeTimers()
+    try {
+      publicUrlMocks.fetchPinned.mockResolvedValue(css('body { color: red } .unused { color: blue }'))
+      const page = stubContextPageWithSheets(['https://example.com/app.css'])
+      page.evaluate.mockReset()
+      page.evaluate.mockResolvedValueOnce({
+        sheets: ['https://example.com/app.css'],
+        title: 'Context title',
+        height: 777,
+        html: '<html><head></head><body>From Context</body></html>',
+      })
+      page.evaluate.mockResolvedValueOnce(undefined) // __name shim
+      page.evaluate.mockReturnValueOnce(new Promise(() => {})) // the prune never returns
+
+      const importing = importPage('https://example.com')
+      await vi.advanceTimersByTimeAsync(PRUNE_WAIT_MS + 1)
+      const imported = await importing
+
+      expect(imported.html).toContain('.unused { color: blue }')
+      expect(page.close).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects a page whose used CSS alone is over the frame limit', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(css('body { color: red }'))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'], () => ({ css: 'x'.repeat(2_100_000) }))
+
+    await expect(importPage('https://example.com')).rejects.toThrow('even after unused styles are removed')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('does not call a small stylesheet oversized when a nested @import is dropped', async () => {
+    /* app.css → mid.css → deep.css. The third level is past the supported
+       import depth, so the capture is incomplete — but nothing here is big,
+       and the error must not claim a size limit. */
+    publicUrlMocks.fetchPinned
+      .mockResolvedValueOnce(css("@import url('/mid.css');"))
+      .mockResolvedValueOnce(css("@import url('/deep.css');"))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'])
+
+    const error = await importPage('https://example.com').catch((thrown: Error) => thrown)
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('could not be fully loaded')
+    expect((error as Error).message).not.toContain('import limit')
+    expect(publicUrlMocks.fetchPinned).toHaveBeenCalledTimes(2)
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('stops fetching @imports after the first one fails', async () => {
+    publicUrlMocks.fetchPinned
+      .mockResolvedValueOnce(css("@import url('/a.css'); @import url('/b.css');"))
+      .mockResolvedValueOnce(blocked(403))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'])
+
+    await expect(importPage('https://example.com')).rejects.toThrow('could not be fully loaded')
     expect(publicUrlMocks.fetchPinned).toHaveBeenCalledTimes(2)
     expect(page.close).toHaveBeenCalledOnce()
   })

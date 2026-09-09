@@ -6,6 +6,7 @@ import { syncEdges, syncKeys, syncLinks } from './db/schema.ts'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
 import type { Frame } from '../shared/types.ts'
+import { MAX_FRAME_HTML_BYTES } from './limits.ts'
 
 /**
  * Design sync: a PostHog-style snippet (public/doop-sync.js) embedded in an
@@ -144,7 +145,6 @@ export function wrapSnapshotHtml(html: string, marker: string, baseUrl: string |
 
 /* ------------------------------------------------------------------ */
 
-export const MAX_SNAPSHOT_BYTES = 2_500_000
 const INGESTS_PER_MIN = 30
 /** floor between rewrites of the SAME page — a busy app must not churn the
  *  canvas (and its websocket room) with a frame write per user interaction */
@@ -309,8 +309,10 @@ export async function handleIngest(req: express.Request, res: express.Response) 
     if (!edgesRecorded) return res.status(400).json({ error: 'html (or edges) required' })
     return res.json({ ok: true, edges: edgesRecorded })
   }
-  if (html.length > MAX_SNAPSHOT_BYTES) {
-    return res.status(413).json({ error: 'snapshot exceeds the 2.5 MB limit — mask or exclude heavy content' })
+  if (Buffer.byteLength(html) > MAX_FRAME_HTML_BYTES) {
+    return res.status(413).json({
+      error: `snapshot exceeds the ${MAX_FRAME_HTML_BYTES / 1_000_000} MB limit — mask or exclude heavy content`,
+    })
   }
   /* hotspots persist only once the frame write they describe lands (below) —
      a 429'd snapshot must not leave coordinates for content nobody sees */

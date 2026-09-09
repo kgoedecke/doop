@@ -401,6 +401,7 @@ Steering happens at three layers (the same architecture paper.design uses, plus 
 | `get_guide`            | The agent playbook — agents are instructed to load this first                                                       |
 | `set_status`           | Broadcast a one-line "what I'm working on" — shown live in the working-now strip, avatar tooltip, and activity feed |
 | `get_feedback`         | Fetch & claim open human feedback requests — for agents whose job is to poll the canvas periodically                |
+| `get_comments`         | Read element-pinned comments and replies, optionally filtered by frame or resolution state, without claiming work   |
 | `list_canvases`        | List all canvases                                                                                                   |
 | `create_canvas`        | Create a canvas, returns its shareable id                                                                           |
 | `get_canvas`           | Canvas layout: every frame's position/size/meta                                                                     |
@@ -446,7 +447,7 @@ leaving and is sent to late joiners.
 Hover any task in the Tasks tab and hit **↩** to leave feedback (e.g. _"make the accent warmer"_).
 Each note becomes an **open request on the canvas** — a work item, not mail for the agent whose
 task it was. MCP is pull-based, so delivery rides the result-nudge layer: the **next identified
-agent call** on the canvas (any tool carrying an `agent_name`, whoever it is) returns a
+agent call** on the canvas that supports feedback delivery (carrying an `agent_name`, whoever it is) returns a
 `HUMAN FEEDBACK` block quoting the note, saying whose work it concerns, and instructing the agent
 to address it before continuing — including editing another agent's frame (a human request
 overrides the don't-touch etiquette). Picking it up claims it: the UI flips from _"→ waiting for
@@ -458,6 +459,19 @@ already on the canvas, or a fresh one you spawn (_"check in on canvas ⟨id⟩"_
 caretaker, point an agent at `get_feedback` — a non-blocking fetch-and-claim designed for a
 "check the canvas every few minutes, address whatever humans requested" loop.
 REST equivalent: `POST /api/tasks/:id/feedback` with `{ text, from }`.
+
+### Reading element comments through MCP
+
+Call `get_comments({ canvas_id })` to read the canvas's retained element comments and replies
+(up to 100 entries, newest first). Each entry includes its ID, frame ID, author, text, timestamp,
+CSS selector, HTML snippet, and any claim, failure, or resolution metadata. Replies carry a
+`parentId` pointing to their root comment.
+
+Pass `frame_id` to read only comments on a frame belonging to that canvas, or
+`include_resolved: false` to exclude resolved entries. Resolved entries are included by default
+so conversation context remains available. An empty result is `[]`. The tool enforces the same
+canvas access permissions as other MCP reads; optional `agent_name` announces presence.
+It does not claim task feedback or comments, or mark anything resolved.
 
 ## What's in the box
 

@@ -1,0 +1,31 @@
+# Toolchain for building the Tauri desktop shell: bun (for @tauri-apps/cli),
+# a stable Rust with the requested targets, a Rust build cache shared across
+# workflows and jobs on the same OS, and the desktop/ node_modules.
+name: Set up desktop toolchain
+description: Bun, Rust (+targets), cargo cache and desktop/ dependencies for tauri build
+
+inputs:
+  targets:
+    description: Comma-separated extra Rust targets (e.g. aarch64-apple-darwin,x86_64-apple-darwin)
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
+    # pinned by commit like every other action; the toolchain to install
+    # is then passed explicitly (the @stable ref only selected it by name)
+    - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      with:
+        toolchain: stable
+        targets: ${{ inputs.targets }}
+    - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+      with:
+        workspaces: desktop/src-tauri
+        # one cache per OS instead of one per job, so the release build
+        # restores what the PR build compiled (and vice versa)
+        shared-key: desktop
+    - run: bun install --frozen-lockfile
+      shell: bash
+      working-directory: desktop

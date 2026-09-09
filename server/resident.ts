@@ -921,7 +921,7 @@ async function execTool(
   actor: ReturnType<typeof actions.resolveActor>,
   runState: RunState,
 ): Promise<Anthropic.ToolResultBlockParam> {
-  const input = block.input as Record<string, string>
+  const input = block.input as { frame_id: string } & Record<string, string>
   const fail = (msg: string): Anthropic.ToolResultBlockParam => ({
     type: 'tool_result',
     tool_use_id: block.id,

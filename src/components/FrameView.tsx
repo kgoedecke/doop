@@ -242,7 +242,8 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         trackSave(api.updateFrame(f.id, after).catch(console.error))
         updates.push({ frameId: f.id, before: g.orig, after })
       }
-      if (updates.length === 1) recordUpdate(updates[0].frameId, updates[0].before, updates[0].after)
+      const [only, ...more] = updates
+      if (only && !more.length) recordUpdate(only.frameId, only.before, only.after)
       else recordUpdates(updates)
       /* a click (no drag) on the frame surface targets the element under
          the cursor: probe it and show the element toolbar */
@@ -466,8 +467,11 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     return () => window.removeEventListener('message', onMsg)
   }, [frame.id])
 
-  /* deselecting the frame ends the edit session */
+  /* deselecting the frame ends the edit session. Selection lives in the
+     store and the iframe has to be told, so this is a sync with an external
+     system rather than derived state. */
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
     if (!selected && editing) exitEdit()
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -756,7 +760,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                     {!composing ? (
                       <>
                         <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop animate-[chip-in_0.18s_ease]">
-                          <span className="px-[3px] text-[11px] font-bold text-brand [font-family:ui-monospace,monospace]">
+                          <span className="rounded-[5px] bg-white/[0.14] px-[5px] py-px text-[11px] font-bold text-white [font-family:ui-monospace,monospace]">
                             {anchor.tag}
                           </span>
                           <Button

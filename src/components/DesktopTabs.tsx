@@ -12,17 +12,8 @@ import {
   ContextMenuTrigger,
 } from './ui/context-menu'
 import { cn } from '@/lib/utils'
-import {
-  closeAllTabs,
-  closeOtherTabs,
-  closeTab,
-  ensureTab,
-  hasInsetTrafficLights,
-  isDesktopShell,
-  openCanvasTab,
-  openExternal,
-  useTabs,
-} from '../lib/desktop'
+import { closeAllTabs, closeOtherTabs, closeTab, ensureTab, openCanvasTab, openExternal, useTabs } from '../lib/desktop'
+import { hasInsetTrafficLights, isDesktopShell } from '../lib/shell'
 import type { CanvasTab } from '../lib/desktop'
 
 /**
@@ -148,6 +139,6 @@ function TabContextMenu({ tab, path }: { tab: CanvasTab; path: string }) {
 /** Invisible drag handle for shell screens without the tab strip (signed
  *  out): the overlay title bar has no native drag area of its own. */
 export function ShellDragBar() {
-  if (!isDesktopShell()) return null
+  if (!hasInsetTrafficLights()) return null
   return <div data-tauri-drag-region className="fixed inset-x-0 top-0 z-[950] h-6" />
 }

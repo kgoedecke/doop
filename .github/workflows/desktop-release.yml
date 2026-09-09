@@ -1,11 +1,16 @@
-# Builds the distributable desktop DMG (universal: Apple Silicon + Intel).
-# - Tag `desktop-v*` → builds and attaches the DMG to a GitHub Release.
-# - Manual dispatch → builds and uploads the DMG as a workflow artifact.
+# Builds the distributable desktop installers: a universal macOS DMG (Apple
+# Silicon + Intel) and a Windows NSIS setup .exe.
+# - Tag `desktop-v*` → builds both, then one release job attaches them to a
+#   GitHub Release. The release is only created once both builds succeeded,
+#   so a tag never ends up published with a single installer.
+# - Manual dispatch → builds and uploads the installers as workflow artifacts.
 # - PRs touching this file → same as dispatch, so the pipeline stays validated.
 #
-# Signing + notarization happen automatically once the APPLE_* repo secrets
-# exist (see desktop/README.md). Until then the DMG is unsigned: it works,
-# but downloaders must approve it in System Settings → Privacy & Security.
+# macOS signing + notarization happen automatically once the APPLE_* repo
+# secrets exist (see desktop/README.md). Until then the DMG is unsigned: it
+# works, but downloaders must approve it in System Settings → Privacy &
+# Security. The Windows installer is never signed (no Authenticode
+# certificate is configured): SmartScreen warns and users click through.
 name: Desktop Release
 
 on:
@@ -13,7 +18,9 @@ on:
     tags: ['desktop-v*']
   workflow_dispatch:
   pull_request:
-    paths: ['.github/workflows/desktop-release.yml']
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - '.github/actions/setup-desktop/**'
 
 permissions:
   contents: write
@@ -22,16 +29,10 @@ jobs:
   dmg-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-desktop
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop/src-tauri
-      - run: bun install --frozen-lockfile
-        working-directory: desktop
       - name: Build DMG (signed + notarized when APPLE_* secrets are set)
         working-directory: desktop
         env:
@@ -51,14 +52,39 @@ jobs:
             echo "::warning::APPLE_* secrets not set — building an UNSIGNED dmg (System Settings → Open Anyway required)"
           fi
           bunx tauri build --target universal-apple-darwin --bundles dmg
-      - name: Attach DMG to release
-        if: startsWith(github.ref, 'refs/tags/desktop-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-      - name: Upload DMG artifact
-        if: "!startsWith(github.ref, 'refs/tags/desktop-v')"
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: doop-dmg
           path: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  nsis-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-desktop
+      - name: Build Windows installer (unsigned)
+        working-directory: desktop
+        run: bunx tauri build --bundles nsis
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: doop-windows-setup
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: [dmg-macos, nsis-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Attach installers to release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          files: |
+            installers/*.dmg
+            installers/*.exe
+          fail_on_unmatched_files: true

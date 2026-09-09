@@ -126,13 +126,14 @@ export function createPinnedLookup(expectedHost: string, addresses: PublicAddres
     const family = typeof options === 'number' ? options : options.family
     const candidates =
       family === 4 || family === 6 ? addresses.filter((address) => address.family === family) : addresses
-    if (!candidates.length) {
+    const first = candidates[0]
+    if (!first) {
       const error = Object.assign(new Error('no approved address for requested family'), { code: 'ENOTFOUND' })
       callback(error, '', 0)
       return
     }
     if (typeof options === 'object' && options.all) callback(null, candidates)
-    else callback(null, candidates[0].address, candidates[0].family)
+    else callback(null, first.address, first.family)
   }
 }
 

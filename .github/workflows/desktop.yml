@@ -1,34 +1,48 @@
 # Builds the desktop shell (unsigned) so shell changes are validated in CI.
 # Product changes never require a desktop build — the shell loads the hosted
-# site — so this only runs when desktop/ itself changes, or on demand.
+# site — so this only runs when desktop/ itself changes, or on demand. It
+# also runs on pushes to main so the Rust cache gets seeded on the base
+# branch, where PR builds can restore it.
 name: Desktop
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/actions/setup-desktop/**'
   pull_request:
     paths:
       - 'desktop/**'
+      - '.github/actions/setup-desktop/**'
       - '.github/workflows/desktop.yml'
 
 jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop/src-tauri
-      - run: bun install --frozen-lockfile
-        working-directory: desktop
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-desktop
       # .app only: unsigned (ad-hoc), dmg packaging is left to local/signed
       # release builds where a Developer ID is available
       - run: bunx tauri build --bundles app
         working-directory: desktop
       - name: Zip app bundle
         run: ditto -c -k --keepParent desktop/src-tauri/target/release/bundle/macos/doop.app doop-macos-unsigned.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: doop-macos-unsigned
           path: doop-macos-unsigned.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/setup-desktop
+      - run: bunx tauri build --bundles nsis
+        working-directory: desktop
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: doop-windows-unsigned
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe

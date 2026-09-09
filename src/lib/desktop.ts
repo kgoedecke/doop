@@ -7,28 +7,15 @@
 
 import { create } from 'zustand'
 import { navigate } from '../App'
+import { isDesktopShell } from './shell'
 
 export type CanvasTab = { id: string; name: string }
 
 type ShellWindow = Window & {
-  __DOOP_DESKTOP__?: unknown
   __TAURI__?: { opener?: { openUrl?: (url: string) => Promise<void> } }
 }
 
 const shellWindow = window as ShellWindow
-
-export function isDesktopShell(): boolean {
-  return typeof shellWindow.__DOOP_DESKTOP__ === 'string'
-}
-
-/** The overlay title bar (traffic lights floating over the page) arrived
- *  with shell 0.1.2; older shells keep a native title bar and need no inset. */
-export function hasInsetTrafficLights(): boolean {
-  const v = shellWindow.__DOOP_DESKTOP__
-  if (typeof v !== 'string') return false
-  const [maj = 0, min = 0, pat = 0] = v.split('.').map((n) => parseInt(n, 10) || 0)
-  return maj > 0 || min > 1 || (min === 1 && pat >= 2)
-}
 
 /* ---------- tab strip state ---------- */
 

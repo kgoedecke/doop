@@ -76,7 +76,7 @@ export class Client {
       redirect: 'manual',
     })
     for (const c of res.headers.getSetCookie()) {
-      const [pair] = c.split(';')
+      const [pair = ''] = c.split(';')
       const idx = pair.indexOf('=')
       this.cookies.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim())
     }

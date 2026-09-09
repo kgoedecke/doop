@@ -24,19 +24,26 @@ on port 4400 alongside a `postgres:16-alpine` container, and applies DB migratio
 (`server/db/index.ts`). CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
 format:check, build, test) but does not build or push a container image.
 
-## Desktop app (Tauri, macOS DMG)
+## Desktop app (Tauri: macOS DMG + Windows NSIS installer)
 
-Driven by `.github/workflows/desktop-release.yml`:
+Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup
+in `.github/actions/setup-desktop`:
 
-- Push a tag matching `desktop-v*` -> builds a universal (Apple Silicon + Intel) DMG with
-  `bunx tauri build --target universal-apple-darwin --bundles dmg` and attaches it to a GitHub
-  Release.
-- `workflow_dispatch` or a PR touching the workflow file itself -> same build, uploaded as a
-  workflow artifact instead (keeps the pipeline validated without cutting a release).
-- Signing/notarization: automatic once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+- Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
+  with `bunx tauri build --target universal-apple-darwin --bundles dmg`, `nsis-windows` builds
+  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, and a final `release`
+  job (`needs` both) attaches the two to one GitHub Release - so a tag is never published with
+  only one installer.
+- `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
+  workflow artifacts instead (keeps the pipeline validated without cutting a release).
+- macOS signing/notarization: automatic once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` repo secrets exist (see
   `desktop/README.md`). Without them the DMG is unsigned - it still works, but downloaders must
   approve it via System Settings -> Privacy & Security.
+- The Windows installer is unsigned (no Authenticode certificate configured): SmartScreen warns on
+  first run and users click "More info" -> "Run anyway".
+- The shell tells the page its platform via `window.__DOOP_DESKTOP_PLATFORM__` (read in
+  `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
 

@@ -88,6 +88,13 @@ that @mentions them, or feedback on a task they ran. Anything left unaddressed i
 to you. If a human asks you for something one of these roles owns, just do it — the
 routing is for their benefit, not a lock on your work.
 
+Use get_comments({ canvas_id }) to read element-pinned comments and replies, including
+their frame, selector, snippet, author, thread links, and claim/failure/resolution state.
+Add frame_id to focus on one frame. Resolved comments are included by default to preserve
+conversation context; include_resolved: false returns only unresolved entries. The result
+is newest first and covers the retained history (up to 100 entries per canvas). Reading
+comments does not claim work or resolve it; task feedback is separate (get_feedback).
+
 ## Narrate your work — set_status
 
 People watching the canvas cannot see your reasoning, only your edits. Bridge that gap

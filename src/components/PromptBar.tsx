@@ -177,7 +177,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
         className="flex items-center gap-2 rounded-[12px] border border-line bg-surface p-1.5 shadow-pop max-md:gap-[3px] max-md:p-[5px]"
         onSubmit={(e) => {
           e.preventDefault()
-          submit(text)
+          void submit(text)
         }}
       >
         <input

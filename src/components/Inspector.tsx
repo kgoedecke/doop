@@ -36,22 +36,17 @@ export function Inspector({
   const saveTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
 
-  /* switching frames resets the draft */
+  /* switching frames resets the draft; otherwise pull in remote html
+     updates unless the user is typing */
   useEffect(() => {
-    if (frameId.current !== frame.id) {
-      frameId.current = frame.id
+    const switched = frameId.current !== frame.id
+    frameId.current = frame.id
+    const typing = document.activeElement === textareaRef.current
+    if (switched || (!typing && frame.html !== draft)) {
       setDraft(frame.html)
       setSaveState('idle')
     }
-  }, [frame.id])
-
-  /* pull in remote html updates unless the user is typing */
-  useEffect(() => {
-    if (document.activeElement !== textareaRef.current && frame.html !== draft) {
-      setDraft(frame.html)
-      setSaveState('idle')
-    }
-  }, [frame.html])
+  }, [frame.id, frame.html, draft])
 
   function onHtmlChange(value: string) {
     setDraft(value)
@@ -124,9 +119,10 @@ export function Inspector({
           className={exportBtn}
           title="Public image URL — always renders the current design; paste it as og:image or a blog featured image"
           onClick={() => {
-            navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=2`)
-            setCopiedUrl(true)
-            window.setTimeout(() => setCopiedUrl(false), 1500)
+            navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=2`).then(() => {
+              setCopiedUrl(true)
+              window.setTimeout(() => setCopiedUrl(false), 1500)
+            }, console.error)
           }}
         >
           {copiedUrl ? '✓ copied' : 'Copy image URL'}
@@ -169,7 +165,12 @@ export function Inspector({
 
 function NumberlessInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState(value)
-  useEffect(() => setDraft(value), [value])
+  /* a committed or remote value replaces whatever was being typed */
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(value)
+  }
   return (
     <Input
       variant="mono"
@@ -185,7 +186,11 @@ function NumberlessInput({ value, onCommit }: { value: string; onCommit: (v: str
 
 function NumInput({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
   const [draft, setDraft] = useState(String(value))
-  useEffect(() => setDraft(String(value)), [value])
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(String(value))
+  }
   return (
     <Input
       variant="mono"

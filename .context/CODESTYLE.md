@@ -12,12 +12,16 @@
 
 - Base: `@eslint/js` recommended + `typescript-eslint` recommended, with `eslint-config-prettier`
   applied last so stylistic rules never fight Prettier.
-- `src/**/*.{ts,tsx}` additionally pulls in `eslint-plugin-react-hooks` recommended rules.
-  `react-hooks/set-state-in-effect` is downgraded to `warn` for now (pre-existing patterns; tighten
-  to `error` once those effects are refactored) - do not silently re-tighten it in an unrelated PR.
-- `@typescript-eslint/no-explicit-any` is `warn`, not `error` - the server exchanges broad JSON
-  shapes with itself at its seams, so `any` there is a conscious, allowed choice; still prefer a
-  real type where the shape is actually known.
+- `bun run lint` runs with `--max-warnings 0`: a warning fails CI the same as an error.
+- `src/**/*.{ts,tsx}` additionally pulls in `eslint-plugin-react-hooks` recommended rules, with
+  `react-hooks/set-state-in-effect` and `react-hooks/exhaustive-deps` at `error`. Reset state from
+  a changed prop during render (the `seen`/`setSeen` pattern), not in an effect; a genuine
+  external-system sync may carry a scoped `eslint-disable-next-line` with a reason.
+- `@typescript-eslint/no-floating-promises` is `error` (type-aware, via `projectService`) across
+  `src/`, `server/`, `shared/` and `tests/`. Await, `.catch`, or `void` a promise on purpose;
+  `void fn()` is for callees that already handle their own errors.
+- `@typescript-eslint/no-explicit-any` is `error`. The server exchanges broad JSON shapes with
+  itself at its seams; an `any` there must be a commented `eslint-disable-next-line`, not a habit.
 - `@typescript-eslint/no-unused-vars` is `error`, with `_`-prefixed args/vars and rest-sibling
   destructuring exempted.
 - `@typescript-eslint/no-namespace` allows declarations (`declare global { namespace Express }` is
@@ -43,4 +47,8 @@
 ## TypeScript
 
 - `strict: true`, `noEmit: true` (type-check only; Vite/tsx handle actual transpilation).
+- `noUncheckedIndexedAccess`: indexing an array, record, or regex match group yields
+  `T | undefined`. Destructure with a default, guard with `if (!x) return`, or `?? ''` for capture
+  groups; reserve `!` for indexes that are provably in range (a modulo, a checked length).
+- `noFallthroughCasesInSwitch` and `noImplicitOverride` are on.
 - Path alias `@/*` -> `./src/*`.

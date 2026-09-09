@@ -11,15 +11,14 @@ export async function executeGuardedBatch<T, R>(
     priority?: (item: T) => number
   },
 ): Promise<R[]> {
-  const order = items.map((_, index) => index)
+  const order = items.map((item, index) => ({ item, index }))
   const priority = options.priority
   if (priority) {
-    order.sort((a, b) => priority(items[b]) - priority(items[a]) || a - b)
+    order.sort((a, b) => priority(b.item) - priority(a.item) || a.index - b.index)
   }
 
   const results = new Array<R>(items.length)
-  for (const index of order) {
-    const item = items[index]
+  for (const { item, index } of order) {
     const reason = options.blocked(item)
     results[index] = reason ? options.skipped(item, reason) : await options.execute(item)
   }

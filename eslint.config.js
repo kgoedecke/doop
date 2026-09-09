@@ -12,15 +12,24 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      /* pre-existing patterns; tighten to error once the effects are refactored */
-      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/set-state-in-effect': 'error',
+      'react-hooks/exhaustive-deps': 'error',
+    },
+  },
+  {
+    /* type-aware rules for the TypeScript sources: a dropped promise is a
+       real bug (lost errors, work that never awaits), not a style nit */
+    files: ['src/**/*.{ts,tsx}', 'server/**/*.ts', 'shared/**/*.ts', 'tests/**/*.ts'],
+    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
+    rules: {
+      '@typescript-eslint/no-floating-promises': 'error',
     },
   },
   {
     rules: {
-      /* the server talks to itself over broad JSON shapes; any is pragmatic
-         at the seams but should stay a conscious choice */
-      '@typescript-eslint/no-explicit-any': 'warn',
+      /* the server talks to itself over broad JSON shapes; the odd any at a
+         seam must be an explicit, commented eslint-disable, not a habit */
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
