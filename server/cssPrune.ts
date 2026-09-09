@@ -56,25 +56,63 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
     }
   }
 
+  /* A @font-face earns its place two ways. Chromium starts loading a font
+     the moment laid-out text needs it, so with the full sheet active one
+     forced layout marks every family the current layout uses, including
+     through inline styles and var(). Rules kept for states the capture is
+     not in (hover, other viewports) name their families in font-family, so
+     those count too. */
+  const normalizeFamily = (family: string) =>
+    family
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .trim()
+      .toLowerCase()
+  const loadedFamilies = (): Set<string> | null => {
+    if (!document.fonts) return null
+    void document.documentElement.offsetHeight
+    const loaded = new Set<string>()
+    for (const face of document.fonts) if (face.status !== 'unloaded') loaded.add(normalizeFamily(face.family))
+    return loaded
+  }
+  const namedFamilies = new Set<string>()
+  let familiesUnknown = false
+  const noteFamilies = (rule: CSSRule) => {
+    if (rule instanceof CSSStyleRule) {
+      const value = rule.style.getPropertyValue('font-family')
+      if (value.includes('var(')) familiesUnknown = true
+      for (const family of value.split(',')) if (family.trim()) namedFamilies.add(normalizeFamily(family))
+    }
+    if ('cssRules' in rule) for (const child of Array.from((rule as CSSGroupingRule).cssRules)) noteFamilies(child)
+  }
+
   const isGrouping = (rule: CSSRule): rule is CSSGroupingRule =>
     'cssRules' in rule && !(rule instanceof CSSStyleRule) && !(rule instanceof CSSKeyframesRule)
 
-  const keep = (rule: CSSRule): string | null => {
+  /* Top-level @font-face decisions wait until every kept rule is known, so
+     they pass through the first walk as the rule itself. */
+  const keep = (rule: CSSRule): string | CSSFontFaceRule | null => {
     if (performance.now() >= deadline) return rule.cssText
-    if (rule instanceof CSSStyleRule) return used(rule.selectorText) ? rule.cssText : null
+    if (rule instanceof CSSFontFaceRule) return rule
+    if (rule instanceof CSSStyleRule) {
+      if (!used(rule.selectorText)) return null
+      noteFamilies(rule)
+      return rule.cssText
+    }
     if (isGrouping(rule)) {
       /* @media, @supports, @layer, @container, @scope… keep the wrapper only
          when something inside it survived. Media conditions are not
          evaluated: a frame can be resized after import. */
       const inner = Array.from(rule.cssRules)
         .map(keep)
-        .filter((text): text is string => text !== null)
+        .filter((kept): kept is string | CSSFontFaceRule => kept !== null)
+        .map((kept) => (typeof kept === 'string' ? kept : kept.cssText))
       if (inner.length === 0) return null
       const header = rule.cssText.slice(0, rule.cssText.indexOf('{'))
       return `${header}{\n${inner.join('\n')}\n}`
     }
-    /* @font-face, @keyframes, @property, @page, @counter-style… have no
-       selector to test. They are small and dropping one breaks a kept rule. */
+    /* @keyframes, @property, @page, @counter-style… have no selector to
+       test. They are small and dropping one breaks a kept rule. */
     return rule.cssText
   }
 
@@ -83,12 +121,22 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
   ;(document.head ?? document.documentElement).appendChild(style)
   try {
     const sheet = style.sheet
-    const css = sheet
-      ? Array.from(sheet.cssRules)
-          .map(keep)
-          .filter((text): text is string => text !== null)
-          .join('\n')
-      : rawCss
+    let css = rawCss
+    if (sheet) {
+      const kept = Array.from(sheet.cssRules)
+        .map(keep)
+        .filter((entry): entry is string | CSSFontFaceRule => entry !== null)
+      const loaded = loadedFamilies()
+      const fontFaceUsed = (rule: CSSFontFaceRule) => {
+        if (familiesUnknown || !loaded) return true
+        const family = normalizeFamily(rule.style.getPropertyValue('font-family'))
+        return loaded.has(family) || namedFamilies.has(family)
+      }
+      css = kept
+        .map((entry) => (typeof entry === 'string' ? entry : fontFaceUsed(entry) ? entry.cssText : null))
+        .filter((text): text is string => text !== null)
+        .join('\n')
+    }
     style.remove()
     return { css, html: document.documentElement.outerHTML }
   } finally {

@@ -16,7 +16,7 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
     browser = await getBrowser()
     page = await browser.newPage()
     await page.setContent(
-      '<!doctype html><html><head></head><body><div class="used"><ul><li>one</li></ul><a href="#">link</a></div></body></html>',
+      '<!doctype html><html><head></head><body><div class="used"><ul><li>one</li></ul><a href="#">link</a></div><p style="font-family: Inline">inline</p></body></html>',
     )
   }, 60_000)
 
@@ -84,14 +84,48 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
     expect(html).not.toContain('<style>')
   })
 
+  it('keeps the @font-face blocks the page lays out text with and drops the rest', async () => {
+    const pruned = await prune(
+      '@font-face { font-family: Used; src: url("https://example.com/u.woff2") }' +
+        '@font-face { font-family: "Unused Sans"; src: url("https://example.com/n.woff2") }' +
+        '@font-face { font-family: Inline; src: url("https://example.com/i.woff2") }' +
+        '.used { font-family: Used, sans-serif }',
+    )
+
+    expect(pruned).toContain('font-family: Used')
+    expect(pruned).toContain('font-family: Inline')
+    expect(pruned).not.toContain('Unused Sans')
+  })
+
+  it('keeps @font-face blocks named by rules kept for states the capture is not in', async () => {
+    const pruned = await prune(
+      '@font-face { font-family: Narrow; src: url("https://example.com/w.woff2") }' +
+        '@font-face { font-family: Hover; src: url("https://example.com/h.woff2") }' +
+        '@font-face { font-family: Nobody; src: url("https://example.com/x.woff2") }' +
+        '@media (max-width: 600px) { .used { font-family: Narrow } }' +
+        '.used:hover { font-family: "Hover" }',
+    )
+
+    expect(pruned).toContain('font-family: Narrow')
+    expect(pruned).toContain('font-family: Hover')
+    expect(pruned).not.toContain('Nobody')
+  })
+
+  it('keeps every @font-face when a kept rule picks its family through var()', async () => {
+    const pruned = await prune(
+      '@font-face { font-family: Maybe; src: url("https://example.com/m.woff2") }' +
+        ':root { --body-font: Maybe } .used { font-family: var(--body-font) }',
+    )
+
+    expect(pruned).toContain('font-family: Maybe')
+  })
+
   it('keeps at-rules that have no selector to test', async () => {
     const pruned = await prune(
-      '@font-face { font-family: X; src: url("https://example.com/x.woff2") }' +
-        '@keyframes spin { to { transform: rotate(1turn) } }' +
+      '@keyframes spin { to { transform: rotate(1turn) } }' +
         '@property --n { syntax: "<number>"; inherits: false; initial-value: 0 }',
     )
 
-    expect(pruned).toContain('@font-face')
     expect(pruned).toContain('@keyframes spin')
     expect(pruned).toContain('@property --n')
   })
