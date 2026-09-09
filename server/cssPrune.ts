@@ -80,7 +80,9 @@ export function pruneCssInDocument(rawCss: string, deadlineMs: number): PrunedPa
   const noteFamilies = (rule: CSSRule) => {
     if (rule instanceof CSSStyleRule) {
       const value = rule.style.getPropertyValue('font-family')
-      if (value.includes('var(')) familiesUnknown = true
+      /* A var() in the font shorthand leaves the font-family longhand empty
+         in CSSOM, so the shorthand has to be checked as well. */
+      if (value.includes('var(') || rule.style.getPropertyValue('font').includes('var(')) familiesUnknown = true
       for (const family of value.split(',')) if (family.trim()) namedFamilies.add(normalizeFamily(family))
     }
     if ('cssRules' in rule) for (const child of Array.from((rule as CSSGroupingRule).cssRules)) noteFamilies(child)

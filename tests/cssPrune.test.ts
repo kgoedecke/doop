@@ -120,6 +120,15 @@ describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
     expect(pruned).toContain('font-family: Maybe')
   })
 
+  it('keeps every @font-face when a kept rule picks its family through var() in the font shorthand', async () => {
+    const pruned = await prune(
+      '@font-face { font-family: Shorthand; src: url("https://example.com/s.woff2") }' +
+        ':root { --heading: 700 2rem Shorthand } .used:hover { font: var(--heading) }',
+    )
+
+    expect(pruned).toContain('font-family: Shorthand')
+  })
+
   it('keeps at-rules that have no selector to test', async () => {
     const pruned = await prune(
       '@keyframes spin { to { transform: rotate(1turn) } }' +
