@@ -33,6 +33,7 @@ import {
   parseHtmlPage,
   parseSitemap,
 } from '../server/importer.ts'
+import { PRUNE_WAIT_MS } from '../server/cssPrune.ts'
 
 interface PageStubOptions {
   finalUrl?: string
@@ -358,6 +359,32 @@ describe('webpage capture', () => {
     expect(imported.html).toContain('After page scripts ran')
     expect(imported.html).not.toContain('From Context')
     expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('ships the unpruned CSS when the pruning pass does not come back in time', async () => {
+    vi.useFakeTimers()
+    try {
+      publicUrlMocks.fetchPinned.mockResolvedValue(css('body { color: red } .unused { color: blue }'))
+      const page = stubContextPageWithSheets(['https://example.com/app.css'])
+      page.evaluate.mockReset()
+      page.evaluate.mockResolvedValueOnce({
+        sheets: ['https://example.com/app.css'],
+        title: 'Context title',
+        height: 777,
+        html: '<html><head></head><body>From Context</body></html>',
+      })
+      page.evaluate.mockResolvedValueOnce(undefined) // __name shim
+      page.evaluate.mockReturnValueOnce(new Promise(() => {})) // the prune never returns
+
+      const importing = importPage('https://example.com')
+      await vi.advanceTimersByTimeAsync(PRUNE_WAIT_MS + 1)
+      const imported = await importing
+
+      expect(imported.html).toContain('.unused { color: blue }')
+      expect(page.close).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rejects a page whose used CSS alone is over the frame limit', async () => {

@@ -20,6 +20,12 @@ import type { Page } from 'puppeteer-core'
  *  selector set must not be able to hold the import open. */
 export const PRUNE_DEADLINE_MS = 5_000
 
+/** The in-page deadline is checked between rules, so one pathological
+ *  selector can still run past it. The server stops waiting here and ships
+ *  the unpruned sheet; the stalled renderer goes down with the isolated page
+ *  when the import finishes. */
+export const PRUNE_WAIT_MS = PRUNE_DEADLINE_MS + 3_000
+
 export interface PrunedPage {
   css: string
   /** The document serialised in the same pass the CSS was pruned against, so
@@ -99,7 +105,10 @@ export async function pruneUnusedCss(page: Page, css: string): Promise<PrunedPag
        serialises the function source, so the helper must exist in the page.
        Same shim as inspectFrame in screenshot.ts. */
     await page.evaluate('globalThis.__name = (target) => target')
-    const pruned = await page.evaluate(pruneCssInDocument, css, PRUNE_DEADLINE_MS)
+    const pruned = await Promise.race([
+      page.evaluate(pruneCssInDocument, css, PRUNE_DEADLINE_MS),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), PRUNE_WAIT_MS).unref?.()),
+    ])
     return typeof pruned?.css === 'string' && typeof pruned.html === 'string' ? pruned : null
   } catch {
     return null
