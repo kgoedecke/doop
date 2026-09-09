@@ -28,6 +28,8 @@ import {
   MAX_ASSET_BYTES,
 } from './assets.ts'
 import * as ingest from './ingest.ts'
+import * as backgrounds from './backgrounds.ts'
+import * as storage from './storage.ts'
 import * as github from './github.ts'
 import * as githubApp from './githubApp.ts'
 import { seed } from './seed.ts'
@@ -58,6 +60,7 @@ const BUILD_ID = (() => {
 
 /* boot: connect the DB, hydrate memory, import pre-DB store.json once */
 await initDb()
+await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
 let data = await persist.hydrate()
@@ -354,6 +357,25 @@ app.get('/a/:id.:ext', async (req, res) => {
     res.send(found.buf)
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'asset fetch failed' })
+  }
+})
+
+/* Curated background library (server/backgrounds.ts): /bg/<id>.webp and  */
+/* /bg/<id>-t.webp straight from object storage. Public and immutable —  */
+/* the catalog is checked in, the bytes are put there by the import      */
+/* script and never rewritten under the same id.                         */
+app.get('/bg/:file', async (req, res) => {
+  const key = backgrounds.keyForFile(req.params.file)
+  if (!key) return res.status(404).end()
+  try {
+    const buf = await storage.getObject(key)
+    if (!buf) return res.status(404).end()
+    res.set('Content-Type', 'image/webp')
+    res.set('Cache-Control', 'public, max-age=31536000, immutable')
+    res.set('X-Content-Type-Options', 'nosniff')
+    res.send(buf)
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : 'background fetch failed' })
   }
 })
 

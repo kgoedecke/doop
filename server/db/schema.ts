@@ -1,4 +1,4 @@
-import { pgTable, text, doublePrecision, bigint, boolean, integer, index, primaryKey } from 'drizzle-orm/pg-core'
+import { pgTable, text, doublePrecision, bigint, boolean, integer, index, primaryKey, jsonb } from 'drizzle-orm/pg-core'
 
 /**
  * One Postgres-dialect schema for every environment: PGlite (embedded, file
@@ -388,4 +388,26 @@ export const modelAccounts = pgTable('model_accounts', {
   model: text('model'),
   connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/* The curated background library behind search_backgrounds
+   (server/backgrounds.ts). Bytes live in object storage under bg/<id>.webp
+   and bg/<id>-t.webp; this row is everything the search ranks on. */
+export const backgrounds = pgTable('backgrounds', {
+  id: text('id').primaryKey(),
+  /** sha1 of the uploaded source file — re-uploads of the same image are skipped */
+  source: text('source').notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  tone: text('tone').notNull(),
+  style: text('style').notNull(),
+  avgColor: text('avg_color').notNull(),
+  palette: jsonb('palette').$type<string[]>().notNull(),
+  tags: jsonb('tags').$type<string[]>().notNull(),
+  slots: jsonb('slots').$type<string[]>().notNull(),
+  textZone: text('text_zone').notNull(),
+  description: text('description').notNull(),
+  /** off = kept but hidden from search; new uploads without tags start off */
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 })
