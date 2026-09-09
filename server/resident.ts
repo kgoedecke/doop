@@ -11,7 +11,6 @@ import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
 import { DESIGN_BRIEF, DESIGN_QUALITY } from './guide.ts'
-import { getStyleRecipe } from './recipes.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
 import type { Frame } from '../shared/types.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
@@ -166,7 +165,7 @@ function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.g
   const redesignNote = isRedesign
     ? ' For the redesign itself, work audit-first and deliver TWO drafts:' +
       ' (1) Audit the source — inspect_frame on a source frame for its computed palette, type, spacing, radii and shadows (import_webpage first for a live site), plus a screenshot for layout.' +
-      ' (2) Persist the audit with set_guidelines as a doc named "redesign-<source>" (e.g. "redesign-pipefile-com"): a "Source baseline" recording the old system (palette hexes, type, spacing/radii, and the section map — each section\'s purpose and one-line message) as a descriptive record of what you are redesigning away from, NOT rules to follow; then two binding directions. "Direction A — closer to home": the brand stays recognizable — logo, name, core brand colors (re-weighted freely, with new neutrals and tints) — while every detail is redesigned: typography, spacing rhythm, radii, shadows, patterns, background treatments, button and component styling, section layout. "Direction B — further out": same product, same real copy and facts, but freer — reinterpret the palette and push the aesthetic somewhere genuinely different; do not invent it from vibes — retrieve category inspiration (get_style_recipe for the closest recipe, search_inspiration for live exemplars), adapt it, and name it in the redesign doc.' +
+      ' (2) Persist the audit with set_guidelines as a doc named "redesign-<source>" (e.g. "redesign-pipefile-com"): a "Source baseline" recording the old system (palette hexes, type, spacing/radii, and the section map — each section\'s purpose and one-line message) as a descriptive record of what you are redesigning away from, NOT rules to follow; then two binding directions. "Direction A — closer to home": the brand stays recognizable — logo, name, core brand colors (re-weighted freely, with new neutrals and tints) — while every detail is redesigned: typography, spacing rhythm, radii, shadows, patterns, background treatments, button and component styling, section layout. "Direction B — further out": same product, same real copy and facts, but freer — reinterpret the palette and push the aesthetic somewhere genuinely different; do not invent it from vibes — retrieve category inspiration with search_inspiration (live exemplars with mood, palette and fonts), pick ONE exemplar and follow it, and name it in the redesign doc.' +
       ' (3) Deliver TWO new frames side by side, named "<source> — A (on-brand)" and "<source> — B (departure)", each executing its direction precisely; screenshot both. Both frames together are this card\'s deliverable. In both: keep the source\'s real copy and product facts, restructure sections when it strengthens the page\'s argument, and give details a genuinely new treatment rather than reordering the old elements.' +
       ' Exception: if the request already fixes the scope ("keep it subtle", "same style", "go wild", "rebrand"), deliver ONE draft at that scope instead.' +
       ' If your canvas guidelines already include a redesign doc for this source, skip (1)-(2) and follow its directions.'
@@ -811,25 +810,17 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'get_style_recipe',
-    description:
-      'Fetch one of the built-in style recipes — complete, executable style directions (mood north star, palette with roles, type pairing, signature moves) distilled from real gallery exemplars. The design-brief ritual in your instructions lists the menu; fetch the closest match for your category before writing a brief, then ADAPT it to the brand rather than copying it verbatim.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Recipe slug from the menu in your instructions' },
-      },
-      required: ['name'],
-    },
-  },
-  {
     name: 'search_inspiration',
     description:
-      'Search a curated gallery of real, well-designed live websites by category and SEE thumbnails with pre-distilled style facts (one-line mood north star, named palette, fonts). Use it while writing a design brief — especially for landing pages — when no built-in recipe fits the category, or alongside one: query the category plus the page type ("law firm landing page", "dark fintech dashboard"). Adapt what you see into the brief and name the exemplars; never embed these screenshots or copy an identity.',
+      'Search a curated gallery of real, well-designed live websites by category and SEE thumbnails with pre-distilled style facts (one-line mood north star, named palette, fonts). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages: query the page archetype plus the register you want ("law firm landing page, editorial", "dark fintech dashboard"), not just the product noun. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Category + page type, e.g. "grocery delivery landing page"' },
+        query: {
+          type: 'string',
+          description:
+            'Page archetype + register, e.g. "grocery delivery landing page, warm", "dark fintech dashboard"',
+        },
         count: { type: 'number', description: 'Exemplars to return, default 4, max 6' },
       },
       required: ['query'],
@@ -838,7 +829,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'save_decision',
     description:
-      'Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, recipe adapted, palette roles, type). Keep it under 500 chars. Design taste only, never one-off content edits.',
+      'Persist a design decision to the canvas Memory so humans and later agents see what was committed to — this is how you post your design brief (mood, the one exemplar followed, palette roles, type). Keep it under 500 chars. Design taste only, never one-off content edits.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1251,11 +1242,6 @@ async function execTool(
             `HTML${truncated ? ` (first ${MAX_HTML_READ_CHARS} of ${ref.html.length} characters — lift the design tokens from the <style> head and the screenshot)` : ''}:\n${ref.html.slice(0, MAX_HTML_READ_CHARS)}`,
         })
         return ok(blocks)
-      }
-      case 'get_style_recipe': {
-        const recipe = getStyleRecipe(String(input.name ?? ''))
-        if (!recipe) return fail(`no recipe named "${input.name}" — use a slug from the menu in your instructions`)
-        return ok(`# ${recipe.title} (${recipe.category})\n\n${recipe.markdown}`)
       }
       case 'search_inspiration': {
         const raw = block.input as { query?: string; count?: number }

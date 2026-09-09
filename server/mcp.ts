@@ -10,7 +10,6 @@ import { auth, getUserName, isBanned, PUBLIC_ORIGIN } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
-import { getStyleRecipe, STYLE_RECIPES } from './recipes.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
 import { ESCAPED_HTML_NOTE, looksEscapedHtml } from './escapedHtml.ts'
 import { describeSyncFlow, getSyncFlow } from './ingest.ts'
@@ -213,35 +212,15 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   )
 
   server.registerTool(
-    'get_style_recipe',
-    {
-      title: 'Get style recipe',
-      description:
-        "Fetch one of the built-in style recipes — complete, executable style directions (mood north star, palette with roles, type pairing, signature moves) distilled from real gallery exemplars. The agent guide's design-brief ritual lists the menu; fetch the closest match for your category before writing a brief, then ADAPT it to the brand rather than copying it verbatim.",
-      inputSchema: {
-        name: z
-          .enum(STYLE_RECIPES.map((r) => r.name) as [string, ...string[]])
-          .describe('Recipe slug from the menu in the agent guide'),
-        canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
-        agent_name: agentName,
-      },
-    },
-    async ({ name, canvas_id, agent_name }) => {
-      const recipe = getStyleRecipe(name)
-      if (!recipe) return err(`no recipe named "${name}"`)
-      const result = text({ ok: true, name: recipe.name, category: recipe.category, recipe: recipe.markdown })
-      return canvas_id ? withFeedback(result, canvas_id, actorFrom(agent_name)) : result
-    },
-  )
-
-  server.registerTool(
     'search_inspiration',
     {
       title: 'Search design inspiration',
       description:
-        'Search a curated gallery of real, well-designed live websites by category and SEE thumbnails of each, with pre-distilled style facts (one-line mood north star, named palette, fonts). Use it while writing a design brief — especially for landing pages — when no built-in recipe fits the category, or alongside one: query the category plus the page type ("law firm landing page", "dark fintech dashboard"). Adapt what you see into the brief and name the exemplars; never embed these screenshots or copy an identity.',
+        'Search a curated gallery of real, well-designed live websites by category and SEE thumbnails of each, with pre-distilled style facts (one-line mood north star, named palette, fonts). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages: query the page archetype plus the register you want ("law firm landing page, editorial", "dark fintech dashboard"), not just the product noun. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
       inputSchema: {
-        query: z.string().describe('Category + page type, e.g. "grocery delivery landing page"'),
+        query: z
+          .string()
+          .describe('Page archetype + register, e.g. "grocery delivery landing page, warm", "dark fintech dashboard"'),
         count: z.number().min(1).max(6).optional().describe('Exemplars to return, default 4'),
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,

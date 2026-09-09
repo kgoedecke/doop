@@ -68,7 +68,7 @@ export async function searchInspiration(query: string, count = 4): Promise<Inspi
 }
 
 export const INSPIRATION_USAGE_NOTE =
-  'These are real pages by other companies: study them, then ADAPT — steal the logic (ground/accent discipline, type contrast, density, mood), never the identity. Do not embed these screenshots or copy a palette hex-for-hex into a frame; distill what fits your brief, name the exemplar(s) in it, and diverge on the specifics.'
+  'Study these pages closely — ground and accent discipline, type contrast, density, mood, what carries the hero. Pick the ONE that fits your brief best and follow it; do not blend several into a composite. Name it in the brief. Do not embed these screenshots in a frame.'
 
 export function describeInspiration(r: InspirationResult, index: number): string {
   const palette = r.palette.length > 0 ? r.palette.map((c) => `${c.hex} (${c.name})`).join(', ') : 'n/a'
