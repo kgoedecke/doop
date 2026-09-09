@@ -1,0 +1,87 @@
+import type { Page } from 'puppeteer-core'
+
+/**
+ * Drop the CSS a captured page does not use.
+ *
+ * Sites ship one bundle for the whole product; a single page uses a small
+ * fraction of it. Inlining all of it makes imported frames heavy to store,
+ * broadcast and render, and near-unreadable for an agent that receives the
+ * frame HTML on every get_frame call. Matching selectors against the
+ * captured DOM keeps only what styles this page.
+ *
+ * The browser is the CSS parser: the sheet is injected into the page and
+ * walked through CSSOM, so there is no parser dependency and no drift between
+ * what we keep and what Chromium understands.
+ */
+
+/** Runs INSIDE the captured page via page.evaluate, so it must be
+ *  self-contained: no closure over module scope, no imports. */
+export function pruneCssInDocument(rawCss: string): string {
+  /* Pseudo-classes and pseudo-elements describe state, not structure. Strip
+     them so `a:hover::before` keeps its rule when any `a` exists. Functional
+     pseudos (:not, :is, :nth-child…) are stripped too, which only widens the
+     match — the conservative direction. */
+  const stripPseudos = (selector: string) => selector.replace(/::?[a-zA-Z-]+(?:\([^()]*(?:\([^()]*\)[^()]*)*\))?/g, '')
+
+  const used = (selectorText: string): boolean => {
+    const selector = stripPseudos(selectorText).trim()
+    if (!selector) return true
+    try {
+      return document.querySelector(selector) !== null
+    } catch {
+      /* Chromium parsed it, but stripping made it unparseable: keep it. */
+      return true
+    }
+  }
+
+  const isGrouping = (rule: CSSRule): rule is CSSGroupingRule =>
+    'cssRules' in rule && !(rule instanceof CSSStyleRule) && !(rule instanceof CSSKeyframesRule)
+
+  const keep = (rule: CSSRule): string | null => {
+    if (rule instanceof CSSStyleRule) return used(rule.selectorText) ? rule.cssText : null
+    if (isGrouping(rule)) {
+      /* @media, @supports, @layer, @container, @scope… keep the wrapper only
+         when something inside it survived. Media conditions are not
+         evaluated: a frame can be resized after import. */
+      const inner = Array.from(rule.cssRules)
+        .map(keep)
+        .filter((text): text is string => text !== null)
+      if (inner.length === 0) return null
+      const header = rule.cssText.slice(0, rule.cssText.indexOf('{'))
+      return `${header}{\n${inner.join('\n')}\n}`
+    }
+    /* @font-face, @keyframes, @property, @page, @counter-style… have no
+       selector to test. They are small and dropping one breaks a kept rule. */
+    return rule.cssText
+  }
+
+  const style = document.createElement('style')
+  style.textContent = rawCss
+  ;(document.head ?? document.documentElement).appendChild(style)
+  try {
+    const sheet = style.sheet
+    if (!sheet) return rawCss
+    return Array.from(sheet.cssRules)
+      .map(keep)
+      .filter((text): text is string => text !== null)
+      .join('\n')
+  } finally {
+    style.remove()
+  }
+}
+
+/** Prune `css` against the DOM currently loaded in `page`. Falls back to the
+ *  unpruned sheet if the page cannot run the pruner: an oversized import is
+ *  still an import. */
+export async function pruneUnusedCss(page: Page, css: string): Promise<string> {
+  try {
+    /* tsx/esbuild annotates nested functions with __name; page.evaluate
+       serialises the function source, so the helper must exist in the page.
+       Same shim as inspectFrame in screenshot.ts. */
+    await page.evaluate('globalThis.__name = (target) => target')
+    const pruned = await page.evaluate(pruneCssInDocument, css)
+    return typeof pruned === 'string' ? pruned : css
+  } catch {
+    return css
+  }
+}

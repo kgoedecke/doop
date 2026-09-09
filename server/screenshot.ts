@@ -19,7 +19,8 @@ const CHROME_PATHS = [
   '/usr/bin/chromium-browser',
 ].filter((p): p is string => !!p)
 
-function findBrowser(): string {
+/** The first usable local browser executable, or null when there is none. */
+export function findBrowserPath(): string | null {
   for (const p of CHROME_PATHS) {
     try {
       fs.accessSync(p, fs.constants.X_OK)
@@ -28,7 +29,13 @@ function findBrowser(): string {
       /* keep looking */
     }
   }
-  throw new Error('No Chrome/Chromium found. Set CHROME_PATH to a browser executable.')
+  return null
+}
+
+function findBrowser(): string {
+  const path = findBrowserPath()
+  if (!path) throw new Error('No Chrome/Chromium found. Set CHROME_PATH to a browser executable.')
+  return path
 }
 
 let browserPromise: Promise<Browser> | null = null

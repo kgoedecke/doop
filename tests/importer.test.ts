@@ -39,6 +39,8 @@ interface PageStubOptions {
   preview?: { description: string; text: string; pageHeight: number; hasVisualContent?: boolean }
   screenshot?: Buffer
   snapshot?: { baseUrl?: string; sheets: string[]; title: string; height: number; html: string }
+  /** What the in-page CSS pruner hands back; echoes the fetched CSS by default. */
+  prune?: (css: string) => string
   /** Context.dev captures render with scripts disabled, so importPage skips
    *  the scroll-walk evaluate — the stub's call sequence must match. */
   contextPath?: boolean
@@ -57,6 +59,10 @@ function stubPage(options: PageStubOptions = {}) {
       html: '<html><head></head><body>Captured</body></html>',
     },
   )
+  if (options.snapshot?.sheets.length) {
+    evaluate.mockResolvedValueOnce(undefined) // __name shim
+    evaluate.mockImplementationOnce(async (_pruner: unknown, css: string) => (options.prune ?? ((c) => c))(css))
+  }
   if (options.preview) evaluate.mockResolvedValueOnce(options.preview)
   const page = {
     setViewport: vi.fn().mockResolvedValue(undefined),
@@ -237,7 +243,7 @@ describe('webpage capture', () => {
   const css = (body: string) => new Response(body, { headers: { 'content-type': 'text/css' } })
   const blocked = (status = 200) =>
     new Response('<html>challenge</html>', { status, headers: { 'content-type': 'text/html' } })
-  const stubContextPageWithSheets = (sheets: string[]) => {
+  const stubContextPageWithSheets = (sheets: string[], prune?: (css: string) => string) => {
     contextMocks.configured.mockReturnValue(true)
     contextMocks.scrape.mockResolvedValue({
       html: '<!doctype html><html><head><link rel="stylesheet" href="/app.css"></head><body>From Context</body></html>',
@@ -254,6 +260,7 @@ describe('webpage capture', () => {
         height: 777,
         html: '<html><head></head><body>From Context</body></html>',
       },
+      prune,
     })
   }
 
@@ -298,29 +305,48 @@ describe('webpage capture', () => {
 
   it('blames its own budget, not the site, when a declared stylesheet size exceeds it', async () => {
     publicUrlMocks.fetchPinned.mockResolvedValue(
-      new Response('body { color: red }', { headers: { 'content-type': 'text/css', 'content-length': '2500000' } }),
+      new Response('body { color: red }', { headers: { 'content-type': 'text/css', 'content-length': '9000000' } }),
     )
     const page = stubContextPageWithSheets(['https://example.com/app.css'])
 
-    await expect(importPage('https://example.com')).rejects.toThrow('2 MB import limit')
+    await expect(importPage('https://example.com')).rejects.toThrow('8 MB import limit')
     expect(page.close).toHaveBeenCalledOnce()
   })
 
   it('stops reading a streamed stylesheet without content-length once it passes the budget', async () => {
-    publicUrlMocks.fetchPinned.mockResolvedValue(css('x'.repeat(2_100_000)))
+    publicUrlMocks.fetchPinned.mockResolvedValue(css('x'.repeat(8_100_000)))
     const page = stubContextPageWithSheets(['https://example.com/app.css'])
 
-    await expect(importPage('https://example.com')).rejects.toThrow('2 MB import limit')
+    await expect(importPage('https://example.com')).rejects.toThrow('8 MB import limit')
     expect(page.close).toHaveBeenCalledOnce()
   })
 
   it('charges every sheet against one page budget', async () => {
     publicUrlMocks.fetchPinned
-      .mockResolvedValueOnce(css('a'.repeat(1_200_000)))
-      .mockResolvedValueOnce(css('b'.repeat(1_200_000)))
+      .mockResolvedValueOnce(css('a'.repeat(4_200_000)))
+      .mockResolvedValueOnce(css('b'.repeat(4_200_000)))
     const page = stubContextPageWithSheets(['https://example.com/vendor.css', 'https://example.com/app.css'])
 
-    await expect(importPage('https://example.com')).rejects.toThrow('2 MB import limit')
+    await expect(importPage('https://example.com')).rejects.toThrow('8 MB import limit')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('inlines only the CSS the page actually uses', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(css('body { color: red } .unused { color: blue }'))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'], () => 'body { color: red }')
+
+    const imported = await importPage('https://example.com')
+
+    expect(imported.html).toContain('body { color: red }')
+    expect(imported.html).not.toContain('.unused')
+    expect(page.close).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a page whose used CSS alone is over the frame limit', async () => {
+    publicUrlMocks.fetchPinned.mockResolvedValue(css('body { color: red }'))
+    const page = stubContextPageWithSheets(['https://example.com/app.css'], () => 'x'.repeat(2_100_000))
+
+    await expect(importPage('https://example.com')).rejects.toThrow('even after unused styles are removed')
     expect(page.close).toHaveBeenCalledOnce()
   })
 

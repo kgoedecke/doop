@@ -14,6 +14,7 @@ import {
   parsePublicHttpUrl,
 } from './publicUrl.ts'
 import { navigateWebsitePage, WebsiteCaptureUnavailableError } from './websiteAccess.ts'
+import { pruneUnusedCss } from './cssPrune.ts'
 
 /**
  * Website importer: discover a bounded set of same-site pages, or acquire one
@@ -29,9 +30,12 @@ const VIEWPORT_WIDTH = 1280
 const MAX_HEIGHT = 6000
 const MAX_PREVIEW_HEIGHT = 4000
 const MAX_PREVIEW_TEXT_CHARS = 6000
-/* One budget for all of a page's CSS, shared by every sheet and @import.
-   Real sites ship one big bundled stylesheet, so a per-sheet cap below the
-   page budget only rejected pages that fit. */
+/* Two CSS budgets. Raw sheets are fetched under one shared bound so an
+   untrusted host cannot make us download without limit; what lands in the
+   frame is the pruned remainder, held to the smaller limit that keeps frames
+   cheap to store, broadcast and read. Real sites ship one multi-megabyte
+   bundle per product, so the fetch bound must fit a whole bundle. */
+const MAX_CSS_FETCH_BYTES = 8_000_000
 const MAX_CSS_BYTES = 2_000_000
 const MAX_DOCUMENT_BYTES = 3_000_000
 const MAX_DISCOVERY_BYTES = 2_000_000
@@ -403,7 +407,8 @@ type CapturedCss = { ok: true; css: string } | { ok: false; reason: 'oversized' 
 const OVERSIZED: CapturedCss = { ok: false, reason: 'oversized' }
 const UNREACHABLE: CapturedCss = { ok: false, reason: 'unreachable' }
 
-const CSS_OVERSIZED_MESSAGE = `This page's stylesheets are larger than Doop's ${MAX_CSS_BYTES / 1_000_000} MB import limit`
+const CSS_OVERSIZED_MESSAGE = `This page's stylesheets are larger than Doop's ${MAX_CSS_FETCH_BYTES / 1_000_000} MB import limit`
+const CSS_PRUNED_OVERSIZED_MESSAGE = `This page needs more than Doop's ${MAX_CSS_BYTES / 1_000_000} MB CSS import limit even after unused styles are removed`
 const CSS_UNREACHABLE_MESSAGE = 'The webpage HTML was captured, but one or more stylesheets could not be fully loaded'
 
 /** Fetch a stylesheet within the bytes still available for the page's CSS,
@@ -611,13 +616,17 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
 
     let css = ''
     for (const sheet of snap.sheets) {
-      const captured = await fetchCss(sheet, MAX_CSS_BYTES - Buffer.byteLength(css))
+      const captured = await fetchCss(sheet, MAX_CSS_FETCH_BYTES - Buffer.byteLength(css))
       if (!captured.ok) {
         throw new WebsiteCaptureUnavailableError(
           captured.reason === 'oversized' ? CSS_OVERSIZED_MESSAGE : CSS_UNREACHABLE_MESSAGE,
         )
       }
       css += captured.css + '\n'
+    }
+    if (css.trim()) {
+      css = await pruneUnusedCss(page, css)
+      if (Buffer.byteLength(css) > MAX_CSS_BYTES) throw new WebsiteCaptureUnavailableError(CSS_PRUNED_OVERSIZED_MESSAGE)
     }
 
     /* Scrolling/lazy loading can trigger a delayed navigation. Re-check the
