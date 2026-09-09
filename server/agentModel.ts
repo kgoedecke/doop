@@ -69,29 +69,49 @@ function anthropicTier(): AgentModel | null {
   return {
     provider: 'anthropic',
     label: `Doop (${ANTHROPIC_MODEL})`,
-    async run(req) {
-      const res = await client.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: req.maxTokens,
-        system: req.system.map((block) => ({
-          type: 'text' as const,
-          text: block.text,
-          ...(block.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
-        })),
-        tools: req.tools,
-        messages: req.messages,
-      })
-      const stop: StopReason =
-        res.stop_reason === 'refusal'
-          ? 'refusal'
-          : res.stop_reason === 'max_tokens'
-            ? 'max_tokens'
-            : res.stop_reason === 'tool_use'
-              ? 'tool_use'
-              : 'end_turn'
-      return { content: res.content as TurnBlock[], stop_reason: stop }
-    },
+    run: (req) => runAnthropicTurn(client, ANTHROPIC_MODEL, req),
   }
+}
+
+/**
+ * One Anthropic turn, streamed and collected into a message.
+ *
+ * Streaming is not for show here: it is what lets a turn run long. The SDK
+ * refuses a non-streaming request whose max_tokens implies more than ten
+ * minutes of generation ("Streaming is required for operations that may take
+ * longer than 10 minutes"), and GitHub recon asks for 32k tokens per turn. A
+ * bigger client timeout would silence that check but leave a silent HTTP
+ * connection open for the whole generation, which proxies drop. Over SSE the
+ * SDK's timeout only guards the wait for headers; the response itself stays
+ * alive on the API's ping events until the message is complete.
+ */
+export async function runAnthropicTurn(
+  client: Anthropic,
+  model: string,
+  req: AgentTurnRequest,
+): Promise<AgentTurnResult> {
+  const res = await client.messages
+    .stream({
+      model,
+      max_tokens: req.maxTokens,
+      system: req.system.map((block) => ({
+        type: 'text' as const,
+        text: block.text,
+        ...(block.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
+      })),
+      tools: req.tools,
+      messages: req.messages,
+    })
+    .finalMessage()
+  const stop: StopReason =
+    res.stop_reason === 'refusal'
+      ? 'refusal'
+      : res.stop_reason === 'max_tokens'
+        ? 'max_tokens'
+        : res.stop_reason === 'tool_use'
+          ? 'tool_use'
+          : 'end_turn'
+  return { content: res.content as TurnBlock[], stop_reason: stop }
 }
 
 function azureTier(): AgentModel | null {
