@@ -309,7 +309,7 @@ export async function handleIngest(req: express.Request, res: express.Response) 
     if (!edgesRecorded) return res.status(400).json({ error: 'html (or edges) required' })
     return res.json({ ok: true, edges: edgesRecorded })
   }
-  if (html.length > MAX_FRAME_HTML_BYTES) {
+  if (Buffer.byteLength(html) > MAX_FRAME_HTML_BYTES) {
     return res.status(413).json({
       error: `snapshot exceeds the ${MAX_FRAME_HTML_BYTES / 1_000_000} MB limit — mask or exclude heavy content`,
     })

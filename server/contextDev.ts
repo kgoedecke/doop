@@ -113,7 +113,7 @@ export async function scrapeContextWebsiteHtml(
   if (body.success !== true || typeof body.html !== 'string' || !body.html.trim()) {
     throw new WebsiteCaptureUnavailableError('Context.dev returned no webpage HTML')
   }
-  if (body.html.length > MAX_FRAME_HTML_BYTES) {
+  if (Buffer.byteLength(body.html) > MAX_FRAME_HTML_BYTES) {
     throw new WebsiteCaptureUnavailableError('Context.dev returned webpage HTML that is too large to import safely')
   }
   if (body.type !== 'html') {

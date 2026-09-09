@@ -651,7 +651,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
     else html = inject + html
     html = '<!doctype html>\n' + html
 
-    if (html.length > MAX_FRAME_HTML_BYTES) {
+    if (Buffer.byteLength(html) > MAX_FRAME_HTML_BYTES) {
       throw new WebsiteCaptureUnavailableError('The captured webpage is too large to import safely')
     }
 
