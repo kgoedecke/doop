@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import express from 'express'
 import { eq, inArray } from 'drizzle-orm'
@@ -1492,24 +1492,7 @@ app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata)
 /* path-aware variant some clients probe for a resource at /mcp */
 app.get('/.well-known/oauth-protected-resource/mcp', protectedResourceMetadata)
 
-/* Deployment-private extras: whatever the hosted instance mounts that the
-   open-source tree does not ship (marketing-site proxy, founder outreach).
-   The hook is server/private/index.ts, present only in that private checkout,
-   so the path goes through a variable — an unresolved static import would
-   break the typecheck here, an unexecuted dynamic one can't — and the
-   existence check keeps the import from throwing where the file is absent.
-   Must precede the SPA catch-all so the hook can claim routes. */
-const privateModule = './private/index.ts'
-if (existsSync(new URL(privateModule, import.meta.url))) {
-  const { mountPrivate } = (await import(privateModule)) as {
-    mountPrivate: (a: express.Express) => void | Promise<void>
-  }
-  await mountPrivate(app)
-}
-
-/* robots + minimal sitemap for every deployment. Registered after the
-   private hook on purpose: a hosted deployment may register a richer sitemap
-   there, and the first matching route wins. */
+/* robots + minimal sitemap for every deployment */
 app.get('/robots.txt', (_req, res) => {
   res
     .type('text/plain')
