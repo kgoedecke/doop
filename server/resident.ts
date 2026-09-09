@@ -107,7 +107,7 @@ Rules:
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
 - Never leave a frame worse than you found it.
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
-- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For hero sections, section bands and bento tiles use search_backgrounds BEFORE writing the section — pick by tone and palette, paste its css line, put copy in the text_zone — instead of a flat CSS gradient. For UI icons use search_icons and hotlink the SVG URL. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
+- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
 - If a request is unclear or impossible (missing frame, contradictory ask), do the closest reasonable thing and say what you did in your final message.
 - Your final message should be one or two sentences: what you changed and where.
 
@@ -745,13 +745,13 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'search_backgrounds',
+    name: 'list_backgrounds',
     description:
-      'Search a curated library of premium backgrounds for hero sections, section bands and bento tiles (glows, grainy meshes, aurora, neon, painterly scenes) — candidates come WITH thumbnails and a ready-to-paste CSS line that includes a legibility scrim. Call it BEFORE writing a hero or full-bleed section instead of settling for a flat CSS gradient. Describe mood and palette; filter by tone (light/dark — match your copy color), style and slot. Pick by palette hexes so it sits with the frame, then put copy in the text_zone.',
+      "Browse a curated library of premium backgrounds for hero sections, section bands and bento tiles (glows, grainy meshes, aurora, neon, painterly scenes) as a page of thumbnails, each with palette hexes and a ready-to-paste CSS line that includes a legibility scrim. Reach for it when a hero or full-bleed section wants atmosphere, depth or a focal glow; a quiet typographic design can stay flat, but a default two-stop gradient is rarely right. Filter by tone (light/dark — match your copy color), slot and style; an optional query only reorders. Then decide like a designer: does one genuinely fit the frame's style and palette? If yes use it and put copy in its text_zone; if not, call again with a different filter or draw the background yourself.",
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Mood, palette and subject, e.g. "dark purple glow for a SaaS hero"' },
+        query: { type: 'string', description: 'Mood / palette words to put first — reorders, never filters' },
         tone: {
           type: 'string',
           enum: [...backgrounds.BACKGROUND_TONES],
@@ -763,9 +763,9 @@ const TOOLS: Anthropic.Tool[] = [
           enum: [...backgrounds.BACKGROUND_SLOTS],
           description: 'hero, section band, or card/bento tile',
         },
-        count: { type: 'number', description: 'Candidates to return, 1-8, default 5' },
+        count: { type: 'number', description: 'Thumbnails to return, 1-24, default 12' },
       },
-      required: ['query'],
+      required: [],
     },
   },
   {
@@ -1127,19 +1127,18 @@ async function execTool(
         })
         return ok(blocks)
       }
-      case 'search_backgrounds': {
+      case 'list_backgrounds': {
         if (!backgrounds.backgroundsEnabled())
           return fail(
             'the background library is empty on this server — draw the background as layered CSS gradients instead',
           )
         const raw = block.input as { query?: string; tone?: string; style?: string; slot?: string; count?: number }
-        const query = String(raw.query || '').trim()
-        if (!query) return fail('query must be a non-empty string')
+        const query = String(raw.query || '').trim() || undefined
         const pick = <T extends string>(list: readonly T[], v: unknown): T | undefined =>
           list.includes(v as T) ? (v as T) : undefined
-        const results = backgrounds.searchBackgrounds(
-          query,
+        const listing = backgrounds.browseBackgrounds(
           {
+            query,
             tone: pick(backgrounds.BACKGROUND_TONES, raw.tone),
             style: pick(backgrounds.BACKGROUND_STYLES, raw.style),
             slot: pick(backgrounds.BACKGROUND_SLOTS, raw.slot),
@@ -1147,11 +1146,12 @@ async function execTool(
           },
           PUBLIC_ORIGIN,
         )
+        const { results } = listing
         if (results.length === 0)
-          return ok(`no backgrounds for "${query}" — drop a filter or describe the mood more broadly`)
+          return ok('no backgrounds match the tone/style/slot filters you set — drop one and call again')
         const thumbs = await Promise.all(results.map((r) => backgrounds.fetchThumb(r.id)))
         const blocks: NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>> = [
-          { type: 'text', text: `${results.length} background(s) for "${query}" — thumbnails below, pick by number:` },
+          { type: 'text', text: backgrounds.listHeadline(listing, query) },
         ]
         results.forEach((r, i) => {
           const thumb = thumbs[i]

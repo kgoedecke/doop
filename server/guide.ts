@@ -209,14 +209,19 @@ any public image URL. Source images in this order:
   license-safe) with object-fit: cover and a real alt text. For an image the design
   will depend on long-term, pass image_url to upload_asset source_url for a permanent
   copy on this origin.
-- **Backgrounds — search_backgrounds.** A curated library of premium backgrounds for
+- **Backgrounds — list_backgrounds.** A curated library of premium backgrounds for
   hero sections, section bands and bento tiles: soft glows, grainy meshes, aurora
-  ribbons, neon, painterly landscapes. Call it BEFORE writing a hero or any full-bleed
-  section — a flat two-stop CSS gradient is the fallback, not the default. Describe the
-  mood and palette ("warm sunset glow", "dark teal aurora"), set tone to match your copy
-  color (dark image = light text), and pick by the palette hexes so it sits with the
-  frame. Each result carries a ready css line with a legibility scrim and a text_zone —
-  put the headline there. One image per bento grid at most; keep the other tiles flat.
+  ribbons, neon, painterly landscapes. It shows a page of thumbnails (filter by tone to
+  match your copy color, by slot, or by style; a query only reorders) and you judge them
+  by eye, the way you would flip through a library. Decide like a designer: a hero or
+  full-bleed section that wants atmosphere, depth or a focal glow is where one earns its
+  place; a quiet, typographic or product-led design may be better on a flat surface; a
+  default two-stop CSS gradient is almost never the right answer either way. Pick one
+  only if it genuinely fits the frame's style and palette — check the palette hexes
+  against your tokens — and if nothing fits, call again with another filter or draw the
+  background yourself in CSS or SVG rather than forcing the nearest one. Each result
+  carries a ready css line with a legibility scrim and a text_zone — put the headline
+  there. One image per bento grid at most; keep the other tiles flat.
 - **UI icons — search_icons.** 200k+ open-source icons (Material, Lucide, Tabler,
   Phosphor, …). Search the concept ("shopping cart"). Hotlink the svg_url; recolor
   monochrome icons with ?color=%23<hex> and size with &height=<px>.

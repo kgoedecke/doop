@@ -266,56 +266,184 @@ const SLOT_WORDS: Record<string, BackgroundSlot> = {
   tile: 'card',
 }
 
+/* Designer vocabulary → the words the catalog is tagged with. A query word
+   that is not itself a tag still lands on its neighbours, at a lower weight
+   than a direct hit. */
+const SYNONYMS: Record<string, string[]> = {
+  silver: ['grey', 'metallic', 'monochrome'],
+  gray: ['grey', 'monochrome'],
+  grey: ['monochrome', 'muted'],
+  white: ['clean', 'minimal', 'soft'],
+  cream: ['beige', 'warm', 'soft'],
+  ivory: ['beige', 'soft'],
+  black: ['dark', 'minimal'],
+  minimal: ['clean', 'calm', 'subtle', 'minimal'],
+  minimalist: ['clean', 'calm', 'minimal'],
+  subtle: ['soft', 'calm', 'muted', 'minimal'],
+  clean: ['minimal', 'calm', 'soft'],
+  quiet: ['calm', 'soft', 'muted'],
+  grid: ['geometric', 'lines', 'halftone', 'wireframe', 'mesh'],
+  lines: ['geometric', 'neon', 'curve'],
+  architectural: ['geometric', 'editorial', 'minimal', 'monochrome'],
+  architecture: ['geometric', 'editorial', 'minimal'],
+  grain: ['grain', 'texture', 'halftone', 'noise'],
+  grainy: ['grain', 'texture', 'halftone'],
+  noise: ['grain', 'texture'],
+  film: ['grain', 'muted', 'cinematic'],
+  fine: ['subtle', 'soft'],
+  paper: ['texture', 'beige', 'soft'],
+  fabric: ['texture', 'fabric'],
+  stone: ['texture', 'grey', 'beige'],
+  marble: ['texture', 'painterly', 'soft'],
+  metal: ['metallic', 'grey', 'hardware'],
+  chrome: ['metallic', 'grey', 'hardware'],
+  glass: ['glass', 'curve', 'premium'],
+  glow: ['glow', 'soft'],
+  glowing: ['glow', 'neon'],
+  gradient: ['gradient', 'mesh', 'glow', 'blur'],
+  blur: ['blur', 'mesh', 'soft'],
+  blurry: ['blur', 'mesh'],
+  abstract: ['abstract', 'mesh', 'blur', 'glow'],
+  space: ['space', 'stars', 'night', 'dark'],
+  galaxy: ['space', 'stars', 'night'],
+  nature: ['nature', 'meadow', 'hills', 'mountains'],
+  sky: ['sky', 'clouds'],
+  ocean: ['coast', 'beach', 'blue'],
+  sea: ['coast', 'beach', 'blue'],
+  fire: ['thermal', 'orange', 'energetic'],
+  luxury: ['luxury', 'premium', 'gold'],
+  luxurious: ['luxury', 'premium', 'gold'],
+  premium: ['premium', 'luxury'],
+  corporate: ['saas', 'fintech', 'premium', 'calm'],
+  enterprise: ['saas', 'fintech', 'premium', 'calm'],
+  startup: ['saas', 'tech', 'bold'],
+  developer: ['developer', 'code', 'tech'],
+  coding: ['developer', 'code', 'tech'],
+  ai: ['ai', 'tech', 'purple', 'glow'],
+  crypto: ['fintech', 'dark', 'neon', 'tech'],
+  finance: ['fintech', 'premium', 'calm'],
+  health: ['wellness', 'calm', 'soft'],
+  medical: ['wellness', 'calm', 'clean'],
+  fitness: ['energetic', 'bold', 'gaming'],
+  kids: ['playful', 'bright', 'fresh'],
+  fun: ['playful', 'bright', 'vivid'],
+  vibrant: ['vivid', 'bold', 'saturated'],
+  colorful: ['vivid', 'rainbow', 'colorful'],
+  pastel: ['pastel', 'soft', 'pink', 'lavender'],
+  purple: ['purple', 'violet', 'lavender'],
+  violet: ['purple', 'violet'],
+  red: ['red', 'coral', 'thermal'],
+  yellow: ['yellow', 'gold', 'amber'],
+  green: ['green', 'mint', 'lime'],
+  blue: ['blue', 'cyan', 'navy', 'teal'],
+  orange: ['orange', 'amber', 'peach', 'coral'],
+  pink: ['pink', 'coral', 'magenta'],
+  sunset: ['sunset', 'dusk', 'golden', 'warm'],
+  sunrise: ['sunrise', 'golden', 'warm'],
+  night: ['night', 'dark', 'stars'],
+  moody: ['moody', 'dark', 'cinematic', 'muted'],
+  dramatic: ['dramatic', 'epic', 'cinematic', 'bold'],
+  cozy: ['warm', 'soft', 'calm'],
+  retro: ['retro', 'halftone', 'stripes'],
+  futuristic: ['tech', 'neon', 'ai', 'scifi'],
+  '3d': ['3d', 'wireframe', 'terrain'],
+}
+
 function score(entry: BackgroundEntry, words: string[]): number {
-  const haystack = new Set([...entry.tags, entry.style, entry.tone, ...tokens(entry.description)])
+  const haystack = new Set([...entry.tags, entry.style, ...tokens(entry.description)])
   let hits = 0
   for (const w of words) {
     if (haystack.has(w)) hits += 2
     else if (entry.style.startsWith(w) || [...haystack].some((h) => h.startsWith(w) && w.length >= 4)) hits += 1
+    else if ((SYNONYMS[w] ?? []).some((syn) => haystack.has(syn))) hits += 1
   }
   return hits
 }
 
-export function searchBackgrounds(
-  query: string,
-  opts: BackgroundSearchOptions,
-  publicOrigin: string,
-): BackgroundResult[] {
-  const count = Math.max(1, Math.min(opts.count ?? 5, 8))
-  const words = tokens(query)
-  const tone = opts.tone ?? words.map((w) => TONE_WORDS[w]).find(Boolean)
-  const style =
-    opts.style ?? words.find((w): w is BackgroundStyle => (BACKGROUND_STYLES as readonly string[]).includes(w))
-  const slot = opts.slot ?? words.map((w) => SLOT_WORDS[w]).find(Boolean)
-  const filtered = Boolean(tone || style || slot)
+export interface BackgroundListing {
+  results: BackgroundResult[]
+  /** enabled images that passed the filters, before the count cap */
+  total: number
+  /** true when the query hint actually matched something in the ordering */
+  hinted: boolean
+}
 
-  const ranked = catalog
+export interface BrowseOptions extends BackgroundSearchOptions {
+  /** optional mood / palette words that bias the order; never a filter */
+  query?: string
+}
+
+const DEFAULT_COUNT = 12
+const MAX_COUNT = 24
+
+/* Words in the query that name a tone, style or slot are hints, not
+   filters: "white grain grid" should still surface a light textured image
+   when the library has no grain-styled one. Only the explicit options filter. */
+function hints(words: string[]) {
+  return {
+    tone: words.map((w) => TONE_WORDS[w]).find(Boolean),
+    style: words.find((w): w is BackgroundStyle => (BACKGROUND_STYLES as readonly string[]).includes(w)),
+    slot: words.map((w) => SLOT_WORDS[w]).find(Boolean),
+  }
+}
+
+/* Interleave entries by style so a page of results shows the breadth of the
+   library rather than twelve variations of one look. Stable within a style. */
+function spreadByStyle(entries: BackgroundEntry[]): BackgroundEntry[] {
+  const byStyle = new Map<BackgroundStyle, BackgroundEntry[]>()
+  for (const e of entries) byStyle.set(e.style, [...(byStyle.get(e.style) ?? []), e])
+  const lanes = [...byStyle.values()]
+  const out: BackgroundEntry[] = []
+  for (let i = 0; out.length < entries.length; i++) {
+    for (const lane of lanes) {
+      const next = lane[i]
+      if (next) out.push(next)
+    }
+  }
+  return out
+}
+
+/** A page of the library for the agent to judge by eye. Explicit filters
+ *  narrow; query words only reorder; matched entries lead, the rest are
+ *  spread across styles. Never empty unless a filter excludes everything. */
+export function browseBackgrounds(opts: BrowseOptions, publicOrigin: string): BackgroundListing {
+  const count = Math.max(1, Math.min(opts.count ?? DEFAULT_COUNT, MAX_COUNT))
+  const words = tokens(opts.query ?? '')
+  const hint = hints(words)
+  const slotForCss = opts.slot ?? hint.slot
+
+  const pool = catalog
     .filter((e) => e.enabled)
-    .filter((e) => (!tone || e.tone === tone) && (!style || e.style === style) && (!slot || e.slots.includes(slot)))
-    .map((entry) => ({ entry, score: score(entry, words) }))
-    /* with a filter in play, the filtered set is a useful answer even when the
-       words hit nothing; without one, no hits means no answer */
-    .filter(({ score }) => score > 0 || filtered)
-    .sort((a, b) => b.score - a.score)
-
-  /* a filter-only or weak query still deserves variety: spread across styles */
-  const picked: BackgroundEntry[] = []
-  const seenStyles = new Set<BackgroundStyle>()
-  for (const { entry, score } of ranked) {
-    if (picked.length >= count) break
-    if (score === 0 && seenStyles.has(entry.style) && ranked.length > count) continue
-    seenStyles.add(entry.style)
-    picked.push(entry)
-  }
-  for (const { entry } of ranked) {
-    if (picked.length >= count) break
-    if (!picked.includes(entry)) picked.push(entry)
-  }
-
-  return picked.map((entry) => {
-    const urls = urlsFor(entry, publicOrigin)
-    return { ...entry, ...urls, css: cssFor(entry, urls.image_url, slot ?? entry.slots[0] ?? 'hero') }
+    .filter(
+      (e) =>
+        (!opts.tone || e.tone === opts.tone) &&
+        (!opts.style || e.style === opts.style) &&
+        (!opts.slot || e.slots.includes(opts.slot)),
+    )
+  const scored = pool.map((entry) => {
+    const matched = score(entry, words)
+    const boost =
+      (hint.tone && entry.tone === hint.tone ? 2 : 0) +
+      (hint.style && entry.style === hint.style ? 3 : 0) +
+      (hint.slot && entry.slots.includes(hint.slot) ? 1 : 0)
+    return { entry, matched, score: matched + boost }
   })
+  /* a tone or slot word alone ("white", "hero") is not a match — only tags,
+     description words or a style are */
+  const hinted = words.length > 0 && scored.some(({ matched }) => matched > 0)
+
+  const lead = scored
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(({ entry }) => entry)
+  const rest = spreadByStyle(scored.filter(({ score }) => score === 0).map(({ entry }) => entry))
+  const picked = [...spreadByStyle(lead.slice(0, count)), ...rest].slice(0, count)
+
+  const results = picked.map((entry) => {
+    const urls = urlsFor(entry, publicOrigin)
+    return { ...entry, ...urls, css: cssFor(entry, urls.image_url, slotForCss ?? entry.slots[0] ?? 'hero') }
+  })
+  return { results, total: pool.length, hinted }
 }
 
 /** A scrim keeps copy legible: light images get a white veil, dark ones a
@@ -332,6 +460,17 @@ function cssFor(entry: BackgroundEntry, url: string, slot: BackgroundSlot): stri
           : 'to bottom'
   const strength = slot === 'card' ? '.25' : '.45'
   return `background: linear-gradient(${direction}, rgba(${veil},${strength}), rgba(${veil},0) 70%), url("${url}") center/cover no-repeat;`
+}
+
+/** First line of a tool result: what the agent is looking at and how to use it. */
+export function listHeadline(listing: BackgroundListing, query?: string): string {
+  const shown = `${listing.results.length} of ${listing.total} backgrounds`
+  const order = query
+    ? listing.hinted
+      ? `ordered with the closest matches for "${query}" first, then a spread of other looks`
+      : `nothing is tagged for "${query}", so this is a spread across the library's looks`
+    : "a spread across the library's looks"
+  return `${shown} — ${order}. Thumbnails below. Judge each by eye against the frame's style and palette; pick one only if it genuinely serves the design, otherwise draw the background yourself in CSS or SVG.`
 }
 
 export function describeBackground(r: BackgroundResult, index: number): string {

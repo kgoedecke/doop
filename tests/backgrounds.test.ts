@@ -5,7 +5,7 @@ import {
   fetchThumb,
   keyForFile,
   normalizeTags,
-  searchBackgrounds,
+  browseBackgrounds,
   setCatalogForTests,
   type BackgroundEntry,
 } from '../server/backgrounds.ts'
@@ -60,35 +60,35 @@ const CATALOG: BackgroundEntry[] = [
 
 const ORIGIN = 'https://doop.test'
 
-describe('searchBackgrounds', () => {
+describe('browseBackgrounds', () => {
   afterEach(() => setCatalogForTests([]))
 
   it('ranks by query words across tags, style and description', () => {
     setCatalogForTests(CATALOG)
-    expect(searchBackgrounds('warm sunset', {}, ORIGIN)[0]?.id).toBe('sunset')
+    expect(browseBackgrounds({ query: 'warm sunset' }, ORIGIN).results[0]?.id).toBe('sunset')
   })
 
-  it('reads tone, style and slot out of the query when no filter is passed', () => {
+  it('ranks tone, style and slot words in the query first without filtering on them', () => {
     setCatalogForTests(CATALOG)
-    const ids = searchBackgrounds('dark aurora hero', {}, ORIGIN).map((r) => r.id)
-    expect(ids).toEqual(['tealaurora'])
+    const ids = browseBackgrounds({ query: 'dark aurora hero' }, ORIGIN).results.map((r) => r.id)
+    expect(ids[0]).toBe('tealaurora')
   })
 
   it('applies explicit filters over query hints', () => {
     setCatalogForTests(CATALOG)
-    const ids = searchBackgrounds('calm', { tone: 'light', slot: 'card' }, ORIGIN).map((r) => r.id)
+    const ids = browseBackgrounds({ query: 'calm', tone: 'light', slot: 'card' }, ORIGIN).results.map((r) => r.id)
     expect(ids).toEqual(['pastelmesh'])
   })
 
   it('returns a spread of styles for a filter-only query', () => {
     setCatalogForTests(CATALOG)
-    const styles = searchBackgrounds('', { tone: 'dark' }, ORIGIN).map((r) => r.style)
+    const styles = browseBackgrounds({ tone: 'dark' }, ORIGIN).results.map((r) => r.style)
     expect(new Set(styles).size).toBe(styles.length)
   })
 
   it('builds urls on the public origin and a scrim that fades toward the text zone', () => {
     setCatalogForTests(CATALOG)
-    const r = searchBackgrounds('purple', {}, ORIGIN)[0]!
+    const r = browseBackgrounds({ query: 'purple' }, ORIGIN).results[0]!
     expect(r.image_url).toBe(`${ORIGIN}/bg/purpleglow.webp`)
     expect(r.thumb_url).toBe(`${ORIGIN}/bg/purpleglow-t.webp`)
     expect(r.css).toContain('to right')
@@ -98,13 +98,52 @@ describe('searchBackgrounds', () => {
 
   it('never returns a disabled background', () => {
     setCatalogForTests([...CATALOG, entry({ id: 'hidden', tags: ['zebra'], enabled: false })])
-    expect(searchBackgrounds('zebra', {}, ORIGIN)).toEqual([])
+    const disabledOnly = browseBackgrounds({ query: 'zebra' }, ORIGIN)
+    expect(disabledOnly.results.map((r) => r.id)).not.toContain('hidden')
   })
 
-  it('caps count at 8 and returns nothing for words that match nothing', () => {
+  it('caps count at 24 and defaults to 12', () => {
     setCatalogForTests(CATALOG)
-    expect(searchBackgrounds('', { count: 50 }, ORIGIN).length).toBeLessThanOrEqual(8)
-    expect(searchBackgrounds('zebra', {}, ORIGIN)).toEqual([])
+    const many = Array.from({ length: 40 }, (_, i) => entry({ id: `bg${i}`, style: i % 2 ? 'glow' : 'mesh' }))
+    setCatalogForTests(many)
+    expect(browseBackgrounds({ count: 50 }, ORIGIN).results.length).toBe(24)
+    const page = browseBackgrounds({}, ORIGIN).results
+    expect(page.length).toBe(12)
+    /* round-robin across styles, not twelve of one look */
+    expect(page.slice(0, 4).map((r) => r.style)).toEqual(['mesh', 'glow', 'mesh', 'glow'])
+  })
+
+  it('never comes back empty: unmatched words return a spread, flagged as not hinted', () => {
+    setCatalogForTests(CATALOG)
+    const miss = browseBackgrounds({ query: 'xylophone quantum' }, ORIGIN)
+    expect(miss.hinted).toBe(false)
+    expect(miss.results.length).toBeGreaterThan(0)
+    /* a tone word on its own is a ranking hint, not a match */
+    const hint = browseBackgrounds({ query: 'light xylophone' }, ORIGIN)
+    expect(hint.hinted).toBe(false)
+    expect(hint.results[0]?.tone).toBe('light')
+    expect(browseBackgrounds({ query: 'teal' }, ORIGIN).hinted).toBe(true)
+  })
+
+  it('reaches tags through designer synonyms', () => {
+    setCatalogForTests([
+      ...CATALOG,
+      entry({
+        id: 'greypeak',
+        tone: 'light',
+        style: 'geometric',
+        tags: ['grey', 'monochrome', 'minimal', 'editorial'],
+        description: 'Black fabric peak on light grey, monochrome',
+      }),
+    ])
+    const hit = browseBackgrounds({ query: 'silver architectural' }, ORIGIN)
+    expect(hit.hinted).toBe(true)
+    expect(hit.results[0]?.id).toBe('greypeak')
+  })
+
+  it('only explicit filters can empty the result', () => {
+    setCatalogForTests(CATALOG)
+    expect(browseBackgrounds({ query: 'anything', style: 'grain' }, ORIGIN).results).toEqual([])
   })
 })
 
@@ -117,7 +156,7 @@ describe('/bg key mapping', () => {
   })
 })
 
-describe('search_backgrounds MCP tool', () => {
+describe('list_backgrounds MCP tool', () => {
   afterEach(() => setCatalogForTests([]))
 
   it('is registered, filters by enum, and returns css with the results', async () => {
@@ -129,15 +168,15 @@ describe('search_backgrounds MCP tool', () => {
     await client.connect(clientTransport)
     try {
       const { tools } = await client.listTools()
-      const tool = tools.find((t) => t.name === 'search_backgrounds')
+      const tool = tools.find((t) => t.name === 'list_backgrounds')
       expect(tool).toBeDefined()
       const schema = tool!.inputSchema as { properties?: Record<string, { enum?: string[] }> }
       expect(schema.properties?.tone?.enum).toEqual(['light', 'dark'])
       expect(schema.properties?.slot?.enum).toEqual(['hero', 'section', 'card'])
-      expect(client.getInstructions()).toContain('search_backgrounds')
+      expect(client.getInstructions()).toContain('list_backgrounds')
 
       const result = await client.callTool({
-        name: 'search_backgrounds',
+        name: 'list_backgrounds',
         arguments: { query: 'teal', agent_name: 'tester' },
       })
       const texts = (result.content as { type: string; text?: string }[])
@@ -162,7 +201,7 @@ describe('search_backgrounds MCP tool', () => {
     await client.connect(clientTransport)
     try {
       const result = await client.callTool({
-        name: 'search_backgrounds',
+        name: 'list_backgrounds',
         arguments: { query: 'anything', agent_name: 'tester' },
       })
       expect(result.isError).toBe(true)

@@ -31,7 +31,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Creating: create_frame, then stream the design with append_frame_html one complete section at a time (~1–4 KB chunks; start=true on the first, done=true on the last). Each chunk renders the moment it arrives — viewers watch you work.
 - Review: after every create or significant edit you MUST call get_frame_screenshot and fix what looks wrong before moving on.
 - Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
-- Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, search_backgrounds finds curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) with thumbnails — call it BEFORE writing a hero or any full-bleed section instead of settling for a flat CSS gradient, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. Never inline images as data: URIs.
+- Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. Never inline images as data: URIs.
 - Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
 - Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
 - Comments: call get_comments to read element-pinned comments and replies on a canvas, optionally filtered by frame. This does not claim feedback or resolve comments.
@@ -849,13 +849,16 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   )
 
   server.registerTool(
-    'search_backgrounds',
+    'list_backgrounds',
     {
-      title: 'Search backgrounds',
+      title: 'List backgrounds',
       description:
-        'Search a curated library of premium backgrounds for hero sections, section bands and bento tiles — soft glows, grainy meshes, aurora ribbons, neon, painterly landscapes — and get candidates WITH visual thumbnails plus a ready-to-paste CSS line that includes a legibility scrim. Call it BEFORE writing a hero or any full-bleed section: a flat CSS gradient is the fallback, not the default. Describe mood and palette ("warm sunset glow", "dark teal aurora", "calm pastel mesh"); filter by tone (light/dark, match your copy color), style and slot. Pick by palette hexes so it sits with the frame, then put copy in the text_zone.',
+        'Browse a curated library of premium backgrounds for hero sections, section bands and bento tiles — soft glows, grainy meshes, aurora ribbons, neon, painterly landscapes — as a page of thumbnails you look at, each with palette hexes and a ready-to-paste CSS line that includes a legibility scrim. Reach for it when a hero or full-bleed section wants atmosphere, depth or a focal glow; a quiet typographic design can stay flat, but a default two-stop gradient is rarely right. Filter by tone (light/dark — match your copy color), slot and style; an optional query ("warm sunset", "dark teal") only reorders. Then decide like a designer: does one of these genuinely fit the frame\'s style and palette? If yes, use it and put the copy in its text_zone. If not, call again with a different filter, or draw the background yourself.',
       inputSchema: {
-        query: z.string().describe('Mood, palette and subject, e.g. "dark purple glow for a SaaS hero"'),
+        query: z
+          .string()
+          .optional()
+          .describe('Mood / palette words to put first, e.g. "warm sunset glow" — reorders, never filters'),
         tone: z
           .enum(backgrounds.BACKGROUND_TONES)
           .optional()
@@ -865,7 +868,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
           .enum(backgrounds.BACKGROUND_SLOTS)
           .optional()
           .describe('Where it goes: hero, section band, or card/bento tile'),
-        count: z.number().min(1).max(8).optional().describe('Candidates to return, default 5'),
+        count: z.number().min(1).max(24).optional().describe('Thumbnails to return, default 12'),
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
@@ -876,21 +879,17 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
           'the background library is empty on this server — draw the background as CSS (layered radial-gradients with a grain overlay) instead',
         )
       try {
-        const results = backgrounds.searchBackgrounds(query, { tone, style, slot, count }, PUBLIC_ORIGIN)
+        const listing = backgrounds.browseBackgrounds({ query, tone, style, slot, count }, PUBLIC_ORIGIN)
+        const { results } = listing
         if (results.length === 0)
           return text({
             ok: true,
             backgrounds: [],
-            note: `No backgrounds for "${query}" — drop a filter or describe the mood more broadly (e.g. "warm glow", "dark mesh").`,
+            note: 'No backgrounds match the tone/style/slot filters you set — drop one and call again.',
           })
         const thumbs = await Promise.all(results.map((r) => backgrounds.fetchThumb(r.id)))
         type ResultBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
-        const content: ResultBlock[] = [
-          {
-            type: 'text' as const,
-            text: `${results.length} background(s) for "${query}" — thumbnails below, pick by number:`,
-          },
-        ]
+        const content: ResultBlock[] = [{ type: 'text' as const, text: backgrounds.listHeadline(listing, query) }]
         results.forEach((r, i) => {
           const thumb = thumbs[i]
           if (thumb) content.push({ type: 'image' as const, data: thumb.data, mimeType: thumb.mime })
