@@ -3,7 +3,7 @@ import { useStore } from '../lib/store'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import { BookmarkIcon, PanelRightIcon, PulseIcon, SparkIcon } from './ui/icons'
+import { BookmarkIcon, PanelExpandRightIcon, PulseIcon, SparkIcon } from './ui/icons'
 
 type PanelTab = 'tasks' | 'activity' | 'memory'
 
@@ -28,7 +28,7 @@ export function SideRail({ onOpen }: { onOpen: () => void }) {
       className="absolute top-3 right-3 z-[38] flex w-12 flex-col items-center gap-1.5 rounded-[14px] border border-line bg-surface p-1.5 shadow-card"
     >
       <RailControl label="Expand panel" onClick={onOpen}>
-        <PanelRightIcon />
+        <PanelExpandRightIcon />
       </RailControl>
       <span aria-hidden className="my-0.5 h-px w-6 bg-line-soft" />
       <RailControl

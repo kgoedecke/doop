@@ -35,7 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
-import { CopyIcon, MoreHorizontalIcon, ShareIcon, TrashIcon } from '../components/ui/icons'
+import { CopyIcon, MoreHorizontalIcon, PlusIcon, ShareIcon, TrashIcon } from '../components/ui/icons'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Toast } from '../components/ui/toast'
 import {
@@ -401,14 +401,22 @@ export function Home() {
               ) : view === 'grid' ? (
                 <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-3.5 xs:grid-cols-[repeat(auto-fill,minmax(214px,1fr))] md:gap-4">
                   {canvases !== null && (
-                    <Button
-                      variant="ghost"
-                      className="min-h-16 flex-col justify-center gap-1.5 overflow-hidden rounded-[14px] border-[1.5px] border-dashed p-0 text-ink-faint hover:border-brand hover:bg-brand/[0.04] hover:text-accent-ink xs:min-h-full"
+                    <button
+                      className={cn(
+                        cardCls,
+                        'flex min-h-16 flex-col items-center justify-center gap-3.5 px-4 py-6 text-center text-ink hover:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand xs:min-h-full',
+                      )}
+                      aria-label="Create a new canvas"
                       onClick={createCanvas}
                     >
-                      <span className="font-display text-[34px] font-bold leading-none">+</span>
-                      <span className="text-[13px] font-semibold">New canvas</span>
-                    </Button>
+                      <span className="grid size-8 place-items-center rounded-lg bg-brand text-white">
+                        <PlusIcon width={20} height={20} strokeWidth={1.8} />
+                      </span>
+                      <span>
+                        <span className="block font-display text-[13.5px] font-semibold">New canvas</span>
+                        <span className="mt-[5px] block text-[11.5px] text-ink-soft">Start from scratch</span>
+                      </span>
+                    </button>
                   )}
                   {canvases === null &&
                     [0, 1, 2, 3].map((i) => (

@@ -225,11 +225,22 @@ export function VectorIcon(props: SVGProps<SVGSVGElement>) {
 }
 
 /* a window with its right pane marked out — the side-panel toggle */
-export function PanelRightIcon(props: SVGProps<SVGSVGElement>) {
+/** Mirror of PanelCollapseIcon for a panel docked on the right. */
+export function PanelCollapseRightIcon(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg {...iconProps} strokeWidth={1.8} {...props}>
+    <svg {...iconProps} {...props}>
       <rect x="3" y="4" width="18" height="16" rx="2.5" />
-      <path d="M15 4v16" />
+      <path d="M15 4v16M8 10l2 2-2 2" />
+    </svg>
+  )
+}
+
+/** Mirror of PanelExpandIcon for a panel docked on the right. */
+export function PanelExpandRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M15 4v16m-5-11-3 3 3 3" />
     </svg>
   )
 }

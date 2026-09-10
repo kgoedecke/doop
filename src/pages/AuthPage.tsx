@@ -342,6 +342,7 @@ export function AuthPage() {
                 variant="default"
                 size="lg"
                 block
+                className="border-line"
                 type="button"
                 onClick={() => socialSignIn('google')}
                 disabled={busy}
@@ -355,6 +356,7 @@ export function AuthPage() {
                 variant="default"
                 size="lg"
                 block
+                className="border-line"
                 type="button"
                 onClick={() => socialSignIn('microsoft')}
                 disabled={busy}
@@ -364,7 +366,15 @@ export function AuthPage() {
               </Button>
             )}
             {oidc.enabled && (
-              <Button variant="default" size="lg" block type="button" onClick={ssoSignIn} disabled={busy}>
+              <Button
+                variant="default"
+                size="lg"
+                block
+                className="border-line"
+                type="button"
+                onClick={ssoSignIn}
+                disabled={busy}
+              >
                 {mode === 'signup' ? 'Sign up' : 'Sign in'} with {oidc.displayName}
               </Button>
             )}

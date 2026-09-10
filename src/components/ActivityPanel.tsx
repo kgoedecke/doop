@@ -6,17 +6,10 @@ import { timeAgo } from '../lib/time'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { MemoryPanel } from './MemoryPanel'
-import {
-  Panel,
-  PanelBody,
-  PanelClose,
-  PanelHeader,
-  PanelTab,
-  PanelTabPanel,
-  PanelTabs,
-  PanelTabsRoot,
-} from './ui/panel'
+import { Panel, PanelBody, PanelHeader, PanelTab, PanelTabPanel, PanelTabs, PanelTabsRoot } from './ui/panel'
 import { Button } from './ui/button'
+import { Tooltip } from './ui/tooltip'
+import { PanelCollapseRightIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
@@ -71,7 +64,17 @@ export function ActivityPanel({
               Memory
             </PanelTab>
           </PanelTabs>
-          <PanelClose onClick={onClose} />
+          <Tooltip label="Collapse panel" side="bottom" align="end">
+            <Button
+              variant="bare"
+              size="icon-sm"
+              className="shrink-0 text-ink-faint hover:bg-paper-deep hover:text-ink"
+              aria-label="Collapse panel"
+              onClick={onClose}
+            >
+              <PanelCollapseRightIcon width={13} height={13} />
+            </Button>
+          </Tooltip>
         </PanelHeader>
         <PanelTabPanel value="tasks">
           <TaskList />
