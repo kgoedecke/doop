@@ -3,6 +3,7 @@ import { authClient } from '../lib/auth'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { useMe } from '../lib/me'
+import { isDesktopShell } from '../lib/shell'
 import { AgentIcon } from './AgentIcon'
 import { ConnectModal } from './ConnectModal'
 import { CodeBlock } from './ui/code-block'
@@ -79,7 +80,11 @@ export function AccountMenu() {
           onSelect={() =>
             authClient.signOut().then(() => {
               posthog.reset()
-              location.reload()
+              /* the shell has no marketing site: a signed-out reload of /
+                 would show the landing page, so it goes to the sign-in form
+                 the shell opens on (main.rs) */
+              if (isDesktopShell()) location.assign('/auth')
+              else location.reload()
             })
           }
         >
