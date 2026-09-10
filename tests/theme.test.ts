@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getTheme, resolveTheme } from '../src/lib/theme'
+import { getTheme, resolveTheme, setTheme } from '../src/lib/theme'
 
 describe('theme utilities', () => {
   it('resolves explicit light and dark themes correctly', () => {
@@ -14,5 +14,11 @@ describe('theme utilities', () => {
   it('resolves system mode based on matchMedia fallback', () => {
     const resolved = resolveTheme('system')
     expect(['light', 'dark']).toContain(resolved)
+  })
+
+  it('updates in-memory theme when setTheme is called', () => {
+    setTheme('dark')
+    expect(getTheme()).toBe('dark')
+    setTheme('system')
   })
 })

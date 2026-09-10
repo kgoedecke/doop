@@ -5,16 +5,20 @@ export type Theme = 'light' | 'dark' | 'system'
 const STORAGE_KEY = 'doop-theme'
 const THEME_CHANGE_EVENT = 'doop-theme-change'
 
+let activeTheme: Theme | null = null
+
 export function getTheme(): Theme {
+  if (activeTheme !== null) return activeTheme
   if (typeof window === 'undefined') return 'system'
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored === 'light' || stored === 'dark' || stored === 'system') {
+      activeTheme = stored
       return stored
     }
   } catch {
     // Storage access restricted (e.g. sandboxed webview, private browsing);
-    // fall through to the default.
+    // fall through to default.
   }
   return 'system'
 }
@@ -43,12 +47,13 @@ export function applyTheme(theme: Theme): 'light' | 'dark' {
 }
 
 export function setTheme(theme: Theme): void {
+  activeTheme = theme
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(STORAGE_KEY, theme)
   } catch {
     // Storage write failed (quota exceeded, restricted access, etc.);
-    // the theme is still applied visually for this session.
+    // the theme is still applied visually and preserved in-memory for this session.
   }
   applyTheme(theme)
   window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT, { detail: theme }))
@@ -79,14 +84,27 @@ export function useTheme() {
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => resolveTheme(getTheme()))
 
   useEffect(() => {
-    const handleThemeChange = () => {
+    const handleThemeChange = (e?: Event) => {
+      if (e && 'detail' in e) {
+        const detailTheme = (e as CustomEvent<Theme>).detail
+        if (detailTheme === 'light' || detailTheme === 'dark' || detailTheme === 'system') {
+          activeTheme = detailTheme
+        }
+      }
       const currentTheme = getTheme()
       setLocalTheme(currentTheme)
       setResolvedTheme(resolveTheme(currentTheme))
     }
 
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!e.key || e.key === STORAGE_KEY) {
+        activeTheme = null
+        handleThemeChange()
+      }
+    }
+
     window.addEventListener(THEME_CHANGE_EVENT, handleThemeChange)
-    window.addEventListener('storage', handleThemeChange)
+    window.addEventListener('storage', handleStorageChange)
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handleMediaChange = () => {
@@ -103,7 +121,7 @@ export function useTheme() {
 
     return () => {
       window.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange)
-      window.removeEventListener('storage', handleThemeChange)
+      window.removeEventListener('storage', handleStorageChange)
       if (mediaQuery.removeEventListener) {
         mediaQuery.removeEventListener('change', handleMediaChange)
       } else {
