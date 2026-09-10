@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { loadGoogleConfig, loadOidcConfig, loginProvidersConfig, oidcPublicConfig } from '../server/auth.ts'
+import {
+  loadGoogleConfig,
+  loadMicrosoftConfig,
+  loadOidcConfig,
+  loginProvidersConfig,
+  oidcPublicConfig,
+} from '../server/auth.ts'
 
 /**
  * Pure config-parsing/validation, no server spawn needed - same pattern as
@@ -15,6 +21,9 @@ const OIDC_VARS = [
   'OIDC_PROVIDER_NAME',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
+  'MICROSOFT_CLIENT_ID',
+  'MICROSOFT_CLIENT_SECRET',
+  'MICROSOFT_TENANT_ID',
 ] as const
 const saved: Record<string, string | undefined> = {}
 
@@ -135,14 +144,14 @@ describe('loadGoogleConfig', () => {
 
 describe('loginProvidersConfig', () => {
   it('reports both providers off when nothing is configured', () => {
-    expect(loginProvidersConfig()).toEqual({ enabled: false, google: false })
+    expect(loginProvidersConfig()).toEqual({ enabled: false, google: false, microsoft: false })
   })
 
   it('reports google on, independently of SSO, and never the secret', () => {
     process.env.GOOGLE_CLIENT_ID = 'g-client'
     process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
 
-    expect(loginProvidersConfig()).toEqual({ enabled: false, google: true })
+    expect(loginProvidersConfig()).toEqual({ enabled: false, google: true, microsoft: false })
     expect(JSON.stringify(loginProvidersConfig())).not.toContain('g-secret')
   })
 
@@ -151,6 +160,43 @@ describe('loginProvidersConfig', () => {
     process.env.GOOGLE_CLIENT_ID = 'g-client'
     process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
 
-    expect(loginProvidersConfig()).toEqual({ enabled: true, displayName: 'SSO', google: true })
+    expect(loginProvidersConfig()).toEqual({ enabled: true, displayName: 'SSO', google: true, microsoft: false })
+  })
+})
+
+describe('loadMicrosoftConfig', () => {
+  it('returns null when neither var is set', () => {
+    expect(loadMicrosoftConfig()).toBeNull()
+  })
+
+  it.each([{ MICROSOFT_CLIENT_ID: 'm-client' }, { MICROSOFT_CLIENT_SECRET: 'm-secret' }])(
+    'throws when only one of the pair is set: %o',
+    (partial) => {
+      Object.assign(process.env, partial)
+      expect(() => loadMicrosoftConfig()).toThrow(/MICROSOFT_CLIENT_ID.*MICROSOFT_CLIENT_SECRET/)
+    },
+  )
+
+  it('defaults the tenant to common', () => {
+    process.env.MICROSOFT_CLIENT_ID = 'm-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'm-secret'
+
+    expect(loadMicrosoftConfig()).toEqual({ clientId: 'm-client', clientSecret: 'm-secret', tenantId: 'common' })
+  })
+
+  it('takes MICROSOFT_TENANT_ID when set', () => {
+    process.env.MICROSOFT_CLIENT_ID = 'm-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'm-secret'
+    process.env.MICROSOFT_TENANT_ID = 'tenant-123'
+
+    expect(loadMicrosoftConfig()?.tenantId).toBe('tenant-123')
+  })
+
+  it('shows up in loginProvidersConfig without the secret', () => {
+    process.env.MICROSOFT_CLIENT_ID = 'm-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'm-secret'
+
+    expect(loginProvidersConfig()).toEqual({ enabled: false, google: false, microsoft: true })
+    expect(JSON.stringify(loginProvidersConfig())).not.toContain('m-secret')
   })
 })

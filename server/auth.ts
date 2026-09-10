@@ -140,36 +140,66 @@ export function oidcPublicConfig(): { enabled: boolean; displayName?: string } {
   return config ? { enabled: true, displayName: config.providerName } : { enabled: false }
 }
 
-interface GoogleConfig {
+interface OAuthClient {
   clientId: string
   clientSecret: string
 }
 
 /**
- * Env-gated "Continue with Google", alongside email/password and OIDC SSO.
- * Same all-or-nothing rule as loadOidcConfig: GOOGLE_CLIENT_ID and
- * GOOGLE_CLIENT_SECRET must be set together, and a half-set pair refuses to
- * boot rather than showing a Google button that can never complete.
+ * The <PREFIX>_CLIENT_ID / <PREFIX>_CLIENT_SECRET pair behind each social
+ * provider. Same all-or-nothing rule as loadOidcConfig: both set enables
+ * the provider, neither leaves it off, and a half-set pair refuses to boot
+ * rather than showing a button that can never complete.
  */
-export function loadGoogleConfig(): GoogleConfig | null {
-  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = process.env
-  const setCount = [GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET].filter(Boolean).length
+function loadOAuthClient(prefix: 'GOOGLE' | 'MICROSOFT', label: string): OAuthClient | null {
+  const clientId = process.env[`${prefix}_CLIENT_ID`]
+  const clientSecret = process.env[`${prefix}_CLIENT_SECRET`]
+  const setCount = [clientId, clientSecret].filter(Boolean).length
   if (setCount === 0) return null
   if (setCount < 2) {
-    throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set to enable Google sign-in')
+    throw new Error(`${prefix}_CLIENT_ID and ${prefix}_CLIENT_SECRET must both be set to enable ${label} sign-in`)
   }
-  return { clientId: GOOGLE_CLIENT_ID!, clientSecret: GOOGLE_CLIENT_SECRET! }
+  return { clientId: clientId!, clientSecret: clientSecret! }
+}
+
+/** Env-gated "Sign in with Google", alongside email/password and OIDC SSO. */
+export function loadGoogleConfig(): OAuthClient | null {
+  return loadOAuthClient('GOOGLE', 'Google')
+}
+
+interface MicrosoftConfig extends OAuthClient {
+  /** Entra tenant: `common` (any Microsoft account, the default), `organizations`, `consumers`, or a tenant id. */
+  tenantId: string
+}
+
+/**
+ * Env-gated "Sign in with Microsoft" (Entra ID / personal Microsoft
+ * accounts). MICROSOFT_TENANT_ID narrows who may sign in: leave it at
+ * `common` for a public instance, set your tenant id to make the button an
+ * org-only door.
+ */
+export function loadMicrosoftConfig(): MicrosoftConfig | null {
+  const client = loadOAuthClient('MICROSOFT', 'Microsoft')
+  return client && { ...client, tenantId: process.env.MICROSOFT_TENANT_ID || 'common' }
 }
 
 /** Everything the login page needs to render its provider buttons. Never a secret. */
-export function loginProvidersConfig(): { enabled: boolean; displayName?: string; google: boolean } {
-  return { ...oidcPublicConfig(), google: loadGoogleConfig() !== null }
+export function loginProvidersConfig(): {
+  enabled: boolean
+  displayName?: string
+  google: boolean
+  microsoft: boolean
+} {
+  return { ...oidcPublicConfig(), google: loadGoogleConfig() !== null, microsoft: loadMicrosoftConfig() !== null }
 }
 
 /**
  * Shared by every external identity provider doop signs people in through
- * (the OIDC SSO plugin and the Google social provider — both hand this the
- * raw OIDC-shaped profile, `email` + `email_verified`).
+ * (the OIDC SSO plugin and the Google and Microsoft social providers — each
+ * hands this its raw profile: `email` + `email_verified`, or for Microsoft,
+ * which only sends email_verified when the app registration asks for it,
+ * the `verified_primary_email` optional claim listing addresses the account
+ * has proven; better-auth reads exactly the same two signals).
  *
  * better-auth's account-linking gate requires the LOCAL user row to already
  * be emailVerified before it will link an incoming OAuth sign-in to it —
@@ -201,9 +231,14 @@ export function loginProvidersConfig(): { enabled: boolean; displayName?: string
 async function linkVerifiedProviderEmail(profile: {
   email?: unknown
   email_verified?: unknown
+  verified_primary_email?: unknown
 }): Promise<Record<string, never>> {
   const email = typeof profile.email === 'string' ? profile.email.toLowerCase() : undefined
-  if (email && profile.email_verified === true) {
+  const verifiedPrimary = Array.isArray(profile.verified_primary_email) ? profile.verified_primary_email : []
+  const verified =
+    profile.email_verified === true ||
+    verifiedPrimary.some((candidate) => typeof candidate === 'string' && candidate.toLowerCase() === email)
+  if (email && verified) {
     const [existing] = await db
       .select({ id: authSchema.user.id })
       .from(authSchema.user)
@@ -239,6 +274,7 @@ function assertSignupDomainAllowed(email: string): void {
 function buildAuth() {
   const oidc = loadOidcConfig()
   const google = loadGoogleConfig()
+  const microsoft = loadMicrosoftConfig()
   if (!process.env.BETTER_AUTH_SECRET && process.env.NODE_ENV === 'production') {
     throw new Error('BETTER_AUTH_SECRET must be set in production')
   }
@@ -260,19 +296,29 @@ function buildAuth() {
           return origin ? [origin] : []
         },
     database: drizzleAdapter(db, { provider: 'pg', schema: authSchema }),
-    /* "Continue with Google", absent unless both GOOGLE_* vars are set.
-       Google always sends email_verified, so account linking to an
-       existing password account goes through linkVerifiedProviderEmail
-       exactly as it does for OIDC SSO. */
-    socialProviders: google
-      ? {
-          google: {
-            clientId: google.clientId,
-            clientSecret: google.clientSecret,
-            mapProfileToUser: linkVerifiedProviderEmail,
-          },
-        }
-      : undefined,
+    /* Social providers, each absent unless its <PREFIX>_* pair is set.
+       Google always sends email_verified; Microsoft sends it (or
+       verified_primary_email) only if the app registration's optional
+       claims include it, otherwise a Microsoft sign-in can only link to an
+       already-verified local account. Either way linking goes through
+       linkVerifiedProviderEmail exactly as it does for OIDC SSO. */
+    socialProviders: {
+      ...(google && {
+        google: {
+          clientId: google.clientId,
+          clientSecret: google.clientSecret,
+          mapProfileToUser: linkVerifiedProviderEmail,
+        },
+      }),
+      ...(microsoft && {
+        microsoft: {
+          clientId: microsoft.clientId,
+          clientSecret: microsoft.clientSecret,
+          tenantId: microsoft.tenantId,
+          mapProfileToUser: linkVerifiedProviderEmail,
+        },
+      }),
+    },
     /* Verification is enforced only when an SMTP mailer is configured —
        without one (dev, tiny self-hosts) signup stays open and every email
        is printed to the server log instead, links included — and only when

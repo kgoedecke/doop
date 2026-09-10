@@ -62,6 +62,18 @@ function resumeOAuthFlow(): boolean {
 
 type AuthMode = 'signin' | 'signup' | 'forgot' | 'reset'
 
+/** Microsoft's four-square logo, per its sign-in branding guidelines (inline for the same reason). */
+function MicrosoftMark() {
+  return (
+    <svg viewBox="0 0 21 21" width="18" height="18" aria-hidden="true" className="shrink-0">
+      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+    </svg>
+  )
+}
+
 /** Google's four-colour "G", per its sign-in branding guidelines (kept inline: no icon set ships it). */
 function GoogleMark() {
   return (
@@ -141,16 +153,17 @@ interface OidcClientConfig {
   enabled: boolean
   displayName?: string
   google: boolean
+  microsoft: boolean
 }
 
 /* The client bundle is static and shared across self-hosted deploys — it
    can't know at build time whether the operator configured SSO, so it asks
    the server. See server/auth.ts loginProvidersConfig. */
 function useOidcConfig(): OidcClientConfig {
-  const [config, setConfig] = useState<OidcClientConfig>({ enabled: false, google: false })
+  const [config, setConfig] = useState<OidcClientConfig>({ enabled: false, google: false, microsoft: false })
   useEffect(() => {
     fetch('/api/oidc-config')
-      .then((res) => (res.ok ? res.json() : { enabled: false, google: false }))
+      .then((res) => (res.ok ? res.json() : { enabled: false, google: false, microsoft: false }))
       .then(setConfig)
       .catch(() => {}) // SSO button just doesn't appear — email/password still works
   }, [])
@@ -209,9 +222,9 @@ export function AuthPage() {
     )
   }
 
-  function googleSignIn() {
+  function socialSignIn(provider: 'google' | 'microsoft') {
     return providerSignIn(() =>
-      authClient.signIn.social({ provider: 'google', callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' }),
+      authClient.signIn.social({ provider, callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' }),
     )
   }
 
@@ -322,12 +335,32 @@ export function AuthPage() {
             </>
           )}
         </p>
-        {(oidc.enabled || oidc.google) && (mode === 'signin' || mode === 'signup') && (
+        {(oidc.enabled || oidc.google || oidc.microsoft) && (mode === 'signin' || mode === 'signup') && (
           <>
             {oidc.google && (
-              <Button variant="default" size="lg" block type="button" onClick={googleSignIn} disabled={busy}>
+              <Button
+                variant="default"
+                size="lg"
+                block
+                type="button"
+                onClick={() => socialSignIn('google')}
+                disabled={busy}
+              >
                 <GoogleMark />
                 {mode === 'signup' ? 'Sign up' : 'Sign in'} with Google
+              </Button>
+            )}
+            {oidc.microsoft && (
+              <Button
+                variant="default"
+                size="lg"
+                block
+                type="button"
+                onClick={() => socialSignIn('microsoft')}
+                disabled={busy}
+              >
+                <MicrosoftMark />
+                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Microsoft
               </Button>
             )}
             {oidc.enabled && (

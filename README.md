@@ -289,6 +289,18 @@ boot). The login page shows a "Sign in with Google" button whenever both are set
 linking and admin promotion follow the same rules as SSO above; `SIGNUP_EMAIL_DOMAINS`
 applies to Google (and SSO) sign-ups exactly as it does to email/password.
 
+### Sign in with Microsoft
+
+Same shape as Google. Register an app in [Microsoft Entra](https://entra.microsoft.com)
+(App registrations, platform Web) with `<BETTER_AUTH_URL>/api/auth/callback/microsoft` as a
+redirect URI, create a client secret, and set `MICROSOFT_CLIENT_ID` and
+`MICROSOFT_CLIENT_SECRET` together. `MICROSOFT_TENANT_ID` (default `common`, any Microsoft
+account) can be `organizations`, `consumers`, or your tenant id to make the button an
+org-only door. Microsoft does not assert email ownership unless the app registration's
+ID token includes the `email` and `verified_primary_email` optional claims; without them a
+Microsoft sign-in still works but only links to an existing account that is already
+verified. Everything else (allowlist, admin promotion) follows the SSO rules above.
+
 ## Agent auth (MCP OAuth)
 
 The `/mcp` endpoint requires OAuth. Adding the server in Claude Code / Codex triggers
