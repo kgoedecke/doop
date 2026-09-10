@@ -19,8 +19,12 @@ interface Options {
 
 function parseArgs(argv: string[]): Options {
   const limitArg = argv.indexOf('--limit')
+  const limit = limitArg === -1 ? Infinity : Number(argv[limitArg + 1])
+  if (Number.isNaN(limit) || limit < 0) {
+    throw new Error('--limit must be a non-negative number')
+  }
   return {
-    limit: limitArg === -1 ? Infinity : Number(argv[limitArg + 1]),
+    limit,
     force: argv.includes('--force'),
   }
 }

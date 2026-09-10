@@ -59,9 +59,10 @@ describe('server/voyage.ts', () => {
       const vector = await embedImage(inputBuffer)
 
       expect(vector).toEqual(dummyVector)
-      expect(requestBody?.model).toBe('voyage-multimodal-3')
-      expect(requestBody?.inputs?.[0]?.content?.[0]?.type).toBe('image_base64')
-      expect(requestBody?.inputs?.[0]?.content?.[0]?.image_base64).toContain('data:image/jpeg;base64,')
+      const body1 = requestBody as VoyageRequestBody | null
+      expect(body1?.model).toBe('voyage-multimodal-3')
+      expect(body1?.inputs?.[0]?.content?.[0]?.type).toBe('image_base64')
+      expect(body1?.inputs?.[0]?.content?.[0]?.image_base64).toContain('data:image/jpeg;base64,')
     })
 
     it('returns null when API call returns an HTTP error code', async () => {
@@ -102,8 +103,9 @@ describe('server/voyage.ts', () => {
 
       const vector = await embedText('silver grid architecture')
       expect(vector).toEqual(dummyVector)
-      expect(requestBody?.model).toBe('voyage-multimodal-3')
-      expect(requestBody?.inputs?.[0]?.content?.[0]).toEqual({ type: 'text', text: 'silver grid architecture' })
+      const body2 = requestBody as VoyageRequestBody | null
+      expect(body2?.model).toBe('voyage-multimodal-3')
+      expect(body2?.inputs?.[0]?.content?.[0]).toEqual({ type: 'text', text: 'silver grid architecture' })
     })
 
     it('returns null on failure soft-fail', async () => {
