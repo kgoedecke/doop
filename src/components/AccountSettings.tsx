@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
+import { useTheme } from '../lib/theme'
+import { IconLaptop, IconMoon, IconSun } from './DashShell'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
@@ -17,6 +19,7 @@ const settingsInput = 'w-full sm:w-[280px]'
 export function AccountSettings() {
   const { data: session } = authClient.useSession()
   const user = session?.user
+  const { theme, setTheme } = useTheme()
 
   /* null while untouched, so the field tracks the session until you type */
   const [draft, setDraft] = useState<string | null>(null)
@@ -180,6 +183,44 @@ export function AccountSettings() {
           ) : (
             <Note>At least 8 characters</Note>
           )}
+        </CardRow>
+      </Card>
+
+      <Card className={settingsCard}>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>Choose your preferred color theme for Doop across all canvases and pages.</CardDescription>
+        </CardHeader>
+        <CardRow label="Theme">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant={theme === 'light' ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setTheme('light')}
+              className="gap-1.5"
+            >
+              <IconSun /> Light
+            </Button>
+            <Button
+              type="button"
+              variant={theme === 'dark' ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setTheme('dark')}
+              className="gap-1.5"
+            >
+              <IconMoon /> Dark
+            </Button>
+            <Button
+              type="button"
+              variant={theme === 'system' ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setTheme('system')}
+              className="gap-1.5"
+            >
+              <IconLaptop /> System
+            </Button>
+          </div>
         </CardRow>
       </Card>
     </>

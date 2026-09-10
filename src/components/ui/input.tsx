@@ -19,7 +19,7 @@ export const fieldVariants = cva(
         bare: 'border-0 bg-transparent p-0 focus:ring-0 md:text-sm',
         /* an editable heading: invisible until you hover or focus it */
         title:
-          'rounded-lg border border-transparent bg-transparent px-2 font-display font-semibold hover:border-line focus:border-ink focus:bg-white md:text-[15px]',
+          'rounded-lg border border-transparent bg-transparent px-2 font-display font-semibold hover:border-line focus:border-ink focus:bg-surface md:text-[15px]',
       },
       inputSize: {
         sm: 'h-8 py-1',

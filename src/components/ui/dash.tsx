@@ -98,7 +98,7 @@ function DashHeader({ className, ...props }: React.ComponentProps<'header'>) {
     <header
       data-slot="dash-header"
       className={cn(
-        'flex h-auto min-h-[60px] flex-none flex-wrap items-center gap-2 border-b border-line bg-white/75 px-4 py-3 backdrop-blur-sm md:h-[60px] md:flex-nowrap md:gap-3 md:px-[26px] md:py-0',
+        'flex h-auto min-h-[60px] flex-none flex-wrap items-center gap-2 border-b border-line bg-surface/75 px-4 py-3 backdrop-blur-sm md:h-[60px] md:flex-nowrap md:gap-3 md:px-[26px] md:py-0',
         className,
       )}
       {...props}

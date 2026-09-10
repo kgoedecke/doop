@@ -84,7 +84,7 @@ export function MemoryPanel() {
       )}
 
       {pending.map((p) => (
-        <div key={p.id} className="mx-4 mt-3 rounded-[12px] border border-brand bg-white px-3.5 py-3 shadow-card">
+        <div key={p.id} className="mx-4 mt-3 rounded-[12px] border border-brand bg-surface px-3.5 py-3 shadow-card">
           <div className="text-[10.5px] font-extrabold uppercase tracking-[0.08em] text-accent-ink">
             <DoopMark size={11} /> Memory suggestion
           </div>
@@ -329,7 +329,7 @@ function GuideModal({ canvasId, name, onClose }: { canvasId: string; name: strin
             />
             <div className={meta}>id: {creating ? slugify(titleDraft) || '…' : doc?.name}</div>
             <Textarea
-              className="mt-3 min-h-[38dvh] resize-y rounded-[12px] bg-white px-4 py-3.5 font-mono leading-[1.65] focus:ring-0 sm:min-h-[46vh] md:text-[12.5px]"
+              className="mt-3 min-h-[38dvh] resize-y rounded-[12px] bg-surface px-4 py-3.5 font-mono leading-[1.65] focus:ring-0 sm:min-h-[46vh] md:text-[12.5px]"
               autoFocus={!creating}
               placeholder={'# Rules\n\nPalette, fonts, layout recipes, asset URLs…'}
               value={draft}

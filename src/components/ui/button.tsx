@@ -33,7 +33,7 @@ const buttonVariants = cva(
         /* filled destructive pill — the retry affordance on failed tasks */
         'danger-solid': 'border-accent-ink bg-accent-ink text-white hover:border-ink hover:bg-ink',
         /* flat ink fill: compact affordances inside cards */
-        solid: 'border-transparent bg-ink text-white hover:bg-ink/90 disabled:opacity-40',
+        solid: 'border-transparent bg-ink text-paper hover:bg-ink/90 disabled:opacity-40',
         /* sits on a dark surface — the element toolbar over a frame */
         inverse: 'border-transparent bg-transparent text-white hover:bg-white/15',
       },

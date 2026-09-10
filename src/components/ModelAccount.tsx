@@ -81,7 +81,7 @@ const planRow = (live: boolean) =>
 const planMark = (live: boolean) =>
   cn(
     'grid h-9 w-9 flex-none place-items-center rounded-[11px] border border-line bg-paper-deep text-ink',
-    live && 'border-black bg-black text-white',
+    live && 'border-ink bg-ink text-paper',
   )
 const planPill = (on: boolean) =>
   cn(
