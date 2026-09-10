@@ -399,13 +399,14 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
   const selectReq = useRef(0)
   useEffect(() => {
-    if (!runtimeReady || !wantedSel || wantedSel === probeSel) return
+    const cur = useStore.getState().selectedElement
+    if (!runtimeReady || cur?.frameId !== frame.id || cur.selector === probeSel) return
     selectReq.current += 1
     iframeRef.current?.contentWindow?.postMessage(
-      { type: 'doop:select', reqId: selectReq.current, selector: wantedSel },
+      { type: 'doop:select', reqId: selectReq.current, selector: cur.selector },
       '*',
     )
-  }, [runtimeReady, wantedSel, probeSel])
+  }, [runtimeReady, wantedSel, probeSel, frame.id])
 
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
