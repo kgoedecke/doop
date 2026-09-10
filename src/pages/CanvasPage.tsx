@@ -26,6 +26,7 @@ import { SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
+import { PresentMode } from '../components/PresentMode'
 import { BrainIcon } from '../components/BrainIcon'
 import { getIdentity, setName } from '../lib/identity'
 import {
@@ -42,7 +43,7 @@ import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet'
-import { GithubIcon, ImportIcon, MoreHorizontalIcon, PulseIcon, SparkIcon } from '../components/ui/icons'
+import { GithubIcon, ImportIcon, MoreHorizontalIcon, PlayIcon, PulseIcon, SparkIcon } from '../components/ui/icons'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
@@ -90,6 +91,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const [view, setView] = useState<'canvas' | 'board'>('canvas')
   const [showConnect, setShowConnect] = useState(false)
   const [showShare, setShowShare] = useState(false)
+  const [presenting, setPresenting] = useState(false)
   /* returning from a GitHub App install: the setup redirect appends a signed
      pass — pull it off the URL and open the import modal on the repo picker */
   const [ghInstallPass, setGhInstallPass] = useState<string | null>(() => {
@@ -323,6 +325,18 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             ))}
           </div>
           <BarDivider />
+          <Tooltip label={selectedId ? 'Present this frame' : 'Select a frame to present'} side="bottom">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-[34px] rounded-[7px] bg-surface hover:border-ink-faint hover:bg-paper-deep disabled:opacity-40"
+              aria-label="Present selected frame"
+              disabled={!selectedId}
+              onClick={() => setPresenting(true)}
+            >
+              <PlayIcon className="size-3.5" />
+            </Button>
+          </Tooltip>
           <Button
             variant="ghost"
             className="h-[34px] rounded-[7px] bg-surface px-[17px] text-[12.5px] font-semibold hover:border-ink-faint hover:bg-paper-deep"
@@ -539,6 +553,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
 
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
+      {presenting && selectedId && <PresentMode frameId={selectedId} onClose={() => setPresenting(false)} />}
       {showShare && canvas && (
         <ShareModal
           key={canvas.id}

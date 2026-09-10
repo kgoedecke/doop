@@ -245,10 +245,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     editTimer = setTimeout(postEdited, 400)
   })
 
+  /* Escape pressed with focus inside the frame: the parent never sees the
+     key event itself, so relay it (present mode closes on it) */
   document.addEventListener('keydown', function (ev) {
-    if (editing && ev.key === 'Escape') {
+    if (ev.key !== 'Escape') return
+    if (editing) {
       setEdit(false)
       parent.postMessage({ type: 'doop:edit-esc' }, '*')
+    } else {
+      parent.postMessage({ type: 'doop:esc' }, '*')
     }
   })
 

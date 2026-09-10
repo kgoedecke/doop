@@ -253,3 +253,11 @@ export function BookmarkIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+export function PlayIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
