@@ -40,7 +40,7 @@ import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet'
-import { GithubIcon } from '../components/ui/icons'
+import { GithubIcon, ImportIcon, MoreHorizontalIcon, PulseIcon, SparkIcon } from '../components/ui/icons'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
@@ -250,8 +250,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     /* --app-inset is 0 normally; the impersonation shell raises it so this
        fixed layer starts below the banner instead of under it */
     <div className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] flex flex-col">
-      <div className="z-40 flex h-[52px] flex-none items-center gap-3 border-b border-line bg-surface px-3 max-md:h-[112px] max-md:flex-wrap max-md:content-center max-md:gap-x-2 max-md:gap-y-1.5 max-md:px-2 max-md:py-2">
-        <div className="flex min-w-0 items-center gap-1.5 max-md:basis-full">
+      {/* Three tiers. Desktop (≥ md): one row with the full action set. Tablet
+          (xs..md): still one row — the id badge and the text actions fold
+          into the ••• sheet so the name and the view switch keep their room.
+          Phone (< xs): two rows, the name on top, the switch and the actions
+          below it, each at its natural width. */}
+      <div className="z-40 flex h-14 flex-none items-center gap-4 border-b border-line bg-surface px-4 max-md:gap-2.5 max-md:px-3 max-xs:h-[100px] max-xs:flex-wrap max-xs:content-center max-xs:gap-y-2 max-xs:py-2">
+        <div className="flex min-w-0 items-center gap-1.5 max-xs:basis-full">
           <Tooltip label="All canvases" side="bottom" align="start">
             <Button
               variant="bare"
@@ -274,7 +279,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           )}
         </div>
         <Segmented
-          className="max-md:order-2 max-md:flex-1"
+          className="shrink-0 max-xs:order-2"
           aria-label="View"
           value={view}
           onValueChange={(next) => setView(next as 'canvas' | 'board')}
@@ -282,8 +287,18 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           <SegmentedItem value="canvas">Canvas</SegmentedItem>
           <SegmentedItem value="board">Board</SegmentedItem>
         </Segmented>
-        <div className="ml-auto flex items-center gap-3 max-md:hidden">
-          <div className="flex items-center" title={others.map((p) => p.name).join(', ') || 'Just you here'}>
+        <div className="ml-auto flex items-center gap-2.5 max-md:hidden">
+          <Button
+            variant="bare"
+            className="h-8 px-2.5 text-[12.5px] font-medium"
+            onClick={() => setShowImport(true)}
+            title="Import a live web page as a frame"
+          >
+            <ImportIcon className="size-[13px]" />
+            Import
+          </Button>
+          <BarDivider />
+          <div className="flex items-center px-0.5" title={others.map((p) => p.name).join(', ') || 'Just you here'}>
             <Button
               variant="bare"
               className="p-0 hover:bg-transparent"
@@ -304,46 +319,87 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               />
             ))}
           </div>
-          <Button variant="ghost" onClick={() => setShowActivity((v) => !v)}>
-            Activity
+          <BarDivider />
+          <Tooltip label="Activity" side="bottom">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-[34px] rounded-[7px] bg-surface hover:border-ink-faint hover:bg-paper-deep"
+              aria-label="Activity"
+              onClick={() => setShowActivity((v) => !v)}
+            >
+              <PulseIcon />
+            </Button>
+          </Tooltip>
+          <Button
+            variant="ghost"
+            className="h-[34px] rounded-[7px] bg-surface px-[17px] text-[12.5px] font-semibold hover:border-ink-faint hover:bg-paper-deep"
+            onClick={() => setShowShare(true)}
+          >
+            Share
           </Button>
-          <Button variant="ghost" onClick={() => setShowImport(true)} title="Import a live web page as a frame">
-            ⤓ Import
-          </Button>
-          <Button onClick={() => setShowShare(true)}>Share</Button>
           <Button
             variant="primary"
+            className="h-[34px] rounded-[7px] px-[13px] text-[12.5px]"
             onClick={() => {
               posthog.capture('agent_connection_opened')
               setShowConnect(true)
             }}
           >
-            ✦ Connect AI
+            <SparkIcon className="size-3" />
+            Connect AI
           </Button>
         </div>
-        <div className="order-3 hidden items-center gap-1.5 max-md:flex">
-          <Button variant="ghost" className="h-10 bg-surface" onClick={() => setShowActivity(true)}>
-            Activity
-          </Button>
+        <div className="ml-auto hidden items-center gap-1.5 max-md:flex max-xs:order-3">
+          <div
+            className="mr-1 flex items-center max-sm:hidden"
+            title={others.map((p) => p.name).join(', ') || 'Just you here'}
+          >
+            <Avatar name={me.name} kind="user" stacked />
+            {others.map((p) => (
+              <Avatar
+                key={p.clientId}
+                name={p.name}
+                color={p.color}
+                kind={p.kind}
+                status={p.status}
+                owner={p.owner}
+                stacked
+              />
+            ))}
+          </div>
+          <Tooltip label="Activity" side="bottom">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-[34px] rounded-[7px] bg-surface"
+              aria-label="Activity"
+              onClick={() => setShowActivity((v) => !v)}
+            >
+              <PulseIcon />
+            </Button>
+          </Tooltip>
           <Button
             variant="primary"
-            className="h-10"
+            className="h-[34px] rounded-[7px] px-[13px] text-[12.5px]"
             onClick={() => {
               posthog.capture('agent_connection_opened')
               setShowConnect(true)
             }}
           >
-            ✦ AI
+            <SparkIcon className="size-3" />
+            <span className="max-sm:hidden">Connect AI</span>
+            <span className="sm:hidden">AI</span>
           </Button>
           <Tooltip label="Canvas actions" side="bottom" align="end">
             <Button
               variant="ghost"
               size="icon"
-              className="size-10 bg-surface"
+              className="size-[34px] rounded-[7px] bg-surface"
               aria-label="Canvas actions"
               onClick={() => setShowMobileActions(true)}
             >
-              •••
+              <MoreHorizontalIcon />
             </Button>
           </Tooltip>
         </div>
@@ -546,6 +602,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       )}
     </div>
   )
+}
+
+/* hairline between the top bar's clusters: actions | presence | sharing */
+function BarDivider() {
+  return <span aria-hidden className="mx-1 h-[22px] w-px bg-line-soft" />
 }
 
 function ImportModal({
@@ -1474,7 +1535,7 @@ function CanvasName() {
     <Input
       variant="title"
       inputSize="sm"
-      className={cn(canvasNameCls, 'truncate max-md:max-w-[calc(100vw-72px)]')}
+      className={cn(canvasNameCls, 'truncate max-xs:max-w-[calc(100vw-72px)]')}
       value={draft ?? canvas.name}
       size={Math.max(6, (draft ?? canvas.name).length)}
       onFocus={() => setDraft(canvas.name)}

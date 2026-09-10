@@ -91,3 +91,30 @@ export function SyncIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+/* arrow into a tray — the top bar's Import */
+export function ImportIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} strokeWidth={1.9} {...props}>
+      <path d="M12 3v11m0 0 4.5-4.5M12 14l-4.5-4.5M4 20h16" />
+    </svg>
+  )
+}
+
+/* heartbeat line — the activity feed */
+export function PulseIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} strokeWidth={1.8} {...props}>
+      <path d="M3 12h4l3-8 4 16 3-8h4" />
+    </svg>
+  )
+}
+
+/* four-point spark — the AI affordance */
+export function SparkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} fill="currentColor" stroke="none" {...props}>
+      <path d="M12 2.6 14.3 9l6.4 2.3-6.4 2.3L12 20l-2.3-6.4L3.3 11.3 9.7 9z" />
+    </svg>
+  )
+}
