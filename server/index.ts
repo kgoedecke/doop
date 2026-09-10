@@ -11,7 +11,7 @@ import { store } from './store.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
-import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN, oidcPublicConfig } from './auth.ts'
+import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN, loginProvidersConfig } from './auth.ts'
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import * as demo from './demo.ts'
@@ -457,9 +457,9 @@ app.post('/api/account-exists', async (req, res) => {
 
 /* Public: is SSO configured, and what should the login button say? Static
    build shared across self-hosted deploys can't know this at build time —
-   see server/auth.ts oidcPublicConfig for what's safe to expose here. */
+   see server/auth.ts loginProvidersConfig for what's safe to expose here. */
 app.get('/api/oidc-config', (req, res) => {
-  res.json(oidcPublicConfig())
+  res.json(loginProvidersConfig())
 })
 
 /* ------------------------------------------------------------------ */

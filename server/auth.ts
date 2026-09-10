@@ -1,5 +1,5 @@
 import { betterAuth } from 'better-auth'
-import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { APIError } from 'better-auth/api'
 import { eq, inArray, or, isNull, ne, and, sql } from 'drizzle-orm'
 import { admin, mcp, genericOAuth } from 'better-auth/plugins'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
@@ -140,7 +140,37 @@ export function oidcPublicConfig(): { enabled: boolean; displayName?: string } {
   return config ? { enabled: true, displayName: config.providerName } : { enabled: false }
 }
 
+interface GoogleConfig {
+  clientId: string
+  clientSecret: string
+}
+
 /**
+ * Env-gated "Continue with Google", alongside email/password and OIDC SSO.
+ * Same all-or-nothing rule as loadOidcConfig: GOOGLE_CLIENT_ID and
+ * GOOGLE_CLIENT_SECRET must be set together, and a half-set pair refuses to
+ * boot rather than showing a Google button that can never complete.
+ */
+export function loadGoogleConfig(): GoogleConfig | null {
+  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = process.env
+  const setCount = [GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET].filter(Boolean).length
+  if (setCount === 0) return null
+  if (setCount < 2) {
+    throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must both be set to enable Google sign-in')
+  }
+  return { clientId: GOOGLE_CLIENT_ID!, clientSecret: GOOGLE_CLIENT_SECRET! }
+}
+
+/** Everything the login page needs to render its provider buttons. Never a secret. */
+export function loginProvidersConfig(): { enabled: boolean; displayName?: string; google: boolean } {
+  return { ...oidcPublicConfig(), google: loadGoogleConfig() !== null }
+}
+
+/**
+ * Shared by every external identity provider doop signs people in through
+ * (the OIDC SSO plugin and the Google social provider — both hand this the
+ * raw OIDC-shaped profile, `email` + `email_verified`).
+ *
  * better-auth's account-linking gate requires the LOCAL user row to already
  * be emailVerified before it will link an incoming OAuth sign-in to it —
  * the IdP's own emailVerified claim alone is not enough (see
@@ -151,7 +181,7 @@ export function oidcPublicConfig(): { enabled: boolean; displayName?: string } {
  * password user could never link their account to SSO — exactly the
  * migration this feature exists to support.
  *
- * Used as the OIDC provider's mapProfileToUser, which runs before that gate:
+ * Used as each provider's mapProfileToUser, which runs before that gate:
  * if the IdP marks this email verified and a local, still-unverified account
  * already holds it, the IdP has already proven ownership — mark the local
  * account verified too, so the gate's own default (matching, verified email)
@@ -168,7 +198,7 @@ export function oidcPublicConfig(): { enabled: boolean; displayName?: string } {
  * account still happens — once, safely — the next time syncAdmins runs at
  * boot, since this handler leaves emailVerified true.
  */
-async function linkVerifiedOidcEmail(profile: {
+async function linkVerifiedProviderEmail(profile: {
   email?: unknown
   email_verified?: unknown
 }): Promise<Record<string, never>> {
@@ -185,8 +215,30 @@ async function linkVerifiedOidcEmail(profile: {
   return {}
 }
 
+/**
+ * SIGNUP_EMAIL_DOMAINS, enforced where every sign-up path converges — the
+ * user row's creation — rather than on the email/password endpoint alone,
+ * so an OAuth provider (Google, SSO) can't walk around the allowlist with
+ * an address it would have rejected typed in. The email endpoint returns
+ * the thrown error as a plain 400; the OAuth callbacks (social and
+ * genericOAuth alike, as of better-auth 1.6.26) catch it and redirect back
+ * to /auth with the MESSAGE as the ?error= code, spaces turned into
+ * underscores — see SIGNUP_RESTRICTED_PREFIX in AuthPage.tsx, which undoes
+ * that. Keep the message's first words stable.
+ */
+function assertSignupDomainAllowed(email: string): void {
+  if (!SIGNUP_EMAIL_DOMAINS.length) return
+  const lowered = email.toLowerCase()
+  const domain = lowered.slice(lowered.lastIndexOf('@') + 1)
+  if (SIGNUP_EMAIL_DOMAINS.includes(domain)) return
+  throw new APIError('BAD_REQUEST', {
+    message: `Sign up is restricted to ${SIGNUP_EMAIL_DOMAINS.map((d) => `@${d}`).join(', ')} email addresses.`,
+  })
+}
+
 function buildAuth() {
   const oidc = loadOidcConfig()
+  const google = loadGoogleConfig()
   if (!process.env.BETTER_AUTH_SECRET && process.env.NODE_ENV === 'production') {
     throw new Error('BETTER_AUTH_SECRET must be set in production')
   }
@@ -208,18 +260,19 @@ function buildAuth() {
           return origin ? [origin] : []
         },
     database: drizzleAdapter(db, { provider: 'pg', schema: authSchema }),
-    hooks: {
-      before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== '/sign-up/email' || !SIGNUP_EMAIL_DOMAINS.length) return
-        const email = typeof ctx.body?.email === 'string' ? ctx.body.email.toLowerCase() : ''
-        const domain = email.slice(email.lastIndexOf('@') + 1)
-        if (!SIGNUP_EMAIL_DOMAINS.includes(domain)) {
-          throw new APIError('BAD_REQUEST', {
-            message: `Sign up is restricted to ${SIGNUP_EMAIL_DOMAINS.map((d) => `@${d}`).join(', ')} email addresses.`,
-          })
+    /* "Continue with Google", absent unless both GOOGLE_* vars are set.
+       Google always sends email_verified, so account linking to an
+       existing password account goes through linkVerifiedProviderEmail
+       exactly as it does for OIDC SSO. */
+    socialProviders: google
+      ? {
+          google: {
+            clientId: google.clientId,
+            clientSecret: google.clientSecret,
+            mapProfileToUser: linkVerifiedProviderEmail,
+          },
         }
-      }),
-    },
+      : undefined,
     /* Verification is enforced only when an SMTP mailer is configured —
        without one (dev, tiny self-hosts) signup stays open and every email
        is printed to the server log instead, links included — and only when
@@ -257,6 +310,9 @@ function buildAuth() {
     databaseHooks: {
       user: {
         create: {
+          before: async (user) => {
+            assertSignupDomainAllowed(user.email)
+          },
           after: async (user) => {
             const first = (user.name || 'Your').split(/\s+/)[0]
             const canvas = store.createCanvas(`${first}'s first canvas`, user.id)
@@ -283,7 +339,7 @@ function buildAuth() {
        surface there rather than at boot — an implementation detail of this
        version, not a documented contract, so don't rely on it.
        pkce: true because some IdPs reject a non-PKCE authorization code flow.
-       Account linking (see linkVerifiedOidcEmail below): better-auth's own
+       Account linking (see linkVerifiedProviderEmail above): better-auth's own
        default linking gate requires BOTH the IdP's email_verified claim AND
        the local user row already being emailVerified — the second half is
        unreachable on an SMTP-less instance, where no local account ever
@@ -304,7 +360,7 @@ function buildAuth() {
                   discoveryUrl: `${oidc.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`,
                   scopes: oidc.scopes,
                   pkce: true,
-                  mapProfileToUser: linkVerifiedOidcEmail,
+                  mapProfileToUser: linkVerifiedProviderEmail,
                 },
               ],
             }),

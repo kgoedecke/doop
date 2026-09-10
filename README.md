@@ -279,6 +279,16 @@ promotion still requires the normal `ADMIN_EMAILS` path (verified signup, or
 
 Env: see the OIDC block in [.env.example](.env.example).
 
+### Sign in with Google
+
+Optional, alongside email/password and SSO. Create an OAuth client (Web application) in
+the [Google Cloud console](https://console.cloud.google.com/apis/credentials), add
+`<BETTER_AUTH_URL>/api/auth/callback/google` as an authorised redirect URI, and set
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` together (one without the other refuses to
+boot). The login page shows a "Sign in with Google" button whenever both are set. Account
+linking and admin promotion follow the same rules as SSO above; `SIGNUP_EMAIL_DOMAINS`
+applies to Google (and SSO) sign-ups exactly as it does to email/password.
+
 ## Agent auth (MCP OAuth)
 
 The `/mcp` endpoint requires OAuth. Adding the server in Claude Code / Codex triggers

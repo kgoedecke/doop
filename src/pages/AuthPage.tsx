@@ -62,12 +62,36 @@ function resumeOAuthFlow(): boolean {
 
 type AuthMode = 'signin' | 'signup' | 'forgot' | 'reset'
 
+/** Google's four-colour "G", per its sign-in branding guidelines (kept inline: no icon set ships it). */
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" className="shrink-0">
+      <path
+        fill="#4285F4"
+        d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.64h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.58-5.17 3.58-8.81Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.88-3c-1.07.72-2.45 1.15-4.06 1.15-3.13 0-5.77-2.11-6.72-4.95H1.28v3.09A12 12 0 0 0 12 24Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.28 14.29A7.2 7.2 0 0 1 4.9 12c0-.8.14-1.57.38-2.29V6.62H1.28a12 12 0 0 0 0 10.76l4-3.09Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.77c1.76 0 3.34.61 4.59 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.28 6.62l4 3.09C6.23 6.88 8.87 4.77 12 4.77Z"
+      />
+    </svg>
+  )
+}
+
 /* Human copy for the OAuth error codes better-auth's callback can redirect
    back with (see redirectOnError in its oauth2 package) — everything else
    falls back to a generic message. account_not_linked is the one an
    operator is most likely to actually hit: an existing local account whose
    email the IdP claims, but that better-auth's own gate refused to link
-   (see linkVerifiedOidcEmail in server/auth.ts for why that should now be
+   (see linkVerifiedProviderEmail in server/auth.ts for why that should now be
    rare, not why it can still happen — a provider that never sends
    email_verified, for instance). */
 const SSO_ERROR_MESSAGES: Record<string, string> = {
@@ -75,16 +99,28 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
     'That email already has a doop account that could not be linked automatically — sign in with email/password instead.',
   "email_doesn't_match": "The signed-in email doesn't match the account you started from — try again.",
   email_is_missing: "Your identity provider didn't share an email address — doop needs one to sign you in.",
+  email_not_found: "Your identity provider didn't share an email address — doop needs one to sign you in.",
 }
 
 /* A failure inside the IdP round trip (the browser has already left and
    come back) redirects here with ?error=<code> rather than throwing where
    ssoSignIn's own res.error check could see it — that check only ever
    catches failures of the *initiating* request (e.g. unknown providerId). */
+/* better-auth's OAuth callbacks relay an error thrown by our own user-create
+   hook (SIGNUP_EMAIL_DOMAINS, see assertSignupDomainAllowed in
+   server/auth.ts) as the ?error= code itself, message with its spaces
+   turned into underscores. Neither the message's words nor an email domain
+   contain underscores, so flipping them back restores it verbatim. */
+const SIGNUP_RESTRICTED_PREFIX = 'Sign_up_is_restricted'
+
 function ssoErrorFromUrl(): string | null {
-  const code = new URLSearchParams(location.search).get('error')
+  const params = new URLSearchParams(location.search)
+  const code = params.get('error')
   if (!code) return null
-  return SSO_ERROR_MESSAGES[code] ?? 'SSO sign-in failed — try again or use email/password.'
+  if (code.startsWith(SIGNUP_RESTRICTED_PREFIX)) return code.replaceAll('_', ' ')
+  const description = params.get('error_description')
+  if (description) return description
+  return SSO_ERROR_MESSAGES[code] ?? 'Sign-in failed — try again or use email/password.'
 }
 
 /* Where the SSO redirect should land, mirroring resumeOAuthFlow() below —
@@ -100,20 +136,21 @@ function ssoCallbackURL(): string {
   return location.pathname + location.search
 }
 
-/** Matches server/auth.ts oidcPublicConfig's response shape. */
+/** Matches server/auth.ts loginProvidersConfig's response shape. */
 interface OidcClientConfig {
   enabled: boolean
   displayName?: string
+  google: boolean
 }
 
 /* The client bundle is static and shared across self-hosted deploys — it
    can't know at build time whether the operator configured SSO, so it asks
-   the server. See server/auth.ts oidcPublicConfig. */
+   the server. See server/auth.ts loginProvidersConfig. */
 function useOidcConfig(): OidcClientConfig {
-  const [config, setConfig] = useState<OidcClientConfig>({ enabled: false })
+  const [config, setConfig] = useState<OidcClientConfig>({ enabled: false, google: false })
   useEffect(() => {
     fetch('/api/oidc-config')
-      .then((res) => (res.ok ? res.json() : { enabled: false }))
+      .then((res) => (res.ok ? res.json() : { enabled: false, google: false }))
       .then(setConfig)
       .catch(() => {}) // SSO button just doesn't appear — email/password still works
   }, [])
@@ -151,21 +188,31 @@ export function AuthPage() {
     if (ssoErrorFromUrl()) history.replaceState(null, '', location.pathname)
   }, [])
 
-  async function ssoSignIn() {
+  /* Both providers leave for the IdP and come back with a session (or an
+     ?error= — see ssoErrorFromUrl); success redirects the browser away
+     immediately, so only the failure to *start* leaves us here to show
+     something. */
+  async function providerSignIn(start: () => Promise<{ error?: { message?: string } | null }>) {
     setError(null)
     setBusy(true)
     try {
-      const res = await authClient.signIn.oauth2({
-        providerId: 'oidc',
-        callbackURL: ssoCallbackURL(),
-        errorCallbackURL: '/auth',
-      })
-      /* success redirects the browser away immediately; only the failure
-         case leaves us here to show something */
-      if (res.error) setError(res.error.message ?? 'Could not start SSO sign-in — try again or use email/password.')
+      const res = await start()
+      if (res.error) setError(res.error.message ?? 'Could not start sign-in — try again or use email/password.')
     } finally {
       setBusy(false)
     }
+  }
+
+  function ssoSignIn() {
+    return providerSignIn(() =>
+      authClient.signIn.oauth2({ providerId: 'oidc', callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' }),
+    )
+  }
+
+  function googleSignIn() {
+    return providerSignIn(() =>
+      authClient.signIn.social({ provider: 'google', callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' }),
+    )
   }
 
   async function resendVerification() {
@@ -275,11 +322,19 @@ export function AuthPage() {
             </>
           )}
         </p>
-        {oidc.enabled && (mode === 'signin' || mode === 'signup') && (
+        {(oidc.enabled || oidc.google) && (mode === 'signin' || mode === 'signup') && (
           <>
-            <Button variant="default" size="lg" block type="button" onClick={ssoSignIn} disabled={busy}>
-              {mode === 'signup' ? 'Sign up' : 'Sign in'} with {oidc.displayName}
-            </Button>
+            {oidc.google && (
+              <Button variant="default" size="lg" block type="button" onClick={googleSignIn} disabled={busy}>
+                <GoogleMark />
+                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Google
+              </Button>
+            )}
+            {oidc.enabled && (
+              <Button variant="default" size="lg" block type="button" onClick={ssoSignIn} disabled={busy}>
+                {mode === 'signup' ? 'Sign up' : 'Sign in'} with {oidc.displayName}
+              </Button>
+            )}
             <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-faint">
               <span className="h-px flex-1 bg-line" />
               or

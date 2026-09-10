@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { loadOidcConfig, oidcPublicConfig } from '../server/auth.ts'
+import { loadGoogleConfig, loadOidcConfig, loginProvidersConfig, oidcPublicConfig } from '../server/auth.ts'
 
 /**
  * Pure config-parsing/validation, no server spawn needed - same pattern as
@@ -7,7 +7,15 @@ import { loadOidcConfig, oidcPublicConfig } from '../server/auth.ts'
  * covered separately in tests/oidc.test.ts against a real server.
  */
 
-const OIDC_VARS = ['OIDC_ISSUER', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'OIDC_SCOPES', 'OIDC_PROVIDER_NAME'] as const
+const OIDC_VARS = [
+  'OIDC_ISSUER',
+  'OIDC_CLIENT_ID',
+  'OIDC_CLIENT_SECRET',
+  'OIDC_SCOPES',
+  'OIDC_PROVIDER_NAME',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+] as const
 const saved: Record<string, string | undefined> = {}
 
 beforeEach(() => {
@@ -101,5 +109,48 @@ describe('oidcPublicConfig', () => {
     setRequiredOidcEnv()
 
     expect(JSON.stringify(oidcPublicConfig())).not.toContain('secret-xyz')
+  })
+})
+
+describe('loadGoogleConfig', () => {
+  it('returns null when neither var is set', () => {
+    expect(loadGoogleConfig()).toBeNull()
+  })
+
+  it.each([{ GOOGLE_CLIENT_ID: 'g-client' }, { GOOGLE_CLIENT_SECRET: 'g-secret' }])(
+    'throws when only one of the pair is set: %o',
+    (partial) => {
+      Object.assign(process.env, partial)
+      expect(() => loadGoogleConfig()).toThrow(/GOOGLE_CLIENT_ID.*GOOGLE_CLIENT_SECRET/)
+    },
+  )
+
+  it('returns the pair when both are set', () => {
+    process.env.GOOGLE_CLIENT_ID = 'g-client'
+    process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
+
+    expect(loadGoogleConfig()).toEqual({ clientId: 'g-client', clientSecret: 'g-secret' })
+  })
+})
+
+describe('loginProvidersConfig', () => {
+  it('reports both providers off when nothing is configured', () => {
+    expect(loginProvidersConfig()).toEqual({ enabled: false, google: false })
+  })
+
+  it('reports google on, independently of SSO, and never the secret', () => {
+    process.env.GOOGLE_CLIENT_ID = 'g-client'
+    process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
+
+    expect(loginProvidersConfig()).toEqual({ enabled: false, google: true })
+    expect(JSON.stringify(loginProvidersConfig())).not.toContain('g-secret')
+  })
+
+  it('combines SSO and google', () => {
+    setRequiredOidcEnv()
+    process.env.GOOGLE_CLIENT_ID = 'g-client'
+    process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
+
+    expect(loginProvidersConfig()).toEqual({ enabled: true, displayName: 'SSO', google: true })
   })
 })

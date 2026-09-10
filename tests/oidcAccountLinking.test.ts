@@ -15,7 +15,7 @@ import { Client, startServer, type Server } from './harness.ts'
  * decodeJwt-based getUserInfo (see node_modules/better-auth/dist/plugins/
  * generic-oauth/routes.mjs) currently accepts either way.
  *
- * This exists to prove server/auth.ts's linkVerifiedOidcEmail: better-auth's
+ * This exists to prove server/auth.ts's linkVerifiedProviderEmail: better-auth's
  * own account-linking gate requires the LOCAL user to already be
  * emailVerified before it will link an incoming OAuth sign-in to them, which
  * an SMTP-less instance (the default in this test harness, and a supported
@@ -90,28 +90,36 @@ const codeToClaims = new Map<string, Record<string, unknown>>()
 let idp: HttpServer
 let server: Server
 
-/* 4973: clear of every other test file's port range (see tests/oidc.test.ts
-   for the full accounting) - the fake IdP itself binds an OS-assigned port. */
+/* 4973/4974: clear of every other test file's port range (see
+   tests/oidc.test.ts for the full accounting) - the fake IdP itself binds an
+   OS-assigned port. */
 const PORT = 4973
+const PORT_RESTRICTED = 4974
+let restricted: Server
 
 beforeAll(async () => {
   idp = await startFakeIdp(codeToClaims)
   const idpPort = (idp.address() as AddressInfo).port
-  server = await startServer(PORT, {
+  const oidcEnv = {
     OIDC_ISSUER: `http://localhost:${idpPort}`,
     OIDC_CLIENT_ID: 'test-client',
     OIDC_CLIENT_SECRET: 'test-secret',
-  })
+  }
+  ;[server, restricted] = await Promise.all([
+    startServer(PORT, oidcEnv),
+    startServer(PORT_RESTRICTED, { ...oidcEnv, SIGNUP_EMAIL_DOMAINS: 'jointhetroops.com' }),
+  ])
 }, 70_000)
 
 afterAll(() => {
   idp?.close()
   server?.stop()
+  restricted?.stop()
 })
 
 async function driveSsoCallback(client: Client, code: string): Promise<Response> {
   const initiate = await (
-    await client.post('/api/auth/sign-in/oauth2', { providerId: 'oidc', callbackURL: '/' })
+    await client.post('/api/auth/sign-in/oauth2', { providerId: 'oidc', callbackURL: '/', errorCallbackURL: '/auth' })
   ).json()
   const state = new URL(initiate.url).searchParams.get('state')
   return client.get(`/api/auth/oauth2/callback/oidc?code=${code}&state=${state}`)
@@ -149,5 +157,42 @@ describe('OIDC account linking against a real (faked-IdP) callback', () => {
 
     const me = await (await client.get('/api/me')).json()
     expect(me.email).toBe('dave@test.dev')
+  })
+})
+
+describe('SIGNUP_EMAIL_DOMAINS on the OAuth path', () => {
+  it('bounces a provider sign-up from an unlisted domain back to /auth with the message, creating no account', async () => {
+    const client = new Client(restricted)
+    const code = 'code-erin'
+    codeToClaims.set(code, { sub: 'oidc-sub-erin', email: 'erin@example.com', email_verified: true, name: 'Erin' })
+
+    const callback = await driveSsoCallback(client, code)
+
+    expect(callback.status).toBe(302)
+    const location = new URL(callback.headers.get('location') ?? '', 'http://x')
+    expect(location.pathname).toBe('/auth')
+    /* better-auth relays the hook's message as the code, underscored -
+       AuthPage.tsx's SIGNUP_RESTRICTED_PREFIX depends on exactly this shape */
+    expect(location.searchParams.get('error')).toMatch(/^Sign_up_is_restricted_to_@jointhetroops\.com/)
+
+    const exists = await client.post('/api/account-exists', { email: 'erin@example.com' })
+    expect(await exists.json()).toEqual({ exists: false })
+  })
+
+  it('still admits a listed domain', async () => {
+    const client = new Client(restricted)
+    const code = 'code-frank'
+    codeToClaims.set(code, {
+      sub: 'oidc-sub-frank',
+      email: 'frank@jointhetroops.com',
+      email_verified: true,
+      name: 'Frank',
+    })
+
+    const callback = await driveSsoCallback(client, code)
+
+    expect(callback.status).toBe(302)
+    expect(new URL(callback.headers.get('location') ?? '', 'http://x').searchParams.get('error')).toBeNull()
+    expect((await (await client.get('/api/me')).json()).email).toBe('frank@jointhetroops.com')
   })
 })

@@ -44,14 +44,14 @@ afterAll(() => {
 describe('GET /api/oidc-config', () => {
   it('reports disabled when no OIDC env vars are set', async () => {
     const client = new Client(unconfigured)
-    expect(await (await client.get('/api/oidc-config')).json()).toEqual({ enabled: false })
+    expect(await (await client.get('/api/oidc-config')).json()).toEqual({ enabled: false, google: false })
   })
 
   it('reports enabled with the configured display name, and never the secret', async () => {
     const client = new Client(configured)
     const res = await client.get('/api/oidc-config')
     const body = await res.text()
-    expect(JSON.parse(body)).toEqual({ enabled: true, displayName: 'Zitadel' })
+    expect(JSON.parse(body)).toEqual({ enabled: true, displayName: 'Zitadel', google: false })
     expect(body).not.toContain('test-secret')
   })
 })
