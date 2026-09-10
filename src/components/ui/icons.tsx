@@ -223,3 +223,22 @@ export function VectorIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+/* a window with its right pane marked out — the side-panel toggle */
+export function PanelRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} strokeWidth={1.8} {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M15 4v16" />
+    </svg>
+  )
+}
+
+/* ribbon bookmark — the canvas memory */
+export function BookmarkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} strokeWidth={1.8} {...props}>
+      <path d="M6 4h12v17l-6-4-6 4z" />
+    </svg>
+  )
+}

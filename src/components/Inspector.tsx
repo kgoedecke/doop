@@ -80,7 +80,7 @@ export function Inspector({
     >
       <PanelHeader>
         Frame
-        <PanelClose onClick={() => select(null)}>✕</PanelClose>
+        <PanelClose onClick={() => select(null)} />
       </PanelHeader>
       <div className="grid grid-cols-2 gap-2.5 border-b border-line-soft px-4 py-3.5">
         <Field label="Name" className="col-span-full">

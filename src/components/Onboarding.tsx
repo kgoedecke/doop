@@ -173,7 +173,7 @@ export function Onboarding() {
   }
 
   return (
-    <div className="absolute right-4 bottom-4 z-40 flex w-[300px] flex-col gap-2.5 rounded-[12px] border border-line bg-surface px-4 pt-3.5 pb-4 shadow-pop">
+    <div className="absolute right-4 bottom-4 z-40 md:right-[72px] flex w-[300px] flex-col gap-2.5 rounded-[12px] border border-line bg-surface px-4 pt-3.5 pb-4 shadow-pop">
       <header className="flex items-center justify-between">
         <span className="font-display text-[14px] font-semibold tracking-[-0.01em]">Getting started</span>
         <Button variant="bare" size="icon-sm" className="text-xs" onClick={dismiss} title="Dismiss">

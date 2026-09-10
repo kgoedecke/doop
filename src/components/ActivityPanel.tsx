@@ -71,7 +71,7 @@ export function ActivityPanel({
               Memory
             </PanelTab>
           </PanelTabs>
-          <PanelClose onClick={onClose}>✕</PanelClose>
+          <PanelClose onClick={onClose} />
         </PanelHeader>
         <PanelTabPanel value="tasks">
           <TaskList />

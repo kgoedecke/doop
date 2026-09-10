@@ -7,6 +7,7 @@ import * as TabsPrimitive from '@radix-ui/react-tabs'
 import { Button } from './button'
 import { CollapsibleTrigger } from './collapsible'
 import { Tooltip } from './tooltip'
+import { XIcon } from './icons'
 
 /* The canvas rails (Activity, Inspector). On a wide screen they float over the
    board; inside a mobile Sheet they fill it. That used to be a `.side-panel`
@@ -107,17 +108,25 @@ function PanelDisclosure({ className, ...props }: React.ComponentProps<typeof Co
   )
 }
 
-/** The small ✕ that closes a rail. */
-function PanelClose({ className, label = 'Close', ...props }: React.ComponentProps<'button'> & { label?: string }) {
+/** The small ✕ that closes a rail. Draws its own glyph: a text ✕ sits on a
+ *  baseline and never centres in the button, the icon does. */
+function PanelClose({
+  className,
+  label = 'Close',
+  children: _children,
+  ...props
+}: React.ComponentProps<'button'> & { label?: string }) {
   return (
     <Tooltip label={label} side="bottom" align="end">
       <Button
         variant="bare"
         size="icon-sm"
         aria-label={label}
-        className={cn('shrink-0 text-[15px] text-ink-faint hover:bg-paper-deep hover:text-ink', className)}
+        className={cn('shrink-0 text-ink-faint hover:bg-paper-deep hover:text-ink', className)}
         {...props}
-      />
+      >
+        <XIcon className="size-[13px]" strokeWidth={2.2} />
+      </Button>
     </Tooltip>
   )
 }

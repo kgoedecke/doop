@@ -22,6 +22,7 @@ import { ConnectModal } from '../components/ConnectModal'
 import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
 import { PromptBar } from '../components/PromptBar'
 import { WorkingNow } from '../components/WorkingNow'
+import { SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
@@ -322,17 +323,6 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             ))}
           </div>
           <BarDivider />
-          <Tooltip label="Activity" side="bottom">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-[34px] rounded-[7px] bg-surface hover:border-ink-faint hover:bg-paper-deep"
-              aria-label="Activity"
-              onClick={() => setShowActivity((v) => !v)}
-            >
-              <PulseIcon />
-            </Button>
-          </Tooltip>
           <Button
             variant="ghost"
             className="h-[34px] rounded-[7px] bg-surface px-[17px] text-[12.5px] font-semibold hover:border-ink-faint hover:bg-paper-deep"
@@ -370,17 +360,6 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               />
             ))}
           </div>
-          <Tooltip label="Activity" side="bottom">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-[34px] rounded-[7px] bg-surface"
-              aria-label="Activity"
-              onClick={() => setShowActivity((v) => !v)}
-            >
-              <PulseIcon />
-            </Button>
-          </Tooltip>
           <Button
             variant="primary"
             className="h-[34px] rounded-[7px] px-[13px] text-[12.5px]"
@@ -415,7 +394,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             <Stage onAddFrame={addFrame} />
             <div
               className={cn(
-                'pointer-events-none absolute top-3 right-3 z-30 flex flex-col items-end gap-2 transition-[right] duration-150 ease-[ease] [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2',
+                'pointer-events-none absolute top-3 right-[72px] z-30 flex flex-col items-end gap-2 transition-[right] duration-150 ease-[ease] [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2',
                 /* clear of the 300px side panel at right: 12px */
                 showActivity && 'right-[324px]',
               )}
@@ -466,9 +445,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             <Onboarding />
             {!isMobile && (layersOpen ? <LayersPanel onAddFrame={addFrame} /> : <LayersRailToggle />)}
             {!isMobile && selectedFrame && inspectorOpen && !deferPanel && (
-              /* the frame properties sit at the right, beside the Activity rail when it is open */
-              <Inspector frame={selectedFrame} className={cn(showActivity && 'right-[324px]')} />
+              /* the frame properties sit at the right: beside the Activity panel when it is
+                 open, beside the collapsed side rail otherwise */
+              <Inspector frame={selectedFrame} className={showActivity ? 'right-[324px]' : 'right-[72px]'} />
             )}
+            {!isMobile && !showActivity && <SideRail onOpen={() => setShowActivity(true)} />}
             {!isMobile && showActivity && <ActivityPanel onClose={() => setShowActivity(false)} />}
           </>
         )}
@@ -507,6 +488,16 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                   }}
                 >
                   Share canvas
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-11 justify-start border-line bg-surface px-4"
+                  onClick={() => {
+                    setShowMobileActions(false)
+                    setShowActivity(true)
+                  }}
+                >
+                  <PulseIcon /> Agents & activity
                 </Button>
                 <Button
                   variant="ghost"
