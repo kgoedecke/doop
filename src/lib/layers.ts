@@ -145,6 +145,15 @@ export function removeElement(html: string, selector: string): string | null {
   return serialize(doc)
 }
 
+/** The frame's HTML with the element's markup swapped for `outerHtml`. */
+export function replaceElement(html: string, selector: string, outerHtml: string): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  el.outerHTML = outerHtml
+  return serialize(doc)
+}
+
 /** The frame's HTML with a copy of the element inserted right after it. */
 export function duplicateElement(html: string, selector: string): string | null {
   const doc = parse(html)

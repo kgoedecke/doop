@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { ElementComment, Frame } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { useStore } from '../lib/store'
+import { registerFrameWindow, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
@@ -277,6 +278,13 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
   }, [])
+  /* once the runtime answers, the element panel may talk to this document */
+  useEffect(() => {
+    const win = iframeRef.current?.contentWindow
+    if (!runtimeReady || !win) return
+    registerFrameWindow(frame.id, win)
+    return () => unregisterFrameWindow(frame.id, win)
+  }, [runtimeReady, frame.id])
   useEffect(() => {
     if (!runtimeReady || editing || suspendPost) return
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html }, '*')

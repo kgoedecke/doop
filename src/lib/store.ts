@@ -56,6 +56,9 @@ interface State {
    *  surface and a click on a Layers row both land here, so the outline in
    *  the frame and the highlighted row stay in step */
   selectedElement: { frameId: string; selector: string } | null
+  /** the element properties panel is showing — opened by a Layers row, it
+   *  then follows whatever element is selected until it is closed */
+  elementPanelOpen: boolean
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
   viewport: Viewport
@@ -121,6 +124,7 @@ interface State {
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
   setSelectedElement(el: { frameId: string; selector: string } | null): void
+  setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
   setViewport(v: Viewport): void
   setSnapGuides(guides: SnapGuide[]): void
@@ -158,6 +162,7 @@ export const useStore = create<State>((set, get) => ({
   inspectorOpen: false,
   ctxMenu: null,
   selectedElement: null,
+  elementPanelOpen: false,
   layersOpen: readLayersOpen(),
   viewport: { x: 0, y: 0, zoom: 1 },
   snapGuides: [],
@@ -300,7 +305,7 @@ export const useStore = create<State>((set, get) => ({
       const selectedIds = selectedId ? [selectedId] : []
       return s.selectedId === selectedId
         ? { selectedId, selectedIds }
-        : { selectedId, selectedIds, inspectorOpen: false, selectedElement: null }
+        : { selectedId, selectedIds, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
     }),
   toggleSelect: (id) =>
     set((s) => {
@@ -308,14 +313,14 @@ export const useStore = create<State>((set, get) => ({
       const selectedId = selectedIds[selectedIds.length - 1] ?? null
       return selectedId === s.selectedId
         ? { selectedIds }
-        : { selectedIds, selectedId, inspectorOpen: false, selectedElement: null }
+        : { selectedIds, selectedId, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
     }),
   selectMany: (ids) =>
     set((s) => {
       const selectedId = ids[ids.length - 1] ?? null
       return selectedId === s.selectedId
         ? { selectedIds: ids }
-        : { selectedIds: ids, selectedId, inspectorOpen: false, selectedElement: null }
+        : { selectedIds: ids, selectedId, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
     }),
   setPanMode: (panMode) => set({ panMode }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
@@ -328,6 +333,7 @@ export const useStore = create<State>((set, get) => ({
         ? s
         : { selectedElement },
     ),
+  setElementPanelOpen: (elementPanelOpen) => set({ elementPanelOpen }),
   setLayersOpen: (layersOpen) => {
     try {
       localStorage.setItem(LAYERS_OPEN_KEY, layersOpen ? '1' : '0')

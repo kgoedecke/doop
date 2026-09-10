@@ -9,7 +9,13 @@ const { useStore } = await import('../src/lib/store')
    the Layers rail — the store is what keeps the two views on one element */
 describe('selectedElement', () => {
   beforeEach(() => {
-    useStore.setState({ selectedId: null, selectedIds: [], selectedElement: null, inspectorOpen: false })
+    useStore.setState({
+      selectedId: null,
+      selectedIds: [],
+      selectedElement: null,
+      inspectorOpen: false,
+      elementPanelOpen: false,
+    })
   })
 
   it('is kept while the same frame stays selected', () => {
@@ -40,5 +46,15 @@ describe('selectedElement', () => {
     const before = useStore.getState().selectedElement
     useStore.getState().setSelectedElement({ ...el })
     expect(useStore.getState().selectedElement).toBe(before)
+  })
+
+  it('closes the element panel when the selection leaves the frame', () => {
+    useStore.getState().select('a')
+    useStore.getState().setSelectedElement({ frameId: 'a', selector: '#hero' })
+    useStore.getState().setElementPanelOpen(true)
+    useStore.getState().select('a')
+    expect(useStore.getState().elementPanelOpen).toBe(true)
+    useStore.getState().select('b')
+    expect(useStore.getState().elementPanelOpen).toBe(false)
   })
 })

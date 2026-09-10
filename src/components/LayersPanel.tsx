@@ -1,21 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
-import { api } from '../lib/api'
 import { getIdentity } from '../lib/identity'
-import { deleteFramesTracked, recordUpdate } from '../lib/history'
-import {
-  ancestorsOf,
-  buildLayerTree,
-  duplicateElement,
-  elementHtml,
-  filterLayers,
-  removeElement,
-  type LayerKind,
-  type LayerNode,
-} from '../lib/layers'
+import { deleteFramesTracked } from '../lib/history'
+import { ancestorsOf, buildLayerTree, elementHtml, filterLayers, type LayerNode } from '../lib/layers'
+import { deleteLayer, duplicateLayer } from '../lib/layerEdits'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
+import { LayerKindIcon } from './LayerKindIcon'
 import { FrameContextMenu } from './FrameContextMenu'
 import { Panel, PanelBody, PanelHeader } from './ui/panel'
 import { Button } from './ui/button'
@@ -30,19 +22,15 @@ import {
 } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 import {
-  BoxIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CollapseAllIcon,
   FrameIcon,
-  ImageIcon,
   LayersIcon,
   PanelCollapseIcon,
   PanelExpandIcon,
   PlusIcon,
   SearchIcon,
-  TextIcon,
-  VectorIcon,
 } from './ui/icons'
 
 /* the tree indents 18px per level; frame rows sit at depth 0 */
@@ -143,10 +131,13 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
   const rows = useMemo(() => visibleRows(frames, q, expanded), [frames, q, expanded])
   const currentKey = selectedElement ? rowKey(selectedElement.frameId, selectedElement.selector) : selectedId
 
+  /* a layer row opens the element properties panel; a frame row closes it
+     and leaves the frame's own inspector to the frame-name click */
   function activate(row: VisibleRow) {
     const s = useStore.getState()
     s.select(row.frame.id)
     s.setSelectedElement(row.kind === 'node' ? { frameId: row.frame.id, selector: row.node.selector } : null)
+    s.setElementPanelOpen(row.kind === 'node')
   }
 
   /* ↑↓ walk the visible rows, ←→ close and open them, ⌫ deletes what is
@@ -327,26 +318,6 @@ export function LayersRailToggle() {
   )
 }
 
-/* ---- element edits from the rail ---- */
-
-function saveHtml(frame: Frame, html: string) {
-  recordUpdate(frame.id, { html: frame.html }, { html })
-  useStore.getState().patchFrameLocal(frame.id, { html })
-  api.updateFrame(frame.id, { html }).catch(console.error)
-}
-
-function deleteLayer(frame: Frame, selector: string) {
-  const html = removeElement(frame.html, selector)
-  if (html === null) return
-  useStore.getState().setSelectedElement(null)
-  saveHtml(frame, html)
-}
-
-function duplicateLayer(frame: Frame, selector: string) {
-  const html = duplicateElement(frame.html, selector)
-  if (html !== null) saveHtml(frame, html)
-}
-
 function FrameRow({
   row,
   selected,
@@ -433,7 +404,7 @@ function NodeRow({
           depth={row.depth}
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
-          icon={<KindIcon kind={node.kind} />}
+          icon={<LayerKindIcon kind={node.kind} />}
           label={node.label}
           detail={node.detail}
           selected={selected}
@@ -537,14 +508,6 @@ function Row({
 function Caret({ open, present }: { open: boolean; present: boolean }) {
   if (!present) return null
   return open ? <ChevronDownIcon width={11} height={11} /> : <ChevronRightIcon width={11} height={11} />
-}
-
-function KindIcon({ kind }: { kind: LayerKind }) {
-  const size = { width: 13, height: 13 }
-  if (kind === 'text') return <TextIcon {...size} />
-  if (kind === 'image') return <ImageIcon {...size} />
-  if (kind === 'svg') return <VectorIcon {...size} />
-  return <BoxIcon {...size} />
 }
 
 function Kbd({ children }: { children: ReactNode }) {

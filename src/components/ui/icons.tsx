@@ -261,3 +261,11 @@ export function PlayIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+export function ArrowUpIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M12 19V5m0 0-6 6m6-6 6 6" />
+    </svg>
+  )
+}
