@@ -7,9 +7,14 @@ const THEME_CHANGE_EVENT = 'doop-theme-change'
 
 export function getTheme(): Theme {
   if (typeof window === 'undefined') return 'system'
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored === 'light' || stored === 'dark' || stored === 'system') {
-    return stored
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored === 'light' || stored === 'dark' || stored === 'system') {
+      return stored
+    }
+  } catch {
+    // Storage access restricted (e.g. sandboxed webview, private browsing);
+    // fall through to the default.
   }
   return 'system'
 }
@@ -39,7 +44,12 @@ export function applyTheme(theme: Theme): 'light' | 'dark' {
 
 export function setTheme(theme: Theme): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(STORAGE_KEY, theme)
+  try {
+    localStorage.setItem(STORAGE_KEY, theme)
+  } catch {
+    // Storage write failed (quota exceeded, restricted access, etc.);
+    // the theme is still applied visually for this session.
+  }
   applyTheme(theme)
   window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT, { detail: theme }))
 }
