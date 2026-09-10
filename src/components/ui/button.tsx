@@ -31,7 +31,7 @@ const buttonVariants = cva(
         'bare-danger': 'border-transparent bg-transparent font-semibold text-accent-ink hover:bg-accent-ink/10',
         link: 'border-transparent bg-transparent font-semibold text-ink underline-offset-4 hover:underline',
         /* filled destructive pill — the retry affordance on failed tasks */
-        'danger-solid': 'border-accent-ink bg-accent-ink text-white hover:border-ink hover:bg-ink',
+        'danger-solid': 'border-accent-ink bg-accent-ink text-white hover:border-ink hover:bg-ink hover:text-paper',
         /* flat ink fill: compact affordances inside cards */
         solid: 'border-transparent bg-ink text-paper hover:bg-ink/90 disabled:opacity-40',
         /* sits on a dark surface — the element toolbar over a frame */

@@ -48,7 +48,7 @@ function Avatar({
       title={`${name}${kind === 'agent' ? (owner ? ` (${owner}'s agent)` : ' (agent)') : ''}${status ? ` — ${status}` : ''}`}
       {...props}
     >
-      <span className="grid place-items-center text-white">
+      <span className={cn('grid place-items-center', kind === 'agent' ? 'text-white' : 'text-paper')}>
         {kind === 'agent' ? <AgentIcon name={name} size={15} color={brand?.fg ?? '#fff'} /> : initialsOf(name)}
       </span>
     </div>

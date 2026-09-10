@@ -341,9 +341,8 @@ export function Home() {
               <DashSubtitle>
                 {canvases === null
                   ? '…'
-                  : `${counts.all} ${counts.all === 1 ? 'canvas' : 'canvases'} · ${frameTotal} ${
-                      frameTotal === 1 ? 'frame' : 'frames'
-                    }${agents.length ? ` · ${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}` : ''}`}
+                  : `${counts.all} ${counts.all === 1 ? 'canvas' : 'canvases'} · ${frameTotal} ${frameTotal === 1 ? 'frame' : 'frames'
+                  }${agents.length ? ` · ${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}` : ''}`}
               </DashSubtitle>
             </div>
             <SegmentedIcons
@@ -668,7 +667,7 @@ function CanvasActions({
               ? 'size-8 flex-none rounded-full text-ink-faint hover:bg-paper-deep hover:text-ink focus-visible:ring-2 focus-visible:ring-brand'
               : /* the frosted chip: surface at 72% over the preview, blurred, edged by the
                    elevation ring rather than a border; revealed by the tile's hover */
-                'absolute right-2 top-2 size-9 rounded-[12px] corner-squircle bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] text-ink shadow-elevation-1 backdrop-blur-[6px] hover:shadow-elevation-1-hover focus-visible:shadow-elevation-1-focus md:size-[30px] md:rounded-[10px] md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 md:data-[state=open]:opacity-100',
+              'absolute right-2 top-2 size-9 rounded-[12px] corner-squircle bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] text-ink shadow-elevation-1 backdrop-blur-[6px] hover:shadow-elevation-1-hover focus-visible:shadow-elevation-1-focus md:size-[30px] md:rounded-[10px] md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 md:data-[state=open]:opacity-100',
           )}
         >
           <MoreHorizontalIcon className="size-4" />
