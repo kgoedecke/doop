@@ -189,7 +189,7 @@ export function Onboarding() {
 function Step({ done, label, children }: { done: boolean; label: string; children?: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-2.5">
-      <span className={cn('w-3.5 flex-none text-[13px]', done ? 'text-[#1e7a4c]' : 'text-ink-faint')}>
+      <span className={cn('w-3.5 flex-none text-[13px]', done ? 'text-success-ink' : 'text-ink-faint')}>
         {done ? '✓' : '○'}
       </span>
       <div className="flex flex-col gap-[5px]">

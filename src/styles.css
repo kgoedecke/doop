@@ -18,6 +18,10 @@
   --color-line-soft: var(--line-soft);
   --color-brand: var(--brand);
   --color-accent-ink: var(--accent-ink);
+  --color-success: var(--success);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
   --font-ui: var(--font-ui);
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
@@ -99,6 +103,12 @@
   --brand: #2743ee;
   --accent-ink: #d0341f;
   --dot: #ebe9e4;
+  /* Status colours: the fill (--success, --warning) tints and dots, the ink
+     variant is the text that sits on paper. Both flip with the theme. */
+  --success: #3f9c52;
+  --success-ink: #1e7a4c;
+  --warning: #ffb800;
+  --warning-ink: #8a5b00;
   --font-ui: 'Instrument Sans', sans-serif;
   /* Display is the SAME sans as the UI — the chrome is quiet by design.
      Editorial serif is opt-in per element via `font-serif`, reserved for
@@ -258,6 +268,10 @@
   --line: #2e2e34;
   --line-soft: #242428;
   --dot: #28282c;
+  --success: #4caf60;
+  --success-ink: #6fd08e;
+  --warning: #ffb800;
+  --warning-ink: #e6b04a;
 
   --background: var(--paper);
   --foreground: var(--ink);

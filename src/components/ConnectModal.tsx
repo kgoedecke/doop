@@ -83,7 +83,7 @@ export function AgentArrival() {
     [presences],
   )
   return arrived ? (
-    <span className="mr-auto inline-flex items-center gap-[7px] text-[12.5px] text-[#1e7a4c]">
+    <span className="mr-auto inline-flex items-center gap-[7px] text-[12.5px] text-success-ink">
       ✓ {arrived.name} is here — it worked
     </span>
   ) : (

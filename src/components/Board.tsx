@@ -146,7 +146,7 @@ function Team({ tasks, onPick }: { tasks: AgentTask[]; onPick: (id: string) => v
                     <Dot
                       size="sm"
                       className="animate-[stream-pulse_1.2s_ease-in-out_infinite]"
-                      style={{ background: role.reviewer ? '#1e7a4c' : 'var(--brand)' }}
+                      style={{ background: role.reviewer ? 'var(--success-ink)' : 'var(--brand)' }}
                     />
                     {working.status}
                   </>
@@ -467,7 +467,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                 )}
                 {t.queuedBy && pipelineOf(t).length > 1 && <Trail task={t} state="done" />}
                 <div className={metaCls}>
-                  <span className="font-[750] text-[#1e7a4c]">✓</span> {t.agentName || t.queuedBy}
+                  <span className="font-[750] text-success-ink">✓</span> {t.agentName || t.queuedBy}
                   {t.queuedBy && t.agentName && <span> · for {t.queuedBy}</span>}
                   <span> · {timeAgo(t.endedAt!)}</span>
                 </div>

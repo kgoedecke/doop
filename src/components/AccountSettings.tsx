@@ -129,7 +129,7 @@ export function AccountSettings() {
         >
           <span className="min-w-0 font-mono text-[13px] [overflow-wrap:anywhere]">{user?.email}</span>
           {user?.emailVerified ? (
-            <Badge className="border-[#3f9c52]/35 bg-[#3f9c52]/10 text-[10.5px] text-[#2f7a3f]">verified</Badge>
+            <Badge className="border-success/35 bg-success/10 text-[10.5px] text-success-ink">verified</Badge>
           ) : (
             <Badge className="text-[10.5px]">unverified</Badge>
           )}
