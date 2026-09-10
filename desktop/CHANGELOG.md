@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/kgoedecke/doop/compare/desktop-v0.2.0...desktop-v0.2.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **desktop:** cmd+w closes the active tab instead of the app, logout lands on /auth ([#155](https://github.com/kgoedecke/doop/issues/155)) ([eaeebd2](https://github.com/kgoedecke/doop/commit/eaeebd2414679ba61ff46cdc17080c53582d1b92))
+
 ## [0.2.0](https://github.com/kgoedecke/doop/compare/desktop-v0.1.4...desktop-v0.2.0) (2026-09-09)
 
 

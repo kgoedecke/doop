@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0](https://github.com/kgoedecke/doop/compare/v0.3.0...v0.4.0) (2026-09-10)
+
+
+### Features
+
+* **auth:** sign in with Google, and enforce SIGNUP_EMAIL_DOMAINS on every sign-up path ([#159](https://github.com/kgoedecke/doop/issues/159)) ([1a78a84](https://github.com/kgoedecke/doop/commit/1a78a8411a6e257ba8a12c22a788c0eb875c540f))
+* **auth:** sign in with Microsoft ([#160](https://github.com/kgoedecke/doop/issues/160)) ([b736528](https://github.com/kgoedecke/doop/commit/b736528e57ba5e43f7e081ed1aaf2e6a59fd6bd5))
+* **backgrounds:** list_backgrounds — browse the library by eye instead of keyword search ([#154](https://github.com/kgoedecke/doop/issues/154)) ([941074f](https://github.com/kgoedecke/doop/commit/941074f0ef7f37a0bdd4d0da46ec68ad75fe442c))
+* **canvas:** collapsible side rail replaces the top-bar Activity button ([#158](https://github.com/kgoedecke/doop/issues/158)) ([619734e](https://github.com/kgoedecke/doop/commit/619734eae2e356497d05f3fabd3d55936b5efb4d))
+* **canvas:** element properties panel opens from a Layers row ([#161](https://github.com/kgoedecke/doop/issues/161)) ([80c63ad](https://github.com/kgoedecke/doop/commit/80c63ad95364afa21a046c9239d3b4a62244f85a))
+* **canvas:** layers panel on the left, frame inspector moves right ([#157](https://github.com/kgoedecke/doop/issues/157)) ([86a2c9c](https://github.com/kgoedecke/doop/commit/86a2c9c85d4fe7e6b17f98d350501855f9af2936))
+* **canvas:** present mode plays the selected frame full-screen ([#163](https://github.com/kgoedecke/doop/issues/163)) ([ccab4eb](https://github.com/kgoedecke/doop/commit/ccab4eb3323a1979b796a40c08eeb4d69e708b86))
+* **canvas:** restyle the top bar after the Doop interface reference ([#156](https://github.com/kgoedecke/doop/issues/156)) ([2a45f34](https://github.com/kgoedecke/doop/commit/2a45f34484112ee275f2fb99bbff77f1ebf63073))
+* **inspiration:** drop the recipe menu; the brief starts with a live search ([#134](https://github.com/kgoedecke/doop/issues/134)) ([c3aaa0c](https://github.com/kgoedecke/doop/commit/c3aaa0c61d2eda6f4ba3991539d2589abdf9b53a))
+* **mcp:** search_backgrounds tool over a curated background library ([#152](https://github.com/kgoedecke/doop/issues/152)) ([1c4852f](https://github.com/kgoedecke/doop/commit/1c4852f3b74ddae90010b4c23e44a0b2d09be6a9))
+
+
+### Bug Fixes
+
+* **desktop:** cmd+w closes the active tab instead of the app, logout lands on /auth ([#155](https://github.com/kgoedecke/doop/issues/155)) ([eaeebd2](https://github.com/kgoedecke/doop/commit/eaeebd2414679ba61ff46cdc17080c53582d1b92))
+
 ## [0.3.0](https://github.com/kgoedecke/doop/compare/v0.2.0...v0.3.0) (2026-09-09)
 
 
