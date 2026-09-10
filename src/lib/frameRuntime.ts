@@ -141,16 +141,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* tell the parent which element is selected for editing, so it can anchor
      the element toolbar (comment etc.) to it */
   function activeInfo() {
-    if (!activeEl) return null
-    var snippet = activeEl.outerHTML || ''
-    if (snippet.length > 400) snippet = snippet.slice(0, 397) + '...'
-    return {
-      selector: cssPath(activeEl),
-      tag: activeEl.tagName.toLowerCase(),
-      text: (activeEl.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80),
-      snippet: snippet,
-      rect: designRect(activeEl),
-    }
+    return activeEl ? hitInfo(activeEl) : null
   }
 
   function postActive() {
@@ -288,9 +279,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return { x: r.left / curZoom, y: r.top / curZoom, width: r.width / curZoom, height: r.height / curZoom }
   }
 
-  function probe(x, y) {
-    var el = document.elementFromPoint(x * curZoom, y * curZoom)
-    if (!el || el === document.documentElement || el === document.body) return null
+  function hitInfo(el) {
     var snippet = el.outerHTML || ''
     if (snippet.length > 400) snippet = snippet.slice(0, 397) + '...'
     return {
@@ -300,6 +289,20 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       snippet: snippet,
       rect: designRect(el),
     }
+  }
+
+  function probe(x, y) {
+    var el = document.elementFromPoint(x * curZoom, y * curZoom)
+    if (!el || el === document.documentElement || el === document.body) return null
+    return hitInfo(el)
+  }
+
+  /* the Layers panel selects by selector rather than by point */
+  function describe(selector) {
+    var el = null
+    try { el = selector ? document.querySelector(selector) : null } catch (e) { /* bad selector */ }
+    if (!el || el === document.documentElement || el === document.body) return null
+    return hitInfo(el)
   }
 
   /* hover inspection: like probe but fired on every (throttled) pointer move,
@@ -338,6 +341,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:hover') {
       parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y) }, '*')
+    }
+    if (d.type === 'doop:select') {
+      parent.postMessage({ type: 'doop:select-result', reqId: d.reqId, hit: describe(d.selector) }, '*')
     }
     if (d.type === 'doop:code') {
       parent.postMessage({ type: 'doop:code-result', reqId: d.reqId, html: elementCode(d.selector) }, '*')

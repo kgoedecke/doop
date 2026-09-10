@@ -369,11 +369,47 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:locate', reqId: '__probe__', selector: probeSel }, '*')
   }, [runtimeReady, html, probeSel])
 
+  /* deselecting the frame drops its element selection too, so a stale
+     outline never reappears when the frame is picked again */
+  const [wasSelected, setWasSelected] = useState(selected)
+  if (wasSelected !== selected) {
+    setWasSelected(selected)
+    if (!selected) setProbe(null)
+  }
+
+  /* the outlined element is shared with the Layers panel through the store:
+     what is probed here is published, and a row picked there is resolved
+     into a probe by asking the runtime for the element behind the selector */
+  useEffect(() => {
+    const cur = useStore.getState().selectedElement
+    if (probeSel) {
+      useStore.getState().setSelectedElement({ frameId: frame.id, selector: probeSel })
+    } else if (cur?.frameId === frame.id) {
+      useStore.getState().setSelectedElement(null)
+    }
+  }, [probeSel, frame.id])
+  const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
+  const selectReq = useRef(0)
+  useEffect(() => {
+    if (!runtimeReady || !wantedSel || wantedSel === probeSel) return
+    selectReq.current += 1
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'doop:select', reqId: selectReq.current, selector: wantedSel },
+      '*',
+    )
+  }, [runtimeReady, wantedSel, probeSel])
+
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
       if (ev.data?.type === 'doop:probe-result' && ev.data.reqId === probeReq.current) {
         setProbe(ev.data.hit ?? null)
+      }
+      if (ev.data?.type === 'doop:select-result' && ev.data.reqId === selectReq.current) {
+        const hit = (ev.data.hit ?? null) as ProbeHit | null
+        closePopovers()
+        if (hit) setProbe(hit)
+        else useStore.getState().setSelectedElement(null) // the row's element is gone from the live document
       }
       if (ev.data?.type === 'doop:hover-result' && ev.data.reqId === hoverReq.current) {
         const hit = (ev.data.hit ?? null) as HoverHit | null

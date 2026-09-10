@@ -1,12 +1,20 @@
 import { useStore } from '../lib/store'
 import { AgentIcon } from './AgentIcon'
+import { cn } from '@/lib/utils'
 
 /** Floating strip of live "what I'm working on" statuses (agents post via set_status). */
 export function WorkingNow() {
   const working = useStore((s) => Object.values(s.presences).filter((p) => p.status))
+  const layersOpen = useStore((s) => s.layersOpen)
   if (working.length === 0) return null
   return (
-    <div className="pointer-events-none absolute bottom-4 left-4 z-30 flex max-w-[min(420px,60vw)] flex-col gap-1.5 max-md:right-2 max-md:bottom-[calc(132px+env(safe-area-inset-bottom))] max-md:left-2 max-md:max-w-none">
+    <div
+      className={cn(
+        'pointer-events-none absolute bottom-4 left-4 z-30 flex max-w-[min(420px,60vw)] flex-col gap-1.5 max-md:right-2 max-md:bottom-[calc(132px+env(safe-area-inset-bottom))] max-md:left-2 max-md:max-w-none',
+        /* clear of the 300px Layers rail at left: 12px */
+        layersOpen && 'md:left-[324px]',
+      )}
+    >
       {working.map((p) => (
         <div
           key={p.clientId}

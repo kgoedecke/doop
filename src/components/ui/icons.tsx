@@ -118,3 +118,108 @@ export function SparkIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   )
 }
+
+export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  )
+}
+
+export function SearchIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  )
+}
+
+export function PlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+/** Two chevrons pointing inward — collapse every open row. */
+export function CollapseAllIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="m7 4 5 5 5-5M7 20l5-5 5 5" />
+    </svg>
+  )
+}
+
+/** Collapse a side rail: the panel outline with an arrow tucking into it. */
+export function PanelCollapseIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M9 4v16M16 10l-2 2 2 2" />
+    </svg>
+  )
+}
+
+/** Expand a side rail: the same outline, arrow pointing out. */
+export function PanelExpandIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M9 4v16m5-11 3 3-3 3" />
+    </svg>
+  )
+}
+
+/** The stacked-sheets glyph the Layers rail wears when collapsed. */
+export function LayersIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="m12 3 10 5-10 5L2 8zM2 12l10 5 10-5M2 16l10 5 10-5" />
+    </svg>
+  )
+}
+
+/** A frame row's mark: the artboard hash. */
+export function FrameIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+    </svg>
+  )
+}
+
+export function BoxIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+    </svg>
+  )
+}
+
+export function TextIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M5 6h14M12 6v13" />
+    </svg>
+  )
+}
+
+export function ImageIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <path d="m4 16 5-5 4 4 3-3 4 4" />
+    </svg>
+  )
+}
+
+export function VectorIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M5 19c0-8 4-14 14-14M5 19h3M5 19v-3M19 5h-3M19 5v3" />
+    </svg>
+  )
+}

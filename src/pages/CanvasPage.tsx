@@ -22,6 +22,7 @@ import { ConnectModal } from '../components/ConnectModal'
 import { LimitWall, isResidentLimit } from '../components/TeamAllowance'
 import { PromptBar } from '../components/PromptBar'
 import { WorkingNow } from '../components/WorkingNow'
+import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
 import { BrainIcon } from '../components/BrainIcon'
@@ -245,6 +246,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   /* a right-click that selected the frame keeps the Inspector out until the
      context menu closes — it would slide in right under the open menu */
   const deferPanel = useStore((s) => !!s.ctxMenu?.deferPanel)
+  const layersOpen = useStore((s) => s.layersOpen)
 
   return (
     /* --app-inset is 0 normally; the impersonation shell raises it so this
@@ -462,7 +464,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             <WorkingNow />
             <PromptBar canvasId={canvasId} />
             <Onboarding />
-            {!isMobile && selectedFrame && inspectorOpen && !deferPanel && <Inspector frame={selectedFrame} />}
+            {!isMobile && (layersOpen ? <LayersPanel onAddFrame={addFrame} /> : <LayersRailToggle />)}
+            {!isMobile && selectedFrame && inspectorOpen && !deferPanel && (
+              /* the frame properties sit at the right, beside the Activity rail when it is open */
+              <Inspector frame={selectedFrame} className={cn(showActivity && 'right-[324px]')} />
+            )}
             {!isMobile && showActivity && <ActivityPanel onClose={() => setShowActivity(false)} />}
           </>
         )}

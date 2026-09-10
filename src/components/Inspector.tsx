@@ -20,10 +20,12 @@ const exportBtn = 'px-[11px] py-[5px] text-xs no-underline max-md:min-h-9'
 export function Inspector({
   frame,
   surface = 'floating',
+  className,
 }: {
   frame: Frame
   /* 'inline' when the inspector is filling a mobile Sheet */
   surface?: 'floating' | 'inline'
+  className?: string
 }) {
   const select = useStore((s) => s.select)
   /* the raw HTML editor is a power tool — collapsed by default so the panel
@@ -71,8 +73,9 @@ export function Inspector({
     <Panel
       surface={surface}
       className={cn(
-        surface === 'floating' && 'left-3 top-3 max-h-[calc(100%-24px)] w-[340px]',
+        surface === 'floating' && 'right-3 top-3 max-h-[calc(100%-24px)] w-[340px] transition-[right] duration-150',
         'max-md:overflow-y-auto max-md:overscroll-contain',
+        className,
       )}
     >
       <PanelHeader>
