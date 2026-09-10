@@ -29,6 +29,26 @@ function parseArgs(argv: string[]): Options {
   }
 }
 
+const REMOTE_FETCH_TIMEOUT_MS = 15_000
+
+async function getImageBytes(id: string): Promise<Buffer | null> {
+  const local = await storage.getObject(backgrounds.displayKey(id))
+  if (local) return local
+
+  const remoteOrigin = (process.env.BACKGROUNDS_ORIGIN || 'https://doop.design').replace(/\/$/, '')
+  try {
+    const res = await fetch(`${remoteOrigin}/bg/${id}.webp`, {
+      signal: AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS),
+    })
+    if (res.ok) {
+      return Buffer.from(await res.arrayBuffer())
+    }
+  } catch {
+    /* remote fetch failed */
+  }
+  return null
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2))
 
@@ -54,9 +74,9 @@ async function main() {
     const prefix = `[${num}/${pending.length}] ${entry.id}`
 
     try {
-      const bytes = await storage.getObject(backgrounds.displayKey(entry.id))
+      const bytes = await getImageBytes(entry.id)
       if (!bytes) {
-        console.warn(`${prefix}: skipped (image bytes missing from storage)`)
+        console.warn(`${prefix}: skipped (image bytes missing from storage and remote origin)`)
         failed++
         continue
       }
