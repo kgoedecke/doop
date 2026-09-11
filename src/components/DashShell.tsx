@@ -17,6 +17,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CompassIcon,
+  GearIcon,
+  GridIcon,
+  HelpIcon,
+  ListIcon,
+  LogOutIcon,
+  ShieldIcon,
+  SparkIcon,
+  UserIcon,
+  UsersIcon,
+} from './ui/icons'
 
 /** Pieces the signed-in shell repeats on every page: the account menu in the
  *  top bar and the connect card pinned to the bottom of the rail. They live
@@ -130,113 +144,21 @@ export function ConnectCard() {
   )
 }
 
-/* ---- icons ---- */
+/* ---- icons ----
+   The shell's nav glyphs, at the rail's 15px, drawn from the shared set. */
 
-const stroke = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.9 } as const
+const rail = { width: 15, height: 15, 'aria-hidden': true } as const
 
-export function IconGrid() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <rect x="3" y="3" width="7" height="7" rx="1.5" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5" />
-    </svg>
-  )
-}
-
-export function IconList() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <path d="M4 6h16M4 12h16M4 18h16" />
-    </svg>
-  )
-}
-
-export function IconUser() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="3.2" />
-    </svg>
-  )
-}
-
-export function IconShare() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="3.2" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.8" />
-    </svg>
-  )
-}
-
+export const IconGrid = () => <GridIcon {...rail} />
+export const IconList = () => <ListIcon {...rail} />
+export const IconUser = () => <UserIcon {...rail} />
+export const IconShare = () => <UsersIcon {...rail} />
 /** the gallery: a compass — designs to steer by */
-export function IconCommunity() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="m15.5 8.5-2.2 5.3-4.8 1.7 2.2-5.3z" />
-    </svg>
-  )
-}
-
-export function IconSpark() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <path d="M12 1.6l2.4 7.5 7.5 2.4-7.5 2.4-2.4 7.5-2.4-7.5L2.1 11.5l7.5-2.4z" />
-    </svg>
-  )
-}
-
-export function IconGear() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <circle cx="12" cy="12" r="3.2" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9 2 2 0 1 1-2.8 2.8 1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2 2 2 0 1 1-2.8-2.8A1.7 1.7 0 0 0 3 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9 2 2 0 1 1 2.8-2.8A1.7 1.7 0 0 0 10 4.2a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2 2 2 0 1 1 2.8 2.8A1.7 1.7 0 0 0 21 11a2 2 0 1 1 0 4Z" />
-    </svg>
-  )
-}
-
-export function IconShield() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z" />
-    </svg>
-  )
-}
-
-export function IconHelp() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M9.5 9.5a2.6 2.6 0 1 1 3.4 2.5c-.6.2-.9.7-.9 1.3v.4M12 17h.01" />
-    </svg>
-  )
-}
-
-export function IconOut() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" {...stroke} aria-hidden>
-      <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" />
-      <path d="m15 16 4-4-4-4M19 12H9" />
-    </svg>
-  )
-}
-
-export function IconBack() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
-      <path d="m14 6-6 6 6 6" />
-    </svg>
-  )
-}
-
-export function IconChevron() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
-      <path d="m9 6 6 6-6 6" />
-    </svg>
-  )
-}
+export const IconCommunity = () => <CompassIcon {...rail} />
+export const IconSpark = () => <SparkIcon {...rail} />
+export const IconGear = () => <GearIcon {...rail} />
+export const IconShield = () => <ShieldIcon {...rail} />
+export const IconHelp = () => <HelpIcon {...rail} />
+export const IconOut = () => <LogOutIcon {...rail} />
+export const IconBack = () => <ChevronLeftIcon width={14} height={14} aria-hidden />
+export const IconChevron = () => <ChevronRightIcon width={12} height={12} aria-hidden />

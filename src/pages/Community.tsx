@@ -40,10 +40,11 @@ import { cn } from '@/lib/utils'
 type Shelf = 'all' | CommunityCategory
 type Sort = 'trending' | 'newest'
 
-/* a gallery tile: the Card surface, made clickable — the same lift as Home */
+/* a gallery tile: the raised Card surface, made clickable — the same tile as Home */
 const cardCls = cn(
-  cardVariants(),
-  'group relative overflow-hidden p-0 text-left transition-[translate,box-shadow,border-color] duration-150 hover:-translate-y-[3px] hover:border-ink-faint hover:shadow-pop',
+  cardVariants({ tone: 'raised' }),
+  'group relative z-[2] transform-gpu overflow-hidden rounded-[14px] p-0 text-left text-ink',
+  'bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] backdrop-blur-[6px]',
 )
 
 /** The community gallery: designs people have published for others to

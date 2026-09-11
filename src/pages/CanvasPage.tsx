@@ -28,7 +28,6 @@ import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
 import { PresentMode } from '../components/PresentMode'
-import { BrainIcon } from '../components/BrainIcon'
 import { getIdentity, setName } from '../lib/identity'
 import {
   copyFrames,
@@ -44,7 +43,15 @@ import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet'
-import { GithubIcon, ImportIcon, MoreHorizontalIcon, PlayIcon, PulseIcon, SparkIcon } from '../components/ui/icons'
+import {
+  BrainIcon,
+  GithubIcon,
+  ImportIcon,
+  MoreHorizontalIcon,
+  PlayIcon,
+  PulseIcon,
+  SparkIcon,
+} from '../components/ui/icons'
 import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
@@ -455,7 +462,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                     setDecisionToast(null)
                   }}
                 >
-                  <BrainIcon size={17} />
+                  <BrainIcon width={17} height={17} />
                   <span>
                     <b className="block font-display text-[13px] font-semibold tracking-[-0.01em]">Saved to Memory</b>
                     <span className="mt-[1px] block text-[12px] leading-[1.4] text-ink-soft">{decisionToast}</span>

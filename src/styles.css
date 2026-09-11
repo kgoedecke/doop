@@ -24,6 +24,17 @@
   --font-serif: var(--font-serif);
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
+  --shadow-elevation-1: var(--shadow-elevation-1);
+  --shadow-elevation-1-hover: var(--shadow-elevation-1-hover);
+  --shadow-elevation-1-focus: var(--shadow-elevation-1-focus);
+  --shadow-elevation-2: var(--shadow-elevation-2);
+  /* Named motion: Penner curves as `ease-out-quad` etc. Durations are
+     `duration-instant` … `duration-slow` (defined as utilities below). */
+  --ease-out-quad: var(--ease-out-quad);
+  --ease-out-cubic: var(--ease-out-cubic);
+  --ease-out-quint: var(--ease-out-quint);
+  --ease-in-out-quad: var(--ease-in-out-quad);
+  --ease-in-out-cubic: var(--ease-in-out-cubic);
   --breakpoint-xs: 30rem;
   /* Doop's mobile boundary, in one place. `md:` is the switch between the
      phone layout and the desktop one, and useIsMobile() matches the same
@@ -99,6 +110,33 @@
      a surface off the page rather than drawing it. */
   --shadow-card: 0 1px 2px rgba(17, 17, 16, 0.04), 0 10px 28px -18px rgba(17, 17, 16, 0.18);
   --shadow-pop: 0 2px 6px rgba(17, 17, 16, 0.06), 0 22px 56px -26px rgba(17, 17, 16, 0.24);
+  /* Elevation: no CSS border — the edge is a half-pixel shadow ring, so a
+     hairline reads as part of the lift rather than a drawn outline. -1 is a
+     resting surface (with a hover and a focus step), -2 is a floating one. */
+  --shadow-elevation-1:
+    0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 2px 3px -2px rgba(0, 0, 0, 0.1), 0 3px 12px -4px rgba(0, 0, 0, 0.1),
+    0 4px 16px -8px rgba(0, 0, 0, 0.1);
+  --shadow-elevation-1-hover:
+    0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 5px 7px -2px rgba(0, 0, 0, 0.1), 0 7px 20px -4px rgba(0, 0, 0, 0.1),
+    0 7px 28px -8px rgba(0, 0, 0, 0.1);
+  --shadow-elevation-1-focus:
+    0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 0 0 3px color-mix(in srgb, var(--brand) 24%, transparent),
+    0 2px 3px -2px rgba(0, 0, 0, 0.1), 0 3px 12px -4px rgba(0, 0, 0, 0.1);
+  --shadow-elevation-2:
+    0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 8px 12px -4px rgba(0, 0, 0, 0.1), 0 16px 32px -8px rgba(0, 0, 0, 0.14),
+    0 24px 56px -16px rgba(0, 0, 0, 0.18);
+  /* Motion: Penner easing curves and a named duration scale. */
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-quad: cubic-bezier(0.455, 0.03, 0.515, 0.955);
+  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --duration-instant: 0.05s;
+  --duration-micro: 0.1s;
+  --duration-fast: 0.15s;
+  --duration-normal: 0.2s;
+  --duration-slow: 0.3s;
+  --duration-slower: 0.45s;
   --background: var(--paper);
   --foreground: var(--ink);
   --card: var(--surface);
@@ -138,6 +176,32 @@
 /* Base layer: the resets and defaults every screen inherits. Everything that
    used to live below this line — some 6,800 lines of component rules — now
    lives in src/components/ui as real components. */
+/* Duration utilities read the named scale above (Tailwind has no theme
+   namespace for durations), and `corner-squircle` is the superellipse
+   corner used on tiles and cards — browsers without corner-shape fall back
+   to the plain radius. */
+@utility duration-instant {
+  transition-duration: var(--duration-instant);
+}
+@utility duration-micro {
+  transition-duration: var(--duration-micro);
+}
+@utility duration-fast {
+  transition-duration: var(--duration-fast);
+}
+@utility duration-normal {
+  transition-duration: var(--duration-normal);
+}
+@utility duration-slow {
+  transition-duration: var(--duration-slow);
+}
+@utility duration-slower {
+  transition-duration: var(--duration-slower);
+}
+@utility corner-squircle {
+  corner-shape: superellipse(1.4);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

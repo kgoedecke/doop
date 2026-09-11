@@ -3,16 +3,18 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 
-const cardVariants = cva('min-w-0 border bg-surface', {
+const cardVariants = cva('min-w-0 bg-surface', {
   variants: {
     tone: {
-      default: 'rounded-[10px] border-line shadow-card',
+      /* a resting surface: squircle corners, no drawn border — the edge is
+         the half-pixel ring inside the elevation shadow */
+      default: 'rounded-[10px] corner-squircle shadow-elevation-1',
       /* settings/admin sections: a flat panel that groups rows */
-      flat: 'rounded-[10px] border-line',
-      /* clickable tiles (canvas cards): the hairline darkens to ink on hover
-         — the lift is in the rule, not under the card */
+      flat: 'rounded-[10px] border border-line',
+      /* clickable tiles (canvas cards): the shadow deepens on hover — the
+         lift is under the card, nothing is redrawn */
       raised:
-        'rounded-[10px] border-line shadow-card transition-[border-color,box-shadow] hover:border-ink hover:shadow-pop',
+        'rounded-[10px] corner-squircle shadow-elevation-1 transition-[box-shadow] duration-normal ease-out-quad hover:shadow-elevation-1-hover',
     },
   },
   defaultVariants: { tone: 'default' },

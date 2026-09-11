@@ -9,6 +9,7 @@ import { Input } from './ui/input'
 import { Dot } from './ui/dot'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { cn } from '@/lib/utils'
+import { CheckIcon } from './ui/icons'
 
 /**
  * "Keep the Doop Agent running on my own subscription."
@@ -506,18 +507,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 }
 
 function Tick() {
-  return (
-    <svg viewBox="0 0 20 20" width="13" height="13" aria-hidden>
-      <path
-        d="M4 10.5 L8 14.5 L16 5.5"
-        fill="none"
-        stroke="#1a6b43"
-        strokeWidth="2.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
+  return <CheckIcon width={13} height={13} strokeWidth={2.5} color="#1a6b43" aria-hidden />
 }
 
 /** OpenAI's mark, inlined so the page needs no external request. */

@@ -35,7 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
-import { CopyIcon, MoreHorizontalIcon, PlusIcon, ShareIcon, TrashIcon } from '../components/ui/icons'
+import { CopyIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, ShareIcon, TrashIcon } from '../components/ui/icons'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Toast } from '../components/ui/toast'
 import {
@@ -57,9 +57,12 @@ const LIVE_WINDOW = 5 * 60 * 1000
 type Scope = 'all' | 'mine' | 'shared'
 
 /* a canvas tile: the Card surface, made clickable */
+/* Canvas tiles: the raised Card surface (frosted, squircle corners, no drawn
+   border — the edge is the elevation ring) with the lift on hover. */
 const cardCls = cn(
-  cardVariants(),
-  'overflow-hidden p-0 text-left transition-[translate,box-shadow,border-color] duration-150 hover:-translate-y-[3px] hover:border-ink-faint hover:shadow-pop',
+  cardVariants({ tone: 'raised' }),
+  'relative z-[2] transform-gpu overflow-hidden rounded-[14px] p-0 text-left text-ink',
+  'bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] backdrop-blur-[6px]',
 )
 
 export function Home() {
@@ -301,10 +304,7 @@ export function Home() {
             <Logo className="size-7" /> Doop
           </Button>
           <label className="order-2 flex h-10 max-w-none flex-1 basis-full items-center gap-[9px] rounded-[10px] border border-line bg-surface px-[11px] text-ink-faint focus-within:border-ink-faint md:order-none md:h-[34px] md:max-w-[400px] md:basis-auto">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-3.2-3.2" />
-            </svg>
+            <SearchIcon width={14} height={14} aria-hidden />
             <Input
               ref={searchRef}
               value={query}
@@ -568,7 +568,7 @@ function AgentStack({ canvas }: { canvas: CanvasMeta }) {
       {agents.map((a) => (
         <i
           key={a.name}
-          className="grid size-5 place-items-center rounded-[6px] border border-line bg-surface shadow-[0_1px_3px_rgba(18,18,23,0.1)]"
+          className="grid size-5 place-items-center rounded-[7px] corner-squircle bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] shadow-elevation-1 backdrop-blur-[6px]"
           style={{ color: colorFor(a.name) }}
           title={a.name}
         >
@@ -659,16 +659,18 @@ function CanvasActions({
           type="button"
           aria-label={`Actions for ${canvas.name}`}
           className={cn(
-            'grid cursor-pointer place-items-center rounded-full transition-[opacity,background,color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
+            'grid cursor-pointer place-items-center transition-[opacity,box-shadow,background,color] duration-normal ease-out-quad focus-visible:outline-none',
             compact
-              ? 'size-8 flex-none text-ink-faint hover:bg-paper-deep hover:text-ink'
-              : 'absolute right-2 top-2 size-10 bg-ink/75 text-white opacity-100 hover:bg-ink md:size-7 md:opacity-0 md:group-hover:opacity-100 md:data-[state=open]:opacity-100',
+              ? 'size-8 flex-none rounded-full text-ink-faint hover:bg-paper-deep hover:text-ink focus-visible:ring-2 focus-visible:ring-brand'
+              : /* the frosted chip: surface at 72% over the preview, blurred, edged by the
+                   elevation ring rather than a border; revealed by the tile's hover */
+                'absolute right-2 top-2 size-9 rounded-[12px] corner-squircle bg-[color-mix(in_srgb,var(--surface)_72%,transparent)] text-ink shadow-elevation-1 backdrop-blur-[6px] hover:shadow-elevation-1-hover focus-visible:shadow-elevation-1-focus md:size-[30px] md:rounded-[10px] md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 md:data-[state=open]:opacity-100',
           )}
         >
           <MoreHorizontalIcon className="size-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-[190px]">
+      <DropdownMenuContent className="w-[190px] rounded-[14px] corner-squircle border-0 shadow-elevation-2">
         <DropdownMenuItem onSelect={onShare}>
           <ShareIcon className="size-4" /> Share
         </DropdownMenuItem>
