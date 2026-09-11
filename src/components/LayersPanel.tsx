@@ -1,10 +1,27 @@
-import { useEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { getIdentity } from '../lib/identity'
 import { deleteFramesTracked } from '../lib/history'
-import { ancestorsOf, buildLayerTree, elementHtml, filterLayers, type LayerNode } from '../lib/layers'
-import { deleteLayer, duplicateLayer } from '../lib/layerEdits'
+import {
+  ancestorsOf,
+  buildLayerTree,
+  elementHtml,
+  filterLayers,
+  type DropPlace,
+  type DropTarget,
+  type LayerNode,
+} from '../lib/layers'
+import { deleteLayer, duplicateLayer, moveLayer, shiftLayer } from '../lib/layerEdits'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
@@ -61,6 +78,32 @@ function frameTree(frame: Frame): LayerNode[] {
 type VisibleRow =
   | { kind: 'frame'; key: string; frame: Frame; open: boolean; empty: boolean }
   | { kind: 'node'; key: string; frame: Frame; node: LayerNode; depth: number; open: boolean; parentKey: string }
+type NodeVisibleRow = Extract<VisibleRow, { kind: 'node' }>
+
+/* a press has to travel this far before it is a drag rather than a click */
+const DRAG_THRESHOLD = 4
+/* the band at a row's top and bottom that means "next to", not "into" */
+const EDGE_BAND = 0.3
+
+function holds(node: LayerNode, selector: string): boolean {
+  return node.children.some((c) => c.selector === selector || holds(c, selector))
+}
+
+/** Where a drop over `row` lands — a line above or below it, or into it.
+ *  Only boxes take children; an open box's lower part reads as "into" so the
+ *  line under it always means "first child" rather than the ambiguous "after
+ *  the subtree". A frame row is the top of its body. */
+function dropOver(row: VisibleRow, fraction: number): DropPlace {
+  if (row.kind === 'frame') return 'inside'
+  if (row.node.kind !== 'box') return fraction < 0.5 ? 'before' : 'after'
+  if (fraction < EDGE_BAND) return 'before'
+  if (!row.open && fraction > 1 - EDGE_BAND) return 'after'
+  return 'inside'
+}
+
+function targetOf(row: VisibleRow, place: DropPlace): DropTarget {
+  return { selector: row.kind === 'frame' ? 'body' : row.node.selector, place }
+}
 
 function visibleRows(frames: Frame[], query: string, expanded: Set<string>): VisibleRow[] {
   const rows: VisibleRow[] = []
@@ -93,6 +136,13 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
   const setLayersOpen = useStore((s) => s.setLayersOpen)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  /* the row being dragged and where it would land; the pointer handlers are
+     bound to the window for the length of the press, so they read the rows
+     through a ref rather than a stale closure */
+  const [drag, setDrag] = useState<NodeVisibleRow | null>(null)
+  const [drop, setDrop] = useState<{ key: string; place: DropPlace } | null>(null)
+  const rowsRef = useRef<VisibleRow[]>([])
+  const didDrag = useRef(false)
 
   /* the selected frame opens on its own, and a selection made inside a frame
      opens every row above it — derived from the selection during render, not
@@ -129,6 +179,9 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
 
   const q = query.trim().toLowerCase()
   const rows = useMemo(() => visibleRows(frames, q, expanded), [frames, q, expanded])
+  useEffect(() => {
+    rowsRef.current = rows
+  }, [rows])
   const currentKey = selectedElement ? rowKey(selectedElement.frameId, selectedElement.selector) : selectedId
 
   /* a layer row opens the element properties panel; a frame row closes it
@@ -140,8 +193,68 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
     s.setElementPanelOpen(row.kind === 'node')
   }
 
-  /* ↑↓ walk the visible rows, ←→ close and open them, ⌫ deletes what is
-     selected, ↵ flies to the frame — the panel is a tree, so it drives like one */
+  /* the drop under the pointer: a row of the dragged element's frame that is
+     neither the element itself nor inside it */
+  function dropAt(dragged: NodeVisibleRow, x: number, y: number) {
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-row-key]')
+    const row = el ? rowsRef.current.find((r) => r.key === el.dataset.rowKey) : undefined
+    if (!row || !el || row.frame.id !== dragged.frame.id || row.key === dragged.key) return null
+    if (row.kind === 'node' && holds(dragged.node, row.node.selector)) return null
+    const rect = el.getBoundingClientRect()
+    return { key: row.key, place: dropOver(row, (y - rect.top) / rect.height) }
+  }
+
+  /* a press on a layer row turns into a drag once it travels; the row is
+     dropped where the pointer lets go, and the click that follows a drag is
+     swallowed so the drop does not double as a select. The target is read
+     again at release (the list may have scrolled under a still pointer), the
+     frame is read from the store (a collaborator may have edited it during
+     the drag — moveLayer refuses selectors that no longer resolve), and a
+     cancelled gesture drops nothing. */
+  function onRowPointerDown(e: ReactPointerEvent<HTMLDivElement>, row: NodeVisibleRow) {
+    if (e.button !== 0) return
+    const start = { x: e.clientX, y: e.clientY }
+    const body = e.currentTarget.closest<HTMLElement>('[data-slot="panel-body"]')
+    let active = false
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      setDrag(null)
+      setDrop(null)
+    }
+    const onMove = (ev: PointerEvent) => {
+      if (!active) {
+        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < DRAG_THRESHOLD) return
+        active = true
+        didDrag.current = true
+        setDrag(row)
+      }
+      if (body) {
+        const rect = body.getBoundingClientRect()
+        if (ev.clientY < rect.top + 24) body.scrollBy(0, -8)
+        else if (ev.clientY > rect.bottom - 24) body.scrollBy(0, 8)
+      }
+      setDrop(dropAt(row, ev.clientX, ev.clientY))
+    }
+    const onUp = (ev: PointerEvent) => {
+      const wasActive = active
+      finish()
+      if (!wasActive) return
+      const target = dropAt(row, ev.clientX, ev.clientY)
+      const over = target && rowsRef.current.find((r) => r.key === target.key)
+      const frame = useStore.getState().canvas?.frames.find((f) => f.id === row.frame.id)
+      if (over && target && frame) moveLayer(frame, row.node.selector, targetOf(over, target.place))
+    }
+    const onCancel = () => finish()
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+  }
+
+  /* ↑↓ walk the visible rows, ⌥↑↓ move the selected layer among its
+     siblings, ←→ close and open rows, ⌫ deletes what is selected, ↵ flies to
+     the frame — the panel is a tree, so it drives like one */
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if ((e.target as HTMLElement).tagName === 'INPUT') return
     const index = rows.findIndex((r) => r.key === currentKey)
@@ -150,12 +263,17 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
       const next = rows[index < 0 ? (dir === 1 ? 0 : rows.length - 1) : index + dir]
       if (next) activate(next)
     }
+    const shift = (dir: 1 | -1) => {
+      if (row?.kind === 'node') shiftLayer(row.frame, row.node.selector, dir)
+    }
     switch (e.key) {
       case 'ArrowDown':
-        step(1)
+        if (e.altKey) shift(1)
+        else step(1)
         break
       case 'ArrowUp':
-        step(-1)
+        if (e.altKey) shift(-1)
+        else step(-1)
         break
       case 'ArrowRight':
         if (row && !row.open) setOpen(row.key, true)
@@ -232,7 +350,17 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
           </Tooltip>
         </span>
       </div>
-      <PanelBody className="px-2 pb-2 outline-none" role="tree" tabIndex={0} onKeyDown={onKeyDown}>
+      <PanelBody
+        className={cn('px-2 pb-2 outline-none', drag && 'cursor-grabbing')}
+        role="tree"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        onClickCapture={(e) => {
+          if (!didDrag.current) return
+          didDrag.current = false
+          e.stopPropagation()
+        }}
+      >
         {frames.length === 0 && (
           <div className="px-3 py-6 text-center text-[12.5px] text-ink-faint">
             No frames yet. Press + to add one, or ask the agent for a design.
@@ -248,6 +376,7 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
               row={row}
               selected={row.frame.id === selectedId && !selectedElement}
               current={row.frame.id === selectedId}
+              drop={drop?.key === row.key ? drop.place : undefined}
               onToggle={() => setOpen(row.key, !row.open)}
               onActivate={() => activate(row)}
             />
@@ -256,8 +385,11 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
               key={row.key}
               row={row}
               selected={row.key === currentKey}
+              dragging={drag?.key === row.key}
+              drop={drop?.key === row.key ? drop.place : undefined}
               onToggle={() => setOpen(row.key, !row.open)}
               onActivate={() => activate(row)}
+              onPointerDown={(e) => onRowPointerDown(e, row)}
             />
           ),
         )}
@@ -265,7 +397,8 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
       <footer className="flex flex-none items-center justify-between gap-2 whitespace-nowrap border-t border-line-soft px-3 py-[9px] font-mono text-[10px] tracking-[0.04em] text-ink-faint">
         <span>
           <Kbd>↑</Kbd>
-          <Kbd>↓</Kbd> move · <Kbd>←</Kbd>
+          <Kbd>↓</Kbd> move · <Kbd>⌥↑</Kbd>
+          <Kbd>⌥↓</Kbd> reorder · <Kbd>←</Kbd>
           <Kbd>→</Kbd> fold
         </span>
         <span>
@@ -322,6 +455,7 @@ function FrameRow({
   row,
   selected,
   current,
+  drop,
   onToggle,
   onActivate,
 }: {
@@ -329,6 +463,7 @@ function FrameRow({
   selected: boolean
   /** the frame is selected, whether or not an element inside it is */
   current: boolean
+  drop?: DropPlace
   onToggle: () => void
   onActivate: () => void
 }) {
@@ -346,7 +481,9 @@ function FrameRow({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <Row
+            data-row-key={row.key}
             depth={0}
+            drop={drop}
             caret={<Caret open={row.open} present />}
             onCaret={onToggle}
             icon={<FrameIcon width={13} height={13} />}
@@ -387,13 +524,19 @@ function FrameRow({
 function NodeRow({
   row,
   selected,
+  dragging,
+  drop,
   onToggle,
   onActivate,
+  onPointerDown,
 }: {
-  row: Extract<VisibleRow, { kind: 'node' }>
+  row: NodeVisibleRow
   selected: boolean
+  dragging: boolean
+  drop?: DropPlace
   onToggle: () => void
   onActivate: () => void
+  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const { frame, node } = row
   const hasChildren = node.children.length > 0
@@ -401,15 +544,19 @@ function NodeRow({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <Row
+          data-row-key={row.key}
           depth={row.depth}
+          drop={drop}
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
           icon={<LayerKindIcon kind={node.kind} />}
           label={node.label}
           detail={node.detail}
           selected={selected}
+          className={cn(dragging && 'opacity-40')}
           onClick={onActivate}
           onContextMenu={onActivate}
+          onPointerDown={onPointerDown}
         />
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -425,6 +572,15 @@ function NodeRow({
           Copy selector
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => duplicateLayer(frame, node.selector)}>Duplicate</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => shiftLayer(frame, node.selector, -1)}>
+          Move up
+          <MenuHint>⌥↑</MenuHint>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => shiftLayer(frame, node.selector, 1)}>
+          Move down
+          <MenuHint>⌥↓</MenuHint>
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem tone="danger" onSelect={() => deleteLayer(frame, node.selector)}>
           Delete element
@@ -446,6 +602,8 @@ type RowProps = Omit<HTMLAttributes<HTMLDivElement>, 'onClick'> & {
   label: string
   detail?: string
   selected: boolean
+  /** where a dragged layer would land on this row */
+  drop?: DropPlace
   trailing?: ReactNode
   onClick: () => void
 }
@@ -458,6 +616,7 @@ function Row({
   label,
   detail,
   selected,
+  drop,
   className,
   trailing,
   onClick,
@@ -475,13 +634,24 @@ function Row({
       role="treeitem"
       aria-selected={selected}
       className={cn(
-        'flex h-[26px] cursor-default select-none items-center gap-1 whitespace-nowrap rounded-md pr-1.5 text-[12.5px] text-ink hover:bg-paper-deep',
+        'relative flex h-[26px] cursor-default select-none items-center gap-1 whitespace-nowrap rounded-md pr-1.5 text-[12.5px] text-ink hover:bg-paper-deep',
         selected && 'bg-brand text-white hover:bg-brand [&_[data-icon]]:text-white/85',
+        drop === 'inside' && 'shadow-[inset_0_0_0_2px_var(--brand)]',
         className,
       )}
       style={{ ...rest.style, paddingLeft: 6 + depth * INDENT }}
       onClick={onClick}
     >
+      {(drop === 'before' || drop === 'after') && (
+        <span
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute right-1 z-[1] h-0.5 rounded-full bg-brand',
+            drop === 'before' ? '-top-px' : '-bottom-px',
+          )}
+          style={{ left: 6 + depth * INDENT }}
+        />
+      )}
       <span
         data-icon
         className={cn('grid size-3.5 flex-none place-items-center text-ink-faint', onCaret && 'cursor-pointer')}

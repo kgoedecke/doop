@@ -165,6 +165,66 @@ export function duplicateElement(html: string, selector: string): string | null 
   return serialize(doc)
 }
 
+/** Where a moved element lands relative to its target: as its previous or
+ *  next sibling, or as its first child. */
+export type DropPlace = 'before' | 'after' | 'inside'
+
+export interface DropTarget {
+  selector: string
+  place: DropPlace
+}
+
+export interface MovedElement {
+  html: string
+  /** the element's selector after the move — its path changes with its position */
+  selector: string
+}
+
+/* the neighbouring layer the rail shows: markup that draws nothing is stepped over */
+function visibleSibling(el: Element, dir: -1 | 1): Element | null {
+  let cur = dir === -1 ? el.previousElementSibling : el.nextElementSibling
+  while (cur && HIDDEN_TAGS.has(cur.tagName)) cur = dir === -1 ? cur.previousElementSibling : cur.nextElementSibling
+  return cur
+}
+
+/** True when the element already sits where the drop would put it, as the
+ *  rail shows it — hopping over a hidden <script> is not a move. */
+function alreadyAt(el: Element, at: Element, where: DropPlace): boolean {
+  if (where === 'before') return visibleSibling(el, 1) === at
+  if (where === 'after') return visibleSibling(el, -1) === at
+  const first = at.firstElementChild
+  return el === (first && HIDDEN_TAGS.has(first.tagName) ? visibleSibling(first, 1) : first)
+}
+
+function move(doc: Document, el: Element, at: Element, where: DropPlace): MovedElement | null {
+  if (el === at || el.contains(at) || alreadyAt(el, at, where)) return null
+  if (where === 'inside') at.prepend(el)
+  else if (where === 'before') at.before(el)
+  else at.after(el)
+  return { html: serialize(doc), selector: elementPath(el) }
+}
+
+/** The frame's HTML with the element moved next to, or into, the target.
+ *  Null when either selector no longer resolves, the target sits inside the
+ *  element (a node cannot hold itself), or the element is already there. */
+export function moveElement(html: string, selector: string, target: DropTarget): MovedElement | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  const at = find(doc, target.selector)
+  if (!el || !at) return null
+  return move(doc, el, at, target.place)
+}
+
+/** The frame's HTML with the element swapped past the layer above (-1) or
+ *  below (1) it. Null at either end of the list. */
+export function shiftElement(html: string, selector: string, dir: -1 | 1): MovedElement | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  const sibling = el && visibleSibling(el, dir)
+  if (!el || !sibling) return null
+  return move(doc, el, sibling, dir === -1 ? 'before' : 'after')
+}
+
 /* attributes whose value is an id, or a space-separated list of ids */
 const ID_REF_ATTRS = new Set([
   'for',
