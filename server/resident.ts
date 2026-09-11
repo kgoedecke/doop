@@ -7,6 +7,8 @@ import { inspectFrame, renderFrame } from './screenshot.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName } from '../shared/agents.ts'
 import type { AgentRole } from '../shared/agents.ts'
 import * as imageSearch from './imageSearch.ts'
+import * as imageGen from './imageGen.ts'
+import * as assets from './assets.ts'
 import * as backgrounds from './backgrounds.ts'
 import { PUBLIC_ORIGIN } from './auth.ts'
 import * as ingest from './ingest.ts'
@@ -107,7 +109,7 @@ Rules:
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
 - Never leave a frame worse than you found it.
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
-- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
+- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. When the design needs a visual that stock cannot supply — brand-specific illustration, a product render, a mascot, abstract hero art in the exact palette — or the card asks for a generated image, call generate_image with ONE considered prompt (subject, style, composition, palette hexes, lighting, exclusions) and embed the returned url; it spends the requester's quota or money, so refine a near miss by prompt rather than regenerating blind. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
 - If a request is unclear or impossible (missing frame, contradictory ask), do the closest reasonable thing and say what you did in your final message.
 - Your final message should be one or two sentences: what you changed and where.
 
@@ -142,7 +144,14 @@ interface RunState {
   verifiedFrames: Set<string>
   rewriteDrafts: Map<string, string>
   blockedWebsiteAccess?: string
+  /** whose account pays for generated images: the run's payer, else the server key */
+  payerId?: string
+  /** images actually produced in this run — capped, since each one spends the payer's quota or money */
+  imagesGenerated: number
 }
+
+/* enough for a hero plus a retry or two; a run that wants more is looping */
+const MAX_IMAGES_PER_RUN = 4
 
 function deliverableFrameIds(runState: RunState): string[] {
   return [...runState.mutatedFrames].filter((id) => !runState.sourceFrames.has(id))
@@ -399,6 +408,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       verificationFrames: new Set(),
       verifiedFrames: new Set(),
       rewriteDrafts: new Map(),
+      ...(model.userId ? { payerId: model.userId } : {}),
+      imagesGenerated: 0,
     }
     let refused = false
     let crashed = false
@@ -742,6 +753,28 @@ const TOOLS: Anthropic.Tool[] = [
         count: { type: 'number', description: 'Candidates to return, 1-8, default 5' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'generate_image',
+    description:
+      "Generate an image from a text prompt with AI and get a permanent URL to embed, plus a preview to judge. For visuals stock search cannot supply: brand-specific illustration, product renders, mascots, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It spends the requester's ChatGPT quota or OpenAI money and takes 20–60 seconds, so write ONE considered prompt (subject, style, composition, palette hexes, lighting, what to leave out) and refine a near miss by prompt.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'What to draw: subject, style, composition, palette, lighting, mood' },
+        aspect: {
+          type: 'string',
+          enum: [...imageGen.IMAGE_ASPECTS],
+          description: 'square 1024×1024 (default), landscape 1536×1024, portrait 1024×1536 — match the slot',
+        },
+        quality: {
+          type: 'string',
+          enum: [...imageGen.IMAGE_QUALITIES],
+          description: 'low is fast and cheap; default medium',
+        },
+      },
+      required: ['prompt'],
     },
   },
   {
@@ -1126,6 +1159,39 @@ async function execTool(
           })
         })
         return ok(blocks)
+      }
+      case 'generate_image': {
+        const raw = block.input as { prompt?: string; aspect?: string; quality?: string }
+        const prompt = String(raw.prompt || '').trim()
+        if (!prompt) return fail('prompt must be a non-empty string')
+        if (runState.imagesGenerated >= MAX_IMAGES_PER_RUN) {
+          return fail(
+            `this task has already generated ${MAX_IMAGES_PER_RUN} images — use one of them, or finish and let your human ask for more`,
+          )
+        }
+        const aspect = (imageGen.IMAGE_ASPECTS as readonly string[]).includes(String(raw.aspect))
+          ? (raw.aspect as imageGen.ImageAspect)
+          : undefined
+        const quality = (imageGen.IMAGE_QUALITIES as readonly string[]).includes(String(raw.quality))
+          ? (raw.quality as imageGen.ImageQuality)
+          : undefined
+        const image = await imageGen.generateImage(runState.payerId, { prompt, aspect, quality })
+        const asset = await assets.createAsset(image.buf, {
+          canvasId,
+          ...(runState.payerId ? { ownerId: runState.payerId } : {}),
+          uploadedBy: actor.name,
+        })
+        /* counted once an image actually exists: a refusal or a transient
+           failure spent nothing and must not lock the tool for the run */
+        runState.imagesGenerated++
+        const url = `${PUBLIC_ORIGIN}/a/${asset.id}.${asset.ext}`
+        return ok([
+          { type: 'image', source: { type: 'base64', media_type: image.preview.mime, data: image.preview.data } },
+          {
+            type: 'text',
+            text: `Generated ${image.width}×${image.height} (${asset.mime}, billed to ${image.billedTo}) — preview above, judge it before embedding.\nurl: ${url}\nusage: <img src="${url}" alt="" style="object-fit: cover">`,
+          },
+        ])
       }
       case 'list_backgrounds': {
         if (!backgrounds.backgroundsEnabled())

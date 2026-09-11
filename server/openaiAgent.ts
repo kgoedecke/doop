@@ -24,8 +24,8 @@ import type { ModelAccount } from './modelAccounts.ts'
  * message. The model sees the same pixels in the same order.
  */
 
-const CHATGPT_URL = process.env.CHATGPT_RESPONSES_URL || 'https://chatgpt.com/backend-api/codex/responses'
-const OPENAI_URL = process.env.OPENAI_RESPONSES_URL || 'https://api.openai.com/v1/responses'
+export const CHATGPT_URL = process.env.CHATGPT_RESPONSES_URL || 'https://chatgpt.com/backend-api/codex/responses'
+export const OPENAI_URL = process.env.OPENAI_RESPONSES_URL || 'https://api.openai.com/v1/responses'
 /**
  * The GPT-5.6 tiers, which a ChatGPT sign-in and an API key can both reach.
  * Users pick one in Settings — they are paying for it, and the tiers trade
@@ -58,7 +58,7 @@ export function modelFor(account: Pick<ModelAccount, 'model'>): string {
 /* The Codex backend only answers clients it recognises, so this is the value
    it expects rather than a free-form product name. Override if OpenAI ever
    admits other originators. */
-const ORIGINATOR = process.env.CHATGPT_ORIGINATOR || 'codex_cli_rs'
+export const ORIGINATOR = process.env.CHATGPT_ORIGINATOR || 'codex_cli_rs'
 
 export type TurnBlock = Anthropic.TextBlockParam | Anthropic.ToolUseBlockParam
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'refusal'
@@ -208,6 +208,9 @@ interface ResponseBody {
     name?: string
     arguments?: string
     content?: { type: string; text?: string; refusal?: string }[]
+    /** image_generation_call items: the finished image, base64 */
+    result?: string | null
+    status?: string
   }[]
 }
 
@@ -260,7 +263,7 @@ function fromResponse(body: ResponseBody): TurnResult {
  * and no output array, so trusting that event alone yields an empty turn.
  * api.openai.com does include the array, and it wins when present.
  */
-async function readEventStream(res: Response): Promise<ResponseBody> {
+export async function readEventStream(res: Response): Promise<ResponseBody> {
   if (!res.body) throw new Error('OpenAI returned no response body')
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -302,7 +305,7 @@ async function readEventStream(res: Response): Promise<ResponseBody> {
   return final.output?.length ? final : { ...final, output: streamed }
 }
 
-async function failure(res: Response, label: string): Promise<Error> {
+export async function responseError(res: Response, label: string): Promise<Error> {
   const text = await res.text().catch(() => '')
   const detail = text.slice(0, 400)
   if (res.status === 401 || res.status === 403) {
@@ -339,7 +342,7 @@ async function runChatgpt(account: ModelAccount, req: TurnRequest): Promise<Turn
       stream: true,
     }),
   })
-  if (!res.ok) throw await failure(res, 'ChatGPT')
+  if (!res.ok) throw await responseError(res, 'ChatGPT')
   return fromResponse(await readEventStream(res))
 }
 
@@ -360,7 +363,7 @@ async function runApiKey(account: ModelAccount, req: TurnRequest): Promise<TurnR
       store: false,
     }),
   })
-  if (!res.ok) throw await failure(res, 'OpenAI')
+  if (!res.ok) throw await responseError(res, 'OpenAI')
   return fromResponse((await res.json()) as ResponseBody)
 }
 
@@ -399,7 +402,7 @@ export async function runAzureTurn(config: AzureConfig, req: TurnRequest): Promi
       store: false,
     }),
   })
-  if (!res.ok) throw await failure(res, 'Azure OpenAI')
+  if (!res.ok) throw await responseError(res, 'Azure OpenAI')
   return fromResponse((await res.json()) as ResponseBody)
 }
 

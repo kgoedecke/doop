@@ -50,3 +50,42 @@ describe('MCP website tool contract', () => {
     }
   })
 })
+
+describe('MCP generate_image tool contract', () => {
+  it('scopes a generation to a canvas and lets the agent choose aspect and quality', async () => {
+    const server = buildMcpServer('Test Owner', 'test-owner-id')
+    const client = new Client({ name: 'doop-tool-contract-test', version: '1.0.0' })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    try {
+      const { tools } = await client.listTools()
+      const generate = tools.find((tool) => tool.name === 'generate_image')
+      expect(generate).toBeDefined()
+      const schema = generate!.inputSchema as ToolInputSchema
+      expect(schema.properties).toEqual(
+        expect.objectContaining({
+          prompt: expect.any(Object),
+          aspect: expect.any(Object),
+          quality: expect.any(Object),
+          canvas_id: expect.any(Object),
+          agent_name: expect.any(Object),
+        }),
+      )
+      expect(new Set(schema.required)).toEqual(new Set(['prompt', 'canvas_id', 'agent_name']))
+      expect(client.getInstructions()).toContain('generate_image')
+
+      /* an unknown canvas must be refused before anything is spent */
+      const result = await client.callTool({
+        name: 'generate_image',
+        arguments: { prompt: 'a red circle', canvas_id: 'nope', agent_name: 'Test' },
+      })
+      expect(result.isError).toBe(true)
+    } finally {
+      await client.close()
+      await server.close()
+    }
+  })
+})

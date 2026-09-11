@@ -36,6 +36,7 @@ import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
 import { serverTierInfo } from './agentModel.ts'
+import { serverImageGenEnabled } from './imageGen.ts'
 import { AGENT_MODELS } from './openaiAgent.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { colorFor } from '../shared/types.ts'
@@ -1658,5 +1659,10 @@ server.listen(PORT, () => {
     tier.ready
       ? `⟡ doop agent        on — free tier on this server’s ${tier.provider === 'azure' ? 'Azure OpenAI deployment' : 'Anthropic key'}, then each user’s own model account`
       : `⟡ doop agent        no server ${tier.provider === 'azure' ? 'Azure config' : 'key'} — runs only for users who connect their own ChatGPT subscription or OpenAI key (${tier.provider === 'azure' ? 'set the AZURE_OPENAI_* vars' : 'set ANTHROPIC_API_KEY'} for a free tier; agents connected over MCP work regardless)`,
+  )
+  console.log(
+    serverImageGenEnabled()
+      ? '⟡ image generation  on — each user’s connected ChatGPT/OpenAI account, else this server’s OPENAI_API_KEY'
+      : '⟡ image generation  on for users with a connected ChatGPT/OpenAI account only (set OPENAI_API_KEY to cover everyone else)',
   )
 })

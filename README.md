@@ -437,6 +437,7 @@ Steering happens at three layers (the same architecture paper.design uses, plus 
 | `edit_frame_html`      | Targeted exact find/replace in a frame's HTML — morphs into the render in place                                     |
 | `update_frame`         | Rename / move / resize a frame                                                                                      |
 | `delete_frame`         | Remove a frame                                                                                                      |
+| `generate_image`       | Generate an image from a prompt with AI (on the user's ChatGPT/OpenAI account, else `OPENAI_API_KEY`) → asset URL   |
 
 Mutating tools accept `agent_name`; the agent then appears in the presence stack (pulsing square avatar),
 gets an "editing" ring + chip on the frame it touched, and its actions land in the activity feed. Agents

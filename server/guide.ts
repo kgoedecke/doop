@@ -235,6 +235,19 @@ any public image URL. Source images in this order:
   nothing, retry with its exact domain, then pick a different real brand rather than
   inventing one. Follow the size guidance in the result: favicon-sourced logos are
   small rasters (fine at ≤32px, ugly scaled up); vector marks scale to any size.
+- **Generated imagery — generate_image.** When no stock photo can be the visual — a
+  brand-specific illustration, a product render, a mascot, abstract hero art in the
+  frame's exact palette — or your human asks for a
+  generated image, generate one from a prompt. It returns a permanent URL on this origin
+  plus a preview: look at the preview and judge it like any other asset before it goes
+  in. It runs on your human's connected ChatGPT subscription or OpenAI key (else the
+  server's key) and costs them quota or money, and takes 20–60 seconds, so write ONE
+  considered prompt — subject, style, composition, palette hexes, lighting, what to
+  leave out — and refine a near miss by saying what was wrong rather than rolling the
+  dice again. Match aspect to the slot (square, landscape, portrait). Images come back
+  opaque — no transparent cut-outs — so place them in a box, mask them with CSS, or
+  prompt for the surface color you will put them on. Photography that exists in the
+  world is still search_images' job.
 - **Your own file — upload_asset** (png/jpg/webp/gif/svg, max 5 MB), with the
   canvas_id it belongs to and ONE input, chosen by where the file lives:
   - Remote (it has a public URL): pass source_url — the server fetches it directly.
