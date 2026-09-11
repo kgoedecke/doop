@@ -112,9 +112,7 @@ export function ElementPanel({ frame, selector, className }: { frame: Frame; sel
   }
 
   function close() {
-    const s = useStore.getState()
-    s.setElementPanelOpen(false)
-    s.setSelectedElement(null)
+    useStore.getState().pickElement(null)
   }
 
   const name = node ? (node.detail ? `${node.tag}${node.detail}` : node.label) : selector.split(' > ').at(-1)

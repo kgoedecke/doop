@@ -386,14 +386,16 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   }
 
   /* the outlined element is shared with the Layers panel through the store:
-     what is probed here is published, and a row picked there is resolved
-     into a probe by asking the runtime for the element behind the selector */
+     what is probed here is picked (which also opens its properties panel,
+     the same as a click on its Layers row), and a row picked there is
+     resolved into a probe by asking the runtime for the element behind the
+     selector */
   useEffect(() => {
     const cur = useStore.getState().selectedElement
     if (probeSel) {
-      useStore.getState().setSelectedElement({ frameId: frame.id, selector: probeSel })
+      useStore.getState().pickElement({ frameId: frame.id, selector: probeSel })
     } else if (cur?.frameId === frame.id) {
-      useStore.getState().setSelectedElement(null)
+      useStore.getState().pickElement(null)
     }
   }, [probeSel, frame.id])
   const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))

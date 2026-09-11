@@ -58,3 +58,42 @@ describe('selectedElement', () => {
     expect(useStore.getState().elementPanelOpen).toBe(false)
   })
 })
+
+/* a pick is what a click on an element does — on the frame surface and on a
+   Layers row alike: the element is selected and its properties panel opens */
+describe('pickElement', () => {
+  beforeEach(() => {
+    useStore.setState({ selectedId: 'a', selectedIds: ['a'], selectedElement: null, elementPanelOpen: false })
+  })
+
+  it('selects the element and opens the panel', () => {
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    expect(useStore.getState().selectedElement).toEqual({ frameId: 'a', selector: '#hero' })
+    expect(useStore.getState().elementPanelOpen).toBe(true)
+  })
+
+  it('picking nothing (a click on empty frame space) clears the selection and closes the panel', () => {
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    useStore.getState().pickElement(null)
+    expect(useStore.getState().selectedElement).toBeNull()
+    expect(useStore.getState().elementPanelOpen).toBe(false)
+  })
+
+  it('reopens a closed panel when the same element is picked again', () => {
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    useStore.getState().setElementPanelOpen(false)
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    expect(useStore.getState().elementPanelOpen).toBe(true)
+  })
+
+  it('does not produce a new state object for a repeat pick of the open element', () => {
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    const before = useStore.getState()
+    useStore.getState().pickElement({ frameId: 'a', selector: '#hero' })
+    expect(useStore.getState()).toBe(before)
+    useStore.getState().pickElement(null)
+    const cleared = useStore.getState()
+    useStore.getState().pickElement(null)
+    expect(useStore.getState()).toBe(cleared)
+  })
+})

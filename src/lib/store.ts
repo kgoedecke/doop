@@ -56,8 +56,9 @@ interface State {
    *  surface and a click on a Layers row both land here, so the outline in
    *  the frame and the highlighted row stay in step */
   selectedElement: { frameId: string; selector: string } | null
-  /** the element properties panel is showing — opened by a Layers row, it
-   *  then follows whatever element is selected until it is closed */
+  /** the element properties panel is showing — opened by a pick (a click on
+   *  the frame surface or a Layers row), it then follows whatever element is
+   *  selected until it is closed */
   elementPanelOpen: boolean
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
@@ -124,6 +125,10 @@ interface State {
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
   setSelectedElement(el: { frameId: string; selector: string } | null): void
+  /** an element picked by the user — on the frame surface or in the Layers
+   *  rail: selects it and opens its properties panel; picking nothing clears
+   *  the selection and closes the panel */
+  pickElement(el: { frameId: string; selector: string } | null): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
   setViewport(v: Viewport): void
@@ -333,6 +338,13 @@ export const useStore = create<State>((set, get) => ({
         ? s
         : { selectedElement },
     ),
+  pickElement: (el) =>
+    set((s) => {
+      if (!el) return s.selectedElement || s.elementPanelOpen ? { selectedElement: null, elementPanelOpen: false } : s
+      const same = s.selectedElement?.frameId === el.frameId && s.selectedElement?.selector === el.selector
+      if (same && s.elementPanelOpen) return s
+      return { selectedElement: same ? s.selectedElement : el, elementPanelOpen: true }
+    }),
   setElementPanelOpen: (elementPanelOpen) => set({ elementPanelOpen }),
   setLayersOpen: (layersOpen) => {
     try {

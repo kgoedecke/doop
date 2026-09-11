@@ -189,8 +189,7 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
   function activate(row: VisibleRow) {
     const s = useStore.getState()
     s.select(row.frame.id)
-    s.setSelectedElement(row.kind === 'node' ? { frameId: row.frame.id, selector: row.node.selector } : null)
-    s.setElementPanelOpen(row.kind === 'node')
+    s.pickElement(row.kind === 'node' ? { frameId: row.frame.id, selector: row.node.selector } : null)
   }
 
   /* the drop under the pointer: a row of the dragged element's frame that is
