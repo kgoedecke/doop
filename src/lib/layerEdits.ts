@@ -58,6 +58,18 @@ export function moveLayer(frame: Frame, selector: string, target: DropTarget): b
   return commitMove(frame, moveElement(frame.html, selector, target))
 }
 
+/** Finish a drag that began on `pressed`: the element is moved in the frame
+ *  as the store holds it now, unless its HTML changed during the gesture.
+ *  A path selector can survive a collaborator's edit while pointing at a
+ *  different element (a same-tag sibling inserted above shifts every
+ *  nth-of-type below it), so a changed frame drops nothing. False when
+ *  nothing moved. */
+export function dropLayer(pressed: Frame, selector: string, target: DropTarget): boolean {
+  const frame = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
+  if (!frame || frame.html !== pressed.html) return false
+  return moveLayer(frame, selector, target)
+}
+
 /** Step the element one layer up (-1) or down (1) among its siblings. */
 export function shiftLayer(frame: Frame, selector: string, dir: -1 | 1): boolean {
   return commitMove(frame, shiftElement(frame.html, selector, dir))
