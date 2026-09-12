@@ -34,6 +34,7 @@ export function Inspector({
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
+  const [copiedHtml, setCopiedHtml] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const saveTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
@@ -142,7 +143,7 @@ export function Inspector({
         <PanelDisclosure>
           <span>{'</>'} HTML</span>
         </PanelDisclosure>
-        <CollapsibleContent className="flex min-h-0 flex-col">
+        <CollapsibleContent className="relative flex min-h-0 flex-col">
           <Textarea
             ref={textareaRef}
             variant="bare"
@@ -152,6 +153,19 @@ export function Inspector({
             placeholder="<!doctype html>…"
             onChange={(e) => onHtmlChange(e.target.value)}
           />
+          <button
+            type="button"
+            className="absolute right-2 top-2 rounded-[6px] bg-white/[0.08] px-2 py-1 text-[11px] text-[#e9e9ee] transition-colors hover:bg-white/[0.18]"
+            title="Copy the frame's full HTML"
+            onClick={() => {
+              navigator.clipboard.writeText(draft).then(() => {
+                setCopiedHtml(true)
+                window.setTimeout(() => setCopiedHtml(false), 1500)
+              }, console.error)
+            }}
+          >
+            {copiedHtml ? '✓' : 'copy'}
+          </button>
         </CollapsibleContent>
       </Collapsible>
       <footer className="flex items-center justify-between border-t border-line-soft px-4 py-2.5">
