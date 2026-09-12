@@ -5,6 +5,7 @@ import { copyFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '.
 import { deleteFramesTracked } from '../lib/history'
 import { useStore } from '../lib/store'
 import { MOD_KEY } from '../lib/keys'
+import { formatHtml } from '../lib/htmlFormatter'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 
@@ -46,6 +47,14 @@ export function FrameContextMenu({ frame, at }: { frame: Frame; at: MutableRefOb
       </ContextMenuItem>
       <ContextMenuItem onSelect={() => navigator.clipboard.writeText(`${location.origin}/i/${frame.id}.png?scale=2`)}>
         Copy image URL
+      </ContextMenuItem>
+      <ContextMenuItem
+        onSelect={() => {
+          const formatted = formatHtml(frame.html)
+          navigator.clipboard.writeText(formatted).catch(console.error)
+        }}
+      >
+        Copy HTML
       </ContextMenuItem>
       <ContextMenuItem asChild>
         <a href={`/i/${frame.id}.png?scale=2&download`}>Download PNG</a>

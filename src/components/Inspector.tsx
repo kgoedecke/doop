@@ -10,6 +10,8 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Field } from './ui/field'
 import { Textarea } from './ui/textarea'
+import { formatHtml, HtmlHighlightView } from '../lib/htmlFormatter'
+import { CodeViewerModal } from './CodeViewerModal'
 
 const HTML_OPEN_KEY = 'doop:inspector-html'
 
@@ -34,21 +36,31 @@ export function Inspector({
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
+  const [copiedHtml, setCopiedHtml] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [showCodeViewer, setShowCodeViewer] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const saveTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
 
+  function copyHtml() {
+    navigator.clipboard.writeText(draft).then(() => {
+      setCopiedHtml(true)
+      window.setTimeout(() => setCopiedHtml(false), 1500)
+    }, console.error)
+  }
+
   /* switching frames resets the draft; otherwise pull in remote html
-     updates unless the user is typing */
+     updates unless the user is typing in the textarea or expanded modal */
   useEffect(() => {
     const switched = frameId.current !== frame.id
     frameId.current = frame.id
-    const typing = document.activeElement === textareaRef.current
+    const typing = document.activeElement === textareaRef.current || showCodeViewer
     if (switched || (!typing && frame.html !== draft)) {
       setDraft(frame.html)
       setSaveState('idle')
     }
-  }, [frame.id, frame.html, draft])
+  }, [frame.id, frame.html, draft, showCodeViewer])
 
   function onHtmlChange(value: string) {
     setDraft(value)
@@ -130,6 +142,9 @@ export function Inspector({
         >
           {copiedUrl ? '✓ copied' : 'Copy image URL'}
         </Button>
+        <Button className={exportBtn} title="Copy complete HTML code to clipboard" onClick={copyHtml}>
+          {copiedHtml ? '✓ copied' : 'Copy HTML'}
+        </Button>
       </div>
       <Collapsible
         className="flex min-h-0 flex-col"
@@ -139,19 +154,67 @@ export function Inspector({
           localStorage.setItem(HTML_OPEN_KEY, next ? '1' : '0')
         }}
       >
-        <PanelDisclosure>
-          <span>{'</>'} HTML</span>
-        </PanelDisclosure>
+        <div className="flex items-center justify-between border-t border-line-soft bg-transparent pr-3">
+          <PanelDisclosure className="border-t-0 flex-1">
+            <span>{'</>'} HTML</span>
+          </PanelDisclosure>
+          {showHtml && (
+            <div className="flex items-center gap-1 shrink-0">
+              <Button
+                variant="bare"
+                size="sm"
+                className="h-6 px-1.5 font-mono text-[11px] text-ink-faint hover:text-ink"
+                onClick={() => setIsEditing(!isEditing)}
+                title={isEditing ? 'View syntax highlighted code' : 'Edit raw HTML'}
+              >
+                {isEditing ? 'Preview' : 'Edit'}
+              </Button>
+              <Button
+                variant="bare"
+                size="sm"
+                className="h-6 px-1.5 font-mono text-[11px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+                onClick={copyHtml}
+                title="Copy complete formatted HTML"
+              >
+                {copiedHtml ? '✓ copied' : 'Copy'}
+              </Button>
+              <Button
+                variant="bare"
+                size="sm"
+                className="h-6 px-1.5 font-mono text-[11px] font-semibold text-accent-ink hover:bg-accent-ink/10"
+                onClick={() => setShowCodeViewer(true)}
+                title="Open expanded code viewer modal"
+              >
+                Expand ⤢
+              </Button>
+            </div>
+          )}
+        </div>
         <CollapsibleContent className="flex min-h-0 flex-col">
-          <Textarea
-            ref={textareaRef}
-            variant="bare"
-            className="h-[320px] flex-none bg-[#17171b] p-3.5 font-mono text-xs leading-[1.55] text-[#e9e9ee] [tab-size:2] max-md:h-auto max-md:min-h-[160px] max-md:flex-1 md:text-xs"
-            value={draft}
-            spellCheck={false}
-            placeholder="<!doctype html>…"
-            onChange={(e) => onHtmlChange(e.target.value)}
-          />
+          {isEditing ? (
+            <Textarea
+              ref={textareaRef}
+              variant="bare"
+              className="h-[300px] flex-none bg-[#17171b] p-3.5 font-mono text-xs leading-[1.55] text-[#e9e9ee] [tab-size:2] max-md:h-auto max-md:min-h-[160px] max-md:flex-1 md:text-xs"
+              value={draft}
+              spellCheck={false}
+              placeholder="<!doctype html>…"
+              onChange={(e) => onHtmlChange(e.target.value)}
+            />
+          ) : (
+            <div
+              className="group relative h-[300px] flex-none overflow-auto bg-[#17171b] p-3.5 font-mono text-xs leading-[1.55] text-[#e9e9ee] [tab-size:2] max-md:h-auto max-md:min-h-[160px] max-md:flex-1 cursor-pointer"
+              onClick={() => setShowCodeViewer(true)}
+              title="Click to open expanded code viewer"
+            >
+              <div className="absolute right-3 top-3 opacity-0 transition-opacity group-hover:opacity-100">
+                <span className="rounded-[6px] border border-line-soft bg-surface px-2 py-1 font-mono text-[10.5px] font-medium text-ink shadow-sm">
+                  Click to Expand ⤢
+                </span>
+              </div>
+              <HtmlHighlightView code={formatHtml(draft)} />
+            </div>
+          )}
         </CollapsibleContent>
       </Collapsible>
       <footer className="flex items-center justify-between border-t border-line-soft px-4 py-2.5">
@@ -162,6 +225,15 @@ export function Inspector({
           Delete frame
         </Button>
       </footer>
+      {showCodeViewer && (
+        <CodeViewerModal
+          open={showCodeViewer}
+          frame={frame}
+          code={draft}
+          onClose={() => setShowCodeViewer(false)}
+          onSaveCode={(newCode) => onHtmlChange(newCode)}
+        />
+      )}
     </Panel>
   )
 }
