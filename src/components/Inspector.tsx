@@ -34,8 +34,10 @@ export function Inspector({
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
+  const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const saveTimer = useRef<number | null>(null)
+  const copyTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
 
   /* switching frames resets the draft; otherwise pull in remote html
@@ -48,7 +50,17 @@ export function Inspector({
       setDraft(frame.html)
       setSaveState('idle')
     }
+    /* a copy confirmation belongs to the frame it was copied from */
+    if (switched) setHtmlCopy('idle')
   }, [frame.id, frame.html, draft])
+
+  /* the confirmation timer must not fire after the panel is gone */
+  useEffect(
+    () => () => {
+      if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    },
+    [],
+  )
 
   function onHtmlChange(value: string) {
     setDraft(value)
@@ -61,6 +73,20 @@ export function Inspector({
       setSaveState('saved')
       window.setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 1500)
     }, 700)
+  }
+
+  async function copyHtml() {
+    /* one timer only, so an older copy can't clear the newest tick early */
+    if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    try {
+      await navigator.clipboard.writeText(draft)
+      setHtmlCopy('copied')
+      copyTimer.current = window.setTimeout(() => setHtmlCopy('idle'), 1500)
+    } catch (caught) {
+      console.error(caught)
+      /* a failure stays up until the next attempt, so it can be read */
+      setHtmlCopy('failed')
+    }
   }
 
   function commitMeta(patch: Partial<Frame>) {
@@ -142,16 +168,30 @@ export function Inspector({
         <PanelDisclosure>
           <span>{'</>'} HTML</span>
         </PanelDisclosure>
-        <CollapsibleContent className="flex min-h-0 flex-col">
+        <CollapsibleContent className="relative flex min-h-0 flex-col">
+          {/* pr-11 keeps the copy button's corner clear of the code, as CodeBlock does */}
           <Textarea
             ref={textareaRef}
             variant="bare"
-            className="h-[320px] flex-none bg-[#17171b] p-3.5 font-mono text-xs leading-[1.55] text-[#e9e9ee] [tab-size:2] max-md:h-auto max-md:min-h-[160px] max-md:flex-1 md:text-xs"
+            className="h-[320px] flex-none bg-[#17171b] py-3.5 pl-3.5 pr-11 font-mono text-xs leading-[1.55] text-[#e9e9ee] [tab-size:2] max-md:h-auto max-md:min-h-[160px] max-md:flex-1 md:text-xs"
             value={draft}
             spellCheck={false}
             placeholder="<!doctype html>…"
             onChange={(e) => onHtmlChange(e.target.value)}
           />
+          <button
+            type="button"
+            className="absolute right-2 top-2 rounded-[6px] bg-white/[0.08] px-2 py-1 text-[11px] text-[#e9e9ee] transition-colors hover:bg-white/[0.18]"
+            title="Copy the frame's full HTML"
+            onClick={copyHtml}
+          >
+            {htmlCopy === 'copied' ? '✓' : 'copy'}
+          </button>
+          {htmlCopy === 'failed' && (
+            <p className="px-3.5 py-2 text-[11px] text-accent-ink">
+              Couldn’t copy the HTML. Select it in the editor and copy it by hand.
+            </p>
+          )}
         </CollapsibleContent>
       </Collapsible>
       <footer className="flex items-center justify-between border-t border-line-soft px-4 py-2.5">
