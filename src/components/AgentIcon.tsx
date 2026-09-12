@@ -23,7 +23,7 @@ export function AgentIcon({ name, size = 13, color }: { name: string; size?: num
   /* Anything else is a Doop agent (the built-in roles, or an unknown MCP
      client) and wears the brand's own mark, as on the marketing site. */
   if (!path) return <DoopMark size={size} color={color} />
-  const fill = color ?? (n.includes('claude') ? '#D97757' : '#000')
+  const fill = color ?? (n.includes('claude') ? '#D97757' : 'currentColor')
   return (
     <svg
       className="mr-px inline-block align-[-2px]"

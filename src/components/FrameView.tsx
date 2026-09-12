@@ -704,7 +704,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
           {editing && (
             <div
               className={cn(
-                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center gap-[9px] whitespace-nowrap rounded-full bg-ink py-1 pr-[5px] pl-3 text-[11px] font-semibold text-white shadow-card animate-[chip-in_0.25s_ease]',
+                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center gap-[9px] whitespace-nowrap rounded-full bg-ink py-1 pr-[5px] pl-3 text-[11px] font-semibold text-paper shadow-card animate-[chip-in_0.25s_ease]',
                 COUNTER_SCALE,
               )}
               onPointerDown={(e) => e.stopPropagation()}

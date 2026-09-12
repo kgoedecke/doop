@@ -421,7 +421,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               )}
             >
               {pendingProposal && mutedProposal !== pendingProposal.id && !(showActivity && panelTab === 'memory') && (
-                <div className="flex items-center rounded-[10px] border border-brand bg-white shadow-card">
+                <div className="flex items-center rounded-[10px] border border-brand bg-surface shadow-card">
                   <Button
                     variant="bare"
                     className="py-[9px] pl-3.5 pr-1 text-[12.5px] font-bold text-accent-ink hover:bg-transparent hover:text-accent-ink"
@@ -867,7 +867,7 @@ function ImportModal({
             >
               {visibleScreens.map((screen, index) => (
                 <label
-                  className="relative grid min-h-[58px] cursor-pointer grid-cols-[20px_24px_minmax(0,1fr)_auto] items-center gap-2.5 border-b border-line bg-surface px-3 py-[9px] first:rounded-t-[10px] last:rounded-t-none last:rounded-b-[10px] last:border-b-0 hover:bg-[#fbfbfc]"
+                  className="relative grid min-h-[58px] cursor-pointer grid-cols-[20px_24px_minmax(0,1fr)_auto] items-center gap-2.5 border-b border-line bg-surface px-3 py-[9px] first:rounded-t-[10px] last:rounded-t-none last:rounded-b-[10px] last:border-b-0 hover:bg-paper"
                   key={screenKey(screen)}
                 >
                   <Checkbox
@@ -969,7 +969,7 @@ function ImportModal({
                 id="import-url"
                 variant="mono"
                 inputSize="lg"
-                className="bg-paper focus:border-ink focus:bg-white focus:ring-0"
+                className="bg-paper focus:border-ink focus:bg-surface focus:ring-0"
                 autoFocus
                 placeholder="https://example.com"
                 value={url}
@@ -1087,7 +1087,7 @@ function ImportModal({
                 const path = pathname + pageUrl.search
                 return (
                   <label
-                    className="relative grid min-h-[58px] cursor-pointer grid-cols-[20px_24px_minmax(0,1fr)] items-center gap-2.5 border-b border-line bg-surface px-3 py-[9px] first:rounded-t-[10px] last:rounded-t-none last:rounded-b-[10px] last:border-b-0 hover:bg-[#fbfbfc]"
+                    className="relative grid min-h-[58px] cursor-pointer grid-cols-[20px_24px_minmax(0,1fr)] items-center gap-2.5 border-b border-line bg-surface px-3 py-[9px] first:rounded-t-[10px] last:rounded-t-none last:rounded-b-[10px] last:border-b-0 hover:bg-paper"
                     key={page.url}
                   >
                     <Checkbox
@@ -1271,7 +1271,7 @@ function SyncKeysSection({ canvasId }: { canvasId: string }) {
           </div>
           <div className="relative">
             <Textarea
-              className="resize-none border-line-soft bg-black/[0.04] py-2 pl-2.5 pr-[84px] font-mono text-[11px] leading-normal text-ink-faint focus:border-line focus:text-ink focus:ring-0 md:text-[11px] [word-break:break-all]"
+              className="resize-none border-line-soft bg-ink/[0.04] py-2 pl-2.5 pr-[84px] font-mono text-[11px] leading-normal text-ink-faint focus:border-line focus:text-ink focus:ring-0 md:text-[11px] [word-break:break-all]"
               readOnly
               rows={4}
               value={snippetFor(k.secret)}
