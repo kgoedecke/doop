@@ -400,14 +400,25 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   }, [probeSel, frame.id])
   const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
   const selectReq = useRef(0)
+  const selectSel = useRef<string | null>(null)
   useEffect(() => {
     if (!runtimeReady || !wantedSel || wantedSel === probeSel) return
+    /* a surface click clears the probe, and the effect above has just cleared
+       the store to match — but this render still carries the old selector.
+       Re-selecting it here would resurrect the previous element and (via the
+       select-result's closePopovers) cancel the pending click probe, so only
+       a selection that is still live in the store (a Layers row pick) is
+       resolved into a probe. A request already in flight for the old
+       selector is dropped for the same reason. */
+    const live = useStore.getState().selectedElement
     selectReq.current += 1
+    if (live?.frameId !== frame.id || live.selector !== wantedSel) return
+    selectSel.current = wantedSel
     iframeRef.current?.contentWindow?.postMessage(
       { type: 'doop:select', reqId: selectReq.current, selector: wantedSel },
       '*',
     )
-  }, [runtimeReady, wantedSel, probeSel])
+  }, [runtimeReady, wantedSel, probeSel, frame.id])
 
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
@@ -416,6 +427,10 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         setProbe(ev.data.hit ?? null)
       }
       if (ev.data?.type === 'doop:select-result' && ev.data.reqId === selectReq.current) {
+        /* the answer is only acted on while the asked-for element is still
+           the live selection — a surface click in the meantime has moved on */
+        const live = useStore.getState().selectedElement
+        if (live?.frameId !== frame.id || live.selector !== selectSel.current) return
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         closePopovers()
         if (hit) setProbe(hit)
@@ -454,7 +469,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [])
+  }, [frame.id])
 
   /* Esc dismisses popovers (edit mode has its own Esc path inside the iframe) */
   useEffect(() => {
