@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/kgoedecke/doop/compare/v0.4.0...v0.5.0) (2026-09-12)
+
+
+### Features
+
+* **agents:** generate_image tool draws with AI on the user's own account ([#165](https://github.com/kgoedecke/doop/issues/165)) ([ad55317](https://github.com/kgoedecke/doop/commit/ad553177f327b468c84a6c111474f70bda13c0d5))
+* **automations:** scheduled pulls and agent tasks, with a Meta integration ([#168](https://github.com/kgoedecke/doop/issues/168)) ([ce34ba6](https://github.com/kgoedecke/doop/commit/ce34ba67df715c2ed32e1de4ddc66e72041534f0))
+* **canvas:** element properties panel opens from a click on the canvas ([#167](https://github.com/kgoedecke/doop/issues/167)) ([510fdfe](https://github.com/kgoedecke/doop/commit/510fdfecb0d5214ede2dcfd787c9e5f342fddcb7))
+* **canvas:** reorder elements in the Layers panel ([#164](https://github.com/kgoedecke/doop/issues/164)) ([fbc831e](https://github.com/kgoedecke/doop/commit/fbc831ef05264c5f3bbd6cc7ac310bf897d69447))
+
 ## [0.4.0](https://github.com/kgoedecke/doop/compare/v0.3.0...v0.4.0) (2026-09-10)
 
 
