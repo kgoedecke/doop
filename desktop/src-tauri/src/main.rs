@@ -188,8 +188,10 @@ fn main() {
             let handle = app.handle().clone();
             let entry = format!("{}/auth", base_url());
             // Hosts that stay inside the shell; any other http(s) target opens
-            // in the system browser. Hostless schemes (about:, blob:) stay in —
-            // sandboxed frame content depends on them.
+            // in the system browser. Hostless web schemes (about:, blob:) stay
+            // in — sandboxed frame content depends on them — but mailto: and
+            // tel: are hostless too and WKWebView drops them silently, so they
+            // go to the system handler (Mail) instead.
             let mut app_hosts: Vec<String> =
                 vec!["localhost".into(), "127.0.0.1".into()];
             if let Some(host) = Url::parse(APP_URL)?.host_str() {
@@ -216,9 +218,10 @@ fn main() {
                     .inner_size(1440.0, 900.0)
                     .min_inner_size(900.0, 600.0)
                     .on_navigation(move |url| {
-                        let in_app = match url.host_str() {
-                            Some(host) => app_hosts.iter().any(|h| h == host),
-                            None => true,
+                        let in_app = match (url.scheme(), url.host_str()) {
+                            ("mailto" | "tel", _) => false,
+                            (_, Some(host)) => app_hosts.iter().any(|h| h == host),
+                            (_, None) => true,
                         };
                         if !in_app {
                             let _ = handle.opener().open_url(url.as_str(), None::<String>);
