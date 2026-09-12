@@ -9,6 +9,9 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
   Activity,
+  Building,
+  CreditCard,
+  Lock,
   Clock,
   Attachment,
   Brain,
@@ -104,3 +107,7 @@ export const HelpIcon = icon(HelpCircle)
 export const LogOutIcon = icon(LogOut)
 export const AttachmentIcon = icon(Attachment)
 export const BrainIcon = icon(Brain)
+/** a shared workspace — the org's building */
+export const BuildingIcon = icon(Building)
+export const CreditCardIcon = icon(CreditCard)
+export const LockIcon = icon(Lock)

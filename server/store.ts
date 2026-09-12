@@ -27,6 +27,7 @@ class Store {
       name: c.name,
       ownerId: c.ownerId,
       shared: viewerId !== undefined ? c.ownerId !== viewerId || undefined : undefined,
+      ...(c.workspaceId ? { workspaceId: c.workspaceId } : {}),
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
       frameCount: c.frames.length,
@@ -36,13 +37,20 @@ class Store {
     }
   }
 
-  /** Canvases visible to a user: their own plus ones they were invited to.
-   *  Unowned (legacy/seeded) canvases are NOT listed — listing them to
-   *  everyone leaked one user's work onto every other user's dashboard.
-   *  They remain reachable by their unguessable id and claimable there. */
-  listCanvases(userId: string) {
+  /** Canvases visible to a user: their own, ones they were invited to, and
+   *  every canvas in the workspaces they belong to (the caller resolves
+   *  membership — see workspaces.canvasesFor). Unowned (legacy/seeded)
+   *  canvases are NOT listed — listing them to everyone leaked one user's
+   *  work onto every other user's dashboard. They remain reachable by their
+   *  unguessable id and claimable there. */
+  listCanvases(userId: string, workspaceIds: readonly string[] = []) {
     return [...this.canvases.values()]
-      .filter((c) => c.ownerId === userId || c.memberIds?.includes(userId))
+      .filter(
+        (c) =>
+          c.ownerId === userId ||
+          c.memberIds?.includes(userId) ||
+          (c.workspaceId !== undefined && workspaceIds.includes(c.workspaceId)),
+      )
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((c) => this.toMeta(c, userId))
   }
@@ -64,9 +72,10 @@ class Store {
     }
   }
 
-  createCanvas(name: string, ownerId?: string): Canvas {
+  createCanvas(name: string, ownerId?: string, workspaceId?: string): Canvas {
     const now = Date.now()
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
+    if (workspaceId) canvas.workspaceId = workspaceId
     this.canvases.set(canvas.id, canvas)
     persist.saveCanvas(canvas)
     return canvas
@@ -76,12 +85,13 @@ class Store {
    * activity, tasks, external connections and the gallery listing belong to
    * the source only. `name` defaults to "<source> copy"; `dropDemo` leaves
    * product-made onboarding frames behind (a gallery copy is the design,
-   * not the welcome tour that happened to sit next to it). */
+   * not the welcome tour that happened to sit next to it); `workspaceId`
+   * files the copy in a workspace (the caller checks membership). */
   async duplicateCanvas(
     id: string,
     ownerId: string,
     by: string,
-    options: { name?: string; dropDemo?: boolean } = {},
+    options: { name?: string; dropDemo?: boolean; workspaceId?: string } = {},
   ): Promise<Canvas | undefined> {
     const source = this.canvases.get(id)
     if (!source) return undefined
@@ -112,6 +122,7 @@ class Store {
       createdAt: now,
       updatedAt: now,
       frames,
+      ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
       ...(references?.length ? { references } : {}),
     }
@@ -154,6 +165,36 @@ class Store {
     else delete c.linkAccess
     persist.saveCanvas(c)
     return c
+  }
+
+  /* ---- workspaces ---- */
+
+  /** File a canvas in a workspace, or take it back to its owner's personal
+   *  space (undefined). Access checks are the caller's; like the privacy
+   *  toggles this is not a design edit, so updatedAt stays put. */
+  setWorkspace(id: string, workspaceId: string | undefined): Canvas | undefined {
+    const c = this.canvases.get(id)
+    if (!c) return undefined
+    if (workspaceId) c.workspaceId = workspaceId
+    else delete c.workspaceId
+    persist.saveCanvas(c)
+    return c
+  }
+
+  countWorkspaceCanvases(workspaceId: string): number {
+    let n = 0
+    for (const c of this.canvases.values()) if (c.workspaceId === workspaceId) n++
+    return n
+  }
+
+  /** A workspace is going away: every canvas in it becomes personal again. */
+  detachWorkspace(workspaceId: string): void {
+    for (const c of this.canvases.values()) {
+      if (c.workspaceId === workspaceId) {
+        delete c.workspaceId
+        persist.saveCanvas(c)
+      }
+    }
   }
 
   /* ---- community gallery ---- */

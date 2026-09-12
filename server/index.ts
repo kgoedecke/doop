@@ -10,12 +10,14 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
-import { canAccessCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
+import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
 import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN, loginProvidersConfig } from './auth.ts'
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
 import { integrationsRouter } from './integrations.ts'
+import * as workspaces from './workspaces.ts'
+import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
@@ -71,6 +73,8 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
 }
 store.init(data.canvases)
+await workspaces.hydrateWorkspaces() // before the first request: canAccessCanvas reads membership
+billing.reportBillingConfig()
 actions.hydrateLogs(data)
 seed()
 
@@ -464,6 +468,16 @@ app.all('/api/auth/*', async (req, res, next) => {
   toNodeHandler(auth)(req, res).catch(next)
 })
 
+/* Stripe webhooks: the signature covers the exact bytes, so this route takes
+   the raw body and sits ahead of the JSON parser; no session — Stripe is the
+   caller. Everything it does is in server/workspaces.ts. */
+app.post('/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, res) => {
+  workspaces.handleStripeWebhook(req, res).catch((err) => {
+    console.error('[billing] webhook crashed', err)
+    if (!res.headersSent) res.status(500).json({ error: 'webhook handling failed' })
+  })
+})
+
 app.use(express.json({ limit: '10mb' }))
 
 /* Public: does an account exist for this email? Drives the login page's
@@ -552,6 +566,8 @@ app.get('/api/me', async (req, res) => {
     name,
     email,
     admin: isAdmin(req.user),
+    /* 'team' while a member of a live paid workspace — the account menu's plan line */
+    plan: workspaces.planFor(id),
     /* the SPA cannot infer this: impersonation swaps the session cookie
        outright, so everything else on this response describes the person
        being viewed, not the admin doing the viewing */
@@ -593,6 +609,8 @@ app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)
 app.use('/api/integrations', integrationsRouter)
+app.use('/api/workspaces', workspaces.workspacesRouter)
+app.use('/api/billing', billing.billingRouter)
 
 /* free-tier meter for the resident team: {used, limit, connected, byoModel} */
 app.get('/api/agent-allowance', (req, res) => {
@@ -699,7 +717,7 @@ app.delete('/api/model-account', async (req, res) => {
 
 app.get('/api/canvases', (req, res) =>
   res.json(
-    store.listCanvases(req.user!.id).map((c) => {
+    workspaces.canvasesFor(req.user!.id).map((c) => {
       /* which agents have worked on this canvas (most recent first), with
          the user whose token they connected under and when they last worked */
       const seen = new Map<string, { owner?: string; lastAt: number }>()
@@ -712,17 +730,41 @@ app.get('/api/canvases', (req, res) =>
   ),
 )
 
+/* A workspace canvas needs membership and a workspace that may still grow —
+   the 402 is what every client turns into the upgrade modal. */
+function requireGrowableWorkspace(req: express.Request, res: express.Response, workspaceId: string) {
+  const ws = workspaces.getWorkspace(workspaceId)
+  if (!ws || !workspaces.isWorkspaceMember(ws.id, req.user!.id)) {
+    res.status(404).json({ error: 'workspace not found' })
+    return null
+  }
+  if (!workspaces.isActive(ws)) {
+    workspaces.planRequired(res, ws)
+    return null
+  }
+  return ws
+}
+
 app.post('/api/canvases', (req, res) => {
   const name = String(req.body?.name || 'Untitled canvas')
-  res.json(store.createCanvas(name, req.user!.id))
+  const workspaceId = typeof req.body?.workspaceId === 'string' ? req.body.workspaceId : undefined
+  if (workspaceId && !requireGrowableWorkspace(req, res, workspaceId)) return
+  res.json(store.createCanvas(name, req.user!.id, workspaceId))
 })
 
 app.post('/api/canvases/:id/duplicate', async (req, res) => {
   const source = store.getCanvas(req.params.id)
   if (!source) return res.status(404).json({ error: 'not found' })
   if (!hasDurableCanvasAccess(req.user!.id, source)) return res.status(403).json({ error: 'access denied' })
+  /* a copy stays in the workspace when the copier is a member of it and the
+     workspace may still take canvases; otherwise it lands in their personal space */
+  const sourceWs = source.workspaceId ? workspaces.getWorkspace(source.workspaceId) : undefined
+  const workspaceId =
+    sourceWs && workspaces.isWorkspaceMember(sourceWs.id, req.user!.id) && workspaces.isActive(sourceWs)
+      ? sourceWs.id
+      : undefined
   try {
-    const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name)
+    const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name, { workspaceId })
     res.json(copy)
   } catch (error) {
     console.error('[canvas] duplicate failed', error)
@@ -756,6 +798,26 @@ app.delete('/api/canvases/:id/publish', (req, res) => {
   res.json({ ok: true })
 })
 
+/* Move a canvas into a workspace (any member, while it may grow) or back out
+   to its owner's personal space (the owner, or a workspace admin). Moving
+   is an access change, not an edit: every member of the target workspace
+   can open it from now on. */
+app.put('/api/canvases/:id/workspace', (req, res) => {
+  const c = requireCanvas(req, res, req.params.id)
+  if (!c) return
+  const target = req.body?.workspaceId
+  if (target !== null && typeof target !== 'string')
+    return res.status(400).json({ error: 'workspaceId must be a workspace id or null' })
+  if (!canManageCanvas(req.user!.id, c))
+    return res.status(403).json({ error: 'only the canvas owner or a workspace admin can move it' })
+  if (target !== null) {
+    if (target === c.workspaceId) return res.json({ ok: true })
+    if (!requireGrowableWorkspace(req, res, target)) return
+  }
+  store.setWorkspace(c.id, target ?? undefined)
+  res.json({ ok: true })
+})
+
 app.post('/api/canvases/:id/claim', (req, res) => {
   const c = store.claimCanvas(req.params.id, req.user!.id)
   if (!c) return res.status(409).json({ error: 'not found or already owned' })
@@ -764,7 +826,7 @@ app.post('/api/canvases/:id/claim', (req, res) => {
 
 /* recent activity across all of the user's canvases, for the home dashboard */
 app.get('/api/home/activity', (req, res) => {
-  const canvases = store.listCanvases(req.user!.id)
+  const canvases = workspaces.canvasesFor(req.user!.id)
   const items = canvases.flatMap((c) =>
     actions
       .getActivity(c.id)
@@ -778,9 +840,11 @@ app.get('/api/home/activity', (req, res) => {
 app.delete('/api/canvases/:id', (req, res) => {
   const c = store.getCanvas(req.params.id)
   if (!c) return res.status(404).json({ error: 'not found' })
-  /* only the owner may delete; unclaimed (legacy) canvases are reachable
-     only by direct link and must be claimed before they can be destroyed */
-  if (c.ownerId !== req.user!.id) return res.status(403).json({ error: c.ownerId ? 'not yours' : 'claim it first' })
+  /* only the owner (or an admin of its workspace) may delete; unclaimed
+     (legacy) canvases are reachable only by direct link and must be claimed
+     before they can be destroyed */
+  if (!c.ownerId) return res.status(403).json({ error: 'claim it first' })
+  if (!canManageCanvas(req.user!.id, c)) return res.status(403).json({ error: 'not yours' })
   actions.deleteCanvas(c.id)
   res.json({ ok: true })
 })

@@ -1,5 +1,18 @@
-import type { ActivityItem, Canvas, CanvasMeta, CommunityCategory, CommunityItem, Frame } from '../../shared/types'
+import type {
+  ActivityItem,
+  Canvas,
+  CanvasMeta,
+  CommunityCategory,
+  CommunityItem,
+  Frame,
+  WorkspaceDetail,
+  WorkspaceInvite,
+  WorkspaceMember,
+  WorkspaceRole,
+  WorkspaceSummary,
+} from '../../shared/types'
 import type { Automation, AutomationRun, Schedule, Step } from '../../shared/automations'
+import type { BillingInterval, Plan } from '../../shared/billing'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -166,6 +179,22 @@ export interface IntegrationsStatus {
 }
 import { getIdentity } from './identity'
 
+export interface WorkspacesResponse {
+  workspaces: WorkspaceSummary[]
+  billing: { enabled: boolean }
+}
+
+export interface PlansResponse {
+  enabled: boolean
+  plans: Plan[]
+  /** intervals the server holds a Stripe price for */
+  intervals: BillingInterval[]
+}
+
+/** An invite lands one of two ways: an existing account is a member at
+ *  once; an unknown email waits (and was emailed, when SMTP is set up). */
+export type WorkspaceInviteResult = { member: WorkspaceMember } | { invite: WorkspaceInvite; emailed: boolean }
+
 function actor() {
   const { clientId, name } = getIdentity()
   return { clientId, name, kind: 'user' as const }
@@ -185,6 +214,18 @@ export class ApiError extends Error {
   }
 }
 
+/** The paywall: a 402 naming the workspace that needs a plan. Every surface
+ *  that can grow a workspace turns this into the upgrade modal for it. */
+export function paywalledWorkspace(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 402) return null
+  return typeof err.body.workspaceId === 'string' ? err.body.workspaceId : null
+}
+
+export function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) return String(err.body.error ?? err.body.message ?? fallback)
+  return fallback
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
@@ -199,7 +240,11 @@ export const api = {
   getCanvas: (id: string) => req<Canvas>(`/api/canvases/${id}`),
   deleteCanvas: (id: string) => req(`/api/canvases/${id}`, { method: 'DELETE' }),
   homeActivity: () => req<HomeActivity[]>('/api/home/activity'),
-  createCanvas: (name: string) => req<Canvas>('/api/canvases', { method: 'POST', body: JSON.stringify({ name }) }),
+  createCanvas: (name: string, workspaceId?: string) =>
+    req<Canvas>('/api/canvases', { method: 'POST', body: JSON.stringify({ name, workspaceId }) }),
+  /* file a canvas in a workspace, or back in its owner's personal space (null) */
+  moveCanvas: (id: string, workspaceId: string | null) =>
+    req(`/api/canvases/${id}/workspace`, { method: 'PUT', body: JSON.stringify({ workspaceId }) }),
   duplicateCanvas: (id: string) => req<Canvas>(`/api/canvases/${id}/duplicate`, { method: 'POST' }),
   claimCanvas: (id: string) => req(`/api/canvases/${id}/claim`, { method: 'POST' }),
   renameCanvas: (id: string, name: string) =>
@@ -345,6 +390,38 @@ export const api = {
   runAutomation: (id: string) => req<AutomationRun>(`/api/automations/${id}/run`, { method: 'POST' }),
   listRuns: (id: string, before?: number) =>
     req<AutomationRun[]>(`/api/automations/${id}/runs${before ? `?before=${before}` : ''}`),
+  /* workspaces: the shared, per-seat paid space for a team */
+  listWorkspaces: () => req<WorkspacesResponse>('/api/workspaces'),
+  createWorkspace: (name: string) =>
+    req<WorkspaceSummary>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) }),
+  getWorkspace: (id: string) => req<WorkspaceDetail>(`/api/workspaces/${id}`),
+  renameWorkspace: (id: string, name: string) =>
+    req<WorkspaceSummary>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteWorkspace: (id: string) => req(`/api/workspaces/${id}`, { method: 'DELETE' }),
+  inviteToWorkspace: (id: string, email: string, role: WorkspaceRole = 'member') =>
+    req<WorkspaceInviteResult>(`/api/workspaces/${id}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    }),
+  setWorkspaceRole: (id: string, userId: string, role: WorkspaceRole) =>
+    req(`/api/workspaces/${id}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  removeWorkspaceMember: (id: string, userId: string) =>
+    req(`/api/workspaces/${id}/members/${userId}`, { method: 'DELETE' }),
+  revokeWorkspaceInvite: (id: string, inviteId: string) =>
+    req(`/api/workspaces/${id}/invites/${inviteId}`, { method: 'DELETE' }),
+  /* billing: the catalogue, and the hosted Stripe pages */
+  billingPlans: () => req<PlansResponse>('/api/billing/plans'),
+  workspaceCheckout: (id: string, interval: BillingInterval) =>
+    req<{ url: string }>(`/api/workspaces/${id}/billing/checkout`, {
+      method: 'POST',
+      body: JSON.stringify({ interval }),
+    }),
+  workspacePortal: (id: string) => req<{ url: string }>(`/api/workspaces/${id}/billing/portal`, { method: 'POST' }),
+  syncWorkspaceBilling: (id: string, sessionId?: string) =>
+    req<WorkspaceSummary>(`/api/workspaces/${id}/billing/sync`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    }),
   /* integrations: per-user connections to outside services */
   integrations: () => req<IntegrationsStatus>('/api/integrations'),
   startMetaConnect: () => req<{ url: string }>('/api/integrations/meta/start', { method: 'POST' }),

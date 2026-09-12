@@ -6,13 +6,16 @@ import {
   type CommunityCategory,
 } from '../../shared/types'
 import { navigate } from '../App'
-import { api, ApiError, type CanvasMember } from '../lib/api'
+import type { WorkspaceSummary } from '../../shared/types'
+import { api, ApiError, paywalledWorkspace, type CanvasMember } from '../lib/api'
+import { UpgradeModal } from './WorkspaceModals'
+import { Sel } from './AutomateShell'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
 import { Avatar } from './ui/avatar'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
-import { XIcon } from './ui/icons'
+import { BuildingIcon, XIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Modal, ModalTitle } from './ui/modal'
 import { Textarea } from './ui/textarea'
@@ -20,10 +23,10 @@ import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 
 type ShareableCanvas = Pick<
   Canvas,
-  'id' | 'name' | 'ownerId' | 'linkAccess' | 'memberIds' | 'publishedAt' | 'description' | 'category'
+  'id' | 'name' | 'ownerId' | 'linkAccess' | 'memberIds' | 'workspaceId' | 'publishedAt' | 'description' | 'category'
 >
 type SharePatch = Partial<
-  Pick<ShareableCanvas, 'linkAccess' | 'memberIds' | 'publishedAt' | 'description' | 'category'>
+  Pick<ShareableCanvas, 'linkAccess' | 'memberIds' | 'workspaceId' | 'publishedAt' | 'description' | 'category'>
 >
 
 /* One sharing surface for the canvas and dashboard. The caller owns canvas
@@ -44,6 +47,8 @@ export function ShareModal({
   const isOwner = !!canvas.ownerId && canvas.ownerId === meId
   const linkEdits = canvas.linkAccess === 'edit'
   const [people, setPeople] = useState<CanvasMember[] | null>(null)
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
+  const [upgrade, setUpgrade] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -54,10 +59,34 @@ export function ShareModal({
       .listMembers(canvas.id)
       .then((members) => active && setPeople(members))
       .catch(() => active && setPeople([]))
+    api
+      .listWorkspaces()
+      .then((res) => active && setWorkspaces(res.workspaces))
+      .catch(() => {})
     return () => {
       active = false
     }
   }, [canvas.id])
+
+  const workspace = canvas.workspaceId ? workspaces.find((w) => w.id === canvas.workspaceId) : undefined
+
+  async function move(target: string) {
+    if (busy) return
+    const workspaceId = target || null
+    setBusy(true)
+    setError(null)
+    try {
+      await api.moveCanvas(canvas.id, workspaceId)
+      posthog.capture('canvas_moved', { into: !!workspaceId })
+      onChange({ workspaceId: workspaceId ?? undefined })
+    } catch (caught) {
+      const walled = paywalledWorkspace(caught)
+      if (walled) setUpgrade(walled)
+      else setError(caught instanceof ApiError ? String(caught.body.error ?? 'move failed') : 'move failed')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function invite() {
     const clean = email.trim()
@@ -188,7 +217,45 @@ export function ShareModal({
             </div>
           ))}
           {people === null && <p className="text-[12px] text-ink-faint">Loading…</p>}
+          {canvas.workspaceId && (
+            <div className="flex items-center gap-2.5 px-[2px] py-1.5">
+              <span className="grid size-7 flex-none place-items-center rounded-full bg-paper-deep text-ink-soft">
+                <BuildingIcon width={14} height={14} aria-hidden />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col leading-[1.3]">
+                <b className="truncate text-[13px] font-semibold">Everyone in {workspace?.name ?? 'the workspace'}</b>
+                <span className="truncate text-[12px] text-ink-faint">
+                  {workspace
+                    ? `${workspace.memberCount} ${workspace.memberCount === 1 ? 'person' : 'people'}`
+                    : 'workspace members'}
+                </span>
+              </span>
+              <span className="flex-none text-[12px] text-ink-faint">Can edit</span>
+            </div>
+          )}
         </div>
+        {/* filing: a workspace canvas is open to the whole team, so the
+            choice sits with the access controls rather than in a menu */}
+        {isOwner && workspaces.length > 0 && (
+          <div className="mt-2.5 flex flex-col gap-2 border-t border-line-soft pt-3.5 sm:flex-row sm:items-center">
+            <span className="text-[13px] font-medium text-ink">Workspace</span>
+            <Sel
+              className="sm:ml-auto sm:w-[240px]"
+              value={canvas.workspaceId ?? ''}
+              disabled={busy}
+              onChange={(event) => move(event.target.value)}
+              aria-label="Workspace this canvas lives in"
+            >
+              <option value="">Personal — invite-only</option>
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                  {w.active ? '' : ' (needs a plan)'}
+                </option>
+              ))}
+            </Sel>
+          </div>
+        )}
         <div className="mt-2.5 flex flex-col items-stretch justify-between gap-2.5 border-t border-line-soft pt-3.5 sm:flex-row sm:items-center">
           {isOwner ? (
             <label
@@ -209,6 +276,13 @@ export function ShareModal({
         </div>
         {isOwner && (
           <CommunityListing canvas={canvas} busy={busy} setBusy={setBusy} setError={setError} onChange={onChange} />
+        )}
+        {upgrade && (
+          <UpgradeModal
+            workspaceId={upgrade}
+            reason="Moving a canvas into a workspace needs a Team plan."
+            onClose={() => setUpgrade(null)}
+          />
         )}
       </>
     </Modal>

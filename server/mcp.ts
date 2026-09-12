@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas } from './access.ts'
+import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned, PUBLIC_ORIGIN } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
@@ -272,14 +273,18 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   server.registerTool(
     'list_canvases',
     {
-      description: "List the connected user's design canvases with their ids, names and frame counts.",
+      description:
+        "List the connected user's design canvases with their ids, names and frame counts — personal ones, ones shared with them, and every canvas in their workspaces (workspace_id / workspace_name set).",
       inputSchema: {},
     },
     /* '' matches no ownerId: a session without a user sees nothing */
     async () =>
       text(
-        store.listCanvases(ownerId ?? '').map((m) => ({
+        workspaces.canvasesFor(ownerId ?? '').map((m) => ({
           ...m,
+          ...(m.workspaceId
+            ? { workspace_id: m.workspaceId, workspace_name: workspaces.getWorkspace(m.workspaceId)?.name }
+            : {}),
           /* count what get_canvas will actually return — demo frames are hidden from agents */
           frameCount: store.getCanvas(m.id)?.frames.filter((f) => !f.demo).length ?? m.frameCount,
           guidelinesCount: store.getGuidelines(m.id).length,
@@ -290,13 +295,24 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   server.registerTool(
     'create_canvas',
     {
-      description: 'Create a new design canvas. Returns the canvas id, which is part of the shareable URL (/c/<id>).',
-      inputSchema: { name: z.string().describe('Canvas name'), agent_name: agentName.optional() },
+      description:
+        'Create a new design canvas. Returns the canvas id, which is part of the shareable URL (/c/<id>). Pass workspace_id (from list_canvases) to create it inside a shared workspace so every member can open it.',
+      inputSchema: {
+        name: z.string().describe('Canvas name'),
+        workspace_id: z.string().optional().describe('Create inside this shared workspace'),
+        agent_name: agentName.optional(),
+      },
     },
-    async ({ name }) => {
+    async ({ name, workspace_id }) => {
+      if (workspace_id) {
+        const ws = workspaces.getWorkspace(workspace_id)
+        if (!ws || !workspaces.isWorkspaceMember(ws.id, ownerId)) return err(`no workspace with id ${workspace_id}`)
+        if (!workspaces.isActive(ws))
+          return err(`workspace "${ws.name}" needs a Team plan before canvases can be added`)
+      }
       /* owned by the connecting user — an ownerless canvas would be invisible
          on every dashboard (and was once visible on all of them) */
-      const canvas = store.createCanvas(name, ownerId)
+      const canvas = store.createCanvas(name, ownerId, workspace_id)
       return text({ id: canvas.id, name: canvas.name, url: `/c/${canvas.id}` })
     },
   )

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Canvas, CanvasMeta } from '../../shared/types'
+import type { Canvas, CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { colorFor } from '../../shared/types'
-import { api, type HomeActivity } from '../lib/api'
+import { api, errorMessage, paywalledWorkspace, type HomeActivity } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { navigate } from '../App'
 import { Logo } from '../components/Logo'
 import { timeAgo } from '../lib/time'
 import { AgentIcon } from '../components/AgentIcon'
 import { ShareModal } from '../components/ShareModal'
+import { CreateWorkspaceModal, MoveCanvasModal, UpgradeModal } from '../components/WorkspaceModals'
 import {
   AccountMenu,
   ConnectCard,
@@ -16,8 +17,10 @@ import {
   IconIntegrations,
   IconGrid,
   IconList,
+  IconLock,
   IconShare,
   IconUser,
+  IconWorkspace,
 } from '../components/DashShell'
 import { posthog } from '../lib/posthog'
 import { closeTab, openCanvasTab, pruneTabs } from '../lib/desktop'
@@ -27,6 +30,7 @@ import { Badge } from '../components/ui/badge'
 import { Input } from '../components/ui/input'
 import { Card, cardVariants } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
+import { Callout } from '../components/ui/callout'
 import { Dot } from '../components/ui/dot'
 import { Wordmark } from '../components/ui/wordmark'
 import { SegmentedIconItem, SegmentedIcons } from '../components/ui/segmented'
@@ -37,7 +41,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
-import { CopyIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, ShareIcon, TrashIcon } from '../components/ui/icons'
+import {
+  BuildingIcon,
+  CopyIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  SearchIcon,
+  ShareIcon,
+  TrashIcon,
+} from '../components/ui/icons'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Toast } from '../components/ui/toast'
 import {
@@ -56,7 +68,12 @@ import { cn } from '@/lib/utils'
 /** an agent that worked this recently is treated as still at the desk */
 const LIVE_WINDOW = 5 * 60 * 1000
 
-type Scope = 'all' | 'mine' | 'shared'
+/** the three fixed views, or one workspace (`ws:<id>`) */
+type Scope = 'all' | 'mine' | 'shared' | `ws:${string}`
+
+function workspaceOf(scope: Scope): string | undefined {
+  return scope.startsWith('ws:') ? scope.slice(3) : undefined
+}
 
 /* a canvas tile: the Card surface, made clickable */
 /* Canvas tiles: the raised Card surface (frosted, squircle corners, no drawn
@@ -69,12 +86,17 @@ const cardCls = cn(
 
 export function Home() {
   const [canvases, setCanvases] = useState<CanvasMeta[] | null>(null)
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
   const [activity, setActivity] = useState<HomeActivity[]>([])
   const [scope, setScope] = useState<Scope>('all')
   const [query, setQuery] = useState('')
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [shareCanvas, setShareCanvas] = useState<Canvas | null>(null)
   const [deleteCanvas, setDeleteCanvas] = useState<CanvasMeta | null>(null)
+  const [moveCanvas, setMoveCanvas] = useState<CanvasMeta | null>(null)
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false)
+  /* the upgrade wall, aimed at one workspace, with what they were doing */
+  const [upgrade, setUpgrade] = useState<{ workspaceId: string; reason?: string } | null>(null)
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   /* a clock the render can read: an agent that just worked shows as live, and
@@ -109,10 +131,31 @@ export function Home() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  /* inside a workspace view the new canvas is filed there — and a workspace
+     without a plan answers with the wall instead */
   async function createCanvas() {
-    const canvas = await api.createCanvas('Untitled canvas')
-    posthog.capture('canvas_created')
-    open(canvas.id, canvas.name)
+    const workspaceId = workspaceOf(scope)
+    try {
+      const canvas = await api.createCanvas('Untitled canvas', workspaceId)
+      posthog.capture('canvas_created', { workspace: !!workspaceId })
+      open(canvas.id, canvas.name)
+    } catch (error) {
+      const walled = paywalledWorkspace(error)
+      if (walled) setUpgrade({ workspaceId: walled, reason: 'Adding a canvas to a workspace needs a Team plan.' })
+      else showToast(errorMessage(error, 'Couldn’t create the canvas'))
+    }
+  }
+
+  function workspaceName(id: string | undefined): string | undefined {
+    return id ? workspaces.find((w) => w.id === id)?.name : undefined
+  }
+
+  /** delete and move are the owner's — and, in a workspace, its admins' */
+  function canManage(c: CanvasMeta): boolean {
+    if (!c.ownerId) return false
+    if (!c.shared) return true
+    const ws = c.workspaceId ? workspaces.find((w) => w.id === c.workspaceId) : undefined
+    return !!ws && ws.role !== 'member'
   }
 
   async function duplicate(canvas: CanvasMeta) {
@@ -161,6 +204,10 @@ export function Home() {
         pruneTabs(new Set(list.map((c) => c.id)))
       })
       .catch(console.error)
+    api
+      .listWorkspaces()
+      .then((res) => setWorkspaces(res.workspaces))
+      .catch(console.error)
   }
 
   const hour = new Date().getHours()
@@ -173,12 +220,31 @@ export function Home() {
     shared: canvases?.filter((c) => c.shared).length ?? 0,
   }
 
+  const scopedWorkspace = workspaceOf(scope)
+  const currentWorkspace = scopedWorkspace ? workspaces.find((w) => w.id === scopedWorkspace) : undefined
+  /* a workspace that vanished (deleted, or left) drops the view back to all */
+  const scopeGone = !!scopedWorkspace && workspaces.length > 0 && !currentWorkspace
+  const [seenScopeGone, setSeenScopeGone] = useState(false)
+  if (scopeGone !== seenScopeGone) {
+    setSeenScopeGone(scopeGone)
+    if (scopeGone) setScope('all')
+  }
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
+    const ws = workspaceOf(scope)
     return (canvases ?? [])
-      .filter((c) => (scope === 'mine' ? !c.shared : scope === 'shared' ? !!c.shared : true))
+      .filter((c) =>
+        ws ? c.workspaceId === ws : scope === 'mine' ? !c.shared : scope === 'shared' ? !!c.shared : true,
+      )
       .filter((c) => !q || c.name.toLowerCase().includes(q))
   }, [canvases, scope, query])
+
+  const workspaceCounts = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of canvases ?? []) if (c.workspaceId) map.set(c.workspaceId, (map.get(c.workspaceId) ?? 0) + 1)
+    return map
+  }, [canvases])
 
   /* every agent that has worked on these canvases, aggregated across them */
   const agents = useMemo(() => {
@@ -229,6 +295,34 @@ export function Home() {
           />
           <NavItem icon={<IconAutomations />} label="Automations" on={false} go={() => navigate('/automations')} />
           <NavItem icon={<IconIntegrations />} label="Integrations" on={false} go={() => navigate('/integrations')} />
+        </nav>
+
+        <DashSectionLabel>Workspaces</DashSectionLabel>
+        <nav className="flex flex-col gap-0.5">
+          {workspaces.map((w) => (
+            <NavItem
+              key={w.id}
+              icon={<IconWorkspace />}
+              label={w.name}
+              count={
+                w.active ? (
+                  (workspaceCounts.get(w.id) ?? 0)
+                ) : (
+                  <span className="inline-flex items-center gap-1" title="No plan yet">
+                    <IconLock />
+                  </span>
+                )
+              }
+              on={scope === `ws:${w.id}`}
+              go={() => setScope(`ws:${w.id}`)}
+            />
+          ))}
+          <NavItem
+            icon={<PlusIcon width={15} height={15} aria-hidden />}
+            label={workspaces.length ? 'New workspace' : 'Create a workspace'}
+            on={false}
+            go={() => setCreatingWorkspace(true)}
+          />
         </nav>
 
         <DashSectionLabel>Explore</DashSectionLabel>
@@ -324,6 +418,15 @@ export function Home() {
             </kbd>
           </label>
           <span className="flex-1" />
+          {currentWorkspace && (
+            <Button
+              variant="ghost"
+              className="min-h-10 max-md:hidden md:min-h-0"
+              onClick={() => navigate(`/w/${currentWorkspace.id}`)}
+            >
+              <BuildingIcon /> Manage
+            </Button>
+          )}
           <Button variant="primary" className="min-h-10 px-3 md:min-h-0 md:px-3.5" onClick={createCanvas}>
             <span className="max-md:hidden">+ New canvas</span>
             <span className="hidden max-md:inline">+ New</span>
@@ -334,17 +437,38 @@ export function Home() {
         <DashContent>
           <div className="flex items-start gap-4 md:items-end">
             <div>
-              <DashTitle>
-                {daypart}, {first}
-                <em className="not-italic text-brand">.</em>
-              </DashTitle>
-              <DashSubtitle>
-                {canvases === null
-                  ? '…'
-                  : `${counts.all} ${counts.all === 1 ? 'canvas' : 'canvases'} · ${frameTotal} ${
-                      frameTotal === 1 ? 'frame' : 'frames'
-                    }${agents.length ? ` · ${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}` : ''}`}
-              </DashSubtitle>
+              {currentWorkspace ? (
+                <>
+                  <DashTitle className="truncate">{currentWorkspace.name}</DashTitle>
+                  <DashSubtitle>
+                    {`${visible.length} ${visible.length === 1 ? 'canvas' : 'canvases'} · ${currentWorkspace.memberCount} ${
+                      currentWorkspace.memberCount === 1 ? 'person' : 'people'
+                    } · ${currentWorkspace.plan === 'team' && currentWorkspace.active ? 'Team plan' : currentWorkspace.active ? 'Shared workspace' : 'No plan yet'}`}
+                    {' · '}
+                    <button
+                      type="button"
+                      className="font-semibold text-ink underline underline-offset-2"
+                      onClick={() => navigate(`/w/${currentWorkspace.id}`)}
+                    >
+                      People &amp; billing
+                    </button>
+                  </DashSubtitle>
+                </>
+              ) : (
+                <>
+                  <DashTitle>
+                    {daypart}, {first}
+                    <em className="not-italic text-brand">.</em>
+                  </DashTitle>
+                  <DashSubtitle>
+                    {canvases === null
+                      ? '…'
+                      : `${counts.all} ${counts.all === 1 ? 'canvas' : 'canvases'} · ${frameTotal} ${
+                          frameTotal === 1 ? 'frame' : 'frames'
+                        }${agents.length ? ` · ${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}` : ''}`}
+                  </DashSubtitle>
+                </>
+              )}
             </div>
             <SegmentedIcons
               className="ml-auto flex-none"
@@ -361,8 +485,28 @@ export function Home() {
             </SegmentedIcons>
           </div>
 
+          {currentWorkspace && !currentWorkspace.active && (
+            <Callout className="mt-4 flex max-w-[760px] flex-col gap-2 sm:flex-row sm:items-center">
+              <span className="flex-1">
+                <b>{currentWorkspace.name} has no plan yet.</b>{' '}
+                {currentWorkspace.role !== 'owner'
+                  ? 'Ask the owner to choose one — until then no canvases can be added here.'
+                  : 'Choose a Team plan to add canvases and invite your team.'}
+              </span>
+              {currentWorkspace.role === 'owner' && (
+                <Button variant="primary" size="sm" onClick={() => setUpgrade({ workspaceId: currentWorkspace.id })}>
+                  Choose a plan
+                </Button>
+              )}
+            </Callout>
+          )}
+
           <div className="mt-4 flex items-center gap-2 md:hidden">
-            <Tabs value={scope} onValueChange={(next) => setScope(next as Scope)} className="flex min-w-0 flex-1">
+            <Tabs
+              value={scopedWorkspace ? 'all' : scope}
+              onValueChange={(next) => setScope(next as Scope)}
+              className="flex min-w-0 flex-1"
+            >
               <TabsList className="h-10 w-full border border-line bg-surface p-1 shadow-card">
                 <TabsTrigger value="all">All · {counts.all}</TabsTrigger>
                 <TabsTrigger value="mine">Mine · {counts.mine}</TabsTrigger>
@@ -439,7 +583,11 @@ export function Home() {
                         <div className="px-3 pb-3 pt-2.5">
                           <div className="truncate font-display text-[13.5px] font-semibold">{c.name}</div>
                           <div className="mt-[5px] flex items-center gap-1.5 text-[11.5px] text-ink-faint">
-                            <Meta canvas={c} onClaim={reload} />
+                            <Meta
+                              canvas={c}
+                              onClaim={reload}
+                              workspace={scopedWorkspace ? undefined : workspaceName(c.workspaceId)}
+                            />
                           </div>
                         </div>
                       </button>
@@ -448,7 +596,8 @@ export function Home() {
                         duplicating={duplicatingId === c.id}
                         onShare={() => share(c)}
                         onDuplicate={() => duplicate(c)}
-                        onDelete={c.ownerId && !c.shared ? () => setDeleteCanvas(c) : undefined}
+                        onMove={workspaces.length && canManage(c) ? () => setMoveCanvas(c) : undefined}
+                        onDelete={canManage(c) ? () => setDeleteCanvas(c) : undefined}
                       />
                     </div>
                   ))}
@@ -491,7 +640,8 @@ export function Home() {
                           duplicating={duplicatingId === c.id}
                           onShare={() => share(c)}
                           onDuplicate={() => duplicate(c)}
-                          onDelete={c.ownerId && !c.shared ? () => setDeleteCanvas(c) : undefined}
+                          onMove={workspaces.length && canManage(c) ? () => setMoveCanvas(c) : undefined}
+                          onDelete={canManage(c) ? () => setDeleteCanvas(c) : undefined}
                         />
                       </div>
                     </div>
@@ -511,6 +661,45 @@ export function Home() {
           onCopied={() => {
             setShareCanvas(null)
             showToast('Canvas link copied')
+          }}
+        />
+      )}
+      {creatingWorkspace && (
+        <CreateWorkspaceModal
+          onClose={() => setCreatingWorkspace(false)}
+          onCreated={(ws) => {
+            setCreatingWorkspace(false)
+            reload()
+            setScope(`ws:${ws.id}`)
+            /* a workspace that cannot grow yet goes straight to the plan picker */
+            if (!ws.active)
+              setUpgrade({ workspaceId: ws.id, reason: `"${ws.name}" is ready — pick a plan to start using it.` })
+          }}
+        />
+      )}
+      {upgrade && (
+        <UpgradeModal
+          workspaceId={upgrade.workspaceId}
+          reason={upgrade.reason}
+          onClose={() => {
+            setUpgrade(null)
+            reload()
+          }}
+        />
+      )}
+      {moveCanvas && (
+        <MoveCanvasModal
+          canvas={moveCanvas}
+          workspaces={workspaces}
+          onClose={() => setMoveCanvas(null)}
+          onMoved={(workspaceId) => {
+            setMoveCanvas(null)
+            showToast(workspaceId ? `Moved to ${workspaceName(workspaceId) ?? 'the workspace'}` : 'Moved to Personal')
+            reload()
+          }}
+          onPaywall={(workspaceId) => {
+            setMoveCanvas(null)
+            setUpgrade({ workspaceId, reason: 'Moving a canvas into a workspace needs a Team plan.' })
           }}
         />
       )}
@@ -583,7 +772,7 @@ function AgentStack({ canvas }: { canvas: CanvasMeta }) {
   )
 }
 
-function Meta({ canvas: c, onClaim }: { canvas: CanvasMeta; onClaim: () => void }) {
+function Meta({ canvas: c, onClaim, workspace }: { canvas: CanvasMeta; onClaim: () => void; workspace?: string }) {
   return (
     <>
       <span>
@@ -591,7 +780,15 @@ function Meta({ canvas: c, onClaim }: { canvas: CanvasMeta; onClaim: () => void 
       </span>
       <span className="opacity-60">·</span>
       <span>{timeAgo(c.updatedAt)}</span>
-      {c.shared && (
+      {workspace && (
+        <>
+          <span className="opacity-60">·</span>
+          <span className="inline-flex min-w-0 items-center gap-1 truncate" title={`In the ${workspace} workspace`}>
+            <BuildingIcon width={11} height={11} aria-hidden /> {workspace}
+          </span>
+        </>
+      )}
+      {c.shared && !workspace && !c.workspaceId && (
         <>
           <span className="opacity-60">·</span>
           <span title="You were invited to collaborate on this canvas">shared with you</span>
@@ -624,7 +821,7 @@ export function NavItem({
 }: {
   icon: React.ReactNode
   label: string
-  count?: number
+  count?: React.ReactNode
   on: boolean
   go: () => void
 }) {
@@ -647,6 +844,7 @@ function CanvasActions({
   duplicating,
   onShare,
   onDuplicate,
+  onMove,
   onDelete,
 }: {
   canvas: CanvasMeta
@@ -654,6 +852,7 @@ function CanvasActions({
   duplicating: boolean
   onShare: () => void
   onDuplicate: () => void
+  onMove?: () => void
   onDelete?: () => void
 }) {
   return (
@@ -681,6 +880,11 @@ function CanvasActions({
         <DropdownMenuItem disabled={duplicating} onSelect={onDuplicate}>
           <CopyIcon className="size-4" /> {duplicating ? 'Duplicating…' : 'Duplicate'}
         </DropdownMenuItem>
+        {onMove && (
+          <DropdownMenuItem onSelect={onMove}>
+            <BuildingIcon className="size-4" /> {canvas.workspaceId ? 'Move…' : 'Move to workspace…'}
+          </DropdownMenuItem>
+        )}
         {onDelete && (
           <>
             <DropdownMenuSeparator />

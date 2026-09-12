@@ -8,6 +8,7 @@ import { Admin } from './pages/Admin'
 import { Automations } from './pages/Automations'
 import { AutomationEditor } from './pages/AutomationEditor'
 import { Integrations } from './pages/Integrations'
+import { Workspace } from './pages/Workspace'
 import { authClient } from './lib/auth'
 import { setName } from './lib/identity'
 import { posthog, syncReplayForUser, suspendAnalyticsWhileImpersonating } from './lib/posthog'
@@ -126,6 +127,8 @@ export function App() {
     <Community />
   ) : path.startsWith('/integrations') ? (
     <Integrations />
+  ) : path.match(/^\/w\/([^/]+)/) ? (
+    <Workspace workspaceId={path.match(/^\/w\/([^/]+)/)![1]!} key={path} />
   ) : path.match(/^\/automations\/([^/]+)/) ? (
     <AutomationEditor automationId={path.match(/^\/automations\/([^/]+)/)![1]!} key={path} />
   ) : path.startsWith('/automations') ? (

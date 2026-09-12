@@ -42,6 +42,7 @@ function canvasColumns(c: Canvas) {
     description: c.description ?? null,
     category: c.category ?? null,
     copyCount: c.copyCount ?? 0,
+    workspaceId: c.workspaceId ?? null,
     updatedAt: c.updatedAt,
   }
 }
@@ -565,6 +566,7 @@ export async function hydrate(): Promise<Hydrated> {
     ...(c.description ? { description: c.description } : {}),
     ...(isCommunityCategory(c.category) ? { category: c.category } : {}),
     ...(c.copyCount ? { copyCount: c.copyCount } : {}),
+    ...(c.workspaceId ? { workspaceId: c.workspaceId } : {}),
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     frames: [],

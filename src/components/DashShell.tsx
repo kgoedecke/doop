@@ -18,9 +18,12 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import {
+  BuildingIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
+  CreditCardIcon,
+  LockIcon,
   CompassIcon,
   GearIcon,
   GridIcon,
@@ -73,8 +76,18 @@ export function AccountMenu() {
             </span>
           </span>
         </DropdownMenuLabel>
+        {/* the plan is a workspace thing; this line says which side of it the
+            account is on — a member of a live paid workspace is on Team */}
         <div className="mx-2.5 mb-2 flex items-center gap-[7px] text-[11.5px] text-ink-soft">
-          <Badge>beta</Badge> Free while in beta
+          {me?.plan === 'team' ? (
+            <>
+              <Badge tone="accent">team</Badge> Team plan
+            </>
+          ) : (
+            <>
+              <Badge>free</Badge> Personal plan
+            </>
+          )}
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate('/settings')}>
@@ -162,6 +175,10 @@ export const IconAutomations = () => <ClockIcon {...rail} />
 /** a pulse line — a live connection */
 export const IconIntegrations = () => <PulseIcon {...rail} />
 export const IconSpark = () => <SparkIcon {...rail} />
+/** a shared workspace — the org's building */
+export const IconWorkspace = () => <BuildingIcon {...rail} />
+export const IconBilling = () => <CreditCardIcon {...rail} />
+export const IconLock = () => <LockIcon width={12} height={12} aria-hidden />
 export const IconGear = () => <GearIcon {...rail} />
 export const IconShield = () => <ShieldIcon {...rail} />
 export const IconHelp = () => <HelpIcon {...rail} />

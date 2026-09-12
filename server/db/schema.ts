@@ -35,9 +35,78 @@ export const canvases = pgTable('canvases', {
   category: text('category'),
   /** how many times the gallery has copied this canvas — the "trending" signal */
   copyCount: integer('copy_count').notNull().default(0),
+  /** the shared workspace this canvas lives in; null = the owner's personal
+   *  space. Every workspace member can open a workspace canvas. */
+  workspaceId: text('workspace_id'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
+
+/** A shared workspace: a team's home for canvases. Membership (below) grants
+ *  access to every canvas inside it, so a workspace is the org-level unit
+ *  the per-canvas invite model never had. Billing is per workspace, per
+ *  seat (see shared/billing.ts): the Stripe columns are the mirror of the
+ *  subscription, written by the webhook and the post-checkout sync — never
+ *  by a UI request directly. Without Stripe configured (self-hosting) the
+ *  status column is ignored and every workspace is active. */
+export const workspaces = pgTable('workspaces', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  ownerId: text('owner_id').notNull(),
+  /** 'inactive' (never paid) | 'trialing' | 'active' | 'past_due' | 'canceled' */
+  status: text('status').notNull().default('inactive'),
+  /** 'team'; null until a plan was chosen */
+  plan: text('plan'),
+  /** 'month' | 'year' */
+  interval: text('interval'),
+  /** the paid seat count Stripe is billing for */
+  seats: integer('seats').notNull().default(0),
+  stripeCustomerId: text('stripe_customer_id'),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  /** epoch ms the current billing period ends (= the next renewal) */
+  currentPeriodEnd: bigint('current_period_end', { mode: 'number' }),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+  /** Stripe's `created` of the last subscription event applied (epoch s) —
+   *  an older event arriving late must not roll the mirror back */
+  billingEventAt: bigint('billing_event_at', { mode: 'number' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** Who is in a workspace, and as what. The owner IS listed here (role
+ *  'owner'), unlike canvas_members — every seat is a row, so the seat count
+ *  billed to Stripe is a plain count of this table. */
+export const workspaceMembers = pgTable(
+  'workspace_members',
+  {
+    workspaceId: text('workspace_id').notNull(),
+    userId: text('user_id').notNull(),
+    /** 'owner' | 'admin' | 'member' */
+    role: text('role').notNull(),
+    addedBy: text('added_by').notNull(),
+    addedAt: bigint('added_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] }), index('workspace_members_user_idx').on(t.userId)],
+)
+
+/** An invitation to someone who has no doop account yet. Accepted
+ *  automatically the moment an account with that email is created; a seat
+ *  is only billed from then on. */
+export const workspaceInvites = pgTable(
+  'workspace_invites',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    email: text('email').notNull(),
+    role: text('role').notNull(),
+    invitedBy: text('invited_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('workspace_invites_workspace_email_idx').on(t.workspaceId, t.email),
+    index('workspace_invites_email_idx').on(t.email),
+  ],
+)
 
 /** Users invited to collaborate on a canvas (the owner is not listed).
  *  Access = owner ∪ members ∪ (everyone, when link_access = 'edit'). */

@@ -99,6 +99,13 @@
       "when": 1789165950163,
       "tag": "0013_integrations_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789193130109,
+      "tag": "0014_workspaces",
+      "breakpoints": true
     }
   ]
 }

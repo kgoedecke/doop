@@ -6,4 +6,5 @@ lists every file in this folder.
 
 ## Active
 
-(none yet)
+- [workspaces-billing.md](workspaces-billing.md) - Shared workspaces (org-level canvas access with
+  roles) and the per-seat Team plan on Stripe: data model, entitlement rules, API, webhook flow.

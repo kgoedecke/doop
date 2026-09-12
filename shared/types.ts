@@ -1,3 +1,5 @@
+import type { BillingInterval, WorkspaceStatus } from './billing.ts'
+
 export interface Frame {
   id: string
   canvasId: string
@@ -22,6 +24,8 @@ export interface CanvasMeta {
   ownerId?: string
   /** true when this canvas is on the list because the user was invited */
   shared?: boolean
+  /** the shared workspace it lives in; unset = a personal canvas */
+  workspaceId?: string
   createdAt: number
   updatedAt: number
   frameCount: number
@@ -80,6 +84,10 @@ export interface Canvas {
   linkAccess?: 'edit' | 'none'
   /** user ids invited to collaborate (the owner is not listed) */
   memberIds?: string[]
+  /** the shared workspace this canvas belongs to — every workspace member
+   *  can open it, on top of the owner and invited members. Unset = the
+   *  owner's personal space. */
+  workspaceId?: string
   /** set while the owner lists this canvas in the community gallery. The
    *  gallery shows previews and hands out copies — it never opens the
    *  canvas itself, so publishing does not change who can edit it. */
@@ -97,6 +105,68 @@ export interface Canvas {
   guidelines?: GuidelineDoc[]
   /** frames pinned to Memory as style exemplars — HTML snapshotted at pin time */
   references?: MemoryReference[]
+}
+
+/* ---- workspaces ---- */
+
+export const WORKSPACE_ROLES = ['owner', 'admin', 'member'] as const
+export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number]
+
+export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
+  return typeof value === 'string' && (WORKSPACE_ROLES as readonly string[]).includes(value)
+}
+
+/** A workspace as the dashboard lists it — for one viewer, hence `role`. */
+export interface WorkspaceSummary {
+  id: string
+  name: string
+  ownerId: string
+  /** the viewer's role in it */
+  role: WorkspaceRole
+  status: WorkspaceStatus
+  /** true when members may grow it: no billing on this server, or a live
+   *  subscription. Canvases inside stay reachable either way. */
+  active: boolean
+  plan: 'team' | null
+  interval: BillingInterval | null
+  /** seats Stripe is billing for right now */
+  seats: number
+  memberCount: number
+  canvasCount: number
+  /** next renewal (or the end, when cancelAtPeriodEnd) — epoch ms */
+  currentPeriodEnd?: number
+  cancelAtPeriodEnd: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface WorkspaceMember {
+  userId: string
+  name: string
+  email: string
+  role: WorkspaceRole
+  addedAt: number
+}
+
+/** An outstanding invite to an email with no doop account yet. */
+export interface WorkspaceInvite {
+  id: string
+  email: string
+  role: WorkspaceRole
+  invitedByName: string
+  createdAt: number
+}
+
+export interface WorkspaceDetail extends WorkspaceSummary {
+  members: WorkspaceMember[]
+  /** only admins and the owner see these */
+  invites: WorkspaceInvite[]
+  billing: {
+    /** Stripe is configured on this server — plans can be bought */
+    enabled: boolean
+    /** a Stripe customer exists, so the billing portal can open */
+    portal: boolean
+  }
 }
 
 /* ---- design memory ---- */

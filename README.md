@@ -246,6 +246,39 @@ blocks outbound SMTP: Railway and most PaaS block 25/465/587. Resend also serves
 Env: `BETTER_AUTH_SECRET` (required in production), `TRUSTED_ORIGINS` (comma-separated,
 defaults to the localhost dev origins).
 
+### Workspaces and billing (Team plan)
+
+A **workspace** is a team's shared home for canvases: everyone in it opens every canvas inside,
+with no per-canvas invites. Create one from the sidebar on the home screen, invite people by
+email (existing accounts join at once; anyone else joins the moment they sign up with that
+address), file canvases in it from the Share modal or the canvas menu ("Move to workspace…"),
+and manage people, roles (owner / admin / member) and billing at `/w/<id>`. Agents see workspace
+canvases in `list_canvases` and can create into one with `create_canvas`'s `workspace_id`.
+
+Workspaces are the paid part of doop on a hosted deployment. Plans (see `shared/billing.ts`):
+
+| Plan       | Price                                     | What it is                                                         |
+| ---------- | ----------------------------------------- | ------------------------------------------------------------------ |
+| Personal   | free                                      | Your own canvases, per-canvas invites, agents, community, imports. |
+| Team       | $20 / seat / month, or $192 / seat / year | Shared workspaces with roles; seats follow the people list.        |
+| Enterprise | talk to us                                | SSO, dedicated support, custom terms.                              |
+
+**Self-hosting: billing is off unless you turn it on.** Without `STRIPE_SECRET_KEY` every
+workspace is active and nothing is locked. With it, a workspace must hold a live per-seat
+subscription before it can _grow_ — create canvases in it, invite people, take canvases in —
+and the upgrade modal appears wherever that is attempted. Canvases already in a workspace stay
+open to its members whatever the subscription does (a failed card never locks a team out of its
+work). Deleting a workspace hands every canvas back to its owner's personal space and cancels
+the subscription.
+
+To enable billing: create the product and prices with `node scripts/stripe-setup.mjs`
+(prints `STRIPE_PRICE_TEAM_MONTHLY` / `STRIPE_PRICE_TEAM_YEARLY`), point a Stripe webhook at
+`<origin>/stripe/webhook` for `checkout.session.completed` and
+`customer.subscription.{created,updated,deleted}`, and set `STRIPE_WEBHOOK_SECRET`. Checkout,
+cards, invoices and cancelling all happen on Stripe's hosted pages; the server only mirrors the
+subscription onto the workspace (through the webhook, and a direct sync when the browser lands
+back from Checkout, so local development works without a tunnel).
+
 ### Instance admins
 
 `ADMIN_EMAILS` (comma-separated) names the accounts that get the `admin` role, applied at
