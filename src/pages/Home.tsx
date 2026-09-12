@@ -11,7 +11,9 @@ import { ShareModal } from '../components/ShareModal'
 import {
   AccountMenu,
   ConnectCard,
+  IconAutomations,
   IconCommunity,
+  IconIntegrations,
   IconGrid,
   IconList,
   IconShare,
@@ -225,6 +227,8 @@ export function Home() {
             on={scope === 'shared'}
             go={() => setScope('shared')}
           />
+          <NavItem icon={<IconAutomations />} label="Automations" on={false} go={() => navigate('/automations')} />
+          <NavItem icon={<IconIntegrations />} label="Integrations" on={false} go={() => navigate('/integrations')} />
         </nav>
 
         <DashSectionLabel>Explore</DashSectionLabel>

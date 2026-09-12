@@ -1,4 +1,16 @@
-import { pgTable, text, doublePrecision, bigint, boolean, integer, index, primaryKey, jsonb } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  text,
+  doublePrecision,
+  bigint,
+  boolean,
+  integer,
+  index,
+  uniqueIndex,
+  primaryKey,
+  jsonb,
+} from 'drizzle-orm/pg-core'
+import type { Schedule, Step } from '../../shared/automations.ts'
 
 /**
  * One Postgres-dialect schema for every environment: PGlite (embedded, file
@@ -411,3 +423,68 @@ export const backgrounds = pgTable('backgrounds', {
   enabled: boolean('enabled').notNull().default(true),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 })
+
+/** A user's connection to an outside service (Meta today). One row per
+ *  user and provider; the token never leaves the server — API responses
+ *  carry the account list and display fields only. Revocation = row
+ *  deletion. Automations reference the provider, not the row, so a
+ *  reconnect picks the same automations back up. */
+export const integrations = pgTable(
+  'integrations',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    /** 'meta' */
+    provider: text('provider').notNull(),
+    accessToken: text('access_token').notNull(),
+    /** epoch ms the token expires; null = the provider said it doesn't */
+    expiresAt: bigint('expires_at', { mode: 'number' }),
+    /** the provider-side identity the token belongs to — display only */
+    accountName: text('account_name'),
+    /** what the connection unlocks: Meta ad accounts the user may pull from */
+    accounts: jsonb('accounts').$type<{ id: string; name: string }[]>().notNull(),
+    connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('integrations_user_provider_idx').on(t.userId, t.provider)],
+)
+
+/** A scheduled workflow: `schedule` says when, `steps` say what (see
+ *  shared/automations.ts). Owned by a user; every step names a canvas the
+ *  owner must be able to reach. Cold path — read by the scheduler tick and
+ *  the Automations pages, no in-memory mirror. */
+export const automations = pgTable(
+  'automations',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    name: text('name').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    schedule: jsonb('schedule').$type<Schedule>().notNull(),
+    steps: jsonb('steps').$type<Step[]>().notNull(),
+    /** when the scheduler fires it next; null while disabled or incomplete */
+    nextRunAt: bigint('next_run_at', { mode: 'number' }),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('automations_owner_idx').on(t.ownerId), index('automations_next_run_idx').on(t.nextRunAt)],
+)
+
+/** One execution of an automation, kept as a slim log line. */
+export const automationRuns = pgTable(
+  'automation_runs',
+  {
+    id: text('id').primaryKey(),
+    automationId: text('automation_id').notNull(),
+    startedAt: bigint('started_at', { mode: 'number' }).notNull(),
+    endedAt: bigint('ended_at', { mode: 'number' }),
+    /** 'running' | 'ok' | 'failed' */
+    status: text('status').notNull(),
+    summary: text('summary'),
+    error: text('error'),
+    canvasId: text('canvas_id'),
+    /** 'reconnect' when the fix is re-authorising an integration */
+    failure: text('failure'),
+  },
+  (t) => [index('automation_runs_automation_idx').on(t.automationId)],
+)

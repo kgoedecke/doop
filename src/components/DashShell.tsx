@@ -20,12 +20,14 @@ import {
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  ClockIcon,
   CompassIcon,
   GearIcon,
   GridIcon,
   HelpIcon,
   ListIcon,
   LogOutIcon,
+  PulseIcon,
   ShieldIcon,
   SparkIcon,
   UserIcon,
@@ -155,6 +157,10 @@ export const IconUser = () => <UserIcon {...rail} />
 export const IconShare = () => <UsersIcon {...rail} />
 /** the gallery: a compass — designs to steer by */
 export const IconCommunity = () => <CompassIcon {...rail} />
+/** a clock — things that happen on a schedule */
+export const IconAutomations = () => <ClockIcon {...rail} />
+/** a pulse line — a live connection */
+export const IconIntegrations = () => <PulseIcon {...rail} />
 export const IconSpark = () => <SparkIcon {...rail} />
 export const IconGear = () => <GearIcon {...rail} />
 export const IconShield = () => <ShieldIcon {...rail} />

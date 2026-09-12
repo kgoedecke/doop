@@ -5,6 +5,9 @@ import { Settings } from './pages/Settings'
 import { CanvasPage } from './pages/CanvasPage'
 import { AuthPage } from './pages/AuthPage'
 import { Admin } from './pages/Admin'
+import { Automations } from './pages/Automations'
+import { AutomationEditor } from './pages/AutomationEditor'
+import { Integrations } from './pages/Integrations'
 import { authClient } from './lib/auth'
 import { setName } from './lib/identity'
 import { posthog, syncReplayForUser, suspendAnalyticsWhileImpersonating } from './lib/posthog'
@@ -121,6 +124,12 @@ export function App() {
     <Settings />
   ) : path.startsWith('/community') ? (
     <Community />
+  ) : path.startsWith('/integrations') ? (
+    <Integrations />
+  ) : path.match(/^\/automations\/([^/]+)/) ? (
+    <AutomationEditor automationId={path.match(/^\/automations\/([^/]+)/)![1]!} key={path} />
+  ) : path.startsWith('/automations') ? (
+    <Automations />
   ) : (
     <Home />
   )

@@ -1,4 +1,5 @@
 import type { ActivityItem, Canvas, CanvasMeta, CommunityCategory, CommunityItem, Frame } from '../../shared/types'
+import type { Automation, AutomationRun, Schedule, Step } from '../../shared/automations'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -141,6 +142,27 @@ export interface ModelAccountStatus {
 export interface WebsiteImportResult {
   frames: Frame[]
   failures: { url: string; error: string }[]
+}
+
+/** What the server accepts when creating or patching an automation. */
+export interface AutomationInput {
+  name?: string
+  enabled?: boolean
+  schedule?: Schedule
+  steps?: Step[]
+}
+
+/** The Integrations page: per-provider connection state. A provider the
+ *  server has no app credentials for reports `enabled: false`. */
+export interface IntegrationsStatus {
+  meta: {
+    enabled: boolean
+    connected: boolean
+    accountName?: string
+    accounts?: { id: string; name: string }[]
+    connectedAt?: number
+    expiresAt?: number | null
+  }
 }
 import { getIdentity } from './identity'
 
@@ -312,6 +334,21 @@ export const api = {
   resolveComment: (commentId: string) => req(`/api/comments/${commentId}/resolve`, { method: 'POST' }),
   retryComment: (commentId: string) => req(`/api/comments/${commentId}/retry`, { method: 'POST' }),
   retryTaskFeedback: (feedbackId: string) => req(`/api/feedback/${feedbackId}/retry`, { method: 'POST' }),
+  /* automations: scheduled pulls and agent tasks */
+  listAutomations: () => req<Automation[]>('/api/automations'),
+  getAutomation: (id: string) => req<Automation>(`/api/automations/${id}`),
+  createAutomation: (input: AutomationInput) =>
+    req<Automation>('/api/automations', { method: 'POST', body: JSON.stringify(input) }),
+  updateAutomation: (id: string, input: AutomationInput) =>
+    req<Automation>(`/api/automations/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  deleteAutomation: (id: string) => req(`/api/automations/${id}`, { method: 'DELETE' }),
+  runAutomation: (id: string) => req<AutomationRun>(`/api/automations/${id}/run`, { method: 'POST' }),
+  listRuns: (id: string, before?: number) =>
+    req<AutomationRun[]>(`/api/automations/${id}/runs${before ? `?before=${before}` : ''}`),
+  /* integrations: per-user connections to outside services */
+  integrations: () => req<IntegrationsStatus>('/api/integrations'),
+  startMetaConnect: () => req<{ url: string }>('/api/integrations/meta/start', { method: 'POST' }),
+  disconnectMeta: () => req<IntegrationsStatus>('/api/integrations/meta', { method: 'DELETE' }),
 }
 
 export interface AdminCanvas extends CanvasMeta {

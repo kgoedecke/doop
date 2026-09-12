@@ -9,6 +9,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
   Activity,
+  Clock,
   Attachment,
   Brain,
   Compass,
@@ -96,6 +97,7 @@ export const ListIcon = icon(Menu)
 export const UserIcon = icon(User)
 export const UsersIcon = icon(Group)
 export const CompassIcon = icon(Compass)
+export const ClockIcon = icon(Clock)
 export const GearIcon = icon(Settings)
 export const ShieldIcon = icon(Shield)
 export const HelpIcon = icon(HelpCircle)

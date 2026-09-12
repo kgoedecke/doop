@@ -85,6 +85,20 @@
       "when": 1788994279174,
       "tag": "0011_backgrounds",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789160600561,
+      "tag": "0012_automations",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789165950163,
+      "tag": "0013_integrations_unique",
+      "breakpoints": true
     }
   ]
 }
