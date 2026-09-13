@@ -7,6 +7,7 @@ import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, rol
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import type {
   Actor,
+  ActorKind,
   ActivityItem,
   AgentTask,
   DesignDecision,
@@ -465,6 +466,7 @@ export function replyToComment(
   text: string,
   from: string,
   fromUserId?: string,
+  kind: ActorKind = 'user',
 ): ElementComment | undefined {
   const open = openThread(commentId)
   if (!open) return undefined
@@ -475,6 +477,7 @@ export function replyToComment(
     text,
     from,
     fromUserId,
+    kind,
   )
 }
 
@@ -497,6 +500,7 @@ function postComment(
   text: string,
   from: string,
   fromUserId?: string,
+  kind: ActorKind = 'user',
 ): ElementComment | undefined {
   const clean = text.trim()
   if (!clean) return undefined
@@ -527,7 +531,7 @@ function postComment(
   const excerpt = clean.length > 80 ? clean.slice(0, 77) + '…' : clean
   logActivity(
     frame.canvasId,
-    resolveActor({ name: from, kind: 'user' }),
+    resolveActor({ name: from, kind }),
     anchor.parentId
       ? `replied to a comment in “${frame.name}”: “${excerpt}”`
       : `commented on an element in “${frame.name}”: “${excerpt}”`,

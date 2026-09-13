@@ -424,6 +424,8 @@ Steering happens at three layers (the same architecture paper.design uses, plus 
 | `set_status`           | Broadcast a one-line "what I'm working on" — shown live in the working-now strip, avatar tooltip, and activity feed |
 | `get_feedback`         | Fetch & claim open human feedback requests — for agents whose job is to poll the canvas periodically                |
 | `get_comments`         | Read element-pinned comments and replies, optionally filtered by frame or resolution state, without claiming work   |
+| `reply_to_comment`     | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment             |
+| `resolve_comment`      | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory             |
 | `list_canvases`        | List all canvases                                                                                                   |
 | `create_canvas`        | Create a canvas, returns its shareable id                                                                           |
 | `get_canvas`           | Canvas layout: every frame's position/size/meta                                                                     |
@@ -483,7 +485,7 @@ caretaker, point an agent at `get_feedback` — a non-blocking fetch-and-claim d
 "check the canvas every few minutes, address whatever humans requested" loop.
 REST equivalent: `POST /api/tasks/:id/feedback` with `{ text, from }`.
 
-### Reading element comments through MCP
+### Element comments through MCP
 
 Call `get_comments({ canvas_id })` to read the canvas's retained element comments and replies
 (up to 100 entries, newest first). Each entry includes its ID, frame ID, author, text, timestamp,
@@ -495,6 +497,14 @@ Pass `frame_id` to read only comments on a frame belonging to that canvas, or
 so conversation context remains available. An empty result is `[]`. The tool enforces the same
 canvas access permissions as other MCP reads; optional `agent_name` announces presence.
 It does not claim task feedback or comments, or mark anything resolved.
+
+`reply_to_comment({ canvas_id, comment_id, text, agent_name })` adds a reply to a thread,
+inheriting the root's element anchor. `resolve_comment({ canvas_id, comment_id, agent_name })`
+closes it, and resolving an `@mention` thread also records the exchange in canvas Memory. Both
+require the same canvas access as every other MCP tool. A reply whose text `@mentions` a resident
+role spends one resident task from the account's allowance — the same free-tier meter that a board
+card, an `@mention` comment, or task feedback consumes (`server/allowance.ts`); plain replies are
+free. `resolve_comment` also costs nothing.
 
 ## What's in the box
 

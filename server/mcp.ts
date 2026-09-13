@@ -21,6 +21,8 @@ import { viewWebsite } from './website.ts'
 import { createImportedWebpageFrame } from './webpageImport.ts'
 import { normalizeImportUrl } from './importer.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
+import { mentionedRole } from '../shared/agents.ts'
+import * as allowance from './allowance.ts'
 
 const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases contain frames — artboards that render complete HTML documents live for everyone viewing.
 
@@ -35,7 +37,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (illustration, product render, brand-specific hero art, a mark or cut-out that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
 - Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
 - Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
-- Comments: call get_comments to read element-pinned comments and replies on a canvas, optionally filtered by frame. This does not claim feedback or resolve comments.
+- Comments: call get_comments to read element-pinned comments and replies on a canvas, optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.`
 
@@ -198,6 +200,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   }
   const noCanvas = (id: string) => err(`no canvas with id ${id} accessible to this account`)
   const noFrame = (id: string) => err(`no frame with id ${id} accessible to this account`)
+  const noComment = (id: string) => err(`no comment with id ${id} on this canvas`)
   /* Reads count as arrival: presence (and with it every "your agent is
      connected" confirmation in the UI) must appear on an agent's FIRST
      canvas-scoped call, not only once it mutates something. */
@@ -581,6 +584,84 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         .filter((comment) => include_resolved || comment.resolvedAt === undefined)
       // Deliberately omit withFeedback: inspecting comments must not claim work.
       return text(comments)
+    },
+  )
+
+  server.registerTool(
+    'reply_to_comment',
+    {
+      description:
+        'Reply inside an element-comment thread on a canvas. The reply inherits the root comment’s element anchor, so an @mention in it gives the resident agent the same anchor the conversation is about. Writing does not resolve the thread — read the request with get_comments, make the change, then close it with resolve_comment. If the text @mentions a resident role (e.g. "@Doop"), it counts as a new resident task against the account’s meter, exactly like a comment left in the browser.',
+      inputSchema: {
+        canvas_id: z.string(),
+        comment_id: z.string().describe('The root comment or any reply in the thread (from get_comments)'),
+        text: z.string().describe('The reply text. Trimmed; empty replies are rejected.'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, comment_id, text: body, agent_name }) => {
+      if (!canvasFor(canvas_id)) return noCanvas(canvas_id)
+      const found = actions.findComment(comment_id)
+      if (!found || found.canvasId !== canvas_id) return noComment(comment_id)
+      if (!body.trim() || !actions.openThread(comment_id)) return err('thread resolved or empty text')
+      const actor = actorFrom(agent_name)
+      arrive(canvas_id, agent_name)
+      /* A reply that @mentions a resident agent is a new command to the team,
+         metered like a card; plain replies stay free. Mirrors the REST reply
+         route so the meter is spent exactly once either way. */
+      let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
+      if (mentionedRole(body) && ownerId) {
+        gate = await allowance.consumeResidentTask(ownerId)
+        if (!gate.ok)
+          return err(
+            `resident task limit reached (${gate.used}/${gate.limit}) — connect a model account or retry later`,
+          )
+      }
+      const reply = actions.replyToComment(comment_id, body, actor.name, undefined, 'agent')
+      if (!reply) {
+        /* the thread closed while the meter was being written: give the task back */
+        if (gate && ownerId) {
+          await allowance
+            .refundResidentTask(gate, ownerId)
+            .catch((e) => console.error(`[mcp] could not refund a resident task for ${ownerId}:`, e))
+        }
+        return err('thread resolved meanwhile')
+      }
+      return withFeedback(text(reply), canvas_id, actor)
+    },
+  )
+
+  server.registerTool(
+    'resolve_comment',
+    {
+      description:
+        'Resolve an element-comment thread on a canvas, marking the request addressed. Resolving a root comment closes its whole thread; resolving a reply closes only that reply. When the thread was an @mention of a resident agent, resolving it also records the exchange as a design decision in the canvas Memory (plain human-to-human notes are not). This does not claim task feedback — use get_feedback for that.',
+      inputSchema: {
+        canvas_id: z.string(),
+        comment_id: z.string().describe('The root comment or a reply (from get_comments)'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, comment_id, agent_name }) => {
+      if (!canvasFor(canvas_id)) return noCanvas(canvas_id)
+      const found = actions.findComment(comment_id)
+      if (!found || found.canvasId !== canvas_id) return noComment(comment_id)
+      const actor = actorFrom(agent_name)
+      arrive(canvas_id, agent_name)
+      const alreadyResolved = found.resolvedAt !== undefined
+      const resolved = actions.resolveComment(comment_id, actor.name)
+      if (!resolved) return noComment(comment_id)
+      return withFeedback(
+        text({
+          ok: true,
+          id: resolved.id,
+          alreadyResolved,
+          resolvedBy: resolved.resolvedBy,
+          resolvedAt: resolved.resolvedAt ? new Date(resolved.resolvedAt).toISOString() : undefined,
+        }),
+        canvas_id,
+        actor,
+      )
     },
   )
 

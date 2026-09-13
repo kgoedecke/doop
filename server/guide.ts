@@ -95,8 +95,15 @@ Use get_comments({ canvas_id }) to read element-pinned comments and replies, inc
 their frame, selector, snippet, author, thread links, and claim/failure/resolution state.
 Add frame_id to focus on one frame. Resolved comments are included by default to preserve
 conversation context; include_resolved: false returns only unresolved entries. The result
-is newest first and covers the retained history (up to 100 entries per canvas). Reading
-comments does not claim work or resolve it; task feedback is separate (get_feedback).
+is newest first and covers the retained history (up to 100 entries per canvas).
+
+Answer a thread with reply_to_comment({ canvas_id, comment_id, text, agent_name }) — the
+reply inherits the root's element anchor, so an @mention reaches the resident agent with
+the same context the conversation is about. Close the thread with resolve_comment once the
+request is carried out; resolving an @mention thread also records the exchange in the
+canvas Memory. Writing is metered only when a reply @mentions a resident role, exactly
+like a comment left in the browser. Reading does not claim work or resolve it; task
+feedback is separate (get_feedback).
 
 ## Narrate your work — set_status
 
