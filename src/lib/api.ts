@@ -2,6 +2,7 @@ import type {
   ActivityItem,
   Canvas,
   CanvasMeta,
+  CardScope,
   CommunityCategory,
   CommunityItem,
   Frame,
@@ -366,8 +367,11 @@ export const api = {
   disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),
-  addCard: (canvasId: string, title: string, agents: string[], attachments?: string[]) =>
-    req(`/api/canvases/${canvasId}/cards`, { method: 'POST', body: JSON.stringify({ title, agents, attachments }) }),
+  addCard: (canvasId: string, title: string, agents: string[], attachments?: string[], scope?: CardScope) =>
+    req(`/api/canvases/${canvasId}/cards`, {
+      method: 'POST',
+      body: JSON.stringify({ title, agents, attachments, scope }),
+    }),
   completeCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),
   retryCard: (canvasId: string, cardId: string) =>

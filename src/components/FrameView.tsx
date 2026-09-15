@@ -151,6 +151,11 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       /* clicking a frame already in a group keeps the group — the drag
          moves all of them */
       select(frame.id)
+    } else if (panelOnClick && useStore.getState().selectedElement?.frameId === frame.id) {
+      /* grabbing the title bar while one of its elements is picked means
+         "the whole frame now" — drop the element selection */
+      useStore.getState().pickElement(null)
+      closePopovers() // and its outline, so a stale target never lingers
     }
     setDragging(true)
     clearHover()

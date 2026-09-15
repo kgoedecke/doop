@@ -1487,6 +1487,7 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
     req.body?.agents,
     req.body?.attachments,
     req.user!.id,
+    req.body?.scope,
   )
   if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
   res.json(card)

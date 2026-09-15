@@ -250,6 +250,8 @@ export const tasks = pgTable(
     kind: text('kind'),
     /** JSON payload of a structured card — what its runner needs, never a secret */
     payload: text('payload'),
+    /** JSON CardScope: the frame/element the prompt was scoped to when queued */
+    scope: text('scope'),
   },
   (t) => [index('tasks_canvas_idx').on(t.canvasId)],
 )

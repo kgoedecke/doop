@@ -16,7 +16,7 @@ import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
 import { DESIGN_BRIEF, DESIGN_QUALITY } from './guide.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
-import type { Frame } from '../shared/types.ts'
+import type { AgentTask, Frame } from '../shared/types.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
@@ -313,6 +313,25 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           items.map((i) => `- ${i.from} (about the work "${i.about}"): "${i.text}"`).join('\n'),
       )
     }
+    /* a card asked from a selection is about THAT frame or element: the
+       agent edits it in place instead of delivering something new elsewhere */
+    function describeScope(scope: AgentTask['scope']): string {
+      if (!scope) return ''
+      const f = store.getFrame(scope.frameId)
+      if (!f) {
+        /* the target is gone: say so rather than letting the request run
+           canvas-wide against something the human never pointed at */
+        return `\n  This request was scoped to frame ${scope.frameId}, which has since been deleted. Do not redesign anything else in its place: call set_status explaining that the frame it was about no longer exists, and finish.`
+      }
+      const where = `frame ${f.id} ("${f.name}")`
+      if (!scope.selector) {
+        return `\n  Scoped to ${where}: the request is about this frame. Edit it in place (edit_frame_html or set_frame_html); do not create a new frame unless the request explicitly asks for one.`
+      }
+      return (
+        `\n  Scoped to the element \`${scope.selector}\` inside ${where}: the request is about this element. ` +
+        `Call get_frame to read its HTML, change that element (and only what it needs) with edit_frame_html, and keep the rest of the frame as it is.`
+      )
+    }
     if (cards.length > 0) {
       sections.push(
         `Queued cards — work requests humans left on the board for you:\n` +
@@ -337,7 +356,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                     `Call screenshot_frame on each BEFORE designing and build from what you see. ` +
                     `They are source material — leave them as they are and deliver in a separate frame.`
                   : ''
-              return `- from ${c.queuedBy}: "${c.status}"${route}${refs}`
+              const scoped = describeScope(c.scope)
+              return `- from ${c.queuedBy}: "${c.status}"${route}${scoped}${refs}`
             })
             .join('\n'),
       )

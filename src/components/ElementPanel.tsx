@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { inspectElement, onFrameReady, styleElement, type ElementInfo, type StylePatch } from '../lib/frameBridge'
-import { ancestorsOf, buildLayerTree, elementHtml, type LayerNode } from '../lib/layers'
+import { ancestorsOf, buildLayerTree, elementHtml, findLayer, layerName } from '../lib/layers'
 import { replaceLayerHtml } from '../lib/layerEdits'
 import {
   borderSummary,
@@ -67,7 +67,7 @@ export function ElementPanel({ frame, selector, className }: { frame: Frame; sel
   const [info, setInfo] = useState<ElementInfo | null>(null)
 
   const tree = useMemo(() => buildLayerTree(frame.html), [frame.html])
-  const node = useMemo(() => findNode(tree, selector), [tree, selector])
+  const node = useMemo(() => findLayer(tree, selector), [tree, selector])
   const parentNode = useMemo(() => ancestorsOf(tree, selector)?.at(-1) ?? null, [tree, selector])
 
   /* re-read after every html change — remote edits and our own saves alike —
@@ -115,7 +115,7 @@ export function ElementPanel({ frame, selector, className }: { frame: Frame; sel
     useStore.getState().pickElement(null)
   }
 
-  const name = node ? (node.detail ? `${node.tag}${node.detail}` : node.label) : selector.split(' > ').at(-1)
+  const name = node ? layerName(node) : selector.split(' > ').at(-1)
   const parentLabel = parentNode ? `${parentNode.tag}${parentNode.detail}` : 'body'
 
   return (
@@ -161,15 +161,6 @@ export function ElementPanel({ frame, selector, className }: { frame: Frame; sel
       </PanelTabsRoot>
     </Panel>
   )
-}
-
-function findNode(nodes: LayerNode[], selector: string): LayerNode | null {
-  for (const n of nodes) {
-    if (n.selector === selector) return n
-    const hit = findNode(n.children, selector)
-    if (hit) return hit
-  }
-  return null
 }
 
 function Waiting() {

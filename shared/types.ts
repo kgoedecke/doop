@@ -300,10 +300,19 @@ export interface AgentTask {
   attachments?: string[]
   /** index into pipeline of the stage that is queued or running right now */
   stage?: number
+  /** board cards: the frame (and optionally the element inside it) the human
+   *  had selected when they asked — the agent edits that in place */
+  scope?: CardScope
   /** structured board cards the resident runner dispatches on, instead of
    *  handing the title to the chat agent. Absent on prompt cards. */
   kind?: RepoCardKind
   payload?: RepoCardPayload
+}
+
+export interface CardScope {
+  frameId: string
+  /** element selector inside the frame (frameRuntime cssPath); absent = whole frame */
+  selector?: string
 }
 
 export type RepoCardKind = 'sketch' | 'design-system'

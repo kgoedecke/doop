@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
@@ -8,7 +8,12 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Note } from './ui/note'
 import { DoopMark } from './Logo'
-import { AttachmentIcon } from './ui/icons'
+import { AttachmentIcon, XIcon } from './ui/icons'
+import { LayerKindIcon } from './LayerKindIcon'
+import { buildLayerTree, findLayer, layerName } from '../lib/layers'
+import type { CardScope } from '../../shared/types'
+import type { LayerKind } from '../lib/layers'
+import { cn } from '../lib/utils'
 
 /**
  * The canvas's front door to the resident team: a prompt bar that queues a
@@ -20,6 +25,25 @@ import { AttachmentIcon } from './ui/icons'
  */
 
 const MAX_ATTACHMENTS = 4
+/** the scope chip's label is cut here so a long text node never eats the input */
+const MAX_SCOPE_LABEL = 24
+
+interface ScopeChip {
+  scope: CardScope
+  /** what the chip reads: an element's "aside.rail", a frame's name */
+  label: string
+  kind: LayerKind | 'frame'
+}
+
+function clip(text: string): string {
+  return text.length > MAX_SCOPE_LABEL ? `${text.slice(0, MAX_SCOPE_LABEL - 1).trimEnd()}…` : text
+}
+
+/** "frame:element" for an element scope, the frame id alone for a frame one */
+function scopeKey(scope: CardScope): string {
+  return scope.selector ? `${scope.frameId}:${scope.selector}` : scope.frameId
+}
+
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024 // mirrors the server's asset cap
 
 /** How long after a submit a newly created frame still gets the camera. */
@@ -40,7 +64,28 @@ interface Attachment {
 
 export function PromptBar({ canvasId }: { canvasId: string }) {
   const frames = useStore((s) => s.canvas?.frames)
+  const selectedId = useStore((s) => s.selectedId)
+  const selectedElement = useStore((s) => s.selectedElement)
   const { allowance, refresh } = useAllowance()
+  /* the selection is the prompt's scope until the chip is dismissed — × or
+     Esc drops it entirely, no stepping up to the frame. Keyed on the scope
+     so a new selection brings the chip back. */
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  const chip = useMemo<ScopeChip | null>(() => {
+    const frame = frames?.find((f) => f.id === (selectedElement?.frameId ?? selectedId))
+    if (!frame) return null
+    const scope: CardScope = selectedElement
+      ? { frameId: frame.id, selector: selectedElement.selector }
+      : { frameId: frame.id }
+    if (dismissed === scopeKey(scope)) return null
+    if (!selectedElement) return { scope, label: frame.name, kind: 'frame' }
+    const node = findLayer(buildLayerTree(frame.html), selectedElement.selector)
+    return {
+      scope,
+      label: node ? layerName(node) : (selectedElement.selector.split(' > ').at(-1) ?? 'element'),
+      kind: node?.kind ?? 'box',
+    }
+  }, [frames, selectedId, selectedElement, dismissed])
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [busy, setBusy] = useState(false)
@@ -132,8 +177,12 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
         clean,
         ['doop'],
         refFrames.map((f) => f.id),
+        chip?.scope,
       )
-      posthog.capture('prompt_bar_submitted', { attachments: refFrames.length })
+      posthog.capture('prompt_bar_submitted', {
+        attachments: refFrames.length,
+        scope: chip ? (chip.scope.selector ? 'element' : 'frame') : 'none',
+      })
       awaiting.current = openFlyWindow(refFrames.map((f) => f.id))
       attachments.forEach((a) => URL.revokeObjectURL(a.preview))
       setAttachments([])
@@ -203,14 +252,51 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
         >
           <AttachmentIcon aria-hidden />
         </Button>
+        {chip && (
+          <span
+            className="group/scope flex max-w-[40%] flex-none items-center gap-1 rounded-[7px] bg-brand/10 py-1 pl-2 pr-1 font-mono text-[12.5px] text-accent-ink"
+            title={
+              chip.kind === 'frame' ? `Scoped to the frame “${chip.label}”` : `Scoped to ${chip.label} in this frame`
+            }
+          >
+            <span className="flex-none opacity-70">
+              {chip.kind === 'frame' ? <FrameGlyph /> : <LayerKindIcon kind={chip.kind} />}
+            </span>
+            <span className="min-w-0 truncate">{clip(chip.label)}</span>
+            <Button
+              variant="bare"
+              className={cn(
+                'size-4 flex-none justify-center rounded-full p-0 text-accent-ink/70 hover:bg-brand/15 hover:text-accent-ink',
+                'opacity-0 transition-opacity focus-visible:opacity-100 group-hover/scope:opacity-100',
+              )}
+              aria-label={chip.kind === 'frame' ? 'Remove frame scope' : 'Remove element scope'}
+              disabled={busy}
+              onClick={() => setDismissed(scopeKey(chip.scope))}
+            >
+              <XIcon className="size-3" aria-hidden />
+            </Button>
+          </span>
+        )}
         <Input
           ref={inputRef}
           variant="bare"
           inputSize="auto"
-          className="flex-1 px-1 py-1.5 md:px-2 md:text-sm"
+          className="min-w-0 flex-1 px-1 py-1.5 md:px-2 md:text-sm"
           value={text}
           disabled={busy}
-          placeholder="Ask the Doop Agent to design something…"
+          placeholder={
+            chip
+              ? chip.kind === 'frame'
+                ? 'Ask the Doop Agent to change this frame…'
+                : 'Ask the Doop Agent to change this element…'
+              : 'Ask the Doop Agent to design something…'
+          }
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && chip) {
+              e.preventDefault()
+              setDismissed(scopeKey(chip.scope))
+            }
+          }}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
             const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
@@ -238,10 +324,25 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           <Note size="sm" className="text-xs text-ink-soft">
             <DoopMark size={11} /> The Doop Agent is on it — watch the canvas
           </Note>
+        ) : chip ? (
+          <Note size="sm" className="text-xs text-ink-soft">
+            <span className="text-accent-ink">✦</span>{' '}
+            {chip.kind === 'frame'
+              ? 'Scoped to this frame — press Esc to ask about the whole canvas'
+              : 'Scoped to the selection — press Esc to ask without it'}
+          </Note>
         ) : (
           <MeterLine allowance={allowance} />
         )}
       </div>
     </div>
+  )
+}
+
+function FrameGlyph() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" />
+    </svg>
   )
 }

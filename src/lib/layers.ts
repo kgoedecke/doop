@@ -93,6 +93,21 @@ export function elementPath(el: Element): string {
  *  must be open for its row to show. Walked on the tree rather than derived
  *  from the selector string: a path anchored on an #id says nothing about the
  *  elements above that id. Null when the selector is not in the tree. */
+/** The node a selector names, anywhere in the tree. */
+export function findLayer(nodes: LayerNode[], selector: string): LayerNode | null {
+  for (const n of nodes) {
+    if (n.selector === selector) return n
+    const hit = findLayer(n.children, selector)
+    if (hit) return hit
+  }
+  return null
+}
+
+/** The name a node shows for itself: "aside.rail", "#nav", or its text. */
+export function layerName(node: LayerNode): string {
+  return node.detail ? `${node.tag}${node.detail}` : node.label
+}
+
 export function ancestorsOf(nodes: LayerNode[], selector: string): LayerNode[] | null {
   for (const node of nodes) {
     if (node.selector === selector) return []

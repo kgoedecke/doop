@@ -10,6 +10,7 @@ import { isCommunityCategory } from '../../shared/types.ts'
 import type {
   ActivityItem,
   AgentTask,
+  CardScope,
   Canvas,
   DesignDecision,
   ElementComment,
@@ -359,6 +360,18 @@ export function deleteFrame(frameId: string) {
   swallow(db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId)))
 }
 
+/** The frame/element a prompt card was scoped to, or nothing when the row
+ *  carries none or it no longer parses. */
+function scopeField(scope: string | null): Pick<AgentTask, 'scope'> {
+  if (!scope) return {}
+  try {
+    const parsed = JSON.parse(scope) as CardScope
+    return typeof parsed?.frameId === 'string' ? { scope: parsed } : {}
+  } catch {
+    return {}
+  }
+}
+
 /** A structured card's kind + payload, or nothing when the row is a prompt
  *  card or its payload no longer parses (the card then reads as a plain one). */
 function repoCardFields(kind: string | null, payload: string | null): Pick<AgentTask, 'kind' | 'payload'> {
@@ -391,6 +404,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     attachments: task.attachments?.join(',') ?? null,
     kind: task.kind ?? null,
     payload: task.payload ? JSON.stringify(task.payload) : null,
+    scope: task.scope ? JSON.stringify(task.scope) : null,
   }
   swallow(
     db
@@ -645,6 +659,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.stage != null ? { stage: row.stage } : {}),
       ...(row.attachments ? { attachments: row.attachments.split(',').filter(Boolean) } : {}),
       ...repoCardFields(row.kind, row.payload),
+      ...scopeField(row.scope),
     })
     tasks.set(row.canvasId, list)
   }
