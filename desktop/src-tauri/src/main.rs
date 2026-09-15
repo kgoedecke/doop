@@ -23,12 +23,24 @@
 // registers the scheme (tauri.conf.json) and forwards each URL to the page
 // as a `deep-link://new-url` event; the shell only brings its window to the
 // front so the person sees the result of the click.
+//
+// Downloads (the Inspector's PNG/JPG export links, served with
+// Content-Disposition: attachment) need a download handler: without one
+// WKWebView treats the response as a navigation and shows the image in the
+// window instead of saving it. wry picks ~/Downloads/<server filename>
+// (deduplicated) as the destination; the shell just accepts it and reveals
+// the finished file in Finder / Explorer, since the webview has no download
+// bar of its own to show where it went.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
+use std::sync::Mutex;
+use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
@@ -243,9 +255,45 @@ fn main() {
                 app.package_info().version,
                 std::env::consts::OS
             );
+            // macOS never reports the saved path on `Finished`, so remember
+            // the destinations accepted on `Requested`, keyed by URL. The same
+            // URL can be in flight more than once (double-clicking Download),
+            // so each key holds a queue: wry gives every request its own
+            // deduplicated filename and completions arrive in request order.
+            let download_handle = app.handle().clone();
+            let downloads: Mutex<HashMap<String, VecDeque<PathBuf>>> =
+                Mutex::new(HashMap::new());
             let builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::External(entry.parse()?))
                     .initialization_script(&desktop_marker)
+                    .on_download(move |_webview, event| {
+                        match event {
+                            DownloadEvent::Requested { url, destination } => {
+                                if let Ok(mut map) = downloads.lock() {
+                                    map.entry(url.to_string())
+                                        .or_default()
+                                        .push_back(destination.clone());
+                                }
+                            }
+                            DownloadEvent::Finished { url, path, success } => {
+                                let remembered = downloads.lock().ok().and_then(|mut map| {
+                                    let queue = map.get_mut(url.as_str())?;
+                                    let front = queue.pop_front();
+                                    if queue.is_empty() {
+                                        map.remove(url.as_str());
+                                    }
+                                    front
+                                });
+                                if success {
+                                    if let Some(saved) = path.or(remembered) {
+                                        let _ = download_handle.opener().reveal_item_in_dir(saved);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        true
+                    })
                     .title("doop")
                     .inner_size(1440.0, 900.0)
                     .min_inner_size(900.0, 600.0)
