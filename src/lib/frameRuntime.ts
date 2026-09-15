@@ -1,3 +1,5 @@
+import { FRAME_REPLAY_RUNTIME } from './frameReplayRuntime'
+
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
  * via postMessage and the runtime morphs the live DOM to match — only changed
@@ -7,6 +9,7 @@
 export const FRAME_BOOTSTRAP = `<!doctype html>
 <html><head></head><body><script data-v-boot>
 (function () {
+  ${FRAME_REPLAY_RUNTIME}
   /* horizontal overscroll inside a frame must not chain to the parent page,
      where the browser turns it into a history back/forward swipe. Adopted
      sheet, not a <style> tag — the morph would wipe a tag from <head>. */
@@ -72,6 +75,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var scripts = document.querySelectorAll('script:not([data-v-ran]):not([data-v-boot])')
     for (var i = 0; i < scripts.length; i++) {
       var old = scripts[i]
+      if (old === replayScript) continue
       var s = document.createElement('script')
       for (var j = 0; j < old.attributes.length; j++) s.setAttribute(old.attributes[j].name, old.attributes[j].value)
       s.textContent = old.textContent
@@ -183,6 +187,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function serialize() {
     var root = document.documentElement.cloneNode(true)
+    // Remove only our pending loader's clone, preserving design-owned attributes.
+    if (replayScript && replayScript.parentNode === document.documentElement) {
+      var replayIndex = Array.prototype.indexOf.call(document.documentElement.childNodes, replayScript)
+      root.childNodes[replayIndex].remove()
+    }
     var boot = root.querySelector('script[data-v-boot]')
     if (boot && boot.parentNode) boot.parentNode.removeChild(boot)
     var es = root.querySelector('style[data-v-edit]')

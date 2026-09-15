@@ -18,6 +18,7 @@ import 'posthog-js/dist/web-vitals'
    it must be compiled in or the no-external build can never show it. */
 import 'posthog-js/dist/conversations'
 import posthog from 'posthog-js/dist/module.no-external'
+import { installFrameReplay } from './frameReplay'
 import { desktopPlatform, isDesktopShell, shellVersion } from './shell'
 
 const key = import.meta.env.VITE_POSTHOG_KEY
@@ -45,6 +46,7 @@ const NO_REPLAY_KEY = 'doop:internal-no-replay'
 if (!key) {
   console.warn('VITE_POSTHOG_KEY is unset — PostHog is disabled and no events will be sent.')
 } else {
+  installFrameReplay()
   posthog.init(key, {
     api_host: host,
     /* api_host is our relay; links out to the PostHog app must not be */
@@ -56,6 +58,7 @@ if (!key) {
       capture_console_errors: false,
     },
     session_recording: {
+      recordCrossOriginIframes: true,
       /* a design tool: what people type into prompts/comments is the point
          of watching a replay. Credentials stay masked. */
       maskAllInputs: false,

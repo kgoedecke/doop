@@ -77,6 +77,7 @@ export function PresentMode({ frameId, onClose }: { frameId: string; onClose: ()
           ref={iframeRef}
           className="block border-none bg-white"
           title={frame.name}
+          data-doop-frame=""
           sandbox="allow-scripts"
           srcDoc={FRAME_BOOTSTRAP}
           style={{ width: frame.width, height: frame.height, transform: `scale(${scale})`, transformOrigin: '0 0' }}

@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+  <body>
+    <script type="module">
+      import 'posthog-js/dist/posthog-recorder'
+      import { Replayer } from 'posthog-js/dist/rrweb'
+      import { installFrameReplay } from '/src/lib/frameReplay.ts'
+      import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
+      installFrameReplay()
+      const rrweb = window.__PosthogExtensions__.rrweb
+      window.renderReplay = (events) => {
+        document.body.innerHTML = ''
+        const player = new Replayer(events, { root: document.body, mouseTail: false })
+        player.pause(events[events.length - 1].timestamp - events[0].timestamp + 1)
+      }
+      window.events = []
+      window.messages = []
+      window.addEventListener('message', (ev) => window.messages.push(ev.data))
+      window.addFrame = () => {
+        const frame = document.createElement('iframe')
+        frame.setAttribute('data-doop-frame', '')
+        frame.sandbox = 'allow-scripts'
+        frame.srcdoc = FRAME_BOOTSTRAP
+        document.body.appendChild(frame)
+      }
+      window.startReplay = (privacy = {}) => {
+        window.stopReplay = rrweb.record({
+          emit: (event) => window.events.push(event),
+          recordCrossOriginIframes: true,
+          maskAllInputs: false,
+          maskInputOptions: { password: true, email: true },
+          blockClass: 'ph-no-capture',
+          maskTextClass: 'ph-mask',
+          ...privacy,
+        })
+      }
+      window.snapshot = () => rrweb.record.takeFullSnapshot()
+      window.addFrame()
+      window.testReady = true
+    </script>
+  </body>
+</html>

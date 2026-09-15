@@ -668,6 +668,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
               ref={iframeRef}
               className="block border-none bg-white"
               title={frame.name}
+              data-doop-frame=""
               sandbox="allow-scripts"
               srcDoc={FRAME_BOOTSTRAP}
               style={{
