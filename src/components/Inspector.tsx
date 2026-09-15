@@ -34,6 +34,7 @@ export function Inspector({
   const [draft, setDraft] = useState(frame.html)
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saved'>('idle')
   const [copiedUrl, setCopiedUrl] = useState(false)
+  const [copiedHtml, setCopiedHtml] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const saveTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
@@ -129,6 +130,18 @@ export function Inspector({
           }}
         >
           {copiedUrl ? '✓ copied' : 'Copy image URL'}
+        </Button>
+        <Button
+          className={exportBtn}
+          title="Copy the frame's full HTML"
+          onClick={() => {
+            navigator.clipboard.writeText(draft).then(() => {
+              setCopiedHtml(true)
+              window.setTimeout(() => setCopiedHtml(false), 1500)
+            }, console.error)
+          }}
+        >
+          {copiedHtml ? '✓ copied' : 'Copy code'}
         </Button>
       </div>
       <Collapsible
