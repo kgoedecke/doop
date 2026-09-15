@@ -298,6 +298,9 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
         return
     }
     e.preventDefault()
+    /* the canvas page listens for ⌫ on window and deletes the selected
+       frame — keys the tree handled must not reach it */
+    e.stopPropagation()
   }
 
   return (
