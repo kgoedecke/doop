@@ -27,10 +27,12 @@
 // Downloads (the Inspector's PNG/JPG export links, served with
 // Content-Disposition: attachment) need a download handler: without one
 // WKWebView treats the response as a navigation and shows the image in the
-// window instead of saving it. wry picks ~/Downloads/<server filename>
-// (deduplicated) as the destination; the shell just accepts it and reveals
-// the finished file in Finder / Explorer, since the webview has no download
-// bar of its own to show where it went.
+// window instead of saving it. The shell asks where to save with a native
+// save panel (rfd, synchronous: the download callback already runs on the
+// UI thread, and tauri-plugin-dialog's blocking variant would wait on that
+// same thread) seeded with wry's default of ~/Downloads/<server filename>,
+// then reveals the finished file in Finder / Explorer, since the webview
+// has no download bar of its own.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(target_os = "macos")]
@@ -256,7 +258,7 @@ fn main() {
                 std::env::consts::OS
             );
             // macOS never reports the saved path on `Finished`, so remember
-            // the destinations accepted on `Requested`, keyed by URL. The same
+            // the destinations chosen on `Requested`, keyed by URL. The same
             // URL can be in flight more than once (double-clicking Download),
             // so each key holds a queue: wry gives every request its own
             // deduplicated filename and completions arrive in request order.
@@ -269,6 +271,21 @@ fn main() {
                     .on_download(move |_webview, event| {
                         match event {
                             DownloadEvent::Requested { url, destination } => {
+                                let mut picker = rfd::FileDialog::new().set_title("Save export");
+                                if let Some(dir) = destination.parent() {
+                                    picker = picker.set_directory(dir);
+                                }
+                                if let Some(name) = destination.file_name().and_then(|n| n.to_str()) {
+                                    picker = picker.set_file_name(name);
+                                }
+                                if let Some(ext) = destination.extension().and_then(|e| e.to_str()) {
+                                    picker = picker.add_filter(ext.to_uppercase(), &[ext]);
+                                }
+                                // Cancelling the panel cancels the download.
+                                let Some(chosen) = picker.save_file() else {
+                                    return false;
+                                };
+                                *destination = chosen;
                                 if let Ok(mut map) = downloads.lock() {
                                     map.entry(url.to_string())
                                         .or_default()
