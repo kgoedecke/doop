@@ -7,6 +7,13 @@
     "devUrl": "http://localhost:4300",
     "frontendDist": "https://doop.design"
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["doop"]
+      }
+    }
+  },
   "app": {
     "windows": [],
     "withGlobalTauri": true,

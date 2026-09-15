@@ -17,6 +17,17 @@ The URL is baked in at compile time (`src-tauri/src/main.rs`); the in-shell
 navigation allowlist follows it automatically.
 
 Links outside doop.design open in the system browser (`src-tauri/src/main.rs`).
+Google / Microsoft / SSO sign-in runs there too: identity providers refuse
+embedded webviews, so the page opens the provider in the browser and the
+finished sign-in returns through a `doop://auth?token=…` link (deep-link
+plugin, scheme in `tauri.conf.json`) that the page redeems for a session — see
+`src/lib/desktopAuth.ts`. macOS only routes `doop://` to an installed bundle, so
+`tauri dev` cannot receive it. To test locally, build a `.app` with
+`bunx tauri build --debug --bundles app` (a debug build still targets
+localhost:4300) and launch it. A built bundle treats localhost as a remote
+origin, so temporarily add `http://localhost:4300` to `remote.urls` in
+`capabilities/default.json` for that test or the page gets no IPC (no events,
+no opener) — and take it out again before committing.
 When a deploy ships a new client bundle, long-running windows get a
 "doop was updated — Reload" toast on WebSocket reconnect (see `serverBuild`
 in the `init` message).

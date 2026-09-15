@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { APIError } from 'better-auth/api'
 import { eq, inArray, or, isNull, ne, and, sql } from 'drizzle-orm'
-import { admin, mcp, genericOAuth } from 'better-auth/plugins'
+import { admin, mcp, genericOAuth, oneTimeToken } from 'better-auth/plugins'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
@@ -405,6 +405,12 @@ function buildAuth() {
     plugins: [
       mcp({ loginPage: '/' }),
       admin({ impersonationSessionDuration: 15 * 60 }),
+      /* oneTimeToken: how a Google / Microsoft / SSO sign-in finished in the
+         system browser reaches the desktop app (src/lib/desktopAuth.ts). The
+         browser session mints a token, the app redeems it and gets the same
+         session's cookie. Single use, hashed at rest, two minutes to live —
+         it travels through a doop:// URL that lands in browser history. */
+      oneTimeToken({ storeToken: 'hashed', expiresIn: 2 }),
       ...(oidc
         ? [
             genericOAuth({

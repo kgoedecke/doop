@@ -15,14 +15,32 @@
 // on a single-window app closes the whole app. Ours binds Cmd+W to "Close
 // Tab" and hands the keystroke to the page as a `close-tab` event
 // (src/lib/desktop.ts closes the active canvas tab).
+//
+// Sign-in with Google / Microsoft / SSO cannot happen in the webview —
+// identity providers refuse embedded browsers — so the page opens the
+// provider in the system browser and the finished sign-in comes back as a
+// doop://auth?token=… link (src/lib/desktopAuth.ts). The deep-link plugin
+// registers the scheme (tauri.conf.json) and forwards each URL to the page
+// as a `deep-link://new-url` event; the shell only brings its window to the
+// front so the person sees the result of the click.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
-use tauri::{AppHandle, Emitter};
-use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::Emitter;
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
+
+/// Bring the (only) window forward: after a doop:// link, or when a second
+/// instance was launched to deliver one.
+fn focus_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
 
 /// The hosted app this shell wraps. Self-hosters can point release builds at
 /// their own instance without patching the source:
@@ -160,7 +178,13 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 }
 
 fn main() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    // single-instance must be the first plugin so a second launch is caught
+    // before anything else initialises; it hands the launch's URL args to
+    // the deep-link plugin through the `deep-link` feature.
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| focus_main_window(app)))
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init());
     #[cfg(target_os = "macos")]
     let builder = builder.menu(build_menu).on_menu_event(|app, event| {
         if event.id() == CLOSE_TAB {
@@ -185,6 +209,14 @@ fn main() {
             let _ = (window, event);
         })
         .setup(|app| {
+            // macOS registers doop:// from the bundle's Info.plist, so it
+            // only works installed; Windows and Linux can register at
+            // runtime, which also makes `tauri dev` receive links.
+            #[cfg(any(windows, target_os = "linux"))]
+            app.deep_link().register_all()?;
+            let focus_handle = app.handle().clone();
+            app.deep_link().on_open_url(move |_event| focus_main_window(&focus_handle));
+
             let handle = app.handle().clone();
             let entry = format!("{}/auth", base_url());
             // Hosts that stay inside the shell; any other http(s) target opens

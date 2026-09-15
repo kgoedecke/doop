@@ -10,6 +10,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# doop:// links: how a sign-in finished in the system browser reaches the app
+# (src/lib/desktopAuth.ts). single-instance routes a link that Windows/Linux
+# deliver by launching a second copy back into the running one.
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# generate_context! embeds the `plugins` section of tauri.conf.json through it
+serde_json = "1"
 
 # Repositioning the traffic lights over the web app's tab strip (main.rs);
 # AppKit resets them on window events, so the shell moves them itself.

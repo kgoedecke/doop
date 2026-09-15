@@ -7,6 +7,16 @@
 
 import { create } from 'zustand'
 import { navigate } from '../App'
+import { authClient } from './auth'
+import {
+  type DesktopSignInProvider,
+  desktopSignInURL,
+  forgetPendingSignIn,
+  isPendingSignIn,
+  newChallenge,
+  parseDesktopAuthDeepLink,
+  rememberPendingSignIn,
+} from './desktopAuth'
 import { isDesktopShell } from './shell'
 
 export type CanvasTab = { id: string; name: string }
@@ -14,7 +24,8 @@ export type CanvasTab = { id: string; name: string }
 type ShellWindow = Window & {
   __TAURI__?: {
     opener?: { openUrl?: (url: string) => Promise<void> }
-    event?: { listen?: (name: string, handler: () => void) => Promise<() => void> }
+    event?: { listen?: <T>(name: string, handler: (event: { payload: T }) => void) => Promise<() => void> }
+    deepLink?: { getCurrent?: () => Promise<string[] | null> }
     window?: { getCurrentWindow?: () => { close: () => Promise<void> } }
   }
 }
@@ -141,6 +152,72 @@ export function closeActiveTab() {
   shellWindow.__TAURI__?.window?.getCurrentWindow?.().close().catch(console.error)
 }
 
+/* ---------- sign-in handoff from the system browser ---------- */
+
+/** Whether this shell can receive a doop:// link: shells from 0.2.1 register
+ *  the scheme and inject the deep-link plugin's API. Older shells have no
+ *  way to get the session back, so the sign-in form keeps its in-webview
+ *  attempt there. Detected by the API rather than the version so a local
+ *  build tests the same code path as a release. */
+export function supportsBrowserSignIn(): boolean {
+  return typeof shellWindow.__TAURI__?.deepLink?.getCurrent === 'function'
+}
+
+/** Step 1 of the desktop sign-in (src/lib/desktopAuth.ts): remember a
+ *  fresh challenge as the pending sign-in and send the system browser to
+ *  the page that starts the provider round trip. False if the browser
+ *  could not be opened — the caller shows its start-failure message. */
+export async function beginBrowserSignIn(provider: DesktopSignInProvider, to: string): Promise<boolean> {
+  const open = shellWindow.__TAURI__?.opener?.openUrl
+  if (typeof open !== 'function') return false
+  const challenge = newChallenge()
+  if (!rememberPendingSignIn(challenge)) return false
+  try {
+    await open(desktopSignInURL(location.origin, { provider, challenge, to }))
+    return true
+  } catch (err) {
+    console.error(err)
+    forgetPendingSignIn()
+    return false
+  }
+}
+
+/** Step 3: the deep-link plugin delivered doop:// URLs. Redeem the one that
+ *  answers this app's pending sign-in — the server responds with the session
+ *  cookie — and reload onto the target so every session-aware piece of the
+ *  app starts from the cookie. Links answering nothing pending are ignored:
+ *  an unsolicited link from someone else's browser session, or the launch
+ *  URL the plugin replays after the reload that follows a redeem. */
+async function completeBrowserSignIn(urls: readonly string[]) {
+  const link = urls.map(parseDesktopAuthDeepLink).find((l) => l !== null && isPendingSignIn(l.challenge))
+  if (!link) return
+  /* the pending record outlives a verify that never got an answer (the
+     request threw: offline, server restarting) so the person can click
+     "Open doop" in the browser again; it is cleared once the server has
+     ruled on the token, before the reload that follows either ruling */
+  const res = await authClient.oneTimeToken.verify({ token: link.token })
+  forgetPendingSignIn()
+  if (res.error) {
+    /* expired or already used: the sign-in form explains and offers a retry */
+    location.assign('/auth?error=desktop_handoff')
+    return
+  }
+  location.assign(link.to)
+}
+
+function listenForBrowserSignIn() {
+  const tauri = shellWindow.__TAURI__
+  tauri?.event
+    ?.listen?.<string[]>('deep-link://new-url', (e) => void completeBrowserSignIn(e.payload).catch(console.error))
+    .catch(console.error)
+  /* the link that launched the app: the person quit doop while the browser
+     was still busy, and the callback relaunched it */
+  tauri?.deepLink
+    ?.getCurrent?.()
+    .then((urls) => (urls ? completeBrowserSignIn(urls) : undefined))
+    .catch(console.error)
+}
+
 /* ---------- external links ---------- */
 
 /** Hand a URL to the system browser via the shell's opener IPC. False on
@@ -161,6 +238,7 @@ export function initDesktopShell() {
      it as an event — the page never sees the keystroke. Windows has no menu
      bar, so Ctrl+W arrives as a plain keydown. Both close the active tab. */
   shellWindow.__TAURI__?.event?.listen?.('close-tab', closeActiveTab).catch(console.error)
+  listenForBrowserSignIn()
   document.addEventListener('keydown', (e) => {
     if (e.key.toLowerCase() !== 'w' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return
     e.preventDefault()

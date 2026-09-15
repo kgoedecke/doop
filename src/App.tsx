@@ -4,6 +4,9 @@ import { Community } from './pages/Community'
 import { Settings } from './pages/Settings'
 import { CanvasPage } from './pages/CanvasPage'
 import { AuthPage } from './pages/AuthPage'
+import { DesktopHandoff } from './pages/DesktopHandoff'
+import { DesktopSignIn } from './pages/DesktopSignIn'
+import { DESKTOP_HANDOFF_PATH, DESKTOP_SIGNIN_PATH } from './lib/desktopAuth'
 import { Admin } from './pages/Admin'
 import { Automations } from './pages/Automations'
 import { AutomationEditor } from './pages/AutomationEditor'
@@ -98,6 +101,17 @@ export function App() {
         <AuthScreen />
       </>
     )
+  /* the desktop app sent this browser here to begin a provider sign-in on
+     its behalf (src/lib/desktopAuth.ts) — signed in or not, the page itself
+     decides where to go next */
+  if (path === DESKTOP_SIGNIN_PATH)
+    return (
+      <>
+        <ShellDragBar />
+        <DesktopSignIn signedIn={!!session} />
+      </>
+    )
+
   /* signed out: every path lands on the sign-in form. The marketing site is
      a separate service (see server/marketing.ts) that owns `/` for
      visitors; share links (/c/…) and interrupted MCP OAuth redirects keep
@@ -119,6 +133,8 @@ export function App() {
   const canvasId = path.match(/^\/c\/([^/]+)/)?.[1]
   const page = canvasId ? (
     <CanvasPage canvasId={canvasId} key={canvasId} />
+  ) : path === DESKTOP_HANDOFF_PATH ? (
+    <DesktopHandoff />
   ) : path.startsWith('/admin') ? (
     <Admin />
   ) : path.startsWith('/settings') ? (

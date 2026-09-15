@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
 import { setName } from '../lib/identity'
+import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
+import type { DesktopSignInProvider } from '../lib/desktopAuth'
+import { safeRelativeTarget } from '../lib/safeTarget'
+import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
 import { AuthScreen } from '../components/ui/screen'
 import { Wordmark } from '../components/ui/wordmark'
@@ -31,21 +35,6 @@ async function accountExists(email: string): Promise<boolean> {
   }
 }
 
-/* Only ever follow a same-origin relative path from a query param. A naive
-   startsWith('/') check passes both "//evil.com" (protocol-relative — the
-   browser resolves it against the current protocol, landing on a different
-   origin) and "/\evil.com" (browsers normalize the backslash to a second
-   slash for http(s) URLs, same bypass) — resolving against location.origin
-   and comparing origins catches both. */
-function safeRelativeTarget(raw: string | null): string | null {
-  if (!raw || !raw.startsWith('/')) return null
-  try {
-    return new URL(raw, location.origin).origin === location.origin ? raw : null
-  } catch {
-    return null
-  }
-}
-
 function resumeOAuthFlow(): boolean {
   const params = new URLSearchParams(location.search)
   const target = safeRelativeTarget(params.get('redirect_to') || params.get('redirect_uri'))
@@ -61,6 +50,12 @@ function resumeOAuthFlow(): boolean {
 }
 
 type AuthMode = 'signin' | 'signup' | 'forgot' | 'reset'
+
+/** The redirect knobs shared by better-auth's social and oauth2 sign-ins. */
+interface ProviderStart {
+  callbackURL: string
+  errorCallbackURL: string
+}
 
 /** Microsoft's four-square logo, per its sign-in branding guidelines (inline for the same reason). */
 function MicrosoftMark() {
@@ -112,6 +107,8 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
   "email_doesn't_match": "The signed-in email doesn't match the account you started from — try again.",
   email_is_missing: "Your identity provider didn't share an email address — doop needs one to sign you in.",
   email_not_found: "Your identity provider didn't share an email address — doop needs one to sign you in.",
+  /* the desktop shell's browser handoff (src/lib/desktopAuth.ts) came back with a spent or expired token */
+  desktop_handoff: 'That sign-in link has expired — start again and finish in your browser within a couple of minutes.',
 }
 
 /* A failure inside the IdP round trip (the browser has already left and
@@ -170,6 +167,13 @@ function useOidcConfig(): OidcClientConfig {
   return config
 }
 
+/* Set once the desktop shell has sent a provider sign-in to the system
+   browser. Lives outside the component because the sign-in request makes
+   the auth client re-check the session, App swaps in its pending screen for
+   a moment, and this form remounts with fresh state — the notice would be
+   gone before anyone read it. A page load (the sign-in landing) resets it. */
+let browserSignInNotice: string | null = null
+
 export function AuthPage() {
   const oidc = useOidcConfig()
   /* better-auth lands password-reset links on /auth/reset?token=… */
@@ -180,7 +184,7 @@ export function AuthPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(ssoErrorFromUrl)
   /* informational state (not an error): "check your email" and friends */
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(browserSignInNotice)
   /* signin failed on an unverified email — offer a resend */
   const [unverified, setUnverified] = useState(false)
   /* set when the error's real fix is the other mode: signin with an unknown
@@ -205,27 +209,41 @@ export function AuthPage() {
      ?error= — see ssoErrorFromUrl); success redirects the browser away
      immediately, so only the failure to *start* leaves us here to show
      something. */
-  async function providerSignIn(start: () => Promise<{ error?: { message?: string } | null }>) {
+  async function providerSignIn(
+    provider: DesktopSignInProvider,
+    start: (opts: ProviderStart) => Promise<{ error?: { message?: string } | null }>,
+  ) {
     setError(null)
+    setNotice(null)
     setBusy(true)
+    const startFailed = 'Could not start sign-in — try again or use email/password.'
     try {
-      const res = await start()
-      if (res.error) setError(res.error.message ?? 'Could not start sign-in — try again or use email/password.')
+      if (isDesktopShell() && supportsBrowserSignIn()) {
+        /* Identity providers refuse embedded webviews, so the desktop shell
+           signs in through the system browser and gets the session handed
+           back over a doop:// link (src/lib/desktopAuth.ts). The browser
+           starts the provider round trip itself, from a doop page. */
+        if (!(await beginBrowserSignIn(provider, ssoCallbackURL()))) {
+          setError(startFailed)
+          return
+        }
+        browserSignInNotice = 'Finish signing in in your browser — doop signs you in here the moment you come back.'
+        setNotice(browserSignInNotice)
+        return
+      }
+      const res = await start({ callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' })
+      if (res.error) setError(res.error.message ?? startFailed)
     } finally {
       setBusy(false)
     }
   }
 
   function ssoSignIn() {
-    return providerSignIn(() =>
-      authClient.signIn.oauth2({ providerId: 'oidc', callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' }),
-    )
+    return providerSignIn('oidc', (opts) => authClient.signIn.oauth2({ providerId: 'oidc', ...opts }))
   }
 
   function socialSignIn(provider: 'google' | 'microsoft') {
-    return providerSignIn(() =>
-      authClient.signIn.social({ provider, callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' }),
-    )
+    return providerSignIn(provider, (opts) => authClient.signIn.social({ provider, ...opts }))
   }
 
   async function resendVerification() {
