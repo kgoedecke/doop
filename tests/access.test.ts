@@ -38,7 +38,15 @@ describe('canvas access model', () => {
     expect((await fetch(`${BASE}/api/canvases`)).status).toBe(401)
     const mcp = await fetch(`${BASE}/mcp`, { method: 'POST', body: '{}' })
     expect(mcp.status).toBe(401)
-    expect(mcp.headers.get('www-authenticate')).toContain('oauth-protected-resource')
+    expect(mcp.headers.get('www-authenticate')).toContain(`${BASE}/.well-known/oauth-protected-resource/mcp`)
+  })
+
+  it('publishes protected-resource metadata naming the /mcp endpoint (RFC 9728)', async () => {
+    for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+      const meta = await (await fetch(`${BASE}${path}`)).json()
+      expect(meta.resource).toBe(`${BASE}/mcp`)
+      expect(meta.authorization_servers).toEqual([BASE])
+    }
   })
 
   it('signs up three accounts and creates a canvas with a frame', async () => {

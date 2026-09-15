@@ -1565,13 +1565,16 @@ function bridge(handler: (req: globalThis.Request) => Promise<globalThis.Respons
 }
 app.get('/.well-known/oauth-authorization-server', (req, res) => bridge(oAuthDiscoveryMetadata(auth))(req, res))
 
-/* Protected-resource metadata must echo the origin the CLIENT used (RFC 9728
-   — clients verify `resource` against the URL they connected to), while the
-   authorization server stays on the canonical origin. In dev the app may be
-   reached via :4300, :4301 (vite port bump) or :4400 — all must validate. */
+/* Protected-resource metadata must name the exact endpoint the CLIENT
+   connected to (RFC 9728 §3.3 — strict clients such as Muse reject a `resource`
+   that differs from the URL they called, so it is `<origin>/mcp`, never the bare
+   origin), while the authorization server stays on the canonical origin. In dev
+   the app may be reached via :4300, :4301 (vite port bump) or :4400 — all must
+   validate, so the origin is echoed from the request. Both well-known paths
+   serve the same document, the shape Linear ships. */
 function protectedResourceMetadata(req: express.Request, res: express.Response) {
   res.json({
-    resource: `${req.protocol}://${req.get('host')}`,
+    resource: `${req.protocol}://${req.get('host')}/mcp`,
     authorization_servers: [PUBLIC_ORIGIN],
     jwks_uri: `${PUBLIC_ORIGIN}/api/auth/mcp/jwks`,
     scopes_supported: ['openid', 'profile', 'email', 'offline_access'],

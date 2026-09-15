@@ -1446,7 +1446,7 @@ export async function handleMcpRequest(req: Request, res: Response) {
       .status(401)
       .set(
         'WWW-Authenticate',
-        `Bearer realm="doop", resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
+        `Bearer realm="doop", resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"`,
       )
       .json({
         jsonrpc: '2.0',
