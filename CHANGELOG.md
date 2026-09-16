@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0](https://github.com/kgoedecke/doop/compare/v0.4.0...v0.5.0) (2026-09-16)
+
+
+### Features
+
+* **agents:** generate_image tool draws with AI on the user's own account ([#165](https://github.com/kgoedecke/doop/issues/165)) ([ad55317](https://github.com/kgoedecke/doop/commit/ad553177f327b468c84a6c111474f70bda13c0d5))
+* **automations:** scheduled pulls and agent tasks, with a Meta integration ([#168](https://github.com/kgoedecke/doop/issues/168)) ([ce34ba6](https://github.com/kgoedecke/doop/commit/ce34ba67df715c2ed32e1de4ddc66e72041534f0))
+* **canvas:** element properties panel opens from a click on the canvas ([#167](https://github.com/kgoedecke/doop/issues/167)) ([510fdfe](https://github.com/kgoedecke/doop/commit/510fdfecb0d5214ede2dcfd787c9e5f342fddcb7))
+* **canvas:** prompt bar scopes a request to the selected frame or element ([#180](https://github.com/kgoedecke/doop/issues/180)) ([ba36d77](https://github.com/kgoedecke/doop/commit/ba36d77494e0c9f2ae7bf62ff8830697897aebe8))
+* **canvas:** reorder elements in the Layers panel ([#164](https://github.com/kgoedecke/doop/issues/164)) ([fbc831e](https://github.com/kgoedecke/doop/commit/fbc831ef05264c5f3bbd6cc7ac310bf897d69447))
+* **desktop:** google, microsoft and sso sign-in through the system browser with a doop:// handoff ([#177](https://github.com/kgoedecke/doop/issues/177)) ([5b51765](https://github.com/kgoedecke/doop/commit/5b517654bdada4d41820f51f04037fd24bfaa501))
+* **mcp:** reply to and resolve element comments ([#150](https://github.com/kgoedecke/doop/issues/150)) ([775fd2e](https://github.com/kgoedecke/doop/commit/775fd2e6e222ab0a4cb197cb14fb70699d0f5a80))
+* **workspaces:** shared workspaces with a per-seat Team plan on Stripe ([#170](https://github.com/kgoedecke/doop/issues/170)) ([f64c9ab](https://github.com/kgoedecke/doop/commit/f64c9ab869cdc5742a385fbe5fab43b4b59304c6))
+
+
+### Bug Fixes
+
+* **canvas:** clicking a second element in a frame moves the selection ([#171](https://github.com/kgoedecke/doop/issues/171)) ([bd23ae6](https://github.com/kgoedecke/doop/commit/bd23ae6818221a947245f6ef1bbbd304fc121c25))
+* **canvas:** guard Layers drops against void targets and stale selectors ([#169](https://github.com/kgoedecke/doop/issues/169)) ([8cfcd1a](https://github.com/kgoedecke/doop/commit/8cfcd1a050b401b8a011735a0a336dade07a93ec))
+* **layers:** delete key on a layer row no longer deletes the whole frame ([#179](https://github.com/kgoedecke/doop/issues/179)) ([377ae4c](https://github.com/kgoedecke/doop/commit/377ae4c003ba56cbf9dafe1c06266b6aee5e8ec6))
+* **mcp:** bill agent comment replies to the connecting user, not the canvas owner ([5198236](https://github.com/kgoedecke/doop/commit/5198236d7ef2bd7e38068af1b4877f1d9ad66fee))
+* **mcp:** protected-resource metadata names the /mcp endpoint so strict OAuth clients can connect ([#174](https://github.com/kgoedecke/doop/issues/174)) ([fcf2947](https://github.com/kgoedecke/doop/commit/fcf2947b9c8d292cde3fa44ccd027ea3e8049c28))
+* **replay:** capture sandboxed frame content in PostHog ([#176](https://github.com/kgoedecke/doop/issues/176)) ([4a50323](https://github.com/kgoedecke/doop/commit/4a50323d15f2efd750479214ddbeead384ddab4a))
+* **workspaces:** order billing events across subscriptions, durable revocations, owner-only moves in ([33aff5c](https://github.com/kgoedecke/doop/commit/33aff5c6c5c482095137f3e52e3d2b7cfdf70ee5))
+
 ## [0.4.0](https://github.com/kgoedecke/doop/compare/v0.3.0...v0.4.0) (2026-09-10)
 
 
