@@ -18,6 +18,10 @@
   --color-line-soft: var(--line-soft);
   --color-brand: var(--brand);
   --color-accent-ink: var(--accent-ink);
+  --color-success: var(--success);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
   --font-ui: var(--font-ui);
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
@@ -99,6 +103,12 @@
   --brand: #2743ee;
   --accent-ink: #d0341f;
   --dot: #ebe9e4;
+  /* Status colours: the fill (--success, --warning) tints and dots, the ink
+     variant is the text that sits on paper. Both flip with the theme. */
+  --success: #3f9c52;
+  --success-ink: #1e7a4c;
+  --warning: #ffb800;
+  --warning-ink: #8a5b00;
   --font-ui: 'Instrument Sans', sans-serif;
   /* Display is the SAME sans as the UI — the chrome is quiet by design.
      Editorial serif is opt-in per element via `font-serif`, reserved for
@@ -249,37 +259,49 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --paper: #121214;
+  --paper-deep: #1a1a1e;
+  --surface: #1d1d21;
+  --ink: #f4f4f6;
+  --ink-soft: #a1a1aa;
+  --ink-faint: #71717a;
+  --line: #2e2e34;
+  --line-soft: #242428;
+  --dot: #28282c;
+  --success: #4caf60;
+  --success-ink: #6fd08e;
+  --warning: #ffb800;
+  --warning-ink: #e6b04a;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
+  --secondary: var(--paper-deep);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-deep);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--paper-deep);
+  --accent-foreground: var(--ink);
+  --destructive: var(--accent-ink);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--ink-faint);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 10px 28px -18px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 2px 8px rgba(0, 0, 0, 0.5), 0 22px 56px -26px rgba(0, 0, 0, 0.7);
+
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--paper-deep);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--ink-faint);
 }
 
 /* Keyframes: the one thing utilities cannot express. Components reference

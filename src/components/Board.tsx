@@ -146,7 +146,7 @@ function Team({ tasks, onPick }: { tasks: AgentTask[]; onPick: (id: string) => v
                     <Dot
                       size="sm"
                       className="animate-[stream-pulse_1.2s_ease-in-out_infinite]"
-                      style={{ background: role.reviewer ? '#1e7a4c' : 'var(--brand)' }}
+                      style={{ background: role.reviewer ? 'var(--success-ink)' : 'var(--brand)' }}
                     />
                     {working.status}
                   </>
@@ -370,7 +370,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                           size="sm"
                           className={cn(
                             'gap-1 rounded-full px-2 py-1 text-[11.5px] text-ink-soft hover:border-ink-soft hover:bg-transparent',
-                            at >= 0 && 'border-ink bg-ink text-white hover:border-ink hover:bg-ink hover:text-white',
+                            at >= 0 && 'border-ink bg-ink text-paper hover:border-ink hover:bg-ink hover:text-paper',
                           )}
                           title={role.blurb}
                           onClick={() => toggle(role.id)}
@@ -378,7 +378,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                           <RoleMark role={role} size={13} />
                           {role.name}
                           {at >= 0 && agents.length > 1 && (
-                            <span className="grid h-[13px] min-w-[13px] place-items-center rounded-full bg-white/25 font-mono text-[9.5px]">
+                            <span className="grid h-[13px] min-w-[13px] place-items-center rounded-full bg-paper/25 font-mono text-[9.5px]">
                               {at + 1}
                             </span>
                           )}
@@ -389,7 +389,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2.5">
                   <Button
-                    className="rounded-full border-transparent bg-ink px-3.5 py-1.5 text-xs font-bold text-white shadow-none hover:translate-x-0 hover:translate-y-0 hover:shadow-none"
+                    className="rounded-full border-transparent bg-ink px-3.5 py-1.5 text-xs font-bold text-paper shadow-none hover:translate-x-0 hover:translate-y-0 hover:shadow-none"
                     disabled={!draft.trim()}
                     onClick={submit}
                   >
@@ -467,7 +467,7 @@ export function Board({ canvasId }: { canvasId: string }) {
                 )}
                 {t.queuedBy && pipelineOf(t).length > 1 && <Trail task={t} state="done" />}
                 <div className={metaCls}>
-                  <span className="font-[750] text-[#1e7a4c]">✓</span> {t.agentName || t.queuedBy}
+                  <span className="font-[750] text-success-ink">✓</span> {t.agentName || t.queuedBy}
                   {t.queuedBy && t.agentName && <span> · for {t.queuedBy}</span>}
                   <span> · {timeAgo(t.endedAt!)}</span>
                 </div>

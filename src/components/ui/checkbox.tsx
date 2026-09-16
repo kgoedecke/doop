@@ -18,7 +18,7 @@ function Checkbox({ className, boxClassName, ...props }: React.ComponentProps<'i
       <span
         aria-hidden="true"
         className={cn(
-          'grid size-5 flex-none place-items-center rounded-[5px] border border-ink-faint bg-surface text-xs font-extrabold text-white transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand peer-disabled:opacity-50',
+          'grid size-5 flex-none place-items-center rounded-[5px] border border-ink-faint bg-surface text-xs font-extrabold text-paper transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand peer-disabled:opacity-50',
           boxClassName,
         )}
       >

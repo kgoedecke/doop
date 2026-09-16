@@ -33,7 +33,7 @@ export function useModelAccount(): {
 } {
   const [account, setAccount] = useState<ModelAccountStatus | null>(null)
   const refresh = useCallback(() => {
-    api.modelAccount().then(setAccount, () => {})
+    api.modelAccount().then(setAccount, () => { })
   }, [])
   useEffect(refresh, [refresh])
   return { account, refresh, set: setAccount }
@@ -76,17 +76,17 @@ function planName(plan: string): string {
 const planRow = (live: boolean) =>
   cn(
     'flex gap-[14px] border-b border-line-soft px-[22px] py-[18px] last:border-b-0 max-md:gap-3 max-md:px-4 max-md:py-[17px]',
-    live && 'bg-[linear-gradient(90deg,rgba(63,156,82,0.05),transparent_40%)]',
+    live && 'bg-[linear-gradient(90deg,color-mix(in_srgb,var(--success)_5%,transparent),transparent_40%)]',
   )
 const planMark = (live: boolean) =>
   cn(
     'grid h-9 w-9 flex-none place-items-center rounded-[11px] border border-line bg-paper-deep text-ink',
-    live && 'border-black bg-black text-white',
+    live && 'border-ink bg-ink text-paper',
   )
 const planPill = (on: boolean) =>
   cn(
     'rounded-full bg-paper-deep px-[9px] py-[3px] text-[11.5px] font-bold text-ink-faint',
-    on && 'bg-[rgba(30,122,76,0.12)] text-[#1a6b43]',
+    on && 'bg-success-ink/12 text-success-ink',
   )
 /* the model tiers as chips — the base .chip recipe reshaped into the picker */
 const planAsCode =
@@ -144,7 +144,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         (next) => {
           if (next.connected) settle(next)
         },
-        () => {},
+        () => { },
       )
       /* the device flow can also fail server-side (expired, refused) — that
          status is the only place the user would ever learn why */
@@ -156,7 +156,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               setError(flow.error || 'That sign-in did not complete')
             }
           },
-          () => {},
+          () => { },
         )
       }
     }, 1500)
@@ -193,7 +193,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   const cancelDevice = () => {
     setDevice(null)
-    api.cancelDeviceAuth().catch(() => {})
+    api.cancelDeviceAuth().catch(() => { })
   }
 
   /* the escape hatch when device codes are unavailable (workspace admin has
