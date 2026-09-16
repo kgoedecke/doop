@@ -617,7 +617,10 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
             `resident task limit reached (${gate.used}/${gate.limit}) — connect a model account or retry later`,
           )
       }
-      const reply = actions.replyToComment(comment_id, body, actor.name, undefined, 'agent')
+      /* attributed to the agent, billed to the connecting user: the resident
+         picks whose model account pays from the requester id, and without one
+         it falls back to the canvas owner's — wrong on a shared canvas */
+      const reply = actions.replyToComment(comment_id, body, actor.name, ownerId, 'agent')
       if (!reply) {
         /* the thread closed while the meter was being written: give the task back */
         if (gate && ownerId) {
@@ -635,7 +638,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
     'resolve_comment',
     {
       description:
-        'Resolve an element-comment thread on a canvas, marking the request addressed. Resolving a root comment closes its whole thread; resolving a reply closes only that reply. When the thread was an @mention of a resident agent, resolving it also records the exchange as a design decision in the canvas Memory (plain human-to-human notes are not). This does not claim task feedback — use get_feedback for that.',
+        'Resolve an element-comment thread on a canvas, marking the request addressed. Resolving a root comment closes its whole thread; resolving a reply closes only that reply. When the thread was an @mention of a resident agent, resolving it also records the exchange as a design decision in the canvas Memory (plain human-to-human notes are not). Like every mutating tool, the result also carries any pending task feedback addressed to you; get_feedback is for polling it on its own.',
       inputSchema: {
         canvas_id: z.string(),
         comment_id: z.string().describe('The root comment or a reply (from get_comments)'),

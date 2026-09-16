@@ -166,9 +166,33 @@ describe('element-comment write MCP tools', () => {
       })
       expect(isError).toBeFalsy()
       expect(parsed).toEqual(reply)
-      /* the 5th arg is the actor kind: an agent reply must not log as a human */
-      expect(replySpy).toHaveBeenCalledWith('m1', '  Done  ', 'Claude', undefined, 'agent')
+      /* the 4th arg is who pays, the 5th the actor kind: an agent reply must not log as a human */
+      expect(replySpy).toHaveBeenCalledWith('m1', '  Done  ', 'Claude', OWNER_ID, 'agent')
       expect(heartbeat).toHaveBeenCalledTimes(1)
+    } finally {
+      await close()
+    }
+  })
+
+  it('bills a reply on a shared canvas to the collaborator who sent it, not the canvas owner', async () => {
+    stubCanvas({ ...CANVAS, ownerId: 'someone-else', memberIds: ['mate-1'] })
+    const root = comment({ id: 'm1' })
+    vi.spyOn(actions, 'findComment').mockReturnValue(root)
+    vi.spyOn(actions, 'openThread').mockReturnValue({ root, frame: FRAME })
+    const replySpy = vi
+      .spyOn(actions, 'replyToComment')
+      .mockReturnValue(comment({ id: 'm2', parentId: 'm1', from: 'Claude', text: '@Doop tighten this' }))
+    vi.spyOn(allowance, 'consumeResidentTask').mockResolvedValue(gate())
+    const { client, close } = await connect('mate-1')
+    try {
+      const { isError } = await call(client, 'reply_to_comment', {
+        canvas_id: CANVAS.id,
+        comment_id: 'm1',
+        text: '@Doop tighten this',
+        agent_name: 'Claude',
+      })
+      expect(isError).toBeFalsy()
+      expect(replySpy).toHaveBeenCalledWith('m1', '@Doop tighten this', 'Claude', 'mate-1', 'agent')
     } finally {
       await close()
     }
