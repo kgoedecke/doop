@@ -264,10 +264,13 @@ async function applySubscriptionNow(
 ): Promise<{ ws: WorkspaceRecord; applied: boolean } | undefined> {
   const ws = records.get(id)
   if (!ws) return undefined
-  const sameSubscription = ws.stripeSubscriptionId === patch.stripeSubscriptionId
-  if (sameSubscription && ws.billingEventAt !== null && patch.billingEventAt < ws.billingEventAt) {
+  /* the ordering guard holds across subscriptions too: a delayed event for
+     the subscription this workspace already left must not overwrite the
+     current one — or, worse, cancel it as "superseded" */
+  if (ws.billingEventAt !== null && patch.billingEventAt < ws.billingEventAt) {
     return { ws, applied: false }
   }
+  const sameSubscription = ws.stripeSubscriptionId === patch.stripeSubscriptionId
   const superseded =
     !sameSubscription && ws.stripeSubscriptionId && isWorkspaceActive(ws.status) ? ws.stripeSubscriptionId : null
   const updatedAt = Date.now()
@@ -341,15 +344,17 @@ export function setRole(workspaceId: string, userId: string, role: WorkspaceRole
   return true
 }
 
-export function removeMember(workspaceId: string, userId: string): boolean {
+/** Unlike an add or a role change, a revocation is durable before it
+ *  answers: one that only reached memory would quietly come back at the
+ *  next restart, with the member's access to every workspace canvas. */
+export async function removeMember(workspaceId: string, userId: string): Promise<boolean> {
   const ws = records.get(workspaceId)
   const map = members.get(workspaceId)
-  if (!ws || !map?.delete(userId)) return false
-  swallow(
-    db
-      .delete(t.workspaceMembers)
-      .where(and(eq(t.workspaceMembers.workspaceId, workspaceId), eq(t.workspaceMembers.userId, userId))),
-  )
+  if (!ws || !map?.has(userId)) return false
+  await db
+    .delete(t.workspaceMembers)
+    .where(and(eq(t.workspaceMembers.workspaceId, workspaceId), eq(t.workspaceMembers.userId, userId)))
+  map.delete(userId)
   reconcileSeats(ws)
   return true
 }
@@ -607,7 +612,7 @@ workspacesRouter.patch('/:id/members/:userId', (req, res) => {
   res.json({ ok: true })
 })
 
-workspacesRouter.delete('/:id/members/:userId', (req, res) => {
+workspacesRouter.delete('/:id/members/:userId', async (req, res) => {
   const ws = requireWorkspace(req, res, req.params.id)
   if (!ws) return
   const target = req.params.userId
@@ -618,7 +623,12 @@ workspacesRouter.delete('/:id/members/:userId', (req, res) => {
     return res
       .status(400)
       .json({ error: self ? 'delete the workspace instead of leaving it' : 'the owner cannot be removed' })
-  if (!removeMember(ws.id, target)) return res.status(404).json({ error: 'not a member' })
+  try {
+    if (!(await removeMember(ws.id, target))) return res.status(404).json({ error: 'not a member' })
+  } catch (err) {
+    console.error('[workspaces] remove member failed', err)
+    return res.status(500).json({ error: 'could not remove the member' })
+  }
   res.json({ ok: true })
 })
 

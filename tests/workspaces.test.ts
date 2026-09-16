@@ -175,6 +175,24 @@ describe('workspaces (self-hosted, billing off)', () => {
     ).toBe(200)
   })
 
+  it('a workspace admin cannot re-home a member’s canvas into another workspace', async () => {
+    const other = (await (await owner.post('/api/workspaces', { name: 'Elsewhere' })).json()).id
+    /* the owner is an admin where the canvas lives and a member of the target */
+    const grab = await owner.req(`/api/canvases/${personalId}/workspace`, {
+      method: 'PUT',
+      body: JSON.stringify({ workspaceId: other }),
+    })
+    expect(grab.status).toBe(403)
+    const list = await (await teammate.get('/api/canvases')).json()
+    expect(list.find((c: { id: string }) => c.id === personalId).workspaceId).toBe(workspaceId)
+    /* the canvas owner is not in that workspace, so it is not even visible to them */
+    const stray = await teammate.req(`/api/canvases/${personalId}/workspace`, {
+      method: 'PUT',
+      body: JSON.stringify({ workspaceId: other }),
+    })
+    expect(stray.status).toBe(404)
+  })
+
   it('a workspace admin may delete a member’s canvas in the workspace', async () => {
     const scratch = (await (await teammate.post('/api/canvases', { name: 'Scratch', workspaceId })).json()).id
     expect((await stranger.delete(`/api/canvases/${scratch}`)).status).toBe(403)

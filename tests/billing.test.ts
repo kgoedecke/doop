@@ -232,6 +232,20 @@ describe('workspaces behind Stripe', () => {
     expect((await (await pending.get('/api/workspaces')).json()).workspaces).toHaveLength(1)
   })
 
+  it('a delayed event for the subscription the workspace left cannot displace the new one', async () => {
+    /* sub_test was cancelled at t0+10 and replaced by sub_test_2 at t0+20;
+       this is its cancellation arriving again, late, out of order */
+    const res = await subscriptionEvent('evt_old_late', 'customer.subscription.deleted', t0 + 15, {
+      workspaceId,
+      status: 'canceled',
+    })
+    expect(res.status).toBe(200)
+    const ws = await (await owner.get(`/api/workspaces/${workspaceId}`)).json()
+    expect(ws.status).toBe('active')
+    expect(ws.active).toBe(true)
+    expect(ws.seats).toBe(3)
+  })
+
   it('survives a restart with the billing state intact', async () => {
     server.stop({ keepData: true })
     await server.stopped
