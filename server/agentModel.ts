@@ -4,7 +4,7 @@ import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAccount, withFreshToken, accountModelFor } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
-import { ModelAuthError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
+import { ModelAuthError, ModelUnavailableError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
 
 /**
@@ -51,7 +51,7 @@ export interface AgentModel {
   run(req: AgentTurnRequest): Promise<AgentTurnResult>
 }
 
-export { ModelAuthError }
+export { ModelAuthError, ModelUnavailableError }
 export class ModelConfigurationError extends ModelAuthError {}
 
 /* ---------------------------------------------------------------- */

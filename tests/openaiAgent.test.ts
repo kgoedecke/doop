@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type Anthropic from '@anthropic-ai/sdk'
-import { _internal, azureResponsesUrl, runAzureTurn } from '../server/openaiAgent.ts'
+import {
+  _internal,
+  AGENT_MODELS,
+  azureResponsesUrl,
+  isKnownModel,
+  ModelUnavailableError,
+  responseError,
+  runAzureTurn,
+} from '../server/openaiAgent.ts'
 import { parseAuthCode } from '../server/modelAccounts.ts'
 
 /**
@@ -142,6 +150,57 @@ describe('OpenAI Responses output -> Anthropic blocks', () => {
       output: [{ type: 'function_call', call_id: 'call_5', name: 'set_status', arguments: '{oops' }],
     })
     expect(result.content).toEqual([{ type: 'tool_use', id: 'call_5', name: 'set_status', input: {} }])
+  })
+})
+
+describe('model menu', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('offers GPT-6 Astra above the GPT-5.6 tiers', () => {
+    expect(AGENT_MODELS.map((model) => model.id)).toEqual([
+      'gpt-6-astra',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+    ])
+    expect(isKnownModel('gpt-6-astra')).toBe(true)
+    expect(isKnownModel('gpt-6')).toBe(false)
+  })
+
+  it('defaults to Terra when no override is set, whatever this shell exports', async () => {
+    vi.stubEnv('DOOP_AGENT_OPENAI_MODEL', '')
+    vi.resetModules()
+    const fresh = await import('../server/openaiAgent.ts')
+    expect(fresh.DEFAULT_OPENAI_MODEL).toBe('gpt-5.6-terra')
+  })
+
+  it('tells a model the account cannot run apart from a dead credential', async () => {
+    const noAccess = await responseError(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: 'The model `gpt-6-astra` does not exist or you do not have access to it.',
+            code: 'model_not_found',
+          },
+        }),
+        { status: 404 },
+      ),
+      'ChatGPT',
+    )
+    expect(noAccess).toBeInstanceOf(ModelUnavailableError)
+    expect(noAccess.message).toContain('gpt-6-astra')
+
+    const badRequest = await responseError(
+      new Response('Invalid value for reasoning.effort', { status: 400 }),
+      'OpenAI',
+    )
+    expect(badRequest).not.toBeInstanceOf(ModelUnavailableError)
+
+    const denied = await responseError(new Response('denied', { status: 401 }), 'OpenAI')
+    expect(denied).not.toBeInstanceOf(ModelUnavailableError)
   })
 })
 

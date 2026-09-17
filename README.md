@@ -147,9 +147,11 @@ Azure OpenAI is deliberately _not_ a connectable account kind: a user-supplied e
 URL the server fetches with the run's full context — an SSRF vector — so Azure stays a server-level
 provider only.
 
-Either way the user picks their **model tier** in Settings — `gpt-5.6-sol` (flagship),
-`gpt-5.6-terra` (the default workhorse) or `gpt-5.6-luna` (cheap and fast). They are paying for it,
-so the choice is theirs; `DOOP_AGENT_OPENAI_MODEL` only sets the default they start on. Note that
+Either way the user picks their **model tier** in Settings — `gpt-6-astra` (the newest flagship;
+on a ChatGPT subscription it needs Plus or better and OpenAI is still rolling it out per account),
+`gpt-5.6-sol` (flagship), `gpt-5.6-terra` (the default workhorse) or `gpt-5.6-luna` (cheap and
+fast). They are paying for it, so the choice is theirs; `DOOP_AGENT_OPENAI_MODEL` only sets the
+default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so
 pinning a 5.4 id via that env var will break the subscription path after that date.
 

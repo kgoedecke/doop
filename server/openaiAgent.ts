@@ -27,12 +27,16 @@ import type { ModelAccount } from './modelAccounts.ts'
 export const CHATGPT_URL = process.env.CHATGPT_RESPONSES_URL || 'https://chatgpt.com/backend-api/codex/responses'
 export const OPENAI_URL = process.env.OPENAI_RESPONSES_URL || 'https://api.openai.com/v1/responses'
 /**
- * The GPT-5.6 tiers, which a ChatGPT sign-in and an API key can both reach.
- * Users pick one in Settings — they are paying for it, and the tiers trade
- * real money against real quality — so this list is the menu, not a detail.
- * Ordered best-first; the default is the middle one.
+ * The OpenAI tiers a ChatGPT sign-in and an API key can both reach: GPT-6
+ * Astra (the September 2026 flagship — on Codex it needs a Plus plan or
+ * better, and OpenAI is still rolling it out account by account) on top of
+ * the three GPT-5.6 tiers. Users pick one in Settings — they are paying for
+ * it, and the tiers trade real money against real quality — so this list is
+ * the menu, not a detail. Ordered best-first; the default stays on Terra:
+ * Astra bills several times Sol per token, which is a choice to opt into.
  */
 export const AGENT_MODELS = [
+  { id: 'gpt-6-astra', name: 'GPT-6 Astra', blurb: 'Newest flagship — the sharpest reasoning, at the highest price' },
   { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', blurb: 'Flagship — the most detail and polish, and the priciest' },
   { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', blurb: 'The everyday workhorse. A good default for design work' },
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', blurb: 'Fastest and cheapest — fine for small, mechanical edits' },
@@ -78,6 +82,20 @@ export interface TurnResult {
 /** The connection is no longer usable (revoked, expired past refresh, or the
  *  key was rotated) — the user has to reconnect. */
 export class ModelAuthError extends Error {}
+
+/** The account is fine but cannot run the chosen model — Astra still rolling
+ *  out to a ChatGPT plan, an API key without access to it — so the fix is a
+ *  different tier in Settings, not a reconnect. */
+export class ModelUnavailableError extends Error {}
+
+/* how OpenAI's surfaces phrase "no such model for you": the API's `model_not_found`
+   code, and the Codex backend's prose about the model not existing / access */
+const MODEL_UNAVAILABLE =
+  /model_not_found|model[^.]{0,80}(does not exist|not found|not available|unsupported|no access|not (have|allowed))/i
+
+export function isModelUnavailable(detail: string): boolean {
+  return MODEL_UNAVAILABLE.test(detail)
+}
 
 /* ---------------------------------------------------------------- */
 /* Anthropic messages -> Responses input items                      */
@@ -300,7 +318,7 @@ export async function readEventStream(res: Response): Promise<ResponseBody> {
       else if (event.type === 'error') failure = event.error?.message || event.message || 'stream error'
     }
   }
-  if (failure) throw new Error(failure)
+  if (failure) throw isModelUnavailable(failure) ? new ModelUnavailableError(failure) : new Error(failure)
   if (!final) throw new Error('OpenAI stream ended without a completed response')
   return final.output?.length ? final : { ...final, output: streamed }
 }
@@ -313,6 +331,11 @@ export async function responseError(res: Response, label: string): Promise<Error
   }
   if (res.status === 429) {
     return new Error(`${label} rate-limited this account (429). ${detail}`)
+  }
+  if ((res.status === 400 || res.status === 404) && isModelUnavailable(detail)) {
+    return new ModelUnavailableError(
+      `${label} cannot run this model on the connected account (${res.status}). ${detail}`,
+    )
   }
   return new Error(`${label} request failed (${res.status}). ${detail}`)
 }

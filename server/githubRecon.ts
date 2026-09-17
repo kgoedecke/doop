@@ -1,4 +1,4 @@
-import { ModelAuthError, type AgentModel } from './agentModel.ts'
+import { ModelAuthError, ModelUnavailableError, type AgentModel } from './agentModel.ts'
 import type { TurnBlock } from './openaiAgent.ts'
 import { createAsset } from './assets.ts'
 import * as actions from './actions.ts'
@@ -427,6 +427,8 @@ function isRepoCard(card: AgentTask): card is RepoCard {
 function failureReason(err: unknown): string {
   if (err instanceof ModelAuthError)
     return 'The connected model account turned down the request. Reconnect it in Settings, then retry.'
+  if (err instanceof ModelUnavailableError)
+    return 'The chosen model is not available on the connected account yet. Pick another model in Settings, then retry.'
   const message = err instanceof Error ? err.message : 'unknown error'
   return `Doop could not finish this: ${message.slice(0, 200)}. Retry when you are ready.`
 }
@@ -437,7 +439,7 @@ function failureReason(err: unknown): string {
  *  the cause chain is checked, not just the top error. */
 function isAccountError(err: unknown): boolean {
   for (let e = err, depth = 0; e instanceof Error && depth < 5; e = e.cause, depth++) {
-    if (e instanceof ModelAuthError) return true
+    if (e instanceof ModelAuthError || e instanceof ModelUnavailableError) return true
     if (/credit|billing|quota|api key|credentials|unauthorized|401|403/i.test(e.message)) return true
   }
   return false

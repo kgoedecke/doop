@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
-import { ModelAuthError, ModelConfigurationError, pickModel } from './agentModel.ts'
+import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
@@ -435,6 +435,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let crashed = false
     let staleAccount = false
     let accountError: string | undefined
+    let unavailableModel = false
     let finished = false
     let mutationNudgeSent = false
     let verificationNudgeSent = false
@@ -595,12 +596,20 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
          reconnect, whatever error class its transport leaks */
       accountError = err instanceof ModelConfigurationError && model.userId ? err.message : undefined
       staleAccount = err instanceof ModelAuthError && !!model.userId
+      /* likewise a model the account cannot run yet (Astra mid-rollout): the
+         fix is a different tier in Settings, and a retry on the same one
+         would only fail the same way */
+      unavailableModel = err instanceof ModelUnavailableError && !!model.userId
       console.error('[resident] run errored', err)
       actions.setAgentStatus(
         canvasId,
         actor,
         accountError ??
-          (staleAccount ? 'Your model connection expired — reconnect it' : 'Hit a snag — waiting for a retry'),
+          (staleAccount
+            ? 'Your model connection expired — reconnect it'
+            : unavailableModel
+              ? 'Model not available on your account — pick another in Settings'
+              : 'Hit a snag — waiting for a retry'),
       )
     }
 
@@ -648,6 +657,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         reason =
           accountError ??
           `${model.label} turned down the connected account. Reconnect it in Doop, then retry.${blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : ''}`
+      } else if (unavailableModel) {
+        reason = `${model.label} is not available on your connected account yet. Pick another model in Settings, then retry.`
       } else if (blockedWebsiteAccess) {
         reason = blockedWebsiteAccess
       } else if (refused) {
