@@ -228,7 +228,10 @@ any public image URL. Source images in this order:
   against your tokens — and if nothing fits, call again with another filter or draw the
   background yourself in CSS or SVG rather than forcing the nearest one. Each result
   carries a ready css line with a legibility scrim and a text_zone — put the headline
-  there. One image per bento grid at most; keep the other tiles flat.
+  there. One image per bento grid at most; keep the other tiles flat. When the hero
+  wants a real scene in the frame's exact palette — a monochrome mountain range behind
+  a product window, a desert at dusk in the brand's two colors — the library will not
+  have it: generate it (next section, "hero backgrounds").
 - **UI icons — search_icons.** 200k+ open-source icons (Material, Lucide, Tabler,
   Phosphor, …). Search the concept ("shopping cart"). Hotlink the svg_url; recolor
   monochrome icons with ?color=%23<hex> and size with &height=<px>.
@@ -243,8 +246,8 @@ any public image URL. Source images in this order:
   inventing one. Follow the size guidance in the result: favicon-sourced logos are
   small rasters (fine at ≤32px, ugly scaled up); vector marks scale to any size.
 - **Generated imagery — generate_image.** When no stock photo can be the visual — a
-  brand-specific illustration, a product render, a mascot, abstract hero art in the
-  frame's exact palette — or your human asks for a
+  full-bleed hero background in the frame's exact palette, a brand-specific
+  illustration, a product render, a mascot — or your human asks for a
   generated image, generate one from a prompt. It returns a permanent URL on this origin
   plus a preview: look at the preview and judge it like any other asset before it goes
   in. It runs on your human's connected ChatGPT subscription or OpenAI key (else the
@@ -255,6 +258,14 @@ any public image URL. Source images in this order:
   opaque — no transparent cut-outs — so place them in a box, mask them with CSS, or
   prompt for the surface color you will put them on. Photography that exists in the
   world is still search_images' job.
+  - **Hero backgrounds are where it shines.** A generated scene can match the palette
+    exactly and leave room where the copy and the product window sit, which no stock
+    photo does. Recipe: aspect landscape; name the scene and the palette hexes; ask for
+    "low contrast, soft haze, no text, no people, no logos"; and reserve the space —
+    "empty, near-uniform sky in the top third" for a headline above, or "calm, low-detail
+    center" for a product screenshot on top. Then treat it like a library background:
+    object-fit: cover, a legibility scrim over the copy zone, and the headline in the
+    space you asked for. Monochrome or duotone scenes read as brand rather than stock.
 - **Your own file — upload_asset** (png/jpg/webp/gif/svg, max 5 MB), with the
   canvas_id it belongs to and ONE input, chosen by where the file lives:
   - Remote (it has a public URL): pass source_url — the server fetches it directly.
