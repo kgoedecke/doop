@@ -1638,7 +1638,14 @@ wss.on('connection', (ws, upgradeReq) => {
         return
       }
       const canvas = store.getCanvas(msg.canvasId)
-      if (!canvas) return
+      if (!canvas) {
+        /* a typo'd id or a canvas someone just deleted: say so and close,
+           instead of leaving the socket open with nothing ever coming back.
+           The client used to sit on a blank, unusable canvas UI forever
+           waiting for an 'init' that would never arrive. */
+        ws.close(4404, 'not found')
+        return
+      }
       if (!canAccessCanvas(session.user.id, canvas)) {
         ws.close(4403, 'no access')
         return

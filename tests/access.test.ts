@@ -176,4 +176,12 @@ describe('canvas access model', () => {
     expect((await owner.delete(`/api/canvases/${canvasId}`)).status).toBe(200)
     expect((await owner.get(`/api/canvases/${canvasId}`)).status).toBe(404)
   })
+
+  /* https://github.com/kgoedecke/doop/issues/73 — joining an id that was never
+     a canvas (a typo'd URL, or one just deleted above) used to leave the
+     socket open with no 'init' and no close, so the client sat on a blank
+     canvas UI forever. The server should say clearly that it isn't there. */
+  it('closes the socket right away for a canvas id that does not exist', async () => {
+    expect(await owner.joinWs('this-canvas-id-was-never-created')).toEqual({ kind: 'closed', code: 4404 })
+  })
 })

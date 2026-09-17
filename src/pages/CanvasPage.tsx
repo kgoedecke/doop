@@ -44,6 +44,8 @@ import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet'
+import { AuthScreen } from '../components/ui/screen'
+import { Wordmark } from '../components/ui/wordmark'
 import {
   BrainIcon,
   GithubIcon,
@@ -120,6 +122,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const [toast, setToast] = useState<string | null>(null)
   const updateReady = useStore((s) => s.updateReady)
   const limitWall = useStore((s) => s.limitWall)
+  const canvasNotFound = useStore((s) => s.canvasNotFound)
 
   /* keep the desktop shell's tab label in step with the live canvas name.
      The store's canvas briefly lags a navigation (the previous page's data
@@ -135,6 +138,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       disconnect()
       useStore.getState().setCanvas(null)
       useStore.getState().setPresences([])
+      useStore.getState().setCanvasNotFound(false)
       select(null)
       clearHistory()
     }
@@ -267,6 +271,27 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   /* both right-hand property panels sit beside the Activity panel when it is
      open, beside the collapsed side rail otherwise */
   const propertiesPanelCls = showActivity ? 'right-[324px]' : 'right-[72px]'
+
+  /* the id in the URL isn't a canvas — a typo, a stale link, or one someone
+     just deleted. Say so plainly rather than opening a canvas shell that
+     can't load anything and never will. */
+  if (canvasNotFound) {
+    return (
+      <AuthScreen>
+        <div className="flex w-[min(400px,100%)] flex-col gap-3.5 rounded-[12px] border border-line bg-surface p-6 pt-[30px] text-center shadow-pop sm:p-9 sm:pb-7">
+          <Wordmark className="mb-1.5 self-center" />
+          <h1 className="font-serif text-[28px] font-normal leading-[1.05] tracking-[-0.015em]">Canvas not found</h1>
+          <p className="text-[14px] leading-[1.5] text-ink-soft">
+            &ldquo;{canvasId}&rdquo; doesn&rsquo;t match a canvas we know about. It may have been deleted, or the link
+            may be wrong.
+          </p>
+          <Button className="self-center" onClick={() => navigate('/')}>
+            Back to your canvases
+          </Button>
+        </div>
+      </AuthScreen>
+    )
+  }
 
   return (
     /* --app-inset is 0 normally; the impersonation shell raises it so this

@@ -66,6 +66,10 @@ interface State {
   /** live alignment guide lines while a frame drag is snapped to a neighbour */
   snapGuides: SnapGuide[]
   connected: boolean
+  /** the join for the current canvasId was refused: no such canvas (deleted,
+   *  or the id in the URL was never one) — CanvasPage shows a not-found
+   *  screen instead of an unusable, unresponsive canvas UI */
+  canvasNotFound: boolean
   /** a reconnect revealed a newer client bundle on the server — offer a reload */
   updateReady: boolean
   /** frameId -> color, set briefly when a remote actor updates a frame */
@@ -84,6 +88,7 @@ interface State {
 
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
+  setCanvasNotFound(v: boolean): void
   setUpdateReady(v: boolean): void
   setPresences(list: Presence[]): void
   upsertPresence(p: Presence): void
@@ -172,12 +177,14 @@ export const useStore = create<State>((set, get) => ({
   viewport: { x: 0, y: 0, zoom: 1 },
   snapGuides: [],
   connected: false,
+  canvasNotFound: false,
   updateReady: false,
   flashes: {},
   streams: {},
 
   setCanvas: (canvas) => set({ canvas }),
   setConnected: (connected) => set({ connected }),
+  setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) => set({ presences: Object.fromEntries(list.map((p) => [p.clientId, p])) }),
   upsertPresence: (p) => set((s) => ({ presences: { ...s.presences, [p.clientId]: p } })),

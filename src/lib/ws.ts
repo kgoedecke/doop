@@ -10,6 +10,9 @@ let loadedBuild: string | null = null
 
 export function connect(canvasId: string) {
   currentCanvasId = canvasId
+  /* a fresh attempt for a (possibly different) id — any not-found from a
+     previous canvas must not leak into this one */
+  useStore.getState().setCanvasNotFound(false)
   open()
 }
 
@@ -63,6 +66,14 @@ function open() {
       /* the owner locked this canvas — retrying would loop forever */
       currentCanvasId = null
       location.href = '/'
+      return
+    }
+    if (ev.code === 4404) {
+      /* no such canvas — a typo'd id, or one that was just deleted. Stop
+         retrying (there is nothing to reconnect to) and let CanvasPage show
+         a not-found screen instead of an unresponsive, empty canvas UI. */
+      currentCanvasId = null
+      useStore.getState().setCanvasNotFound(true)
       return
     }
     if (currentCanvasId) {
