@@ -37,7 +37,8 @@ import {
   pasteFrameCentered,
   pasteImagesCentered,
 } from '../lib/frameClipboard'
-import { clearHistory, deleteFramesTracked, recordCreate, redo, undo } from '../lib/history'
+import { clearHistory, recordCreate, redo, undo } from '../lib/history'
+import { deleteSelection } from '../lib/layerEdits'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
@@ -151,11 +152,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       const selectedIds = useStore.getState().selectedIds
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length) {
-        e.preventDefault()
-        const frames = useStore.getState().canvas?.frames.filter((f) => selectedIds.includes(f.id)) ?? []
-        deleteFramesTracked(frames)
-      }
+      /* a picked element (from the canvas or the layers tree) is what ⌫
+         removes — the frame it lives in only goes when nothing inside it is
+         selected. Auto-repeat is ignored: a held key must not take the
+         element and then, on the next repeat, the frame under it. */
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.repeat && deleteSelection()) e.preventDefault()
       if (e.key === 'Escape') select(null)
       if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()

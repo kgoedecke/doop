@@ -291,6 +291,9 @@ export function LayersPanel({ onAddFrame }: { onAddFrame: () => void }) {
         break
       case 'Backspace':
       case 'Delete':
+        /* a held key repeats: once the element is gone the frame row would
+           be next, so only the first press deletes */
+        if (e.repeat) break
         if (row?.kind === 'frame') deleteFramesTracked([row.frame])
         else if (row) deleteLayer(row.frame, row.node.selector)
         break

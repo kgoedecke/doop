@@ -1,7 +1,7 @@
 import type { Frame } from '../../shared/types'
 import { useStore } from './store'
 import { api } from './api'
-import { recordUpdate } from './history'
+import { deleteFramesTracked, recordUpdate } from './history'
 import {
   duplicateElement,
   moveElement,
@@ -20,13 +20,38 @@ export function saveFrameHtml(frame: Frame, html: string) {
   api.updateFrame(frame.id, { html }).catch(console.error)
 }
 
-export function deleteLayer(frame: Frame, selector: string) {
+/** Remove one element; false when the selector no longer resolves (a
+ *  collaborator rewrote the frame under the pick), in which case the stale
+ *  pick is dropped so it cannot stand in for a frame selection. */
+export function deleteLayer(frame: Frame, selector: string): boolean {
   const html = removeElement(frame.html, selector)
-  if (html === null) return
   const store = useStore.getState()
   store.setSelectedElement(null)
   store.setElementPanelOpen(false)
+  if (html === null) return false
   saveFrameHtml(frame, html)
+  return true
+}
+
+/** ⌫ on the canvas: a picked element is always what goes, never the frame
+ *  around it — a pick whose frame or selector no longer exists (deleted or
+ *  rewritten by a collaborator) is dropped rather than falling through to
+ *  the frames. Frames only go when nothing is picked. Returns false when
+ *  the key had nothing to act on. */
+export function deleteSelection(): boolean {
+  const s = useStore.getState()
+  const frames = s.canvas?.frames ?? []
+  const picked = s.selectedElement
+  if (picked) {
+    const pickedFrame = frames.find((f) => f.id === picked.frameId)
+    if (pickedFrame) deleteLayer(pickedFrame, picked.selector)
+    else s.pickElement(null)
+    return true
+  }
+  const selected = frames.filter((f) => s.selectedIds.includes(f.id))
+  if (!selected.length) return false
+  deleteFramesTracked(selected)
+  return true
 }
 
 export function duplicateLayer(frame: Frame, selector: string) {

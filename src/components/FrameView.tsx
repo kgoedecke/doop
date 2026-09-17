@@ -213,10 +213,13 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
               width: Math.max(120, Math.round(from.width + dx)),
               height: Math.max(80, Math.round(from.height + dy)),
             }
-      /* edges pull onto neighbouring frames' edges/centers; ⌥ drags free.
-         Frames riding along in the group are not neighbours. */
+      /* edges pull onto neighbouring frames' edges/centers; ⌥ drags free —
+         except that a ⌥⇧ duplicate-drag holds ⌥ for the whole gesture, and
+         the copy should land on the guides like any other move. Frames
+         riding along in the group are not neighbours. */
       const others = useStore.getState().canvas?.frames.filter((f) => !groupIds.has(f.id)) ?? []
-      const snapped = ev.altKey ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom)
+      const free = ev.altKey && !duplicating
+      const snapped = free ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom)
       useStore.getState().setSnapGuides(snapped.guides)
       if (mode === 'move') {
         /* the snapped delta of the dragged frame moves the whole group */
