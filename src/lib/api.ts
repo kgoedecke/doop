@@ -1,3 +1,4 @@
+import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type {
   ActivityItem,
   Canvas,
@@ -116,7 +117,7 @@ export interface Allowance {
   connected: boolean
   /** connected a model account the Doop Agent itself can run on */
   byoModel: boolean
-  byoKind?: ModelAccountKind
+  byoKind?: ModelAccountKind | 'claude-local'
   byoEmail?: string
   /** free tasks are spent and their own account is carrying the agent */
   onOwnAccount: boolean
@@ -237,6 +238,20 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
+  setLocalAgent: (preference: LocalAgentPreference) =>
+    req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),
+  pollLocalAgent: (deviceId: string) =>
+    req<{ job: LocalAgentJob | null; enabled: boolean }>('/api/local-agent/poll', {
+      method: 'POST',
+      body: JSON.stringify({ deviceId }),
+    }),
+  finishLocalAgent: (id: string, deviceId: string, result: LocalAgentResult) =>
+    req<{ ok: boolean }>(`/api/local-agent/finish/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ deviceId, ...result }),
+    }),
+  stopLocalAgent: () => req<{ ok: boolean }>('/api/local-agent/stop', { method: 'POST' }),
   listCanvases: () => req<CanvasMeta[]>('/api/canvases'),
   getCanvas: (id: string) => req<Canvas>(`/api/canvases/${id}`),
   deleteCanvas: (id: string) => req(`/api/canvases/${id}`, { method: 'DELETE' }),

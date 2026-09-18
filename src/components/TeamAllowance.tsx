@@ -40,7 +40,12 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
   if (allowance.byoModel) {
     return (
       <span className="text-[12px] text-[#1e7a4c]">
-        Doop Agent on your {allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT'}
+        Doop Agent on your{' '}
+        {allowance.byoKind === 'claude-local'
+          ? 'local Claude CLI'
+          : allowance.byoKind === 'openai-key'
+            ? 'OpenAI key'
+            : 'ChatGPT'}
       </span>
     )
   }

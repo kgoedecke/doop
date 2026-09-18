@@ -559,3 +559,10 @@ export const automationRuns = pgTable(
   },
   (t) => [index('automation_runs_automation_idx').on(t.automationId)],
 )
+
+/** Local execution preference; Claude credentials never leave the desktop. */
+export const localAgentPreferences = pgTable('local_agent_preferences', {
+  userId: text('user_id').primaryKey(),
+  enabled: boolean('enabled').notNull().default(false),
+  model: text('model').notNull().default('default'),
+})

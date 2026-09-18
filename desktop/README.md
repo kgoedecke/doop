@@ -43,6 +43,48 @@ bun run dev    # opens the shell against the local vite server (localhost:4300)
 
 `bun run dev` expects the dev server in the repo root to be running.
 
+## Local Claude CLI
+
+Settings → Doop Agent includes **Claude · Local CLI** in shells built with the
+local-runner capability. Install the native `claude` executable, sign in through
+`claude auth login` (or the row's **Sign in** button), then choose **Use instead**.
+No Claude Agent SDK is installed or used. The shell invokes `claude -p` directly
+and consumes newline-delimited JSON output.
+
+The first connection shows a native consent dialog. It allows this Doop account
+on this device to use the CLI's existing login for canvas tasks. Claude credentials
+stay in Claude's local credential storage; Doop never reads or uploads them. The
+runner excludes inherited API-key/provider overrides so it does not silently bill
+an API key. Claude's own login and usage limits determine account access.
+
+- The local-provider preference and model choice (CLI default, Sonnet, Opus) are
+  account-wide. Device consent remains local. A connected ChatGPT/OpenAI account
+  is retained, and its **Use instead** button switches back to server execution.
+- Queued design cards, comments and feedback run while the desktop is open.
+  Offline work stays queued with no automatic server fallback. Only one desktop
+  claims a user's runs at a time. Closing/reloading during a run interrupts it;
+  its lease expires and the card becomes retryable. Retry starts a fresh CLI run.
+- The native process receives only the current run's Doop MCP tools. Built-in
+  shell/file tools, user/project settings, hooks and unrelated MCP servers are
+  disabled. `--bare` is intentionally not used because it skips subscription auth.
+- **Stop task** cancels the local process; **Disconnect** disables Doop's local
+  connection without signing the user out of Claude Code. Recent text output is
+  visible in Settings; canvas tool activity appears through existing task/status
+  events. The CLI also retains its normal local session history.
+- Repository-import jobs and separately billed image generation currently require
+  a server provider. Other existing canvas tools and completion checks are reused.
+
+The server migration `0016_local_agent` stores the preference only. Per-run MCP
+credentials are random, ephemeral, canvas-scoped tokens revoked on completion or
+cancellation. The `/local-agent/mcp/:id` route rechecks canvas access and bans;
+Vite proxies that route in development. The relay shares the existing resident
+runner's single-process ownership model; it is not a distributed worker queue.
+
+Ship the updated server/frontend and rebuild the desktop shell together. Older
+shells display an update hint; browser sessions display a desktop-only hint.
+Subscription availability is governed by Anthropic's current terms and account
+policy; an existing CLI login is not a promise of unlimited usage.
+
 ## Build
 
 ```sh

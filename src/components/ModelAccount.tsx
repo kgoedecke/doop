@@ -1,3 +1,6 @@
+import { LocalClaudeRow } from './LocalClaude'
+import { authClient } from '../lib/auth'
+import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import type { DeviceFlow, ModelAccountStatus } from '../lib/api'
@@ -108,6 +111,11 @@ const rowBtn = 'max-md:justify-center'
 
 export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const { account, refresh, set } = useModelAccount()
+  const { data: session } = authClient.useSession()
+  const local = useLocalAgent((s) => s.preference)
+  const selectServer = async () => {
+    if (session?.user.id) await selectLocalAgent(session.user.id, { enabled: false, model: local?.model ?? 'default' })
+  }
   const [authUrl, setAuthUrl] = useState('')
   /* true while the server is listening on the loopback callback port for us —
      the user approves in the other tab and this one just flips */
@@ -172,6 +180,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setBusy(true)
     setError('')
     try {
+      await selectServer()
       const { url, catching } = await api.chatgptAuthorize()
       if (catching) {
         /* we hold the loopback port, so the browser round trip completes by
@@ -218,6 +227,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setBusy(true)
     setError('')
     try {
+      await selectServer()
       settle(await api.connectChatgpt(redirect))
       posthog.capture('chatgpt_connected')
     } catch (e) {
@@ -231,6 +241,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setBusy(true)
     setError('')
     try {
+      await selectServer()
       settle(await api.connectOpenAiKey(apiKey))
       posthog.capture('model_account_connected', { kind: 'openai-key' })
     } catch (e) {
@@ -304,7 +315,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   return (
     <div className="flex flex-col">
       {account.chatgptEnabled !== false && (
-        <section className={planRow(onChatgpt)}>
+        <section className={planRow(onChatgpt && !local?.enabled)}>
           <span className={planMark(onChatgpt)}>
             <OpenAiMark />
           </span>
@@ -313,7 +324,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
                 Codex Plan
               </h3>
-              <span className={planPill(onChatgpt)}>{onChatgpt ? 'Connected' : 'Not connected'}</span>
+              <span className={planPill(onChatgpt)}>
+                {onChatgpt ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+              </span>
             </div>
             <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
               Route OpenAI models through your ChatGPT subscription
@@ -339,6 +352,16 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               <>
                 <div className={actionsRow}>
                   {modelChips(true)}
+                  {local?.enabled && (
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        selectServer().catch(fail)
+                      }}
+                    >
+                      Use instead
+                    </Button>
+                  )}
                   <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
                     Disconnect
                   </Button>
@@ -442,7 +465,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         </section>
       )}
 
-      <section className={planRow(onKey)}>
+      <section className={planRow(onKey && !local?.enabled)}>
         <span className={planMark(onKey)}>
           <OpenAiMark />
         </span>
@@ -451,7 +474,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
               OpenAI API key
             </h3>
-            <span className={planPill(onKey)}>{onKey ? 'Connected' : 'Not connected'}</span>
+            <span className={planPill(onKey)}>
+              {onKey ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+            </span>
           </div>
           <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
             Pay per token on your own OpenAI account — no ChatGPT subscription involved
@@ -461,6 +486,16 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             <>
               <div className={actionsRow}>
                 {modelChips(true)}
+                {local?.enabled && (
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      selectServer().catch(fail)
+                    }}
+                  >
+                    Use instead
+                  </Button>
+                )}
                 <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
                   Disconnect
                 </Button>
@@ -500,6 +535,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           )}
         </div>
       </section>
+
+      <LocalClaudeRow />
 
       {error && <p className="mt-[10px] text-[12.5px] text-accent-ink">{error}</p>}
     </div>

@@ -54,7 +54,9 @@ export function Settings() {
 
   const meter = allowance
     ? allowance.byoModel
-      ? `Running on your ${allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT subscription'}.`
+      ? allowance.byoKind === 'claude-local'
+        ? 'Claude CLI selected — runs on your connected desktop.'
+        : `Running on your ${allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT subscription'}.`
       : allowance.limit <= 0
         ? 'No free tasks on this server — connect an account to use the Doop Agent.'
         : left === 0
@@ -139,10 +141,8 @@ export function Settings() {
               <CardHeader>
                 <CardTitle>Doop Agent</CardTitle>
                 <CardDescription>
-                  The Doop Agent designs on your canvases without a client to connect.{' '}
-                  {allowance && allowance.limit > 0
-                    ? 'Every account gets a few tasks on us. Connect an account of your own and it takes over from the next task — no limits, nothing metered.'
-                    : 'It runs on an account you connect — your ChatGPT subscription or an OpenAI key. No limits, nothing metered.'}
+                  Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your
+                  desktop. Your provider’s usage limits and charges apply.
                 </CardDescription>
                 {meter && (
                   <div className="mt-[11px] flex flex-col items-start gap-[7px] text-[11.5px] text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">

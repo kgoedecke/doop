@@ -1,3 +1,4 @@
+import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
 import http from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -479,6 +480,9 @@ app.post('/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, re
 })
 
 app.use(express.json({ limit: '10mb' }))
+app.all('/local-agent/mcp/:id', (req, res, next) => {
+  handleLocalAgentMcp(req, res).catch(next)
+})
 
 /* Public: does an account exist for this email? Drives the login page's
    "no account found — sign up instead" prompt. Existence is already
@@ -605,6 +609,7 @@ function requireFrame(req: express.Request, res: express.Response, frameId: stri
   return frame
 }
 
+app.use('/api/local-agent', localAgentRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)

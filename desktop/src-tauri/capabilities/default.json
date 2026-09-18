@@ -13,7 +13,19 @@
     "deep-link:default",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://**" }, { "url": "http://**" }]
-    }
+      "allow": [
+        {
+          "url": "https://**"
+        },
+        {
+          "url": "http://**"
+        }
+      ]
+    },
+    "allow-claude-status",
+    "allow-claude-connect",
+    "allow-claude-login",
+    "allow-claude-run",
+    "allow-claude-stop"
   ]
 }

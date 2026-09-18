@@ -1,3 +1,4 @@
+import { startLocalAgent } from './lib/localAgent'
 import { useEffect, useRef, useState } from 'react'
 import { Home } from './pages/Home'
 import { Community } from './pages/Community'
@@ -93,6 +94,11 @@ export function App() {
   useEffect(() => {
     if (!isPending) setTabsUser(session?.user?.id ?? null)
   }, [isPending, session?.user?.id])
+
+  const localAgentUser = !isPending && me && !me.impersonating ? session?.user.id : undefined
+  useEffect(() => {
+    if (localAgentUser) return startLocalAgent(localAgentUser)
+  }, [localAgentUser])
 
   if (isPending)
     return (

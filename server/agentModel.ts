@@ -1,3 +1,6 @@
+import { getLocalAgentPreference } from './localAgentPreferences.ts'
+import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
+import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAccount, withFreshToken } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
@@ -23,7 +26,7 @@ import type { StopReason, TurnBlock } from './openaiAgent.ts'
  */
 
 export type ServerProvider = 'anthropic' | 'azure'
-export type Provider = ServerProvider | AccountKind
+export type Provider = ServerProvider | AccountKind | 'claude-local'
 
 export interface AgentTurnRequest {
   /** ordered system blocks; `cache` marks an Anthropic cache breakpoint */
@@ -44,6 +47,7 @@ export interface AgentModel {
   label: string
   /** the user whose account pays, when it isn't the server's key */
   userId?: string
+  runHarness?: (req: LocalHarnessRequest) => Promise<LocalAgentResult>
   run(req: AgentTurnRequest): Promise<AgentTurnResult>
 }
 
@@ -224,6 +228,23 @@ function byoModel(account: ModelAccount): AgentModel {
  * connecting stops costing us anything from that moment on.
  */
 export async function pickModel(payerId?: string): Promise<AgentModel | null> {
+  if (payerId) {
+    const local = await getLocalAgentPreference(payerId)
+    if (local.enabled) {
+      if (!localAgentRuns.online(payerId)) return null
+      return {
+        provider: 'claude-local',
+        label: `Claude CLI (${local.model})`,
+        userId: payerId,
+        runHarness: (req) => localAgentRuns.start(payerId, local.model, req),
+        run: () =>
+          Promise.reject(
+            new Error('Repository imports require a server provider. Select your connected account in Settings.'),
+          ),
+      }
+    }
+  }
+
   const account = payerId
     ? await getAccount(payerId).catch((err) => {
         console.error('[doop-agent] could not read the connected model account', err)

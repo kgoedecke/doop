@@ -456,110 +456,135 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           ]
         : []
       const maxTurns = REDESIGN_RE.test(workText) ? MAX_REDESIGN_TURNS : MAX_TURNS
-      for (let turn = 0; turn < maxTurns; turn++) {
-        const res = await model.run({
-          maxTokens: 16000,
-          system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock],
-          tools: TOOLS,
-          messages,
+      if (model.runHarness) {
+        const result = await model.runHarness({
+          canvasId,
+          prompt: kickoff,
+          system: [systemFor(role), ...guidelinesBlock.map((b) => b.text)].join('\n\n'),
+          // Image generation uses a separate paid model account; the local CLI
+          // connection must never imply that the user's subscription covers it.
+          tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
+          maxTurns,
+          execute: async (block) => {
+            if (runState.blockedWebsiteAccess)
+              return {
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: runState.blockedWebsiteAccess,
+                is_error: true,
+              }
+            return execTool(block, canvasId, actor, runState)
+          },
         })
+        finished = result.success
+        crashed = !result.success
+        messages.push({ role: 'assistant', content: [{ type: 'text', text: result.text }] })
+        if (!result.success) actions.agentSummary(canvasId, actor, result.text)
+      } else
+        for (let turn = 0; turn < maxTurns; turn++) {
+          const res = await model.run({
+            maxTokens: 16000,
+            system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock],
+            tools: TOOLS,
+            messages,
+          })
 
-        if (res.stop_reason === 'refusal') {
-          actions.setAgentStatus(canvasId, actor, "Couldn't address that feedback")
-          refused = true
-          break
-        }
+          if (res.stop_reason === 'refusal') {
+            actions.setAgentStatus(canvasId, actor, "Couldn't address that feedback")
+            refused = true
+            break
+          }
 
-        messages.push({ role: 'assistant', content: res.content })
-        turnsUsed = turn + 1
-        const toolBlocks = res.content.filter(
-          (block): block is Anthropic.ToolUseBlockParam => block.type === 'tool_use',
-        )
-        console.log(
-          `[resident] response canvas=${canvasId} turn=${turnsUsed} stop=${res.stop_reason} tools=${toolBlocks.map((block) => block.name).join(',') || 'none'}`,
-        )
+          messages.push({ role: 'assistant', content: res.content })
+          turnsUsed = turn + 1
+          const toolBlocks = res.content.filter(
+            (block): block is Anthropic.ToolUseBlockParam => block.type === 'tool_use',
+          )
+          console.log(
+            `[resident] response canvas=${canvasId} turn=${turnsUsed} stop=${res.stop_reason} tools=${toolBlocks.map((block) => block.name).join(',') || 'none'}`,
+          )
 
-        /* A response can contain a complete tool_use block even when its stop
+          /* A response can contain a complete tool_use block even when its stop
          reason is max_tokens. The Messages protocol still requires an
          immediate tool_result for every emitted tool id, so content blocks —
          not stop_reason — are authoritative for tool execution. */
-        if (toolBlocks.length > 0) {
-          /* Models may emit an import and design mutations in one parallel
+          if (toolBlocks.length > 0) {
+            /* Models may emit an import and design mutations in one parallel
              batch. Run imports first and defer every other call to the next
              turn, when the model can inspect the imported source. If access is
              blocked, skip the whole remainder. Results retain protocol order. */
-          const importInBatch = toolBlocks.some((block) => block.name === 'import_webpage')
-          let importFailureInBatch: string | undefined
-          const results = await executeGuardedBatch<Anthropic.ToolUseBlockParam, Anthropic.ToolResultBlockParam>(
-            toolBlocks,
-            {
-              priority: (block) => (block.name === 'import_webpage' ? 1 : 0),
-              blocked: (block) =>
-                runState.blockedWebsiteAccess ??
-                importFailureInBatch ??
-                (importInBatch && block.name !== 'import_webpage'
-                  ? 'The website import must be inspected before any design changes. Continue on the next turn by calling screenshot_frame on the imported source.'
-                  : undefined),
-              skipped: (block, reason) => ({
-                type: 'tool_result',
-                tool_use_id: block.id,
-                content: `Skipped ${block.name}. ${reason}`,
-                is_error: true,
-              }),
-              execute: async (block) => {
-                const target = (block.input as Record<string, unknown>).frame_id
-                console.log(
-                  `[resident] tool canvas=${canvasId} name=${block.name}${typeof target === 'string' ? ` frame=${target}` : ''}`,
-                )
-                const result = await execTool(block, canvasId, actor, runState)
-                if (block.name === 'import_webpage' && result.is_error && !runState.blockedWebsiteAccess) {
-                  importFailureInBatch =
-                    'The website import failed. Correct the tool error and retry the import before making design changes.'
-                }
-                return result
+            const importInBatch = toolBlocks.some((block) => block.name === 'import_webpage')
+            let importFailureInBatch: string | undefined
+            const results = await executeGuardedBatch<Anthropic.ToolUseBlockParam, Anthropic.ToolResultBlockParam>(
+              toolBlocks,
+              {
+                priority: (block) => (block.name === 'import_webpage' ? 1 : 0),
+                blocked: (block) =>
+                  runState.blockedWebsiteAccess ??
+                  importFailureInBatch ??
+                  (importInBatch && block.name !== 'import_webpage'
+                    ? 'The website import must be inspected before any design changes. Continue on the next turn by calling screenshot_frame on the imported source.'
+                    : undefined),
+                skipped: (block, reason) => ({
+                  type: 'tool_result',
+                  tool_use_id: block.id,
+                  content: `Skipped ${block.name}. ${reason}`,
+                  is_error: true,
+                }),
+                execute: async (block) => {
+                  const target = (block.input as Record<string, unknown>).frame_id
+                  console.log(
+                    `[resident] tool canvas=${canvasId} name=${block.name}${typeof target === 'string' ? ` frame=${target}` : ''}`,
+                  )
+                  const result = await execTool(block, canvasId, actor, runState)
+                  if (block.name === 'import_webpage' && result.is_error && !runState.blockedWebsiteAccess) {
+                    importFailureInBatch =
+                      'The website import failed. Correct the tool error and retry the import before making design changes.'
+                  }
+                  return result
+                },
               },
-            },
-          )
-          messages.push({ role: 'user', content: results })
-          continue
-        }
+            )
+            messages.push({ role: 'user', content: results })
+            continue
+          }
 
-        if (runState.blockedWebsiteAccess) {
+          if (runState.blockedWebsiteAccess) {
+            finished = true
+            break
+          }
+
+          if (res.stop_reason === 'max_tokens' && !outputLimitNudgeSent) {
+            outputLimitNudgeSent = true
+            messages.push({
+              role: 'user',
+              content:
+                'Your response reached the output limit before producing an executable edit. Continue with bounded tool calls: begin_frame_rewrite, append_frame_rewrite with each chunk under 12,000 characters, then commit_frame_rewrite and screenshot_frame.',
+            })
+            continue
+          }
+
+          if (requireMutation && deliverableFrameIds(runState).length === 0 && !mutationNudgeSent) {
+            mutationNudgeSent = true
+            messages.push({
+              role: 'user',
+              content:
+                'You have not changed or created a deliverable frame yet, so the queued design card is not complete. Imported source frames are reference material and do not count as the deliverable. Make the requested visual change now. For a full redesign, use begin_frame_rewrite, append_frame_rewrite chunks under 12,000 characters, and commit_frame_rewrite, then verify it with screenshot_frame.',
+            })
+            continue
+          }
+          const unverified = verificationFrameIds(runState).filter((id) => !runState.verifiedFrames.has(id))
+          if (cards.length > 0 && unverified.length > 0 && !verificationNudgeSent) {
+            verificationNudgeSent = true
+            messages.push({
+              role: 'user',
+              content: `You have not visually verified ${unverified.join(', ')}. Call screenshot_frame for each frame, inspect the render, and fix any problems before finishing.`,
+            })
+            continue
+          }
           finished = true
           break
         }
-
-        if (res.stop_reason === 'max_tokens' && !outputLimitNudgeSent) {
-          outputLimitNudgeSent = true
-          messages.push({
-            role: 'user',
-            content:
-              'Your response reached the output limit before producing an executable edit. Continue with bounded tool calls: begin_frame_rewrite, append_frame_rewrite with each chunk under 12,000 characters, then commit_frame_rewrite and screenshot_frame.',
-          })
-          continue
-        }
-
-        if (requireMutation && deliverableFrameIds(runState).length === 0 && !mutationNudgeSent) {
-          mutationNudgeSent = true
-          messages.push({
-            role: 'user',
-            content:
-              'You have not changed or created a deliverable frame yet, so the queued design card is not complete. Imported source frames are reference material and do not count as the deliverable. Make the requested visual change now. For a full redesign, use begin_frame_rewrite, append_frame_rewrite chunks under 12,000 characters, and commit_frame_rewrite, then verify it with screenshot_frame.',
-          })
-          continue
-        }
-        const unverified = verificationFrameIds(runState).filter((id) => !runState.verifiedFrames.has(id))
-        if (cards.length > 0 && unverified.length > 0 && !verificationNudgeSent) {
-          verificationNudgeSent = true
-          messages.push({
-            role: 'user',
-            content: `You have not visually verified ${unverified.join(', ')}. Call screenshot_frame for each frame, inspect the render, and fix any problems before finishing.`,
-          })
-          continue
-        }
-        finished = true
-        break
-      }
     } catch (err) {
       /* An API/tool crash becomes a visible, manually retryable failure. */
       crashed = true

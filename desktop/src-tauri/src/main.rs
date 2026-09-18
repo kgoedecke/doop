@@ -39,6 +39,8 @@
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+mod claude;
+
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -162,7 +164,13 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         app,
         "File",
         true,
-        &[&MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("Cmd+W"))?],
+        &[&MenuItem::with_id(
+            app,
+            CLOSE_TAB,
+            "Close Tab",
+            true,
+            Some("Cmd+W"),
+        )?],
     )?;
     let edit = Submenu::with_items(
         app,
@@ -178,7 +186,12 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
-    let view = Submenu::with_items(app, "View", true, &[&PredefinedMenuItem::fullscreen(app, None)?])?;
+    let view = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[&PredefinedMenuItem::fullscreen(app, None)?],
+    )?;
     let window = Submenu::with_items(
         app,
         "Window",
@@ -196,7 +209,17 @@ fn main() {
     // before anything else initialises; it hands the launch's URL args to
     // the deep-link plugin through the `deep-link` feature.
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| focus_main_window(app)))
+        .manage(claude::ClaudeState::default())
+        .invoke_handler(tauri::generate_handler![
+            claude::claude_status,
+            claude::claude_connect,
+            claude::claude_login,
+            claude::claude_run,
+            claude::claude_stop
+        ])
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main_window(app)
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init());
     #[cfg(target_os = "macos")]
@@ -253,7 +276,7 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}';",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true;",
                 app.package_info().version,
                 std::env::consts::OS
             );
@@ -336,6 +359,11 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to start doop");
+        .build(tauri::generate_context!())
+        .expect("failed to start doop")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                claude::shutdown(&app.state::<claude::ClaudeState>());
+            }
+        });
 }
