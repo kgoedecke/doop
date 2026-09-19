@@ -69,7 +69,7 @@ export function LocalClaudeRow() {
           </span>
         </div>
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
-          Route Claude models through your Claude subscription
+          Use your Claude subscription locally, in the desktop app only.
         </p>
         {connected && native?.email && (
           <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-[13px] text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
