@@ -132,3 +132,44 @@ it('ignores an in-flight status response after cancelling device sign-in', async
   await act(async () => resolveStatus(connected))
   expect(mocks.selectLocal).not.toHaveBeenCalled()
 })
+
+it.each([false, true])('shows a retryable switch failure after authorization (loopback=%s)', async (catching) => {
+  mocks.authorize.mockResolvedValue({ url: 'https://example.test/authorize', catching })
+  await act(async () => button('Use instead').click())
+  mocks.account.mockResolvedValue(connected)
+  mocks.selectLocal.mockRejectedValueOnce(new Error('Preference request failed'))
+  await tick()
+  expect(container.textContent).toContain('ChatGPT connected, but switching providers failed')
+  expect(container.textContent).not.toContain('Waiting for approval')
+  expect(button('Retry switch')).toBeDefined()
+  await tick()
+  expect(mocks.selectLocal).toHaveBeenCalledTimes(1)
+  await act(async () => button('Retry switch').click())
+  expect(mocks.selectLocal).toHaveBeenCalledTimes(2)
+  expect(container.textContent).not.toContain('switching providers failed')
+  expect(mocks.authorize).toHaveBeenCalledTimes(1)
+  expect(mocks.connect).not.toHaveBeenCalled()
+})
+
+it('retries only the switch after a successful pasted-code exchange', async () => {
+  mocks.authorize.mockResolvedValue({ url: 'https://example.test/authorize', catching: true })
+  await act(async () => button('Use instead').click())
+  await act(async () => button('Paste the redirect URL instead').click())
+  const input = container.querySelector('input')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(
+      input,
+      'http://localhost:1455/auth/callback?code=test',
+    )
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  mocks.connect.mockResolvedValue(connected)
+  mocks.selectLocal.mockRejectedValueOnce(new Error('Preference request failed'))
+  await act(async () => button('Finish connecting').click())
+  expect(button('Retry switch')).toBeDefined()
+  expect(button('Finish connecting')).toBeUndefined()
+  await act(async () => button('Retry switch').click())
+  expect(mocks.connect).toHaveBeenCalledTimes(1)
+  expect(mocks.selectLocal).toHaveBeenCalledTimes(2)
+  expect(container.textContent).not.toContain('switching providers failed')
+})

@@ -110,6 +110,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const [showKey, setShowKey] = useState<false | 'openai-key' | 'anthropic-key'>(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [switchFailed, setSwitchFailed] = useState(false)
 
   const settle = useCallback(
     (next: ModelAccountStatus) => {
@@ -121,11 +122,30 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       setApiKey('')
       setShowKey(false)
       setError('')
+      setSwitchFailed(false)
       onChange?.()
       /* every allowance meter and wall on screen re-reads, not just this pane */
       useStore.getState().allowanceChanged()
     },
     [set, onChange],
+  )
+
+  const activateChatgpt = useCallback(
+    async (next: ModelAccountStatus) => {
+      // Authorization is complete even if selecting the provider subsequently fails.
+      // Keep the connected account visible so retry never exchanges the OAuth code again.
+      settle(next)
+      setBusy(true)
+      try {
+        await selectServer()
+      } catch {
+        setSwitchFailed(true)
+        setError('ChatGPT connected, but switching providers failed. Retry the switch without signing in again.')
+      } finally {
+        setBusy(false)
+      }
+    },
+    [settle, selectServer],
   )
 
   /* poll only while a sign-in is actually in flight */
@@ -139,8 +159,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         .then(async (next) => {
           // An existing API-key account is not evidence that OAuth succeeded.
           if (cancelled || !next.connected || next.kind !== 'chatgpt') return
-          await selectServer()
-          if (!cancelled) settle(next)
+          cancelled = true
+          await activateChatgpt(next)
         })
         .catch(() => {})
       /* the device flow can also fail server-side (expired, refused) — that
@@ -148,7 +168,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       if (pendingDevice) {
         api.deviceAuthStatus().then(
           (flow) => {
-            if ('userCode' in flow && flow.status === 'error') {
+            if (!cancelled && 'userCode' in flow && flow.status === 'error') {
               setDevice(null)
               setError(flow.error || 'That sign-in did not complete')
             }
@@ -161,7 +181,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [waiting, pendingDevice, settle, selectServer])
+  }, [waiting, pendingDevice, activateChatgpt])
 
   const fail = (e: unknown) => {
     const body = (e as { body?: { error?: string } })?.body
@@ -219,8 +239,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setError('')
     try {
       const next = await api.connectChatgpt(redirect)
-      await selectServer()
-      settle(next)
+      await activateChatgpt(next)
       posthog.capture('chatgpt_connected')
     } catch (e) {
       fail(e)
@@ -351,14 +370,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 <div className={actionsRow}>
                   {modelChips(true)}
                   <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-                    {local?.enabled && (
-                      <Button
-                        disabled={busy}
-                        onClick={() => {
-                          selectServer().catch(fail)
-                        }}
-                      >
-                        Use instead
+                    {(local?.enabled || switchFailed) && (
+                      <Button disabled={busy} onClick={() => activateChatgpt(account)}>
+                        {switchFailed ? 'Retry switch' : 'Use instead'}
                       </Button>
                     )}
                     <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
