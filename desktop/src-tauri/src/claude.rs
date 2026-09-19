@@ -178,6 +178,61 @@ pub async fn claude_connect(app: AppHandle, user_id: String, enabled: bool) -> R
     }).await.map_err(|e| e.to_string())?
 }
 
+// Serialize installation across windows and repeated IPC requests.
+static INSTALLING: Mutex<()> = Mutex::new(());
+
+fn installer_command() -> Command {
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut cmd = Command::new("/bin/bash");
+        // Download fully before executing; the URL and script are never supplied by the webview.
+        cmd.args(["-c", r#"set -eu
+installer=$(mktemp)
+trap 'rm -f "$installer"' EXIT
+curl --proto '=https' --proto-redir '=https' --fail --show-error --silent --location --connect-timeout 20 --max-time 120 https://claude.ai/install.sh -o "$installer"
+bash "$installer"
+"#]);
+        cmd
+    };
+    #[cfg(windows)]
+    let mut cmd = {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command",
+            "$ErrorActionPreference = 'Stop'; $script = Invoke-RestMethod -Uri 'https://claude.ai/install.ps1' -TimeoutSec 120; Invoke-Expression $script"]);
+        cmd.creation_flags(0x08000000);
+        cmd
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    cmd
+}
+
+#[tauri::command]
+pub async fn claude_install(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = INSTALLING.try_lock().map_err(|_| "Claude Code installation is already running.")?;
+        if executable().is_ok() { return Ok(()); }
+        let accepted = rfd::MessageDialog::new().set_title("Install Claude Code?")
+            .set_description("Download and run Anthropic's official installer on this computer? Claude Code installs for your user account and manages its own updates.")
+            .set_buttons(rfd::MessageButtons::OkCancel).show();
+        if accepted != rfd::MessageDialogResult::Ok { return Err("Installation cancelled.".into()); }
+        let mut cmd = installer_command();
+        cmd.current_dir(directory(&app)?);
+        let ok = collect(cmd.spawn().map_err(|e| format!("Could not start the installer: {e}"))?,
+            Duration::from_secs(600), Arc::new(AtomicBool::new(false)), |_| {})
+            .map_err(|_| "Installation did not finish in time. Refresh to check, or use the installation guide.")?;
+        if !ok { return Err("Installation failed. Check your internet connection or use the installation guide.".into()); }
+        let mut verify = command()?;
+        verify.arg("--version");
+        let ok = collect(verify.spawn().map_err(|e| e.to_string())?,
+            Duration::from_secs(20), Arc::new(AtomicBool::new(false)), |_| {})?;
+        if !ok { return Err("Claude Code was installed but could not start. See the installation guide.".into()); }
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn claude_login(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -371,6 +426,27 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn installer_does_not_execute_a_failed_download() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("doop-installer-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let curl = dir.join("curl");
+        // Write a partial payload, then simulate a failed download. It must never run.
+        std::fs::write(&curl, "#!/bin/sh\nfor arg do target=$arg; done\nprintf 'echo SHOULD_NOT_RUN' > \"$target\"\nexit 22\n").unwrap();
+        std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let output = installer_command()
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .env("TMPDIR", &dir)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn streams_every_line_before_reporting_exit() {

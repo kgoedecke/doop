@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-claude-install"
+description = "Enables the claude_install command without any pre-configured scope."
+commands.allow = ["claude_install"]
+
+[[permission]]
+identifier = "deny-claude-install"
+description = "Denies the claude_install command without any pre-configured scope."
+commands.deny = ["claude_install"]

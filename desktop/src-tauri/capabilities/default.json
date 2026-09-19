@@ -25,6 +25,7 @@
     "allow-claude-status",
     "allow-claude-connect",
     "allow-claude-login",
+    "allow-claude-install",
     "allow-claude-run",
     "allow-claude-stop"
   ]

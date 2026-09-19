@@ -5,6 +5,7 @@ import { isDesktopShell } from '../lib/shell'
 import {
   disconnectLocalAgent,
   hasLocalClaude,
+  canInstallClaude,
   invokeClaude,
   refreshLocalAgent,
   selectLocalAgent,
@@ -22,6 +23,7 @@ export function LocalClaudeRow() {
   const userId = session?.user.id
   const { preference, native, running, progress, error: runnerError } = useLocalAgent()
   const [busy, setBusy] = useState(false)
+  const [installing, setInstalling] = useState(false)
   const [error, setError] = useState('')
   useEffect(() => {
     if (!userId) return
@@ -115,6 +117,24 @@ export function LocalClaudeRow() {
           )}
           {supported && (
             <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
+              {native && !native.installed && canInstallClaude() && (
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    act(async () => {
+                      setInstalling(true)
+                      try {
+                        await invokeClaude('claude_install')
+                        await refreshLocalAgent(userId!)
+                      } finally {
+                        setInstalling(false)
+                      }
+                    })
+                  }
+                >
+                  {installing ? 'Installing…' : 'Install Claude Code'}
+                </Button>
+              )}
               {!connected && (
                 <Button variant="ghost" disabled={busy} onClick={() => act(() => refreshLocalAgent(userId!))}>
                   Refresh
@@ -167,9 +187,8 @@ export function LocalClaudeRow() {
         {supported && native && !native.installed && (
           <p className="mt-[10px] text-[13px] text-ink-faint">
             <a className="underline" href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer">
-              Install Claude Code
+              Installation guide
             </a>
-            , then refresh.
           </p>
         )}
         {active && !connected && (

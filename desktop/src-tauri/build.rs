@@ -4,6 +4,7 @@ fn main() {
             "claude_status",
             "claude_connect",
             "claude_login",
+            "claude_install",
             "claude_run",
             "claude_stop",
         ]),
