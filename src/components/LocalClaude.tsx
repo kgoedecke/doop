@@ -12,6 +12,7 @@ import {
 } from '../lib/localAgent'
 import { CLAUDE_MODELS, normalizeClaudeModel, type ClaudeModel } from '../../shared/localAgent'
 import { Button } from './ui/button'
+import { AgentIcon } from './AgentIcon'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { CheckIcon } from './ui/icons'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
@@ -56,7 +57,7 @@ export function LocalClaudeRow() {
   return (
     <section className={planRow(active)}>
       <span aria-hidden="true" className={planMark(active)}>
-        <span className="text-lg text-accent-ink">✳</span>
+        <AgentIcon name="claude" size={20} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
