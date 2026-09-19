@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/kgoedecke/doop/compare/desktop-v0.3.0...desktop-v0.4.0) (2026-09-19)
+
+
+### Features
+
+* **agent:** add Claude CLI and API key providers ([#155](https://github.com/kgoedecke/doop/issues/155)) ([4bed23d](https://github.com/kgoedecke/doop/commit/4bed23da489bcb5345e483015c791b51ff30c81e))
+
 ## [0.3.0](https://github.com/kgoedecke/doop/compare/desktop-v0.2.1...desktop-v0.3.0) (2026-09-16)
 
 

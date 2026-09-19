@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0](https://github.com/kgoedecke/doop/compare/v0.5.0...v0.6.0) (2026-09-19)
+
+
+### Features
+
+* **agent:** add Claude CLI and API key providers ([#155](https://github.com/kgoedecke/doop/issues/155)) ([4bed23d](https://github.com/kgoedecke/doop/commit/4bed23da489bcb5345e483015c791b51ff30c81e))
+* **agent:** add GPT-6 Astra to the OpenAI model menu ([#190](https://github.com/kgoedecke/doop/issues/190)) ([31123df](https://github.com/kgoedecke/doop/commit/31123dfcbfb6dfa3d2770eaaec14eed67f33f186))
+* **canvas:** locate and follow collaborators from task rows and avatars ([#191](https://github.com/kgoedecke/doop/issues/191)) ([876abcf](https://github.com/kgoedecke/doop/commit/876abcf894981f86fa8c67f9bfd3905fc6d5e649))
+
+
+### Bug Fixes
+
+* **canvas:** keep frame title labels from stealing clicks at low zoom ([#193](https://github.com/kgoedecke/doop/issues/193)) ([3a5df79](https://github.com/kgoedecke/doop/commit/3a5df790acc565fe44ced06443c461d0b3dfc34e))
+* **canvas:** snap duplicate-drags to guides and let ⌫ delete the picked element ([#187](https://github.com/kgoedecke/doop/issues/187)) ([08c9fe7](https://github.com/kgoedecke/doop/commit/08c9fe776c712bf9bf141ed281305c3f8b1b56c4))
+* close the socket with a clear code when a canvas does not exist ([#154](https://github.com/kgoedecke/doop/issues/154)) ([39f037e](https://github.com/kgoedecke/doop/commit/39f037ed4e484ae2781c484f0f45c69b5ed6c725)), closes [#73](https://github.com/kgoedecke/doop/issues/73)
+* **db:** renumber the local-agent migration to 0017 behind task_frames ([a4cc4bb](https://github.com/kgoedecke/doop/commit/a4cc4bbc72363694fa77d33125fb5047f97ba95f))
+* one-click copy button for the frame's HTML code ([#148](https://github.com/kgoedecke/doop/issues/148)) ([2230a8b](https://github.com/kgoedecke/doop/commit/2230a8bd6435a7a357c5544cb9506903e4df4836))
+
+
+### Documentation
+
+* **agents:** teach agents to generate hero backgrounds ([90853e8](https://github.com/kgoedecke/doop/commit/90853e8277e03befc4edb880fa7853416fa9d62c))
+
 ## [0.5.0](https://github.com/kgoedecke/doop/compare/v0.4.0...v0.5.0) (2026-09-16)
 
 
