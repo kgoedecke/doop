@@ -99,9 +99,11 @@ export function ModelAccountPanel({
   const { account, refresh, set } = useModelAccount()
   const { data: session } = authClient.useSession()
   const local = useLocalAgent((s) => s.preference)
-  const selectServer = async () => {
-    if (session?.user.id) await selectLocalAgent(session.user.id, { enabled: false, model: local?.model ?? 'default' })
-  }
+  const userId = session?.user.id
+  const localModel = local?.model ?? 'default'
+  const selectServer = useCallback(async () => {
+    if (userId) await selectLocalAgent(userId, { enabled: false, model: localModel })
+  }, [userId, localModel])
   const [authUrl, setAuthUrl] = useState('')
   /* true while the server is listening on the loopback callback port for us —
      the user approves in the other tab and this one just flips */
@@ -134,13 +136,17 @@ export function ModelAccountPanel({
   const pendingDevice = device?.status === 'pending'
   useEffect(() => {
     if (!waiting && !pendingDevice) return
+    let cancelled = false
     const id = window.setInterval(() => {
-      api.modelAccount().then(
-        (next) => {
-          if (next.connected) settle(next)
-        },
-        () => {},
-      )
+      api
+        .modelAccount()
+        .then(async (next) => {
+          // An existing API-key account is not evidence that OAuth succeeded.
+          if (cancelled || !next.connected || next.kind !== 'chatgpt') return
+          await selectServer()
+          if (!cancelled) settle(next)
+        })
+        .catch(() => {})
       /* the device flow can also fail server-side (expired, refused) — that
          status is the only place the user would ever learn why */
       if (pendingDevice) {
@@ -155,8 +161,11 @@ export function ModelAccountPanel({
         )
       }
     }, 1500)
-    return () => window.clearInterval(id)
-  }, [waiting, pendingDevice, settle])
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [waiting, pendingDevice, settle, selectServer])
 
   const fail = (e: unknown) => {
     const body = (e as { body?: { error?: string } })?.body
@@ -167,7 +176,6 @@ export function ModelAccountPanel({
     setBusy(true)
     setError('')
     try {
-      await selectServer()
       const { url, catching } = await api.chatgptAuthorize()
       if (catching) {
         /* we hold the loopback port, so the browser round trip completes by
@@ -214,8 +222,9 @@ export function ModelAccountPanel({
     setBusy(true)
     setError('')
     try {
+      const next = await api.connectChatgpt(redirect)
       await selectServer()
-      settle(await api.connectChatgpt(redirect))
+      settle(next)
       posthog.capture('chatgpt_connected')
     } catch (e) {
       fail(e)
