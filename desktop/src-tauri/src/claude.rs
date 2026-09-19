@@ -110,6 +110,32 @@ fn enabled_users(app: &AppHandle) -> Result<HashSet<String>, String> {
         .map_err(|e| e.to_string())
 }
 
+const MAX_CLI_LINE_BYTES: usize = 2_000_000;
+
+// Bound allocations even if the CLI never emits a newline.
+fn read_cli_line(reader: &mut impl BufRead) -> Result<Option<String>, String> {
+    let mut line = Vec::new();
+    loop {
+        let buffer = reader.fill_buf().map_err(|e| format!("Could not read Claude output: {e}"))?;
+        if buffer.is_empty() {
+            if line.is_empty() { return Ok(None); }
+            break;
+        }
+        let newline = buffer.iter().position(|b| *b == b'\n');
+        let count = newline.map_or(buffer.len(), |index| index);
+        if line.len() + count > MAX_CLI_LINE_BYTES {
+            return Err("Claude output exceeded the 2 MB line limit. The run was stopped; retry with a smaller tool result.".into());
+        }
+        line.extend_from_slice(&buffer[..count]);
+        reader.consume(count + usize::from(newline.is_some()));
+        if newline.is_some() {
+            if line.last() == Some(&b'\r') { line.pop(); }
+            break;
+        }
+    }
+    String::from_utf8(line).map(Some).map_err(|_| "Claude output was not valid UTF-8.".into())
+}
+
 fn collect(
     mut child: Child,
     timeout: Duration,
@@ -119,10 +145,12 @@ fn collect(
     let stdout = child.stdout.take().ok_or("Missing CLI output")?;
     let (sender, receiver) = std::sync::mpsc::sync_channel(32);
     let reader = std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if line.len() > 2_000_000 || sender.send(line).is_err() {
-                break;
+        let mut reader = BufReader::new(stdout);
+        loop {
+            match read_cli_line(&mut reader) {
+                Ok(Some(line)) => { if sender.send(Ok(line)).is_err() { break; } }
+                Ok(None) => break,
+                Err(error) => { let _ = sender.send(Err(error)); break; }
             }
         }
     });
@@ -134,7 +162,12 @@ fn collect(
             break Err("Claude run stopped or timed out. Retry when ready.".into());
         }
         match receiver.recv_timeout(Duration::from_millis(100)) {
-            Ok(line) => on_line(&line),
+            Ok(Ok(line)) => on_line(&line),
+            Ok(Err(error)) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(error);
+            },
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => match child.try_wait() {
                 Ok(Some(status)) => break Ok(status.success()),
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
@@ -484,6 +517,38 @@ mod tests {
         )
         .is_err());
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn bounded_reader_handles_line_endings_and_eof() {
+        let mut reader = std::io::Cursor::new(b"first\r\n\nlast");
+        assert_eq!(read_cli_line(&mut reader).unwrap(), Some("first".into()));
+        assert_eq!(read_cli_line(&mut reader).unwrap(), Some("".into()));
+        assert_eq!(read_cli_line(&mut reader).unwrap(), Some("last".into()));
+        assert_eq!(read_cli_line(&mut reader).unwrap(), None);
+        let mut reader = std::io::Cursor::new(vec![b'x'; MAX_CLI_LINE_BYTES]);
+        assert_eq!(read_cli_line(&mut reader).unwrap().unwrap().len(), MAX_CLI_LINE_BYTES);
+    }
+
+    #[test]
+    fn bounded_reader_rejects_oversized_and_invalid_lines() {
+        let mut reader = std::io::Cursor::new(vec![b'x'; MAX_CLI_LINE_BYTES + 1]);
+        assert!(read_cli_line(&mut reader).unwrap_err().contains("2 MB"));
+        let mut reader = std::io::Cursor::new(vec![0xff, b'\n']);
+        assert!(read_cli_line(&mut reader).unwrap_err().contains("UTF-8"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_output_stops_the_child_promptly() {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "printf '%02000001d' 0; exec sleep 10"])
+            .stdout(Stdio::piped())
+            .spawn().unwrap();
+        let started = Instant::now();
+        let error = collect(child, Duration::from_secs(15), Arc::new(AtomicBool::new(false)), |_| {}).unwrap_err();
+        assert!(error.contains("2 MB"));
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]
