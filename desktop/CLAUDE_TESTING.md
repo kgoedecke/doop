@@ -46,5 +46,7 @@ platform regressions.
   isolated temporary configuration directory, and inherited API credentials removed.
   It emitted a browser authorization URL and waited for authorization without a TTY.
   The process was stopped before authorization; the existing login was preserved.
-- Full fresh browser authorization and the native consent dialog smoke test remain
-  manual checks. Startup is not evidence that authorization completes successfully.
+- The user manually tested Claude sign-in in the desktop app and confirmed it
+  works. This supplements the automated non-TTY startup check above.
+- The native consent dialog smoke test remains a separate manual check; the
+  sign-in confirmation does not establish that both consent outcomes were tested.
