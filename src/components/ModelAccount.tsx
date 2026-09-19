@@ -103,6 +103,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const [device, setDevice] = useState<DeviceFlow | null>(null)
   const [redirect, setRedirect] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [workspaceDraft, setWorkspaceId] = useState<string | null>(null)
+  const workspaceId = workspaceDraft ?? account?.workspaceId ?? ''
   const [showKey, setShowKey] = useState<false | 'openai-key' | 'anthropic-key'>(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -116,6 +118,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       setRedirect('')
       setApiKey('')
       setShowKey(false)
+      setWorkspaceId(null)
       setError('')
       onChange?.()
       /* every allowance meter and wall on screen re-reads, not just this pane */
@@ -222,10 +225,25 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setBusy(true)
     setError('')
     try {
-      const next = await (showKey === 'anthropic-key' ? api.connectAnthropicKey(apiKey) : api.connectOpenAiKey(apiKey))
+      const next = await (showKey === 'anthropic-key'
+        ? api.connectAnthropicKey(apiKey, workspaceId)
+        : api.connectOpenAiKey(apiKey))
       await selectServer()
       settle(next)
       posthog.capture('model_account_connected', { kind: showKey || 'openai-key' })
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const saveWorkspace = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      set(await api.setAnthropicWorkspace(workspaceId))
+      setWorkspaceId(null)
     } catch (e) {
       fail(e)
     } finally {
@@ -298,6 +316,23 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       </div>
     )
   }
+
+  const workspaceField = (
+    <label className="mt-3 block text-[13px] text-ink-soft">
+      Anthropic workspace ID (optional)
+      <Input
+        className="mt-2"
+        value={workspaceId}
+        onChange={(e) => setWorkspaceId(e.target.value)}
+        placeholder="wrkspc_…"
+        spellCheck={false}
+        disabled={busy}
+      />
+      <span className="mt-2 block text-[12px] text-ink-faint">
+        Required for keys that aren’t scoped to one workspace. Find it in Claude Console → Settings → Workspaces.
+      </span>
+    </label>
+  )
 
   return (
     <div className="flex flex-col">
@@ -572,6 +607,17 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                   </Button>
                 </div>
               </div>
+              <details className="mt-3 text-[13px] text-ink-soft">
+                <summary className="cursor-pointer">Workspace settings</summary>
+                {workspaceField}
+                <Button
+                  className="mt-3"
+                  onClick={saveWorkspace}
+                  disabled={busy || workspaceId.trim() === (account.workspaceId ?? '')}
+                >
+                  {busy ? 'Saving…' : 'Save workspace'}
+                </Button>
+              </details>
             </>
           ) : showKey === 'anthropic-key' ? (
             <div className={planFlow}>
@@ -587,6 +633,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 autoFocus
                 spellCheck={false}
               />
+              {workspaceField}
               <div className={maActions}>
                 <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
                   {busy ? 'Saving…' : 'Save key'}

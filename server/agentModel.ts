@@ -52,6 +52,7 @@ export interface AgentModel {
 }
 
 export { ModelAuthError }
+export class ModelConfigurationError extends ModelAuthError {}
 
 /* ---------------------------------------------------------------- */
 /* the server tier: pays for everyone's free tasks                  */
@@ -202,7 +203,10 @@ function joinSystem(req: AgentTurnRequest): string {
 function byoModel(account: ModelAccount): AgentModel {
   if (account.kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
-    const client = new Anthropic({ apiKey: account.apiKey })
+    const client = new Anthropic({
+      apiKey: account.apiKey,
+      ...(account.accountId ? { defaultHeaders: { 'anthropic-workspace-id': account.accountId } } : {}),
+    })
     const model = accountModelFor(account)
     return {
       provider: account.kind,
@@ -212,6 +216,15 @@ function byoModel(account: ModelAccount): AgentModel {
         try {
           return await runAnthropicTurn(client, model, req)
         } catch (error) {
+          if (
+            error instanceof Anthropic.APIError &&
+            (error.status === 400 || error.status === 404) &&
+            /anthropic-workspace-id|workspace/i.test(error.message)
+          ) {
+            throw new ModelConfigurationError(
+              'Set a valid Anthropic workspace ID in Settings → Claude API key → Workspace settings, then retry. You can also use a key scoped to one workspace.',
+            )
+          }
           if (error instanceof Anthropic.APIError && (error.status === 401 || error.status === 403)) {
             throw new ModelAuthError('Anthropic rejected your API key. Reconnect it in Settings.')
           }

@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
-import { ModelAuthError, pickModel } from './agentModel.ts'
+import { ModelAuthError, ModelConfigurationError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
@@ -434,6 +434,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let refused = false
     let crashed = false
     let staleAccount = false
+    let accountError: string | undefined
     let finished = false
     let mutationNudgeSent = false
     let verificationNudgeSent = false
@@ -592,12 +593,14 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
          gets its own wording all the way through to the card — but only when
          the credential is theirs: a server-tier run has no account to
          reconnect, whatever error class its transport leaks */
+      accountError = err instanceof ModelConfigurationError && model.userId ? err.message : undefined
       staleAccount = err instanceof ModelAuthError && !!model.userId
       console.error('[resident] run errored', err)
       actions.setAgentStatus(
         canvasId,
         actor,
-        staleAccount ? 'Your model connection expired — reconnect it' : 'Hit a snag — waiting for a retry',
+        accountError ??
+          (staleAccount ? 'Your model connection expired — reconnect it' : 'Hit a snag — waiting for a retry'),
       )
     }
 
@@ -642,7 +645,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     } else {
       let reason: string
       if (staleAccount) {
-        reason = `${model.label} turned down the connected account. Reconnect it in Doop, then retry.${blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : ''}`
+        reason =
+          accountError ??
+          `${model.label} turned down the connected account. Reconnect it in Doop, then retry.${blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : ''}`
       } else if (blockedWebsiteAccess) {
         reason = blockedWebsiteAccess
       } else if (refused) {

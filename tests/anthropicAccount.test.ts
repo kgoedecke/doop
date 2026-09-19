@@ -28,6 +28,18 @@ it('stores a Claude key privately, switches off local execution, and validates p
   expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ model: 'claude-opus-5' })
   expect((await alice.post('/api/model-account/anthropic-key', { apiKey: 'invalid' })).status).toBe(400)
   expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ model: 'claude-opus-5' })
+  const workspace = await alice.patch('/api/model-account/anthropic-workspace', { workspaceId: 'wrkspc_testworkspace' })
+  expect(workspace.status).toBe(200)
+  expect(await workspace.json()).toMatchObject({ workspaceId: 'wrkspc_testworkspace', model: 'claude-opus-5' })
+  expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ workspaceId: 'wrkspc_testworkspace' })
+  expect((await bob.patch('/api/model-account/anthropic-workspace', { workspaceId: 'wrkspc_bob' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/anthropic-workspace', { workspaceId: 'bad\r\nheader' })).status).toBe(
+    400,
+  )
+  expect((await alice.patch('/api/model-account/anthropic-workspace', { workspaceId: '' })).status).toBe(200)
+  expect(await (await alice.get('/api/model-account')).json()).not.toHaveProperty('workspaceId')
+  const reconnect = await alice.post('/api/model-account/anthropic-key', { apiKey: key, workspaceId: 'wrkspc_new' })
+  expect(await reconnect.json()).toMatchObject({ workspaceId: 'wrkspc_new' })
   expect((await alice.delete('/api/model-account')).status).toBe(200)
   expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ connected: false })
 })

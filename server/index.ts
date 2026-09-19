@@ -718,12 +718,24 @@ app.post('/api/model-account/openai-key', async (req, res) => {
 
 app.post('/api/model-account/anthropic-key', async (req, res) => {
   try {
-    const status = await modelAccounts.connectAnthropicKey(req.user!.id, String(req.body?.apiKey ?? ''))
+    const status = await modelAccounts.connectAnthropicKey(
+      req.user!.id,
+      String(req.body?.apiKey ?? ''),
+      String(req.body?.workspaceId ?? ''),
+    )
     const preference = await getLocalAgentPreference(req.user!.id)
     await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
     res.json(accountView(status))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
+  }
+})
+
+app.patch('/api/model-account/anthropic-workspace', async (req, res) => {
+  try {
+    res.json(accountView(await modelAccounts.setAnthropicWorkspace(req.user!.id, String(req.body?.workspaceId ?? ''))))
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that workspace' })
   }
 })
 

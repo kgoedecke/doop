@@ -141,6 +141,7 @@ export interface AgentModelOption {
 }
 
 export interface ModelAccountStatus {
+  workspaceId?: string
   connected: boolean
   kind?: ModelAccountKind
   email?: string
@@ -379,8 +380,16 @@ export const api = {
     req<ModelAccountStatus>('/api/model-account/chatgpt', { method: 'POST', body: JSON.stringify({ redirect }) }),
   connectOpenAiKey: (apiKey: string) =>
     req<ModelAccountStatus>('/api/model-account/openai-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
-  connectAnthropicKey: (apiKey: string) =>
-    req<ModelAccountStatus>('/api/model-account/anthropic-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectAnthropicKey: (apiKey: string, workspaceId?: string) =>
+    req<ModelAccountStatus>('/api/model-account/anthropic-key', {
+      method: 'POST',
+      body: JSON.stringify({ apiKey, workspaceId }),
+    }),
+  setAnthropicWorkspace: (workspaceId: string) =>
+    req<ModelAccountStatus>('/api/model-account/anthropic-workspace', {
+      method: 'PATCH',
+      body: JSON.stringify({ workspaceId }),
+    }),
   disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),

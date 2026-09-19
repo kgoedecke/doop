@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
-const mocks = vi.hoisted(() => ({ account: vi.fn(), stream: vi.fn(), key: vi.fn() }))
+const mocks = vi.hoisted(() => ({ account: vi.fn(), stream: vi.fn(), key: vi.fn(), headers: vi.fn() }))
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: async () => ({ enabled: false }) }))
 vi.mock('../server/modelAccounts.ts', () => ({
   getAccount: mocks.account,
@@ -12,15 +12,16 @@ vi.mock('@anthropic-ai/sdk', async (importOriginal) => {
   return {
     ...original,
     default: class extends original.default {
-      constructor(options: { apiKey: string }) {
+      constructor(options: { apiKey: string; defaultHeaders?: Record<string, string> }) {
         super(options)
         mocks.key(options.apiKey)
+        mocks.headers(options.defaultHeaders)
         this.messages.stream = mocks.stream
       }
     },
   }
 })
-import { pickModel, ModelAuthError } from '../server/agentModel'
+import { pickModel, ModelAuthError, ModelConfigurationError } from '../server/agentModel'
 const request = { system: [{ text: 'Design', cache: true }], tools: [], messages: [], maxTokens: 1024 }
 afterEach(() => vi.clearAllMocks())
 
@@ -38,6 +39,7 @@ it('uses the payer key and selected Claude model on the server without a local h
   expect(model).toMatchObject({ provider: 'anthropic-key', userId: 'alice' })
   expect(model?.runHarness).toBeUndefined()
   expect(mocks.key).toHaveBeenCalledWith('sk-ant-alice')
+  expect(mocks.headers).toHaveBeenCalledWith(undefined)
   expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
   expect(mocks.stream).toHaveBeenCalledWith(expect.objectContaining({ model: 'claude-opus-5', max_tokens: 1024 }))
 })
@@ -54,4 +56,36 @@ it('reports invalid credentials as a reconnectable account error', async () => {
   })
   const model = await pickModel('alice')
   await expect(model!.run(request)).rejects.toBeInstanceOf(ModelAuthError)
+})
+
+it('passes the selected workspace for every request using a multi-workspace key', async () => {
+  mocks.account.mockResolvedValue({
+    kind: 'anthropic-key',
+    userId: 'alice',
+    apiKey: 'sk-ant-alice',
+    accountId: 'wrkspc_alice',
+    model: 'claude-opus-5',
+  })
+  await pickModel('alice')
+  expect(mocks.headers).toHaveBeenCalledWith({ 'anthropic-workspace-id': 'wrkspc_alice' })
+})
+
+it.each([400, 404])('provides actionable workspace guidance for workspace errors (%s)', async (status) => {
+  mocks.account.mockResolvedValue({
+    kind: 'anthropic-key',
+    userId: 'alice',
+    apiKey: 'sk-ant-alice',
+    model: 'claude-opus-5',
+  })
+  mocks.stream.mockImplementation(() => {
+    throw new Anthropic.APIError(
+      status,
+      undefined,
+      'anthropic-workspace-id is required or workspace not found',
+      new Headers(),
+    )
+  })
+  const model = await pickModel('alice')
+  await expect(model!.run(request)).rejects.toBeInstanceOf(ModelConfigurationError)
+  await expect(model!.run(request)).rejects.toThrow('Workspace settings')
 })
