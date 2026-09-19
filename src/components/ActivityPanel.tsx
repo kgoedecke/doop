@@ -266,20 +266,24 @@ function TaskRow({ task }: { task: AgentTask }) {
         >
           {task.status}
         </span>
-        {!frameId && (
-          <span
-            className="flex-none font-mono text-[9.5px] tracking-[0.06em] text-ink-faint opacity-0 group-hover:opacity-100"
-            title="This task has no frame to jump to"
-          >
-            Not available
+        <span className="relative flex-none font-mono text-[10.5px] text-ink-faint">
+          {/* a row with nowhere to jump says so on hover, in place of its time,
+              so the hint never reserves width and squeezes the status text */}
+          <span className={cn(!frameId && 'group-hover:invisible')}>
+            {task.failedAt
+              ? timeAgo(task.failedAt)
+              : task.endedAt
+                ? `${duration(task)} · ${timeAgo(task.endedAt)}`
+                : duration(task)}
           </span>
-        )}
-        <span className="flex-none font-mono text-[10.5px] text-ink-faint">
-          {task.failedAt
-            ? timeAgo(task.failedAt)
-            : task.endedAt
-              ? `${duration(task)} · ${timeAgo(task.endedAt)}`
-              : duration(task)}
+          {!frameId && (
+            <span
+              className="absolute inset-y-0 right-0 hidden whitespace-nowrap text-[9.5px] tracking-[0.06em] group-hover:block"
+              title="This task has no frame to jump to"
+            >
+              Not available
+            </span>
+          )}
         </span>
         {task.failedAt && task.queuedBy && canvasId ? (
           <Button
