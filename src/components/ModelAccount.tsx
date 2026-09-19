@@ -279,7 +279,7 @@ export function ModelAccountPanel({
   /* On the connected row the chips ARE the model picker; on any other row they
      only advertise what that plan can run, so they stay inert. */
   const modelChips = (live: boolean, claude = false) => {
-    const models = claude ? CLAUDE_MODELS.map((m) => ({ ...m, blurb: '' })) : options
+    const models = claude ? CLAUDE_MODELS : options
     return live ? (
       <ToggleChipGroup aria-label="Model" value={account.model ?? ''} onValueChange={pickModel} disabled={busy}>
         {models.map((m) => (
@@ -604,6 +604,9 @@ export function ModelAccountPanel({
                   </Button>
                 </div>
               </div>
+              <p className="mt-[10px] text-[13px] text-ink-faint">
+                {CLAUDE_MODELS.find((model) => model.id === account.model)?.blurb}
+              </p>
             </>
           ) : showKey === 'anthropic-key' ? (
             <div className={planFlow}>

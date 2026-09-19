@@ -50,6 +50,7 @@ export function LocalClaudeRow() {
   const connected = !!native?.connected && !!native?.enabled
   const supported = hasLocalClaude()
   const selectedModel = normalizeClaudeModel(preference?.model)
+  const selectedBlurb = CLAUDE_MODELS.find((model) => model.id === selectedModel)?.blurb
   const choose = (model: ClaudeModel = selectedModel) =>
     act(async () => {
       if (!userId) return
@@ -98,7 +99,7 @@ export function LocalClaudeRow() {
               onValueChange={(model) => choose(model as ClaudeModel)}
             >
               {CLAUDE_MODELS.map((model) => (
-                <ToggleChipItem key={model.id} value={model.id}>
+                <ToggleChipItem key={model.id} value={model.id} title={model.blurb}>
                   {model.id === selectedModel && (
                     <CheckIcon width={13} height={13} strokeWidth={2.5} color="#1a6b43" aria-hidden />
                   )}
@@ -179,6 +180,7 @@ export function LocalClaudeRow() {
             </div>
           )}
         </div>
+        {connected && <p className="mt-[10px] text-[13px] text-ink-faint">{selectedBlurb}</p>}
         {!supported && (
           <p className="mt-[10px] text-[13px] text-ink-faint">
             {isDesktopShell() ? 'Update Doop to connect Claude.' : 'Connect in the desktop app.'}
