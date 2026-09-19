@@ -294,7 +294,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     <div className="flex flex-col">
       {account.chatgptEnabled !== false && (
         <section className={planRow(onChatgpt && !local?.enabled)}>
-          <span className={planMark(onChatgpt)}>
+          <span className={planMark(onChatgpt && !local?.enabled)}>
             <OpenAiMark />
           </span>
           <div className="min-w-0 flex-1">
@@ -330,19 +330,21 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               <>
                 <div className={actionsRow}>
                   {modelChips(true)}
-                  {local?.enabled && (
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        selectServer().catch(fail)
-                      }}
-                    >
-                      Use instead
+                  <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
+                    {local?.enabled && (
+                      <Button
+                        disabled={busy}
+                        onClick={() => {
+                          selectServer().catch(fail)
+                        }}
+                      >
+                        Use instead
+                      </Button>
+                    )}
+                    <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
+                      Disconnect
                     </Button>
-                  )}
-                  <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                    Disconnect
-                  </Button>
+                  </div>
                 </div>
                 {chosen && <p className="mt-[10px] text-[13px] text-ink-faint">{chosen.blurb}</p>}
               </>
@@ -444,7 +446,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       )}
 
       <section className={planRow(onKey && !local?.enabled)}>
-        <span className={planMark(onKey)}>
+        <span className={planMark(onKey && !local?.enabled)}>
           <OpenAiMark />
         </span>
         <div className="min-w-0 flex-1">
@@ -464,19 +466,21 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             <>
               <div className={actionsRow}>
                 {modelChips(true)}
-                {local?.enabled && (
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      selectServer().catch(fail)
-                    }}
-                  >
-                    Use instead
+                <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
+                  {local?.enabled && (
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        selectServer().catch(fail)
+                      }}
+                    >
+                      Use instead
+                    </Button>
+                  )}
+                  <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
+                    Disconnect
                   </Button>
-                )}
-                <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                  Disconnect
-                </Button>
+                </div>
               </div>
               {chosen && <p className="mt-[10px] text-[13px] text-ink-faint">{chosen.blurb}</p>}
             </>
