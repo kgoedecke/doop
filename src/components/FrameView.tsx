@@ -31,6 +31,9 @@ import { RoleMark } from './RoleMark'
    by the `--zoom` variable the Stage publishes (capped at 2.4× when zoomed
    far out). Preserve these expressions exactly. */
 const COUNTER_SCALE = '[transform:scale(min(calc(1/var(--zoom,1)),2.4))]'
+/* the inverse of COUNTER_SCALE: a box this wide, once counter-scaled, spans
+   exactly the frame's width on screen */
+const LABEL_WIDTH = '[width:calc(100%*max(var(--zoom,1),calc(1/2.4)))]'
 const EDITOR_CHIP =
   'inline-flex items-center gap-1 rounded-full px-[7px] py-0.5 text-[10px] font-bold text-white animate-[chip-in_0.25s_ease]'
 /* the element toolbar's buttons sit on ink and stay compact */
@@ -596,7 +599,12 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         >
           <div
             className={cn(
-              'absolute -top-[26px] left-0 right-0 flex origin-bottom-left cursor-grab select-none items-center gap-2 whitespace-nowrap text-[12px] font-semibold text-ink-soft',
+              'absolute -top-[26px] left-0 flex origin-bottom-left cursor-grab select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft',
+              /* the label is counter-scaled from its bottom-left corner, so
+                 its box must be pre-shrunk by the same factor: a full-width
+                 box scaled by 1/zoom would reach far past the frame's right
+                 edge and swallow pointer-downs meant for the frames beside it */
+              LABEL_WIDTH,
               COUNTER_SCALE,
             )}
             style={duping || dupKeyHeld ? { cursor: DUP_CURSOR } : undefined}
