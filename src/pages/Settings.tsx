@@ -3,6 +3,8 @@ import { navigate } from '../App'
 import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { openCanvasTab } from '../lib/desktop'
+import { LocalClaudeRow } from '../components/LocalClaude'
+import { isDesktopShell } from '../lib/shell'
 import { ModelAccountPanel } from '../components/ModelAccount'
 import { useAllowance } from '../components/TeamAllowance'
 import { AccountSettings } from '../components/AccountSettings'
@@ -36,6 +38,7 @@ type Pane = 'agent' | 'account'
  * account menu. Only the rail's middle changes, to a settings sub-nav.
  */
 export function Settings() {
+  const desktop = isDesktopShell()
   /* the sub-nav switches panes rather than scrolling to an anchor — on a page
      this short an anchor jump looks like nothing happened */
   const [pane, setPane] = useState<Pane>('agent')
@@ -137,29 +140,39 @@ export function Settings() {
           </Tabs>
 
           {pane === 'agent' ? (
-            <Card className="mt-4 max-w-[1000px] overflow-hidden sm:mt-5">
-              <CardHeader>
-                <CardTitle>Doop Agent</CardTitle>
-                <CardDescription>
-                  Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your
-                  desktop. Your provider’s usage limits and charges apply.
-                </CardDescription>
-                {meter && (
-                  <div className="mt-[11px] flex flex-col items-start gap-[7px] text-[11.5px] text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
-                    {allowance && allowance.limit > 0 && !allowance.byoModel && (
-                      <Progress
-                        className="w-[min(100%,240px)] sm:w-[180px]"
-                        value={left ?? 0}
-                        max={allowance.limit}
-                        aria-label="Free Doop Agent tasks left"
-                      />
-                    )}
-                    <span>{meter}</span>
-                  </div>
-                )}
-              </CardHeader>
-              <ModelAccountPanel onChange={refresh} />
-            </Card>
+            <>
+              <Card className="mt-4 max-w-[1000px] overflow-hidden sm:mt-5">
+                <CardHeader>
+                  <CardTitle>Doop Agent</CardTitle>
+                  <CardDescription>
+                    Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your
+                    desktop. Your provider’s usage limits and charges apply.
+                  </CardDescription>
+                  {meter && (
+                    <div className="mt-[11px] flex flex-col items-start gap-[7px] text-[11.5px] text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
+                      {allowance && allowance.limit > 0 && !allowance.byoModel && (
+                        <Progress
+                          className="w-[min(100%,240px)] sm:w-[180px]"
+                          value={left ?? 0}
+                          max={allowance.limit}
+                          aria-label="Free Doop Agent tasks left"
+                        />
+                      )}
+                      <span>{meter}</span>
+                    </div>
+                  )}
+                </CardHeader>
+                <ModelAccountPanel onChange={refresh} includeLocalClaude={desktop} />
+              </Card>
+              {!desktop && (
+                <Card className="mt-5 max-w-[1000px] overflow-hidden">
+                  <CardHeader>
+                    <CardTitle>Desktop app only</CardTitle>
+                  </CardHeader>
+                  <LocalClaudeRow />
+                </Card>
+              )}
+            </>
           ) : (
             <AccountSettings />
           )}

@@ -89,7 +89,13 @@ const maInput = 'rounded-[10px] border-ink px-3 py-[10px] font-mono focus:ring-0
 /* buttons in the responsive action rows centre their label once stacked */
 const rowBtn = 'max-md:justify-center'
 
-export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
+export function ModelAccountPanel({
+  onChange,
+  includeLocalClaude = true,
+}: {
+  onChange?: () => void
+  includeLocalClaude?: boolean
+}) {
   const { account, refresh, set } = useModelAccount()
   const { data: session } = authClient.useSession()
   const local = useLocalAgent((s) => s.preference)
@@ -547,7 +553,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         </div>
       </section>
 
-      <LocalClaudeRow />
+      {includeLocalClaude && <LocalClaudeRow />}
       <section className={planRow(onClaudeKey && !local?.enabled)}>
         <span className={planMark(onClaudeKey && !local?.enabled)}>
           <AgentIcon name="claude" size={20} />
