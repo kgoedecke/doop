@@ -19,8 +19,7 @@ import { CheckIcon, DesktopIcon, DownloadIcon } from './ui/icons'
 import { cn } from '@/lib/utils'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
 
-/* Installers are attached to the desktop-v* GitHub releases (.context/RELEASE.md). */
-const DESKTOP_DOWNLOAD_URL = 'https://github.com/kgoedecke/doop/releases'
+const DESKTOP_DOWNLOAD_URL = 'https://doop.design/download/mac'
 
 /** The plan as a browser sees it: nothing to connect here, so the row is
  *  muted and its only action is getting the desktop app. */

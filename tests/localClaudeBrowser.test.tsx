@@ -34,5 +34,5 @@ it('points a browser at the desktop app instead of offering controls it cannot r
   expect(container.querySelectorAll('button')).toHaveLength(0)
   const link = container.querySelector('a')
   expect(link?.textContent).toBe('Download desktop app')
-  expect(link?.getAttribute('href')).toContain('/releases')
+  expect(link?.getAttribute('href')).toBe('https://doop.design/download/mac')
 })
