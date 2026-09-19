@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/kgoedecke/doop/compare/v0.6.0...v0.6.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **canvas:** keep a followed avatar's colour under the follow halo ([#162](https://github.com/kgoedecke/doop/issues/162)) ([77cb306](https://github.com/kgoedecke/doop/commit/77cb306aad47b9c901979c9d246105958458d7fb))
+
 ## [0.6.0](https://github.com/kgoedecke/doop/compare/v0.5.0...v0.6.0) (2026-09-19)
 
 
