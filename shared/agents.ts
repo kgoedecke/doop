@@ -123,19 +123,36 @@ export function normalizePipeline(ids: unknown): string[] {
 }
 
 /** Every spelling that addresses a role in a comment: @doop, @UXLead, @ux… */
-function mentionsFor(role: AgentRole): string[] {
+export function mentionsFor(role: AgentRole): string[] {
   return [role.id, role.name.replace(/\s+/g, ''), ...(role.aliases ?? [])].map((m) => m.toLowerCase())
+}
+
+/** Every role a piece of text @mentions, in order of first appearance and
+ *  without repeats — a chat message's pipeline. */
+export function mentionedRoles(text: string): AgentRole[] {
+  const found: { role: AgentRole; at: number }[] = []
+  for (const role of AGENT_ROLES) {
+    let first = -1
+    for (const mention of mentionsFor(role)) {
+      const at = text.search(new RegExp(`@${mention}\\b`, 'i'))
+      if (at >= 0 && (first < 0 || at < first)) first = at
+    }
+    if (first >= 0) found.push({ role, at: first })
+  }
+  return found.sort((a, b) => a.at - b.at).map((f) => f.role)
 }
 
 /** The role a piece of text @mentions, if any. First mention wins. */
 export function mentionedRole(text: string): AgentRole | undefined {
-  let best: { role: AgentRole; at: number } | undefined
+  return mentionedRoles(text)[0]
+}
+
+/** The text with every resident @mention taken out — what the agent is
+ *  actually asked to do, without its own name in the brief. */
+export function stripMentions(text: string): string {
+  let out = text
   for (const role of AGENT_ROLES) {
-    for (const mention of mentionsFor(role)) {
-      const re = new RegExp(`@${mention}\\b`, 'i')
-      const at = text.search(re)
-      if (at >= 0 && (!best || at < best.at)) best = { role, at }
-    }
+    for (const mention of mentionsFor(role)) out = out.replace(new RegExp(`@${mention}\\b`, 'gi'), '')
   }
-  return best?.role
+  return out.replace(/[ \t]{2,}/g, ' ').trim()
 }

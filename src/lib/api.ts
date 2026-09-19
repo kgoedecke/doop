@@ -1,6 +1,7 @@
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type {
   ActivityItem,
+  ChatMessage,
   Canvas,
   CanvasMeta,
   CardScope,
@@ -393,6 +394,8 @@ export const api = {
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),
   retryCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
+  sendChat: (canvasId: string, text: string) =>
+    req<ChatMessage>(`/api/canvases/${canvasId}/chat`, { method: 'POST', body: JSON.stringify({ text }) }),
   addComment: (frameId: string, input: { selector: string; snippet: string; text: string }) =>
     req(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
   replyComment: (commentId: string, text: string) =>

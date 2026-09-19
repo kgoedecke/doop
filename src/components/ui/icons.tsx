@@ -9,6 +9,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
   Activity,
+  ChatBubble,
   Building,
   CreditCard,
   Lock,
@@ -79,6 +80,7 @@ export const GithubIcon = icon(Github)
 export const SyncIcon = icon(RefreshDouble)
 export const ImportIcon = icon(Import)
 export const PulseIcon = icon(Activity)
+export const ChatIcon = icon(ChatBubble)
 export const SparkIcon = icon(SparkSolid)
 export const SearchIcon = icon(Search)
 export const PlusIcon = icon(Plus)

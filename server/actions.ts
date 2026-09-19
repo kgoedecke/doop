@@ -3,7 +3,15 @@ import { store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
-import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
+import {
+  DEFAULT_ROLE_ID,
+  mentionedRole,
+  mentionedRoles,
+  normalizePipeline,
+  roleByAgentName,
+  roleName,
+  stripMentions,
+} from '../shared/agents.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import type {
   Actor,
@@ -11,6 +19,7 @@ import type {
   ActivityItem,
   AgentTask,
   CardScope,
+  ChatMessage,
   DesignDecision,
   ElementComment,
   Frame,
@@ -53,6 +62,7 @@ export function hydrateLogs(data: {
   tasks: Map<string, AgentTask[]>
   feedback: Map<string, TaskFeedback[]>
   comments: Map<string, ElementComment[]>
+  chat?: Map<string, ChatMessage[]>
   activity: Map<string, ActivityItem[]>
   decisions: Map<string, DesignDecision[]>
   proposals: Map<string, MemoryProposal[]>
@@ -60,6 +70,8 @@ export function hydrateLogs(data: {
   for (const [canvasId, list] of data.tasks) taskLog.set(canvasId, list)
   for (const [canvasId, list] of data.feedback) feedbackLog.set(canvasId, list)
   for (const [canvasId, list] of data.comments) commentLog.set(canvasId, list)
+  chatLog.clear()
+  for (const [canvasId, list] of data.chat ?? []) chatLog.set(canvasId, list)
   for (const [canvasId, list] of data.activity) activityLog.set(canvasId, list)
   for (const [canvasId, list] of data.decisions) decisionLog.set(canvasId, list)
   for (const [canvasId, list] of data.proposals) proposalLog.set(canvasId, list)
@@ -291,6 +303,97 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
 /* ------------------------------------------------------------------ */
 
 const feedbackLog = new Map<string, TaskFeedback[]>() // canvasId -> entries (newest first)
+
+/* ---- canvas chat ---- */
+
+const chatLog = new Map<string, ChatMessage[]>() // canvasId -> messages (newest first)
+
+export const MAX_CHAT_CHARS = 4_000
+/** an agent's closing summary is a paragraph, not the whole transcript */
+const MAX_CHAT_REPLY_CHARS = 1_500
+
+export function getChat(canvasId: string): ChatMessage[] {
+  return chatLog.get(canvasId) ?? []
+}
+
+function pushChat(message: ChatMessage) {
+  const list = chatLog.get(message.canvasId) ?? []
+  list.unshift(message)
+  const dropped = list.splice(persist.CHAT_LOG_CAP).map((m) => m.id)
+  chatLog.set(message.canvasId, list)
+  persist.saveChat(message)
+  persist.deleteChat(dropped)
+  broadcast(message.canvasId, { type: 'chat', message })
+}
+
+/** A human says something in the canvas chat. @mentioning resident agents
+ *  turns the message into a board card for them, in mention order — the
+ *  message keeps the card's id so the chat can show where the work stands. */
+export function addChatMessage(
+  canvasId: string,
+  text: string,
+  from: string,
+  fromUserId?: string,
+): ChatMessage | undefined {
+  const clean = text.trim().slice(0, MAX_CHAT_CHARS)
+  if (!clean || !store.getCanvas(canvasId)) return undefined
+  const roles = mentionedRoles(clean)
+  const card =
+    roles.length > 0
+      ? addQueuedCard(
+          canvasId,
+          stripMentions(clean) || clean,
+          from,
+          roles.map((r) => r.id),
+          undefined,
+          fromUserId,
+        )
+      : undefined
+  const list = chatLog.get(canvasId) ?? []
+  const message: ChatMessage = {
+    id: nanoid(8),
+    canvasId,
+    from,
+    fromKind: 'user',
+    ...(fromUserId ? { fromUserId } : {}),
+    color: colorFor(from),
+    text: clean,
+    /* strictly increasing per canvas so the thread order survives a restart */
+    at: Math.max(Date.now(), (list[0]?.at ?? 0) + 1),
+    ...(roles.length > 0 ? { mentions: roles.map((r) => r.id) } : {}),
+    ...(card ? { taskId: card.id } : {}),
+  }
+  pushChat(message)
+  return message
+}
+
+/** An agent answers the chat message that queued one of its cards. Nothing
+ *  is posted for cards that came from the board — those have no thread. */
+export function chatReplyForCard(
+  canvasId: string,
+  cardId: string,
+  actor: Actor,
+  text: string,
+): ChatMessage | undefined {
+  const asked = (chatLog.get(canvasId) ?? []).find((m) => m.taskId === cardId && m.fromKind === 'user')
+  if (!asked) return undefined
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return undefined
+  const list = chatLog.get(canvasId) ?? []
+  const message: ChatMessage = {
+    id: nanoid(8),
+    canvasId,
+    from: actor.name,
+    fromKind: 'agent',
+    color: actor.color,
+    text: clean.length > MAX_CHAT_REPLY_CHARS ? clean.slice(0, MAX_CHAT_REPLY_CHARS - 1) + '…' : clean,
+    at: Math.max(Date.now(), (list[0]?.at ?? 0) + 1),
+    taskId: cardId,
+    replyToId: asked.id,
+  }
+  pushChat(message)
+  return message
+}
 
 export function getFeedback(canvasId: string): TaskFeedback[] {
   return feedbackLog.get(canvasId) ?? []
@@ -1241,6 +1344,7 @@ export function deleteCanvas(canvasId: string): boolean {
   taskLog.delete(canvasId)
   feedbackLog.delete(canvasId)
   commentLog.delete(canvasId)
+  chatLog.delete(canvasId)
   activityLog.delete(canvasId)
   decisionLog.delete(canvasId)
   proposalLog.delete(canvasId)

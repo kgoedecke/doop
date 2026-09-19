@@ -222,17 +222,19 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      can still reach this point without a payable account — queued before the
      account was disconnected, or before metering tightened — and it must
      fail visibly with a fix, not crash on a key that was never meant to pay. */
+  const actor = actions.resolveActor({ name: role.name, kind: 'agent' })
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
       'The Doop Agent needs a connected account — connect your ChatGPT subscription or OpenAI key in Settings, then retry.'
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer)) actions.failTaskFeedback(f.id, reason)
     for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer)) actions.failComment(c.id, reason)
-    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer)) actions.failCard(canvasId, c.id, reason)
+    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer)) {
+      actions.chatReplyForCard(canvasId, c.id, actor, reason)
+      actions.failCard(canvasId, c.id, reason)
+    }
     stalled.add(payer)
     return 'no-model'
   }
-  const actor = actions.resolveActor({ name: role.name, kind: 'agent' })
-
   /* claim this agent's open work — the UI flips to "picked up" instantly.
      Claiming happens before the try so an agent with nothing to do never
      shows up in presence. */
@@ -633,24 +635,29 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     console.log(
       `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} verified=${runState.verifiedFrames.size}`,
     )
+    let summary = ''
     if (finished) {
       /* The closing summary remains useful when a no-op card is returned to
          the queue: it tells the human why no deliverable was accepted. */
       const last = messages[messages.length - 1]
       if (last?.role === 'assistant' && Array.isArray(last.content)) {
-        const text = last.content
+        summary = last.content
           .filter((b): b is Anthropic.TextBlock => b.type === 'text')
           .map((b) => b.text)
           .join(' ')
-        console.log(`[resident] summary canvas=${canvasId} ${text.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
-        actions.agentSummary(canvasId, actor, text)
+        console.log(`[resident] summary canvas=${canvasId} ${summary.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
+        actions.agentSummary(canvasId, actor, summary)
       }
     }
     if (finished && !blockedWebsiteAccess && !noMutation && !unverifiedMutation) {
       for (const f of claimed) actions.completeTaskFeedback(f.id)
       for (const c of comments) actions.resolveComment(c.id, role.name)
-      /* a card moves to the next agent in its pipeline, or finishes here */
-      for (const c of cards) actions.advanceCard(canvasId, c.id, actor)
+      /* a card moves to the next agent in its pipeline, or finishes here —
+         and one that was asked for in the chat gets its answer there */
+      for (const c of cards) {
+        actions.chatReplyForCard(canvasId, c.id, actor, summary || 'Done.')
+        actions.advanceCard(canvasId, c.id, actor)
+      }
     } else {
       let reason: string
       if (staleAccount) {
@@ -674,7 +681,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       }
       for (const f of claimed) actions.failTaskFeedback(f.id, reason)
       for (const c of comments) actions.failComment(c.id, reason)
-      for (const c of cards) actions.failCard(canvasId, c.id, reason)
+      for (const c of cards) {
+        actions.chatReplyForCard(canvasId, c.id, actor, reason)
+        actions.failCard(canvasId, c.id, reason)
+      }
     }
   } finally {
     clearInterval(heartbeat)

@@ -304,6 +304,27 @@ export const comments = pgTable(
   (t) => [index('comments_canvas_idx').on(t.canvasId)],
 )
 
+/** The canvas chat. Rows are immutable: a message that queued a card points
+ *  at it through task_id, an agent's answer points back through reply_to_id. */
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    fromName: text('from_name').notNull(),
+    fromKind: text('from_kind').notNull(),
+    fromUserId: text('from_user_id'),
+    color: text('color').notNull(),
+    text: text('text').notNull(),
+    at: bigint('at', { mode: 'number' }).notNull(),
+    /** comma-joined agent-role ids the text @mentions, in order */
+    mentions: text('mentions'),
+    taskId: text('task_id'),
+    replyToId: text('reply_to_id'),
+  },
+  (t) => [index('chat_messages_canvas_idx').on(t.canvasId)],
+)
+
 /** Uploaded image assets: metadata only — bytes live in object storage (or
  *  ./data/assets in dev). canvas_id is a housekeeping hint, not ownership:
  *  liveness comes from asset_refs, so a URL copied to another canvas keeps

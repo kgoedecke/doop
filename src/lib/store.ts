@@ -3,6 +3,7 @@ import type {
   ActivityItem,
   AgentTask,
   Canvas,
+  ChatMessage,
   DesignDecision,
   ElementComment,
   Frame,
@@ -21,6 +22,18 @@ export interface Viewport {
   zoom: number
 }
 
+export type PanelTab = 'tasks' | 'chat' | 'activity' | 'memory'
+
+const chatSeenKey = (canvasId: string) => `doop:chatSeen:${canvasId}`
+
+function loadChatSeen(canvasId: string): number {
+  try {
+    return Number(localStorage.getItem(chatSeenKey(canvasId)) ?? 0) || 0
+  } catch {
+    return 0
+  }
+}
+
 interface State {
   canvas: Canvas | null
   presences: Record<string, Presence>
@@ -32,13 +45,18 @@ interface State {
   feedback: TaskFeedback[]
   /** element-anchored comments (newest first) */
   comments: ElementComment[]
+  /** the canvas chat (newest first) */
+  chat: ChatMessage[]
+  /** when this browser last had the chat open on this canvas — everything
+   *  newer from someone else counts as unread on the rail */
+  chatSeenAt: number
   /** design decisions captured into Memory (newest first) */
   decisions: DesignDecision[]
   /** distiller rule proposals (newest first) */
   proposals: MemoryProposal[]
   /** which tab the side panel shows — in the store so a Memory-suggestion
    *  toast anywhere in the app can jump straight to the Memory tab */
-  panelTab: 'tasks' | 'activity' | 'memory'
+  panelTab: PanelTab
   /** every selected frame, in selection order — marquee and ⇧-click build
    *  this up; a plain click collapses it to one */
   selectedIds: string[]
@@ -113,6 +131,10 @@ interface State {
   upsertFeedback(fb: TaskFeedback): void
   setComments(comments: ElementComment[]): void
   upsertComment(c: ElementComment): void
+  setChat(messages: ChatMessage[]): void
+  pushChat(message: ChatMessage): void
+  /** the chat is on screen: nothing is unread any more */
+  markChatSeen(): void
   upsertFrame(f: Frame): void
   patchFrameLocal(frameId: string, patch: Partial<Frame>): void
   removeFrame(frameId: string): void
@@ -125,7 +147,7 @@ interface State {
   pushDecision(decision: DesignDecision): void
   setProposals(proposals: MemoryProposal[]): void
   upsertProposal(proposal: MemoryProposal): void
-  setPanelTab(tab: 'tasks' | 'activity' | 'memory'): void
+  setPanelTab(tab: PanelTab): void
   setLimitWall(v: boolean): void
   allowanceChanged(): void
   requestFlyTo(frameId: string): void
@@ -171,6 +193,8 @@ export const useStore = create<State>((set, get) => ({
   tasks: [],
   feedback: [],
   comments: [],
+  chat: [],
+  chatSeenAt: 0,
   decisions: [],
   proposals: [],
   panelTab: 'tasks',
@@ -248,6 +272,22 @@ export const useStore = create<State>((set, get) => ({
     }),
   setFeedback: (feedback) => set({ feedback }),
   setComments: (comments) => set({ comments }),
+  setChat: (chat) => set((s) => ({ chat, chatSeenAt: s.canvas ? loadChatSeen(s.canvas.id) : 0 })),
+  pushChat: (message) =>
+    set((s) => (s.chat.some((m) => m.id === message.id) ? {} : { chat: [message, ...s.chat].slice(0, 300) })),
+  markChatSeen: () =>
+    set((s) => {
+      const latest = s.chat[0]?.at ?? 0
+      if (latest <= s.chatSeenAt) return {}
+      if (s.canvas) {
+        try {
+          localStorage.setItem(chatSeenKey(s.canvas.id), String(latest))
+        } catch {
+          /* private mode: the badge just comes back next visit */
+        }
+      }
+      return { chatSeenAt: latest }
+    }),
   upsertComment: (c) =>
     set((s) => {
       const comments = s.comments.some((x) => x.id === c.id)

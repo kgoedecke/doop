@@ -534,7 +534,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                     setShowActivity(true)
                   }}
                 >
-                  <PulseIcon /> Agents & activity
+                  <PulseIcon /> Chat, agents & activity
                 </Button>
                 <Button
                   variant="ghost"

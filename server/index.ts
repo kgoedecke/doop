@@ -1519,6 +1519,27 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
   res.json(card)
 })
 
+/* the canvas chat: a plain message is free; one that @mentions resident
+   agents queues a card for them and is metered like any other card */
+app.post('/api/canvases/:id/chat', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id)) return
+  /* the same cut addChatMessage applies, so a mention past the cap is
+     never metered for a card that then does not exist */
+  const text = String(req.body?.text ?? '')
+    .trim()
+    .slice(0, actions.MAX_CHAT_CHARS)
+  if (!text) return res.status(400).json({ error: 'empty text' })
+  if (mentionedRole(text)) {
+    const gate = await allowance.consumeResidentTask(req.user!.id)
+    if (!gate.ok) {
+      return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+    }
+  }
+  const message = actions.addChatMessage(req.params.id, text, req.user!.name, req.user!.id)
+  if (!message) return res.status(404).json({ error: 'canvas not found or empty text' })
+  res.json(message)
+})
+
 app.post('/api/canvases/:canvasId/cards/:id/done', (req, res) => {
   if (!requireCanvas(req, res, req.params.canvasId)) return
   const card = actions.completeCard(req.params.canvasId, req.params.id)
@@ -1692,6 +1713,7 @@ wss.on('connection', (ws, upgradeReq) => {
         tasks: actions.getTasks(msg.canvasId),
         feedback: actions.getFeedback(msg.canvasId),
         comments: actions.getComments(msg.canvasId),
+        chat: actions.getChat(msg.canvasId),
         decisions: actions.getDecisions(msg.canvasId),
         proposals: actions.getProposals(msg.canvasId),
         selfColor: presence.color,
