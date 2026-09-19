@@ -58,18 +58,6 @@ it('reports invalid credentials as a reconnectable account error', async () => {
   await expect(model!.run(request)).rejects.toBeInstanceOf(ModelAuthError)
 })
 
-it('passes the selected workspace for every request using a multi-workspace key', async () => {
-  mocks.account.mockResolvedValue({
-    kind: 'anthropic-key',
-    userId: 'alice',
-    apiKey: 'sk-ant-alice',
-    accountId: 'wrkspc_alice',
-    model: 'claude-opus-5',
-  })
-  await pickModel('alice')
-  expect(mocks.headers).toHaveBeenCalledWith({ 'anthropic-workspace-id': 'wrkspc_alice' })
-})
-
 it.each([400, 404])('provides actionable workspace guidance for workspace errors (%s)', async (status) => {
   mocks.account.mockResolvedValue({
     kind: 'anthropic-key',
@@ -87,5 +75,5 @@ it.each([400, 404])('provides actionable workspace guidance for workspace errors
   })
   const model = await pickModel('alice')
   await expect(model!.run(request)).rejects.toBeInstanceOf(ModelConfigurationError)
-  await expect(model!.run(request)).rejects.toThrow('Workspace settings')
+  await expect(model!.run(request)).rejects.toThrow('Replace key')
 })

@@ -53,7 +53,6 @@ const ACCOUNT_KINDS: readonly string[] = ['chatgpt', 'openai-key', 'anthropic-ke
 export interface ModelAccount {
   userId: string
   kind: AccountKind
-  /** Provider account ID: ChatGPT account or Anthropic workspace. */
   accountId?: string
   email?: string
   plan?: string
@@ -68,7 +67,6 @@ export interface ModelAccount {
 
 /** What the browser is allowed to know: never a token. */
 export interface AccountStatus {
-  workspaceId?: string
   connected: boolean
   kind?: AccountKind
   email?: string
@@ -119,7 +117,6 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
   return {
     connected: true,
     kind: account.kind,
-    ...(account.kind === 'anthropic-key' && account.accountId ? { workspaceId: account.accountId } : {}),
     ...(account.email ? { email: account.email } : {}),
     ...(account.plan ? { plan: account.plan } : {}),
     /* resolved, so the UI shows what will actually run rather than "default" */
@@ -662,32 +659,27 @@ export function startCallbackCatcher(): Promise<boolean> {
 export async function connectApiKey(userId: string, apiKey: string): Promise<AccountStatus> {
   const key = apiKey.trim()
   if (!key.startsWith('sk-')) throw new Error('That does not look like an OpenAI API key (they start with "sk-")')
-  await save({ userId, kind: 'openai-key', apiKey: key })
+  const previous = await getAccount(userId)
+  await save({
+    userId,
+    kind: 'openai-key',
+    apiKey: key,
+    model: previous?.kind === 'openai-key' ? previous.model : undefined,
+  })
   return getStatus(userId)
 }
 
-export async function connectAnthropicKey(userId: string, apiKey: string, workspaceId = ''): Promise<AccountStatus> {
+export async function connectAnthropicKey(userId: string, apiKey: string): Promise<AccountStatus> {
   const key = apiKey.trim()
   if (!key.startsWith('sk-ant-') || /\s/.test(key))
     throw new Error('That does not look like an Anthropic API key (they start with "sk-ant-")')
-  await save({ userId, kind: 'anthropic-key', apiKey: key, accountId: validateAnthropicWorkspace(workspaceId) })
-  return getStatus(userId)
-}
-
-function validateAnthropicWorkspace(value: string): string | undefined {
-  const workspace = value.trim()
-  if (workspace && !/^wrkspc_[A-Za-z0-9_-]{1,120}$/.test(workspace)) {
-    throw new Error(
-      'Enter an Anthropic workspace ID starting with "wrkspc_", or leave it blank for a workspace-scoped key.',
-    )
-  }
-  return workspace || undefined
-}
-
-export async function setAnthropicWorkspace(userId: string, workspaceId: string): Promise<AccountStatus> {
-  const account = await getAccount(userId)
-  if (account?.kind !== 'anthropic-key') throw new Error('Connect a Claude API key first')
-  await save({ ...account, accountId: validateAnthropicWorkspace(workspaceId) })
+  const previous = await getAccount(userId)
+  await save({
+    userId,
+    kind: 'anthropic-key',
+    apiKey: key,
+    model: previous?.kind === 'anthropic-key' ? previous.model : undefined,
+  })
   return getStatus(userId)
 }
 

@@ -203,10 +203,7 @@ function joinSystem(req: AgentTurnRequest): string {
 function byoModel(account: ModelAccount): AgentModel {
   if (account.kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
-    const client = new Anthropic({
-      apiKey: account.apiKey,
-      ...(account.accountId ? { defaultHeaders: { 'anthropic-workspace-id': account.accountId } } : {}),
-    })
+    const client = new Anthropic({ apiKey: account.apiKey })
     const model = accountModelFor(account)
     return {
       provider: account.kind,
@@ -222,7 +219,7 @@ function byoModel(account: ModelAccount): AgentModel {
             /anthropic-workspace-id|workspace/i.test(error.message)
           ) {
             throw new ModelConfigurationError(
-              'Set a valid Anthropic workspace ID in Settings → Claude API key → Workspace settings, then retry. You can also use a key scoped to one workspace.',
+              'Create an Anthropic API key scoped to one workspace, then use Replace key in Settings → Claude API key and retry.',
             )
           }
           if (error instanceof Anthropic.APIError && (error.status === 401 || error.status === 403)) {
