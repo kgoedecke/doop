@@ -269,14 +269,6 @@ function TaskRow({ task }: { task: AgentTask }) {
         >
           {task.status}
         </span>
-        {!frameId && (
-          <span
-            className="flex-none font-mono text-[9.5px] tracking-[0.06em] text-ink-faint opacity-0 group-hover:opacity-100"
-            title="This task has no frame to jump to"
-          >
-            Not available
-          </span>
-        )}
         <span className="flex-none font-mono text-[10.5px] text-ink-faint">
           {task.failedAt
             ? timeAgo(task.failedAt)
