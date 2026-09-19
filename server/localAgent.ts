@@ -1,3 +1,4 @@
+import { CLAUDE_MODEL_IDS } from '../shared/localAgent.ts'
 import { Router, type Request, type Response } from 'express'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -11,7 +12,10 @@ import { isBanned } from './auth.ts'
 import { onFeedback } from './resident.ts'
 
 export const localAgentRouter = Router()
-const preferenceSchema = z.object({ enabled: z.boolean(), model: z.enum(['default', 'sonnet', 'opus']) })
+const preferenceSchema = z.object({
+  enabled: z.boolean(),
+  model: z.enum([...CLAUDE_MODEL_IDS, 'default', 'sonnet', 'opus']),
+})
 const deviceSchema = z.object({ deviceId: z.string().uuid() })
 
 localAgentRouter.get('/', (req, res, next) => {
@@ -30,7 +34,7 @@ localAgentRouter.put('/', (req, res, next) => {
   void (async () => {
     await localAgentRuns.cancel(userId)
     await saveLocalAgentPreference(userId, parsed.data)
-    res.json(parsed.data)
+    res.json(await getLocalAgentPreference(userId))
     wake(userId)
   })().catch(next)
 })

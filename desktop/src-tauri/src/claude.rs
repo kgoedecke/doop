@@ -252,7 +252,17 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
         return Err("Invalid run token".into());
     }
     let model = field(job, "model")?;
-    if !["default", "sonnet", "opus"].contains(&model) {
+    if ![
+        "default",
+        "sonnet",
+        "opus",
+        "claude-fable-5-1",
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-haiku-4-5-20251001",
+    ]
+    .contains(&model)
+    {
         return Err("Invalid model".into());
     }
     let prompt = field(job, "prompt")?;

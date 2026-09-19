@@ -45,7 +45,7 @@ bun run dev    # opens the shell against the local vite server (localhost:4300)
 
 ## Local Claude CLI
 
-Settings → Doop Agent includes **Claude · Local CLI** in shells built with the
+Settings → Doop Agent includes **Claude Plan** in shells built with the
 local-runner capability. Install the native `claude` executable, sign in through
 `claude auth login` (or the row's **Sign in** button), then choose **Use instead**.
 No Claude Agent SDK is installed or used. The shell invokes `claude -p` directly
@@ -57,8 +57,10 @@ stay in Claude's local credential storage; Doop never reads or uploads them. The
 runner excludes inherited API-key/provider overrides so it does not silently bill
 an API key. Claude's own login and usage limits determine account access.
 
-- The local-provider preference and model choice (CLI default, Sonnet, Opus) are
-  account-wide. Device consent remains local. A connected ChatGPT/OpenAI account
+- The local-provider preference and model choice (Fable 5.1, Opus 5, Sonnet 5, Haiku 4.5) are
+  account-wide. Existing Sonnet/Opus choices map to their named versions; the old
+  CLI-default choice becomes Sonnet 5. Fable 5.1 requires Claude Code 2.1.255 or newer.
+  Device consent remains local. A connected ChatGPT/OpenAI account
   is retained, and its **Use instead** button switches back to server execution.
 - Queued design cards, comments and feedback run while the desktop is open.
   Offline work stays queued with no automatic server fallback. Only one desktop
