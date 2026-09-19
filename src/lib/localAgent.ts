@@ -43,8 +43,11 @@ export async function selectLocalAgent(userId: string, preference: LocalAgentPre
   if (preference.enabled) {
     await invokeClaude('claude_connect', { userId, enabled: true })
   }
-  await api.setLocalAgent(preference)
-  await refreshLocalAgent(userId)
+  const saved = await api.setLocalAgent(preference)
+  // Server routing is authoritative. Disabling local execution must not depend
+  // on the installed CLI responding to a separate status request.
+  useLocalAgent.setState({ preference: saved })
+  if (preference.enabled) await refreshLocalAgent(userId)
   useStore.getState().allowanceChanged()
 }
 
