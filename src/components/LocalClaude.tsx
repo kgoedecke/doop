@@ -71,7 +71,7 @@ export function LocalClaudeRow() {
           </span>
         </div>
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
-          Use your Claude subscription locally, in the desktop app only.
+          Use your Claude subscription locally.
         </p>
         {connected && native?.email && (
           <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-[13px] text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
@@ -179,8 +179,10 @@ export function LocalClaudeRow() {
             </div>
           )}
         </div>
-        {!supported && isDesktopShell() && (
-          <p className="mt-[10px] text-[13px] text-ink-faint">Update Doop to connect Claude.</p>
+        {!supported && (
+          <p className="mt-[10px] text-[13px] text-ink-faint">
+            {isDesktopShell() ? 'Update Doop to connect Claude.' : 'Connect in the desktop app.'}
+          </p>
         )}
         {supported && native && !native.installed && (
           <p className="mt-[10px] text-[13px] text-ink-faint">
