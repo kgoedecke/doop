@@ -75,5 +75,5 @@ it.each([400, 404])('provides actionable workspace guidance for workspace errors
   })
   const model = await pickModel('alice')
   await expect(model!.run(request)).rejects.toBeInstanceOf(ModelConfigurationError)
-  await expect(model!.run(request)).rejects.toThrow('Replace key')
+  await expect(model!.run(request)).rejects.toThrow('Rotate key')
 })

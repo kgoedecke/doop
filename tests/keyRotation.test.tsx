@@ -35,7 +35,7 @@ afterEach(() => {
   container.remove()
 })
 it('opens an empty replacement form and cancels without disconnecting', async () => {
-  await act(async () => button('Replace key').click())
+  await act(async () => button('Rotate key').click())
   expect(container.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('')
   expect(container.textContent).not.toContain('Workspace settings')
   await act(async () => button('Cancel').click())
@@ -45,13 +45,13 @@ it('opens an empty replacement form and cancels without disconnecting', async ()
 })
 it('replaces the key without changing the active execution provider', async () => {
   mocks.replace.mockResolvedValue({ connected: true, kind: 'anthropic-key', model: 'claude-opus-5', models: [] })
-  await act(async () => button('Replace key').click())
+  await act(async () => button('Rotate key').click())
   const input = container.querySelector<HTMLInputElement>('input[type="password"]')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'sk-ant-new-test')
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  await act(async () => button('Replace key').click())
+  await act(async () => button('Rotate key').click())
   expect(mocks.replace).toHaveBeenCalledExactlyOnceWith('sk-ant-new-test')
   expect(mocks.selectLocal).not.toHaveBeenCalled()
   expect(mocks.disconnect).not.toHaveBeenCalled()

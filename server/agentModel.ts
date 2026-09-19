@@ -219,7 +219,7 @@ function byoModel(account: ModelAccount): AgentModel {
             /anthropic-workspace-id|workspace/i.test(error.message)
           ) {
             throw new ModelConfigurationError(
-              'Create an Anthropic API key scoped to one workspace, then use Replace key in Settings → Claude API key and retry.',
+              'Create an Anthropic API key scoped to one workspace, then use Rotate key in Settings → Claude API key and retry.',
             )
           }
           if (error instanceof Anthropic.APIError && (error.status === 401 || error.status === 403)) {

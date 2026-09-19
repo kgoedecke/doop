@@ -487,7 +487,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                       setShowKey('openai-key')
                     }}
                   >
-                    Replace key
+                    Rotate key
                   </Button>
                   {local?.enabled && (
                     <Button
@@ -522,7 +522,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               />
               <div className={maActions}>
                 <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
-                  {busy ? 'Saving…' : onKey ? 'Replace key' : 'Save key'}
+                  {busy ? 'Saving…' : onKey ? 'Rotate key' : 'Save key'}
                 </Button>
                 <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
                   Cancel
@@ -581,7 +581,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                       setShowKey('anthropic-key')
                     }}
                   >
-                    Replace key
+                    Rotate key
                   </Button>
                   {local?.enabled && (
                     <Button
@@ -615,7 +615,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               />
               <div className={maActions}>
                 <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
-                  {busy ? 'Saving…' : onClaudeKey ? 'Replace key' : 'Save key'}
+                  {busy ? 'Saving…' : onClaudeKey ? 'Rotate key' : 'Save key'}
                 </Button>
                 <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
                   Cancel
