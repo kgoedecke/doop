@@ -2,6 +2,7 @@ import type { Presence } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { locatePresence } from '../lib/locate'
 import { Avatar } from './ui/avatar'
+import { cn } from '@/lib/utils'
 
 /** The other people and agents on the canvas. A person's avatar is a toggle:
  *  click to follow their camera around, click again to let go. An agent's
@@ -29,7 +30,8 @@ function FollowAvatar({ presence: p }: { presence: Presence }) {
   return (
     <button
       type="button"
-      className={clickable}
+      /* lifted so the next avatar in the stack does not paint over the halo */
+      className={cn(clickable, followed && 'relative z-10')}
       aria-pressed={followed}
       title={followed ? `Stop following ${p.name}` : `Follow ${p.name} around the canvas`}
       onClick={() => setFollowing(followed ? null : p.clientId)}
