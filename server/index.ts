@@ -40,6 +40,7 @@ import * as githubApp from './githubApp.ts'
 import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
+import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { serverImageGenEnabled } from './imageGen.ts'
 import { AGENT_MODELS } from './openaiAgent.ts'
@@ -710,6 +711,17 @@ app.delete('/api/model-account/chatgpt/device', (req, res) => {
 app.post('/api/model-account/openai-key', async (req, res) => {
   try {
     res.json(accountView(await modelAccounts.connectApiKey(req.user!.id, String(req.body?.apiKey ?? ''))))
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
+  }
+})
+
+app.post('/api/model-account/anthropic-key', async (req, res) => {
+  try {
+    const status = await modelAccounts.connectAnthropicKey(req.user!.id, String(req.body?.apiKey ?? ''))
+    const preference = await getLocalAgentPreference(req.user!.id)
+    await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
+    res.json(accountView(status))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
   }

@@ -3,6 +3,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
+import { CLAUDE_MODEL_IDS, normalizeClaudeModel } from '../shared/localAgent.ts'
 import { isKnownModel, modelFor } from './openaiAgent.ts'
 
 /**
@@ -45,9 +46,9 @@ const REDIRECT_URI = process.env.CHATGPT_OAUTH_REDIRECT_URI || 'http://localhost
    fetch — an ordinary product User-Agent passes where no header at all does */
 const AUTH_USER_AGENT = process.env.CHATGPT_AUTH_USER_AGENT || 'doop/0.1 (+https://doop.design)'
 
-export type AccountKind = 'chatgpt' | 'openai-key'
+export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key'
 
-const ACCOUNT_KINDS: readonly string[] = ['chatgpt', 'openai-key'] satisfies AccountKind[]
+const ACCOUNT_KINDS: readonly string[] = ['chatgpt', 'openai-key', 'anthropic-key'] satisfies AccountKind[]
 
 export interface ModelAccount {
   userId: string
@@ -119,16 +120,21 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
     ...(account.email ? { email: account.email } : {}),
     ...(account.plan ? { plan: account.plan } : {}),
     /* resolved, so the UI shows what will actually run rather than "default" */
-    model: modelFor(account),
+    model: accountModelFor(account),
     connectedAt: account.connectedAt,
   }
 }
 
+export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
+  return account.kind === 'anthropic-key' ? normalizeClaudeModel(account.model) : modelFor(account)
+}
+
 /** Change which model tier this account runs on. */
 export async function setAccountModel(userId: string, model: string): Promise<AccountStatus> {
-  if (!isKnownModel(model)) throw new Error('unknown model')
   const account = await getAccount(userId)
   if (!account) throw new Error('no model account connected')
+  const known = account.kind === 'anthropic-key' ? CLAUDE_MODEL_IDS.some((id) => id === model) : isKnownModel(model)
+  if (!known) throw new Error('unknown model')
   await save({ ...account, model })
   return getStatus(userId)
 }
@@ -654,6 +660,14 @@ export async function connectApiKey(userId: string, apiKey: string): Promise<Acc
   const key = apiKey.trim()
   if (!key.startsWith('sk-')) throw new Error('That does not look like an OpenAI API key (they start with "sk-")')
   await save({ userId, kind: 'openai-key', apiKey: key })
+  return getStatus(userId)
+}
+
+export async function connectAnthropicKey(userId: string, apiKey: string): Promise<AccountStatus> {
+  const key = apiKey.trim()
+  if (!key.startsWith('sk-ant-') || /\s/.test(key))
+    throw new Error('That does not look like an Anthropic API key (they start with "sk-ant-")')
+  await save({ userId, kind: 'anthropic-key', apiKey: key })
   return getStatus(userId)
 }
 

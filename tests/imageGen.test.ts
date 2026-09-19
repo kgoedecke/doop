@@ -151,3 +151,13 @@ describe('failure modes', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
+
+it('does not bill the server for image generation when a Claude API key is selected', async () => {
+  mockedGetAccount.mockResolvedValue({ userId: 'alice', kind: 'anthropic-key', apiKey: 'sk-ant-test', connectedAt: 1 })
+  vi.stubEnv('OPENAI_API_KEY', 'sk-server-test')
+  try {
+    expect(await generatorFor('alice')).toMatchObject({ ok: false })
+  } finally {
+    vi.unstubAllEnvs()
+  }
+})

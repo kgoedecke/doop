@@ -1,4 +1,6 @@
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
+import { AgentIcon } from './AgentIcon'
+import { CLAUDE_MODELS } from '../../shared/localAgent'
 import { LocalClaudeRow } from './LocalClaude'
 import { authClient } from '../lib/auth'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
@@ -101,7 +103,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const [device, setDevice] = useState<DeviceFlow | null>(null)
   const [redirect, setRedirect] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [showKey, setShowKey] = useState(false)
+  const [showKey, setShowKey] = useState<false | 'openai-key' | 'anthropic-key'>(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -113,6 +115,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       setDevice(null)
       setRedirect('')
       setApiKey('')
+      setShowKey(false)
       setError('')
       onChange?.()
       /* every allowance meter and wall on screen re-reads, not just this pane */
@@ -219,9 +222,10 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setBusy(true)
     setError('')
     try {
+      const next = await (showKey === 'anthropic-key' ? api.connectAnthropicKey(apiKey) : api.connectOpenAiKey(apiKey))
       await selectServer()
-      settle(await api.connectOpenAiKey(apiKey))
-      posthog.capture('model_account_connected', { kind: 'openai-key' })
+      settle(next)
+      posthog.capture('model_account_connected', { kind: showKey || 'openai-key' })
     } catch (e) {
       fail(e)
     } finally {
@@ -262,33 +266,38 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const chosen = options.find((m) => m.id === account.model)
   const onChatgpt = account.connected && account.kind === 'chatgpt'
   const onKey = account.connected && account.kind === 'openai-key'
+  const onClaudeKey = account.connected && account.kind === 'anthropic-key'
   /* only one account is stored per user, so connecting one replaces the other */
   const replaces = account.connected
 
   /* On the connected row the chips ARE the model picker; on any other row they
      only advertise what that plan can run, so they stay inert. */
-  const modelChips = (live: boolean) =>
-    live ? (
+  const modelChips = (live: boolean, claude = false) => {
+    const models = claude ? CLAUDE_MODELS.map((m) => ({ ...m, blurb: '' })) : options
+    return live ? (
       <ToggleChipGroup aria-label="Model" value={account.model ?? ''} onValueChange={pickModel} disabled={busy}>
-        {options.map((m) => (
+        {models.map((m) => (
           <ToggleChipItem key={m.id} value={m.id} title={m.blurb}>
             {m.id === account.model && <Tick />}
             {m.name}
           </ToggleChipItem>
         ))}
         {/* a server override outside the known tiers still has to be visible */}
-        {account.model && !chosen && <ToggleChip state="on">{account.model}</ToggleChip>}
+        {account.model && !models.some((m) => m.id === account.model) && (
+          <ToggleChip state="on">{account.model}</ToggleChip>
+        )}
       </ToggleChipGroup>
     ) : (
       /* inert on a row that is not the connected one — a capability list, not a control */
       <div className="flex flex-wrap gap-[9px]">
-        {options.map((m) => (
+        {models.map((m) => (
           <ToggleChip key={m.id} state="idle">
             {m.name}
           </ToggleChip>
         ))}
       </div>
     )
+  }
 
   return (
     <div className="flex flex-col">
@@ -484,7 +493,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               </div>
               {chosen && <p className="mt-[10px] text-[13px] text-ink-faint">{chosen.blurb}</p>}
             </>
-          ) : showKey ? (
+          ) : showKey === 'openai-key' ? (
             <div className={planFlow}>
               <p className="mb-3 mt-2 text-[13px] leading-[1.55] text-ink-soft">
                 The key is stored on the server and never shown again.
@@ -510,7 +519,14 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           ) : (
             <div className={actionsRow}>
               {modelChips(false)}
-              <Button className={rowBtn} onClick={() => setShowKey(true)} disabled={busy}>
+              <Button
+                className={rowBtn}
+                onClick={() => {
+                  setApiKey('')
+                  setShowKey('openai-key')
+                }}
+                disabled={busy}
+              >
                 {replaces ? 'Use instead' : 'Connect'}
               </Button>
             </div>
@@ -519,6 +535,84 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       </section>
 
       <LocalClaudeRow />
+      <section className={planRow(onClaudeKey && !local?.enabled)}>
+        <span className={planMark(onClaudeKey && !local?.enabled)}>
+          <AgentIcon name="claude" size={20} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
+            <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
+              Claude API key
+            </h3>
+            <span className={planPill(onClaudeKey)}>
+              {onClaudeKey ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+            </span>
+          </div>
+          <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
+            Pay per token on your Anthropic account. Runs on Doop’s server.
+          </p>
+
+          {onClaudeKey ? (
+            <>
+              <div className={actionsRow}>
+                {modelChips(true, true)}
+                <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
+                  {local?.enabled && (
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        selectServer().catch(fail)
+                      }}
+                    >
+                      Use instead
+                    </Button>
+                  )}
+                  <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : showKey === 'anthropic-key' ? (
+            <div className={planFlow}>
+              <p className="mb-3 mt-2 text-[13px] leading-[1.55] text-ink-soft">
+                The key is stored on the server and never shown again.
+              </p>
+              <Input
+                className={maInput}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-ant-…"
+                type="password"
+                autoFocus
+                spellCheck={false}
+              />
+              <div className={maActions}>
+                <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
+                  {busy ? 'Saving…' : 'Save key'}
+                </Button>
+                <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className={actionsRow}>
+              {modelChips(false, true)}
+              <Button
+                className={rowBtn}
+                onClick={() => {
+                  setApiKey('')
+                  setShowKey('anthropic-key')
+                }}
+                disabled={busy}
+              >
+                {replaces ? 'Use instead' : 'Connect'}
+              </Button>
+            </div>
+          )}
+        </div>
+      </section>
 
       {error && <p className="mt-[10px] text-[12.5px] text-accent-ink">{error}</p>}
     </div>

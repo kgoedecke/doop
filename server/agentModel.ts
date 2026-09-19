@@ -2,9 +2,9 @@ import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
-import { getAccount, withFreshToken } from './modelAccounts.ts'
+import { getAccount, withFreshToken, accountModelFor } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
-import { modelFor, ModelAuthError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
+import { ModelAuthError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
 
 /**
@@ -190,6 +190,7 @@ function warnOnce(message: string) {
 const BYO_LABELS: Record<AccountKind, string> = {
   chatgpt: 'ChatGPT',
   'openai-key': 'OpenAI',
+  'anthropic-key': 'Claude API',
 }
 
 /* the OpenAI-shaped transports take one system string; cache breakpoints are
@@ -199,9 +200,29 @@ function joinSystem(req: AgentTurnRequest): string {
 }
 
 function byoModel(account: ModelAccount): AgentModel {
+  if (account.kind === 'anthropic-key') {
+    if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
+    const client = new Anthropic({ apiKey: account.apiKey })
+    const model = accountModelFor(account)
+    return {
+      provider: account.kind,
+      label: `Claude API (${model})`,
+      userId: account.userId,
+      async run(req) {
+        try {
+          return await runAnthropicTurn(client, model, req)
+        } catch (error) {
+          if (error instanceof Anthropic.APIError && (error.status === 401 || error.status === 403)) {
+            throw new ModelAuthError('Anthropic rejected your API key. Reconnect it in Settings.')
+          }
+          throw error
+        }
+      },
+    }
+  }
   return {
     provider: account.kind,
-    label: `${BYO_LABELS[account.kind]} (${modelFor(account)})`,
+    label: `${BYO_LABELS[account.kind]} (${accountModelFor(account)})`,
     userId: account.userId,
     async run(req) {
       /* refreshed per turn, not per run: a long design run outlives an

@@ -123,7 +123,7 @@ export interface Allowance {
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind = 'chatgpt' | 'openai-key'
+export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -379,6 +379,8 @@ export const api = {
     req<ModelAccountStatus>('/api/model-account/chatgpt', { method: 'POST', body: JSON.stringify({ redirect }) }),
   connectOpenAiKey: (apiKey: string) =>
     req<ModelAccountStatus>('/api/model-account/openai-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectAnthropicKey: (apiKey: string) =>
+    req<ModelAccountStatus>('/api/model-account/anthropic-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),

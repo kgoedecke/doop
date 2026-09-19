@@ -406,12 +406,16 @@ export async function runAzureTurn(config: AzureConfig, req: TurnRequest): Promi
   return fromResponse((await res.json()) as ResponseBody)
 }
 
-const transports: Record<ModelAccount['kind'], (account: ModelAccount, req: TurnRequest) => Promise<TurnResult>> = {
+const transports: Record<
+  Exclude<ModelAccount['kind'], 'anthropic-key'>,
+  (account: ModelAccount, req: TurnRequest) => Promise<TurnResult>
+> = {
   chatgpt: runChatgpt,
   'openai-key': runApiKey,
 }
 
 export function runOpenAiTurn(account: ModelAccount, req: TurnRequest): Promise<TurnResult> {
+  if (account.kind === 'anthropic-key') throw new Error('Anthropic keys require the Anthropic transport')
   return transports[account.kind](account, req)
 }
 

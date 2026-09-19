@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ preference: vi.fn(), account: vi.fn(), online: vi.fn() }))
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: mocks.preference }))
-vi.mock('../server/modelAccounts.ts', () => ({ getAccount: mocks.account, withFreshToken: vi.fn() }))
+vi.mock('../server/modelAccounts.ts', () => ({
+  getAccount: mocks.account,
+  withFreshToken: vi.fn(),
+  accountModelFor: (account: { model?: string }) => account.model ?? 'default',
+}))
 vi.mock('../server/localAgentRuns.ts', () => ({ localAgentRuns: { online: mocks.online, start: vi.fn() } }))
 import { pickModel } from '../server/agentModel.ts'
 

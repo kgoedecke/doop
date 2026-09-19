@@ -43,9 +43,11 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
         Doop Agent on your{' '}
         {allowance.byoKind === 'claude-local'
           ? 'local Claude CLI'
-          : allowance.byoKind === 'openai-key'
-            ? 'OpenAI key'
-            : 'ChatGPT'}
+          : allowance.byoKind === 'anthropic-key'
+            ? 'Claude API key'
+            : allowance.byoKind === 'openai-key'
+              ? 'OpenAI key'
+              : 'ChatGPT'}
       </span>
     )
   }

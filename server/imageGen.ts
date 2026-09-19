@@ -181,6 +181,8 @@ export async function generatorFor(payerId?: string): Promise<Generator> {
         throw new Error('could not read your connected model account — try again in a moment')
       })
     : null
+  if (account?.kind === 'anthropic-key')
+    return { ok: false, reason: 'Image generation requires a ChatGPT subscription or OpenAI API key.' }
   if (account?.kind === 'chatgpt') return chatgptGenerator(account)
   if (account?.kind === 'openai-key' && account.apiKey) {
     return apiKeyGenerator(account.apiKey, 'OpenAI', ROUTER_MODEL || modelFor(account))
