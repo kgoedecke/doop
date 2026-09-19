@@ -60,7 +60,7 @@ localAgentRouter.post('/poll', (req, res, next) => {
     const wasOnline = localAgentRuns.online(userId)
     const job = localAgentRuns.poll(userId, parsed.data.deviceId)
     res.json({ job, enabled: true })
-    if (!wasOnline || !job) wake(userId)
+    if (!wasOnline) wake(userId)
   })().catch(next)
 })
 
