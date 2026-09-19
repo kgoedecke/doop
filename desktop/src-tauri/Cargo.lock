@@ -904,7 +904,7 @@ dependencies = [
 
 [[package]]
 name = "doop-desktop"
-version = "0.2.1"
+version = "0.4.0"
 dependencies = [
  "objc2-app-kit",
  "rfd",
