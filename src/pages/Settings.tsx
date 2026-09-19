@@ -166,9 +166,6 @@ export function Settings() {
               </Card>
               {!desktop && (
                 <Card className="mt-5 max-w-[1000px] overflow-hidden">
-                  <CardHeader>
-                    <CardTitle>Desktop app only</CardTitle>
-                  </CardHeader>
                   <LocalClaudeRow />
                 </Card>
               )}

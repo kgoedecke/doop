@@ -179,10 +179,8 @@ export function LocalClaudeRow() {
             </div>
           )}
         </div>
-        {!supported && (
-          <p className="mt-[10px] text-[13px] text-ink-faint">
-            {isDesktopShell() ? 'Update Doop to connect Claude.' : 'Connect in the desktop app.'}
-          </p>
+        {!supported && isDesktopShell() && (
+          <p className="mt-[10px] text-[13px] text-ink-faint">Update Doop to connect Claude.</p>
         )}
         {supported && native && !native.installed && (
           <p className="mt-[10px] text-[13px] text-ink-faint">
