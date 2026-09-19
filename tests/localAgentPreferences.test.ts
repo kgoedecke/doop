@@ -53,3 +53,23 @@ it('wakes queued work when a desktop comes online', async () => {
   await poll()
   expect(mocks.wake).toHaveBeenCalledOnce()
 })
+
+it('preserves an in-flight run when changing the selected model', async () => {
+  const response = await fetch(origin, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, model: 'claude-opus-5' }),
+  })
+  expect(response.status).toBe(200)
+  expect(mocks.save).toHaveBeenCalledExactlyOnceWith('alice', { enabled: true, model: 'claude-opus-5' })
+  expect(mocks.cancel).not.toHaveBeenCalled()
+})
+it('cancels an in-flight run when local execution is explicitly disabled', async () => {
+  const response = await fetch(origin, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: false, model: 'claude-opus-5' }),
+  })
+  expect(response.status).toBe(200)
+  expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith('alice')
+})

@@ -32,7 +32,7 @@ localAgentRouter.put('/', (req, res, next) => {
   }
   const userId = req.user!.id
   void (async () => {
-    await localAgentRuns.cancel(userId)
+    if (!parsed.data.enabled) await localAgentRuns.cancel(userId)
     await saveLocalAgentPreference(userId, parsed.data)
     res.json(await getLocalAgentPreference(userId))
     wake(userId)
