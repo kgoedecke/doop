@@ -36,6 +36,7 @@ export async function refreshLocalAgent(userId: string) {
     hasLocalClaude() ? invokeClaude<NativeStatus>('claude_status', { userId }) : Promise.resolve(null),
   ])
   useLocalAgent.setState({ preference, native })
+  return { preference, native }
 }
 
 export async function selectLocalAgent(userId: string, preference: LocalAgentPreference) {

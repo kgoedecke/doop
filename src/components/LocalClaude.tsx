@@ -54,6 +54,11 @@ export function LocalClaudeRow() {
   const choose = (model: ClaudeModel = selectedModel) =>
     act(async () => {
       if (!userId) return
+      if (!active || !connected) {
+        const { native: current } = await refreshLocalAgent(userId)
+        if (!current?.installed) throw new Error('Install Claude Code to connect.')
+        if (!current.connected) throw new Error('Sign in to Claude Code to connect.')
+      }
       await selectLocalAgent(userId, { enabled: true, model })
     })
 
@@ -136,7 +141,7 @@ export function LocalClaudeRow() {
                   {installing ? 'Installing…' : 'Install Claude Code'}
                 </Button>
               )}
-              {!connected && (
+              {!connected && error && (
                 <Button variant="ghost" disabled={busy} onClick={() => act(() => refreshLocalAgent(userId!))}>
                   Refresh
                 </Button>
