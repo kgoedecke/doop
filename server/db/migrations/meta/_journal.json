@@ -120,6 +120,13 @@
       "when": 1789783411083,
       "tag": "0016_task_frames",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789786843578,
+      "tag": "0017_local_agent",
+      "breakpoints": true
     }
   ]
 }
