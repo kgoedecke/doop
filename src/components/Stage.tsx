@@ -6,6 +6,8 @@ import { FrameView } from './FrameView'
 import { FlowOverlay } from './FlowOverlay'
 import { GhostFrames } from './GhostFrames'
 import { Cursors } from './Cursors'
+import { FollowFrame } from './FollowFrame'
+import { cameraOnCursor, cameraToFollow } from '../lib/follow'
 import { SnapGuides } from './SnapGuides'
 import { MOD_KEY } from '../lib/keys'
 import { cn } from '../lib/utils'
@@ -19,6 +21,12 @@ const MIN_ZOOM = 0.08
 const MAX_ZOOM = 3
 
 const sendCursor = throttle((x: number, y: number) => sendWs({ type: 'cursor', x, y }), 50)
+/* the camera is shared so others can follow it — same cadence as the cursor */
+const sendViewport = throttle(
+  (vp: { x: number; y: number; zoom: number }, el: HTMLElement) =>
+    sendWs({ type: 'viewport', viewport: { ...vp, width: el.clientWidth, height: el.clientHeight } }),
+  50,
+)
 
 export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -60,8 +68,12 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     apply(useStore.getState().viewport)
     let settle = 0
     const unsub = useStore.subscribe((s, prev) => {
+      /* a (re)connect needs the camera announced afresh — the server only
+         knows what this socket has sent */
+      if (s.connected && !prev.connected && ref.current) sendViewport(s.viewport, ref.current)
       if (s.viewport === prev.viewport) return
       apply(s.viewport)
+      if (ref.current) sendViewport(s.viewport, ref.current)
       window.clearTimeout(settle)
       settle = window.setTimeout(() => {
         const z = useStore.getState().viewport.zoom
@@ -74,6 +86,70 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     }
   }, [])
 
+  /* following a peer: whenever their camera (or, lacking one, their cursor)
+     moves, ease ours toward the same view. Writes go through
+     setViewportFollowing so they don't count as "our own move" and end the
+     follow — everything else that touches the camera does. */
+  useEffect(() => {
+    let raf = 0
+    let target: { x: number; y: number; zoom: number } | null = null
+    function step() {
+      raf = 0
+      const s = useStore.getState()
+      if (!target || !s.following) return
+      const vp = s.viewport
+      const k = 0.35
+      const next = {
+        x: vp.x + (target.x - vp.x) * k,
+        y: vp.y + (target.y - vp.y) * k,
+        zoom: vp.zoom + (target.zoom - vp.zoom) * k,
+      }
+      const done =
+        Math.abs(next.x - target.x) < 0.5 &&
+        Math.abs(next.y - target.y) < 0.5 &&
+        Math.abs(next.zoom - target.zoom) < 0.001
+      s.setViewportFollowing(done ? target : next)
+      if (!done) raf = requestAnimationFrame(step)
+    }
+    function retarget() {
+      const el = ref.current
+      const s = useStore.getState()
+      if (!el || !s.following) return
+      const leader = s.presences[s.following]
+      const cursor = s.cursors[s.following]
+      const stage = { width: el.clientWidth, height: el.clientHeight }
+      if (leader?.viewport) target = cameraToFollow(leader.viewport, stage)
+      else if (cursor) target = cameraOnCursor(cursor, stage, s.viewport.zoom)
+      else return
+      if (!raf) raf = requestAnimationFrame(step)
+    }
+    const unsub = useStore.subscribe((s, prev) => {
+      if (!s.following) {
+        target = null
+        return
+      }
+      const started = s.following !== prev.following
+      const moved =
+        s.presences[s.following] !== prev.presences[s.following] || s.cursors[s.following] !== prev.cursors[s.following]
+      if (started || moved) retarget()
+    })
+    /* the stage growing or shrinking changes what we can see: followers of
+       ours need the new size, and if we are following, the leader's view
+       has to be refitted to it */
+    const el = ref.current
+    const ro = new ResizeObserver(() => {
+      if (!el) return
+      sendViewport(useStore.getState().viewport, el)
+      retarget()
+    })
+    if (el) ro.observe(el)
+    return () => {
+      unsub()
+      ro.disconnect()
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [])
+
   /* a fly-to request (prompt bar): glide the camera to the frame instead of
      snapping, so the new design streams in on-screen with a bit of drama.
      The request object stays in the store; only a NEW request re-runs this. */
@@ -81,19 +157,10 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   useEffect(() => {
     if (!flyTo) return
     const el = ref.current
-    const f = useStore.getState().canvas?.frames.find((x) => x.id === flyTo.frameId)
-    if (!el || !f) return
-    const pad = 80
-    const zoom = Math.min(
-      MAX_ZOOM,
-      Math.max(MIN_ZOOM, Math.min((el.clientWidth - pad * 2) / f.width, (el.clientHeight - pad * 2) / f.height, 1)),
-    )
-    const target = {
-      x: (el.clientWidth - f.width * zoom) / 2 - f.x * zoom,
-      y: (el.clientHeight - f.height * zoom) / 2 - f.y * zoom,
-      zoom,
-    }
+    if (!el) return
     const from = useStore.getState().viewport
+    const target = flyTargetFor(flyTo, el, from)
+    if (!target) return
     const start = performance.now()
     const DURATION = 700
     const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
@@ -108,6 +175,34 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     })
     return () => cancelAnimationFrame(raf)
   }, [flyTo]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** where a fly-to lands: a frame fitted with padding, or a bare world
+   *  point centred at the zoom we already have (a peer's cursor) */
+  function flyTargetFor(
+    req: NonNullable<typeof flyTo>,
+    el: HTMLDivElement,
+    from: { x: number; y: number; zoom: number },
+  ): { x: number; y: number; zoom: number } | undefined {
+    if ('point' in req) {
+      return {
+        x: el.clientWidth / 2 - req.point.x * from.zoom,
+        y: el.clientHeight / 2 - req.point.y * from.zoom,
+        zoom: from.zoom,
+      }
+    }
+    const f = useStore.getState().canvas?.frames.find((x) => x.id === req.frameId)
+    if (!f) return undefined
+    const pad = 80
+    const zoom = Math.min(
+      MAX_ZOOM,
+      Math.max(MIN_ZOOM, Math.min((el.clientWidth - pad * 2) / f.width, (el.clientHeight - pad * 2) / f.height, 1)),
+    )
+    return {
+      x: (el.clientWidth - f.width * zoom) / 2 - f.x * zoom,
+      y: (el.clientHeight - f.height * zoom) / 2 - f.y * zoom,
+      zoom,
+    }
+  }
 
   /* center one frame in the viewport and select it (shared frame links) */
   const focusFrame = useCallback(
@@ -506,6 +601,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
             </div>
           </div>
         </ContextMenuTrigger>
+        <FollowFrame />
 
         <Toolbar className="absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-1/2 z-[35] -translate-x-1/2 sm:bottom-4">
           <ToolbarButton onClick={onAddFrame}>+ Frame</ToolbarButton>

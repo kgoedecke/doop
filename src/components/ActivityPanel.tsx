@@ -23,6 +23,23 @@ function reportLimit(err: unknown) {
   else console.error(err)
 }
 
+/** The frame a task is "at": the last frame it touched that still exists,
+ *  or — for a task still running before any edit landed — wherever the agent
+ *  is currently focused or streaming. Undefined when there is nowhere to go. */
+function taskFrameId(task: AgentTask, s: ReturnType<typeof useStore.getState>): string | undefined {
+  const frames = s.canvas?.frames ?? []
+  const exists = (id: string | null | undefined) => (id && frames.some((f) => f.id === id) ? id : undefined)
+  for (let i = (task.frameIds?.length ?? 0) - 1; i >= 0; i--) {
+    const id = exists(task.frameIds?.[i])
+    if (id) return id
+  }
+  if (task.endedAt || task.failedAt) return undefined
+  const live = Object.values(s.presences).find((p) => p.kind === 'agent' && p.name === task.agentName)
+  const focused = exists(live?.activeFrameId)
+  if (focused) return focused
+  return exists(Object.entries(s.streams).find(([, actor]) => actor.name === task.agentName)?.[0])
+}
+
 function duration(t: AgentTask): string {
   const end = t.endedAt ?? Date.now()
   const s = Math.max(1, Math.round((end - t.startedAt) / 1000))
@@ -197,9 +214,33 @@ function TaskRow({ task }: { task: AgentTask }) {
 
   const state = task.endedAt ? 'done' : task.failedAt ? 'failed' : 'active'
 
+  /* clicking the task flies the camera to where the agent is (or was) working */
+  const frameId = useStore((s) => taskFrameId(task, s))
+  const frameName = useStore((s) => s.canvas?.frames.find((f) => f.id === frameId)?.name)
+  const goToFrame = () => {
+    if (frameId) useStore.getState().requestFlyTo(frameId)
+  }
+
   return (
     <div className="group">
-      <div className="flex animate-[chip-in_0.25s_ease] items-baseline gap-2 py-[5px] pr-4 pl-5 text-[12.5px] leading-[1.4]">
+      <div
+        role={frameId ? 'button' : undefined}
+        tabIndex={frameId ? 0 : undefined}
+        title={frameName ? `Go to “${frameName}”` : undefined}
+        onClick={goToFrame}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            goToFrame()
+          }
+        }}
+        className={cn(
+          'flex animate-[chip-in_0.25s_ease] items-baseline gap-2 py-[5px] pr-4 pl-5 text-[12.5px] leading-[1.4]',
+          frameId &&
+            'cursor-pointer rounded-md hover:bg-paper-deep focus-visible:bg-paper-deep focus-visible:outline-none',
+        )}
+      >
         {task.failedAt ? (
           <span className="grid size-[15px] flex-none place-items-center self-center rounded-full bg-accent-ink text-[10px] font-extrabold text-white">
             !
@@ -225,6 +266,14 @@ function TaskRow({ task }: { task: AgentTask }) {
         >
           {task.status}
         </span>
+        {!frameId && (
+          <span
+            className="flex-none font-mono text-[9.5px] tracking-[0.06em] text-ink-faint opacity-0 group-hover:opacity-100"
+            title="This task has no frame to jump to"
+          >
+            Not available
+          </span>
+        )}
         <span className="flex-none font-mono text-[10.5px] text-ink-faint">
           {task.failedAt
             ? timeAgo(task.failedAt)
@@ -236,7 +285,10 @@ function TaskRow({ task }: { task: AgentTask }) {
           <Button
             variant="danger-solid"
             size="pill"
-            onClick={() => api.retryCard(canvasId, task.id).catch(reportLimit)}
+            onClick={(e) => {
+              e.stopPropagation()
+              api.retryCard(canvasId, task.id).catch(reportLimit)
+            }}
           >
             ↻ Retry
           </Button>
@@ -247,7 +299,10 @@ function TaskRow({ task }: { task: AgentTask }) {
             size="sm"
             className="flex-none px-1 py-0 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             title="Give the agent feedback on this task"
-            onClick={() => setReplying(true)}
+            onClick={(e) => {
+              e.stopPropagation()
+              setReplying(true)
+            }}
           >
             ↩
           </Button>

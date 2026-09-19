@@ -383,6 +383,11 @@ function repoCardFields(kind: string | null, payload: string | null): Pick<Agent
   }
 }
 
+/* Task rows are written as whole snapshots and never awaited by callers, so
+   two quick edits could otherwise race on the pool and leave the older one
+   in the table. Writes to the same task queue behind each other instead. */
+const taskWrites = new Map<string, Promise<unknown>>()
+
 export function saveTask(canvasId: string, task: AgentTask) {
   const row = {
     id: task.id,
@@ -405,8 +410,9 @@ export function saveTask(canvasId: string, task: AgentTask) {
     kind: task.kind ?? null,
     payload: task.payload ? JSON.stringify(task.payload) : null,
     scope: task.scope ? JSON.stringify(task.scope) : null,
+    frameIds: task.frameIds?.join(',') ?? null,
   }
-  swallow(
+  const write = () =>
     db
       .insert(t.tasks)
       .values(row)
@@ -422,9 +428,12 @@ export function saveTask(canvasId: string, task: AgentTask) {
           failureReason: row.failureReason,
           pipeline: row.pipeline,
           stage: row.stage,
+          frameIds: row.frameIds,
         },
-      }),
-  )
+      })
+  const queued = (taskWrites.get(task.id) ?? Promise.resolve()).then(write, write)
+  taskWrites.set(task.id, queued)
+  swallow(queued.finally(() => taskWrites.get(task.id) === queued && taskWrites.delete(task.id)))
 }
 
 export function saveFeedback(fb: TaskFeedback) {
@@ -660,6 +669,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.attachments ? { attachments: row.attachments.split(',').filter(Boolean) } : {}),
       ...repoCardFields(row.kind, row.payload),
       ...scopeField(row.scope),
+      ...(row.frameIds ? { frameIds: row.frameIds.split(',').filter(Boolean) } : {}),
     })
     tasks.set(row.canvasId, list)
   }

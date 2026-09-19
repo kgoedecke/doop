@@ -1,4 +1,5 @@
 import type { ClientMessage, ServerMessage } from '../../shared/types'
+import { isPeerViewport } from '../../shared/viewport'
 import { getIdentity } from './identity'
 import { useStore } from './store'
 
@@ -34,8 +35,10 @@ function open() {
   s.onopen = () => {
     if (socket !== s) return
     const { clientId, name } = getIdentity()
-    useStore.getState().setConnected(true)
+    /* join first: flipping `connected` makes the Stage announce its camera,
+       and the server drops anything sent before the socket has a canvas */
     sendWs({ type: 'join', canvasId, clientId, name, kind: 'user' })
+    useStore.getState().setConnected(true)
   }
 
   s.onmessage = (ev) => {
@@ -100,6 +103,9 @@ function handle(msg: ServerMessage) {
       break
     case 'cursor':
       s.setCursor(msg.clientId, msg.x, msg.y)
+      break
+    case 'viewport':
+      if (isPeerViewport(msg.viewport)) s.setPeerViewport(msg.clientId, msg.viewport)
       break
     case 'editing':
       s.setEditing(msg.clientId, msg.frameId)

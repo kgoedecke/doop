@@ -650,11 +650,31 @@ export function hasAnnouncedTask(canvasId: string, actor: Actor): boolean {
   return (taskLog.get(canvasId) ?? []).some((t) => sameAgent(t, actor) && !t.endedAt && !t.auto)
 }
 
+/** How many frames a task remembers — the Agents panel only ever jumps to the
+ *  latest one; the rest are history for a sweeping multi-frame task. */
+const TASK_FRAMES_CAP = 20
+
+/** Note that the agent's open tasks touched a frame (most recent last), so a
+ *  click on the task in the Agents panel can fly the camera there. A claimed
+ *  card and a set_status task can be open side by side — both are the work. */
+function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
+  for (const open of taskLog.get(canvasId) ?? []) {
+    if (!sameAgent(open, actor) || open.endedAt) continue
+    if (open.frameIds?.at(-1) === frameId) continue
+    open.frameIds = [...(open.frameIds ?? []).filter((id) => id !== frameId), frameId].slice(-TASK_FRAMES_CAP)
+    persist.saveTask(canvasId, open)
+    broadcast(canvasId, { type: 'task', task: open })
+  }
+}
+
 /* Agents that never call set_status still get a task inferred from what
    they are visibly doing, so the Tasks panel is never silently empty. */
-function autoTask(canvasId: string, actor: Actor, status: string) {
+function autoTask(canvasId: string, actor: Actor, status: string, frameId: string) {
   const list = taskLog.get(canvasId) ?? []
-  if (list.some((t) => sameAgent(t, actor) && !t.endedAt)) return // any open task wins
+  if (list.some((t) => sameAgent(t, actor) && !t.endedAt)) {
+    trackTaskFrame(canvasId, actor, frameId) // any open task wins — it just gains the frame
+    return
+  }
   const task: AgentTask = {
     id: nanoid(8),
     agentName: actor.name,
@@ -663,6 +683,7 @@ function autoTask(canvasId: string, actor: Actor, status: string) {
     status,
     startedAt: Date.now(),
     auto: true,
+    frameIds: [frameId],
   }
   list.unshift(task)
   if (list.length > 100) list.length = 100
@@ -1103,7 +1124,7 @@ export function appendFrameHtml(
     streams.set(frameId, { actor, escaped, lastActivity: Date.now() })
     broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: true, actor })
     logActivity(frame.canvasId, actor, `is designing “${frame.name}” live…`, frameId)
-    autoTask(frame.canvasId, actor, `Designing “${frame.name}”`)
+    autoTask(frame.canvasId, actor, `Designing “${frame.name}”`, frameId)
   }
   const s = streams.get(frameId)!
   s.lastActivity = Date.now()
@@ -1135,7 +1156,7 @@ export function createFrame(
     /* agent one-shot creation still plays back as a reveal */
     broadcast(canvasId, { type: 'frame:created', frame: { ...frame, html: '' }, actor })
     startReveal(frame, actor, 0)
-    autoTask(canvasId, actor, `Designing “${frame.name}”`)
+    autoTask(canvasId, actor, `Designing “${frame.name}”`, frame.id)
   } else {
     broadcast(canvasId, { type: 'frame:created', frame, actor })
   }
@@ -1169,14 +1190,15 @@ export function updateFrame(
       openReveal.actor = actor
       openReveal.shown = Math.min(openReveal.shown, prefix)
       openReveal.deadline = Date.now() + revealDuration(frame.html.length - openReveal.shown)
+      trackTaskFrame(frame.canvasId, actor, frameId)
     } else if (smallTweak) {
       broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
       logActivity(frame.canvasId, actor, `tweaked the design of “${frame.name}”`, frame.id)
-      autoTask(frame.canvasId, actor, `Tweaking “${frame.name}”`)
+      autoTask(frame.canvasId, actor, `Tweaking “${frame.name}”`, frameId)
     } else {
       startReveal(frame, actor, prefix)
       logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
-      autoTask(frame.canvasId, actor, `Redesigning “${frame.name}”`)
+      autoTask(frame.canvasId, actor, `Redesigning “${frame.name}”`, frameId)
     }
   } else {
     if (htmlChanged) {

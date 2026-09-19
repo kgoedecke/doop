@@ -263,6 +263,9 @@ export interface Presence {
   color: string
   kind: ActorKind
   cursor?: { x: number; y: number }
+  /** the region of the canvas this client is looking at — pan/zoom plus the
+   *  stage size, so a follower can fit the same world rect on its own screen */
+  viewport?: PeerViewport
   activeFrameId?: string | null
   /** one-line "what I'm working on right now" (agents set this via set_status) */
   status?: string
@@ -285,6 +288,9 @@ export interface AgentTask {
   endedAt?: number
   /** inferred by the server from frame edits (agent never called set_status) */
   auto?: boolean
+  /** frames the agent edited while this task was open, most recent last —
+   *  lets the Agents panel jump the camera to where the work happened */
+  frameIds?: string[]
   /** human who queued this as a board card */
   queuedBy?: string
   /** account id of that human — decides which model credential runs the card */
@@ -406,11 +412,21 @@ export interface ActivityItem {
   at: number
 }
 
+/** A client's camera: world→screen transform plus the stage size it fills. */
+export interface PeerViewport {
+  x: number
+  y: number
+  zoom: number
+  width: number
+  height: number
+}
+
 /* ---- websocket protocol ---- */
 
 export type ClientMessage =
   | { type: 'join'; canvasId: string; clientId: string; name: string; kind: ActorKind }
   | { type: 'cursor'; x: number; y: number }
+  | { type: 'viewport'; viewport: PeerViewport }
   | { type: 'editing'; frameId: string | null }
   | { type: 'frame:drag'; frameId: string; x: number; y: number; width: number; height: number }
 
@@ -432,6 +448,7 @@ export type ServerMessage =
   | { type: 'presence:join'; presence: Presence }
   | { type: 'presence:leave'; clientId: string }
   | { type: 'cursor'; clientId: string; x: number; y: number }
+  | { type: 'viewport'; clientId: string; viewport: PeerViewport }
   | { type: 'editing'; clientId: string; frameId: string | null }
   | { type: 'status'; clientId: string; status: string | null }
   | { type: 'task'; task: AgentTask }

@@ -9,6 +9,7 @@ import type {
   GuidelineDoc,
   MemoryProposal,
   MemoryReference,
+  PeerViewport,
   Presence,
   TaskFeedback,
 } from '../../shared/types'
@@ -80,7 +81,10 @@ interface State {
   allowanceVersion: number
   /** a request for the Stage to glide the camera to a frame — the prompt bar
    *  raises it so a first deliverable streams in on-screen, never off-canvas */
-  flyTo: { frameId: string; at: number } | null
+  flyTo: { frameId: string; at: number } | { point: { x: number; y: number }; at: number } | null
+  /** clientId of the peer whose camera this one is tracking (Figma-style
+   *  follow); any camera move of our own lets go */
+  following: string | null
 
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
@@ -90,6 +94,11 @@ interface State {
   removePresence(clientId: string): void
   setCursor(clientId: string, x: number, y: number): void
   setEditing(clientId: string, frameId: string | null): void
+  setPeerViewport(clientId: string, viewport: PeerViewport): void
+  /** start (clientId) or stop (null) following a peer's camera */
+  setFollowing(clientId: string | null): void
+  /** camera write that keeps the follow alive — only the follow loop uses it */
+  setViewportFollowing(v: Viewport): void
   setStatus(clientId: string, status: string | null): void
   setActivity(items: ActivityItem[]): void
   pushActivity(item: ActivityItem): void
@@ -115,6 +124,8 @@ interface State {
   setLimitWall(v: boolean): void
   allowanceChanged(): void
   requestFlyTo(frameId: string): void
+  /** glide the camera to a world point at the current zoom (a peer's cursor) */
+  requestFlyToPoint(x: number, y: number): void
   select(id: string | null): void
   /** ⇧-click: add the frame to the selection, or drop it if already in */
   toggleSelect(id: string): void
@@ -161,6 +172,7 @@ export const useStore = create<State>((set, get) => ({
   limitWall: false,
   allowanceVersion: 0,
   flyTo: null,
+  following: null,
   selectedIds: [],
   selectedId: null,
   panMode: false,
@@ -179,7 +191,12 @@ export const useStore = create<State>((set, get) => ({
   setCanvas: (canvas) => set({ canvas }),
   setConnected: (connected) => set({ connected }),
   setUpdateReady: (updateReady) => set({ updateReady }),
-  setPresences: (list) => set({ presences: Object.fromEntries(list.map((p) => [p.clientId, p])) }),
+  setPresences: (list) =>
+    set((s) => ({
+      presences: Object.fromEntries(list.map((p) => [p.clientId, p])),
+      /* a fresh roster (new canvas, reconnect) without our leader ends the follow */
+      ...(s.following && !list.some((p) => p.clientId === s.following) ? { following: null } : {}),
+    })),
   upsertPresence: (p) => set((s) => ({ presences: { ...s.presences, [p.clientId]: p } })),
   removePresence: (clientId) =>
     set((s) => {
@@ -187,8 +204,17 @@ export const useStore = create<State>((set, get) => ({
       const cursors = { ...s.cursors }
       delete presences[clientId]
       delete cursors[clientId]
-      return { presences, cursors }
+      /* the one we were following left: nothing to track any more */
+      return { presences, cursors, ...(s.following === clientId ? { following: null } : {}) }
     }),
+  setPeerViewport: (clientId, viewport) =>
+    set((s) => {
+      const p = s.presences[clientId]
+      if (!p) return {}
+      return { presences: { ...s.presences, [clientId]: { ...p, viewport } } }
+    }),
+  setFollowing: (following) => set({ following }),
+  setViewportFollowing: (viewport) => set({ viewport }),
   setCursor: (clientId, x, y) => set((s) => ({ cursors: { ...s.cursors, [clientId]: { x, y } } })),
   setEditing: (clientId, frameId) =>
     set((s) => {
@@ -302,6 +328,7 @@ export const useStore = create<State>((set, get) => ({
   setLimitWall: (limitWall) => set({ limitWall }),
   allowanceChanged: () => set((s) => ({ allowanceVersion: s.allowanceVersion + 1 })),
   requestFlyTo: (frameId) => set({ flyTo: { frameId, at: Date.now() } }),
+  requestFlyToPoint: (x, y) => set({ flyTo: { point: { x, y }, at: Date.now() } }),
   /* selecting a different frame (or deselecting) closes the Inspector — the
      panel must not follow surface clicks, paste, or undo onto another frame.
      Re-selecting the same frame keeps an open panel open. */
@@ -354,7 +381,8 @@ export const useStore = create<State>((set, get) => ({
     }
     set({ layersOpen })
   },
-  setViewport: (viewport) => set({ viewport }),
+  /* every ordinary camera move (pan, zoom, fit, fly-to) is ours, so it ends a follow */
+  setViewport: (viewport) => set({ viewport, following: null }),
   /* fires on every pointermove during a drag — skip the no-op transitions
      so unsnapped drags don't render the (empty) guide layer each frame */
   setSnapGuides: (snapGuides) =>

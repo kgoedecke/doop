@@ -252,6 +252,8 @@ export const tasks = pgTable(
     payload: text('payload'),
     /** JSON CardScope: the frame/element the prompt was scoped to when queued */
     scope: text('scope'),
+    /** comma-joined ids of the frames edited while the task was open, most recent last */
+    frameIds: text('frame_ids'),
   },
   (t) => [index('tasks_canvas_idx').on(t.canvasId)],
 )

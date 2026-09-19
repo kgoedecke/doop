@@ -1,5 +1,5 @@
 {
-  "id": "01a4c6f7-82d7-46ea-a1ed-c190eee30049",
+  "id": "017cab81-6fd7-4aee-adff-0d7666096b4e",
   "prevId": "9c1f3b1e-6a0e-4d7a-9b6f-2f1c5d8e0a15",
   "version": "7",
   "dialect": "postgresql",
@@ -1999,6 +1999,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "frame_ids": {
+          "name": "frame_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2830,39 +2836,6 @@
           "primaryKey": false,
           "notNull": false,
           "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.local_agent_preferences": {
-      "name": "local_agent_preferences",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'default'"
         }
       },
       "indexes": {},

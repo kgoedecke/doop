@@ -46,6 +46,7 @@ import { serverImageGenEnabled } from './imageGen.ts'
 import { AGENT_MODELS } from './openaiAgent.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { colorFor } from '../shared/types.ts'
+import { isPeerViewport } from '../shared/viewport.ts'
 import type { ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = Number(process.env.PORT || 4400)
@@ -1712,6 +1713,15 @@ wss.on('connection', (ws, upgradeReq) => {
       case 'cursor':
         presence.cursor = { x: msg.x, y: msg.y }
         broadcast(canvasId, { type: 'cursor', clientId: presence.clientId, x: msg.x, y: msg.y }, presence.clientId)
+        break
+      case 'viewport':
+        if (!isPeerViewport(msg.viewport)) break
+        presence.viewport = msg.viewport
+        broadcast(
+          canvasId,
+          { type: 'viewport', clientId: presence.clientId, viewport: msg.viewport },
+          presence.clientId,
+        )
         break
       case 'editing':
         presence.activeFrameId = msg.frameId
