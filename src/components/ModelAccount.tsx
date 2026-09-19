@@ -4,6 +4,7 @@ import { CLAUDE_MODELS } from '../../shared/localAgent'
 import { LocalClaudeRow } from './LocalClaude'
 import { authClient } from '../lib/auth'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
+import { isDesktopShell } from '../lib/shell'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import type { DeviceFlow, ModelAccountStatus } from '../lib/api'
@@ -89,13 +90,8 @@ const maInput = 'rounded-[10px] border-ink px-3 py-[10px] font-mono focus:ring-0
 /* buttons in the responsive action rows centre their label once stacked */
 const rowBtn = 'max-md:justify-center'
 
-export function ModelAccountPanel({
-  onChange,
-  includeLocalClaude = true,
-}: {
-  onChange?: () => void
-  includeLocalClaude?: boolean
-}) {
+export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
+  const desktop = isDesktopShell()
   const { account, refresh, set } = useModelAccount()
   const { data: session } = authClient.useSession()
   const local = useLocalAgent((s) => s.preference)
@@ -562,7 +558,7 @@ export function ModelAccountPanel({
         </div>
       </section>
 
-      {includeLocalClaude && <LocalClaudeRow />}
+      {desktop && <LocalClaudeRow />}
       <section className={planRow(onClaudeKey && !local?.enabled)}>
         <span className={planMark(onClaudeKey && !local?.enabled)}>
           <AgentIcon name="claude" size={20} />
@@ -658,6 +654,8 @@ export function ModelAccountPanel({
         </div>
       </section>
 
+      {/* the browser cannot run the local CLI, so the plan closes the list as a pointer to the desktop app */}
+      {!desktop && <LocalClaudeRow />}
       {error && <p className="mt-[10px] text-[12.5px] text-accent-ink">{error}</p>}
     </div>
   )

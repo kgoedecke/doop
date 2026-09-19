@@ -3,8 +3,6 @@ import { navigate } from '../App'
 import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { openCanvasTab } from '../lib/desktop'
-import { LocalClaudeRow } from '../components/LocalClaude'
-import { isDesktopShell } from '../lib/shell'
 import { ModelAccountPanel } from '../components/ModelAccount'
 import { useAllowance } from '../components/TeamAllowance'
 import { AccountSettings } from '../components/AccountSettings'
@@ -38,7 +36,6 @@ type Pane = 'agent' | 'account'
  * account menu. Only the rail's middle changes, to a settings sub-nav.
  */
 export function Settings() {
-  const desktop = isDesktopShell()
   /* the sub-nav switches panes rather than scrolling to an anchor — on a page
      this short an anchor jump looks like nothing happened */
   const [pane, setPane] = useState<Pane>('agent')
@@ -162,13 +159,8 @@ export function Settings() {
                     </div>
                   )}
                 </CardHeader>
-                <ModelAccountPanel onChange={refresh} includeLocalClaude={desktop} />
+                <ModelAccountPanel onChange={refresh} />
               </Card>
-              {!desktop && (
-                <Card className="mt-5 max-w-[1000px] overflow-hidden">
-                  <LocalClaudeRow />
-                </Card>
-              )}
             </>
           ) : (
             <AccountSettings />

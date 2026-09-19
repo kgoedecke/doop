@@ -15,8 +15,59 @@ import { CLAUDE_MODELS, normalizeClaudeModel, type ClaudeModel } from '../../sha
 import { Button } from './ui/button'
 import { AgentIcon } from './AgentIcon'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
-import { CheckIcon } from './ui/icons'
+import { CheckIcon, DesktopIcon, DownloadIcon } from './ui/icons'
+import { cn } from '@/lib/utils'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
+
+/* Installers are attached to the desktop-v* GitHub releases (.context/RELEASE.md). */
+const DESKTOP_DOWNLOAD_URL = 'https://github.com/kgoedecke/doop/releases'
+
+/** The plan as a browser sees it: nothing to connect here, so the row is
+ *  muted and its only action is getting the desktop app. */
+function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
+  return (
+    <section aria-label="Claude Plan — desktop app" className={cn(planRow(false), 'bg-[#fafafa]')}>
+      <span aria-hidden="true" className={cn(planMark(false), 'border-[#e5e5e3] bg-[#f0f0ef] opacity-45 grayscale')}>
+        <AgentIcon name="claude" size={20} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
+          <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-[#8a8a86] max-md:text-[17px]">
+            Claude Plan
+          </h3>
+          <span className={cn(planPill(false), 'inline-flex items-center gap-[5px] bg-[#ededeb] text-[#74746e]')}>
+            <DesktopIcon width={14} height={14} aria-hidden />
+            Desktop app
+          </span>
+        </div>
+        <p className="mt-1.5 text-[14px] leading-[1.55] text-[#92928d] max-md:text-[13.5px]">
+          Use your Claude subscription locally.
+        </p>
+        <div className="mt-[18px] flex flex-wrap gap-[9px]">
+          {CLAUDE_MODELS.map((model) => (
+            <ToggleChip key={model.id} state="idle" className="bg-[#f0f0ee] text-[#9b9b96] opacity-100">
+              {model.name}
+            </ToggleChip>
+          ))}
+        </div>
+        <div className="mt-[13px] flex items-center justify-between gap-5 max-md:flex-col max-md:items-start max-md:gap-2">
+          <p className="text-[13px] text-[#7b7b75]">
+            {active ? 'Waiting for a connected desktop.' : 'Use this plan in the Doop desktop app.'}
+          </p>
+          <a
+            className="inline-flex items-center gap-[7px] py-1 text-[13px] font-semibold text-brand hover:underline"
+            href={DESKTOP_DOWNLOAD_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <DownloadIcon width={15} height={15} strokeWidth={1.8} aria-hidden />
+            Download desktop app
+          </a>
+        </div>
+      </div>
+    </section>
+  )
+}
 
 export function LocalClaudeRow() {
   const { data: session } = authClient.useSession()
@@ -61,6 +112,8 @@ export function LocalClaudeRow() {
       }
       await selectLocalAgent(userId, { enabled: true, model })
     })
+
+  if (!isDesktopShell()) return <DesktopOnlyClaudeRow active={active} />
 
   return (
     <section className={planRow(active)}>
@@ -186,11 +239,7 @@ export function LocalClaudeRow() {
           )}
         </div>
         {connected && <p className="mt-[10px] text-[13px] text-ink-faint">{selectedBlurb}</p>}
-        {!supported && (
-          <p className="mt-[10px] text-[13px] text-ink-faint">
-            {isDesktopShell() ? 'Update Doop to connect Claude.' : 'Connect in the desktop app.'}
-          </p>
-        )}
+        {!supported && <p className="mt-[10px] text-[13px] text-ink-faint">Update Doop to connect Claude.</p>}
         {supported && native && !native.installed && (
           <p className="mt-[10px] text-[13px] text-ink-faint">
             <a className="underline" href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer">
