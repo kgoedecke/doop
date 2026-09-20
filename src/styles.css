@@ -2,7 +2,7 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* Tailwind is the utility API for Doop's existing design system. Keep the
    semantic CSS variables below as the source of truth while the legacy
@@ -18,6 +18,7 @@
   --color-line-soft: var(--line-soft);
   --color-brand: var(--brand);
   --color-accent-ink: var(--accent-ink);
+  --color-dot: var(--dot);
   --font-ui: var(--font-ui);
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
@@ -83,6 +84,8 @@
 }
 
 :root {
+  color-scheme: light;
+
   /* Warm paper, not cold white: --paper is the backdrop, --surface the raised
      layer. They stay one step apart so panels and cards keep their edge. */
   --paper: #fdfdfc;
@@ -234,7 +237,7 @@
     -webkit-text-size-adjust: 100%;
   }
   ::selection {
-    background: rgb(39 67 238 / 0.18);
+    background: color-mix(in srgb, var(--brand) 28%, transparent);
   }
   button:not(:disabled),
   [role='button']:not(:disabled) {
@@ -249,37 +252,76 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+
+  /* Warm dark charcoal: editorial, quiet, and deep without the harshness
+     of pure OLED black (#000000). The layers maintain precise depth separation:
+     --paper is the canvas floor, --paper-deep the recessed rail/well, and
+     --surface the raised editorial sheet. */
+  --paper: #141413;
+  --paper-deep: #191918;
+  --surface: #20201e;
+  --ink: #f4f3ef;
+  --ink-soft: #a6a39b;
+  --ink-faint: #706d66;
+  --line: rgba(255, 255, 255, 0.12);
+  --line-soft: rgba(255, 255, 255, 0.07);
+  /* Electric cursor blue tuned with high contrast and luminance for dark grounds;
+     accent ink is a softened editorial vermilion for alerts and errors. */
+  --brand: #4a6bff;
+  --accent-ink: #ff5c47;
+  --dot: rgba(255, 255, 255, 0.07);
+
+  /* Hairline elevation system: dark surfaces cannot rely on shadow darkening alone.
+     Each tier features a micro-translucent light catch hairline ring (0.5px) simulating
+     grazing light along physical card edges, backed by soft ambient depth. */
+  --shadow-card:
+    0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 28px -14px rgba(0, 0, 0, 0.55);
+  --shadow-pop:
+    0 0 0 0.5px rgba(255, 255, 255, 0.11), 0 4px 12px rgba(0, 0, 0, 0.45), 0 24px 56px -16px rgba(0, 0, 0, 0.75);
+  --shadow-elevation-1:
+    0 0 0 0.5px rgba(255, 255, 255, 0.09), 0 2px 4px -1px rgba(0, 0, 0, 0.35), 0 4px 14px -3px rgba(0, 0, 0, 0.4);
+  --shadow-elevation-1-hover:
+    0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 6px 10px -2px rgba(0, 0, 0, 0.4), 0 10px 24px -4px rgba(0, 0, 0, 0.55);
+  --shadow-elevation-1-focus:
+    0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 0 0 3px color-mix(in srgb, var(--brand) 32%, transparent),
+    0 2px 4px -1px rgba(0, 0, 0, 0.35), 0 4px 14px -3px rgba(0, 0, 0, 0.4);
+  --shadow-elevation-2:
+    0 0 0 0.5px rgba(255, 255, 255, 0.11), 0 8px 16px -4px rgba(0, 0, 0, 0.5), 0 20px 40px -10px rgba(0, 0, 0, 0.65),
+    0 32px 64px -18px rgba(0, 0, 0, 0.8);
+
+  /* Tailwind & shadcn semantic token harmonization */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--brand);
+  --primary-foreground: #ffffff;
+  --secondary: var(--paper-deep);
+  --secondary-foreground: var(--ink);
+  --muted: var(--paper-deep);
+  --muted-foreground: var(--ink-soft);
+  --accent: var(--paper-deep);
+  --accent-foreground: var(--ink);
+  --destructive: var(--accent-ink);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--brand);
+  --chart-1: #4a6bff;
+  --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #f472b6;
+  --chart-5: #a78bfa;
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--paper-deep);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--brand);
 }
 
 /* Keyframes: the one thing utilities cannot express. Components reference

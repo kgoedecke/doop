@@ -58,7 +58,7 @@ export function AccountMenu() {
       <DropdownMenuTrigger asChild>
         <Button
           variant="bare"
-          className="grid size-10 flex-none place-items-center rounded-[10px] bg-ink font-display text-[12.5px] font-bold text-white hover:bg-ink hover:text-white hover:opacity-90 sm:size-[34px]"
+          className="grid size-10 flex-none place-items-center rounded-[10px] bg-ink font-display text-[12.5px] font-bold text-paper hover:bg-ink hover:text-paper hover:opacity-90 sm:size-[34px]"
           aria-label="Account"
         >
           {initials(session?.user.name)}

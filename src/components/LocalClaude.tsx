@@ -25,32 +25,32 @@ const DESKTOP_DOWNLOAD_URL = 'https://doop.design/download/mac'
  *  muted and its only action is getting the desktop app. */
 function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
   return (
-    <section aria-label="Claude Plan — desktop app" className={cn(planRow(false), 'bg-[#fafafa]')}>
-      <span aria-hidden="true" className={cn(planMark(false), 'border-[#e5e5e3] bg-[#f0f0ef] opacity-45 grayscale')}>
+    <section aria-label="Claude Plan — desktop app" className={cn(planRow(false), 'bg-paper-deep/60')}>
+      <span aria-hidden="true" className={cn(planMark(false), 'border-line bg-paper-deep opacity-50 grayscale')}>
         <AgentIcon name="claude" size={20} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
-          <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-[#8a8a86] max-md:text-[17px]">
+          <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink-soft max-md:text-[17px]">
             Claude Plan
           </h3>
-          <span className={cn(planPill(false), 'inline-flex items-center gap-[5px] bg-[#ededeb] text-[#74746e]')}>
+          <span className={cn(planPill(false), 'inline-flex items-center gap-[5px] bg-paper-deep text-ink-soft')}>
             <DesktopIcon width={14} height={14} aria-hidden />
             Desktop app
           </span>
         </div>
-        <p className="mt-1.5 text-[14px] leading-[1.55] text-[#92928d] max-md:text-[13.5px]">
+        <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
           Use your Claude subscription locally.
         </p>
         <div className="mt-[18px] flex flex-wrap gap-[9px]">
           {CLAUDE_MODELS.map((model) => (
-            <ToggleChip key={model.id} state="idle" className="bg-[#f0f0ee] text-[#9b9b96] opacity-100">
+            <ToggleChip key={model.id} state="idle" className="bg-paper-deep text-ink-soft opacity-80">
               {model.name}
             </ToggleChip>
           ))}
         </div>
         <div className="mt-[13px] flex items-center justify-between gap-5 max-md:flex-col max-md:items-start max-md:gap-2">
-          <p className="text-[13px] text-[#7b7b75]">
+          <p className="text-[13px] text-ink-faint">
             {active ? 'Waiting for a connected desktop.' : 'Use this plan in the Doop desktop app.'}
           </p>
           <a

@@ -35,11 +35,13 @@ function Avatar({
 }) {
   const brand = kind === 'agent' ? agentBrand(name) : undefined
   const tile = brand?.bg ?? color
+  const isDefaultInk = !brand && (color === 'var(--ink)' || !color)
   return (
     <div
       data-slot="avatar"
       className={cn(
-        'relative grid size-[30px] place-items-center rounded-full border-2 border-surface text-[11px] font-bold text-white',
+        'relative grid size-[30px] place-items-center rounded-full border-2 border-surface text-[11px] font-bold',
+        isDefaultInk ? 'text-paper' : 'text-white',
         stacked && '-ml-[7px] first:ml-0',
         kind === 'agent' &&
           'rounded-[9px] after:absolute after:-inset-[5px] after:animate-[agent-pulse_1.8s_ease-out_infinite] after:rounded-[13px] after:border-2 after:border-current after:opacity-0 after:content-[""]',
@@ -49,7 +51,7 @@ function Avatar({
       title={`${name}${kind === 'agent' ? (owner ? ` (${owner}'s agent)` : ' (agent)') : ''}${status ? ` — ${status}` : ''}`}
       {...props}
     >
-      <span className="grid place-items-center text-white">
+      <span className={cn('grid place-items-center', isDefaultInk ? 'text-paper' : 'text-white')}>
         {kind === 'agent' ? <AgentIcon name={name} size={15} color={brand?.fg ?? '#fff'} /> : initialsOf(name)}
       </span>
     </div>

@@ -6,6 +6,7 @@ import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Note } from './ui/note'
 import { Card, CardDescription, CardHeader, CardRow, CardTitle } from './ui/card'
+import { AppearanceSettings } from './AppearanceSettings'
 
 /* settings fields are a fixed column on desktop and full width on a phone */
 const settingsCard = 'mt-4 max-w-[1000px] overflow-hidden sm:mt-5'
@@ -182,6 +183,8 @@ export function AccountSettings() {
           )}
         </CardRow>
       </Card>
+
+      <AppearanceSettings embedded />
     </>
   )
 }

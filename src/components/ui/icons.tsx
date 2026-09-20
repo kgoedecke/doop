@@ -19,6 +19,7 @@ import {
   Computer,
   Download,
   Group,
+  HalfMoon,
   HelpCircle,
   LogOut,
   Menu,
@@ -50,6 +51,7 @@ import {
   SidebarExpand,
   SparkSolid,
   Square,
+  SunLight,
   Text,
   Trash,
   Xmark,
@@ -115,3 +117,5 @@ export const CreditCardIcon = icon(CreditCard)
 export const LockIcon = icon(Lock)
 export const DesktopIcon = icon(Computer)
 export const DownloadIcon = icon(Download)
+export const SunIcon = icon(SunLight)
+export const MoonIcon = icon(HalfMoon)

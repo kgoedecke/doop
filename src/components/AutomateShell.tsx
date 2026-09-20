@@ -130,7 +130,7 @@ export function ClockTile({ size = 24, className }: { size?: number; className?:
         height={icon}
         viewBox="0 0 24 24"
         fill="none"
-        stroke="#fdfdfc"
+        stroke="var(--paper)"
         strokeWidth="1.9"
         strokeLinecap="round"
       >
@@ -189,7 +189,7 @@ export function StepChain({
               key={id}
               role={roleById(id)}
               size={size}
-              className={cn(j > 0 && 'ring-[1.5px] ring-white')}
+              className={cn(j > 0 && 'ring-[1.5px] ring-surface')}
               style={j > 0 ? { marginLeft: -Math.round(size * 0.3) } : undefined}
             />
           ))}

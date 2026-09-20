@@ -6,7 +6,9 @@ import { openCanvasTab } from '../lib/desktop'
 import { ModelAccountPanel } from '../components/ModelAccount'
 import { useAllowance } from '../components/TeamAllowance'
 import { AccountSettings } from '../components/AccountSettings'
+import { AppearanceSettings } from '../components/AppearanceSettings'
 import { AccountMenu, ConnectCard, IconBack, IconChevron, IconSpark, IconUser } from '../components/DashShell'
+import { MoonIcon } from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { Wordmark } from '../components/ui/wordmark'
@@ -24,7 +26,7 @@ import {
   DashTitle,
 } from '../components/ui/dash'
 
-type Pane = 'agent' | 'account'
+type Pane = 'agent' | 'account' | 'appearance'
 
 /**
  * Account settings. Today it holds one thing — which model account the Doop
@@ -85,6 +87,9 @@ export function Settings() {
           <DashNavItem icon={<IconUser />} active={pane === 'account'} onClick={() => setPane('account')}>
             Your account
           </DashNavItem>
+          <DashNavItem icon={<MoonIcon />} active={pane === 'appearance'} onClick={() => setPane('appearance')}>
+            Appearance
+          </DashNavItem>
         </nav>
 
         <div className="min-h-6 flex-1" />
@@ -116,11 +121,15 @@ export function Settings() {
         <DashContent>
           <div className="flex items-start gap-4 md:items-end">
             <div>
-              <DashTitle>{pane === 'agent' ? 'Doop Agent' : 'Your account'}</DashTitle>
+              <DashTitle>
+                {pane === 'agent' ? 'Doop Agent' : pane === 'account' ? 'Your account' : 'Appearance'}
+              </DashTitle>
               <DashSubtitle>
                 {pane === 'agent'
                   ? 'Which model account the agent runs on, for every canvas you work on.'
-                  : 'Who you are on every canvas — and how you get back into this one.'}
+                  : pane === 'account'
+                    ? 'Who you are on every canvas — and how you get back into this one.'
+                    : 'Customize theme, dark mode, and interface display preferences.'}
               </DashSubtitle>
             </div>
           </div>
@@ -131,7 +140,10 @@ export function Settings() {
                 <IconSpark /> Doop Agent
               </TabsTrigger>
               <TabsTrigger value="account">
-                <IconUser /> Your account
+                <IconUser /> Account
+              </TabsTrigger>
+              <TabsTrigger value="appearance">
+                <MoonIcon /> Appearance
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -162,8 +174,10 @@ export function Settings() {
                 <ModelAccountPanel onChange={refresh} />
               </Card>
             </>
-          ) : (
+          ) : pane === 'account' ? (
             <AccountSettings />
+          ) : (
+            <AppearanceSettings />
           )}
         </DashContent>
       </DashMain>

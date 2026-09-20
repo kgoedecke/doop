@@ -18,7 +18,7 @@ function Checkbox({ className, boxClassName, ...props }: React.ComponentProps<'i
       <span
         aria-hidden="true"
         className={cn(
-          'grid size-5 flex-none place-items-center rounded-[5px] border border-ink-faint bg-surface text-xs font-extrabold text-white transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand peer-disabled:opacity-50',
+          'grid size-5 flex-none place-items-center rounded-[5px] border border-ink-faint bg-surface text-xs font-extrabold text-surface transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand peer-disabled:opacity-50',
           boxClassName,
         )}
       >
@@ -49,7 +49,7 @@ function CheckboxCard({
       className={cn(
         'relative mt-3.5 grid cursor-pointer grid-cols-[22px_1fr] items-start gap-3 rounded-[11px] border border-line bg-surface p-[15px] transition-[border-color,background] hover:border-ink-faint',
         checked &&
-          'border-ink hover:border-ink [background:linear-gradient(110deg,rgba(39,67,238,0.05),transparent_72%),var(--surface)]',
+          'border-ink hover:border-ink [background:linear-gradient(110deg,color-mix(in_srgb,var(--brand)_8%,transparent),transparent_72%),var(--surface)]',
         className,
       )}
     >

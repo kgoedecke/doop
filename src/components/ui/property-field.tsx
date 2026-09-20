@@ -138,7 +138,7 @@ export function SelectField<T extends string>({
         onChange={(e) => onChange(e.target.value as T)}
       >
         {options.map((o) => (
-          <option key={o.value} value={o.value}>
+          <option key={o.value} value={o.value} className="bg-surface text-ink">
             {o.label}
           </option>
         ))}
@@ -166,7 +166,7 @@ export function ToggleField({
           aria-pressed={value === on}
           className={cn(
             'flex-1 text-[11px] text-ink-soft transition-colors hover:text-ink',
-            value === on && 'bg-ink font-semibold text-white hover:text-white',
+            value === on && 'bg-ink font-semibold text-paper hover:text-paper',
           )}
           onClick={() => value !== on && onChange(on)}
         >

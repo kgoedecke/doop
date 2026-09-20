@@ -10,12 +10,12 @@ export const planRow = (live: boolean) =>
 export const planMark = (live: boolean) =>
   cn(
     'grid h-9 w-9 flex-none place-items-center rounded-[11px] border border-line bg-paper-deep text-ink',
-    live && 'border-black bg-black text-white',
+    live && 'border-ink bg-ink text-paper',
   )
 export const planPill = (on: boolean) =>
   cn(
     'rounded-full bg-paper-deep px-[9px] py-[3px] text-[11.5px] font-bold text-ink-faint',
-    on && 'bg-[rgba(30,122,76,0.12)] text-[#1a6b43]',
+    on && 'bg-[#3f9c52]/15 text-[#2f7a3f] dark:text-[#52c46f]',
   )
 /* the model tiers as chips — the base .chip recipe reshaped into the picker */
 export const planAsCode =

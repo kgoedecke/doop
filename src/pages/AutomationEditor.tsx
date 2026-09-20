@@ -834,7 +834,7 @@ function StepPicker({ onPick, onCancel }: { onPick: (type: Step['type']) => void
     'flex flex-col items-start gap-2 rounded-[9px] border border-line bg-surface px-3 pb-[11px] pt-3 text-left shadow-card transition-colors hover:border-ink-faint focus-visible:outline-2 focus-visible:outline-brand'
   return (
     <div
-      className="relative rounded-[10px] border-[1.5px] border-dashed border-line bg-white/60 p-3.5"
+      className="relative rounded-[10px] border-[1.5px] border-dashed border-line bg-paper-deep/60 p-3.5"
       onKeyDown={(e) => e.key === 'Escape' && onCancel?.()}
     >
       <Port side="in" dashed />
