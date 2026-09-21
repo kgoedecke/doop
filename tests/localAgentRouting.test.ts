@@ -43,3 +43,9 @@ it('routes hosted selection without requiring a desktop or falling back to anoth
   expect(mocks.online).not.toHaveBeenCalled()
   expect(mocks.account).not.toHaveBeenCalled()
 })
+
+it('pauses hosted scheduling without credential fallback when sign-in is required', async () => {
+  mocks.preference.mockResolvedValue({ enabled: true, transport: 'remote', remoteAuthRequired: true })
+  expect(await pickModel('alice')).toBeNull()
+  expect(mocks.account).not.toHaveBeenCalled()
+})

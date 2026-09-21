@@ -175,3 +175,21 @@ export async function checkRemoteAuth(userId: string): Promise<boolean> {
     controller.abort()
   }
 }
+
+/** Verify a native login completion without trusting the browser's success claim. */
+export async function checkRemoteLogin(userId: string, attemptId: string): Promise<boolean> {
+  const controller = new AbortController()
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)])
+  let succeeded = false
+  try {
+    await remoteEvents(userId, `${remoteIdentity(userId)}:auth`, signal, (event) => {
+      if (event.type === 'auth.finished' && event.attemptId === attemptId) {
+        succeeded = event.authenticated && event.outcome === 'succeeded'
+        controller.abort()
+      }
+    })
+    return succeeded
+  } finally {
+    controller.abort()
+  }
+}

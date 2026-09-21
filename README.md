@@ -636,6 +636,15 @@ the issuer and user IDs stable: changing them creates different workspaces.
 Existing local preferences remain local; hosted execution is explicitly selected.
 Hosted failures never fall back to a different user's account or a server API key.
 
+Claude Code owns credential refresh inside the persistent hosted workspace. A
+confirmed native authentication failure marks the Doop account **Sign-in required**
+and pauses new hosted tasks across its canvases, including after a Doop restart.
+In Settings → Hosted execution, choose **Reconnect Claude** to complete a fresh
+native sign-in. Doop verifies its completion before lifting the pause. Queued
+work becomes eligible again; interrupted cards require an explicit retry because
+previous edits may already have completed. Network failures, unavailable status
+checks, billing errors, and rate limits do not mark the account signed out.
+
 Each canvas run gets a new immutable API session with the selected model, system
 prompt, turn limit, and an exact allowlist of run-scoped Doop MCP tools. Large task
 descriptions are fetched through `get_run_context`, so they are not truncated to

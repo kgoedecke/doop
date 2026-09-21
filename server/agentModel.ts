@@ -263,6 +263,7 @@ export async function pickModel(payerId?: string): Promise<AgentModel | null> {
   if (payerId) {
     const local = await getLocalAgentPreference(payerId)
     if (local.enabled && local.transport === 'remote') {
+      if (local.remoteAuthRequired) return null
       return {
         provider: 'claude-remote',
         label: `Hosted Claude (${local.model})`,

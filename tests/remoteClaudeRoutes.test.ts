@@ -4,6 +4,10 @@ import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 const mocks = vi.hoisted(() => ({
   post: vi.fn(),
+  preference: vi.fn(),
+  clearAuth: vi.fn(),
+  beginAuth: vi.fn(),
+  login: vi.fn(),
   fetch: vi.fn(),
   check: vi.fn(),
   identity: vi.fn(),
@@ -17,13 +21,16 @@ vi.mock('../server/remoteClaudeClient.ts', () => ({
   remotePost: mocks.post,
   remoteFetch: mocks.fetch,
   checkRemoteAuth: mocks.check,
+  checkRemoteLogin: mocks.login,
   remoteIdentity: mocks.identity,
   remoteClaudeConfigured: () => true,
 }))
 vi.mock('../server/auth.ts', () => ({ PUBLIC_ORIGIN: 'https://doop.example', isBanned: async () => mocks.banned }))
 vi.mock('../server/localAgentRuns.ts', () => ({ localAgentRuns: { cancel: mocks.cancel, runningRemote: () => false } }))
 vi.mock('../server/localAgentPreferences.ts', () => ({
-  getLocalAgentPreference: async () => ({ enabled: false, model: 'default' }),
+  getLocalAgentPreference: mocks.preference,
+  clearRemoteAuth: mocks.clearAuth,
+  beginRemoteReauth: mocks.beginAuth,
   saveLocalAgentPreference: mocks.save,
 }))
 vi.mock('../server/resident.ts', () => ({ onFeedback: mocks.wake }))
@@ -51,6 +58,7 @@ afterAll(async () => {
 })
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
   mocks.banned = false
   mocks.impersonated = false
   mocks.post.mockResolvedValue({ sessionId: 'alice:auth' })
@@ -87,6 +95,7 @@ it('blocks cross-origin writes, bans, and impersonation before using hosted iden
   expect((await post('/auth/start', {}, { Origin: 'https://evil.example' })).status).toBe(403)
   mocks.banned = true
   expect((await post('/auth/start', {})).status).toBe(403)
+  mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
   mocks.banned = false
   mocks.impersonated = true
   expect((await fetch(origin + '/events', { headers: { 'X-Doop-User': 'alice' } })).status).toBe(403)
@@ -110,4 +119,31 @@ it('always streams only the caller auth session and forwards the replay cursor',
 it('rejects an old tab after the browser changes Doop accounts', async () => {
   expect((await post('/auth/start', {}, { 'X-Doop-User': 'bob' })).status).toBe(409)
   expect(mocks.post).not.toHaveBeenCalled()
+})
+
+it('requires verified fresh login completion before clearing a blocked account', async () => {
+  const attemptId = crypto.randomUUID()
+  mocks.preference.mockResolvedValue({
+    transport: 'remote',
+    enabled: true,
+    remoteAuthRequired: true,
+    remoteAuthAttempt: attemptId,
+  })
+  expect((await post('/select', { model: 'claude-sonnet-5' })).status).toBe(409)
+  expect(mocks.clearAuth).not.toHaveBeenCalled()
+  mocks.login.mockResolvedValue(false)
+  expect((await post('/select', { model: 'claude-sonnet-5', loginAttemptId: attemptId })).status).toBe(409)
+  mocks.login.mockResolvedValue(true)
+  expect((await post('/select', { model: 'claude-sonnet-5', loginAttemptId: attemptId })).status).toBe(200)
+  expect(mocks.clearAuth).toHaveBeenCalledWith('alice', 0, attemptId)
+  expect(mocks.wake).toHaveBeenCalledWith('canvas')
+})
+
+it('forces a native re-login for a paused account and records its attempt', async () => {
+  const attemptId = crypto.randomUUID()
+  mocks.preference.mockResolvedValue({ remoteAuthRequired: true })
+  const publicKey = { kty: 'EC', crv: 'P-256', x: 'A'.repeat(43), y: 'B'.repeat(43) }
+  expect((await post('/auth/start', { attemptId, publicKey })).status).toBe(202)
+  expect(mocks.beginAuth).toHaveBeenCalledWith('alice', attemptId)
+  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth', { attemptId, publicKey, force: true })
 })

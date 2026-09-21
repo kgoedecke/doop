@@ -37,9 +37,11 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
       )
     }
     refresh()
+    const interval = setInterval(refresh, 10_000)
     window.addEventListener('focus', refresh)
     return () => {
       disposed = true
+      clearInterval(interval)
       window.removeEventListener('focus', refresh)
       login.current?.dispose()
       login.current = undefined
@@ -62,22 +64,22 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
       setBusy(false)
     }
   }
-  async function select(selected = model) {
-    const saved = await api.selectRemoteClaude(userId, selected)
+  async function select(selected = model, loginAttemptId?: string) {
+    const saved = await api.selectRemoteClaude(userId, selected, loginAttemptId)
     useLocalAgent.setState({ preference: saved })
     useStore.getState().allowanceChanged()
     setStatus(await api.remoteClaude(userId))
     setView(null)
   }
   async function connect() {
-    if ((await api.checkRemoteClaude(userId)).authenticated) {
+    if (!status?.authRequired && (await api.checkRemoteClaude(userId)).authenticated) {
       await select()
       return
     }
     login.current?.dispose()
-    const connection = new RemoteClaudeLogin(userId, setView, () => act(() => select()))
+    const connection = new RemoteClaudeLogin(userId, setView, (attemptId) => act(() => select(model, attemptId)))
     login.current = connection
-    await connection.start()
+    await connection.start(status?.authRequired ?? false)
   }
   if (!status?.configured) return null
   return (
@@ -88,11 +90,19 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-display text-[18px] font-extrabold tracking-[-0.02em]">Hosted execution</h3>
-          <span className={planPill(active)}>{active ? 'Active' : 'Available'}</span>
+          <span className={planPill(active)}>
+            {status.authRequired ? 'Sign-in required' : active ? 'Active' : 'Available'}
+          </span>
         </div>
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft">
           Run Claude Code with your own account in a private hosted workspace. Tasks continue when you close Doop.
         </p>
+        {status.authRequired && (
+          <p role="alert" className="mt-2 text-sm text-red-600">
+            Hosted tasks are paused. Reconnect Claude, then retry interrupted tasks; queued tasks will become eligible
+            again.
+          </p>
+        )}
         <div className={actionsRow}>
           {active && (
             <ToggleChipGroup
@@ -118,7 +128,13 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
                   void act(connect)
                 }}
               >
-                {busy ? 'Checking…' : active ? 'Check connection' : 'Connect my account'}
+                {busy
+                  ? 'Checking…'
+                  : status.authRequired
+                    ? 'Reconnect Claude'
+                    : active
+                      ? 'Check connection'
+                      : 'Connect my account'}
               </Button>
             )}
             {active && !view && (

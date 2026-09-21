@@ -32,6 +32,7 @@ it('uses an encrypted native login with ordered output, encrypted input, and no 
   mocks.auth.mockImplementation(async (userId: string, action: string, body: Record<string, unknown>) => {
     expect(userId).toBe('alice')
     if (action === 'start' && body.publicKey) {
+      expect(body.force).toBe(true)
       attemptId = String(body.attemptId)
       key = await crypto.derive(serverPair.privateKey, body.publicKey as JsonWebKey)
       emit({ type: 'auth.started', attemptId, publicKey: serverPair.publicKey, expiresAt: Date.now() + 60000 })
@@ -49,11 +50,12 @@ it('uses an encrypted native login with ordered output, encrypted input, and no 
   const connected = vi.fn(async () => {})
   const login = new RemoteClaudeLogin('alice', (view) => views.push(view), connected)
   try {
-    await login.start()
+    await login.start(true)
     await vi.waitFor(() => expect(views.at(-1)?.text).toContain('https://claude.ai/login'))
     expect(views.at(-1)?.ready).toBe(true)
     await login.send('private-code')
     await vi.waitFor(() => expect(connected).toHaveBeenCalledOnce())
+    expect(connected).toHaveBeenCalledWith(attemptId)
     expect(decrypted).toBe('private-code\r')
     expect(JSON.stringify(mocks.auth.mock.calls)).not.toContain('private-code')
     expect(fetcher).toHaveBeenCalledWith(

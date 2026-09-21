@@ -23,6 +23,9 @@ export function normalizeClaudeModel(model: unknown): ClaudePlanModel {
 }
 
 export interface LocalAgentPreference {
+  remoteAuthAttempt?: string | null
+  remoteAuthRequired?: boolean
+  remoteAuthGeneration?: number
   transport?: 'local' | 'remote'
   enabled: boolean
   model: ClaudeModel
@@ -38,6 +41,7 @@ export interface LocalAgentJob {
 }
 
 export interface LocalAgentResult {
+  authRequired?: boolean
   success: boolean
   text: string
 }

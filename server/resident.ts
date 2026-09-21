@@ -478,6 +478,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             return execTool(block, canvasId, actor, runState)
           },
         })
+        if (result.authRequired) {
+          staleAccount = true
+          accountError = result.text
+        }
         finished = result.success
         crashed = !result.success
         messages.push({ role: 'assistant', content: [{ type: 'text', text: result.text }] })

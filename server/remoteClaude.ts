@@ -5,9 +5,15 @@ import { z } from 'zod'
 import { CLAUDE_MODEL_IDS } from '../shared/localAgent.ts'
 import { isBanned, PUBLIC_ORIGIN } from './auth.ts'
 import { localAgentRuns } from './localAgentRuns.ts'
-import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
+import {
+  beginRemoteReauth,
+  clearRemoteAuth,
+  getLocalAgentPreference,
+  saveLocalAgentPreference,
+} from './localAgentPreferences.ts'
 import {
   checkRemoteAuth,
+  checkRemoteLogin,
   remoteClaudeConfigured,
   remoteFetch,
   remoteIdentity,
@@ -37,8 +43,16 @@ remoteClaudeRouter.use((req, res, next) => {
     else next()
   }, next)
 })
-remoteClaudeRouter.get('/', (req, res) => {
-  res.json({ configured: remoteClaudeConfigured(), running: localAgentRuns.runningRemote(req.user!.id) })
+remoteClaudeRouter.get('/', (req, res, next) => {
+  getLocalAgentPreference(req.user!.id)
+    .then((preference) =>
+      res.json({
+        configured: remoteClaudeConfigured(),
+        running: localAgentRuns.runningRemote(req.user!.id),
+        authRequired: preference.remoteAuthRequired ?? false,
+      }),
+    )
+    .catch(next)
 })
 remoteClaudeRouter.post('/check', (req, res, next) => {
   checkRemoteAuth(req.user!.id)
@@ -47,7 +61,7 @@ remoteClaudeRouter.post('/check', (req, res, next) => {
 })
 remoteClaudeRouter.post('/select', (req, res, next) => {
   const parsed = z
-    .object({ model: z.enum(CLAUDE_MODEL_IDS) })
+    .object({ model: z.enum(CLAUDE_MODEL_IDS), loginAttemptId: z.string().uuid().optional() })
     .strict()
     .safeParse(req.body)
   if (!parsed.success) {
@@ -56,13 +70,27 @@ remoteClaudeRouter.post('/select', (req, res, next) => {
   }
   void (async () => {
     const userId = req.user!.id
+    const previous = await getLocalAgentPreference(userId)
+    if (
+      previous.remoteAuthRequired &&
+      (!parsed.data.loginAttemptId ||
+        previous.remoteAuthAttempt !== parsed.data.loginAttemptId ||
+        !(await checkRemoteLogin(userId, parsed.data.loginAttemptId)))
+    ) {
+      res.status(409).json({ error: 'Reconnect Claude to resume hosted tasks.' })
+      return
+    }
     if (!(await checkRemoteAuth(userId))) {
       res.status(409).json({ error: 'Complete native Claude sign-in first.' })
       return
     }
-    const previous = await getLocalAgentPreference(userId)
     if (previous.transport !== 'remote') await localAgentRuns.cancel(userId)
     await saveLocalAgentPreference(userId, { enabled: true, model: parsed.data.model, transport: 'remote' })
+    await clearRemoteAuth(
+      userId,
+      previous.remoteAuthGeneration ?? 0,
+      previous.remoteAuthRequired ? parsed.data.loginAttemptId : undefined,
+    )
     res.json(await getLocalAgentPreference(userId))
     for (const canvas of store.canvases.values()) if (canAccessCanvas(userId, canvas)) onFeedback(canvas.id)
   })().catch(next)
@@ -96,7 +124,10 @@ const publicKey = z
   })
   .strict()
 const schemas = {
-  start: z.union([z.object({}).strict(), z.object({ attemptId: attempt, publicKey }).strict()]),
+  start: z.union([
+    z.object({}).strict(),
+    z.object({ attemptId: attempt, publicKey, force: z.boolean().optional() }).strict(),
+  ]),
   input: z
     .object({
       attemptId: attempt,
@@ -118,9 +149,17 @@ for (const action of ['start', 'input', 'cancel'] as const) {
       res.status(400).json({ error: 'Invalid encrypted login request.' })
       return
     }
-    remotePost(req.user!.id, action === 'start' ? '/v1/auth' : `/v1/auth/${action}`, parsed.data)
-      .then((result) => res.status(202).json({ sessionId: result.sessionId }))
-      .catch(next)
+    void (async () => {
+      if (action === 'start' && 'attemptId' in parsed.data && 'publicKey' in parsed.data) {
+        const preference = await getLocalAgentPreference(req.user!.id)
+        if (preference.remoteAuthRequired) {
+          await beginRemoteReauth(req.user!.id, parsed.data.attemptId)
+          Object.assign(parsed.data, { force: true })
+        }
+      }
+      const result = await remotePost(req.user!.id, action === 'start' ? '/v1/auth' : `/v1/auth/${action}`, parsed.data)
+      res.status(202).json({ sessionId: result.sessionId })
+    })().catch(next)
   })
 }
 // Only the caller's deterministic auth session is exposed to the browser.

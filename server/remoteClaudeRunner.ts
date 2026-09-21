@@ -1,3 +1,4 @@
+import { getLocalAgentPreference, requireRemoteAuth } from './localAgentPreferences.ts'
 import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
 import type { ClaudeEvent } from '../shared/remoteClaude.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
@@ -53,7 +54,9 @@ export class RemoteResult {
   }
 }
 
-export function runRemoteClaude(userId: string, model: ClaudeModel, request: LocalHarnessRequest) {
+export async function runRemoteClaude(userId: string, model: ClaudeModel, request: LocalHarnessRequest) {
+  const preference = await getLocalAgentPreference(userId)
+  if (preference.remoteAuthRequired) return authRequiredResult()
   // The API bounds request text. Large canvas context stays behind the same
   // per-run MCP authorization as all other canvas data, with no truncation.
   const extended: LocalHarnessRequest = {
@@ -71,7 +74,9 @@ export function runRemoteClaude(userId: string, model: ClaudeModel, request: Loc
         ? Promise.resolve({ type: 'tool_result', tool_use_id: block.id, content: request.prompt })
         : request.execute(block),
   }
-  return localAgentRuns.start(userId, model, extended, (job, signal) => executeRemote(userId, job, extended, signal))
+  return localAgentRuns.start(userId, model, extended, (job, signal) =>
+    executeRemote(userId, job, extended, signal, preference.remoteAuthGeneration ?? 0),
+  )
 }
 
 async function executeRemote(
@@ -79,6 +84,7 @@ async function executeRemote(
   job: LocalAgentJob,
   request: LocalHarnessRequest,
   cancellation: AbortSignal,
+  generation: number,
 ): Promise<LocalAgentResult> {
   const controller = new AbortController()
   const signal = AbortSignal.any([controller.signal, cancellation, AbortSignal.timeout(30 * 60_000)])
@@ -128,7 +134,14 @@ async function executeRemote(
       userId,
       sessionId,
       signal,
-      (event) => {
+      async (event) => {
+        if (event.type === 'auth.required' && event.id === job.id) {
+          await requireRemoteAuth(userId, generation)
+          outcome = authRequiredResult()
+          controller.abort()
+          return
+        }
+        if (outcome?.authRequired) return
         output.accept(event)
         if (event.type === 'error') throw new Error(`Hosted Claude could not run the task (${event.code}).`)
         if (
@@ -175,5 +188,13 @@ async function executeRemote(
     if (sessionId && !finished) {
       await remotePost(userId, '/v1/cancel', { sessionId, messageId: job.id }).catch(() => {})
     }
+  }
+}
+
+function authRequiredResult(): LocalAgentResult {
+  return {
+    success: false,
+    authRequired: true,
+    text: 'Claude sign-in required. Reconnect Claude in Settings → Hosted execution, then retry this task. Previous edits may already have completed.',
   }
 }

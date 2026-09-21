@@ -1,9 +1,11 @@
+vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: vi.fn(), requireRemoteAuth: vi.fn() }))
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateKeyPairSync, verify } from 'node:crypto'
 import {
   remoteBearer,
   remoteIdentity,
   checkRemoteAuth,
+  checkRemoteLogin,
   remoteEvents,
   remotePost,
 } from '../server/remoteClaudeClient.ts'
@@ -154,4 +156,25 @@ it('reassembles bounded results and rejects bad fragments without mixing message
   expect(() =>
     result.accept({ type: 'claude.fragment', id: 'run', eventId: 'bad', total: 100000, index: 0, json: '' }),
   ).toThrow('Invalid')
+})
+
+it('verifies native login completion for the requested attempt only', async () => {
+  configured()
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      sse([
+        { data: { type: 'auth.finished', attemptId: 'old', authenticated: true, outcome: 'succeeded' } },
+        { data: { type: 'auth.finished', attemptId: 'new', authenticated: true, outcome: 'cancelled' } },
+      ]),
+    ),
+  )
+  expect(await checkRemoteLogin('alice', 'new')).toBe(false)
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      sse([{ data: { type: 'auth.finished', attemptId: 'new', authenticated: true, outcome: 'succeeded' } }]),
+    ),
+  )
+  expect(await checkRemoteLogin('alice', 'new')).toBe(true)
 })

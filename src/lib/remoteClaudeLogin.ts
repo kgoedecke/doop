@@ -54,7 +54,7 @@ export class RemoteClaudeLogin {
   constructor(
     private userId: string,
     private update: (view: LoginView) => void,
-    private connected: () => Promise<void>,
+    private connected: (attemptId: string) => Promise<void>,
   ) {}
   private view(status: string) {
     if (!this.controller.signal.aborted)
@@ -65,7 +65,7 @@ export class RemoteClaudeLogin {
         active: !this.finished,
       })
   }
-  async start() {
+  async start(force = false) {
     try {
       this.view('Preparing your private login terminal…')
       this.pair = await this.transport.generate()
@@ -97,7 +97,11 @@ export class RemoteClaudeLogin {
         clearTimeout(timer)
       }
       this.controller.signal.throwIfAborted()
-      await api.remoteClaudeAuth(this.userId, 'start', { attemptId: this.attemptId, publicKey: this.pair.publicKey })
+      await api.remoteClaudeAuth(this.userId, 'start', {
+        attemptId: this.attemptId,
+        publicKey: this.pair.publicKey,
+        ...(force ? { force: true } : {}),
+      })
     } catch (error) {
       this.key = undefined
       this.view(error instanceof Error ? error.message : 'Could not open login. Cancel and retry.')
@@ -133,7 +137,7 @@ export class RemoteClaudeLogin {
           : `Login ${event.outcome}. Cancel and try again.`,
       )
       this.controller.abort()
-      if (event.authenticated && event.outcome === 'succeeded') await this.connected()
+      if (event.authenticated && event.outcome === 'succeeded') await this.connected(this.attemptId)
     } else if (event.type === 'auth.error') {
       if (event.activeAttemptId) this.activeAttemptId = event.activeAttemptId
       throw new Error(

@@ -1,4 +1,5 @@
 export interface RemoteClaudeStatus {
+  authRequired?: boolean
   configured: boolean
   running: boolean
 }
@@ -8,6 +9,7 @@ export type ClaudeEvent = (
   | { type: 'auth.output'; attemptId: string; terminalSequence: number; iv: string; data: string }
   | { type: 'auth.finished'; attemptId: string; authenticated: boolean; outcome: string }
   | { type: 'auth.error'; attemptId: string; code: string; activeAttemptId?: string }
+  | { type: 'auth.required'; id: string }
   | { type: 'auth.status'; authenticated: boolean }
   | { type: 'auth.reset' | 'event_stream_reset' | 'event_cursor_expired' }
   | { type: 'session.ready'; sessionId: string }

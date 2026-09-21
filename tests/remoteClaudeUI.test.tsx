@@ -41,7 +41,7 @@ it('selects hosted execution after verifying this user’s native connection', a
   await act(async () => root.render(<RemoteClaudeRow />))
   await act(async () => connect().click())
   expect(mocks.check).toHaveBeenCalledWith('alice')
-  expect(mocks.select).toHaveBeenCalledWith('alice', 'claude-sonnet-5')
+  expect(mocks.select).toHaveBeenCalledWith('alice', 'claude-sonnet-5', undefined)
   expect(useLocalAgent.getState().preference?.transport).toBe('remote')
   expect(container.textContent).toContain('Disable hosted execution')
 })
@@ -62,4 +62,13 @@ it('renders the API error message without HTTP status or serialized JSON', async
   await act(async () => root.render(<RemoteClaudeRow />))
   await act(async () => connect().click())
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('The hosted Claude workspace did not respond.')
+})
+
+it('shows sign-in required and a reconnect action for a paused hosted account', async () => {
+  mocks.status.mockResolvedValue({ configured: true, running: false, authRequired: true })
+  useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
+  await act(async () => root.render(<RemoteClaudeRow />))
+  expect(container.textContent).toContain('Sign-in required')
+  expect(container.textContent).toContain('Hosted tasks are paused')
+  expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Reconnect Claude')).toBe(true)
 })

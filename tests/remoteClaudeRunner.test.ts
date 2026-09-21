@@ -1,9 +1,16 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { ClaudeEvent } from '../shared/remoteClaude.ts'
-const mocks = vi.hoisted(() => ({ post: vi.fn(), events: vi.fn() }))
+const mocks = vi.hoisted(() => ({ post: vi.fn(), events: vi.fn(), preference: vi.fn(), requireAuth: vi.fn() }))
+vi.mock('../server/localAgentPreferences.ts', () => ({
+  getLocalAgentPreference: mocks.preference,
+  requireRemoteAuth: mocks.requireAuth,
+}))
 vi.mock('../server/remoteClaudeClient.ts', () => ({ remotePost: mocks.post, remoteEvents: mocks.events }))
 import { runRemoteClaude } from '../server/remoteClaudeRunner.ts'
 import { localAgentRuns } from '../server/localAgentRuns.ts'
+beforeEach(() => {
+  mocks.preference.mockResolvedValue({ remoteAuthRequired: false, remoteAuthGeneration: 3 })
+})
 afterEach(async () => {
   await localAgentRuns.cancel('alice')
   vi.unstubAllEnvs()
@@ -81,6 +88,7 @@ it('cancels the remote message and revokes access after a stream failure', async
     execute: vi.fn(),
   })
   expect(result).toEqual({ success: false, text: 'History lost' })
+  expect(mocks.requireAuth).not.toHaveBeenCalled()
   expect(mocks.post).toHaveBeenLastCalledWith(
     'alice',
     '/v1/cancel',
@@ -102,5 +110,28 @@ it('rejects localhost before creating a hosted session and explains the tunnel s
   })
   expect(result.success).toBe(false)
   expect(result.text).toContain('CLAUDE_REMOTE_MCP_ORIGIN')
+  expect(mocks.post).not.toHaveBeenCalled()
+})
+
+it('persists an explicit auth failure for this user and stops dispatching while blocked', async () => {
+  vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  let id = ''
+  mocks.post.mockImplementation(async (_user, path, body) => {
+    if (path === '/v1/messages') id = body.messageId
+    return { sessionId: 'session', receiptId: 'receipt' }
+  })
+  mocks.events.mockImplementation(async (_user, _session, _signal, event, open) => {
+    await open()
+    await event({ type: 'auth.required', id: 'unrelated' })
+    expect(mocks.requireAuth).not.toHaveBeenCalled()
+    await event({ type: 'auth.required', id })
+    await event({ type: 'message.status', id, status: 'failed' })
+  })
+  const request = { canvasId: 'canvas', prompt: 'Task', system: 'Rules', maxTurns: 2, tools: [], execute: vi.fn() }
+  expect(await runRemoteClaude('alice', 'default', request)).toMatchObject({ success: false, authRequired: true })
+  expect(mocks.requireAuth).toHaveBeenCalledWith('alice', 3)
+  mocks.post.mockClear()
+  mocks.preference.mockResolvedValue({ remoteAuthRequired: true })
+  expect(await runRemoteClaude('alice', 'default', request)).toMatchObject({ authRequired: true })
   expect(mocks.post).not.toHaveBeenCalled()
 })
