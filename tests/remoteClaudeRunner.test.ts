@@ -10,7 +10,8 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 it('creates a task-scoped MCP session and delivers complete large context without a desktop', async () => {
-  vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  vi.stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
+  vi.stubEnv('CLAUDE_REMOTE_MCP_ORIGIN', 'https://tools.example')
   const prompt = 'Task '.repeat(20000)
   const execute = vi.fn()
   let messageId = ''
@@ -26,6 +27,7 @@ it('creates a task-scoped MCP session and delivers complete large context withou
         allowedTools: ['mcp__doop__edit', 'mcp__doop__get_run_context'],
       })
       const mcp = (body.mcps as { doop: { url: string; headers: { Authorization: string } } }).doop
+      expect(mcp.url).toMatch(/^https:\/\/tools\.example\/local-agent\/mcp\//)
       messageId = mcp.url.split('/').at(-1)!
       token = mcp.headers.Authorization.slice(7)
       expect(localAgentRuns.poll('alice', 'desktop')).toBeNull()
@@ -85,4 +87,20 @@ it('cancels the remote message and revokes access after a stream failure', async
     expect.objectContaining({ sessionId: 'session', messageId: expect.any(String) }),
   )
   expect(localAgentRuns.runningRemote('alice')).toBe(false)
+})
+
+it('rejects localhost before creating a hosted session and explains the tunnel setting', async () => {
+  vi.stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
+  vi.stubEnv('CLAUDE_REMOTE_MCP_ORIGIN', undefined)
+  const result = await runRemoteClaude('alice', 'default', {
+    canvasId: 'canvas',
+    prompt: 'Task',
+    system: 'Rules',
+    maxTurns: 2,
+    tools: [],
+    execute: vi.fn(),
+  })
+  expect(result.success).toBe(false)
+  expect(result.text).toContain('CLAUDE_REMOTE_MCP_ORIGIN')
+  expect(mocks.post).not.toHaveBeenCalled()
 })

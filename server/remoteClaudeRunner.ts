@@ -86,9 +86,20 @@ async function executeRemote(
   let finished = false
   try {
     signal.throwIfAborted()
-    const origin = new URL(process.env.BETTER_AUTH_URL ?? 'http://localhost:4300')
-    if (origin.protocol !== 'https:')
-      throw new Error('Hosted execution needs a public HTTPS Doop URL for canvas tools.')
+    const origin = new URL(
+      process.env.CLAUDE_REMOTE_MCP_ORIGIN ?? process.env.BETTER_AUTH_URL ?? 'http://localhost:4300',
+    )
+    if (
+      origin.protocol !== 'https:' ||
+      origin.username ||
+      origin.password ||
+      origin.search ||
+      origin.hash ||
+      origin.pathname !== '/'
+    )
+      throw new Error(
+        'Hosted execution needs a public HTTPS address for canvas tools. Set CLAUDE_REMOTE_MCP_ORIGIN to your tunnel origin when developing locally.',
+      )
     if (Buffer.byteLength(job.system) > 32 * 1024)
       throw new Error('The agent system prompt exceeds the hosted 32 KiB limit.')
     const created = await remotePost(

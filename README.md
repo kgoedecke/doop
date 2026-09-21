@@ -620,7 +620,8 @@ Server configuration:
 - `CLAUDE_REMOTE_URL`: the HTTPS API origin, such as `https://cantelop-claude-api.cantelop.dev`.
 - `CLAUDE_REMOTE_ISSUER` and `CLAUDE_REMOTE_AUDIENCE`: must match the API's `AUTH_ISSUER` and `AUTH_AUDIENCE`.
 - `CLAUDE_REMOTE_SIGNING_KEY`: private ES256/P-256 PEM, stored only in Doop's backend environment. Configure its public JWK as the API's `AUTH_PUBLIC_JWK`. This is an application identity key, not a shared Claude credential. Never reuse the API's initial owner bearer token for users.
-- `BETTER_AUTH_URL`: Doop's externally reachable HTTPS origin, used for the run-scoped MCP endpoint.
+- `BETTER_AUTH_URL`: Doop's public origin for sign-in and callbacks.
+- `CLAUDE_REMOTE_MCP_ORIGIN`: optional public HTTPS origin for the run-scoped MCP endpoint; defaults to `BETTER_AUTH_URL`. For local development, keep sign-in on localhost and set this to a tunnel forwarding `/local-agent/mcp/*` to the backend (port 4400 by default). Restart the backend after changing it. The tunnel must remain running while Claude works.
 
 Doop signs five-minute application JWTs with the task requester's Doop user ID as
 `sub`. Each identity gets its own Cantelop workspace and native Claude login. Keep
