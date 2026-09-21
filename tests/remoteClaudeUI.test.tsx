@@ -3,6 +3,36 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ status: vi.fn(), check: vi.fn(), select: vi.fn(), changed: vi.fn() }))
+const loginMocks = vi.hoisted(() => ({
+  text: '',
+  send: vi.fn(),
+  update: undefined as undefined | ((view: { text: string; status: string; ready: boolean; active: boolean }) => void),
+}))
+vi.mock('../src/lib/remoteClaudeLogin', async (original) => {
+  const actual = await original<typeof import('../src/lib/remoteClaudeLogin')>()
+  return {
+    ...actual,
+    RemoteClaudeLogin: class {
+      constructor(_user: string, update: typeof loginMocks.update) {
+        loginMocks.update = update
+      }
+      async start() {
+        loginMocks.update?.({
+          text: loginMocks.text,
+          status: 'Sign in to Claude in a new tab, then return here.',
+          ready: true,
+          active: true,
+        })
+      }
+      async send(value: string) {
+        loginMocks.send(value)
+        loginMocks.update?.({ text: loginMocks.text, status: 'Verifying sign-in…', ready: false, active: true })
+      }
+      dispose() {}
+      async cancel() {}
+    },
+  }
+})
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
 vi.mock('../src/lib/api', () => ({
   api: { remoteClaude: mocks.status, checkRemoteClaude: mocks.check, selectRemoteClaude: mocks.select },
@@ -69,6 +99,39 @@ it('shows sign-in required and a reconnect action for a paused hosted account', 
   useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
   await act(async () => root.render(<RemoteClaudeRow />))
   expect(container.textContent).toContain('Sign-in required')
-  expect(container.textContent).toContain('Hosted tasks are paused')
+  expect(container.textContent).toContain('Connect Claude to resume hosted tasks')
   expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Reconnect Claude')).toBe(true)
+})
+
+it('shows one sign-in action and keeps native output collapsed until needed', async () => {
+  mocks.check.mockResolvedValue({ authenticated: false })
+  loginMocks.text =
+    'Opening browser to sign in…\nhttps://claude.com/oauth/authorize?test=1\nPaste code here if prompted >'
+  await act(async () => root.render(<RemoteClaudeRow />))
+  await act(async () => connect().click())
+  const links = container.querySelectorAll('a')
+  expect(links).toHaveLength(1)
+  expect(links[0]?.textContent).toContain('Open Claude sign-in')
+  expect(links[0]?.target).toBe('_blank')
+  expect(container.querySelector('details')?.open).toBe(false)
+  expect(container.querySelector('pre')?.closest('details')).not.toBeNull()
+  expect(container.querySelector('label[for="hosted-sign-in-code"]')?.textContent).toBe('Code from Claude')
+  const complete = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Complete sign-in')!
+  expect(complete.disabled).toBe(true)
+  const input = container.querySelector<HTMLInputElement>('#hosted-sign-in-code')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'test-code')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => complete.click())
+  expect(loginMocks.send).toHaveBeenCalledWith('test-code')
+  expect(container.querySelector('[role="status"]')?.textContent).toBe('Verifying sign-in…')
+})
+it('waits for a code prompt before showing the code field', async () => {
+  mocks.check.mockResolvedValue({ authenticated: false })
+  loginMocks.text = 'Preparing login'
+  await act(async () => root.render(<RemoteClaudeRow />))
+  await act(async () => connect().click())
+  expect(container.querySelector('#hosted-sign-in-code')).toBeNull()
+  expect(container.querySelector('a')).toBeNull()
 })

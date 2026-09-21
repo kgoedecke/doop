@@ -67,7 +67,7 @@ export class RemoteClaudeLogin {
   }
   async start(force = false) {
     try {
-      this.view('Preparing your private login terminal…')
+      this.view('Preparing secure sign-in…')
       this.pair = await this.transport.generate()
       this.controller.signal.throwIfAborted()
       await api.remoteClaudeAuth(this.userId, 'start', {})
@@ -117,7 +117,7 @@ export class RemoteClaudeLogin {
     if (event.type === 'auth.started') {
       this.key = await this.transport.derive(this.pair!.privateKey, event.publicKey)
       this.expiresAt = event.expiresAt
-      this.view('Open the Anthropic link and follow the native terminal prompts.')
+      this.view('Preparing your Claude sign-in link…')
     } else if (event.type === 'auth.output') {
       if (event.terminalSequence <= this.outputSequence) return
       if (!this.key || event.terminalSequence !== this.outputSequence + 1)
@@ -126,14 +126,14 @@ export class RemoteClaudeLogin {
         this.text + (await this.transport.open(this.key, event, `${this.attemptId}:output:${event.terminalSequence}`))
       ).slice(-64 * 1024)
       this.outputSequence = event.terminalSequence
-      this.view('Complete the sign-in steps shown below.')
+      this.view('Sign in to Claude in a new tab, then return here.')
     } else if (event.type === 'auth.finished') {
       this.finished = true
       this.key = undefined
       this.pair = undefined
       this.view(
         event.authenticated && event.outcome === 'succeeded'
-          ? 'Connected. Selecting hosted execution…'
+          ? 'Claude connected. Enabling hosted execution…'
           : `Login ${event.outcome}. Cancel and try again.`,
       )
       this.controller.abort()
@@ -194,14 +194,14 @@ export class RemoteClaudeLogin {
   async send(text: string) {
     if (!this.key || this.sending || this.finished) return
     this.sending = true
-    this.view('Sending response to the native terminal…')
+    this.view('Verifying sign-in…')
     try {
       const sequence = this.inputSequence + 1
       const frame = await this.transport.seal(this.key, text + '\r', `${this.attemptId}:input:${sequence}`)
       await api.remoteClaudeAuth(this.userId, 'input', { attemptId: this.attemptId, sequence, ...frame })
       this.inputSequence = sequence
       this.sending = false
-      this.view('Waiting for Claude…')
+      this.view('Verifying sign-in…')
     } catch {
       this.key = undefined
       this.sending = false

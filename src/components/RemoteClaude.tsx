@@ -26,6 +26,8 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
   const login = useRef<RemoteClaudeLogin>()
   const active = !!preference?.enabled && preference.transport === 'remote'
   const model = normalizeClaudeModel(preference?.model)
+  const signInUrl = view ? anthropicLinks(view.text).at(-1) : undefined
+  const codeRequested = !!view && /(?:paste|enter)[^\n]{0,50}\bcode\b/i.test(view.text)
   useEffect(() => {
     let disposed = false
     const refresh = () => {
@@ -91,16 +93,15 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-display text-[18px] font-extrabold tracking-[-0.02em]">Hosted execution</h3>
           <span className={planPill(active)}>
-            {status.authRequired ? 'Sign-in required' : active ? 'Active' : 'Available'}
+            {status.authRequired ? 'Sign-in required' : active ? 'Claude connected' : 'Available'}
           </span>
         </div>
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft">
           Run Claude Code with your own account in a private hosted workspace. Tasks continue when you close Doop.
         </p>
         {status.authRequired && (
-          <p role="alert" className="mt-2 text-sm text-red-600">
-            Hosted tasks are paused. Reconnect Claude, then retry interrupted tasks; queued tasks will become eligible
-            again.
+          <p className="mt-2 text-sm text-ink-soft">
+            Connect Claude to resume hosted tasks. You can retry interrupted tasks after signing in.
           </p>
         )}
         <div className={actionsRow}>
@@ -169,66 +170,109 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
           </div>
         </div>
         {view && (
-          <div className="mt-4 space-y-3">
-            <p role="status" className="text-sm">
+          <div className="mt-4 max-w-xl space-y-5">
+            <p role="status" aria-live="polite" className="text-sm text-ink-soft">
               {view.status}
             </p>
-            {anthropicLinks(view.text).map((url) => (
-              <a className="block text-sm underline" key={url} href={url} target="_blank" rel="noopener noreferrer">
-                Open Anthropic sign-in
-              </a>
-            ))}
-            <pre
-              className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-black/5 p-3 text-xs"
-              aria-label="Native Claude login output"
-            >
-              {view.text}
-            </pre>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault()
-                const value = input
-                setInput('')
-                void login.current?.send(value)
-              }}
-              className="space-y-2"
-            >
-              <label htmlFor="hosted-terminal-input" className="block text-sm">
-                Response requested by Claude’s terminal
-              </label>
-              <Input
-                id="hosted-terminal-input"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={1024}
-                disabled={!view.ready}
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-              />
-              <p className="text-xs text-ink-soft">
-                Enter a code only when the terminal asks. An empty response presses Enter. Keep this page open during
-                sign-in.
-              </p>
-              <Button disabled={!view.ready} type="submit">
-                Send response
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => {
-                  void act(async () => {
-                    await login.current?.cancel()
-                    login.current = undefined
-                    setView(null)
-                    setInput('')
-                  })
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold">1. Sign in to Claude</h4>
+              {signInUrl && view.active ? (
+                <Button asChild>
+                  <a href={signInUrl} target="_blank" rel="noopener noreferrer">
+                    Open Claude sign-in <span aria-hidden>↗</span>
+                  </a>
+                </Button>
+              ) : view.active ? (
+                <Button disabled>Preparing sign-in…</Button>
+              ) : null}
+              <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
+            </div>
+            {codeRequested && view.active && (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (!input.trim() || !view.ready) return
+                  const value = input.trim()
+                  setInput('')
+                  void login.current?.send(value)
+                }}
+                className="space-y-2"
+              >
+                <h4 className="text-sm font-semibold">2. Enter your sign-in code</h4>
+                <label htmlFor="hosted-sign-in-code" className="block text-sm">
+                  Code from Claude
+                </label>
+                <Input
+                  id="hosted-sign-in-code"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={1024}
+                  disabled={!view.ready}
+                  value={input}
+                  aria-describedby="hosted-code-help"
+                  onChange={(event) => setInput(event.target.value)}
+                />
+                <p id="hosted-code-help" className="text-xs text-ink-soft">
+                  Paste the code from the Claude sign-in page. Keep this page open while we verify it.
+                </p>
+                <Button disabled={!view.ready || !input.trim()} type="submit">
+                  Complete sign-in
+                </Button>
+              </form>
+            )}
+            <details className="text-xs text-ink-soft">
+              <summary className="cursor-pointer">Troubleshooting details</summary>
+              <pre
+                className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-black/5 p-3"
+                aria-label="Native Claude login output"
+              >
+                {view.text}
+              </pre>
+              <form
+                className="mt-2 space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (!view.ready) return
+                  const value = input
+                  setInput('')
+                  void login.current?.send(value)
                 }}
               >
-                Cancel login
-              </Button>
-            </form>
+                <label htmlFor="hosted-terminal-input" className="block">
+                  Other response requested by Claude
+                </label>
+                <Input
+                  id="hosted-terminal-input"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={1024}
+                  disabled={!view.ready}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                />
+                <p>Use this only for another terminal prompt. An empty response presses Enter.</p>
+                <Button disabled={!view.ready} type="submit" variant="ghost">
+                  Send response
+                </Button>
+              </form>
+            </details>
+            <Button
+              type="button"
+              variant="bare"
+              disabled={busy}
+              onClick={() => {
+                void act(async () => {
+                  await login.current?.cancel()
+                  login.current = undefined
+                  setView(null)
+                  setInput('')
+                })
+              }}
+            >
+              Cancel
+            </Button>
           </div>
         )}
         <p className="mt-3 text-xs text-ink-faint">
