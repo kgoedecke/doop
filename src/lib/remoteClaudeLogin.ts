@@ -66,11 +66,17 @@ export class RemoteClaudeLogin {
       })
   }
   async start(force = false) {
+    let slowStart: ReturnType<typeof setTimeout> | undefined
     try {
       this.view('Preparing secure sign-in…')
       this.pair = await this.transport.generate()
       this.controller.signal.throwIfAborted()
-      await api.remoteClaudeAuth(this.userId, 'start', {})
+      // Opening the SDK event stream provisions the workspace. Subscribe before
+      // dispatching login, without first running a redundant native auth check.
+      this.view('Connecting to your hosted workspace…')
+      slowStart = setTimeout(() => {
+        this.view('Your hosted workspace is taking a moment to start. The sign-in button will appear when it’s ready.')
+      }, 6000)
       let opened!: () => void
       let failed!: (error: unknown) => void
       const ready = new Promise<void>((resolve, reject) => {
@@ -95,8 +101,10 @@ export class RemoteClaudeLogin {
         ])
       } finally {
         clearTimeout(timer)
+        clearTimeout(slowStart)
       }
       this.controller.signal.throwIfAborted()
+      this.view('Starting Claude sign-in…')
       await api.remoteClaudeAuth(this.userId, 'start', {
         attemptId: this.attemptId,
         publicKey: this.pair.publicKey,
@@ -105,6 +113,8 @@ export class RemoteClaudeLogin {
     } catch (error) {
       this.key = undefined
       this.view(error instanceof Error ? error.message : 'Could not open login. Cancel and retry.')
+    } finally {
+      clearTimeout(slowStart)
     }
   }
   private async event(event: ClaudeEvent) {

@@ -75,7 +75,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
     setView(null)
   }
   async function connect() {
-    if (!status?.authRequired && (await api.checkRemoteClaude(userId)).authenticated) {
+    if (active && !status?.authRequired && (await api.checkRemoteClaude(userId)).authenticated) {
       await select()
       return
     }

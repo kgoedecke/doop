@@ -64,28 +64,37 @@ afterEach(() => {
   container.remove()
 })
 const connect = () =>
-  Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Connect my account')!
-it('selects hosted execution after verifying this user’s native connection', async () => {
+  Array.from(container.querySelectorAll('button')).find((button) =>
+    ['Connect my account', 'Check connection'].includes(button.textContent ?? ''),
+  )!
+it('checks an enabled hosted connection before selecting it again', async () => {
+  useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
   mocks.check.mockResolvedValue({ authenticated: true })
   mocks.select.mockResolvedValue({ enabled: true, transport: 'remote', model: 'claude-sonnet-5' })
   await act(async () => root.render(<RemoteClaudeRow />))
-  await act(async () => connect().click())
+  await act(async () =>
+    Array.from(container.querySelectorAll('button'))
+      .find((b) => b.textContent === 'Check connection')!
+      .click(),
+  )
   expect(mocks.check).toHaveBeenCalledWith('alice')
   expect(mocks.select).toHaveBeenCalledWith('alice', 'claude-sonnet-5', undefined)
   expect(useLocalAgent.getState().preference?.transport).toBe('remote')
   expect(container.textContent).toContain('Disable hosted execution')
 })
-it('preserves local selection and shows a retryable error when the upstream check fails', async () => {
+it('preserves selection and shows a retryable error when the upstream check fails', async () => {
+  useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
   mocks.check.mockRejectedValue(new Error('Hosted runtime unavailable'))
   await act(async () => root.render(<RemoteClaudeRow />))
   await act(async () => connect().click())
   expect(mocks.select).not.toHaveBeenCalled()
-  expect(useLocalAgent.getState().preference?.transport).toBe('local')
+  expect(useLocalAgent.getState().preference?.transport).toBe('remote')
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('Hosted runtime unavailable')
   expect(connect().disabled).toBe(false)
 })
 
 it('renders the API error message without HTTP status or serialized JSON', async () => {
+  useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
   mocks.check.mockRejectedValue(
     new ApiError(502, JSON.stringify({ error: 'The hosted Claude workspace did not respond.' })),
   )

@@ -51,6 +51,7 @@ it('uses an encrypted native login with ordered output, encrypted input, and no 
   const login = new RemoteClaudeLogin('alice', (view) => views.push(view), connected)
   try {
     await login.start(true)
+    expect(mocks.auth).not.toHaveBeenCalledWith('alice', 'start', {})
     await vi.waitFor(() => expect(views.at(-1)?.text).toContain('https://claude.ai/login'))
     expect(views.at(-1)?.ready).toBe(true)
     await login.send('private-code')
