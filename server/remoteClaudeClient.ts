@@ -155,34 +155,17 @@ export async function remoteEvents(
 export async function checkRemoteAuth(userId: string): Promise<boolean> {
   const controller = new AbortController()
   const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)])
-  const { sessionId } = await remotePost(userId, '/v1/auth', {}, signal)
+  // /v1/auth already dispatches a fresh check. Its durable output can be replayed
+  // after subscribing; match that receipt so historical statuses cannot be accepted.
+  const { sessionId, receiptId } = await remotePost(userId, '/v1/auth', {}, signal)
   let authenticated: boolean | undefined
-  let receiptId: string | undefined
-  const statuses: { messageId?: string; authenticated: boolean }[] = []
-  const accept = () => {
-    const status = receiptId && statuses.find((event) => event.messageId === receiptId)
-    if (status) {
-      authenticated = status.authenticated
-      controller.abort()
-    }
-  }
   try {
-    await remoteEvents(
-      userId,
-      sessionId,
-      signal,
-      (event) => {
-        if (event.type === 'auth.status') {
-          if (statuses.length >= 256) statuses.shift()
-          statuses.push({ messageId: event.message_id, authenticated: event.authenticated })
-          accept()
-        }
-      },
-      async () => {
-        receiptId = (await remotePost(userId, '/v1/auth/complete', {}, signal)).receiptId
-        accept()
-      },
-    )
+    await remoteEvents(userId, sessionId, signal, (event) => {
+      if (event.type === 'auth.status' && event.message_id === receiptId) {
+        authenticated = event.authenticated
+        controller.abort()
+      }
+    })
     if (authenticated === undefined)
       throw new Error(
         'The hosted Claude workspace did not respond. Sign-in has not started. The hosting service may be unavailable; retry once it is running.',

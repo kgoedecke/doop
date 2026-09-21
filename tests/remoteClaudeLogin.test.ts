@@ -14,7 +14,10 @@ it('uses an encrypted native login with ordered output, encrypted input, and no 
   let key!: CryptoKey
   let attemptId = ''
   let decrypted = ''
-  const emit = (event: unknown) => controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))
+  const emit = (event: unknown) =>
+    controller.enqueue(
+      new TextEncoder().encode(`data: ${JSON.stringify({ message_id: 'login-receipt', data: event })}\n\n`),
+    )
   const fetcher = vi.fn(
     async () =>
       new Response(

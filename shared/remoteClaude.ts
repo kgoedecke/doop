@@ -52,7 +52,15 @@ export async function consumeClaudeEvents(
           .find((line) => line.startsWith('id:'))
           ?.slice(3)
           .trim()
-        if (data) await onEvent(JSON.parse(data) as ClaudeEvent)
+        if (data) {
+          const value = JSON.parse(data)
+          // Cantelop wraps application output; receipt metadata belongs to the envelope.
+          const event =
+            value && typeof value.data === 'object' && value.data !== null
+              ? { ...value.data, message_id: value.message_id }
+              : value
+          await onEvent(event as ClaudeEvent)
+        }
         if (cursor) onCursor(cursor)
       }
       if (buffer.length > 256 * 1024) throw new Error('Claude event exceeded the frame limit.')

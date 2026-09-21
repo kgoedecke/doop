@@ -49,31 +49,18 @@ describe('hosted application identity and stream', () => {
     vi.stubEnv('CLAUDE_REMOTE_URL', 'https://example.com/other')
     expect(() => remoteBearer('alice')).toThrow('HTTPS origin')
   })
-  it('accepts only the status for the fresh auth-check receipt, including an event arriving before its POST response', async () => {
+  it('accepts only the fresh auth receipt from replayed Cantelop envelopes', async () => {
     configured()
-    let stream!: ReadableStreamDefaultController<Uint8Array>
     const fetcher = vi.fn(async (url: string | URL | Request) => {
-      const path = String(url)
-      if (path.endsWith('/v1/auth')) return Response.json({ sessionId: 'alice:auth', receiptId: 'old' })
-      if (path.includes('/v1/events'))
-        return new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              stream = controller
-              controller.enqueue(
-                new TextEncoder().encode('data: {"type":"auth.status","authenticated":true,"message_id":"old"}\n\n'),
-              )
-            },
-          }),
-        )
-      stream.enqueue(
-        new TextEncoder().encode('data: {"type":"auth.status","authenticated":false,"message_id":"fresh"}\n\n'),
-      )
-      return Response.json({ sessionId: 'alice:auth', receiptId: 'fresh' })
+      if (String(url).endsWith('/v1/auth')) return Response.json({ sessionId: 'alice:auth', receiptId: 'fresh' })
+      return sse([
+        { message_id: 'old', data: { type: 'auth.status', authenticated: true } },
+        { message_id: 'fresh', data: { type: 'auth.status', authenticated: false, message_id: 'old' } },
+      ])
     })
     vi.stubGlobal('fetch', fetcher)
     expect(await checkRemoteAuth('alice')).toBe(false)
-    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(fetcher).toHaveBeenCalledTimes(2)
   })
   it('fails on reset without replaying a dispatched task', async () => {
     configured()
