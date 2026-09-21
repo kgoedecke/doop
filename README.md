@@ -630,6 +630,10 @@ leaves task-token authorization in place. Restart `npm run dev` after the addres
 is printed, then retry the card. Keep both processes running; restarting the
 tunnel gives you a new address and requires another backend restart.
 
+The hosted client targets the API's SDK 0.11 request/reply contract (API v7):
+auth checks return their status directly in HTTP 200 responses. Native login
+terminal output, task progress, and re-authentication events still use SSE.
+
 Doop signs five-minute application JWTs with the task requester's Doop user ID as
 `sub`. Each identity gets its own Cantelop workspace and native Claude login. Keep
 the issuer and user IDs stable: changing them creates different workspaces.

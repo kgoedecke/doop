@@ -51,18 +51,43 @@ describe('hosted application identity and stream', () => {
     vi.stubEnv('CLAUDE_REMOTE_URL', 'https://example.com/other')
     expect(() => remoteBearer('alice')).toThrow('HTTPS origin')
   })
-  it('accepts only the fresh auth receipt from replayed Cantelop envelopes', async () => {
+  it.each([true, false])('reads auth status %s directly without opening an event stream', async (authenticated) => {
     configured()
-    const fetcher = vi.fn(async (url: string | URL | Request) => {
-      if (String(url).endsWith('/v1/auth')) return Response.json({ sessionId: 'alice:auth', receiptId: 'fresh' })
-      return sse([
-        { message_id: 'old', data: { type: 'auth.status', authenticated: true } },
-        { message_id: 'fresh', data: { type: 'auth.status', authenticated: false, message_id: 'old' } },
-      ])
-    })
+    const fetcher = vi.fn(async (_url: string | URL | Request) =>
+      Response.json({
+        sessionId: `${remoteIdentity('alice')}:auth`,
+        type: 'auth.status',
+        authenticated,
+      }),
+    )
     vi.stubGlobal('fetch', fetcher)
-    expect(await checkRemoteAuth('alice')).toBe(false)
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(await checkRemoteAuth('alice')).toBe(authenticated)
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher.mock.calls[0]?.[0]).toBe('https://claude.example/v1/auth')
+  })
+  it.each([
+    { type: 'auth.status', authenticated: 'false' },
+    { type: 'auth.status' },
+    { type: 'error', authenticated: false },
+    { type: 'auth.status', authenticated: true, sessionId: 'bob:auth' },
+    { receiptId: 'old-api-receipt' },
+  ])('rejects malformed, foreign, or legacy auth replies instead of reporting sign-out', async (reply) => {
+    configured()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ sessionId: `${remoteIdentity('alice')}:auth`, ...reply })),
+    )
+    await expect(checkRemoteAuth('alice')).rejects.toThrow('invalid authentication status')
+  })
+  it('allows overhead beyond the API request wait and reports timeouts without leaking bodies', async () => {
+    configured()
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('sensitive upstream detail', { status: 504 })),
+    )
+    await expect(checkRemoteAuth('alice')).rejects.toThrow('does not mean you are signed out')
+    expect(timeout).toHaveBeenCalledWith(45_000)
   })
   it('fails on reset without replaying a dispatched task', async () => {
     configured()

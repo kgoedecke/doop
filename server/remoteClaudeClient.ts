@@ -58,17 +58,23 @@ export async function remotePost(
   path: string,
   body: unknown,
   signal?: AbortSignal,
-): Promise<{ sessionId: string; messageId?: string; receiptId: string }> {
+): Promise<{ sessionId: string; messageId?: string; receiptId?: string; type?: string; authenticated?: boolean }> {
   const json = JSON.stringify(body)
   if (Buffer.byteLength(json) > 48 * 1024)
     throw new Error('Hosted Claude request exceeds 48 KiB. Reduce the task context.')
+  // Request/reply checks can wait 30 seconds inside the API, before transport overhead.
+  const timeout = AbortSignal.timeout(
+    path === '/v1/auth' || path === '/v1/auth/complete' || path === '/v1/snapshot' ? 45_000 : 30_000,
+  )
   const response = await remoteFetch(userId, path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: json,
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : undefined,
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   })
   if (!response.ok) {
+    if (response.status === 504)
+      throw new Error('Hosted Claude did not respond in time. Try again; this does not mean you are signed out.')
     // Never expose upstream bodies: configuration can contain MCP credentials.
     throw new Error(`Hosted Claude request failed (${response.status}). Check the connection in Settings.`)
   }
@@ -153,27 +159,15 @@ export async function remoteEvents(
 }
 
 export async function checkRemoteAuth(userId: string): Promise<boolean> {
-  const controller = new AbortController()
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)])
-  // /v1/auth already dispatches a fresh check. Its durable output can be replayed
-  // after subscribing; match that receipt so historical statuses cannot be accepted.
-  const { sessionId, receiptId } = await remotePost(userId, '/v1/auth', {}, signal)
-  let authenticated: boolean | undefined
-  try {
-    await remoteEvents(userId, sessionId, signal, (event) => {
-      if (event.type === 'auth.status' && event.message_id === receiptId) {
-        authenticated = event.authenticated
-        controller.abort()
-      }
-    })
-    if (authenticated === undefined)
-      throw new Error(
-        'The hosted Claude workspace did not respond. Sign-in has not started. The hosting service may be unavailable; retry once it is running.',
-      )
-    return authenticated
-  } finally {
-    controller.abort()
-  }
+  // SDK 0.11 auth checks are request/reply operations, not streamed events.
+  const reply = await remotePost(userId, '/v1/auth', {})
+  if (
+    reply?.sessionId !== `${remoteIdentity(userId)}:auth` ||
+    reply.type !== 'auth.status' ||
+    typeof reply.authenticated !== 'boolean'
+  )
+    throw new Error('Hosted Claude returned an invalid authentication status. Try again.')
+  return reply.authenticated
 }
 
 /** Verify a native login completion without trusting the browser's success claim. */
