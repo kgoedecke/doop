@@ -43,6 +43,14 @@ bun run dev    # opens the shell against the local vite server (localhost:4300)
 
 `bun run dev` expects the dev server in the repo root to be running.
 
+Local development automatically creates and signs in a `Local Tester` account
+when no session exists. Its generated credentials are saved in the webview's
+local storage, and its data lives in your local database. This only runs in
+Vite development on localhost; production builds keep the normal login flow.
+To test login itself, set `VITE_DEV_AUTO_LOGIN=false` in the root `.env`, restart
+the root dev server, and sign out. Leave SMTP and signup domain restrictions
+unset for automatic local signup.
+
 ## Local Claude CLI
 
 Settings → Doop Agent includes **Claude Plan** in shells built with the
