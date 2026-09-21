@@ -623,6 +623,13 @@ Server configuration:
 - `BETTER_AUTH_URL`: Doop's public origin for sign-in and callbacks.
 - `CLAUDE_REMOTE_MCP_ORIGIN`: optional public HTTPS origin for the run-scoped MCP endpoint; defaults to `BETTER_AUTH_URL`. For local development, keep sign-in on localhost and set this to a tunnel forwarding `/local-agent/mcp/*` to the backend (port 4400 by default). Restart the backend after changing it. The tunnel must remain running while Claude works.
 
+For a temporary Cloudflare tunnel during local development, install `cloudflared`
+and run `node scripts/dev-mcp-tunnel.mjs` in a second terminal. The helper exposes
+only `/local-agent/mcp/*`, writes its HTTPS origin to your ignored `.env`, and
+leaves task-token authorization in place. Restart `npm run dev` after the address
+is printed, then retry the card. Keep both processes running; restarting the
+tunnel gives you a new address and requires another backend restart.
+
 Doop signs five-minute application JWTs with the task requester's Doop user ID as
 `sub`. Each identity gets its own Cantelop workspace and native Claude login. Keep
 the issuer and user IDs stable: changing them creates different workspaces.
