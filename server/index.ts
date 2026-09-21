@@ -21,7 +21,7 @@ import { integrationsRouter } from './integrations.ts'
 import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
-import { db, initDb } from './db/index.ts'
+import { db, initDb, closeDb } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
@@ -122,12 +122,17 @@ process.on('unhandledRejection', (reason) => {
 
 /* flush debounced frame writes before the process dies — with a hard-exit
    timeout so a wedged DB can never keep the process (and the port) alive */
+let shuttingDown = false
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(sig, () => {
-    setTimeout(() => process.exit(0), 1500).unref()
+  process.on(sig, () => {
+    if (shuttingDown) return
+    shuttingDown = true
+    setTimeout(() => process.exit(1), 10_000).unref()
     persist
       .flush((id) => store.getFrame(id))
       .catch((err) => console.error('flush on shutdown failed', err))
+      .then(() => closeDb())
+      .catch((err) => console.error('database shutdown failed', err))
       .finally(() => process.exit(0))
   })
 }
