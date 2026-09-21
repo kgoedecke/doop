@@ -25,6 +25,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
   const [error, setError] = useState('')
   const login = useRef<RemoteClaudeLogin>()
   const active = !!preference?.enabled && preference.transport === 'remote'
+  const needsReconnect = active && !!status?.authRequired
   const model = normalizeClaudeModel(preference?.model)
   const signInUrl = view ? anthropicLinks(view.text).at(-1) : undefined
   const codeRequested = !!view && /(?:paste|enter)[^\n]{0,50}\bcode\b/i.test(view.text)
@@ -93,13 +94,13 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-display text-[18px] font-extrabold tracking-[-0.02em]">Hosted execution</h3>
           <span className={planPill(active)}>
-            {status.authRequired ? 'Sign-in required' : active ? 'Claude connected' : 'Available'}
+            {needsReconnect ? 'Sign-in required' : active ? 'Claude connected' : 'Available'}
           </span>
         </div>
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft">
           Run Claude Code with your own account in a private hosted workspace. Tasks continue when you close Doop.
         </p>
-        {status.authRequired && (
+        {needsReconnect && (
           <p className="mt-2 text-sm text-ink-soft">
             Connect Claude to resume hosted tasks. You can retry interrupted tasks after signing in.
           </p>
@@ -131,7 +132,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
               >
                 {busy
                   ? 'Checking…'
-                  : status.authRequired
+                  : needsReconnect
                     ? 'Reconnect Claude'
                     : active
                       ? 'Check connection'
