@@ -54,9 +54,11 @@ export function Settings() {
 
   const meter = allowance
     ? allowance.byoModel
-      ? allowance.byoKind === 'claude-local'
-        ? 'Claude CLI selected — runs on your connected desktop.'
-        : `Running on your ${allowance.byoKind === 'anthropic-key' ? 'Claude API key' : allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT subscription'}.`
+      ? allowance.byoKind === 'claude-remote'
+        ? 'Hosted execution selected — runs using your Claude account.'
+        : allowance.byoKind === 'claude-local'
+          ? 'Claude CLI selected — runs on your connected desktop.'
+          : `Running on your ${allowance.byoKind === 'anthropic-key' ? 'Claude API key' : allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT subscription'}.`
       : allowance.limit <= 0
         ? 'No free tasks on this server — connect an account to use the Doop Agent.'
         : left === 0

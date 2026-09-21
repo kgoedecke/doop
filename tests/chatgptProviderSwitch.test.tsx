@@ -29,6 +29,7 @@ vi.mock('../src/lib/localAgent', () => ({
 vi.mock('../src/lib/store', () => ({ useStore: { getState: () => ({ allowanceChanged: vi.fn() }) } }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/components/LocalClaude', () => ({ LocalClaudeRow: () => null }))
+vi.mock('../src/components/RemoteClaude', () => ({ RemoteClaudeRow: () => null }))
 import { ModelAccountPanel } from '../src/components/ModelAccount'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root

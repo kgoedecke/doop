@@ -23,6 +23,7 @@ export function normalizeClaudeModel(model: unknown): ClaudePlanModel {
 }
 
 export interface LocalAgentPreference {
+  transport?: 'local' | 'remote'
   enabled: boolean
   model: ClaudeModel
 }

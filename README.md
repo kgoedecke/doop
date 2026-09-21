@@ -606,3 +606,44 @@ changes under the same license.
 
 The **doop name and logo are trademarks** and are not covered by the code license —
 please rebrand derived services.
+
+## Hosted execution with your own Claude account
+
+Doop can run canvas tasks through the Cantelop Claude Code API, without keeping a
+local desktop open. In Settings, choose **Hosted execution → Connect my account**.
+The native Claude Code login runs in your private hosted workspace. Open the
+Anthropic link and send any requested terminal response through the encrypted
+login console. Doop never extracts or stores your Claude OAuth credentials.
+
+Server configuration:
+
+- `CLAUDE_REMOTE_URL`: the HTTPS API origin, such as `https://cantelop-claude-api.cantelop.dev`.
+- `CLAUDE_REMOTE_ISSUER` and `CLAUDE_REMOTE_AUDIENCE`: must match the API's `AUTH_ISSUER` and `AUTH_AUDIENCE`.
+- `CLAUDE_REMOTE_SIGNING_KEY`: private ES256/P-256 PEM, stored only in Doop's backend environment. Configure its public JWK as the API's `AUTH_PUBLIC_JWK`. This is an application identity key, not a shared Claude credential. Never reuse the API's initial owner bearer token for users.
+- `BETTER_AUTH_URL`: Doop's externally reachable HTTPS origin, used for the run-scoped MCP endpoint.
+
+Doop signs five-minute application JWTs with the task requester's Doop user ID as
+`sub`. Each identity gets its own Cantelop workspace and native Claude login. Keep
+the issuer and user IDs stable: changing them creates different workspaces.
+Existing local preferences remain local; hosted execution is explicitly selected.
+Hosted failures never fall back to a different user's account or a server API key.
+
+Each canvas run gets a new immutable API session with the selected model, system
+prompt, turn limit, and an exact allowlist of run-scoped Doop MCP tools. Large task
+descriptions are fetched through `get_run_context`, so they are not truncated to
+fit the message endpoint. System prompts must fit the API's 32 KiB limit and the
+whole session configuration must fit 48 KiB. The runtime has no built-in filesystem
+or shell tools. MCP calls recheck canvas membership and bans, and their tokens are
+revoked when a run ends, is stopped, or times out after 30 minutes.
+
+Output reconnects use Cantelop's bounded replay. Lost event history fails the run
+rather than repeating potentially completed edits. Closing the browser does not
+stop a task; restarting the Doop backend interrupts its in-memory run/tool context.
+Existing task recovery marks claimed work failed for explicit retry. There is no
+exactly-once edit guarantee. Repository imports still require an API-key provider;
+they do not use the canvas execution harness.
+
+**Disable hosted execution** stops Doop runs and changes provider selection. It
+does not remove native credentials from the hosted workspace: the current API has
+no logout or workspace-deletion endpoint. Local execution remains available in
+the desktop app. These settings do not change Anthropic billing or account limits.

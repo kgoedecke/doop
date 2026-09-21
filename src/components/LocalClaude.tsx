@@ -96,7 +96,7 @@ export function LocalClaudeRow() {
       setBusy(false)
     }
   }
-  const active = preference?.enabled ?? false
+  const active = !!preference?.enabled && preference.transport !== 'remote'
   const connected = !!native?.connected && !!native?.enabled
   const supported = hasLocalClaude()
   const selectedModel = normalizeClaudeModel(preference?.model)

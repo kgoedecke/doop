@@ -41,13 +41,15 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
     return (
       <span className="text-[12px] text-[#1e7a4c]">
         Doop Agent on your{' '}
-        {allowance.byoKind === 'claude-local'
-          ? 'local Claude CLI'
-          : allowance.byoKind === 'anthropic-key'
-            ? 'Claude API key'
-            : allowance.byoKind === 'openai-key'
-              ? 'OpenAI key'
-              : 'ChatGPT'}
+        {allowance.byoKind === 'claude-remote'
+          ? 'hosted Claude account'
+          : allowance.byoKind === 'claude-local'
+            ? 'local Claude CLI'
+            : allowance.byoKind === 'anthropic-key'
+              ? 'Claude API key'
+              : allowance.byoKind === 'openai-key'
+                ? 'OpenAI key'
+                : 'ChatGPT'}
       </span>
     )
   }

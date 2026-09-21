@@ -52,7 +52,10 @@ export async function selectLocalAgent(userId: string, preference: LocalAgentPre
 }
 
 export async function disconnectLocalAgent(userId: string) {
-  await api.setLocalAgent({ enabled: false, model: useLocalAgent.getState().preference?.model ?? 'default' })
+  const preference = useLocalAgent.getState().preference
+  if (preference?.transport !== 'remote') {
+    await api.setLocalAgent({ enabled: false, model: preference?.model ?? 'default' })
+  }
   await invokeClaude('claude_stop')
   await invokeClaude('claude_connect', { userId, enabled: false })
   await refreshLocalAgent(userId)

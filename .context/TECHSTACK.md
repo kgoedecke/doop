@@ -81,3 +81,17 @@
 - Husky 9.1.7 + lint-staged 17.3.0 - pre-commit hook runs `lint-staged` (`.husky/pre-commit`).
 - commitlint 21.2.2 (`@commitlint/config-conventional`) - conventional commit / PR title linting,
   config in `commitlint.config.js`.
+
+## 12. Hosted Claude execution
+
+- `server/remoteClaudeClient.ts` signs per-user ES256 application JWTs and handles
+  Cantelop SSE replay; `server/remoteClaudeRunner.ts` adapts the resident canvas harness.
+- `server/remoteClaude.ts` provides authenticated native-login proxies. The browser's
+  temporary ECDH/AES-GCM keys encrypt terminal input and output; Claude credentials stay
+  in the user's hosted workspace. Doop stores execution preference, not Claude tokens.
+- Migration `0018_remote_claude` adds the local/remote transport selector. Existing
+  preferences default to local. `LocalAgentRuns` manages both run lifetimes and scoped
+  MCP capabilities; remote runs cannot be claimed by desktop polling.
+- `src/components/RemoteClaude.tsx` provides hosted connection, model selection, and
+  stop/disable controls. See README's hosted execution section for environment settings
+  and recovery limits. The API runtime must start successfully before native sign-in works.

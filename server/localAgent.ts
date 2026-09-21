@@ -32,7 +32,8 @@ localAgentRouter.put('/', (req, res, next) => {
   }
   const userId = req.user!.id
   void (async () => {
-    if (!parsed.data.enabled) await localAgentRuns.cancel(userId)
+    const previous = await getLocalAgentPreference(userId)
+    if (!parsed.data.enabled || previous.transport === 'remote') await localAgentRuns.cancel(userId)
     await saveLocalAgentPreference(userId, parsed.data)
     res.json(await getLocalAgentPreference(userId))
     wake(userId)
@@ -53,7 +54,7 @@ localAgentRouter.post('/poll', (req, res, next) => {
   void (async () => {
     const userId = req.user!.id
     const preference = await getLocalAgentPreference(userId)
-    if (!preference.enabled) {
+    if (!preference.enabled || preference.transport === 'remote') {
       res.json({ job: null, enabled: false })
       return
     }

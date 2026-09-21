@@ -1,3 +1,4 @@
+import { RemoteClaudeRow } from './RemoteClaude'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
 import { AgentIcon } from './AgentIcon'
 import { CLAUDE_MODELS } from '../../shared/localAgent'
@@ -572,6 +573,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         </div>
       </section>
 
+      <RemoteClaudeRow />
       {desktop && <LocalClaudeRow />}
       <section className={planRow(onClaudeKey && !local?.enabled)}>
         <span className={planMark(onClaudeKey && !local?.enabled)}>

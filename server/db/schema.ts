@@ -562,8 +562,9 @@ export const automationRuns = pgTable(
   (t) => [index('automation_runs_automation_idx').on(t.automationId)],
 )
 
-/** Local execution preference; Claude credentials never leave the desktop. */
+/** Execution preference only; native Claude owns credentials on the chosen host. */
 export const localAgentPreferences = pgTable('local_agent_preferences', {
+  transport: text('transport').notNull().default('local'),
   userId: text('user_id').primaryKey(),
   enabled: boolean('enabled').notNull().default(false),
   model: text('model').notNull().default('default'),
