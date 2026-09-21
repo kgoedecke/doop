@@ -7,6 +7,7 @@ import { isBanned, PUBLIC_ORIGIN } from './auth.ts'
 import { localAgentRuns } from './localAgentRuns.ts'
 import {
   beginRemoteReauth,
+  disableRemoteExecution,
   clearRemoteAuth,
   getLocalAgentPreference,
   saveLocalAgentPreference,
@@ -98,10 +99,21 @@ remoteClaudeRouter.post('/select', (req, res, next) => {
 
 remoteClaudeRouter.post('/disable', (req, res, next) => {
   void (async () => {
-    const preference = await getLocalAgentPreference(req.user!.id)
+    await disableRemoteExecution(req.user!.id)
     await localAgentRuns.cancel(req.user!.id, 'remote')
-    if (preference.transport === 'remote')
-      await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
+    try {
+      const result = await remotePost(req.user!.id, '/v1/auth/logout', {})
+      if (
+        result.sessionId !== `${remoteIdentity(req.user!.id)}:auth` ||
+        result.type !== 'auth.status' ||
+        result.authenticated !== false
+      )
+        throw new Error('Sign-out not confirmed')
+    } catch {
+      throw new Error(
+        'Hosted execution is disabled, but Claude sign-out could not be confirmed. Retry disabling to finish signing out.',
+      )
+    }
     res.json(await getLocalAgentPreference(req.user!.id))
   })().catch(next)
 })

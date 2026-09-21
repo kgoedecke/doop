@@ -4,6 +4,7 @@ import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 const mocks = vi.hoisted(() => ({
   post: vi.fn(),
+  disable: vi.fn(),
   preference: vi.fn(),
   clearAuth: vi.fn(),
   beginAuth: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('../server/auth.ts', () => ({ PUBLIC_ORIGIN: 'https://doop.example', isB
 vi.mock('../server/localAgentRuns.ts', () => ({ localAgentRuns: { cancel: mocks.cancel, runningRemote: () => false } }))
 vi.mock('../server/localAgentPreferences.ts', () => ({
   getLocalAgentPreference: mocks.preference,
+  disableRemoteExecution: mocks.disable,
   clearRemoteAuth: mocks.clearAuth,
   beginRemoteReauth: mocks.beginAuth,
   saveLocalAgentPreference: mocks.save,
@@ -146,4 +148,28 @@ it('forces a native re-login for a paused account and records its attempt', asyn
   expect((await post('/auth/start', { attemptId, publicKey })).status).toBe(202)
   expect(mocks.beginAuth).toHaveBeenCalledWith('alice', attemptId)
   expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth', { attemptId, publicKey, force: true })
+})
+
+it('disables and stops hosted tasks before confirming native sign-out', async () => {
+  mocks.post.mockResolvedValueOnce({ sessionId: 'alice:auth', type: 'auth.status', authenticated: false })
+  expect((await post('/disable', {})).status).toBe(200)
+  expect(mocks.disable).toHaveBeenCalledWith('alice')
+  expect(mocks.cancel).toHaveBeenCalledWith('alice', 'remote')
+  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth/logout', {})
+  expect(mocks.disable.mock.invocationCallOrder[0]).toBeLessThan(mocks.cancel.mock.invocationCallOrder[0]!)
+  expect(mocks.cancel.mock.invocationCallOrder[0]).toBeLessThan(mocks.post.mock.invocationCallOrder[0]!)
+})
+it('does not claim successful logout when the API fails or still reports signed in', async () => {
+  for (const result of [
+    { sessionId: 'alice:auth' },
+    { sessionId: 'alice:auth', type: 'auth.status', authenticated: true },
+  ]) {
+    mocks.post.mockResolvedValueOnce(result)
+    const response = await post('/disable', {})
+    expect(response.status).toBe(502)
+    expect((await response.json()).error).toContain('sign-out could not be confirmed')
+  }
+  mocks.post.mockRejectedValueOnce(new Error('timeout'))
+  expect((await post('/disable', {})).status).toBe(502)
+  expect(mocks.disable).toHaveBeenCalledTimes(3)
 })

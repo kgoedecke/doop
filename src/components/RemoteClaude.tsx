@@ -137,7 +137,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
                       : 'Connect my account'}
               </Button>
             )}
-            {active && !view && (
+            {(active || status.authRequired) && !view && (
               <Button
                 disabled={busy}
                 variant="ghost"
@@ -233,7 +233,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
         )}
         <p className="mt-3 text-xs text-ink-faint">
           Claude handles sign-in and stores its credentials in your hosted workspace. Disabling execution stops Doop
-          tasks; it does not sign you out of that workspace.
+          tasks and signs you out of Claude. Connecting again requires sign-in.
         </p>
         {error && (
           <p role="alert" className="mt-3 text-sm text-accent-ink">

@@ -13,6 +13,7 @@ import {
   requireRemoteAuth,
   clearRemoteAuth,
   beginRemoteReauth,
+  disableRemoteExecution,
 } from '../server/localAgentPreferences.ts'
 const client = new PGlite()
 beforeAll(async () => {
@@ -22,6 +23,23 @@ beforeAll(async () => {
     remote_auth_generation integer NOT NULL DEFAULT 0, remote_auth_attempt text
   )`)
   state.db = drizzle(client)
+})
+
+it('disabling hosted execution invalidates old login completions and preserves local execution', async () => {
+  await saveLocalAgentPreference('logout', { enabled: true, transport: 'remote', model: 'default' })
+  await requireRemoteAuth('logout', 0)
+  await beginRemoteReauth('logout', 'old-login')
+  await disableRemoteExecution('logout')
+  expect(await getLocalAgentPreference('logout')).toMatchObject({
+    enabled: false,
+    remoteAuthRequired: true,
+    remoteAuthAttempt: null,
+    remoteAuthGeneration: 1,
+  })
+  await expect(clearRemoteAuth('logout', 0, 'old-login')).rejects.toThrow('changed')
+  await saveLocalAgentPreference('local-user', { enabled: true, transport: 'local', model: 'default' })
+  await disableRemoteExecution('local-user')
+  expect(await getLocalAgentPreference('local-user')).toMatchObject({ enabled: true, transport: 'local' })
 })
 afterAll(() => client.close())
 it('retains the auth gate, isolates users, and fences failures from before reconnect', async () => {

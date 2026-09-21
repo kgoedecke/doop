@@ -64,7 +64,11 @@ export async function remotePost(
     throw new Error('Hosted Claude request exceeds 48 KiB. Reduce the task context.')
   // Request/reply checks can wait 30 seconds inside the API, before transport overhead.
   const timeout = AbortSignal.timeout(
-    path === '/v1/auth' || path === '/v1/auth/complete' || path === '/v1/snapshot' ? 45_000 : 30_000,
+    path === '/v1/auth/logout'
+      ? 60_000
+      : path === '/v1/auth' || path === '/v1/auth/complete' || path === '/v1/snapshot'
+        ? 45_000
+        : 30_000,
   )
   const response = await remoteFetch(userId, path, {
     method: 'POST',
