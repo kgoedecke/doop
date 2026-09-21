@@ -137,7 +137,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
                       : 'Connect my account'}
               </Button>
             )}
-            {(active || status.authRequired) && !view && (
+            {active && !view && (
               <Button
                 disabled={busy}
                 variant="ghost"
