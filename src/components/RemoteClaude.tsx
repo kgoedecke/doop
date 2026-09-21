@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { authClient } from '../lib/auth'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useLocalAgent } from '../lib/localAgent'
 import { useStore } from '../lib/store'
 import { RemoteClaudeLogin, anthropicLinks, type LoginView } from '../lib/remoteClaudeLogin'
@@ -51,7 +51,13 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
     try {
       await fn()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update hosted execution.')
+      setError(
+        e instanceof ApiError && typeof e.body.error === 'string'
+          ? e.body.error
+          : e instanceof Error
+            ? e.message
+            : 'Could not update hosted execution.',
+      )
     } finally {
       setBusy(false)
     }

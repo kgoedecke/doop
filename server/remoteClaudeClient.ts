@@ -183,7 +183,10 @@ export async function checkRemoteAuth(userId: string): Promise<boolean> {
         accept()
       },
     )
-    if (authenticated === undefined) throw new Error('Claude connection check timed out. Try again.')
+    if (authenticated === undefined)
+      throw new Error(
+        'The hosted Claude workspace did not respond. Sign-in has not started. The hosting service may be unavailable; retry once it is running.',
+      )
     return authenticated
   } finally {
     controller.abort()

@@ -6,9 +6,16 @@ const mocks = vi.hoisted(() => ({ status: vi.fn(), check: vi.fn(), select: vi.fn
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
 vi.mock('../src/lib/api', () => ({
   api: { remoteClaude: mocks.status, checkRemoteClaude: mocks.check, selectRemoteClaude: mocks.select },
-  ApiError: class extends Error {},
+  ApiError: class extends Error {
+    body: Record<string, unknown>
+    constructor(status: number, text: string) {
+      super(`${status} ${text}`)
+      this.body = JSON.parse(text)
+    }
+  },
 }))
 vi.mock('../src/lib/store', () => ({ useStore: { getState: () => ({ allowanceChanged: mocks.changed }) } }))
+import { ApiError } from '../src/lib/api'
 import { RemoteClaudeRow } from '../src/components/RemoteClaude'
 import { useLocalAgent } from '../src/lib/localAgent'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -46,4 +53,13 @@ it('preserves local selection and shows a retryable error when the upstream chec
   expect(useLocalAgent.getState().preference?.transport).toBe('local')
   expect(container.querySelector('[role="alert"]')?.textContent).toBe('Hosted runtime unavailable')
   expect(connect().disabled).toBe(false)
+})
+
+it('renders the API error message without HTTP status or serialized JSON', async () => {
+  mocks.check.mockRejectedValue(
+    new ApiError(502, JSON.stringify({ error: 'The hosted Claude workspace did not respond.' })),
+  )
+  await act(async () => root.render(<RemoteClaudeRow />))
+  await act(async () => connect().click())
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe('The hosted Claude workspace did not respond.')
 })
