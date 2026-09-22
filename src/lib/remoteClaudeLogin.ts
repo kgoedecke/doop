@@ -49,12 +49,14 @@ export class RemoteClaudeLogin {
   private inputSequence = 0
   private sending = false
   private text = ''
+  /** replay position of the last handled auth frame, so the server can verify `auth.finished` */
+  private cursor = ''
   private finished = false
   private expiresAt = Date.now() + 10 * 60_000
   constructor(
     private userId: string,
     private update: (view: LoginView) => void,
-    private connected: (attemptId: string) => Promise<void>,
+    private connected: (attemptId: string, cursor: string) => Promise<void>,
   ) {}
   private view(status: string) {
     if (!this.controller.signal.aborted)
@@ -147,7 +149,7 @@ export class RemoteClaudeLogin {
           : `Login ${event.outcome}. Cancel and try again.`,
       )
       this.controller.abort()
-      if (event.authenticated && event.outcome === 'succeeded') await this.connected(this.attemptId)
+      if (event.authenticated && event.outcome === 'succeeded') await this.connected(this.attemptId, this.cursor)
     } else if (event.type === 'auth.error') {
       if (event.activeAttemptId) this.activeAttemptId = event.activeAttemptId
       throw new Error(
@@ -158,12 +160,11 @@ export class RemoteClaudeLogin {
     }
   }
   private async subscribe(opened: () => void) {
-    let cursor = ''
     while (!this.controller.signal.aborted && !this.finished) {
       let response: Response
       try {
         response = await fetch('/api/remote-claude/events', {
-          headers: { 'X-Doop-User': this.userId, ...(cursor ? { 'Last-Event-ID': cursor } : {}) },
+          headers: { 'X-Doop-User': this.userId, ...(this.cursor ? { 'Last-Event-ID': this.cursor } : {}) },
           signal: this.controller.signal,
           cache: 'no-store',
         })
@@ -188,7 +189,7 @@ export class RemoteClaudeLogin {
             }
           },
           (id) => {
-            cursor = id
+            this.cursor = id
           },
           this.controller.signal,
         )

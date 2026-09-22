@@ -243,11 +243,15 @@ export const api = {
     req<RemoteClaudeStatus>('/api/remote-claude', { headers: { 'X-Doop-User': userId } }),
   checkRemoteClaude: (userId: string) =>
     req<{ authenticated: boolean }>('/api/remote-claude/check', { method: 'POST', headers: { 'X-Doop-User': userId } }),
-  selectRemoteClaude: (userId: string, model: string, loginAttemptId?: string) =>
+  selectRemoteClaude: (userId: string, model: string, loginAttemptId?: string, loginCursor?: string) =>
     req<LocalAgentPreference>('/api/remote-claude/select', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
-      body: JSON.stringify({ model, ...(loginAttemptId ? { loginAttemptId } : {}) }),
+      body: JSON.stringify({
+        model,
+        ...(loginAttemptId ? { loginAttemptId } : {}),
+        ...(loginCursor ? { loginCursor } : {}),
+      }),
     }),
   disableRemoteClaude: (userId: string) =>
     req<LocalAgentPreference>('/api/remote-claude/disable', { method: 'POST', headers: { 'X-Doop-User': userId } }),

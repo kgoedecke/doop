@@ -92,8 +92,9 @@ export async function remoteEvents(
   signal: AbortSignal,
   onEvent: (event: ClaudeEvent) => Promise<void> | void,
   onOpen?: () => Promise<void>,
+  initialCursor = '',
 ) {
-  let cursor = ''
+  let cursor = initialCursor
   let opened = false
   let failures = 0
   while (!signal.aborted) {
@@ -106,8 +107,11 @@ export async function remoteEvents(
         signal: connectionSignal,
       })
       clearTimeout(openingTimer)
-      if (!response.ok)
-        throw new ClaudeStreamReset(`Hosted Claude stream failed (${response.status}). Reconnect in Settings.`)
+      // 5xx and 429 are transient on reconnect; they spend the retry budget below.
+      if (!response.ok) {
+        const message = `Hosted Claude stream failed (${response.status}). Reconnect in Settings.`
+        throw response.status === 429 || response.status >= 500 ? new Error(message) : new ClaudeStreamReset(message)
+      }
       // Start reading before dispatch, including if dispatch waits on the runtime.
       let handlerError: unknown
       const reading = consumeClaudeEvents(
@@ -172,18 +176,27 @@ export async function checkRemoteAuth(userId: string): Promise<boolean> {
   return reply.authenticated
 }
 
-/** Verify a native login completion without trusting the browser's success claim. */
-export async function checkRemoteLogin(userId: string, attemptId: string): Promise<boolean> {
+/** Verify a native login completion without trusting the browser's success claim.
+ * Streams without a cursor are live-only, so replay from the browser's last
+ * cursor before `auth.finished`; a forged cursor can only fail the check. */
+export async function checkRemoteLogin(userId: string, attemptId: string, cursor = ''): Promise<boolean> {
   const controller = new AbortController()
   const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)])
   let succeeded = false
   try {
-    await remoteEvents(userId, `${remoteIdentity(userId)}:auth`, signal, (event) => {
-      if (event.type === 'auth.finished' && event.attemptId === attemptId) {
-        succeeded = event.authenticated && event.outcome === 'succeeded'
-        controller.abort()
-      }
-    })
+    await remoteEvents(
+      userId,
+      `${remoteIdentity(userId)}:auth`,
+      signal,
+      (event) => {
+        if (event.type === 'auth.finished' && event.attemptId === attemptId) {
+          succeeded = event.authenticated && event.outcome === 'succeeded'
+          controller.abort()
+        }
+      },
+      undefined,
+      cursor,
+    )
     return succeeded
   } finally {
     controller.abort()

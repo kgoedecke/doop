@@ -62,7 +62,11 @@ remoteClaudeRouter.post('/check', (req, res, next) => {
 })
 remoteClaudeRouter.post('/select', (req, res, next) => {
   const parsed = z
-    .object({ model: z.enum(CLAUDE_MODEL_IDS), loginAttemptId: z.string().uuid().optional() })
+    .object({
+      model: z.enum(CLAUDE_MODEL_IDS),
+      loginAttemptId: z.string().uuid().optional(),
+      loginCursor: z.string().max(256).optional(),
+    })
     .strict()
     .safeParse(req.body)
   if (!parsed.success) {
@@ -76,7 +80,7 @@ remoteClaudeRouter.post('/select', (req, res, next) => {
       previous.remoteAuthRequired &&
       (!parsed.data.loginAttemptId ||
         previous.remoteAuthAttempt !== parsed.data.loginAttemptId ||
-        !(await checkRemoteLogin(userId, parsed.data.loginAttemptId)))
+        !(await checkRemoteLogin(userId, parsed.data.loginAttemptId, parsed.data.loginCursor)))
     ) {
       res.status(409).json({ error: 'Reconnect Claude to resume hosted tasks.' })
       return

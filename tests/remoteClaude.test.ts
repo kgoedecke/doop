@@ -223,3 +223,38 @@ it('verifies native login completion for the requested attempt only', async () =
   )
   expect(await checkRemoteLogin('alice', 'new')).toBe(true)
 })
+
+it('replays login completion from the browser cursor before auth.finished', async () => {
+  configured()
+  const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
+    expect(options.headers).toMatchObject({ 'Last-Event-ID': 'login-stream:2' })
+    return sse([{ type: 'auth.finished', attemptId: 'new', authenticated: true, outcome: 'succeeded' }])
+  })
+  vi.stubGlobal('fetch', fetcher)
+  expect(await checkRemoteLogin('alice', 'new', 'login-stream:2')).toBe(true)
+  expect(fetcher).toHaveBeenCalledOnce()
+})
+
+it.each([429, 503])('retries transient stream HTTP %s without redispatching', async (status) => {
+  configured()
+  const controller = new AbortController()
+  const opened = vi.fn(async () => {})
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(sse([{ type: 'auth.status', authenticated: false }]))
+    .mockResolvedValueOnce(new Response(null, { status }))
+    .mockResolvedValueOnce(sse([{ type: 'auth.status', authenticated: true }]))
+  vi.stubGlobal('fetch', fetcher)
+  await remoteEvents(
+    'alice',
+    'session',
+    controller.signal,
+    (event) => {
+      if (event.type === 'auth.status' && event.authenticated) controller.abort()
+    },
+    opened,
+  )
+  expect(fetcher).toHaveBeenCalledTimes(3)
+  expect(opened).toHaveBeenCalledOnce()
+  expect(fetcher.mock.calls[2]?.[1]?.headers).toMatchObject({ 'Last-Event-ID': 'stream:1' })
+})

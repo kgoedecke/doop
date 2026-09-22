@@ -3,12 +3,12 @@
 This directory is Doop's Cantelop Edge API and native Claude Session service.
 Imported from `cantelop-claude-api` at commit
 `0d2fd96556228191ab5711b883a11117a5410c21`. Make future changes here.
-It deploys independently of Doop's Express server to the existing
-`cantelop-claude-api` app. Moving the source does not move user data.
+It deploys independently of Doop's Express server to the
+`doop-claude-runtime` app named in `cantelop.json` (or your local manifest override). Moving the source does not move user data.
 
-The service pins `@cantelop/sdk@0.11.0` (verified against the npm registry).
+The SDK dependency is pinned in `package.json` and `bun.lock`.
 See the [official SDK documentation](https://github.com/stepandel/cantelop-sdk).
-Use Node 22+, Bun 1.3.10, Cantelop CLI 0.11.1 or newer, and Docker with linux/amd64 support.
+Use Node 22+, Bun 1.3.10, Cantelop CLI 0.11.2 or newer, and Docker with linux/amd64 support.
 
 From the repository root:
 
@@ -83,7 +83,11 @@ Anthropic's [hosting conditions](https://code.claude.com/docs/en/legal-and-compl
 
 ## Local setup
 
-Requires Node.js 22+, the Cantelop CLI, Bun, and Docker with `linux/amd64` support.
+Requires Node.js 22+, Cantelop CLI 0.11.2+, Bun, and Docker with `linux/amd64` support.
+CLI 0.11.2 waits for the container HTTP runtime to become ready before sending
+requests, avoiding the startup race in 0.11.1. For Doop browser testing, follow
+the [fully local setup](../README.md#fully-local-claude-development-no-tunnel);
+the commands below run this service alone from the `cantelop/` directory.
 
 The dev script runs `cantelop dev --container` so Sessions use this service's
 Docker image, including Claude Code, Python, and `/opt/app/login-pty.py`, with
@@ -226,7 +230,7 @@ The HTTP 200 response contains `{sessionId, type: "session.state", configured, m
 
 All API routes except health require an application JWT; the static login page is public. Workspace selection is derived from verified identity; clients cannot select another user's Workspace. Session ownership is checked before dispatch, requests, and event subscription.
 
-With SDK 0.11.0, auth checks and snapshots use `session.request()` and return HTTP 200 with the result instead of a 202 receipt. Clients must read these response bodies instead of waiting for status/snapshot events. Requests wait up to 30 seconds; timeout returns HTTP 504 with `code: "request_wait_timeout"`. A timeout or disconnect stops waiting, not execution; these read-only checks can be repeated. Interactive login start/input/cancel, Session configuration, and model queue/steer/cancel remain asynchronous (202), with outcomes delivered as events. CLI 0.11.1 supports local request/reply verification. For this service, use the container dev script and follow the [fully local Doop setup](../README.md#fully-local-claude-development-no-tunnel). Local request/reply state is in memory and is lost when the CLI restarts.
+Auth checks and snapshots use `session.request()` and return HTTP 200 with the result instead of a 202 receipt. Clients must read these response bodies instead of waiting for status/snapshot events. Requests wait up to 30 seconds; timeout returns HTTP 504 with `code: "request_wait_timeout"`. A timeout or disconnect stops waiting, not execution; these read-only checks can be repeated. Interactive login start/input/cancel, Session configuration, and model queue/steer/cancel remain asynchronous (202), with outcomes delivered as events. CLI 0.11.2 or newer supports local container request/reply verification. For this service, use the container dev script and follow the [fully local Doop setup](../README.md#fully-local-claude-development-no-tunnel). Local request/reply state is in memory and is lost when the CLI restarts.
 
 ## Queue, cancellation, and durability
 

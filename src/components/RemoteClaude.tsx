@@ -113,8 +113,8 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
       setBusy(false)
     }
   }
-  async function select(selected = model, loginAttemptId?: string) {
-    const saved = await api.selectRemoteClaude(userId, selected, loginAttemptId)
+  async function select(selected = model, loginAttemptId?: string, loginCursor?: string) {
+    const saved = await api.selectRemoteClaude(userId, selected, loginAttemptId, loginCursor)
     useLocalAgent.setState({ preference: saved })
     useStore.getState().allowanceChanged()
     setStatus(await api.remoteClaude(userId))
@@ -126,7 +126,9 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
       return
     }
     login.current?.dispose()
-    const connection = new RemoteClaudeLogin(userId, setView, (attemptId) => act(() => select(model, attemptId)))
+    const connection = new RemoteClaudeLogin(userId, setView, (attemptId, cursor) =>
+      act(() => select(model, attemptId, cursor)),
+    )
     login.current = connection
     await connection.start(status?.authRequired ?? false)
   }

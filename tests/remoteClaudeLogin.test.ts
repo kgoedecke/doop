@@ -14,9 +14,12 @@ it('uses an encrypted native login with ordered output, encrypted input, and no 
   let key!: CryptoKey
   let attemptId = ''
   let decrypted = ''
+  let eventSequence = 0
   const emit = (event: unknown) =>
     controller.enqueue(
-      new TextEncoder().encode(`data: ${JSON.stringify({ message_id: 'login-receipt', data: event })}\n\n`),
+      new TextEncoder().encode(
+        `id: login-stream:${++eventSequence}\ndata: ${JSON.stringify({ message_id: 'login-receipt', data: event })}\n\n`,
+      ),
     )
   const fetcher = vi.fn(
     async () =>
@@ -56,7 +59,7 @@ it('uses an encrypted native login with ordered output, encrypted input, and no 
     expect(views.at(-1)?.ready).toBe(true)
     await login.send('private-code')
     await vi.waitFor(() => expect(connected).toHaveBeenCalledOnce())
-    expect(connected).toHaveBeenCalledWith(attemptId)
+    expect(connected).toHaveBeenCalledWith(attemptId, 'login-stream:2')
     expect(decrypted).toBe('private-code\r')
     expect(JSON.stringify(mocks.auth.mock.calls)).not.toContain('private-code')
     expect(fetcher).toHaveBeenCalledWith(

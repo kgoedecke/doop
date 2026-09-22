@@ -78,7 +78,7 @@ it('checks an enabled hosted connection before selecting it again', async () => 
       .click(),
   )
   expect(mocks.check).toHaveBeenCalledWith('alice')
-  expect(mocks.select).toHaveBeenCalledWith('alice', 'claude-sonnet-5', undefined)
+  expect(mocks.select).toHaveBeenCalledWith('alice', 'claude-sonnet-5', undefined, undefined)
   expect(useLocalAgent.getState().preference?.transport).toBe('remote')
   expect(container.textContent).toContain('Active · Connected')
   expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Disconnect')).toBe(true)
