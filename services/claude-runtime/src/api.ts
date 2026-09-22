@@ -49,6 +49,9 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
     Response.json({ sessionId, ...reply, ...extra }, { headers: { 'cache-control': 'no-store' } })
   route('GET', '/login', async () => loginPage())
   route('GET', '/health', async () => Response.json({ ok: true }))
+  route('GET', '/v1/identity', async (request) =>
+    Response.json(await identity(request, env), { headers: { 'cache-control': 'no-store' } }),
+  )
   route('POST', '/v1/auth', async (request) => {
     const user = await identity(request, env)
     const body = await readBody(request)

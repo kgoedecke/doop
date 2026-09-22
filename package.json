@@ -21,7 +21,9 @@
     "claude:check": "bun run --cwd services/claude-runtime check",
     "claude:test": "bun run --cwd services/claude-runtime test",
     "claude:build": "bun run --cwd services/claude-runtime build",
-    "claude:dev": "bun run --cwd services/claude-runtime dev"
+    "claude:dev": "bun run --cwd services/claude-runtime dev",
+    "claude:setup": "node scripts/setup-claude.mjs",
+    "claude:tunnel": "node --env-file-if-exists=.env scripts/dev-mcp-tunnel.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx,js}": [

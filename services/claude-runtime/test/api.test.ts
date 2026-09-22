@@ -15,6 +15,19 @@ function token(sub = 'alice', extra = {}, key = pair.privateKey) {
   const input = `${encode({ alg: 'ES256' })}.${encode({ sub, iss: 'test', aud: 'api', exp: Math.floor(Date.now() / 1000) + 300, ...extra })}`
   return `${input}.${sign('sha256', Buffer.from(input), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`
 }
+
+test('identity checks the handshake without allocating workspaces or sessions', async () => {
+  const f = fixture()
+  const response = await f.request('/v1/identity')
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  const identity = await response.json()
+  assert.match(identity.userId, /^[a-f0-9]{48}$/)
+  assert.equal(identity.workspaceSlug, `u-${identity.userId}`)
+  assert.equal((await f.request('/v1/identity', undefined, token('alice', { aud: 'wrong' }))).status, 401)
+  assert.equal(f.workspaces.length, 0)
+  assert.equal(f.opened.length, 0)
+})
 function fixture(requestError?: Error) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
   const opened: any[] = [],

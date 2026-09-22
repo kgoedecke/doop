@@ -26,13 +26,25 @@ The service's `src/contracts.ts` and `src/terminal-crypto.ts` are also consumed
 by Doop, so API events and encrypted login use the same definitions.
 These modules must remain independent of Node and the Cantelop SDK.
 
-Deploy from this directory using `cantelop doctor`, `cantelop deploy --dry-run`,
-and `cantelop deploy`. Authenticate the CLI normally; do not copy an old
-`.cantelop` directory, signing key, bearer token, or `.env` into the repository.
-Keep `cantelop.json`'s app name, identity issuer, audience, verification key,
-user IDs, workspace slug derivation, and session IDs stable. Verify the release
-is active with `cantelop releases` before testing an existing user's sign-in,
-a canvas task, cancellation, and stream reconnection.
+For a contributor deployment, run `cantelop login` followed by
+`bun run claude:setup` from the repository root. Setup creates a local app
+manifest, generates matching public/private identity configuration, deploys,
+and checks `/v1/identity` without allocating a Workspace or Session. See the
+[root setup guide](../../README.md#set-up-your-own-hosted-claude-service).
+
+Rerun setup to deploy changes to that app. To inspect its releases from this directory:
+
+```sh
+cantelop releases -config cantelop.local.json
+```
+
+The committed `cantelop.json` remains the original deployment target. Manual
+operators can still use `cantelop doctor`, `cantelop deploy --dry-run`, and
+`cantelop deploy` with their original configuration. Do not copy another
+checkout's `.cantelop` directory, private key, bearer token, or `.env`.
+Keep app name, identity issuer, audience, verification key, user IDs, workspace
+slug derivation, and session IDs stable. After a deployment, test native sign-in,
+a canvas task, cancellation, and stream reconnection with your own account.
 
 Doop owns the private application signing key; this service receives only its
 public JWK. Configure the matching variables described in the
@@ -195,6 +207,7 @@ The HTTP 200 response contains `{sessionId, type: "session.state", configured, m
 | Method | Route                      | Behaviour                                                       |
 | ------ | -------------------------- | --------------------------------------------------------------- |
 | GET    | `/health`                  | Public liveness                                                 |
+| GET    | `/v1/identity`             | Verify JWT identity without provisioning resources              |
 | GET    | `/login`                   | Native login page (API actions require a bearer token)          |
 | POST   | `/v1/auth`                 | Allocate Workspace, check auth, or start encrypted native login |
 | POST   | `/v1/auth/input`           | Send encrypted input to the caller’s login terminal             |

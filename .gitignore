@@ -17,3 +17,4 @@ desktop/src-tauri/gen
 services/claude-runtime/.cantelop/
 services/claude-runtime/.dev/
 services/claude-runtime/coverage/
+services/claude-runtime/cantelop.local.json

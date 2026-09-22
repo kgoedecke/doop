@@ -621,6 +621,57 @@ The native Claude Code login runs in your private hosted workspace. Open the
 Anthropic link and send any requested terminal response through the encrypted
 login console. Doop never extracts or stores your Claude OAuth credentials.
 
+### Set up your own hosted Claude service
+
+No configuration needs to be shared by another developer. Install Node 22+, Bun,
+Cantelop CLI, and Docker, then run:
+
+```sh
+cantelop login
+bun run claude:setup
+```
+
+The command asks for your app name and where Doop runs, generates an ES256 key
+pair, writes both sides' matching configuration, deploys your Cantelop app, and
+checks an authenticated endpoint without starting Claude. Sign in with your own
+Claude account in **Settings → Claude Plan** after restarting Doop.
+
+For local Doop, also install `cloudflared`. Setup starts the existing MCP tunnel
+and stays running; keep that terminal open, then start or restart `bun run dev`
+in a second terminal. The temporary tunnel address changes when restarted.
+
+For hosted Doop, provide its public HTTPS origin:
+
+```sh
+bun run claude:setup --app my-doop-claude --mcp-origin https://doop.example
+```
+
+Import the generated **`.env.claude-hosted`** into your Doop hosting provider's
+server environment and restart that deployment. It contains the private signing
+key; keep it private. Set `BETTER_AUTH_URL` to your hosted Doop origin as usual.
+Only the public key is sent to Cantelop. All generated configuration is ignored
+by Git and excluded from Docker contexts.
+
+Rerunning setup reuses the saved identity and app. It does not rotate keys or
+move existing users to different workspaces. Keep a secure backup of your Doop
+configuration: losing its issuer or key is not repaired by generating a new one.
+An existing complete manual configuration is reused; incomplete identities and
+attempts to switch apps in the same checkout fail before writing files.
+
+Useful options:
+
+- `--prepare-only`: generate local configuration without installing or deploying.
+- `--check`: verify the saved handshake without deploying or allocating resources.
+- `--local`: select the local MCP tunnel without a prompt.
+- `bun run claude:tunnel`: restart just the MCP tunnel; restart Doop afterward.
+
+The app override lives in `services/claude-runtime/cantelop.local.json`; the
+committed manifest stays unchanged. `services/claude-runtime/.env.setup` contains
+only public identity configuration. Builds and automated tests need no Cantelop
+or Claude account; deployment and live Claude use require your own accounts.
+
+### Manual configuration
+
 Server configuration:
 
 - `CLAUDE_REMOTE_URL`: the HTTPS API origin, such as `https://cantelop-claude-api.cantelop.dev`.

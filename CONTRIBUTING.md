@@ -40,3 +40,8 @@ include client/service contract checks. Run `bun run claude:check` and
 `bun run claude:test` for its Node test suite. `bun run claude:build` also verifies
 the deployable API and sandbox image and requires Cantelop CLI and Docker.
 See [the service README](services/claude-runtime/README.md) for deployment details.
+
+For live testing on your own Cantelop account, run `cantelop login` and
+`bun run claude:setup`. It provisions matching configuration without another
+developer's environment variables. `--prepare-only` generates files without
+deploying. Setup tests use generated temporary keys and fake deployment commands.
