@@ -37,7 +37,7 @@ import {
   pasteFrameCentered,
   pasteImagesCentered,
 } from '../lib/frameClipboard'
-import { clearHistory, recordCreate, redo, undo } from '../lib/history'
+import { clearHistory, redo, undo } from '../lib/history'
 import { deleteSelection } from '../lib/layerEdits'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
@@ -68,7 +68,7 @@ import { Tooltip } from '../components/ui/tooltip'
 import { Note } from '../components/ui/note'
 import { Textarea } from '../components/ui/textarea'
 import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from '../components/ui/modal'
-import { frameCenterPosition } from '../lib/framePlacement'
+import { createCenteredFrame } from '../lib/framePlacement'
 
 const STARTER_HTML = `<!doctype html>
 <html>
@@ -249,20 +249,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
 
   async function addFrame() {
     const n = (canvas?.frames.length ?? 0) + 1
-    /* land the new frame in the middle of the current view, like Figma does
-       (issue #98), instead of always to the right of the right-most frame -
-       which can be off-screen on a large canvas. */
-    const { x, y } = frameCenterPosition(
-      useStore.getState().viewport,
-      { width: window.innerWidth, height: window.innerHeight },
-      {
-        width: 640,
-        height: 480,
-      },
-    )
-    const frame = await api.createFrame(canvasId, { name: `Frame ${n}`, html: STARTER_HTML, x, y })
-    posthog.capture('frame_created')
-    recordCreate(frame)
+    const frame = await createCenteredFrame(canvasId, `Frame ${n}`, STARTER_HTML)
     select(frame.id)
   }
 
