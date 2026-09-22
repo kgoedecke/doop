@@ -13,11 +13,11 @@ Use Node 22+, Bun 1.3.10, Cantelop CLI 0.10.0 or newer, and Docker with linux/am
 From the repository root:
 
 ```sh
-bun run claude:install
-bun run claude:check
-bun run claude:test
-bun run claude:build
-bun run claude:dev
+bun run cantelop:install
+bun run cantelop:check
+bun run cantelop:test
+bun run cantelop:build
+bun run cantelop:dev
 ```
 
 The service has its own Bun lockfile and TypeScript configurations. Its tests
@@ -27,7 +27,7 @@ by Doop, so API events and encrypted login use the same definitions.
 These modules must remain independent of Node and the Cantelop SDK.
 
 For a contributor deployment, run `cantelop login` followed by
-`bun run claude:setup` from the repository root. Setup creates a local app
+`bun run cantelop:setup` from the repository root. Setup creates a local app
 manifest, generates matching public/private identity configuration, deploys,
 and checks `/v1/identity` without allocating a Workspace or Session. See the
 [root setup guide](../../README.md#set-up-your-own-hosted-claude-service).

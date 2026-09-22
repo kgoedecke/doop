@@ -17,13 +17,13 @@
     "format:check": "prettier --check .",
     "doc-lint": "node scripts/doc-lint.mjs",
     "prepare": "husky || true",
-    "claude:install": "bun install --cwd services/claude-runtime --frozen-lockfile",
-    "claude:check": "bun run --cwd services/claude-runtime check",
-    "claude:test": "bun run --cwd services/claude-runtime test",
-    "claude:build": "bun run --cwd services/claude-runtime build",
-    "claude:dev": "bun run --cwd services/claude-runtime dev",
-    "claude:setup": "node scripts/setup-claude.mjs",
-    "claude:tunnel": "node --env-file-if-exists=.env scripts/dev-mcp-tunnel.mjs"
+    "cantelop:install": "bun install --cwd services/claude-runtime --frozen-lockfile",
+    "cantelop:check": "bun run --cwd services/claude-runtime check",
+    "cantelop:test": "bun run --cwd services/claude-runtime test",
+    "cantelop:build": "bun run --cwd services/claude-runtime build",
+    "cantelop:dev": "bun run --cwd services/claude-runtime dev",
+    "cantelop:setup": "node scripts/setup-claude.mjs",
+    "cantelop:tunnel": "node --env-file-if-exists=.env scripts/dev-mcp-tunnel.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx,js}": [

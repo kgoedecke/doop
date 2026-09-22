@@ -26,7 +26,7 @@ async function main() {
     },
   })
   if (values.help) {
-    console.log(`Usage: bun run claude:setup [--app NAME] [--mcp-origin https://doop.example | --local]
+    console.log(`Usage: bun run cantelop:setup [--app NAME] [--mcp-origin https://doop.example | --local]
 
 Run cantelop login first. Requires Node 22+, Bun, Cantelop CLI, and Docker.
 Generates a private identity, deploys your app, and verifies its JWT handshake.
@@ -100,7 +100,7 @@ Hosted Doop configuration: .env.claude-hosted (private; import into your hosting
 Deployment target: services/claude-runtime/cantelop.local.json`)
   if (values['prepare-only']) {
     console.log('Configuration prepared. Rerun without --prepare-only to deploy and verify.')
-    if (local) console.log('For local MCP access, run bun run claude:tunnel in a second terminal.')
+    if (local) console.log('For local MCP access, run bun run cantelop:tunnel in a second terminal.')
     return
   }
   await deploySetup(setup)

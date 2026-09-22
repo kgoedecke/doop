@@ -33,9 +33,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: bun run claude:install
-      - run: bun run claude:check
-      - run: bun run claude:test
+      - run: bun run cantelop:install
+      - run: bun run cantelop:check
+      - run: bun run cantelop:test
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run format:check
@@ -62,4 +62,4 @@ jobs:
           CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
       - name: Add Cantelop to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: bun run claude:build
+      - run: bun run cantelop:build

@@ -610,8 +610,8 @@ please rebrand derived services.
 
 The hosted service source lives in [`services/claude-runtime`](services/claude-runtime/README.md),
 including the Cantelop API, native Claude runtime, Docker image, and tests. It deploys
-separately from the web server. From the repository root, run `bun run claude:install`,
-`bun run claude:check`, `bun run claude:test`, and `bun run claude:build` to verify it.
+separately from the web server. From the repository root, run `bun run cantelop:install`,
+`bun run cantelop:check`, `bun run cantelop:test`, and `bun run cantelop:build` to verify it.
 The build requires Cantelop CLI and Docker; ordinary Doop development needs neither.
 
 The Claude Plan runs canvas tasks through the Cantelop Claude Code API on the user's
@@ -628,7 +628,7 @@ Cantelop CLI, and Docker, then run:
 
 ```sh
 cantelop login
-bun run claude:setup
+bun run cantelop:setup
 ```
 
 The command asks for your app name and where Doop runs, generates an ES256 key
@@ -643,7 +643,7 @@ in a second terminal. The temporary tunnel address changes when restarted.
 For hosted Doop, provide its public HTTPS origin:
 
 ```sh
-bun run claude:setup --app my-doop-claude --mcp-origin https://doop.example
+bun run cantelop:setup --app my-doop-claude --mcp-origin https://doop.example
 ```
 
 Import the generated **`.env.claude-hosted`** into your Doop hosting provider's
@@ -663,7 +663,7 @@ Useful options:
 - `--prepare-only`: generate local configuration without installing or deploying.
 - `--check`: verify the saved handshake without deploying or allocating resources.
 - `--local`: select the local MCP tunnel without a prompt.
-- `bun run claude:tunnel`: restart just the MCP tunnel; restart Doop afterward.
+- `bun run cantelop:tunnel`: restart just the MCP tunnel; restart Doop afterward.
 
 The app override lives in `services/claude-runtime/cantelop.local.json`; the
 committed manifest stays unchanged. `services/claude-runtime/.env.setup` contains

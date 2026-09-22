@@ -101,12 +101,12 @@
 
 `services/claude-runtime/` contains the separately deployed Cantelop Edge API and
 Session runtime. It uses SDK 0.11.0, Node 22, its own Bun lockfile, and Node tests.
-Root `claude:*` scripts install, check, test, build, and run it. Doop imports its
+Root `cantelop:*` scripts install, check, test, build, and run it. Doop imports its
 runtime-independent event types and terminal crypto; SDK and subprocess code stay
 in the service. Keep the existing Cantelop app and user/workspace identity stable.
 
-`bun run claude:setup` provisions each contributor's identity and local app
+`bun run cantelop:setup` provisions each contributor's identity and local app
 manifest, deploys with only public verification configuration, and verifies
 `GET /v1/identity` without allocating resources. `scripts/lib/claude-setup.mjs`
 contains preparation/deployment/check helpers; reruns preserve existing identity.
-Private hosted exports use `.env.claude-hosted`. Local setup runs `claude:tunnel`.
+Private hosted exports use `.env.claude-hosted`. Local setup runs `cantelop:tunnel`.
