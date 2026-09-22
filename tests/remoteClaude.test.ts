@@ -51,6 +51,26 @@ describe('hosted application identity and stream', () => {
     vi.stubEnv('CLAUDE_REMOTE_URL', 'https://example.com/other')
     expect(() => remoteBearer('alice')).toThrow('HTTPS origin')
   })
+  it('uses the local HTTP runtime with signed application authentication', async () => {
+    configured()
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.stubEnv('CLAUDE_REMOTE_URL', 'http://127.0.0.1:8787')
+    const fetcher = vi.fn(async () =>
+      Response.json({
+        sessionId: `${remoteIdentity('alice')}:auth`,
+        type: 'auth.status',
+        authenticated: false,
+      }),
+    )
+    vi.stubGlobal('fetch', fetcher)
+    expect(await checkRemoteAuth('alice')).toBe(false)
+    expect(fetcher).toHaveBeenCalledWith(
+      'http://127.0.0.1:8787/v1/auth',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer /) }),
+      }),
+    )
+  })
   it.each([true, false])('reads auth status %s directly without opening an event stream', async (authenticated) => {
     configured()
     const fetcher = vi.fn(async (_url: string | URL | Request) =>

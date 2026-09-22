@@ -670,6 +670,43 @@ committed manifest stays unchanged. `cantelop/.env.setup` contains
 only public identity configuration. Builds and automated tests need no Cantelop
 or Claude account; deployment and live Claude use require your own accounts.
 
+### Fully local Claude development (no tunnel)
+
+Use Cantelop CLI 0.11.1 or newer and Docker Desktop on macOS. Run Doop on the
+host and Cantelop Sessions in containers. In Doop's root `.env`, set:
+
+```dotenv
+CLAUDE_REMOTE_URL=http://127.0.0.1:8787
+CLAUDE_REMOTE_MCP_ORIGIN=http://host.docker.internal:4400
+```
+
+Keep `CLAUDE_REMOTE_SIGNING_KEY`, `CLAUDE_REMOTE_ISSUER`, and
+`CLAUDE_REMOTE_AUDIENCE` configured as described below. In `cantelop/.env`, set
+`AUTH_PUBLIC_JWK` to that signing key's public JWK and use the matching
+`AUTH_ISSUER` and `AUTH_AUDIENCE`. If you already generated matching configuration
+with setup, its `cantelop/.env.setup` contains these public settings; use
+`bun run cantelop:dev --env-file .env.setup` instead of the default command.
+Never put the private signing key in the Cantelop environment.
+
+Start `bun run cantelop:dev` and `bun run dev` in separate terminals, then connect
+in **Settings → Claude Plan**. The Cantelop dev script uses `--container`.
+Doop calls the loopback API; the Claude container calls the host backend through
+`host.docker.internal`. Use your backend port if it differs from 4400. Docker
+must be able to reach the backend; container `localhost` points to the container.
+This hostname is provided by Docker Desktop; other Docker setups need equivalent
+host routing configured separately.
+
+HTTP is accepted only when `NODE_ENV` is unset (the default dev script) or
+`development`. The API must use `localhost`, `127.0.0.1`, or `[::1]`; the HTTP MCP
+origin must use `host.docker.internal` and requires a local HTTP API URL.
+Production and other environments still require HTTPS. JWT and run-token
+checks remain enabled.
+
+For **local Doop + remote Cantelop**, keep `CLAUDE_REMOTE_URL` set to the deployed
+HTTPS API and run `bun run cantelop:tunnel` for the MCP callback. Restart Doop
+after changing origins. `cantelop:setup --local` selects this remote-runtime
+workflow and deploys the service; it does not set up a fully local runtime.
+
 ### Manual configuration
 
 Server configuration:

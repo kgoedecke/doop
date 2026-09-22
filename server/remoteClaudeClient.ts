@@ -1,3 +1,4 @@
+import { claudeRuntimeOrigin } from './remoteClaudeOrigins.ts'
 import { createHash, createPrivateKey, sign } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { consumeClaudeEvents, type ClaudeEvent } from '../shared/remoteClaude.ts'
@@ -13,10 +14,7 @@ export function remoteClaudeConfigured() {
 
 function settings() {
   if (!remoteClaudeConfigured()) throw new Error('Hosted execution is not configured on this Doop server.')
-  const url = new URL(process.env.CLAUDE_REMOTE_URL!)
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-    throw new Error('CLAUDE_REMOTE_URL must be an HTTPS origin.')
-  }
+  const url = claudeRuntimeOrigin(process.env.CLAUDE_REMOTE_URL!)
   return {
     origin: url.origin,
     issuer: process.env.CLAUDE_REMOTE_ISSUER!,

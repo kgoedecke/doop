@@ -8,7 +8,7 @@ It deploys independently of Doop's Express server to the existing
 
 The service pins `@cantelop/sdk@0.11.0` (verified against the npm registry).
 See the [official SDK documentation](https://github.com/stepandel/cantelop-sdk).
-Use Node 22+, Bun 1.3.10, Cantelop CLI 0.10.0 or newer, and Docker with linux/amd64 support.
+Use Node 22+, Bun 1.3.10, Cantelop CLI 0.11.1 or newer, and Docker with linux/amd64 support.
 
 From the repository root:
 
@@ -226,7 +226,7 @@ The HTTP 200 response contains `{sessionId, type: "session.state", configured, m
 
 All API routes except health require an application JWT; the static login page is public. Workspace selection is derived from verified identity; clients cannot select another user's Workspace. Session ownership is checked before dispatch, requests, and event subscription.
 
-With SDK 0.11.0, auth checks and snapshots use `session.request()` and return HTTP 200 with the result instead of a 202 receipt. Clients must read these response bodies instead of waiting for status/snapshot events. Requests wait up to 30 seconds; timeout returns HTTP 504 with `code: "request_wait_timeout"`. A timeout or disconnect stops waiting, not execution; these read-only checks can be repeated. Interactive login start/input/cancel, Session configuration, and model queue/steer/cancel remain asynchronous (202), with outcomes delivered as events. Use a deployed platform for request/reply verification; CLI 0.10.0's local development bridge does not support the request endpoint.
+With SDK 0.11.0, auth checks and snapshots use `session.request()` and return HTTP 200 with the result instead of a 202 receipt. Clients must read these response bodies instead of waiting for status/snapshot events. Requests wait up to 30 seconds; timeout returns HTTP 504 with `code: "request_wait_timeout"`. A timeout or disconnect stops waiting, not execution; these read-only checks can be repeated. Interactive login start/input/cancel, Session configuration, and model queue/steer/cancel remain asynchronous (202), with outcomes delivered as events. CLI 0.11.1 supports local request/reply verification. For this service, use the container dev script and follow the [fully local Doop setup](../README.md#fully-local-claude-development-no-tunnel). Local request/reply state is in memory and is lost when the CLI restarts.
 
 ## Queue, cancellation, and durability
 
