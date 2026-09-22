@@ -4,3 +4,9 @@ data
 .git
 .env
 .env.local
+**/node_modules
+**/.cantelop
+**/.dev
+**/.env
+**/.env.*
+**/coverage

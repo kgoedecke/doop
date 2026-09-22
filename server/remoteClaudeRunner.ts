@@ -42,7 +42,9 @@ export class RemoteResult {
       }
     }
   }
-  private native(event: Record<string, unknown>) {
+  private native(value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return
+    const event = value as Record<string, unknown>
     if (event.type === 'result')
       this.result = {
         success: event.is_error === false && event.subtype === 'success',

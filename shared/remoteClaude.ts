@@ -1,23 +1,15 @@
+import type { Event as RuntimeEvent } from '../services/claude-runtime/src/contracts.js'
+
 export interface RemoteClaudeStatus {
   authRequired?: boolean
   configured: boolean
   running: boolean
 }
 
-export type ClaudeEvent = (
-  | { type: 'auth.started'; attemptId: string; publicKey: JsonWebKey; expiresAt: number }
-  | { type: 'auth.output'; attemptId: string; terminalSequence: number; iv: string; data: string }
-  | { type: 'auth.finished'; attemptId: string; authenticated: boolean; outcome: string }
-  | { type: 'auth.error'; attemptId: string; code: string; activeAttemptId?: string }
-  | { type: 'auth.required'; id: string }
-  | { type: 'auth.status'; authenticated: boolean }
-  | { type: 'auth.reset' | 'event_stream_reset' | 'event_cursor_expired' }
-  | { type: 'session.ready'; sessionId: string }
-  | { type: 'message.status'; id: string; status: string }
-  | { type: 'claude'; id: string; event: Record<string, unknown> }
-  | { type: 'claude.fragment'; id: string; eventId: string; index: number; total: number; json: string }
-  | { type: 'error'; code: string }
-) & { message_id?: string }
+// Transport resets and receipt metadata are supplied by Cantelop, outside application events.
+export type ClaudeEvent = (RuntimeEvent | { type: 'event_stream_reset' | 'event_cursor_expired' }) & {
+  message_id?: string
+}
 
 /** Consume bounded SSE frames in order. Advance the replay cursor only after handling a frame. */
 export async function consumeClaudeEvents(

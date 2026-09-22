@@ -30,6 +30,12 @@ jobs:
       # setup-bun restores ~/.bun/install/cache keyed on bun.lock, so this is
       # already the cached path — no separate cache step
       - run: bun install --frozen-lockfile
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun run claude:install
+      - run: bun run claude:check
+      - run: bun run claude:test
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run format:check
@@ -38,3 +44,22 @@ jobs:
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
       - run: bun run test
+
+  claude-runtime-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --cwd services/claude-runtime --frozen-lockfile
+      - name: Install Cantelop CLI
+        run: |
+          curl -fsSL https://console.cantelop.dev/install.sh -o /tmp/install-cantelop.sh
+          CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
+      - name: Add Cantelop to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: bun run claude:build

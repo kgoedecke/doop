@@ -31,3 +31,12 @@ Common types: `feat`, `fix`, `chore`, `refactor`, `style`, `docs`, `test`, `ci`,
 A pre-commit hook (husky + lint-staged) runs ESLint and Prettier on staged files, and a commit-msg hook validates the message. Hooks install automatically via `bun install` (the `prepare` script).
 
 CI runs typecheck, lint, format check, and build on every push and PR.
+
+## Hosted Claude runtime
+
+The Cantelop service lives in `services/claude-runtime/` and uses a separate Bun
+lockfile. Run `bun run claude:install` before root type checking or tests, which
+include client/service contract checks. Run `bun run claude:check` and
+`bun run claude:test` for its Node test suite. `bun run claude:build` also verifies
+the deployable API and sandbox image and requires Cantelop CLI and Docker.
+See [the service README](services/claude-runtime/README.md) for deployment details.

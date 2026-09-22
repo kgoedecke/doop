@@ -96,3 +96,11 @@
   path): hosted connection, model selection, stop and disconnect controls. See README's
   Claude Plan section for environment settings
   and recovery limits. The API runtime must start successfully before native sign-in works.
+
+## Hosted Claude service
+
+`services/claude-runtime/` contains the separately deployed Cantelop Edge API and
+Session runtime. It uses SDK 0.11.0, Node 22, its own Bun lockfile, and Node tests.
+Root `claude:*` scripts install, check, test, build, and run it. Doop imports its
+runtime-independent event types and terminal crypto; SDK and subprocess code stay
+in the service. Keep the existing Cantelop app and user/workspace identity stable.

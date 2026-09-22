@@ -12,3 +12,8 @@ desktop/src-tauri/gen
 # files are ignored.
 .claude/settings.local.json
 .claude/.current-tool
+
+# Local Cantelop artifacts and deployment credentials
+services/claude-runtime/.cantelop/
+services/claude-runtime/.dev/
+services/claude-runtime/coverage/

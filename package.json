@@ -10,13 +10,18 @@
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run tests",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "doc-lint": "node scripts/doc-lint.mjs",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "claude:install": "bun install --cwd services/claude-runtime --frozen-lockfile",
+    "claude:check": "bun run --cwd services/claude-runtime check",
+    "claude:test": "bun run --cwd services/claude-runtime test",
+    "claude:build": "bun run --cwd services/claude-runtime build",
+    "claude:dev": "bun run --cwd services/claude-runtime dev"
   },
   "lint-staged": {
     "*.{ts,tsx,js}": [

@@ -5,3 +5,6 @@ bun.lock
 CHANGELOG.md
 desktop/src-tauri/tauri.conf.json
 desktop/CHANGELOG.md
+services/claude-runtime/.cantelop/
+services/claude-runtime/.dev/
+services/claude-runtime/coverage/

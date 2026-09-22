@@ -44,8 +44,7 @@ bun install
 bun run dev
 ```
 
-Doop builds and installs with [bun](https://bun.sh) (`bun.lock` is the only
-lockfile); the server itself runs on Node.
+Doop builds and installs with [bun](https://bun.sh) (each package uses a `bun.lock` lockfile); the server itself runs on Node.
 
 - Web app: **http://localhost:4300**
 - API + WebSocket + MCP server: **http://localhost:4400** (the web port proxies `/api`, `/ws`, `/mcp` to it)
@@ -608,6 +607,12 @@ The **doop name and logo are trademarks** and are not covered by the code licens
 please rebrand derived services.
 
 ## Claude Plan: hosted execution with your own Claude account
+
+The hosted service source lives in [`services/claude-runtime`](services/claude-runtime/README.md),
+including the Cantelop API, native Claude runtime, Docker image, and tests. It deploys
+separately from the web server. From the repository root, run `bun run claude:install`,
+`bun run claude:check`, `bun run claude:test`, and `bun run claude:build` to verify it.
+The build requires Cantelop CLI and Docker; ordinary Doop development needs neither.
 
 The Claude Plan runs canvas tasks through the Cantelop Claude Code API on the user's
 own Claude subscription, without keeping a desktop open. In Settings, choose
