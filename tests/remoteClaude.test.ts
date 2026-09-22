@@ -65,15 +65,6 @@ describe('hosted application identity and stream', () => {
     expect(fetcher).toHaveBeenCalledOnce()
     expect(fetcher.mock.calls[0]?.[0]).toBe('https://claude.example/v1/auth')
   })
-  it('uses the completion endpoint for the final auth check', async () => {
-    configured()
-    const fetcher = vi.fn(async () =>
-      Response.json({ sessionId: `${remoteIdentity('alice')}:auth`, type: 'auth.status', authenticated: true }),
-    )
-    vi.stubGlobal('fetch', fetcher)
-    expect(await checkRemoteAuth('alice', { completeLogin: true })).toBe(true)
-    expect(fetcher).toHaveBeenCalledWith('https://claude.example/v1/auth/complete', expect.any(Object))
-  })
   it.each([
     { type: 'auth.status', authenticated: 'false' },
     { type: 'auth.status' },

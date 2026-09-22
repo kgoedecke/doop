@@ -162,9 +162,9 @@ export async function remoteEvents(
   }
 }
 
-export async function checkRemoteAuth(userId: string, options: { completeLogin?: boolean } = {}): Promise<boolean> {
+export async function checkRemoteAuth(userId: string): Promise<boolean> {
   // SDK 0.11 auth checks are request/reply operations, not streamed events.
-  const reply = await remotePost(userId, options.completeLogin ? '/v1/auth/complete' : '/v1/auth', {})
+  const reply = await remotePost(userId, '/v1/auth', {})
   if (
     reply?.sessionId !== `${remoteIdentity(userId)}:auth` ||
     reply.type !== 'auth.status' ||

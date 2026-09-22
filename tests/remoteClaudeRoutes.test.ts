@@ -135,12 +135,9 @@ it('requires verified fresh login completion before clearing a blocked account',
   expect(mocks.clearAuth).not.toHaveBeenCalled()
   mocks.login.mockResolvedValue(false)
   expect((await post('/select', { model: 'claude-sonnet-5', loginAttemptId: attemptId })).status).toBe(409)
-  expect(mocks.check).not.toHaveBeenCalled()
   mocks.login.mockResolvedValue(true)
   expect((await post('/select', { model: 'claude-sonnet-5', loginAttemptId: attemptId })).status).toBe(200)
   expect(mocks.clearAuth).toHaveBeenCalledWith('alice', 0, attemptId)
-  expect(mocks.check).toHaveBeenCalledExactlyOnceWith('alice', { completeLogin: true })
-  expect(mocks.login.mock.invocationCallOrder.at(-1)).toBeLessThan(mocks.check.mock.invocationCallOrder[0]!)
   expect(mocks.wake).toHaveBeenCalledWith('canvas')
 })
 

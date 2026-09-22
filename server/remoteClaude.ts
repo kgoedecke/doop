@@ -81,8 +81,7 @@ remoteClaudeRouter.post('/select', (req, res, next) => {
       res.status(409).json({ error: 'Reconnect Claude to resume hosted tasks.' })
       return
     }
-    // Verify completion replay above before allowing the auth sandbox to release.
-    if (!(await checkRemoteAuth(userId, { completeLogin: true }))) {
+    if (!(await checkRemoteAuth(userId))) {
       res.status(409).json({ error: 'Complete native Claude sign-in first.' })
       return
     }
