@@ -37,7 +37,7 @@ import {
   pasteFrameCentered,
   pasteImagesCentered,
 } from '../lib/frameClipboard'
-import { clearHistory, recordCreate, redo, undo } from '../lib/history'
+import { clearHistory, redo, undo } from '../lib/history'
 import { deleteSelection } from '../lib/layerEdits'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
@@ -68,6 +68,7 @@ import { Tooltip } from '../components/ui/tooltip'
 import { Note } from '../components/ui/note'
 import { Textarea } from '../components/ui/textarea'
 import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from '../components/ui/modal'
+import { createCenteredFrame } from '../lib/framePlacement'
 
 const STARTER_HTML = `<!doctype html>
 <html>
@@ -248,9 +249,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
 
   async function addFrame() {
     const n = (canvas?.frames.length ?? 0) + 1
-    const frame = await api.createFrame(canvasId, { name: `Frame ${n}`, html: STARTER_HTML })
-    posthog.capture('frame_created')
-    recordCreate(frame)
+    const frame = await createCenteredFrame(canvasId, `Frame ${n}`, STARTER_HTML)
     select(frame.id)
   }
 
