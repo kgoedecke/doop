@@ -42,7 +42,7 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
       <span className="text-[12px] text-[#1e7a4c]">
         Doop Agent on your{' '}
         {allowance.byoKind === 'claude-remote'
-          ? 'hosted Claude account'
+          ? 'Claude Plan'
           : allowance.byoKind === 'claude-local'
             ? 'local Claude CLI'
             : allowance.byoKind === 'anthropic-key'

@@ -607,10 +607,11 @@ changes under the same license.
 The **doop name and logo are trademarks** and are not covered by the code license —
 please rebrand derived services.
 
-## Hosted execution with your own Claude account
+## Claude Plan: hosted execution with your own Claude account
 
-Doop can run canvas tasks through the Cantelop Claude Code API, without keeping a
-local desktop open. In Settings, choose **Hosted execution → Connect my account**.
+The Claude Plan runs canvas tasks through the Cantelop Claude Code API on the user's
+own Claude subscription, without keeping a desktop open. In Settings, choose
+**Claude Plan → Connect**.
 The native Claude Code login runs in your private hosted workspace. Open the
 Anthropic link and send any requested terminal response through the encrypted
 login console. Doop never extracts or stores your Claude OAuth credentials.
@@ -637,13 +638,14 @@ terminal output, task progress, and re-authentication events still use SSE.
 Doop signs five-minute application JWTs with the task requester's Doop user ID as
 `sub`. Each identity gets its own Cantelop workspace and native Claude login. Keep
 the issuer and user IDs stable: changing them creates different workspaces.
-Existing local preferences remain local; hosted execution is explicitly selected.
+A desktop-CLI preference saved by an older Doop keeps routing to that desktop until
+the user picks another provider; the Claude Plan is explicitly selected.
 Hosted failures never fall back to a different user's account or a server API key.
 
 Claude Code owns credential refresh inside the persistent hosted workspace. A
 confirmed native authentication failure marks the Doop account **Sign-in required**
 and pauses new hosted tasks across its canvases, including after a Doop restart.
-In Settings → Hosted execution, choose **Reconnect Claude** to complete a fresh
+In Settings → Claude Plan, choose **Reconnect Claude** to complete a fresh
 native sign-in. Doop verifies its completion before lifting the pause. Queued
 work becomes eligible again; interrupted cards require an explicit retry because
 previous edits may already have completed. Network failures, unavailable status
@@ -664,7 +666,6 @@ Existing task recovery marks claimed work failed for explicit retry. There is no
 exactly-once edit guarantee. Repository imports still require an API-key provider;
 they do not use the canvas execution harness.
 
-**Disable hosted execution** stops Doop runs and changes provider selection. It
-does not remove native credentials from the hosted workspace: the current API has
-no logout or workspace-deletion endpoint. Local execution remains available in
-the desktop app. These settings do not change Anthropic billing or account limits.
+**Disconnect** stops Doop runs, signs the hosted workspace out of Claude and clears
+the provider selection; connecting again needs a fresh sign-in. These settings do
+not change Anthropic billing or account limits.

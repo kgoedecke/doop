@@ -92,6 +92,7 @@
 - Migration `0018_remote_claude` adds the local/remote transport selector. Existing
   preferences default to local. `LocalAgentRuns` manages both run lifetimes and scoped
   MCP capabilities; remote runs cannot be claimed by desktop polling.
-- `src/components/RemoteClaude.tsx` provides hosted connection, model selection, and
-  stop/disable controls. See README's hosted execution section for environment settings
+- `src/components/RemoteClaude.tsx` renders the Claude Plan row (the only Claude subscription
+  path): hosted connection, model selection, stop and disconnect controls. See README's
+  Claude Plan section for environment settings
   and recovery limits. The API runtime must start successfully before native sign-in works.

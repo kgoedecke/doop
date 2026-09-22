@@ -143,7 +143,7 @@ export class RemoteClaudeLogin {
       this.pair = undefined
       this.view(
         event.authenticated && event.outcome === 'succeeded'
-          ? 'Claude connected. Enabling hosted execution…'
+          ? 'Claude connected. Switching the Doop Agent to your Claude Plan…'
           : `Login ${event.outcome}. Cancel and try again.`,
       )
       this.controller.abort()

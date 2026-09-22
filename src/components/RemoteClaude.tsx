@@ -6,17 +6,62 @@ import { useStore } from '../lib/store'
 import { RemoteClaudeLogin, anthropicLinks, type LoginView } from '../lib/remoteClaudeLogin'
 import { CLAUDE_MODELS, normalizeClaudeModel } from '../../shared/localAgent'
 import type { RemoteClaudeStatus } from '../../shared/remoteClaude'
+import { AgentIcon } from './AgentIcon'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
-import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
+import { CheckIcon } from './ui/icons'
+import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { planRow, planMark, planPill, actionsRow } from './ui/model-plan'
+import { cn } from '@/lib/utils'
 
-export function RemoteClaudeRow() {
+const planHead =
+  'flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]'
+const planTitle = 'font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]'
+const planBlurb = 'mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]'
+
+/**
+ * The Claude Plan: the Doop Agent on the user's own Claude subscription. It
+ * runs Claude Code in a private hosted workspace, so nothing on this machine
+ * has to stay open — and the same row serves the browser and the desktop app.
+ *
+ * `replaces` says another model account is already connected, so the connect
+ * action reads as a switch, the way it does on every other provider row.
+ */
+export function RemoteClaudeRow({ replaces = false }: { replaces?: boolean }) {
   const { data: session } = authClient.useSession()
-  return session?.user.id ? <RemoteClaudeConnection key={session.user.id} userId={session.user.id} /> : null
+  return session?.user.id ? (
+    <RemoteClaudeConnection key={session.user.id} userId={session.user.id} replaces={replaces} />
+  ) : null
 }
 
-function RemoteClaudeConnection({ userId }: { userId: string }) {
+/** A server without hosted execution has no Claude Plan to offer: the row
+ *  stays, muted, so the list keeps its shape and says why. */
+function UnavailableClaudePlanRow() {
+  return (
+    <section aria-label="Claude Plan" className={cn(planRow(false), 'bg-[#fafafa]')}>
+      <span aria-hidden className={cn(planMark(false), 'border-[#e5e5e3] bg-[#f0f0ef] opacity-45 grayscale')}>
+        <AgentIcon name="claude" size={20} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className={planHead}>
+          <h3 className={cn(planTitle, 'text-[#8a8a86]')}>Claude Plan</h3>
+          <span className={cn(planPill(false), 'bg-[#ededeb] text-[#74746e]')}>Not available</span>
+        </div>
+        <p className={cn(planBlurb, 'text-[#92928d]')}>Use your Claude subscription.</p>
+        <div className="mt-[18px] flex flex-wrap gap-[9px]">
+          {CLAUDE_MODELS.map((model) => (
+            <ToggleChip key={model.id} state="idle" className="bg-[#f0f0ee] text-[#9b9b96] opacity-100">
+              {model.name}
+            </ToggleChip>
+          ))}
+        </div>
+        <p className="mt-[13px] text-[13px] text-[#7b7b75]">This server is not set up for hosted Claude execution.</p>
+      </div>
+    </section>
+  )
+}
+
+function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces: boolean }) {
   const preference = useLocalAgent((state) => state.preference)
   const [status, setStatus] = useState<RemoteClaudeStatus | null>(null)
   const [view, setView] = useState<LoginView | null>(null)
@@ -27,6 +72,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
   const active = !!preference?.enabled && preference.transport === 'remote'
   const needsReconnect = active && !!status?.authRequired
   const model = normalizeClaudeModel(preference?.model)
+  const selectedBlurb = CLAUDE_MODELS.find((option) => option.id === model)?.blurb
   const signInUrl = view ? anthropicLinks(view.text).at(-1) : undefined
   const codeRequested = !!view && /(?:paste|enter)[^\n]{0,50}\bcode\b/i.test(view.text)
   useEffect(() => {
@@ -61,7 +107,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
           ? e.body.error
           : e instanceof Error
             ? e.message
-            : 'Could not update hosted execution.',
+            : 'Could not update your Claude Plan.',
       )
     } finally {
       setBusy(false)
@@ -84,21 +130,22 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
     login.current = connection
     await connection.start(status?.authRequired ?? false)
   }
-  if (!status?.configured) return null
+  if (!status) return null
+  if (!status.configured) return <UnavailableClaudePlanRow />
   return (
-    <section className={planRow(active)} aria-label="Hosted execution">
+    <section className={planRow(active)} aria-label="Claude Plan">
       <span aria-hidden className={planMark(active)}>
-        ☁
+        <AgentIcon name="claude" size={20} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-display text-[18px] font-extrabold tracking-[-0.02em]">Hosted execution</h3>
-          <span className={planPill(active)}>
-            {needsReconnect ? 'Sign-in required' : active ? 'Claude connected' : 'Available'}
+        <div className={planHead}>
+          <h3 className={planTitle}>Claude Plan</h3>
+          <span className={planPill(active && !needsReconnect)}>
+            {needsReconnect ? 'Sign-in required' : active ? 'Active · Connected' : 'Not connected'}
           </span>
         </div>
-        <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft">
-          Run Claude Code with your own account in a private hosted workspace. Tasks continue when you close Doop.
+        <p className={planBlurb}>
+          Use your Claude subscription. Tasks run in a private hosted workspace and carry on when you close Doop.
         </p>
         {needsReconnect && (
           <p className="mt-2 text-sm text-ink-soft">
@@ -106,9 +153,9 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
           </p>
         )}
         <div className={actionsRow}>
-          {active && (
+          {active ? (
             <ToggleChipGroup
-              aria-label="Hosted model"
+              aria-label="Claude model"
               value={model}
               disabled={busy || !!view}
               onValueChange={(next) => {
@@ -117,12 +164,24 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
             >
               {CLAUDE_MODELS.map((option) => (
                 <ToggleChipItem key={option.id} value={option.id} title={option.blurb}>
+                  {option.id === model && (
+                    <CheckIcon width={13} height={13} strokeWidth={2.5} color="#1a6b43" aria-hidden />
+                  )}
                   {option.name}
                 </ToggleChipItem>
               ))}
             </ToggleChipGroup>
+          ) : (
+            /* inert on a row that is not the connected one — a capability list, not a control */
+            <div className="flex flex-wrap gap-[9px]">
+              {CLAUDE_MODELS.map((option) => (
+                <ToggleChip key={option.id} state="idle">
+                  {option.name}
+                </ToggleChip>
+              ))}
+            </div>
           )}
-          <div className="flex flex-wrap gap-2 md:ml-auto">
+          <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
             {!view && (
               <Button
                 disabled={busy}
@@ -136,28 +195,14 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
                     ? 'Reconnect Claude'
                     : active
                       ? 'Check connection'
-                      : 'Connect my account'}
-              </Button>
-            )}
-            {active && !view && (
-              <Button
-                disabled={busy}
-                variant="ghost"
-                onClick={() => {
-                  void act(async () => {
-                    useLocalAgent.setState({ preference: await api.disableRemoteClaude(userId) })
-                    useStore.getState().allowanceChanged()
-                    setStatus(await api.remoteClaude(userId))
-                  })
-                }}
-              >
-                Disable hosted execution
+                      : replaces
+                        ? 'Use instead'
+                        : 'Connect'}
               </Button>
             )}
             {active && (
               <Button
                 disabled={busy}
-                variant="ghost"
                 onClick={() => {
                   void act(async () => {
                     await api.stopRemoteClaude(userId)
@@ -168,8 +213,24 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
                 Stop tasks
               </Button>
             )}
+            {active && !view && (
+              <Button
+                disabled={busy}
+                variant="danger"
+                onClick={() => {
+                  void act(async () => {
+                    useLocalAgent.setState({ preference: await api.disableRemoteClaude(userId) })
+                    useStore.getState().allowanceChanged()
+                    setStatus(await api.remoteClaude(userId))
+                  })
+                }}
+              >
+                Disconnect
+              </Button>
+            )}
           </div>
         </div>
+        {active && !view && <p className="mt-[10px] text-[13px] text-ink-faint">{selectedBlurb}</p>}
         {view && (
           <div className="mt-4 max-w-xl space-y-5">
             <p role="status" aria-live="polite" className="text-sm text-ink-soft">
@@ -277,8 +338,8 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
           </div>
         )}
         <p className="mt-3 text-xs text-ink-faint">
-          Claude handles sign-in and stores its credentials in your hosted workspace. Disabling execution stops Doop
-          tasks and signs you out of Claude. Connecting again requires sign-in.
+          Claude handles sign-in and keeps its credentials in your hosted workspace. Disconnecting stops running tasks
+          and signs you out of Claude; connecting again needs a fresh sign-in.
         </p>
         {error && (
           <p role="alert" className="mt-3 text-sm text-accent-ink">

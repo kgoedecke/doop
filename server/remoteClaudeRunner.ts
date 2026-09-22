@@ -195,6 +195,6 @@ function authRequiredResult(): LocalAgentResult {
   return {
     success: false,
     authRequired: true,
-    text: 'Claude sign-in required. Reconnect Claude in Settings → Hosted execution, then retry this task. Previous edits may already have completed.',
+    text: 'Claude sign-in required. Reconnect Claude in Settings → Claude Plan, then retry this task. Previous edits may already have completed.',
   }
 }

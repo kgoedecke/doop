@@ -5,7 +5,7 @@ vi.mock('../src/lib/api', () => ({
   ApiError: class extends Error {},
 }))
 vi.mock('../src/lib/store', () => ({ useStore: { getState: () => ({ allowanceChanged: mocks.changed }) } }))
-import { disconnectLocalAgent, selectLocalAgent, useLocalAgent } from '../src/lib/localAgent'
+import { selectLocalAgent, useLocalAgent } from '../src/lib/localAgent'
 afterEach(() => {
   vi.clearAllMocks()
   vi.unstubAllGlobals()
@@ -30,17 +30,4 @@ it('preserves local routing state when the server rejects the switch', async () 
   await expect(selectLocalAgent('alice', { ...previous, enabled: false })).rejects.toThrow('Network failure')
   expect(useLocalAgent.getState().preference).toEqual(previous)
   expect(mocks.changed).not.toHaveBeenCalled()
-})
-
-it('disconnecting the local CLI leaves a selected hosted account active', async () => {
-  vi.stubGlobal('__DOOP_CLAUDE_CLI__', true)
-  const invoke = vi.fn().mockResolvedValue({ connected: false })
-  vi.stubGlobal('__TAURI__', { core: { invoke } })
-  const preference = { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } as const
-  useLocalAgent.setState({ preference })
-  mocks.status.mockResolvedValue(preference)
-  await disconnectLocalAgent('alice')
-  expect(mocks.save).not.toHaveBeenCalled()
-  expect(useLocalAgent.getState().preference).toEqual(preference)
-  expect(invoke).toHaveBeenCalledWith('claude_connect', { userId: 'alice', enabled: false })
 })

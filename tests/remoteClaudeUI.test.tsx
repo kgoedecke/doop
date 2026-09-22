@@ -65,7 +65,7 @@ afterEach(() => {
 })
 const connect = () =>
   Array.from(container.querySelectorAll('button')).find((button) =>
-    ['Connect my account', 'Check connection'].includes(button.textContent ?? ''),
+    ['Connect', 'Check connection'].includes(button.textContent ?? ''),
   )!
 it('checks an enabled hosted connection before selecting it again', async () => {
   useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
@@ -80,7 +80,8 @@ it('checks an enabled hosted connection before selecting it again', async () => 
   expect(mocks.check).toHaveBeenCalledWith('alice')
   expect(mocks.select).toHaveBeenCalledWith('alice', 'claude-sonnet-5', undefined)
   expect(useLocalAgent.getState().preference?.transport).toBe('remote')
-  expect(container.textContent).toContain('Disable hosted execution')
+  expect(container.textContent).toContain('Active · Connected')
+  expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Disconnect')).toBe(true)
 })
 it('preserves selection and shows a retryable error when the upstream check fails', async () => {
   useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
@@ -143,4 +144,17 @@ it('waits for a code prompt before showing the code field', async () => {
   await act(async () => connect().click())
   expect(container.querySelector('#hosted-sign-in-code')).toBeNull()
   expect(container.querySelector('a')).toBeNull()
+})
+it('keeps a muted Claude Plan row when the server has no hosted execution', async () => {
+  mocks.status.mockResolvedValue({ configured: false, running: false })
+  await act(async () => root.render(<RemoteClaudeRow />))
+  expect(container.textContent).toContain('Claude Plan')
+  expect(container.textContent).toContain('Not available')
+  expect(container.querySelectorAll('button')).toHaveLength(0)
+})
+it('reads as a switch when another model account is already connected', async () => {
+  useLocalAgent.setState({ preference: { enabled: false, model: 'claude-sonnet-5' } })
+  await act(async () => root.render(<RemoteClaudeRow replaces />))
+  expect(container.textContent).toContain('Not connected')
+  expect(Array.from(container.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Use instead'])
 })

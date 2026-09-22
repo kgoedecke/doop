@@ -55,7 +55,7 @@ export function Settings() {
   const meter = allowance
     ? allowance.byoModel
       ? allowance.byoKind === 'claude-remote'
-        ? 'Hosted execution selected — runs using your Claude account.'
+        ? 'Claude Plan selected — runs on your Claude account.'
         : allowance.byoKind === 'claude-local'
           ? 'Claude CLI selected — runs on your connected desktop.'
           : `Running on your ${allowance.byoKind === 'anthropic-key' ? 'Claude API key' : allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT subscription'}.`
@@ -144,8 +144,8 @@ export function Settings() {
                 <CardHeader>
                   <CardTitle>Doop Agent</CardTitle>
                   <CardDescription>
-                    Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your
-                    desktop. Your provider’s usage limits and charges apply.
+                    Choose which account the Doop Agent runs on across your canvases. Your provider’s usage limits and
+                    charges apply.
                   </CardDescription>
                   {meter && (
                     <div className="mt-[11px] flex flex-col items-start gap-[7px] text-[11.5px] text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">

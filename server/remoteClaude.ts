@@ -111,7 +111,7 @@ remoteClaudeRouter.post('/disable', (req, res, next) => {
         throw new Error('Sign-out not confirmed')
     } catch {
       throw new Error(
-        'Hosted execution is disabled, but Claude sign-out could not be confirmed. Retry disabling to finish signing out.',
+        'Claude Plan is disconnected, but Claude sign-out could not be confirmed. Retry disconnecting to finish signing out.',
       )
     }
     res.json(await getLocalAgentPreference(req.user!.id))
