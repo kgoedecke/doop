@@ -85,6 +85,11 @@ Anthropic's [hosting conditions](https://code.claude.com/docs/en/legal-and-compl
 
 Requires Node.js 22+, the Cantelop CLI, Bun, and Docker with `linux/amd64` support.
 
+The dev script runs `cantelop dev --container` so Sessions use this service's
+Docker image, including Claude Code, Python, and `/opt/app/login-pty.py`, with
+the Workspace mounted at `/workspace`. This also applies to
+`bun run cantelop:dev` from the repository root.
+
 ```sh
 bun install --frozen-lockfile
 cp .env.example .env

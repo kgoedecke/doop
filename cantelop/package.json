@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "cantelop dev",
+    "dev": "cantelop dev --container",
     "build": "cantelop build",
     "check": "tsc -p tsconfig.api.json && tsc -p tsconfig.session.json",
     "test": "node --import tsx --test test/*.test.ts"
