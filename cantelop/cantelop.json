@@ -1,5 +1,5 @@
 {
-  "app": "cantelop-claude-api",
+  "app": "doop-claude-runtime",
   "api": "src/api.ts",
   "session": { "entrypoint": "src/session.ts", "dockerfile": "docker/Dockerfile" },
   "environment": {
