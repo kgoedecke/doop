@@ -5,13 +5,7 @@ import prettier from 'eslint-config-prettier'
 
 export default tseslint.config(
   {
-    ignores: [
-      'dist/',
-      'node_modules/',
-      'desktop/src-tauri/target/',
-      'services/claude-runtime/.cantelop/**',
-      'services/claude-runtime/.dev/**',
-    ],
+    ignores: ['dist/', 'node_modules/', 'desktop/src-tauri/target/', 'cantelop/.cantelop/**', 'cantelop/.dev/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

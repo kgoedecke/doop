@@ -55,7 +55,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: bun install --cwd services/claude-runtime --frozen-lockfile
+      - run: bun install --cwd cantelop --frozen-lockfile
       - name: Install Cantelop CLI
         run: |
           curl -fsSL https://console.cantelop.dev/install.sh -o /tmp/install-cantelop.sh

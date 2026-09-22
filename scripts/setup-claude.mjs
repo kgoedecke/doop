@@ -97,7 +97,7 @@ No credentials are printed or copied from another developer.`)
   const setup = await prepareSetup(root, { app, mcpOrigin })
   console.log(`Saved configuration for ${app}. Private key stays in Doop; Cantelop receives only the public key.
 Hosted Doop configuration: .env.claude-hosted (private; import into your hosting provider).
-Deployment target: services/claude-runtime/cantelop.local.json`)
+Deployment target: cantelop/cantelop.local.json`)
   if (values['prepare-only']) {
     console.log('Configuration prepared. Rerun without --prepare-only to deploy and verify.')
     if (local) console.log('For local MCP access, run bun run cantelop:tunnel in a second terminal.')

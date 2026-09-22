@@ -608,7 +608,7 @@ please rebrand derived services.
 
 ## Claude Plan: hosted execution with your own Claude account
 
-The hosted service source lives in [`services/claude-runtime`](services/claude-runtime/README.md),
+The hosted service source lives in [`cantelop`](cantelop/README.md),
 including the Cantelop API, native Claude runtime, Docker image, and tests. It deploys
 separately from the web server. From the repository root, run `bun run cantelop:install`,
 `bun run cantelop:check`, `bun run cantelop:test`, and `bun run cantelop:build` to verify it.
@@ -665,8 +665,8 @@ Useful options:
 - `--local`: select the local MCP tunnel without a prompt.
 - `bun run cantelop:tunnel`: restart just the MCP tunnel; restart Doop afterward.
 
-The app override lives in `services/claude-runtime/cantelop.local.json`; the
-committed manifest stays unchanged. `services/claude-runtime/.env.setup` contains
+The app override lives in `cantelop/cantelop.local.json`; the
+committed manifest stays unchanged. `cantelop/.env.setup` contains
 only public identity configuration. Builds and automated tests need no Cantelop
 or Claude account; deployment and live Claude use require your own accounts.
 

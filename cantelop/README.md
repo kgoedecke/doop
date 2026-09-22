@@ -30,7 +30,7 @@ For a contributor deployment, run `cantelop login` followed by
 `bun run cantelop:setup` from the repository root. Setup creates a local app
 manifest, generates matching public/private identity configuration, deploys,
 and checks `/v1/identity` without allocating a Workspace or Session. See the
-[root setup guide](../../README.md#set-up-your-own-hosted-claude-service).
+[root setup guide](../README.md#set-up-your-own-hosted-claude-service).
 
 Rerun setup to deploy changes to that app. To inspect its releases from this directory:
 
@@ -48,7 +48,7 @@ a canvas task, cancellation, and stream reconnection with your own account.
 
 Doop owns the private application signing key; this service receives only its
 public JWK. Configure the matching variables described in the
-[root README](../../README.md#claude-plan-hosted-execution-with-your-own-claude-account).
+[root README](../README.md#claude-plan-hosted-execution-with-your-own-claude-account).
 Claude credentials and conversation state remain in existing Cantelop Workspaces.
 
 ## Architecture

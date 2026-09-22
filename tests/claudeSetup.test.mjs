@@ -14,7 +14,7 @@ import {
 } from '../scripts/lib/claude-setup.mjs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import process from 'node:process'
-import api from '../services/claude-runtime/src/api.ts'
+import api from '../cantelop/src/api.ts'
 
 const directories = []
 afterEach(async () => {
@@ -55,12 +55,9 @@ it('runs the public prepare-only command without credentials, a CLI, or any depl
 async function fixture(env = '') {
   const root = await mkdtemp(join(tmpdir(), 'doop-claude-setup-'))
   directories.push(root)
-  const service = join(root, 'services/claude-runtime')
+  const service = join(root, 'cantelop')
   await mkdir(service, { recursive: true })
-  const manifest = await readFile(
-    new globalThis.URL('../services/claude-runtime/cantelop.json', import.meta.url),
-    'utf8',
-  )
+  const manifest = await readFile(new globalThis.URL('../cantelop/cantelop.json', import.meta.url), 'utf8')
   await writeFile(join(service, 'cantelop.json'), manifest)
   await writeFile(join(root, '.env'), env)
   return { root, service, manifest }

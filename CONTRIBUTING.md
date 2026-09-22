@@ -34,12 +34,12 @@ CI runs typecheck, lint, format check, and build on every push and PR.
 
 ## Hosted Claude runtime
 
-The Cantelop service lives in `services/claude-runtime/` and uses a separate Bun
+The Cantelop service lives in `cantelop/` and uses a separate Bun
 lockfile. Run `bun run cantelop:install` before root type checking or tests, which
 include client/service contract checks. Run `bun run cantelop:check` and
 `bun run cantelop:test` for its Node test suite. `bun run cantelop:build` also verifies
 the deployable API and sandbox image and requires Cantelop CLI and Docker.
-See [the service README](services/claude-runtime/README.md) for deployment details.
+See [the service README](cantelop/README.md) for deployment details.
 
 For live testing on your own Cantelop account, run `cantelop login` and
 `bun run cantelop:setup`. It provisions matching configuration without another

@@ -14,7 +14,7 @@ desktop/src-tauri/gen
 .claude/.current-tool
 
 # Local Cantelop artifacts and deployment credentials
-services/claude-runtime/.cantelop/
-services/claude-runtime/.dev/
-services/claude-runtime/coverage/
-services/claude-runtime/cantelop.local.json
+cantelop/.cantelop/
+cantelop/.dev/
+cantelop/coverage/
+cantelop/cantelop.local.json

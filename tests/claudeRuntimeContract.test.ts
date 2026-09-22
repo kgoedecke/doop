@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { generateKeyPairSync } from 'node:crypto'
-import api from '../services/claude-runtime/src/api.ts'
-import type { Command, Event, Reply } from '../services/claude-runtime/src/contracts.ts'
+import api from '../cantelop/src/api.ts'
+import type { Command, Event, Reply } from '../cantelop/src/contracts.ts'
 import { checkRemoteAuth, remoteIdentity, remotePost } from '../server/remoteClaudeClient.ts'
 import { consumeClaudeEvents } from '../shared/remoteClaude.ts'
 

@@ -1,1 +1,1 @@
-export { terminalCrypto } from '../../services/claude-runtime/src/terminal-crypto.js'
+export { terminalCrypto } from '../../cantelop/src/terminal-crypto.js'

@@ -10,4 +10,4 @@ data
 **/.env
 **/.env.*
 **/coverage
-services/claude-runtime/cantelop.local.json
+cantelop/cantelop.local.json

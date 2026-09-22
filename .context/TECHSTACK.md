@@ -99,7 +99,7 @@
 
 ## Hosted Claude service
 
-`services/claude-runtime/` contains the separately deployed Cantelop Edge API and
+`cantelop/` contains the separately deployed Cantelop Edge API and
 Session runtime. It uses SDK 0.11.0, Node 22, its own Bun lockfile, and Node tests.
 Root `cantelop:*` scripts install, check, test, build, and run it. Doop imports its
 runtime-independent event types and terminal crypto; SDK and subprocess code stay

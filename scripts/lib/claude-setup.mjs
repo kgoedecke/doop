@@ -57,7 +57,7 @@ async function privateWrite(path, value) {
 }
 
 export async function readSetup(root) {
-  const service = join(root, 'services/claude-runtime')
+  const service = join(root, 'cantelop')
   const source = await optionalFile(join(root, '.env'))
   const local = await optionalFile(join(service, 'cantelop.local.json'))
   const env = parseEnv(source)

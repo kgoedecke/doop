@@ -1,4 +1,4 @@
-import type { Event as RuntimeEvent } from '../services/claude-runtime/src/contracts.js'
+import type { Event as RuntimeEvent } from '../cantelop/src/contracts.js'
 
 export interface RemoteClaudeStatus {
   authRequired?: boolean
