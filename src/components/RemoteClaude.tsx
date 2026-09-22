@@ -122,7 +122,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
               ))}
             </ToggleChipGroup>
           )}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 md:ml-auto">
             {!view && (
               <Button
                 disabled={busy}
