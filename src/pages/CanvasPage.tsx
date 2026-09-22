@@ -28,6 +28,13 @@ import { SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
+import {
+  GlobeIcon,
+  ImportStepFooter,
+  ImportStepHeader,
+  RadioTowerIcon,
+  SourcePicker,
+} from '../components/ImportSources'
 import { PresentMode } from '../components/PresentMode'
 import { getIdentity, setName } from '../lib/identity'
 import {
@@ -334,7 +341,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             variant="bare"
             className="h-8 px-2.5 text-[12.5px] font-medium"
             onClick={() => setShowImport(true)}
-            title="Import a live web page as a frame"
+            title="Import from a website, live app or GitHub repo"
           >
             <ImportIcon className="size-[13px]" />
             Import
@@ -655,6 +662,9 @@ function ImportModal({
   /** a repo import queues cards on the board instead of landing frames */
   onQueued: (cardCount: number) => void
 }) {
+  /* which source's screen is open — null is the picker; landing back from
+     GitHub's install flow jumps straight to that screen */
+  const [source, setSource] = useState<string | null>(installPass || installError ? 'github' : null)
   const [url, setUrl] = useState('')
   const [wholeSite, setWholeSite] = useState(false)
   const [discovery, setDiscovery] = useState<DiscoveredSite | null>(null)
@@ -816,7 +826,7 @@ function ImportModal({
     .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind])
 
   return (
-    <Modal size="lg" onClose={() => !busy && onClose()}>
+    <Modal size="xl" className="sm:max-w-[820px]" onClose={() => !busy && onClose()}>
       <>
         {repoReview ? (
           <>
@@ -967,76 +977,107 @@ function ImportModal({
           </>
         ) : !discovery ? (
           <>
-            <div className="flex flex-col gap-[5px]">
-              <ModalEyebrow>Website capture</ModalEyebrow>
-              <ModalTitle>Import from the web</ModalTitle>
-            </div>
-            <ModalLede>
-              Bring in one page, or discover a whole site and choose the pages you want before anything is added.
-            </ModalLede>
-            <Field className="mt-[22px]" label="Website URL" labelVariant="form" htmlFor="import-url">
-              <Input
-                id="import-url"
-                variant="mono"
-                inputSize="lg"
-                className="bg-paper focus:border-ink focus:bg-white focus:ring-0"
-                autoFocus
-                placeholder="https://example.com"
-                value={url}
-                disabled={!!busy}
-                onChange={(e) => {
-                  setUrl(e.target.value)
-                  setError(null)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    if (wholeSite) void discover()
-                    else void runSinglePage()
-                  }
-                  if (e.key === 'Escape' && !busy) onClose()
-                }}
+            {source === null ? (
+              <SourcePicker
+                onPick={setSource}
+                sources={[
+                  {
+                    id: 'website',
+                    title: 'Website',
+                    blurb: 'One page, or discover a whole site.',
+                    icon: <GlobeIcon className="size-5 text-ink" />,
+                  },
+                  {
+                    id: 'liveapp',
+                    title: 'Live app',
+                    blurb: 'Behind a login, a VPN or localhost.',
+                    icon: <RadioTowerIcon className="size-5 text-ink" />,
+                  },
+                  {
+                    id: 'github',
+                    title: 'GitHub repo',
+                    blurb: 'Screens read from the repo’s routes.',
+                    icon: <GithubIcon width={21} height={21} />,
+                  },
+                ]}
               />
-            </Field>
-            <CheckboxCard
-              checked={wholeSite}
-              disabled={!!busy}
-              onChange={(next) => {
-                setWholeSite(next)
-                setError(null)
-              }}
-              title={
-                <>
-                  Import the entire website{' '}
-                  <em className="ml-[7px] rounded-full bg-paper-deep px-1.5 py-[2px] font-mono text-[8.5px] font-semibold uppercase not-italic tracking-[0.08em] text-ink-faint">
-                    Optional
-                  </em>
-                </>
-              }
-              description="Find public pages on the same site, then review the list."
-            />
-            <p className={importNoteCls}>Snapshots stay editable and commentable. Scripts are removed.</p>
-            {error && <p className={errorNoteCls}>{error}</p>}
-            <ModalActions>
-              <Button variant="ghost" disabled={!!busy} onClick={onClose}>
-                Cancel
-              </Button>
-              <Button variant="primary" disabled={!!busy || !url.trim()} onClick={wholeSite ? discover : runSinglePage}>
-                {busy === 'discovering'
-                  ? 'Finding pages…'
-                  : busy === 'importing'
-                    ? 'Importing…'
-                    : wholeSite
-                      ? 'Find pages →'
-                      : '⤓ Import page'}
-              </Button>
-            </ModalActions>
-            <SyncKeysSection canvasId={canvasId} />
-            <GithubSection
-              canvasId={canvasId}
-              installPass={installPass}
-              installError={installError}
-              onReview={openRepoReview}
-            />
+            ) : source === 'website' ? (
+              <>
+                <ImportStepHeader icon={<GlobeIcon className="size-[22px] text-ink" />} title="Import a website" />
+                <ModalLede>
+                  Bring in one page, or discover a whole site and choose the pages you want before anything is added.
+                </ModalLede>
+                <Field className="mt-[22px]" label="Website URL" labelVariant="form" htmlFor="import-url">
+                  <Input
+                    id="import-url"
+                    variant="mono"
+                    inputSize="lg"
+                    className="bg-paper focus:border-ink focus:bg-white focus:ring-0"
+                    autoFocus
+                    placeholder="https://example.com"
+                    value={url}
+                    disabled={!!busy}
+                    onChange={(e) => {
+                      setUrl(e.target.value)
+                      setError(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        if (wholeSite) void discover()
+                        else void runSinglePage()
+                      }
+                    }}
+                  />
+                </Field>
+                <CheckboxCard
+                  checked={wholeSite}
+                  disabled={!!busy}
+                  onChange={(next) => {
+                    setWholeSite(next)
+                    setError(null)
+                  }}
+                  title={
+                    <>
+                      Import the entire website{' '}
+                      <em className="ml-[7px] rounded-full bg-paper-deep px-1.5 py-[2px] font-mono text-[8.5px] font-semibold uppercase not-italic tracking-[0.08em] text-ink-faint">
+                        Optional
+                      </em>
+                    </>
+                  }
+                  description="Find public pages on the same site, then review the list."
+                />
+                {error && <p className={errorNoteCls}>{error}</p>}
+                <ImportStepFooter
+                  note="Snapshots stay editable and commentable. Scripts are removed."
+                  onBack={() => setSource(null)}
+                  backDisabled={!!busy}
+                >
+                  <Button
+                    variant="primary"
+                    disabled={!!busy || !url.trim()}
+                    onClick={wholeSite ? discover : runSinglePage}
+                  >
+                    {busy === 'discovering'
+                      ? 'Finding pages…'
+                      : busy === 'importing'
+                        ? 'Importing…'
+                        : wholeSite
+                          ? 'Discover pages →'
+                          : '⤓ Import page'}
+                  </Button>
+                </ImportStepFooter>
+              </>
+            ) : source === 'liveapp' ? (
+              <SyncKeysSection canvasId={canvasId} onBack={() => setSource(null)} />
+            ) : source === 'github' ? (
+              <GithubSection
+                canvasId={canvasId}
+                installPass={installPass}
+                installError={installError}
+                onReview={openRepoReview}
+                onBack={() => setSource(null)}
+              />
+            ) : null}
           </>
         ) : (
           <>
@@ -1205,7 +1246,7 @@ function RenameSelfModal({ current, onClose }: { current: string; onClose: () =>
 /* Design sync: mint write-only snippet keys so an app pushes its live screens
    onto this canvas — the import path for products behind SSO/VPN where the
    server-side importer can't go. */
-function SyncKeysSection({ canvasId }: { canvasId: string }) {
+function SyncKeysSection({ canvasId, onBack }: { canvasId: string; onBack: () => void }) {
   const [keys, setKeys] = useState<SyncKeyInfo[] | null>(null)
   const [name, setAppName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1253,15 +1294,22 @@ function SyncKeysSection({ canvasId }: { canvasId: string }) {
     setTimeout(() => setCopiedId(null), 1500)
   }
 
-  if (forbidden) return null
+  if (forbidden) {
+    return (
+      <>
+        <ImportStepHeader icon={<RadioTowerIcon className="size-[22px] text-ink" />} title="Sync a live app" />
+        <ModalLede>Sync keys are for canvas members — ask the owner for durable access.</ModalLede>
+        <ImportStepFooter onBack={onBack} />
+      </>
+    )
+  }
   return (
-    <div className="mt-3.5 flex flex-col gap-2.5 border-t border-line-soft pt-3.5">
-      <h3 className="text-[13px] font-semibold text-ink">Or sync a live app</h3>
-      <Note>
-        For apps a crawler can't reach — behind a login, a VPN, or on localhost. Paste one script tag and each screen
-        people visit lands here as a frame, imported once. Delete a frame to re-import it fresh. The key only writes to
-        this canvas.
-      </Note>
+    <>
+      <ImportStepHeader icon={<RadioTowerIcon className="size-[22px] text-ink" />} title="Sync a live app" />
+      <ModalLede>
+        For apps a crawler cannot reach: behind a login, a VPN, or on localhost. Paste one script tag and each screen
+        people visit lands here as a frame, imported once.
+      </ModalLede>
       {(keys ?? []).map((k) => (
         <div key={k.id} className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2 text-[13px]">
@@ -1298,19 +1346,47 @@ function SyncKeysSection({ canvasId }: { canvasId: string }) {
         </div>
       ))}
       <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row">
-        <Input
-          className="flex-1 rounded-[10px] bg-paper focus:ring-0"
-          placeholder="App name (e.g. Admin dashboard)"
-          value={name}
-          disabled={busy}
-          onChange={(e) => setAppName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && create()}
-        />
-        <Button variant="primary" className="justify-center" disabled={busy || !name.trim()} onClick={create}>
-          Create key
+        <Field className="flex-1" label="App name" labelVariant="form" htmlFor="sync-app-name">
+          <Input
+            id="sync-app-name"
+            inputSize="lg"
+            className="bg-paper focus:border-ink focus:bg-white focus:ring-0"
+            placeholder="Admin dashboard"
+            value={name}
+            disabled={busy}
+            onChange={(e) => setAppName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && create()}
+          />
+        </Field>
+        <Button
+          variant="primary"
+          className="justify-center self-end sm:h-12"
+          disabled={busy || !name.trim()}
+          onClick={create}
+        >
+          ⚿ Create key
         </Button>
       </div>
-    </div>
+      <ol className="mt-3 flex flex-col divide-y divide-line-soft rounded-[10px] border border-line">
+        {[
+          ['Get a key for this canvas', 'The key only writes here. Revoke it from this screen at any time.'],
+          ['Paste the script tag', 'One script tag in your app’s layout. Nothing else to install.'],
+          ['Browse the app', 'Every new screen someone visits lands as a frame. Delete a frame to re-import it fresh.'],
+        ].map(([title, detail], i) => (
+          <li key={title} className="flex gap-3.5 px-3.5 py-3">
+            <span className="font-mono text-[11px] leading-[1.6] text-ink-faint">0{i + 1}</span>
+            <span className="min-w-0">
+              <b className="block text-[13.5px] font-semibold tracking-[-0.012em]">{title}</b>
+              <span className="text-[12.5px] leading-[1.45] text-ink-soft">{detail}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <ImportStepFooter
+        note="Visible page content uploads to Doop as static HTML. Input values are dropped; mark anything sensitive with data-doop-mask."
+        onBack={onBack}
+      />
+    </>
   )
 }
 
@@ -1325,11 +1401,13 @@ function GithubSection({
   installPass,
   installError,
   onReview,
+  onBack,
 }: {
   canvasId: string
   installPass: string | null
   installError: string | null
   onReview: (connection: GithubConnectionInfo, manifest: RepoManifest) => void
+  onBack: () => void
 }) {
   const [connections, setConnections] = useState<GithubConnectionInfo[] | null>(null)
   const [appEnabled, setAppEnabled] = useState(false)
@@ -1438,118 +1516,139 @@ function GithubSection({
     setConnections((c) => c?.filter((x) => x.id !== connId) ?? null)
   }
 
-  if (forbidden) return null
+  if (forbidden) {
+    return (
+      <>
+        <ImportStepHeader icon={<GithubIcon width={22} height={22} />} title="Connect a GitHub repo" />
+        <ModalLede>Repo connections are for canvas members — ask the owner for durable access.</ModalLede>
+        <ImportStepFooter onBack={onBack} />
+      </>
+    )
+  }
   return (
-    <div className="mt-3.5 flex flex-col gap-2.5 border-t border-line-soft pt-3.5">
-      <h3 className="text-[13px] font-semibold text-ink">Or connect a GitHub repo</h3>
-      <Note>
-        Doop reads the repo's routing conventions and lists its screens for review — nothing lands until you pick.
-        {appEnabled
-          ? ' Install the doop app on the repos you choose; access is scoped to exactly those and revocable on GitHub.'
-          : ' Use a fine-grained token scoped to the one repo, read-only contents. The token never leaves the server.'}
-      </Note>
-      {(connections ?? []).map((conn) => (
-        <div key={conn.id} className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2 text-[13px]">
-            <b className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">
-              {conn.repo}
-              <span className="font-normal text-ink-faint">@{conn.branch}</span>
-            </b>
-            <Note className="mr-auto shrink-0">
-              {conn.frames ? `${conn.frames} screen${conn.frames === 1 ? '' : 's'}` : 'nothing imported yet'}
-            </Note>
-            <Button size="sm" className="px-2.5 text-xs" disabled={!!busy} onClick={() => analyze(conn)}>
-              {busy === conn.id ? 'Analyzing…' : 'Analyze'}
-            </Button>
-            <Button
-              variant="bare"
-              size="icon-sm"
-              className="-mr-1.5 text-[13px] hover:bg-accent-ink/10 hover:text-accent-ink"
-              title="Disconnect this repository"
-              onClick={() => disconnect(conn.id)}
-            >
-              ✕
-            </Button>
-          </div>
-        </div>
-      ))}
-      {pickerRepos && (
-        <div className="flex flex-col gap-1.5 rounded-[11px] border border-line bg-paper p-2.5">
-          <b className="text-[12px] text-ink-soft">Pick a repository to connect to this canvas</b>
-          {pickerRepos.map((r) => (
-            <div key={r.fullName} className="flex items-center gap-2 text-[13px]">
-              <GithubIcon width={13} height={13} className="shrink-0 text-ink-faint" />
-              <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px]">
-                {r.fullName}
-                {r.private && <span className="ml-1.5 text-[10px] text-ink-faint">private</span>}
-              </span>
+    <>
+      <ImportStepHeader icon={<GithubIcon width={22} height={22} />} title="Connect a GitHub repo" />
+      <ModalLede>
+        Doop reads the repo&rsquo;s routing conventions and lists its screens for review. Nothing lands until you pick.
+      </ModalLede>
+      <div className="mt-[22px] flex flex-col gap-2.5">
+        {(connections ?? []).map((conn) => (
+          <div key={conn.id} className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2 text-[13px]">
+              <b className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">
+                {conn.repo}
+                <span className="font-normal text-ink-faint">@{conn.branch}</span>
+              </b>
+              <Note className="mr-auto shrink-0">
+                {conn.frames ? `${conn.frames} screen${conn.frames === 1 ? '' : 's'}` : 'nothing imported yet'}
+              </Note>
+              <Button size="sm" className="px-2.5 text-xs" disabled={!!busy} onClick={() => analyze(conn)}>
+                {busy === conn.id ? 'Analyzing…' : 'Analyze'}
+              </Button>
               <Button
-                size="sm"
-                className="px-2.5 text-xs"
-                disabled={!!busy}
-                onClick={() => connectInstalledRepo(r.fullName)}
+                variant="bare"
+                size="icon-sm"
+                className="-mr-1.5 text-[13px] hover:bg-accent-ink/10 hover:text-accent-ink"
+                title="Disconnect this repository"
+                onClick={() => disconnect(conn.id)}
               >
-                {busy === 'connecting' ? 'Connecting…' : 'Connect'}
+                ✕
               </Button>
             </div>
-          ))}
-          {!pickerRepos.length && <Note>All installed repositories are connected.</Note>}
-        </div>
-      )}
-      {appEnabled && !pickerRepos && (
-        <Button variant="primary" className="justify-center gap-2 self-start" disabled={!!busy} onClick={startInstall}>
-          <GithubIcon width={14} height={14} />
-          {busy === 'connecting' ? 'Opening GitHub…' : 'Connect GitHub'}
-        </Button>
-      )}
-      {appEnabled && !showTokenForm && (
-        <Button
-          variant="bare"
-          size="sm"
-          className="self-start p-0 font-mono text-[10.5px] text-ink-faint hover:bg-transparent hover:text-accent-ink"
-          onClick={() => setShowTokenForm(true)}
-        >
-          paste a token instead
-        </Button>
-      )}
-      {(!appEnabled || showTokenForm) && (
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-col items-stretch gap-2 sm:flex-row">
-            <Input
-              className="flex-1 rounded-[10px] bg-paper font-mono text-[12px] focus:ring-0"
-              placeholder="owner/repository"
-              value={repo}
-              disabled={!!busy}
-              onChange={(e) => {
-                setRepo(e.target.value)
-                setError(null)
-              }}
-            />
-            <Input
-              className="flex-1 rounded-[10px] bg-paper font-mono text-[12px] focus:ring-0"
-              type="password"
-              placeholder="Fine-grained token (github_pat_…)"
-              value={token}
-              disabled={!!busy}
-              onChange={(e) => {
-                setToken(e.target.value)
-                setError(null)
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && connectRepo()}
-            />
           </div>
+        ))}
+        {pickerRepos && (
+          <div className="flex flex-col gap-1.5 rounded-[11px] border border-line bg-paper p-2.5">
+            <b className="text-[12px] text-ink-soft">Pick a repository to connect to this canvas</b>
+            {pickerRepos.map((r) => (
+              <div key={r.fullName} className="flex items-center gap-2 text-[13px]">
+                <GithubIcon width={13} height={13} className="shrink-0 text-ink-faint" />
+                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px]">
+                  {r.fullName}
+                  {r.private && <span className="ml-1.5 text-[10px] text-ink-faint">private</span>}
+                </span>
+                <Button
+                  size="sm"
+                  className="px-2.5 text-xs"
+                  disabled={!!busy}
+                  onClick={() => connectInstalledRepo(r.fullName)}
+                >
+                  {busy === 'connecting' ? 'Connecting…' : 'Connect'}
+                </Button>
+              </div>
+            ))}
+            {!pickerRepos.length && <Note>All installed repositories are connected.</Note>}
+          </div>
+        )}
+        {appEnabled && !pickerRepos && (
           <Button
             variant="primary"
-            className="justify-center self-start"
-            disabled={!!busy || !repo.trim() || !token.trim()}
-            onClick={connectRepo}
+            className="justify-center gap-2 self-start"
+            disabled={!!busy}
+            onClick={startInstall}
           >
-            {busy === 'connecting' ? 'Connecting…' : 'Connect'}
+            <GithubIcon width={14} height={14} />
+            {busy === 'connecting' ? 'Opening GitHub…' : 'Connect GitHub'}
           </Button>
-        </div>
-      )}
-      {error && <p className={errorNoteCls}>{error}</p>}
-    </div>
+        )}
+        {appEnabled && !showTokenForm && (
+          <Button
+            variant="bare"
+            size="sm"
+            className="self-start p-0 font-mono text-[10.5px] text-ink-faint hover:bg-transparent hover:text-accent-ink"
+            onClick={() => setShowTokenForm(true)}
+          >
+            paste a token instead
+          </Button>
+        )}
+        {(!appEnabled || showTokenForm) && (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col items-stretch gap-2 sm:flex-row">
+              <Input
+                className="flex-1 rounded-[10px] bg-paper font-mono text-[12px] focus:ring-0"
+                placeholder="owner/repository"
+                value={repo}
+                disabled={!!busy}
+                onChange={(e) => {
+                  setRepo(e.target.value)
+                  setError(null)
+                }}
+              />
+              <Input
+                className="flex-1 rounded-[10px] bg-paper font-mono text-[12px] focus:ring-0"
+                type="password"
+                placeholder="Fine-grained token (github_pat_…)"
+                value={token}
+                disabled={!!busy}
+                onChange={(e) => {
+                  setToken(e.target.value)
+                  setError(null)
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && connectRepo()}
+              />
+            </div>
+            <Button
+              variant="primary"
+              className="justify-center self-start"
+              disabled={!!busy || !repo.trim() || !token.trim()}
+              onClick={connectRepo}
+            >
+              {busy === 'connecting' ? 'Connecting…' : 'Connect'}
+            </Button>
+          </div>
+        )}
+        {error && <p className={errorNoteCls}>{error}</p>}
+      </div>
+      <ImportStepFooter
+        note={
+          appEnabled
+            ? 'Access is scoped to the repos you pick and revocable on GitHub.'
+            : 'A fine-grained, read-only token — it never leaves the server.'
+        }
+        onBack={onBack}
+        backDisabled={!!busy}
+      />
+    </>
   )
 }
 
