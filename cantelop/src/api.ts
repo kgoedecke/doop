@@ -5,6 +5,10 @@ import { identity } from './auth.js'
 import { ApiError, config, fail, fields, readBody, uuid } from './validation.js'
 
 const AUTH_KEEP_ALIVE_SECONDS = 900
+// A zero-second lifetime can release an inactive auth Session before the
+// request/reply message is dispatched. Keep one idle second so logout can
+// settle, then let the platform release the Sandbox automatically.
+const LOGOUT_KEEP_ALIVE_SECONDS = 1
 
 export default defineApi<Command, Reply>(({ app, router, env }) => {
   const route = (method: HttpMethod, path: string, handle: (r: Request) => Promise<Response>) => {
@@ -137,7 +141,7 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
     const session = app.sessions.open({
       id: `${user.userId}:auth`,
       workspaceSlug: user.workspaceSlug,
-      keepAliveSeconds: 0,
+      keepAliveSeconds: LOGOUT_KEEP_ALIVE_SECONDS,
     })
     return result(
       session.id,
