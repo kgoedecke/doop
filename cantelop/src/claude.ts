@@ -10,6 +10,8 @@ export function claudeEnv(workspace: string): NodeJS.ProcessEnv {
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'TERM', 'SSL_CERT_FILE', 'SSL_CERT_DIR']) {
     if (process.env[key]) env[key] = process.env[key]
   }
+  env.DISABLE_AUTOUPDATER = '1'
+  env.DISABLE_UPDATES = '1'
   env.CLAUDE_CONFIG_DIR = `${workspace}/.claude`
   return env
 }

@@ -58,8 +58,13 @@ jobs:
       - run: bun install --cwd cantelop --frozen-lockfile
       - name: Install Cantelop CLI
         run: |
-          curl -fsSL https://console.cantelop.dev/install.sh -o /tmp/install-cantelop.sh
-          CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
+          curl -fsSL --proto '=https' --proto-redir '=https' \
+            https://github.com/stepandel/homebrew-tap/releases/download/cantelop-v0.11.3/cantelop_0.11.3_linux_amd64.tar.gz \
+            -o /tmp/cantelop.tar.gz
+          echo '35436d7827d9d85e52a3d2a13a0a566142569704782304960be9d3af8cc5793a  /tmp/cantelop.tar.gz' | sha256sum --check --strict
+          mkdir -p /tmp/cantelop-cli "$HOME/.local/bin"
+          tar -xzf /tmp/cantelop.tar.gz -C /tmp/cantelop-cli
+          install -m 0755 /tmp/cantelop-cli/cantelop "$HOME/.local/bin/cantelop"
       - name: Add Cantelop to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: bun run cantelop:build

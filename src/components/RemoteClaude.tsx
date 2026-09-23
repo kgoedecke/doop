@@ -68,6 +68,7 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [logoutPending, setLogoutPending] = useState(false)
   const login = useRef<RemoteClaudeLogin>()
   const active = !!preference?.enabled && preference.transport === 'remote'
   const needsReconnect = active && !!status?.authRequired
@@ -119,6 +120,26 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
     useStore.getState().allowanceChanged()
     setStatus(await api.remoteClaude(userId))
     setView(null)
+    setLogoutPending(false)
+  }
+  async function disconnect() {
+    try {
+      const preference = await api.disableRemoteClaude(userId)
+      useLocalAgent.setState({ preference })
+      setLogoutPending(false)
+    } catch (error) {
+      // Execution may already be disabled even when native logout fails.
+      setLogoutPending(true)
+      try {
+        useLocalAgent.setState({ preference: await api.localAgent() })
+      } catch {
+        // Preserve the original failure and keep logout retry available.
+      }
+      throw error
+    } finally {
+      useStore.getState().allowanceChanged()
+    }
+    setStatus(await api.remoteClaude(userId))
   }
   async function connect() {
     if (active && !status?.authRequired && (await api.checkRemoteClaude(userId)).authenticated) {
@@ -215,19 +236,15 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
                 Stop tasks
               </Button>
             )}
-            {active && !view && (
+            {(active || logoutPending) && !view && (
               <Button
                 disabled={busy}
                 variant="danger"
                 onClick={() => {
-                  void act(async () => {
-                    useLocalAgent.setState({ preference: await api.disableRemoteClaude(userId) })
-                    useStore.getState().allowanceChanged()
-                    setStatus(await api.remoteClaude(userId))
-                  })
+                  void act(disconnect)
                 }}
               >
-                Disconnect
+                {logoutPending ? 'Retry sign-out' : 'Disconnect'}
               </Button>
             )}
           </div>

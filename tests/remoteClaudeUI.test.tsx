@@ -2,7 +2,14 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ status: vi.fn(), check: vi.fn(), select: vi.fn(), changed: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  status: vi.fn(),
+  check: vi.fn(),
+  select: vi.fn(),
+  changed: vi.fn(),
+  disable: vi.fn(),
+  preference: vi.fn(),
+}))
 const loginMocks = vi.hoisted(() => ({
   text: '',
   send: vi.fn(),
@@ -35,7 +42,13 @@ vi.mock('../src/lib/remoteClaudeLogin', async (original) => {
 })
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
 vi.mock('../src/lib/api', () => ({
-  api: { remoteClaude: mocks.status, checkRemoteClaude: mocks.check, selectRemoteClaude: mocks.select },
+  api: {
+    remoteClaude: mocks.status,
+    checkRemoteClaude: mocks.check,
+    selectRemoteClaude: mocks.select,
+    disableRemoteClaude: mocks.disable,
+    localAgent: mocks.preference,
+  },
   ApiError: class extends Error {
     body: Record<string, unknown>
     constructor(status: number, text: string) {
@@ -157,4 +170,45 @@ it('reads as a switch when another model account is already connected', async ()
   await act(async () => root.render(<RemoteClaudeRow replaces />))
   expect(container.textContent).toContain('Not connected')
   expect(Array.from(container.querySelectorAll('button')).map((b) => b.textContent)).toEqual(['Use instead'])
+})
+
+it('refreshes disabled execution after logout fails and retains a sign-out retry', async () => {
+  useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
+  const disabled = { enabled: false, transport: 'remote', model: 'claude-sonnet-5' }
+  mocks.disable.mockRejectedValueOnce(new ApiError(502, JSON.stringify({ error: 'Sign-out could not be confirmed' })))
+  mocks.preference.mockResolvedValue(disabled)
+  await act(async () => root.render(<RemoteClaudeRow />))
+  await act(async () =>
+    Array.from(container.querySelectorAll('button'))
+      .find((b) => b.textContent === 'Disconnect')!
+      .click(),
+  )
+  expect(useLocalAgent.getState().preference?.enabled).toBe(false)
+  expect(container.textContent).toContain('Not connected')
+  expect(container.textContent).toContain('Sign-out could not be confirmed')
+  expect(mocks.changed).toHaveBeenCalledOnce()
+  mocks.disable.mockResolvedValueOnce(disabled)
+  await act(async () =>
+    Array.from(container.querySelectorAll('button'))
+      .find((b) => b.textContent === 'Retry sign-out')!
+      .click(),
+  )
+  expect(mocks.disable).toHaveBeenCalledTimes(2)
+  expect(container.textContent).not.toContain('Retry sign-out')
+  expect(container.textContent).not.toContain('Sign-out could not be confirmed')
+})
+
+it('keeps the logout failure and retry when preference refresh also fails', async () => {
+  useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
+  mocks.disable.mockRejectedValueOnce(new Error('Logout unavailable'))
+  mocks.preference.mockRejectedValueOnce(new Error('Preference unavailable'))
+  await act(async () => root.render(<RemoteClaudeRow />))
+  await act(async () =>
+    Array.from(container.querySelectorAll('button'))
+      .find((b) => b.textContent === 'Disconnect')!
+      .click(),
+  )
+  expect(container.textContent).toContain('Logout unavailable')
+  expect(container.textContent).not.toContain('Preference unavailable')
+  expect(container.textContent).toContain('Retry sign-out')
 })

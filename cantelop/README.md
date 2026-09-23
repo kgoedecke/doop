@@ -106,7 +106,7 @@ bun run dev
 
 Use an ES256 JWT issued by your application authentication system as `USER_TOKEN`, matching the public key, issuer, and audience configured in `.env`. Use the API base URL printed by `cantelop dev` as `BASE_URL`. The project does not issue application tokens.
 
-`bun run build` runs `cantelop build`, which reads `cantelop.json` and builds both the Edge API and native Session image. For a reproducible production image, pin the Dockerfile's `CLAUDE_VERSION` to an audited version; the scaffold defaults to Anthropic's stable channel.
+`bun run build` runs `cantelop build`, which reads `cantelop.json` and builds both the Edge API and native Session image. The Dockerfile downloads Claude Code 2.1.267 directly and checks repository-pinned SHA-256 hashes for Linux amd64 and arm64 before installing it. Runtime auto-updates are disabled. To update Claude, change the version and both checksums together using Anthropic's release manifest, then run the service tests and image build. CI similarly pins the Cantelop CLI release archive and checksum in `.github/workflows/ci.yml`; neither build executes a downloaded installer script.
 
 ## API usage
 
