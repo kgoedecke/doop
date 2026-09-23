@@ -17,6 +17,7 @@ function connect() {
   vi.stubEnv('CLAUDE_REMOTE_AUDIENCE', 'cantelop-claude-api')
   vi.stubEnv('CLAUDE_REMOTE_SIGNING_KEY', pair.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString())
   const opened: { id: string; workspaceSlug: string }[] = []
+  const stopped: string[] = []
   const commands: Command[] = []
   const app = {
     workspaces: { open: async ({ slug }: { slug: string }) => ({ id: 'workspace', slug }) },
@@ -25,6 +26,9 @@ function connect() {
         opened.push(options)
         return {
           ...options,
+          stop: async () => {
+            stopped.push(options.id)
+          },
           request: async (command: Command): Promise<Reply> => {
             commands.push(command)
             return command.type === 'snapshot'
@@ -48,11 +52,11 @@ function connect() {
     },
   })
   vi.stubGlobal('fetch', (url: string, options: RequestInit) => router.handle(new Request(url, options)))
-  return { opened, commands }
+  return { opened, commands, stopped }
 }
 
 it('accepts Doop JWTs and retains the same workspace across auth, tasks, snapshots, and logout', async () => {
-  const { opened, commands } = connect()
+  const { opened, commands, stopped } = connect()
   expect(await checkRemoteAuth('alice')).toBe(true)
   const created = await remotePost('alice', '/v1/sessions', { tools: [], allowedTools: [], mcps: {} })
   const message = await remotePost('alice', '/v1/messages', { sessionId: created.sessionId, text: 'Design a card' })
@@ -67,6 +71,7 @@ it('accepts Doop JWTs and retains the same workspace across auth, tasks, snapsho
   expect(await remotePost('alice', '/v1/auth/logout', {})).toMatchObject({ authenticated: false })
   expect(opened.every((session) => session.workspaceSlug === `u-${remoteIdentity('alice')}`)).toBe(true)
   expect(opened[0]?.id).toBe(`${remoteIdentity('alice')}:auth`)
+  expect(stopped).toEqual([`${remoteIdentity('alice')}:auth`, `${remoteIdentity('alice')}:auth`])
   expect(commands.map((command) => command.type)).toEqual([
     'auth.check',
     'configure',

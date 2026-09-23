@@ -47,6 +47,13 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
     )
   const result = (sessionId: string, reply: Reply, extra = {}) =>
     Response.json({ sessionId, ...reply, ...extra }, { headers: { 'cache-control': 'no-store' } })
+  const checkAuth = async (session: ReturnType<typeof app.sessions.open>, request: Request) => {
+    const reply = await session.request({ type: 'auth.check' }, { timeoutMs: 30_000, signal: request.signal })
+    // The native check has completed and credentials live in the persistent Workspace.
+    // Await cleanup so callers can retry if the platform fails to release the Sandbox.
+    if (reply.type === 'auth.status' && reply.authenticated) await session.stop()
+    return reply
+  }
   route('GET', '/login', async () => loginPage())
   route('GET', '/health', async () => Response.json({ ok: true }))
   route('GET', '/v1/identity', async (request) =>
@@ -92,7 +99,7 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
       loginPage: '/login',
     }
     if (start.type === 'auth.check') {
-      return result(session.id, await session.request(start, { timeoutMs: 30_000, signal: request.signal }), metadata)
+      return result(session.id, await checkAuth(session, request), metadata)
     }
     return accepted(session.id, await session.dispatch(start), metadata)
   })
@@ -132,10 +139,11 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
       workspaceSlug: user.workspaceSlug,
       keepAliveSeconds: AUTH_KEEP_ALIVE_SECONDS,
     })
-    return result(
-      session.id,
-      await session.request({ type: 'auth.logout' }, { timeoutMs: 45_000, signal: request.signal }),
-    )
+    const reply = await session.request({ type: 'auth.logout' }, { timeoutMs: 45_000, signal: request.signal })
+    // Logout is complete once the persistent Workspace credentials are gone; the
+    // auth Sandbox has no remaining work and should not sit idle until keep-alive expiry.
+    if (reply.type === 'auth.status' && !reply.authenticated) await session.stop()
+    return result(session.id, reply)
   })
   route('POST', '/v1/auth/complete', async (request) => {
     const user = await identity(request, env)
@@ -145,10 +153,7 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
       workspaceSlug: user.workspaceSlug,
       keepAliveSeconds: AUTH_KEEP_ALIVE_SECONDS,
     })
-    return result(
-      session.id,
-      await session.request({ type: 'auth.check' }, { timeoutMs: 30_000, signal: request.signal }),
-    )
+    return result(session.id, await checkAuth(session, request))
   })
   route('POST', '/v1/sessions', async (request) => {
     const user = await identity(request, env),

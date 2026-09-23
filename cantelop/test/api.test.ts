@@ -28,7 +28,13 @@ test('identity checks the handshake without allocating workspaces or sessions', 
   assert.equal(f.workspaces.length, 0)
   assert.equal(f.opened.length, 0)
 })
-function fixture(requestError?: Error) {
+function fixture(
+  requestError?: Error,
+  authReply: Reply = { type: 'auth.status', authenticated: true },
+  stopError?: Error,
+  logoutReply: Reply = { type: 'auth.status', authenticated: false },
+) {
+  const stopped: string[] = []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
   const opened: any[] = [],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
@@ -51,6 +57,11 @@ function fixture(requestError?: Error) {
         opened.push(input)
         return {
           ...input,
+          stop: async () => {
+            assert.ok(['auth.check', 'auth.logout'].includes(requested.at(-1)?.type ?? ''))
+            stopped.push(input.id)
+            if (stopError) throw stopError
+          },
           dispatch: async (command: Command) => {
             dispatched.push(command)
             return { id: 'receipt' }
@@ -60,9 +71,9 @@ function fixture(requestError?: Error) {
             requestOptions.push(options)
             if (requestError) throw requestError
             return command.type === 'auth.logout'
-              ? { type: 'auth.status', authenticated: false }
+              ? logoutReply
               : command.type === 'auth.check'
-                ? { type: 'auth.status', authenticated: true }
+                ? authReply
                 : { type: 'session.state', configured: true, messages: [], truncated: false }
           },
           events: async (request: Request) =>
@@ -80,7 +91,7 @@ function fixture(requestError?: Error) {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
     )
-  return { request, opened, workspaces, dispatched, requested, requestOptions }
+  return { request, opened, workspaces, dispatched, requested, requestOptions, stopped }
 }
 test('SDK allocates server-selected user Workspace and native-auth Session; repeat provisioning is stable', async () => {
   const f = fixture()
@@ -320,5 +331,57 @@ test('logout uses caller auth session and waits for native sign-out', async () =
   assert.equal((await response.json()).authenticated, false)
   assert.deepEqual(f.requested, [{ type: 'auth.logout' }])
   assert.match(f.opened[0].id, /:auth$/)
+  assert.deepEqual(f.stopped, [f.opened[0].id])
   assert.equal((await f.request('/v1/auth/logout', { sessionId: 'other:auth' })).status, 400)
 })
+
+test('logout leaves its sandbox running when sign-out is unsuccessful', async () => {
+  const f = fixture(undefined, undefined, undefined, { type: 'auth.status', authenticated: true })
+  const response = await f.request('/v1/auth/logout', {})
+  assert.equal(response.status, 200)
+  assert.deepEqual(f.stopped, [])
+})
+
+test('logout surfaces sandbox stop failures for retry', async () => {
+  const f = fixture(undefined, undefined, new RemoteAppError('stop_failed', 503))
+  const response = await f.request('/v1/auth/logout', {})
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { error: 'Operation failed', code: 'stop_failed' })
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+})
+
+for (const path of ['/v1/auth', '/v1/auth/complete']) {
+  test(`${path} stops only the caller's authenticated sandbox after checking native auth`, async () => {
+    const f = fixture()
+    const response = await f.request(path, {})
+    assert.equal(response.status, 200)
+    const reply = await response.json()
+    assert.equal(reply.authenticated, true)
+    assert.deepEqual(f.stopped, [reply.sessionId])
+    assert.match(reply.sessionId, /:auth$/)
+    assert.equal((await f.request(path, {}, 'invalid')).status, 401)
+    assert.equal(f.stopped.length, 1)
+  })
+
+  test(`${path} leaves unauthenticated and unsuccessful checks running`, async () => {
+    for (const reply of [
+      { type: 'auth.status', authenticated: false },
+      { type: 'error', code: 'auth_session_required' },
+    ] as Reply[]) {
+      const f = fixture(undefined, reply)
+      assert.equal((await f.request(path, {})).status, 200)
+      assert.deepEqual(f.stopped, [])
+    }
+    const f = fixture(new RemoteAppError('request_wait_timeout', 504))
+    assert.equal((await f.request(path, {})).status, 504)
+    assert.deepEqual(f.stopped, [])
+  })
+
+  test(`${path} surfaces sandbox stop failures for retry`, async () => {
+    const f = fixture(undefined, undefined, new RemoteAppError('stop_failed', 503))
+    const response = await f.request(path, {})
+    assert.equal(response.status, 503)
+    assert.deepEqual(await response.json(), { error: 'Operation failed', code: 'stop_failed' })
+    assert.equal(response.headers.get('cache-control'), 'no-store')
+  })
+}

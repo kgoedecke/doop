@@ -74,7 +74,8 @@ test('compiled login page completes encrypted native terminal flow with app bear
     active = false,
     stream: ReadableStreamDefaultController<Uint8Array> | undefined,
     finish!: (code: number) => void,
-    sequence = 0
+    sequence = 0,
+    stopped = 0
   const commands: Command[] = [],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
     events: any[] = [],
@@ -117,6 +118,13 @@ test('compiled login page completes encrypted native terminal flow with app bear
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
       open: (options: any) => ({
         ...options,
+        stop: async () => {
+          assert.equal(authenticated, true)
+          assert.equal(events.at(-1)?.type, 'auth.finished')
+          stopped++
+          stream?.close()
+          stream = undefined
+        },
         request: async (payload: Command) => {
           let reply: unknown
           commands.push(payload)
@@ -139,7 +147,7 @@ test('compiled login page completes encrypted native terminal flow with app bear
               extend: () => {},
             },
           })
-          assert.deepEqual(reply, { type: 'auth.status', authenticated: false })
+          assert.deepEqual(reply, { type: 'auth.status', authenticated })
           return reply
         },
         dispatch: async (payload: Command) => {
@@ -227,6 +235,8 @@ test('compiled login page completes encrypted native terminal flow with app bear
   elements.get('input')!.value = 'PRIVATE-CODE'
   await elements.get('terminal-input')!.fire('submit')
   await until(() => elements.get('status')!.textContent.includes('Claude is connected'))
+  assert.equal(stopped, 1)
+  assert.equal(commands.at(-1)?.type, 'auth.check')
   assert.deepEqual(written, ['PRIVATE-CODE\r'])
   assert.equal(elements.get('input')!.value, '')
   assert.equal(elements.get('token')!.value, '')

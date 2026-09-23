@@ -47,7 +47,7 @@ function UnavailableClaudePlanRow() {
           <h3 className={cn(planTitle, 'text-[#8a8a86]')}>Claude Plan</h3>
           <span className={cn(planPill(false), 'bg-[#ededeb] text-[#74746e]')}>Not available</span>
         </div>
-        <p className={cn(planBlurb, 'text-[#92928d]')}>Use your Claude subscription.</p>
+        <p className={cn(planBlurb, 'text-[#92928d]')}>Route Claude models through your Claude subscription</p>
         <div className="mt-[18px] flex flex-wrap gap-[9px]">
           {CLAUDE_MODELS.map((model) => (
             <ToggleChip key={model.id} state="idle" className="bg-[#f0f0ee] text-[#9b9b96] opacity-100">
@@ -167,9 +167,7 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
             {needsReconnect ? 'Sign-in required' : active ? 'Active · Connected' : 'Not connected'}
           </span>
         </div>
-        <p className={planBlurb}>
-          Use your Claude subscription. Tasks run in a private hosted workspace and carry on when you close Doop.
-        </p>
+        <p className={planBlurb}>Route Claude models through your Claude subscription</p>
         {needsReconnect && (
           <p className="mt-2 text-sm text-ink-soft">
             Connect Claude to resume hosted tasks. You can retry interrupted tasks after signing in.
@@ -356,10 +354,6 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
             </Button>
           </div>
         )}
-        <p className="mt-3 text-xs text-ink-faint">
-          Claude handles sign-in and keeps its credentials in your hosted workspace. Disconnecting stops running tasks
-          and signs you out of Claude; connecting again needs a fresh sign-in.
-        </p>
         {error && (
           <p role="alert" className="mt-3 text-sm text-accent-ink">
             {error}

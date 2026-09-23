@@ -112,15 +112,20 @@ export function loginClient(createCrypto: typeof terminalCrypto) {
       finished = true
       controls(false)
       cancel.disabled = true
-      start.disabled = false
       input.value = ''
+      key = undefined
+      pair = undefined
+      if (value.authenticated && value.outcome === 'succeeded') {
+        const completed = await post('/v1/auth/complete', {})
+        if (completed.type !== 'auth.status' || completed.authenticated !== true)
+          throw new Error('Claude sign-in could not be confirmed. Start again.')
+      }
+      start.disabled = false
       display(
         value.authenticated && value.outcome === 'succeeded'
           ? 'Claude is connected. You can now create agent sessions.'
           : `Login ${value.outcome}. You can start again.`,
       )
-      key = undefined
-      pair = undefined
     } else if (value.type === 'auth.error') {
       if (value.activeAttemptId) {
         activeAttemptId = value.activeAttemptId
