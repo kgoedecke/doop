@@ -20,7 +20,6 @@ export default defineConfig({
   },
   server: {
     port: webPort,
-    strictPort: true,
     /* cargo's build output is huge and, on Windows, its binaries stay locked
        while the shell runs (EBUSY); nothing under it is ever served by vite */
     watch: {

@@ -3,7 +3,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import * as schema from './schema.ts'
-import { lockLocalDatabase } from './localLock.ts'
 
 /**
  * DATABASE_URL set   -> real Postgres (production: Railway/Fly managed PG)
@@ -19,11 +18,6 @@ import { lockLocalDatabase } from './localLock.ts'
 export type Db = NodePgDatabase<typeof schema>
 
 export let db: Db
-let closeLocalDb: (() => Promise<void>) | undefined
-
-export async function closeDb(): Promise<void> {
-  await closeLocalDb?.()
-}
 
 /* resolved from this file, not process.cwd() — the server may be launched
    from anywhere (tests spawn it from a temp working directory) */
@@ -41,12 +35,7 @@ export async function initDb(): Promise<void> {
     const { drizzle } = await import('drizzle-orm/pglite')
     const dir = path.join(process.cwd(), 'data', 'pg')
     fs.mkdirSync(dir, { recursive: true }) // PGlite's own mkdir isn't recursive
-    const release = lockLocalDatabase(dir)
     const client = new PGlite(dir)
-    closeLocalDb = async () => {
-      await client.close()
-      release()
-    }
     const pgliteDb = drizzle(client, { schema })
     const { migrate } = await import('drizzle-orm/pglite/migrator')
     await migrate(pgliteDb, { migrationsFolder: MIGRATIONS })

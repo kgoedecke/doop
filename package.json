@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "bun@1.3.10",
   "scripts": {
-    "dev": "concurrently --kill-others -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"node --env-file-if-exists=.env scripts/dev-web.mjs\"",
+    "dev": "concurrently -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",

@@ -14,7 +14,6 @@ import { AutomationEditor } from './pages/AutomationEditor'
 import { Integrations } from './pages/Integrations'
 import { Workspace } from './pages/Workspace'
 import { authClient } from './lib/auth'
-import { devLogin, devLoginEnabled } from './lib/devLogin'
 import { setName } from './lib/identity'
 import { posthog, syncReplayForUser, suspendAnalyticsWhileImpersonating } from './lib/posthog'
 import { useMe } from './lib/me'
@@ -33,20 +32,6 @@ export function navigate(path: string) {
 export function App() {
   const [path, setPath] = useState(location.pathname)
   const { data: session, isPending } = authClient.useSession()
-  const [devLoginDone, setDevLoginDone] = useState(!devLoginEnabled)
-  useEffect(() => {
-    if (isPending || session || devLoginDone) return
-    let active = true
-    devLogin()
-      .then(() => authClient.getSession({ query: { disableCookieCache: true } }))
-      .catch((error: unknown) => console.error('Automatic local login failed:', error))
-      .finally(() => {
-        if (active) setDevLoginDone(true)
-      })
-    return () => {
-      active = false
-    }
-  }, [isPending, session, devLoginDone])
   const me = useMe(session?.user.id)
   const identifiedUserId = useRef<string | null>(null)
 
@@ -115,7 +100,7 @@ export function App() {
     if (localAgentUser) return startLocalAgent(localAgentUser)
   }, [localAgentUser])
 
-  if (isPending || (!session && !devLoginDone))
+  if (isPending)
     return (
       <>
         <ShellDragBar />
