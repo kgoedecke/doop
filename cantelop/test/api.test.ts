@@ -331,17 +331,25 @@ test('logout uses caller auth session and waits for native sign-out', async () =
   assert.equal((await response.json()).authenticated, false)
   assert.deepEqual(f.requested, [{ type: 'auth.logout' }])
   assert.match(f.opened[0].id, /:auth$/)
-  assert.equal(f.opened[0].keepAliveSeconds, 1)
-  assert.deepEqual(f.stopped, [])
+  assert.equal(f.opened[0].keepAliveSeconds, 900)
+  assert.deepEqual(f.stopped, [f.opened[0].id])
   assert.equal((await f.request('/v1/auth/logout', { sessionId: 'other:auth' })).status, 400)
 })
 
-test('logout uses the short idle lifetime after an unsuccessful sign-out reply too', async () => {
+test('logout leaves its sandbox running after an unsuccessful sign-out reply', async () => {
   const f = fixture(undefined, undefined, undefined, { type: 'auth.status', authenticated: true })
   const response = await f.request('/v1/auth/logout', {})
   assert.equal(response.status, 200)
-  assert.equal(f.opened[0].keepAliveSeconds, 1)
+  assert.equal(f.opened[0].keepAliveSeconds, 900)
   assert.deepEqual(f.stopped, [])
+})
+
+test('logout surfaces sandbox stop failures for retry', async () => {
+  const f = fixture(undefined, undefined, new RemoteAppError('stop_failed', 503))
+  const response = await f.request('/v1/auth/logout', {})
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { error: 'Operation failed', code: 'stop_failed' })
+  assert.equal(response.headers.get('cache-control'), 'no-store')
 })
 
 for (const path of ['/v1/auth', '/v1/auth/complete']) {

@@ -71,7 +71,7 @@ it('accepts Doop JWTs and retains the same workspace across auth, tasks, snapsho
   expect(await remotePost('alice', '/v1/auth/logout', {})).toMatchObject({ authenticated: false })
   expect(opened.every((session) => session.workspaceSlug === `u-${remoteIdentity('alice')}`)).toBe(true)
   expect(opened[0]?.id).toBe(`${remoteIdentity('alice')}:auth`)
-  expect(stopped).toEqual([`${remoteIdentity('alice')}:auth`])
+  expect(stopped).toEqual([`${remoteIdentity('alice')}:auth`, `${remoteIdentity('alice')}:auth`])
   expect(commands.map((command) => command.type)).toEqual([
     'auth.check',
     'configure',
