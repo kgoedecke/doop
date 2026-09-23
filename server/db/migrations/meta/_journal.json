@@ -134,6 +134,13 @@
       "when": 1789789243227,
       "tag": "0018_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790153504847,
+      "tag": "0020_image_prefs",
+      "breakpoints": true
     }
   ]
 }

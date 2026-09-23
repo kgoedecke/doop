@@ -42,8 +42,12 @@ import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
 import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
-import { serverImageGenEnabled } from './imageGen.ts'
+import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
+import { setImagePref } from './imagePrefs.ts'
 import { AGENT_MODELS } from './openaiAgent.ts'
+import { CLAUDE_MODELS } from '../shared/localAgent.ts'
+import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
+import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
@@ -630,11 +634,21 @@ app.get('/api/agent-allowance', (req, res) => {
 /* ---- the user's own model account: what keeps the Doop Agent running once
    the free tasks are gone. Tokens live server-side and are never returned. */
 
+/* one curated menu per account kind, with the vision flag the picker renders;
+   the pre-roster providers all see images */
+const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
+  chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
+  'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
+  'anthropic-key': CLAUDE_MODELS.map((m) => ({ ...m, vision: true })),
+  'openrouter-key': OPENROUTER_MODELS,
+  'gemini-key': GEMINI_MODELS,
+}
+
 /* Every route that returns an account status returns the SAME shape: the
-   client re-renders straight from the response, so dropping the model list on
+   client re-renders straight from the response, so dropping the menus on
    a PATCH would collapse the picker until the next reload. */
 function accountView(status: modelAccounts.AccountStatus) {
-  return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), models: AGENT_MODELS }
+  return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
 }
 
 app.get('/api/model-account', (req, res) => {
@@ -731,9 +745,51 @@ app.post('/api/model-account/anthropic-key', async (req, res) => {
   }
 })
 
+/* the two wide-roster keys share the anthropic-key route's shape, including
+   switching off the local-CLI preference so the new account is not shadowed */
+for (const kind of ['openrouter-key', 'gemini-key'] as const) {
+  const connect = kind === 'openrouter-key' ? modelAccounts.connectOpenRouterKey : modelAccounts.connectGeminiKey
+  app.post(`/api/model-account/${kind}`, async (req, res) => {
+    try {
+      const previous = await modelAccounts.getAccount(req.user!.id)
+      const status = await connect(req.user!.id, String(req.body?.apiKey ?? ''))
+      if (previous?.kind !== kind) {
+        const preference = await getLocalAgentPreference(req.user!.id)
+        await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
+      }
+      res.json(accountView(status))
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
+    }
+  })
+}
+
 app.delete('/api/model-account', async (req, res) => {
   await modelAccounts.disconnect(req.user!.id)
   res.json(accountView({ connected: false }))
+})
+
+/* ---- which image model generate_image draws with (the shared registry;
+   entries the payer cannot run are shown but disabled) */
+
+app.get('/api/image-model', (req, res) => {
+  imageModelAvailability(req.user!.id)
+    .then((models) => res.json({ models }))
+    .catch(() => res.status(500).json({ error: 'image models unavailable' }))
+})
+
+app.put('/api/image-model', async (req, res) => {
+  try {
+    const model = String(req.body?.model ?? '')
+    const models = await imageModelAvailability(req.user!.id)
+    const entry = models.find((m) => m.id === model)
+    if (!entry) throw new Error('unknown image model')
+    if (!entry.available) throw new Error('that image model is not available on your account or this server')
+    await setImagePref(req.user!.id, model)
+    res.json({ models: await imageModelAvailability(req.user!.id) })
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the image model' })
+  }
 })
 
 app.get('/api/canvases', (req, res) =>

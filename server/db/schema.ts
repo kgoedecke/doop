@@ -589,3 +589,12 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
   enabled: boolean('enabled').notNull().default(false),
   model: text('model').notNull().default('default'),
 })
+
+/** Which image model generate_image draws with, per user. Separate from
+ *  model_accounts because a server-tier user (no account row) still picks
+ *  among the server-enabled image models. */
+export const imagePrefs = pgTable('image_prefs', {
+  userId: text('user_id').primaryKey(),
+  model: text('model').notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})

@@ -144,6 +144,9 @@ interface RunState {
   verifiedFrames: Set<string>
   rewriteDrafts: Map<string, string>
   blockedWebsiteAccess?: string
+  /** false = the model cannot see images: screenshots are skipped and the
+   *  visual-verification requirement does not apply to this run */
+  vision: boolean
   /** whose account pays for generated images: the run's payer, else the server key */
   payerId?: string
   /** images actually produced in this run — capped, since each one spends the payer's quota or money */
@@ -225,7 +228,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   const actor = actions.resolveActor({ name: role.name, kind: 'agent' })
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
-      'The Doop Agent needs a connected account — connect your ChatGPT subscription or OpenAI key in Settings, then retry.'
+      'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini or Claude API key in Settings, then retry.'
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer)) actions.failTaskFeedback(f.id, reason)
     for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer)) actions.failComment(c.id, reason)
     for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer)) {
@@ -430,6 +433,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       verificationFrames: new Set(),
       verifiedFrames: new Set(),
       rewriteDrafts: new Map(),
+      vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
       imagesGenerated: 0,
     }
@@ -459,6 +463,15 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             },
           ]
         : []
+      /* a text-only model would otherwise chase tools whose whole value is
+         pixels; steer its verification to the textual surfaces instead */
+      const noVisionBlock = runState.vision
+        ? []
+        : [
+            {
+              text: 'Note: your model cannot view images. screenshot_frame returns a text confirmation, not pixels, and image search results describe rather than show. Verify layout by re-reading get_frame_html and checking inspect_frame instead.',
+            },
+          ]
       const maxTurns = REDESIGN_RE.test(workText) ? MAX_REDESIGN_TURNS : MAX_TURNS
       if (model.runHarness) {
         const result = await model.runHarness({
@@ -488,7 +501,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         for (let turn = 0; turn < maxTurns; turn++) {
           const res = await model.run({
             maxTokens: 16000,
-            system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock],
+            system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
             tools: TOOLS,
             messages,
           })
@@ -577,7 +590,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             })
             continue
           }
-          const unverified = verificationFrameIds(runState).filter((id) => !runState.verifiedFrames.has(id))
+          const unverified = runState.vision
+            ? verificationFrameIds(runState).filter((id) => !runState.verifiedFrames.has(id))
+            : []
           if (cards.length > 0 && unverified.length > 0 && !verificationNudgeSent) {
             verificationNudgeSent = true
             messages.push({
@@ -622,6 +637,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     const noMutation = finished && requireMutation && deliverableFrames.length === 0 && !blockedWebsiteAccess
     const unverifiedMutation =
       finished &&
+      runState.vision &&
       !blockedWebsiteAccess &&
       cards.length > 0 &&
       verificationFrameIds(runState).some((id) => !runState.verifiedFrames.has(id))
@@ -1497,7 +1513,12 @@ async function execTool(
       case 'screenshot_frame': {
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
-        const blocks = await frameImageBlocks(f)
+        /* a text-only model cannot see the render — skip the (paid, slow)
+           screenshot entirely and point it at the textual surfaces, while
+           keeping the verified-frames bookkeeping coherent */
+        const blocks = runState.vision
+          ? await frameImageBlocks(f)
+          : `Screenshot skipped: the selected model cannot view images. Frame "${f.name}" is ${f.width}×${f.height}px. Verify your work with get_frame_html and inspect_frame instead.`
         if (runState.mutatedFrames.has(input.frame_id) || runState.verificationFrames.has(input.frame_id)) {
           runState.verifiedFrames.add(input.frame_id)
         }

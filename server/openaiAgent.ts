@@ -88,10 +88,12 @@ export class ModelAuthError extends Error {}
  *  different tier in Settings, not a reconnect. */
 export class ModelUnavailableError extends Error {}
 
-/* how OpenAI's surfaces phrase "no such model for you": the API's `model_not_found`
-   code, and the Codex backend's prose about the model not existing / access */
+/* how the OpenAI-shaped surfaces phrase "no such model for you": the API's
+   `model_not_found` code, the Codex backend's prose about the model not
+   existing / access, OpenRouter's endpoint/data-policy refusals and id
+   complaints, and Gemini's api-version wording */
 const MODEL_UNAVAILABLE =
-  /model_not_found|model[^.]{0,80}(does not exist|not found|not available|unsupported|no access|not (have|allowed))/i
+  /model_not_found|no endpoints found|not a valid model id|is not found for api version|model[^.]{0,80}(does not exist|not found|not available|unsupported|no access|not (have|allowed))/i
 
 export function isModelUnavailable(detail: string): boolean {
   return MODEL_UNAVAILABLE.test(detail)
@@ -101,11 +103,11 @@ export function isModelUnavailable(detail: string): boolean {
 /* Anthropic messages -> Responses input items                      */
 /* ---------------------------------------------------------------- */
 
-type Part = { type: 'input_text'; text: string } | { type: 'input_image'; image_url: string; detail: 'auto' }
+export type Part = { type: 'input_text'; text: string } | { type: 'input_image'; image_url: string; detail: 'auto' }
 
-const IMAGE_NOTE = 'The image(s) above are the result of the tool call you just made.'
+export const IMAGE_NOTE = 'The image(s) above are the result of the tool call you just made.'
 
-function imagePart(source: { type: string; media_type?: string; data?: string; url?: string }): Part | null {
+export function imagePart(source: { type: string; media_type?: string; data?: string; url?: string }): Part | null {
   if (source.type === 'url' && source.url) return { type: 'input_image', image_url: source.url, detail: 'auto' }
   if (source.type === 'base64' && source.data) {
     return {
@@ -118,8 +120,10 @@ function imagePart(source: { type: string; media_type?: string; data?: string; u
 }
 
 /** Split a tool result into the text the function_call_output carries and the
- *  images that have to ride along in a separate user message. */
-function flattenToolResult(block: Anthropic.ToolResultBlockParam): { text: string; images: Part[] } {
+ *  images that have to ride along in a separate user message. Shared with the
+ *  Chat Completions transport, whose `role: 'tool'` messages are text-only in
+ *  exactly the same way. */
+export function flattenToolResult(block: Anthropic.ToolResultBlockParam): { text: string; images: Part[] } {
   const images: Part[] = []
   const texts: string[] = []
   if (typeof block.content === 'string') {
@@ -430,7 +434,7 @@ export async function runAzureTurn(config: AzureConfig, req: TurnRequest): Promi
 }
 
 const transports: Record<
-  Exclude<ModelAccount['kind'], 'anthropic-key'>,
+  Exclude<ModelAccount['kind'], 'anthropic-key' | 'openrouter-key' | 'gemini-key'>,
   (account: ModelAccount, req: TurnRequest) => Promise<TurnResult>
 > = {
   chatgpt: runChatgpt,
@@ -438,7 +442,9 @@ const transports: Record<
 }
 
 export function runOpenAiTurn(account: ModelAccount, req: TurnRequest): Promise<TurnResult> {
-  if (account.kind === 'anthropic-key') throw new Error('Anthropic keys require the Anthropic transport')
+  if (account.kind === 'anthropic-key' || account.kind === 'openrouter-key' || account.kind === 'gemini-key') {
+    throw new Error(`${account.kind} accounts do not use the OpenAI transport`)
+  }
   return transports[account.kind](account, req)
 }
 

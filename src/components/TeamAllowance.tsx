@@ -7,6 +7,7 @@ import { navigate } from '../App'
 import { Button } from './ui/button'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { cn } from '@/lib/utils'
+import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 
 /**
  * Free-tier metering UI for the resident team: the shared allowance hook,
@@ -43,11 +44,9 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
         Doop Agent on your{' '}
         {allowance.byoKind === 'claude-local'
           ? 'local Claude CLI'
-          : allowance.byoKind === 'anthropic-key'
-            ? 'Claude API key'
-            : allowance.byoKind === 'openai-key'
-              ? 'OpenAI key'
-              : 'ChatGPT'}
+          : allowance.byoKind === 'chatgpt' || !allowance.byoKind
+            ? 'ChatGPT'
+            : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}
       </span>
     )
   }

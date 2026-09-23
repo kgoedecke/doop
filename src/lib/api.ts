@@ -124,7 +124,7 @@ export interface Allowance {
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key'
+export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -139,6 +139,8 @@ export interface AgentModelOption {
   id: string
   name: string
   blurb: string
+  /** false = the model cannot see screenshots; runs skip visual review */
+  vision?: boolean
 }
 
 export interface ModelAccountStatus {
@@ -151,8 +153,15 @@ export interface ModelAccountStatus {
   connectedAt?: number
   /** false when the server has switched the ChatGPT flow off */
   chatgptEnabled?: boolean
-  /** the tiers a user may pick between */
-  models?: AgentModelOption[]
+  /** the curated menu each provider's picker offers */
+  menus?: Record<ModelAccountKind, AgentModelOption[]>
+}
+
+/** One image-model registry entry's availability for this user. */
+export interface ImageModelStatus {
+  id: string
+  available: boolean
+  selected: boolean
 }
 
 export interface WebsiteImportResult {
@@ -382,9 +391,16 @@ export const api = {
     req<ModelAccountStatus>('/api/model-account/openai-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   connectAnthropicKey: (apiKey: string) =>
     req<ModelAccountStatus>('/api/model-account/anthropic-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectOpenRouterKey: (apiKey: string) =>
+    req<ModelAccountStatus>('/api/model-account/openrouter-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectGeminiKey: (apiKey: string) =>
+    req<ModelAccountStatus>('/api/model-account/gemini-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),
+  imageModels: () => req<{ models: ImageModelStatus[] }>('/api/image-model'),
+  setImageModel: (model: string) =>
+    req<{ models: ImageModelStatus[] }>('/api/image-model', { method: 'PUT', body: JSON.stringify({ model }) }),
   addCard: (canvasId: string, title: string, agents: string[], attachments?: string[], scope?: CardScope) =>
     req(`/api/canvases/${canvasId}/cards`, {
       method: 'POST',

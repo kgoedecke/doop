@@ -2,10 +2,11 @@ import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
-import { getAccount, withFreshToken, accountModelFor } from './modelAccounts.ts'
+import { getAccount, withFreshToken, accountModelFor, accountVisionFor } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
 import { ModelAuthError, ModelUnavailableError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
+import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCompletionsAgent.ts'
 
 /**
  * Which model runs a Doop Agent turn, and on whose bill.
@@ -47,6 +48,9 @@ export interface AgentModel {
   label: string
   /** the user whose account pays, when it isn't the server's key */
   userId?: string
+  /** false = the model cannot see images and the run degrades to no visual
+   *  review; absent means true (every pre-roster provider has vision) */
+  vision?: boolean
   runHarness?: (req: LocalHarnessRequest) => Promise<LocalAgentResult>
   run(req: AgentTurnRequest): Promise<AgentTurnResult>
 }
@@ -192,6 +196,8 @@ const BYO_LABELS: Record<AccountKind, string> = {
   chatgpt: 'ChatGPT',
   'openai-key': 'OpenAI',
   'anthropic-key': 'Claude API',
+  'openrouter-key': 'OpenRouter',
+  'gemini-key': 'Gemini',
 }
 
 /* the OpenAI-shaped transports take one system string; cache breakpoints are
@@ -228,6 +234,28 @@ function byoModel(account: ModelAccount): AgentModel {
           throw error
         }
       },
+    }
+  }
+  if (account.kind === 'openrouter-key' || account.kind === 'gemini-key') {
+    if (!account.apiKey) throw new ModelAuthError(`Reconnect your ${BYO_LABELS[account.kind]} key in Settings.`)
+    const model = accountModelFor(account)
+    const vision = accountVisionFor(account)
+    const config =
+      account.kind === 'openrouter-key'
+        ? openrouterConfig(account.apiKey, model, vision)
+        : geminiConfig(account.apiKey, model, vision)
+    return {
+      provider: account.kind,
+      label: `${BYO_LABELS[account.kind]} (${model})`,
+      userId: account.userId,
+      vision,
+      run: (req) =>
+        runChatCompletionsTurn(config, {
+          system: joinSystem(req),
+          tools: req.tools,
+          messages: req.messages,
+          maxTokens: req.maxTokens,
+        }),
     }
   }
   return {
