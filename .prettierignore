@@ -5,3 +5,7 @@ bun.lock
 CHANGELOG.md
 desktop/src-tauri/tauri.conf.json
 desktop/CHANGELOG.md
+cantelop/.cantelop/
+cantelop/.dev/
+cantelop/coverage/
+cantelop/cantelop.local.json

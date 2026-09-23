@@ -81,3 +81,32 @@
 - Husky 9.1.7 + lint-staged 17.3.0 - pre-commit hook runs `lint-staged` (`.husky/pre-commit`).
 - commitlint 21.2.2 (`@commitlint/config-conventional`) - conventional commit / PR title linting,
   config in `commitlint.config.js`.
+
+## 12. Hosted Claude execution
+
+- `server/remoteClaudeClient.ts` signs per-user ES256 application JWTs and handles
+  Cantelop SSE replay; `server/remoteClaudeRunner.ts` adapts the resident canvas harness.
+- `server/remoteClaude.ts` provides authenticated native-login proxies. The browser's
+  temporary ECDH/AES-GCM keys encrypt terminal input and output; Claude credentials stay
+  in the user's hosted workspace. Doop stores execution preference, not Claude tokens.
+- Migration `0018_remote_claude` adds the local/remote transport selector. Existing
+  preferences default to local. `LocalAgentRuns` manages both run lifetimes and scoped
+  MCP capabilities; remote runs cannot be claimed by desktop polling.
+- `src/components/RemoteClaude.tsx` renders the Claude Plan row (the only Claude subscription
+  path): hosted connection, model selection, stop and disconnect controls. See README's
+  Claude Plan section for environment settings
+  and recovery limits. The API runtime must start successfully before native sign-in works.
+
+## Hosted Claude service
+
+`cantelop/` contains the separately deployed Cantelop Edge API and
+Session runtime. It uses SDK 0.11.0, Node 22, its own Bun lockfile, and Node tests.
+Root `cantelop:*` scripts install, check, test, build, and run it. Doop imports its
+runtime-independent event types and terminal crypto; SDK and subprocess code stay
+in the service. Keep the existing Cantelop app and user/workspace identity stable.
+
+`bun run cantelop:setup` provisions each contributor's identity and local app
+manifest, deploys with only public verification configuration, and verifies
+`GET /v1/identity` without allocating resources. `scripts/lib/claude-setup.mjs`
+contains preparation/deployment/check helpers; reruns preserve existing identity.
+Private hosted exports use `.env.claude-hosted`. Local setup runs `cantelop:tunnel`.

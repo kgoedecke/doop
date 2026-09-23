@@ -236,77 +236,88 @@ function TaskRow({ task }: { task: AgentTask }) {
           }
         }}
         className={cn(
-          'flex animate-[chip-in_0.25s_ease] items-baseline gap-2 py-[5px] pr-4 pl-5 text-[12.5px] leading-[1.4]',
+          'flex animate-[chip-in_0.25s_ease] items-start gap-2 py-[5px] pr-4 pl-5 text-[12.5px] leading-[1.4]',
           frameId &&
             'cursor-pointer rounded-md hover:bg-paper-deep focus-visible:bg-paper-deep focus-visible:outline-none',
         )}
       >
-        {task.failedAt ? (
-          <span className="grid size-[15px] flex-none place-items-center self-center rounded-full bg-accent-ink text-[10px] font-extrabold text-white">
-            !
-          </span>
-        ) : task.endedAt ? (
-          <span className="flex-none text-[11px] text-ink-faint">✓</span>
-        ) : (
-          <Dot
-            size="sm"
-            className="animate-[status-pulse_1.6s_ease-in-out_infinite] self-center"
-            style={{ background: task.color }}
-          />
-        )}
-        <span
-          className={cn(
-            'min-w-0 flex-1',
-            state === 'active' && 'font-semibold',
-            state === 'done' && 'text-ink-soft',
-            state === 'failed' && 'font-[650] text-accent-ink',
-            /* server-inferred tasks (agent never announced) read as provisional */
-            task.auto && 'italic text-ink-soft',
+        {/* one line-height tall, so the marker centres on the first line of text */}
+        <span className="flex h-[1.4em] w-[15px] flex-none items-center justify-center">
+          {task.failedAt ? (
+            <span className="grid size-[15px] place-items-center rounded-full bg-accent-ink text-[10px] font-extrabold text-white">
+              !
+            </span>
+          ) : task.endedAt ? (
+            <span className="text-[11px] text-ink-faint">✓</span>
+          ) : (
+            <Dot
+              size="sm"
+              className="animate-[status-pulse_1.6s_ease-in-out_infinite]"
+              style={{ background: task.color }}
+            />
           )}
-        >
-          {task.status}
         </span>
-        {!frameId && (
-          <span
-            className="flex-none font-mono text-[9.5px] tracking-[0.06em] text-ink-faint opacity-0 group-hover:opacity-100"
-            title="This task has no frame to jump to"
+        <div className="min-w-0 flex-1">
+          <div
+            title={task.status}
+            className={cn(
+              'line-clamp-3 break-words',
+              state === 'active' && 'font-semibold',
+              state === 'done' && 'text-ink-soft',
+              state === 'failed' && 'font-[650] text-accent-ink',
+              /* server-inferred tasks (agent never announced) read as provisional */
+              task.auto && 'italic text-ink-soft',
+            )}
           >
-            Not available
-          </span>
-        )}
-        <span className="flex-none font-mono text-[10.5px] text-ink-faint">
-          {task.failedAt
-            ? timeAgo(task.failedAt)
-            : task.endedAt
-              ? `${duration(task)} · ${timeAgo(task.endedAt)}`
-              : duration(task)}
-        </span>
-        {task.failedAt && task.queuedBy && canvasId ? (
-          <Button
-            variant="danger-solid"
-            size="pill"
-            onClick={(e) => {
-              e.stopPropagation()
-              api.retryCard(canvasId, task.id).catch(reportLimit)
-            }}
-          >
-            ↻ Retry
-          </Button>
-        ) : null}
-        {!replying && (
-          <Button
-            variant="bare"
-            size="sm"
-            className="flex-none px-1 py-0 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            title="Give the agent feedback on this task"
-            onClick={(e) => {
-              e.stopPropagation()
-              setReplying(true)
-            }}
-          >
-            ↩
-          </Button>
-        )}
+            {task.status}
+          </div>
+          {/* meta sits under the text so it never squeezes the status column */}
+          <div className="mt-0.5 flex min-h-[18px] items-center gap-2 font-mono text-[10.5px] text-ink-faint">
+            <span>
+              {task.failedAt
+                ? timeAgo(task.failedAt)
+                : task.endedAt
+                  ? `${duration(task)} · ${timeAgo(task.endedAt)}`
+                  : duration(task)}
+            </span>
+            {!frameId && (
+              <span
+                className="text-[9.5px] tracking-[0.06em] opacity-0 group-hover:opacity-100"
+                title="This task has no frame to jump to"
+              >
+                no frame
+              </span>
+            )}
+            <span className="ml-auto flex items-center gap-1.5">
+              {task.failedAt && task.queuedBy && canvasId ? (
+                <Button
+                  variant="danger-solid"
+                  size="pill"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    api.retryCard(canvasId, task.id).catch(reportLimit)
+                  }}
+                >
+                  ↻ Retry
+                </Button>
+              ) : null}
+              {!replying && (
+                <Button
+                  variant="bare"
+                  size="sm"
+                  className="h-auto px-1 py-0 font-mono text-[10.5px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
+                  title="Give the agent feedback on this task"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setReplying(true)
+                  }}
+                >
+                  ↩ reply
+                </Button>
+              )}
+            </span>
+          </div>
+        </div>
       </div>
       {feedback
         .slice()
@@ -314,7 +325,7 @@ function TaskRow({ task }: { task: AgentTask }) {
         .map((f) => (
           <div
             key={f.id}
-            className="mt-px mr-4 mb-1 ml-[34px] animate-[chip-in_0.2s_ease] rounded-[8px] bg-paper-deep px-[9px] py-[5px] text-[12px] leading-[1.4]"
+            className="mt-px mr-4 mb-1 ml-[43px] animate-[chip-in_0.2s_ease] rounded-[8px] bg-paper-deep px-[9px] py-[5px] text-[12px] leading-[1.4]"
           >
             <span className="font-bold">{f.from}:</span> <span className="text-ink-soft">{f.text}</span>
             {f.failedAt ? (
@@ -345,7 +356,7 @@ function TaskRow({ task }: { task: AgentTask }) {
           </div>
         ))}
       {replying && (
-        <div className="mt-0.5 mr-4 mb-1.5 ml-[34px]">
+        <div className="mt-0.5 mr-4 mb-1.5 ml-[43px]">
           <Input
             inputSize="sm"
             className="rounded-lg px-[9px] focus:border-ink-soft focus:ring-0 md:text-xs"

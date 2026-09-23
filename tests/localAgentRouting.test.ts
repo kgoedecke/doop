@@ -32,3 +32,20 @@ describe('local provider routing', () => {
     expect(mocks.account).toHaveBeenCalledWith('alice')
   })
 })
+
+it('routes hosted selection without requiring a desktop or falling back to another account', async () => {
+  mocks.preference.mockResolvedValue({ enabled: true, transport: 'remote', model: 'claude-sonnet-5' })
+  mocks.online.mockReturnValue(false)
+  const model = await pickModel('alice')
+  expect(model?.provider).toBe('claude-remote')
+  expect(model?.userId).toBe('alice')
+  expect(model?.runHarness).toBeTypeOf('function')
+  expect(mocks.online).not.toHaveBeenCalled()
+  expect(mocks.account).not.toHaveBeenCalled()
+})
+
+it('pauses hosted scheduling without credential fallback when sign-in is required', async () => {
+  mocks.preference.mockResolvedValue({ enabled: true, transport: 'remote', remoteAuthRequired: true })
+  expect(await pickModel('alice')).toBeNull()
+  expect(mocks.account).not.toHaveBeenCalled()
+})

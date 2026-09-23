@@ -1,0 +1,10 @@
+{
+  "app": "doop-claude-runtime",
+  "api": "src/api.ts",
+  "session": { "entrypoint": "src/session.ts", "dockerfile": "docker/Dockerfile" },
+  "environment": {
+    "AUTH_PUBLIC_JWK": { "required": true },
+    "AUTH_ISSUER": { "required": true },
+    "AUTH_AUDIENCE": { "default": "cantelop-claude-api", "required": true }
+  }
+}

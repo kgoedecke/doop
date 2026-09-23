@@ -1,0 +1,9 @@
+.git
+node_modules
+.env
+.env.*
+.dev
+.cantelop
+coverage
+
+cantelop.local.json
