@@ -521,7 +521,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                     setShowImport(true)
                   }}
                 >
-                  ⤓ Import website
+                  Import website
                 </Button>
                 <Button
                   variant="ghost"
@@ -971,7 +971,7 @@ function ImportModal({
                     ]
                       .filter(Boolean)
                       .join(' + ')
-                      .replace(/^./, (c) => '⤓ Import ' + c)}
+                      .replace(/^./, (c) => 'Import ' + c)}
               </Button>
             </ModalActions>
           </>
@@ -1062,8 +1062,8 @@ function ImportModal({
                       : busy === 'importing'
                         ? 'Importing…'
                         : wholeSite
-                          ? 'Discover pages →'
-                          : '⤓ Import page'}
+                          ? 'Discover pages'
+                          : 'Import page'}
                   </Button>
                 </ImportStepFooter>
               </>
@@ -1182,7 +1182,7 @@ function ImportModal({
               <Button variant="primary" disabled={!!busy || !selectedCount} onClick={importSelected}>
                 {busy === 'importing'
                   ? `Importing ${selectedCount}…`
-                  : `⤓ Import ${selectedCount} ${selectedCount === 1 ? 'page' : 'pages'}`}
+                  : `Import ${selectedCount} ${selectedCount === 1 ? 'page' : 'pages'}`}
               </Button>
             </ModalActions>
           </>
@@ -1364,7 +1364,7 @@ function SyncKeysSection({ canvasId, onBack }: { canvasId: string; onBack: () =>
           disabled={busy || !name.trim()}
           onClick={create}
         >
-          ⚿ Create key
+          Create key
         </Button>
       </div>
       <ol className="mt-3 flex flex-col divide-y divide-line-soft rounded-[10px] border border-line">
@@ -1581,13 +1581,7 @@ function GithubSection({
           </div>
         )}
         {appEnabled && !pickerRepos && (
-          <Button
-            variant="primary"
-            className="justify-center gap-2 self-start"
-            disabled={!!busy}
-            onClick={startInstall}
-          >
-            <GithubIcon width={14} height={14} />
+          <Button variant="primary" className="justify-center self-start" disabled={!!busy} onClick={startInstall}>
             {busy === 'connecting' ? 'Opening GitHub…' : 'Connect GitHub'}
           </Button>
         )}
