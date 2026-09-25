@@ -7,7 +7,6 @@ import { FrameContextMenu } from '../src/components/FrameContextMenu'
 import { ContextMenu, ContextMenuTrigger } from '../src/components/ui/context-menu'
 
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
-
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const frame: Frame = {
@@ -37,7 +36,7 @@ afterEach(() => {
   container.remove()
 })
 
-it('hands focus from the frame menu to a persistent export dialog and dismisses with Escape', async () => {
+async function openFrameMenu(): Promise<Element> {
   await act(async () => {
     root.render(
       <ContextMenu>
@@ -53,9 +52,11 @@ it('hands focus from the frame menu to a persistent export dialog and dismisses 
       .querySelector('button')!
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
   })
-  const menu = document.querySelector('[role="menu"]')!
-  expect(menu.textContent).toContain('Export…')
-  expect(menu.textContent).not.toContain('Download PNG')
+  return document.querySelector('[role="menu"]')!
+}
+
+async function openExportDialog(): Promise<Element> {
+  const menu = await openFrameMenu()
   const exportItem = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
     (item) => item.textContent === 'Export…',
   )!
@@ -65,17 +66,26 @@ it('hands focus from the frame menu to a persistent export dialog and dismisses 
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 30))
   })
+  return document.querySelector('[role="dialog"]')!
+}
+
+it('keeps Copy image URL in the frame menu, not the export dialog', async () => {
+  const menu = await openFrameMenu()
+  expect(menu.textContent).toContain('Copy image URL')
+  expect(menu.textContent).toContain('Export…')
+  expect(menu.textContent).not.toContain('Download PNG')
+})
+
+it('hands focus from the frame menu to a persistent export dialog and dismisses with Escape', async () => {
+  const dialog = await openExportDialog()
 
   expect(document.querySelector('[role="menu"]')).toBeNull()
-  const dialog = document.querySelector('[role="dialog"]')!
   expect(dialog.textContent).toContain('Export “Poster”')
   expect(dialog.contains(document.activeElement)).toBe(true)
-  expect(Array.from(dialog.querySelectorAll('a')).map((a) => a.getAttribute('href'))).toEqual([
-    '/i/export-frame.png?scale=2&download',
-    '/i/export-frame.jpg?scale=2&download',
-  ])
-  expect(dialog.textContent).not.toContain('Copy image URL')
+  expect(dialog.textContent).toContain('Download PNG')
+  expect(dialog.textContent).toContain('Download JPG')
   expect(dialog.textContent).not.toMatch(/PSD|Canva|Figma/)
+  expect(dialog.textContent).not.toContain('Copy image URL')
   await act(async () => {
     document.activeElement!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),

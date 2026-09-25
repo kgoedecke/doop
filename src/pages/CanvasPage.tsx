@@ -70,7 +70,7 @@ import { Avatar } from '../components/ui/avatar'
 import { PeerAvatars } from '../components/PeerAvatars'
 import { Checkbox, CheckboxCard } from '../components/ui/checkbox'
 import { Segmented, SegmentedItem } from '../components/ui/segmented'
-import { Toast, ToastAction } from '../components/ui/toast'
+import { Toast, ToastAction, ToastSpinner } from '../components/ui/toast'
 import { Tooltip } from '../components/ui/tooltip'
 import { Note } from '../components/ui/note'
 import { Textarea } from '../components/ui/textarea'
@@ -129,6 +129,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const [showMobileActions, setShowMobileActions] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const storeNotice = useStore((s) => s.notice)
   const updateReady = useStore((s) => s.updateReady)
   const limitWall = useStore((s) => s.limitWall)
   const canvasNotFound = useStore((s) => s.canvasNotFound)
@@ -639,8 +640,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           doop was updated
           <ToastAction onClick={() => location.reload()}>Reload</ToastAction>
         </Toast>
+      ) : toast ? (
+        <Toast>{toast}</Toast>
       ) : (
-        toast && <Toast>{toast}</Toast>
+        storeNotice && (
+          <Toast>
+            {storeNotice.busy && <ToastSpinner />}
+            {storeNotice.text}
+          </Toast>
+        )
       )}
     </div>
   )

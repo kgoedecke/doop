@@ -95,6 +95,10 @@ interface State {
   flashes: Record<string, { color: string; at: number }>
   /** frameId -> actor currently streaming a design into it */
   streams: Record<string, { name: string; color: string }>
+  /** a transient toast — in the store so long actions fired from surfaces
+   *  that close at once (a context menu) can still report back. A `busy`
+   *  notice (an export in flight) stays up until the next notice replaces it. */
+  notice: { text: string; at: number; busy?: boolean } | null
   /** the free-tier wall is showing — in the store so any surface that hits
    *  the resident-task limit (board, prompt bar, element comment) can raise it */
   limitWall: boolean
@@ -148,6 +152,9 @@ interface State {
   setProposals(proposals: MemoryProposal[]): void
   upsertProposal(proposal: MemoryProposal): void
   setPanelTab(tab: PanelTab): void
+  /** show `text` as a toast for a few seconds — or, with `busy`, with a
+   *  spinner until the next notice replaces it */
+  pushNotice(text: string, options?: { busy?: boolean }): void
   setLimitWall(v: boolean): void
   allowanceChanged(): void
   requestFlyTo(frameId: string): void
@@ -176,6 +183,8 @@ interface State {
 }
 
 const LAYERS_OPEN_KEY = 'doop:layers-open'
+/* longer than the slowest real export (Canva: render + verify, ~3 min) */
+const BUSY_NOTICE_MAX_MS = 5 * 60_000
 
 function readLayersOpen(): boolean {
   try {
@@ -215,6 +224,7 @@ export const useStore = create<State>((set, get) => ({
   connected: false,
   canvasNotFound: false,
   updateReady: false,
+  notice: null,
   flashes: {},
   streams: {},
 
@@ -372,6 +382,24 @@ export const useStore = create<State>((set, get) => ({
       return { proposals }
     }),
   setPanelTab: (panelTab) => set({ panelTab }),
+  pushNotice: (text, options) => {
+    const busy = options?.busy === true
+    const at = Date.now()
+    set({ notice: { text, at, busy } })
+    if (busy) {
+      /* a backstop for a request that never settles (a stalled Canva
+         export) — normally the outcome replaces a busy notice long before */
+      setTimeout(() => {
+        if (get().notice?.at === at) set({ notice: null })
+      }, BUSY_NOTICE_MAX_MS)
+      return
+    }
+    setTimeout(() => {
+      const cur = get().notice
+      /* only clear our own notice — a newer one restarts the clock */
+      if (cur && !cur.busy && Date.now() - cur.at >= 4900) set({ notice: null })
+    }, 5000)
+  },
   setLimitWall: (limitWall) => set({ limitWall }),
   allowanceChanged: () => set((s) => ({ allowanceVersion: s.allowanceVersion + 1 })),
   requestFlyTo: (frameId) => set({ flyTo: { frameId, at: Date.now() } }),
