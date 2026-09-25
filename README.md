@@ -400,6 +400,26 @@ Generic MCP config:
 { "mcpServers": { "doop": { "type": "http", "url": "http://localhost:4300/mcp" } } }
 ```
 
+### Headless agents (agent keys)
+
+The OAuth flow above assumes a human at a browser to approve the connection. A headless client — a
+Mastra workflow, n8n, CI, any server-side agent framework — authenticates with an **agent key**
+instead: mint one under **Settings → Agent keys** and send it as a bearer header. The key acts as
+your account (same canvas access, same attribution) and is checked on every request, so revoking it
+in Settings cuts the agent off immediately.
+
+```json
+{
+  "mcpServers": {
+    "doop": {
+      "type": "http",
+      "url": "http://localhost:4300/mcp",
+      "headers": { "Authorization": "Bearer dpk_…" }
+    }
+  }
+}
+```
+
 Then tell the agent something like:
 
 > Work on canvas `<canvas-id>` (shown in the top bar). Call `get_canvas` to see the existing frames.

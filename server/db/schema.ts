@@ -195,6 +195,30 @@ export const syncEdges = pgTable(
   (t) => [primaryKey({ columns: [t.keyId, t.fromPage, t.toPage] })],
 )
 
+/** Agent keys: account-scoped bearer credentials for the /mcp endpoint — the
+ *  headless counterpart to the MCP OAuth flow, for agents with no browser to
+ *  approve in (Mastra, n8n, CI). A key acts as its owner: every MCP call it
+ *  authenticates goes through the same canvas-access gate as an OAuth
+ *  session. Unlike sync keys the secret is hashed at rest — it grants the
+ *  account's full agent surface, not a single write-only drop box — and is
+ *  shown once, at mint time. `start` keeps the first characters so the list
+ *  UI can say which key is which. Revocation = row deletion, checked on
+ *  every request. */
+export const agentKeys = pgTable(
+  'agent_keys',
+  {
+    id: text('id').primaryKey(),
+    /** sha256 hex of the full secret; the secret itself is never stored */
+    secretHash: text('secret_hash').notNull(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    start: text('start').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+  },
+  (t) => [index('agent_keys_user_idx').on(t.userId), uniqueIndex('agent_keys_hash_idx').on(t.secretHash)],
+)
+
 /** A GitHub repo connected to a canvas as an import source. Two credential
  *  modes: a GitHub App installation (`installationId` set, short-lived
  *  tokens minted per call — the preferred flow) or a fine-grained PAT

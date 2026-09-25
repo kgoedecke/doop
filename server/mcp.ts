@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas } from './access.ts'
+import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
 import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned, PUBLIC_ORIGIN } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
@@ -1440,9 +1441,30 @@ export async function handleMcpRequest(req: Request, res: Response) {
     })
     return
   }
-  /* OAuth gate: the 401 + WWW-Authenticate header is what triggers the
-     browser approval flow in MCP clients (RFC 9728 discovery). */
-  const session = await auth.api.getMcpSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
+  /* Two ways in, one identity. An agent key (`Authorization: Bearer dpk_…`,
+     minted in Settings) is the headless path — Mastra, n8n, CI — where the
+     OAuth browser dance has nobody to dance it. It resolves to its owner on
+     every request, so revocation and bans bite immediately; a recognised but
+     invalid key gets a 401 WITHOUT the WWW-Authenticate pointer, because
+     sending a headless client into OAuth discovery helps nobody. Everything
+     else falls through to the OAuth gate below. */
+  const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1]
+  let session: { userId?: string | null } | null
+  if (bearer && isAgentKeySecret(bearer)) {
+    session = await verifyAgentKey(bearer)
+    if (!session) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: unknown or revoked agent key' },
+        id: null,
+      })
+      return
+    }
+  } else {
+    /* OAuth gate: the 401 + WWW-Authenticate header is what triggers the
+       browser approval flow in MCP clients (RFC 9728 discovery). */
+    session = await auth.api.getMcpSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
+  }
   if (!session) {
     const origin = `${req.protocol}://${req.get('host')}`
     res

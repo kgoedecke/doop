@@ -39,6 +39,16 @@ export interface SyncKeyInfo {
   frames: number
 }
 
+/** An account-scoped bearer credential for /mcp (headless agents). The
+ *  secret exists only on the create response — the list shows `start`. */
+export interface AgentKeyInfo {
+  id: string
+  name: string
+  start: string
+  createdAt: number
+  lastUsedAt: number | null
+}
+
 /** The flow map of a canvas's synced app(s): link hotspots between frames
  *  and how often users actually navigated each pair. */
 export interface SyncFlow {
@@ -300,6 +310,11 @@ export const api = {
   deleteSyncKey: (canvasId: string, keyId: string) =>
     req(`/api/canvases/${canvasId}/sync-keys/${keyId}`, { method: 'DELETE' }),
   syncFlow: (canvasId: string) => req<SyncFlow>(`/api/canvases/${canvasId}/sync-flow`),
+  /* agent keys: bearer credentials for headless MCP clients */
+  listAgentKeys: () => req<AgentKeyInfo[]>('/api/agent-keys'),
+  createAgentKey: (name: string) =>
+    req<AgentKeyInfo & { secret: string }>('/api/agent-keys', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteAgentKey: (keyId: string) => req(`/api/agent-keys/${keyId}`, { method: 'DELETE' }),
   /* GitHub repos connected as import sources */
   listGithubConnections: (canvasId: string) => req<GithubConnectionInfo[]>(`/api/canvases/${canvasId}/github`),
   connectGithub: (canvasId: string, input: { repo: string; token?: string; pass?: string; branch?: string }) =>

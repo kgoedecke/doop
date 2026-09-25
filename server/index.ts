@@ -33,6 +33,7 @@ import {
   MAX_ASSET_BYTES,
 } from './assets.ts'
 import * as ingest from './ingest.ts'
+import * as agentKeys from './agentKeys.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as storage from './storage.ts'
 import * as github from './github.ts'
@@ -790,6 +791,27 @@ app.put('/api/image-model', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the image model' })
   }
+})
+
+/* ---- Agent keys: account-scoped bearer credentials for /mcp, the headless
+   agent path (see server/agentKeys.ts). The secret appears exactly once, in
+   the create response; the list carries only each key's start. The /api
+   session gate above means impersonating admins can look but not mint. */
+
+app.get('/api/agent-keys', async (req, res) => {
+  res.json(await agentKeys.listAgentKeys(req.user!.id))
+})
+
+app.post('/api/agent-keys', async (req, res) => {
+  const key = await agentKeys.createAgentKey(req.user!.id, String(req.body?.name ?? ''))
+  if (!key) return res.status(400).json({ error: 'agent key limit reached — revoke one you no longer use' })
+  res.json(key)
+})
+
+app.delete('/api/agent-keys/:id', async (req, res) => {
+  if (!(await agentKeys.deleteAgentKey(req.user!.id, req.params.id)))
+    return res.status(404).json({ error: 'agent key not found' })
+  res.json({ ok: true })
 })
 
 app.get('/api/canvases', (req, res) =>

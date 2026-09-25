@@ -21,6 +21,7 @@ import {
   Download,
   Group,
   HelpCircle,
+  Key,
   LogOut,
   Menu,
   NavArrowLeft,
@@ -108,6 +109,7 @@ export const ClockIcon = icon(Clock)
 export const GearIcon = icon(Settings)
 export const ShieldIcon = icon(Shield)
 export const HelpIcon = icon(HelpCircle)
+export const KeyIcon = icon(Key)
 export const LogOutIcon = icon(LogOut)
 export const AttachmentIcon = icon(Attachment)
 export const BrainIcon = icon(Brain)
