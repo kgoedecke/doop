@@ -67,6 +67,21 @@ everything). Set `DATABASE_URL` to use a real Postgres — same code path as PGl
 
 Prefer not to run anything? **[doop.design](https://doop.design)** is the hosted version.
 
+## Canvas chat, imports and exports
+
+The canvas Chat tab keeps a shared conversation alongside the design. Mention an agent role to
+queue a design card; its reply threads back into the chat.
+
+The import source picker offers **Website**, **Live app** (the sync snippet), and **GitHub repo**.
+Right-click a frame and choose **Export…** to download PNG or JPG. A progress toast tracks the
+render; the desktop app opens its native save panel.
+
+## Linear
+
+Connect Linear from **Integrations** to read issues through MCP or install Doop as a delegated
+agent. Delegated tickets create a canvas and a design card, then report the result back to Linear.
+See [Linear setup](docs/linear.md) for OAuth and webhook configuration.
+
 ## Hook up Claude Code
 
 One command connects Claude Code (or any MCP client) to your canvas:
