@@ -1,4 +1,6 @@
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
+import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
+import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -492,6 +494,9 @@ for (const extension of extensions) {
 }
 
 app.use(express.json({ limit: '10mb' }))
+app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
+  handleGeminiCloudMcp(req, res).catch(next)
+})
 app.all('/local-agent/mcp/:id', (req, res, next) => {
   handleLocalAgentMcp(req, res).catch(next)
 })
@@ -1228,6 +1233,14 @@ async function withConnectionLock<T>(connectionId: string, fn: () => Promise<T>)
 app.post('/api/canvases/:id/github/:connId/import', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
+  // The pilot owns this user's routing. Reject before analysis, metering or
+  // queueing instead of accepting cards that its canvas-only harness cannot run.
+  if (geminiCloudWorkerFor(req.user!.id)) {
+    return res.status(409).json({
+      error:
+        'Repository imports are unavailable while the Gemini cloud pilot is selected. Ask your operator to disable the pilot, then select a provider that supports repository imports.',
+    })
+  }
   const conn = await github.getConnection(c.id, req.params.connId)
   if (!conn) return res.status(404).json({ error: 'connection not found' })
   if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })

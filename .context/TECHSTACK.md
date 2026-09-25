@@ -62,6 +62,12 @@
 
 ## 9. Infrastructure and Deployment
 
+- Experimental Gemini cloud pilot: `server/geminiCloudRuns.ts` dispatches resident harness tasks
+  to per-user workers; `server/geminiCloudMcp.ts` exposes run-scoped canvas tools. The standalone
+  worker runs official Gemini CLI headlessly, with Google credentials retained in its own volume.
+  `workers/gemini/Dockerfile` builds the worker. Setup and limitations: `docs/gemini-cloud-pilot.md`.
+  `DOOP_GEMINI_CLOUD_WORKERS` enables operator-managed routing and BYO metering; unset by default.
+
 - Docker - `Dockerfile` + `docker-compose.yml`; `docker compose up` runs the app container
   (port 4400) and a `postgres:16-alpine` db container for self-hosting.
 

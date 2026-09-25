@@ -63,9 +63,11 @@ export function Settings() {
 
   const meter = allowance
     ? allowance.byoModel
-      ? allowance.byoKind === 'claude-local'
-        ? 'Claude CLI selected — runs on your connected desktop.'
-        : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
+      ? allowance.byoKind === 'gemini-cloud'
+        ? 'Gemini cloud pilot selected — connection managed by your operator.'
+        : allowance.byoKind === 'claude-local'
+          ? 'Claude CLI selected — runs on your connected desktop.'
+          : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
       : allowance.limit <= 0
         ? 'No free tasks on this server — connect an account to use the Doop Agent.'
         : left === 0

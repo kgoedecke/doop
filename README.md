@@ -149,6 +149,9 @@ kinds of account:
   the picker labels them "no visual review".
 - **Gemini API key** — Google's Gemini models through their OpenAI-compatible endpoint, plus Nano
   Banana image generation.
+- **Gemini cloud pilot** — an operator-managed prototype running the official Gemini CLI in an
+  isolated worker using Google sign-in. Disabled by default; see the
+  [pilot setup and verification guide](docs/gemini-cloud-pilot.md).
 - **Claude API key** — pay-as-you-go on the user's own Anthropic account.
 
 Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRouter/Gemini endpoints

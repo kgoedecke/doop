@@ -128,7 +128,7 @@ export interface Allowance {
   connected: boolean
   /** connected a model account the Doop Agent itself can run on */
   byoModel: boolean
-  byoKind?: ModelAccountKind | 'claude-local'
+  byoKind?: ModelAccountKind | 'claude-local' | 'gemini-cloud'
   byoEmail?: string
   /** free tasks are spent and their own account is carrying the agent */
   onOwnAccount: boolean

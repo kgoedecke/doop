@@ -1,4 +1,5 @@
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
+import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
@@ -27,7 +28,7 @@ import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCo
  */
 
 export type ServerProvider = 'anthropic' | 'azure'
-export type Provider = ServerProvider | AccountKind | 'claude-local'
+export type Provider = ServerProvider | AccountKind | 'claude-local' | 'gemini-cloud'
 
 export interface AgentTurnRequest {
   /** ordered system blocks; `cache` marks an Anthropic cache breakpoint */
@@ -288,6 +289,19 @@ function byoModel(account: ModelAccount): AgentModel {
  */
 export async function pickModel(payerId?: string): Promise<AgentModel | null> {
   if (payerId) {
+    const worker = geminiCloudWorkerFor(payerId)
+    if (worker) {
+      return {
+        provider: 'gemini-cloud',
+        label: 'Gemini CLI (cloud pilot)',
+        userId: payerId,
+        runHarness: (req) => geminiCloudRuns.start(payerId, worker, req),
+        run: () =>
+          Promise.reject(
+            new Error('Gemini cloud pilot supports canvas tasks only. Repository imports require a server provider.'),
+          ),
+      }
+    }
     const local = await getLocalAgentPreference(payerId)
     if (local.enabled) {
       if (!localAgentRuns.online(payerId)) return null
