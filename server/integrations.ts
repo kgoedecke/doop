@@ -1,22 +1,33 @@
 import express from 'express'
 import * as meta from './meta.ts'
+import { extensions } from './extensions.ts'
 
 /**
  * The Integrations page's surface, mounted at /api/integrations (behind the
  * session gate). Connections are per user — an integration is a thing you
- * hold, and automations you own draw on it. Meta is the only provider today;
- * the shape leaves room for more without a second routing scheme.
+ * hold, and automations you own draw on it. Each provider gets its own
+ * sub-path and its own key in the status object.
  */
 export const integrationsRouter = express.Router()
 
 export interface IntegrationsStatus {
   meta: meta.MetaConnectionInfo & { enabled: boolean }
+  /** one key per extension (see server/extensions.ts) — the client side of
+   *  each integration knows its own shape */
+  [extension: string]: unknown
+}
+
+async function statusFor(userId: string): Promise<IntegrationsStatus> {
+  const metaRow = await meta.getConnection(userId)
+  const status: IntegrationsStatus = { meta: { enabled: meta.metaEnabled(), ...meta.connectionInfo(metaRow) } }
+  for (const extension of extensions) {
+    if (extension.connectionStatus) status[extension.id] = await extension.connectionStatus(userId)
+  }
+  return status
 }
 
 integrationsRouter.get('/', async (req, res) => {
-  const row = await meta.getConnection(req.user!.id)
-  const status: IntegrationsStatus = { meta: { enabled: meta.metaEnabled(), ...meta.connectionInfo(row) } }
-  res.json(status)
+  res.json(await statusFor(req.user!.id))
 })
 
 integrationsRouter.post('/meta/start', (req, res) => {
@@ -46,5 +57,20 @@ integrationsRouter.get('/meta/callback', async (req, res) => {
 
 integrationsRouter.delete('/meta', async (req, res) => {
   await meta.disconnect(req.user!.id)
-  res.json({ meta: { enabled: meta.metaEnabled(), connected: false } })
+  res.json(await statusFor(req.user!.id))
 })
+
+/* Each extension's connect routes mount under its id; success responses
+   that should show the fresh status get it from the same statusFor. */
+for (const extension of extensions) {
+  if (extension.connectRouter) {
+    integrationsRouter.use(
+      `/${extension.id}`,
+      extension.connectRouter({
+        respondWithStatus: async (req, res) => {
+          res.json(await statusFor(req.user!.id))
+        },
+      }),
+    )
+  }
+}

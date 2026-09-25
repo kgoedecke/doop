@@ -1,11 +1,13 @@
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
+import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
-import { getAccount, withFreshToken, accountModelFor } from './modelAccounts.ts'
+import { getAccount, withFreshToken, accountModelFor, accountVisionFor } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
 import { ModelAuthError, ModelUnavailableError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
+import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCompletionsAgent.ts'
 
 /**
  * Which model runs a Doop Agent turn, and on whose bill.
@@ -26,7 +28,7 @@ import type { StopReason, TurnBlock } from './openaiAgent.ts'
  */
 
 export type ServerProvider = 'anthropic' | 'azure'
-export type Provider = ServerProvider | AccountKind | 'claude-local'
+export type Provider = ServerProvider | AccountKind | 'claude-local' | 'gemini-cloud'
 
 export interface AgentTurnRequest {
   /** ordered system blocks; `cache` marks an Anthropic cache breakpoint */
@@ -47,6 +49,9 @@ export interface AgentModel {
   label: string
   /** the user whose account pays, when it isn't the server's key */
   userId?: string
+  /** false = the model cannot see images and the run degrades to no visual
+   *  review; absent means true (every pre-roster provider has vision) */
+  vision?: boolean
   runHarness?: (req: LocalHarnessRequest) => Promise<LocalAgentResult>
   run(req: AgentTurnRequest): Promise<AgentTurnResult>
 }
@@ -192,6 +197,8 @@ const BYO_LABELS: Record<AccountKind, string> = {
   chatgpt: 'ChatGPT',
   'openai-key': 'OpenAI',
   'anthropic-key': 'Claude API',
+  'openrouter-key': 'OpenRouter',
+  'gemini-key': 'Gemini',
 }
 
 /* the OpenAI-shaped transports take one system string; cache breakpoints are
@@ -230,6 +237,28 @@ function byoModel(account: ModelAccount): AgentModel {
       },
     }
   }
+  if (account.kind === 'openrouter-key' || account.kind === 'gemini-key') {
+    if (!account.apiKey) throw new ModelAuthError(`Reconnect your ${BYO_LABELS[account.kind]} key in Settings.`)
+    const model = accountModelFor(account)
+    const vision = accountVisionFor(account)
+    const config =
+      account.kind === 'openrouter-key'
+        ? openrouterConfig(account.apiKey, model, vision)
+        : geminiConfig(account.apiKey, model, vision)
+    return {
+      provider: account.kind,
+      label: `${BYO_LABELS[account.kind]} (${model})`,
+      userId: account.userId,
+      vision,
+      run: (req) =>
+        runChatCompletionsTurn(config, {
+          system: joinSystem(req),
+          tools: req.tools,
+          messages: req.messages,
+          maxTokens: req.maxTokens,
+        }),
+    }
+  }
   return {
     provider: account.kind,
     label: `${BYO_LABELS[account.kind]} (${accountModelFor(account)})`,
@@ -260,6 +289,19 @@ function byoModel(account: ModelAccount): AgentModel {
  */
 export async function pickModel(payerId?: string): Promise<AgentModel | null> {
   if (payerId) {
+    const worker = geminiCloudWorkerFor(payerId)
+    if (worker) {
+      return {
+        provider: 'gemini-cloud',
+        label: 'Gemini CLI (cloud pilot)',
+        userId: payerId,
+        runHarness: (req) => geminiCloudRuns.start(payerId, worker, req),
+        run: () =>
+          Promise.reject(
+            new Error('Gemini cloud pilot supports canvas tasks only. Repository imports require a server provider.'),
+          ),
+      }
+    }
     const local = await getLocalAgentPreference(payerId)
     if (local.enabled) {
       if (!localAgentRuns.online(payerId)) return null

@@ -8,6 +8,8 @@ export interface LocalHarnessRequest {
   system: string
   tools: Anthropic.Tool[]
   maxTurns: number
+  /** Stops this canvas run without canceling other work for the account. */
+  isCanceled?: () => boolean
   execute: (block: Anthropic.ToolUseBlockParam) => Promise<Anthropic.ToolResultBlockParam>
 }
 
@@ -37,7 +39,7 @@ export class LocalAgentRuns {
     const device = this.devices.get(userId)
     if (device && device.id !== deviceId && this.online(userId, now)) return null
     this.devices.set(userId, { id: deviceId, at: now })
-    const run = [...this.runs.values()].find((r) => r.userId === userId && !r.closing)
+    const run = [...this.runs.values()].find((r) => r.userId === userId && !r.closing && !r.request.isCanceled?.())
     if (!run || (run.deviceId && run.deviceId !== deviceId)) return null
     run.deviceId = deviceId
     run.lastSeen = now
@@ -69,14 +71,16 @@ export class LocalAgentRuns {
 
   authorized(id: string, token: string): Run | undefined {
     const run = this.runs.get(id)
-    return run && !run.closing && run.deviceId && token === run.job.token ? run : undefined
+    return run && !run.closing && !run.request.isCanceled?.() && run.deviceId && token === run.job.token
+      ? run
+      : undefined
   }
 
   async execute(id: string, token: string, name: string, input: Record<string, unknown>) {
     const run = this.authorized(id, token)
     if (!run || !run.request.tools.some((tool) => tool.name === name)) throw new Error('Run or tool unavailable')
     const result = run.tail.then(() => {
-      if (run.closing) throw new Error('Run ended')
+      if (run.closing || run.request.isCanceled?.()) throw new Error('Run ended')
       return run.request.execute({ type: 'tool_use', id: randomUUID(), name, input })
     })
     run.tail = result.catch(() => {})
@@ -112,10 +116,17 @@ export class LocalAgentRuns {
         .filter(
           (r) =>
             !r.closing &&
-            ((r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now)) || now - r.startedAt > 30 * 60_000),
+            (r.request.isCanceled?.() ||
+              (r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now)) ||
+              now - r.startedAt > 30 * 60_000),
         )
         .map((r) =>
-          this.close(r, { success: false, text: 'Desktop disconnected or local run timed out. Retry the task.' }),
+          this.close(r, {
+            success: false,
+            text: r.request.isCanceled?.()
+              ? 'Task stopped.'
+              : 'Desktop disconnected or local run timed out. Retry the task.',
+          }),
         ),
     )
     for (const [userId, device] of this.devices) if (now - device.at > 60_000) this.devices.delete(userId)

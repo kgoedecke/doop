@@ -103,6 +103,7 @@ function handle(msg: ServerMessage) {
       s.setTasks(msg.tasks)
       s.setFeedback(msg.feedback)
       s.setComments(msg.comments)
+      s.setChat(msg.chat)
       s.setDecisions(msg.decisions)
       s.setProposals(msg.proposals)
       break
@@ -172,6 +173,9 @@ function handle(msg: ServerMessage) {
       break
     case 'activity':
       s.pushActivity(msg.item)
+      break
+    case 'chat':
+      s.pushChat(msg.message)
       break
   }
 }

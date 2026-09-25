@@ -67,6 +67,21 @@ everything). Set `DATABASE_URL` to use a real Postgres — same code path as PGl
 
 Prefer not to run anything? **[doop.design](https://doop.design)** is the hosted version.
 
+## Canvas chat, imports and exports
+
+The canvas Chat tab keeps a shared conversation alongside the design. Mention an agent role to
+queue a design card; its reply threads back into the chat.
+
+The import source picker offers **Website**, **Live app** (the sync snippet), and **GitHub repo**.
+Right-click a frame and choose **Export…** to download PNG or JPG. A progress toast tracks the
+render; the desktop app opens its native save panel.
+
+## Linear
+
+Connect Linear from **Integrations** to read issues through MCP or install Doop as a delegated
+agent. Delegated tickets create a canvas and a design card, then report the result back to Linear.
+See [Linear setup](docs/linear.md) for OAuth and webhook configuration.
+
 ## Hook up Claude Code
 
 One command connects Claude Code (or any MCP client) to your canvas:
@@ -135,22 +150,34 @@ model account and the Doop Agent keeps running on it. **A connected account take
 from the very next task: the free tier is a trial that gets people here, not a balance to spend down
 first, and connecting stops costing the server anything from that moment. The connection is
 account-level, so it lives at **/settings** (Home → Settings); the free-tier wall links there rather
-than carrying its own copy, and "Connect an AI agent" on a canvas stays about MCP clients only. Two
+than carrying its own copy, and "Connect an AI agent" on a canvas stays about MCP clients only. Six
 kinds of account:
 
 - **ChatGPT subscription** — OAuth against `auth.openai.com`, then inference through the Codex
   backend that Plus/Pro/Business plans include. Tokens live in `model_accounts` and never reach a
   browser.
 - **OpenAI API key** — pay-as-you-go on the user's own OpenAI account, no subscription involved.
+- **OpenRouter API key** — one key for a curated multi-vendor roster: Kimi, Qwen, GLM, DeepSeek,
+  MiniMax, MiMo and Gemini Flash (the menu lives in
+  [`shared/modelMenu.ts`](shared/modelMenu.ts)). Models without image input still work, in a
+  degraded mode: the agent skips screenshot review, verifies through the frame HTML instead, and
+  the picker labels them "no visual review".
+- **Gemini API key** — Google's Gemini models through their OpenAI-compatible endpoint, plus Nano
+  Banana image generation.
+- **Gemini cloud pilot** — an operator-managed prototype running the official Gemini CLI in an
+  isolated worker using Google sign-in. Disabled by default; see the
+  [pilot setup and verification guide](docs/gemini-cloud-pilot.md).
+- **Claude API key** — pay-as-you-go on the user's own Anthropic account.
 
-Azure OpenAI is deliberately _not_ a connectable account kind: a user-supplied endpoint would be a
-URL the server fetches with the run's full context — an SSRF vector — so Azure stays a server-level
-provider only.
+Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRouter/Gemini endpoints
+are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
+context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
-Either way the user picks their **model tier** in Settings — `gpt-6-astra` (the newest flagship;
-on a ChatGPT subscription it needs Plus or better and OpenAI is still rolling it out per account),
-`gpt-5.6-sol` (flagship), `gpt-5.6-terra` (the default workhorse) or `gpt-5.6-luna` (cheap and
-fast). They are paying for it, so the choice is theirs; `DOOP_AGENT_OPENAI_MODEL` only sets the
+Either way the user picks their **model tier** in Settings from that provider's curated menu — on
+OpenAI, `gpt-6-astra` (the newest flagship; on a ChatGPT subscription it needs Plus or better and
+OpenAI is still rolling it out per account), `gpt-5.6-sol` (flagship), `gpt-5.6-terra` (the default
+workhorse) or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the choice is theirs;
+`DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL` and `DOOP_AGENT_GEMINI_MODEL` only set the
 default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so
 pinning a 5.4 id via that env var will break the subscription path after that date.
@@ -201,6 +228,8 @@ own agent over MCP.
 | `RESIDENT_TASK_LIMIT`           | `0`                         | Free Doop Agent tasks per account; `0` means a connected account from the first task |
 | `DOOP_AGENT_MODEL`              | `claude-opus-5`             | Model for the Doop Agent on the server's Anthropic key                               |
 | `DOOP_AGENT_OPENAI_MODEL`       | `gpt-5.6-terra`             | Default tier on a user's account; each user can pick another in Settings             |
+| `DOOP_AGENT_OPENROUTER_MODEL`   | `moonshotai/kimi-k2.6`      | Default model on a connected OpenRouter key                                          |
+| `DOOP_AGENT_GEMINI_MODEL`       | `gemini-3.7-flash`          | Default model on a connected Gemini key                                              |
 | `CHATGPT_CONNECT_DISABLED`      | _unset_                     | `1` hides the ChatGPT flow, leaving the API-key path                                 |
 | `DOOP_DISTILL_MODEL`            | `claude-haiku-4-5-20251001` | Model for the guideline distiller                                                    |
 
@@ -389,6 +418,26 @@ Generic MCP config:
 { "mcpServers": { "doop": { "type": "http", "url": "http://localhost:4300/mcp" } } }
 ```
 
+### Headless agents (agent keys)
+
+The OAuth flow above assumes a human at a browser to approve the connection. A headless client — a
+Mastra workflow, n8n, CI, any server-side agent framework — authenticates with an **agent key**
+instead: mint one under **Settings → Agent keys** and send it as a bearer header. The key acts as
+your account (same canvas access, same attribution) and is checked on every request, so revoking it
+in Settings cuts the agent off immediately.
+
+```json
+{
+  "mcpServers": {
+    "doop": {
+      "type": "http",
+      "url": "http://localhost:4300/mcp",
+      "headers": { "Authorization": "Bearer dpk_…" }
+    }
+  }
+}
+```
+
 Then tell the agent something like:
 
 > Work on canvas `<canvas-id>` (shown in the top bar). Call `get_canvas` to see the existing frames.
@@ -453,28 +502,28 @@ Steering happens at three layers (the same architecture paper.design uses, plus 
 
 ### MCP tools
 
-| Tool                   | What it does                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `get_guide`            | The agent playbook — agents are instructed to load this first                                                       |
-| `set_status`           | Broadcast a one-line "what I'm working on" — shown live in the working-now strip, avatar tooltip, and activity feed |
-| `get_feedback`         | Fetch & claim open human feedback requests — for agents whose job is to poll the canvas periodically                |
-| `get_comments`         | Read element-pinned comments and replies, optionally filtered by frame or resolution state, without claiming work   |
-| `reply_to_comment`     | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment             |
-| `resolve_comment`      | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory             |
-| `list_canvases`        | List all canvases                                                                                                   |
-| `create_canvas`        | Create a canvas, returns its shareable id                                                                           |
-| `get_canvas`           | Canvas layout: every frame's position/size/meta                                                                     |
-| `view_website`         | Inspect one public page read-only; returns a desktop screenshot and visible text without changing the canvas        |
-| `import_webpage`       | Import one public URL onto a canvas as an editable HTML snapshot/frame                                              |
-| `create_frame`         | Add a frame with HTML (auto-placed if no x/y)                                                                       |
-| `get_frame`            | Read a frame including its HTML                                                                                     |
-| `get_frame_screenshot` | Render the frame headlessly and return a PNG — lets agents _see_ and iterate on their design                        |
-| `set_frame_html`       | Replace a frame's design in one shot — renders live for everyone                                                    |
-| `append_frame_html`    | **Stream** a design in chunks (`start=true` first, `done=true` last) — viewers watch it build up                    |
-| `edit_frame_html`      | Targeted exact find/replace in a frame's HTML — morphs into the render in place                                     |
-| `update_frame`         | Rename / move / resize a frame                                                                                      |
-| `delete_frame`         | Remove a frame                                                                                                      |
-| `generate_image`       | Generate an image from a prompt with AI (on the user's ChatGPT/OpenAI account, else `OPENAI_API_KEY`) → asset URL   |
+| Tool                   | What it does                                                                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_guide`            | The agent playbook — agents are instructed to load this first                                                                                                          |
+| `set_status`           | Broadcast a one-line "what I'm working on" — shown live in the working-now strip, avatar tooltip, and activity feed                                                    |
+| `get_feedback`         | Fetch & claim open human feedback requests — for agents whose job is to poll the canvas periodically                                                                   |
+| `get_comments`         | Read element-pinned comments and replies, optionally filtered by frame or resolution state, without claiming work                                                      |
+| `reply_to_comment`     | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment                                                                |
+| `resolve_comment`      | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory                                                                |
+| `list_canvases`        | List all canvases                                                                                                                                                      |
+| `create_canvas`        | Create a canvas, returns its shareable id                                                                                                                              |
+| `get_canvas`           | Canvas layout: every frame's position/size/meta                                                                                                                        |
+| `view_website`         | Inspect one public page read-only; returns a desktop screenshot and visible text without changing the canvas                                                           |
+| `import_webpage`       | Import one public URL onto a canvas as an editable HTML snapshot/frame                                                                                                 |
+| `create_frame`         | Add a frame with HTML (auto-placed if no x/y)                                                                                                                          |
+| `get_frame`            | Read a frame including its HTML                                                                                                                                        |
+| `get_frame_screenshot` | Render the frame headlessly and return a PNG — lets agents _see_ and iterate on their design                                                                           |
+| `set_frame_html`       | Replace a frame's design in one shot — renders live for everyone                                                                                                       |
+| `append_frame_html`    | **Stream** a design in chunks (`start=true` first, `done=true` last) — viewers watch it build up                                                                       |
+| `edit_frame_html`      | Targeted exact find/replace in a frame's HTML — morphs into the render in place                                                                                        |
+| `update_frame`         | Rename / move / resize a frame                                                                                                                                         |
+| `delete_frame`         | Remove a frame                                                                                                                                                         |
+| `generate_image`       | Generate an image from a prompt with the image model picked in Settings (GPT Image, Nano Banana or Seedream), on the user's own account, else a server key → asset URL |
 
 Mutating tools accept `agent_name`; the agent then appears in the presence stack (pulsing square avatar),
 gets an "editing" ring + chip on the frame it touched, and its actions land in the activity feed. Agents

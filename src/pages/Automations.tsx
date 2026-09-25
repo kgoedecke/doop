@@ -9,6 +9,7 @@ import {
   type Step,
 } from '../../shared/automations'
 import { api } from '../lib/api'
+import { clientIntegrations } from '../integrations'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { AccountMenu, IconGrid } from '../components/DashShell'
@@ -62,7 +63,7 @@ function everyLine(a: Automation): string {
 export function Automations() {
   const [items, setItems] = useState<Automation[] | null>(null)
   const [canvases, setCanvases] = useState<CanvasMeta[]>([])
-  const [metaConnected, setMetaConnected] = useState(false)
+  const [integrationCount, setIntegrationCount] = useState(0)
   const [busy, setBusy] = useState(false)
   const [remove, setRemove] = useState<Automation | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -72,7 +73,9 @@ export function Automations() {
     api.listCanvases().then(setCanvases).catch(console.error)
     api
       .integrations()
-      .then((s) => setMetaConnected(s.meta.connected))
+      .then((s) =>
+        setIntegrationCount(Number(s.meta.connected) + clientIntegrations.filter((i) => i.isConnected(s)).length),
+      )
       .catch(console.error)
   }, [])
 
@@ -139,7 +142,7 @@ export function Automations() {
         active="automations"
         canvases={canvases}
         automationCount={items?.length}
-        integrationCount={metaConnected ? 1 : 0}
+        integrationCount={integrationCount}
       />
       <DashMain>
         <DashHeader>

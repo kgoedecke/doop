@@ -36,4 +36,16 @@ function ToastAction({ className, ...props }: React.ComponentProps<'button'>) {
   )
 }
 
-export { Toast, ToastAction }
+/** Leads a toast whose action is still running (an export rendering). */
+function ToastSpinner({ className, ...props }: React.ComponentProps<'span'>) {
+  return (
+    <span
+      data-slot="toast-spinner"
+      aria-hidden
+      className={cn('size-3.5 shrink-0 animate-spin rounded-full border-2 border-paper/30 border-t-paper', className)}
+      {...props}
+    />
+  )
+}
+
+export { Toast, ToastAction, ToastSpinner }
