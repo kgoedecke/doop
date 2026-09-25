@@ -22,6 +22,7 @@ import * as backgrounds from './backgrounds.ts'
 import { viewWebsite } from './website.ts'
 import { createImportedWebpageFrame } from './webpageImport.ts'
 import { normalizeImportUrl } from './importer.ts'
+import { extensions, type McpToolHelpers } from './extensions.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import * as allowance from './allowance.ts'
@@ -38,10 +39,15 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
 - Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
-- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
+${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
 - Comments: call get_comments to read element-pinned comments and replies on a canvas, optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.`
+
+function extensionGuideLines(): string {
+  const lines = extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
+  return lines.length ? lines.join('\n') + '\n' : ''
+}
 
 function text(data: unknown) {
   return { content: [{ type: 'text' as const, text: typeof data === 'string' ? data : JSON.stringify(data, null, 2) }] }
@@ -1280,6 +1286,31 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       }
     },
   )
+
+  /* extension tools get the same
+     per-session helpers the built-in tools close over */
+  const extensionHelpers: McpToolHelpers = {
+    ownerId,
+    agentName,
+    actorFrom,
+    canvasFor,
+    noCanvas,
+    err,
+    text,
+    textWithNudge,
+    withFeedback,
+    withStatusNudge,
+    frameSummary,
+    takeImportSlot: (key) => {
+      const now = Date.now()
+      const hits = (importHits.get(key) ?? []).filter((t) => now - t < 60_000)
+      if (hits.length >= IMPORTS_PER_MIN) return false
+      hits.push(now)
+      importHits.set(key, hits)
+      return true
+    },
+  }
+  for (const extension of extensions) extension.registerMcpTools?.(server, extensionHelpers)
 
   server.registerTool(
     'get_frame_screenshot',

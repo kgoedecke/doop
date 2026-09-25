@@ -622,3 +622,48 @@ export const imagePrefs = pgTable('image_prefs', {
   model: text('model').notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
+
+/** One app-actor installation per Linear workspace, billed to its installer. */
+export const linearInstallations = pgTable('linear_installations', {
+  organizationId: text('organization_id').primaryKey(),
+  userId: text('user_id').notNull().unique(),
+  appUserId: text('app_user_id').notNull(),
+  name: text('name').notNull(),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+})
+
+export const linearOAuthStates = pgTable('linear_oauth_states', {
+  hash: text('hash').primaryKey(),
+  userId: text('user_id').notNull(),
+  verifier: text('verifier').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+})
+
+/** A durable inbox and result outbox. Session IDs deduplicate Linear retries. */
+export const linearSessions = pgTable(
+  'linear_sessions',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id').notNull(),
+    userId: text('user_id').notNull(),
+    issueId: text('issue_id'),
+    title: text('title').notNull(),
+    prompt: text('prompt').notNull(),
+    status: text('status').notNull().default('pending'),
+    canvasId: text('canvas_id'),
+    taskId: text('task_id'),
+    error: text('error'),
+    ackId: text('ack_id').notNull(),
+    resultId: text('result_id').notNull(),
+    nextAttemptAt: bigint('next_attempt_at', { mode: 'number' }).notNull().default(0),
+    linked: boolean('linked').notNull().default(false),
+    acknowledged: boolean('acknowledged').notNull().default(false),
+    reported: boolean('reported').notNull().default(false),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('linear_sessions_status_idx').on(t.status)],
+)

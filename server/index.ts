@@ -17,6 +17,7 @@ import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
 import { integrationsRouter } from './integrations.ts'
+import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
@@ -485,6 +486,10 @@ app.post('/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, re
     if (!res.headersSent) res.status(500).json({ error: 'webhook handling failed' })
   })
 })
+
+for (const extension of extensions) {
+  if (extension.webhookRouter) app.use(`/webhooks/${extension.id}`, extension.webhookRouter())
+}
 
 app.use(express.json({ limit: '10mb' }))
 app.all('/local-agent/mcp/:id', (req, res, next) => {
@@ -1881,4 +1886,5 @@ server.listen(PORT, () => {
   )
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()
+  for (const extension of extensions) extension.startWorker?.()
 })

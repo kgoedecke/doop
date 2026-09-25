@@ -253,6 +253,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      repo-reading tools; only prompt cards go through the chat loop below */
   const repoCards = allCards.filter((c) => c.kind)
   const cards = allCards.filter((c) => !c.kind)
+  const canceled = () => cards.length > 0 && cards.every((card) => card.failedAt || card.endedAt)
 
   /* presence otherwise only refreshes on tool activity, and the sweep's TTL
      is shorter than a big generation turn */
@@ -482,12 +483,20 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           // connection must never imply that the user's subscription covers it.
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
           maxTurns,
+          isCanceled: canceled,
           execute: async (block) => {
             if (runState.blockedWebsiteAccess)
               return {
                 type: 'tool_result',
                 tool_use_id: block.id,
                 content: runState.blockedWebsiteAccess,
+                is_error: true,
+              }
+            if (canceled())
+              return {
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: 'This task has been stopped.',
                 is_error: true,
               }
             return execTool(block, canvasId, actor, runState)
@@ -499,6 +508,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         if (!result.success) actions.agentSummary(canvasId, actor, result.text)
       } else
         for (let turn = 0; turn < maxTurns; turn++) {
+          if (canceled()) return 'ran'
           const res = await model.run({
             maxTokens: 16000,
             system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
@@ -506,6 +516,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             messages,
           })
 
+          if (canceled()) return 'ran'
           if (res.stop_reason === 'refusal') {
             actions.setAgentStatus(canvasId, actor, "Couldn't address that feedback")
             refused = true
@@ -537,6 +548,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               {
                 priority: (block) => (block.name === 'import_webpage' ? 1 : 0),
                 blocked: (block) =>
+                  (canceled() ? 'This task has been stopped.' : undefined) ??
                   runState.blockedWebsiteAccess ??
                   importFailureInBatch ??
                   (importInBatch && block.name !== 'import_webpage'
@@ -665,6 +677,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         actions.agentSummary(canvasId, actor, summary)
       }
     }
+    if (canceled()) return 'ran'
     if (finished && !blockedWebsiteAccess && !noMutation && !unverifiedMutation) {
       for (const f of claimed) actions.completeTaskFeedback(f.id)
       for (const c of comments) actions.resolveComment(c.id, role.name)

@@ -901,6 +901,14 @@ export function addQueuedCard(
   return card
 }
 
+/** Publish a board card already committed by a durable integration job. */
+export function publishQueuedCard(canvasId: string, card: AgentTask): void {
+  const list = taskLog.get(canvasId) ?? []
+  if (list.some((task) => task.id === card.id)) return
+  taskLog.set(canvasId, trimTaskLog([card, ...list]))
+  broadcast(canvasId, { type: 'task', task: card })
+}
+
 const TASK_LOG_CAP = 100
 
 /** Keep the task log at its cap without losing open work: the oldest FINISHED

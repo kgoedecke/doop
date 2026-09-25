@@ -190,6 +190,7 @@ export interface AutomationInput {
 /** The Integrations page: per-provider connection state. A provider the
  *  server has no app credentials for reports `enabled: false`. */
 export interface IntegrationsStatus {
+  [integration: string]: unknown
   meta: {
     enabled: boolean
     connected: boolean
@@ -248,7 +249,7 @@ export function errorMessage(err: unknown, fallback: string): string {
   return fallback
 }
 
-async function req<T>(url: string, init?: RequestInit): Promise<T> {
+export async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
