@@ -13,6 +13,7 @@ export interface LocalHarnessRequest {
 
 interface Run {
   userId: string
+  remote?: AbortController
   deviceId?: string
   job: LocalAgentJob
   request: LocalHarnessRequest
@@ -37,18 +38,28 @@ export class LocalAgentRuns {
     const device = this.devices.get(userId)
     if (device && device.id !== deviceId && this.online(userId, now)) return null
     this.devices.set(userId, { id: deviceId, at: now })
-    const run = [...this.runs.values()].find((r) => r.userId === userId && !r.closing)
+    const run = [...this.runs.values()].find((r) => r.userId === userId && !r.closing && !r.remote)
     if (!run || (run.deviceId && run.deviceId !== deviceId)) return null
     run.deviceId = deviceId
     run.lastSeen = now
     return run.job
   }
 
-  start(userId: string, model: ClaudeModel, request: LocalHarnessRequest): Promise<LocalAgentResult> {
+  runningRemote(userId: string) {
+    return [...this.runs.values()].some((r) => r.userId === userId && r.remote && !r.closing)
+  }
+
+  start(
+    userId: string,
+    model: ClaudeModel,
+    request: LocalHarnessRequest,
+    remote?: (job: LocalAgentJob, signal: AbortSignal) => Promise<LocalAgentResult>,
+  ): Promise<LocalAgentResult> {
     const id = randomUUID()
     return new Promise((resolve) => {
       this.runs.set(id, {
         userId,
+        remote: remote ? new AbortController() : undefined,
         request,
         resolve,
         lastSeen: Date.now(),
@@ -64,12 +75,30 @@ export class LocalAgentRuns {
           maxTurns: request.maxTurns,
         },
       })
+      if (remote) {
+        const run = this.runs.get(id)!
+        void Promise.resolve()
+          .then(() => remote(run.job, run.remote!.signal))
+          .catch((error: unknown) => ({
+            success: false,
+            text: error instanceof Error ? error.message : 'Hosted Claude failed.',
+          }))
+          .then(async (result) => {
+            if (!run.closing) await this.close(run, result)
+          })
+      }
     })
+  }
+
+  revokeRemote(id: string) {
+    this.runs.get(id)?.remote?.abort()
   }
 
   authorized(id: string, token: string): Run | undefined {
     const run = this.runs.get(id)
-    return run && !run.closing && run.deviceId && token === run.job.token ? run : undefined
+    return run && !run.closing && !run.remote?.signal.aborted && (run.deviceId || run.remote) && token === run.job.token
+      ? run
+      : undefined
   }
 
   async execute(id: string, token: string, name: string, input: Record<string, unknown>) {
@@ -85,24 +114,25 @@ export class LocalAgentRuns {
 
   async finish(id: string, userId: string, deviceId: string, result: LocalAgentResult) {
     const run = this.runs.get(id)
-    if (!run || run.userId !== userId || run.deviceId !== deviceId || run.closing) return false
+    if (!run || run.remote || run.userId !== userId || run.deviceId !== deviceId || run.closing) return false
     await this.close(run, result)
     return true
   }
 
   private async close(run: Run, result: LocalAgentResult) {
     run.closing = true
+    run.remote?.abort()
     await run.tail
     this.runs.delete(run.job.id)
     run.resolve(result)
   }
 
-  async cancel(userId: string) {
-    this.devices.delete(userId)
+  async cancel(userId: string, transport?: 'remote') {
+    if (!transport) this.devices.delete(userId)
     await Promise.all(
       [...this.runs.values()]
-        .filter((r) => r.userId === userId && !r.closing)
-        .map((r) => this.close(r, { success: false, text: 'Local Claude run stopped.' })),
+        .filter((r) => r.userId === userId && !r.closing && (!transport || r.remote))
+        .map((r) => this.close(r, { success: false, text: 'Claude run stopped.' })),
     )
   }
 
@@ -112,10 +142,16 @@ export class LocalAgentRuns {
         .filter(
           (r) =>
             !r.closing &&
-            ((r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now)) || now - r.startedAt > 30 * 60_000),
+            ((!r.remote && (r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now))) ||
+              now - r.startedAt > 30 * 60_000),
         )
         .map((r) =>
-          this.close(r, { success: false, text: 'Desktop disconnected or local run timed out. Retry the task.' }),
+          this.close(r, {
+            success: false,
+            text: r.remote
+              ? 'Hosted Claude timed out. Review any completed edits before retrying.'
+              : 'Desktop disconnected or local run timed out. Retry the task.',
+          }),
         ),
     )
     for (const [userId, device] of this.devices) if (now - device.at > 60_000) this.devices.delete(userId)

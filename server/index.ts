@@ -1,3 +1,4 @@
+import { remoteClaudeRouter } from './remoteClaude.ts'
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
 import http from 'node:http'
 import { createHash } from 'node:crypto'
@@ -612,6 +613,7 @@ function requireFrame(req: express.Request, res: express.Response, frameId: stri
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/remote-claude', remoteClaudeRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)

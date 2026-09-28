@@ -16,8 +16,6 @@ import {
   Attachment,
   Brain,
   Compass,
-  Computer,
-  Download,
   Group,
   HelpCircle,
   LogOut,
@@ -113,5 +111,3 @@ export const BrainIcon = icon(Brain)
 export const BuildingIcon = icon(Building)
 export const CreditCardIcon = icon(CreditCard)
 export const LockIcon = icon(Lock)
-export const DesktopIcon = icon(Computer)
-export const DownloadIcon = icon(Download)

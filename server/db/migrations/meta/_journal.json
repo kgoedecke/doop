@@ -127,6 +127,20 @@
       "when": 1789786843578,
       "tag": "0017_local_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790017200000,
+      "tag": "0018_remote_claude",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790025364364,
+      "tag": "0019_far_tana_nile",
+      "breakpoints": true
     }
   ]
 }
