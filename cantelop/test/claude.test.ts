@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- CLI process fixture uses broad test doubles. */
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, writeFile, rm, access } from 'node:fs/promises'
@@ -5,7 +6,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NativeClaude, NativeAuthRequired, isNativeAuthFailure, cliArgs, claudeEnv } from '../src/claude.js'
 const config = { tools: ['Read'], allowedTools: ['Read'], mcps: {} }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
 async function fixture(t: any) {
   const root = await mkdtemp(join(tmpdir(), 'cantelop-native-'))
   t.after(() => rm(root, { recursive: true, force: true }))
@@ -54,9 +54,8 @@ test('native runner verifies auth, parses Unicode and final non-newline frame', 
     },
   })
   assert.equal(initialized, true)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
   assert.ok(events.some((e: any) => e.text === 'Hello 😀'))
-  assert.equal((events.at(-1) as Record<string, unknown>).type, 'result')
+  assert.equal((events.at(-1) as any).type, 'result')
 })
 test('native process-group cancellation escalates and waits for stubborn tool descendants', async (t) => {
   const runtime = await fixture(t),
@@ -71,7 +70,6 @@ test('native process-group cancellation escalates and waits for stubborn tool de
     resume: false,
     text: 'wait',
     signal: controller.signal,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
     emit: async (e: any) => {
       if (e.type === 'tool.ready') {
         ready = true
@@ -89,6 +87,7 @@ test('CLI flags retain explicit tools and MCPs, no shared credentials inherited'
   const args = cliArgs(config, 'id', true)
   assert.ok(args.includes('--strict-mcp-config'))
   assert.ok(args.includes('--resume'))
+  assert.ok(args.includes('--include-partial-messages'))
   assert.ok(!args.includes('--dangerously-skip-permissions'))
   process.env.ANTHROPIC_API_KEY = 'must-not-be-inherited'
   try {
@@ -103,7 +102,6 @@ test('CLI flags retain explicit tools and MCPs, no shared credentials inherited'
 test('execution settings reach the subprocess; private prompt files are removed on success and failure', async (t) => {
   const runtime = await fixture(t)
   for (const text of ['hello', 'fail']) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Partial SDK/DOM fixtures exercise runtime boundaries without implementing the platform.
     const events: any[] = []
     const run = runtime.run({
       config: { ...config, model: 'sonnet', maxTurns: 24, systemPrompt: 'Rules 😀\nSecond line' },

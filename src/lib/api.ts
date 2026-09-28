@@ -243,26 +243,25 @@ export const api = {
     req<RemoteClaudeStatus>('/api/remote-claude', { headers: { 'X-Doop-User': userId } }),
   checkRemoteClaude: (userId: string) =>
     req<{ authenticated: boolean }>('/api/remote-claude/check', { method: 'POST', headers: { 'X-Doop-User': userId } }),
-  selectRemoteClaude: (userId: string, model: string, loginAttemptId?: string, loginCursor?: string) =>
+  selectRemoteClaude: (userId: string, model: string) =>
     req<LocalAgentPreference>('/api/remote-claude/select', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
-      body: JSON.stringify({
-        model,
-        ...(loginAttemptId ? { loginAttemptId } : {}),
-        ...(loginCursor ? { loginCursor } : {}),
-      }),
+      body: JSON.stringify({ model }),
     }),
   disableRemoteClaude: (userId: string) =>
     req<LocalAgentPreference>('/api/remote-claude/disable', { method: 'POST', headers: { 'X-Doop-User': userId } }),
   stopRemoteClaude: (userId: string) =>
     req<{ ok: boolean }>('/api/remote-claude/stop', { method: 'POST', headers: { 'X-Doop-User': userId } }),
-  remoteClaudeAuth: (userId: string, action: 'start' | 'input' | 'cancel', body: unknown) =>
-    req<{ sessionId: string }>(`/api/remote-claude/auth/${action}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
-      body: JSON.stringify(body),
-    }),
+  remoteClaudeAuth: (userId: string, action: 'start' | 'code' | 'cancel', body: unknown) =>
+    req<{ authenticated?: boolean; attemptId?: string; url?: string; cancelled?: boolean }>(
+      `/api/remote-claude/auth/${action}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
+        body: JSON.stringify(body),
+      },
+    ),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),

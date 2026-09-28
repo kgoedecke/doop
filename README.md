@@ -618,8 +618,7 @@ The Claude Plan runs canvas tasks through the Cantelop Claude Code API on the us
 own Claude subscription, without keeping a desktop open. In Settings, choose
 **Claude Plan → Connect**.
 The native Claude Code login runs in your private hosted workspace. Open the
-Anthropic link and send any requested terminal response through the encrypted
-login console. Doop never extracts or stores your Claude OAuth credentials.
+Anthropic link and paste the one-time code from Claude into Doop. Doop never extracts or stores your Claude OAuth credentials.
 
 ### Set up your own hosted Claude service
 
@@ -758,9 +757,7 @@ leaves task-token authorization in place. Restart `npm run dev` after the addres
 is printed, then retry the card. Keep both processes running; restarting the
 tunnel gives you a new address and requires another backend restart.
 
-The hosted client uses request/reply for auth checks, which return their status
-directly in HTTP 200 responses. Native login
-terminal output, task progress, and re-authentication events still use SSE.
+The hosted client uses request/reply for auth checks, login, and code confirmation. Task progress and re-authentication events use SSE.
 
 Doop signs five-minute application JWTs with the task requester's Doop user ID as
 `sub`. Each identity gets its own Cantelop workspace and native Claude login. Keep

@@ -26,6 +26,7 @@ export function cliArgs(
     '--output-format',
     'stream-json',
     '--verbose',
+    '--include-partial-messages',
     '--permission-mode',
     'dontAsk',
     '--setting-sources',
@@ -88,8 +89,7 @@ export class NativeClaude implements ClaudeRuntime {
       // A signed-out CLI exits nonzero but still reports structured status.
       const failure = error as { stdout?: string; killed?: boolean; signal?: string }
       if (!failure.killed && !failure.signal && failure.stdout) return authStatus(failure.stdout)
-      // eslint-disable-next-line preserve-caught-error -- Do not retain native process output in surfaced auth errors.
-      throw new Error('Claude authentication status unavailable')
+      throw new Error('Claude authentication status unavailable', { cause: error })
     }
   }
   async logout(): Promise<void> {

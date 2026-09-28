@@ -1,10 +1,41 @@
 import { defineApi, RemoteAppError, type HttpMethod } from '@cantelop/sdk/api'
 import type { Command, Reply } from './contracts.js'
-import { loginPage } from './login-page.js'
 import { identity } from './auth.js'
 import { ApiError, config, fail, fields, readBody, uuid } from './validation.js'
 
 const AUTH_KEEP_ALIVE_SECONDS = 900
+// The Session waits up to 20 s for Claude to print its link or finish the code exchange.
+const LOGIN_WAIT_MS = 45_000
+const LOGIN_ERRORS: Record<string, { status: number; message: string }> = {
+  login_not_active: { status: 409, message: 'No active login attempt. Start a new one.' },
+  code_rejected: { status: 422, message: 'Claude did not accept the code. Try again.' },
+  login_failed: { status: 502, message: 'Claude login did not complete. Start a new attempt.' },
+  login_timeout: { status: 504, message: 'Claude did not respond in time. Check the status before retrying.' },
+}
+// A newly created Workspace can briefly report resource_not_found while platform registration converges.
+const CONVERGENCE_DELAYS_MS = [250, 500, 1000]
+
+async function converge<T>(
+  signal: AbortSignal,
+  attempt: () => Promise<T>,
+  failed?: (error: RemoteAppError) => void,
+): Promise<T> {
+  for (let retry = 0; ; retry++) {
+    try {
+      return await attempt()
+    } catch (error) {
+      if (
+        !(error instanceof RemoteAppError) ||
+        error.code !== 'resource_not_found' ||
+        retry >= CONVERGENCE_DELAYS_MS.length
+      )
+        throw error
+      failed?.(error)
+      await new Promise((resolve) => setTimeout(resolve, CONVERGENCE_DELAYS_MS[retry]))
+      signal.throwIfAborted()
+    }
+  }
+}
 
 export default defineApi<Command, Reply>(({ app, router, env }) => {
   const route = (method: HttpMethod, path: string, handle: (r: Request) => Promise<Response>) => {
@@ -28,139 +59,130 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
       }
     })
   }
+  const openSession = (
+    config: { id: string; workspaceSlug: string; keepAliveSeconds: number },
+    signal: AbortSignal,
+  ) => {
+    const session = app.sessions.open(config)
+    return {
+      id: session.id,
+      stop: () => session.stop(),
+      dispatch: (command: Command) => converge(signal, () => session.dispatch(command)),
+      request: (command: Command, timeoutMs: number) => {
+        // Reuse the failed request's identity so a retry can never execute twice.
+        let id: string | undefined
+        return converge(
+          signal,
+          () => session.request(command, { timeoutMs, signal, ...(id ? { id } : {}) }),
+          (error) => {
+            id = error.messageId ?? id
+          },
+        )
+      },
+      events: (request: Request) => converge(signal, () => session.events(request)),
+    }
+  }
   const userSession = async (request: Request, sessionId: unknown) => {
     const user = await identity(request, env)
     if (typeof sessionId !== 'string' || !sessionId.startsWith(`${user.userId}:`))
       throw new ApiError(404, 'Session not found')
     const suffix = sessionId.slice(user.userId.length + 1)
     if (suffix !== 'auth') uuid(suffix)
-    return app.sessions.open({
-      id: sessionId,
-      workspaceSlug: user.workspaceSlug,
-      keepAliveSeconds: suffix === 'auth' ? AUTH_KEEP_ALIVE_SECONDS : 300,
-    })
+    return openSession(
+      {
+        id: sessionId,
+        workspaceSlug: user.workspaceSlug,
+        keepAliveSeconds: suffix === 'auth' ? AUTH_KEEP_ALIVE_SECONDS : 300,
+      },
+      request.signal,
+    )
   }
   const accepted = (sessionId: string, message: { id: string }, extra = {}) =>
     Response.json(
       { sessionId, receiptId: message.id, ...extra },
       { status: 202, headers: { 'cache-control': 'no-store' } },
     )
-  const result = (sessionId: string, reply: Reply, extra = {}) =>
-    Response.json({ sessionId, ...reply, ...extra }, { headers: { 'cache-control': 'no-store' } })
-  const checkAuth = async (session: ReturnType<typeof app.sessions.open>, request: Request) => {
-    const reply = await session.request({ type: 'auth.check' }, { timeoutMs: 30_000, signal: request.signal })
-    // The native check has completed and credentials live in the persistent Workspace.
-    // Await cleanup so callers can retry if the platform fails to release the Sandbox.
+  const result = (sessionId: string, reply: Reply, extra = {}) => {
+    const failure = reply.type === 'error' ? LOGIN_ERRORS[reply.code] : undefined
+    if (failure)
+      return Response.json(
+        { error: failure.message, code: (reply as { code: string }).code },
+        { status: failure.status, headers: { 'cache-control': 'no-store' } },
+      )
+    return Response.json({ sessionId, ...reply, ...extra }, { headers: { 'cache-control': 'no-store' } })
+  }
+  const authSession = (
+    user: { userId: string; workspaceSlug: string },
+    request: Request,
+    keepAliveSeconds = AUTH_KEEP_ALIVE_SECONDS,
+  ) => openSession({ id: `${user.userId}:auth`, workspaceSlug: user.workspaceSlug, keepAliveSeconds }, request.signal)
+  const confirmed = async (session: ReturnType<typeof openSession>, reply: Reply) => {
+    // Credentials live in the persistent Workspace, so release the Sandbox once native auth is confirmed.
+    // Await cleanup so a platform failure is returned and the caller can retry.
     if (reply.type === 'auth.status' && reply.authenticated) await session.stop()
     return reply
   }
-  route('GET', '/login', async () => loginPage())
   route('GET', '/health', async () => Response.json({ ok: true }))
   route('GET', '/v1/identity', async (request) =>
     Response.json(await identity(request, env), { headers: { 'cache-control': 'no-store' } }),
   )
   route('POST', '/v1/auth', async (request) => {
     const user = await identity(request, env)
-    const body = await readBody(request)
-    fields(body, ['attemptId', 'publicKey', 'force'])
-    if (body.force !== undefined && typeof body.force !== 'boolean') fail('Invalid force flag')
-    if (body.force && !body.attemptId) fail('Login attempt required')
-    let start: Command = { type: 'auth.check' }
-    if (body.attemptId !== undefined || body.publicKey !== undefined) {
-      const attemptId = uuid(body.attemptId)
-      fields(body.publicKey, ['kty', 'crv', 'x', 'y', 'ext', 'key_ops'])
-      const k = body.publicKey
-      if (
-        k.kty !== 'EC' ||
-        k.crv !== 'P-256' ||
-        typeof k.x !== 'string' ||
-        typeof k.y !== 'string' ||
-        !/^[A-Za-z0-9_-]{43}$/.test(k.x) ||
-        !/^[A-Za-z0-9_-]{43}$/.test(k.y)
-      )
-        fail('Invalid terminal public key')
-      start = {
-        type: 'auth.start',
-        attemptId,
-        ...(body.force ? { force: true } : {}),
-        publicKey: { kty: 'EC', crv: 'P-256', x: k.x, y: k.y },
-      }
-    }
-    const workspace = await app.workspaces.open({ slug: user.workspaceSlug })
-    const session = app.sessions.open({
-      id: `${user.userId}:auth`,
-      workspaceSlug: user.workspaceSlug,
-      keepAliveSeconds: AUTH_KEEP_ALIVE_SECONDS,
-    })
-    const metadata = {
-      workspaceId: workspace.id,
-      workspaceSlug: workspace.slug,
-      workspace: '/workspace',
-      loginPage: '/login',
-    }
-    if (start.type === 'auth.check') {
-      return result(session.id, await checkAuth(session, request), metadata)
-    }
-    return accepted(session.id, await session.dispatch(start), metadata)
+    fields(await readBody(request), [])
+    const workspace = await converge(request.signal, () => app.workspaces.open({ slug: user.workspaceSlug }))
+    const session = authSession(user, request)
+    const metadata = { workspaceId: workspace.id, workspaceSlug: workspace.slug, workspace: '/workspace' }
+    return result(session.id, await confirmed(session, await session.request({ type: 'auth.check' }, 30_000)), metadata)
   })
-  for (const action of ['input', 'cancel'] as const)
-    route('POST', `/v1/auth/${action}`, async (request) => {
-      const user = await identity(request, env),
-        body = await readBody(request)
-      fields(body, action === 'input' ? ['attemptId', 'sequence', 'iv', 'data'] : ['attemptId'])
-      const attemptId = uuid(body.attemptId)
-      let command: Command = { type: 'auth.cancel', attemptId }
-      if (action === 'input') {
-        if (
-          !Number.isSafeInteger(body.sequence) ||
-          Number(body.sequence) < 1 ||
-          typeof body.iv !== 'string' ||
-          !/^[A-Za-z0-9+/]{16}$/.test(body.iv) ||
-          typeof body.data !== 'string' ||
-          body.data.length < 24 ||
-          body.data.length > 8192 ||
-          !/^[A-Za-z0-9+/]+={0,2}$/.test(body.data)
-        )
-          fail('Invalid encrypted terminal frame')
-        command = { type: 'auth.input', attemptId, sequence: Number(body.sequence), iv: body.iv, data: body.data }
-      }
-      const session = app.sessions.open({
-        id: `${user.userId}:auth`,
-        workspaceSlug: user.workspaceSlug,
-        keepAliveSeconds: AUTH_KEEP_ALIVE_SECONDS,
-      })
-      return accepted(session.id, await session.dispatch(command))
-    })
+  route('POST', '/v1/auth/login', async (request) => {
+    const user = await identity(request, env),
+      body = await readBody(request)
+    fields(body, ['force'])
+    if (body.force !== undefined && typeof body.force !== 'boolean') fail('Invalid force flag')
+    const session = authSession(user, request)
+    return result(
+      session.id,
+      await confirmed(
+        session,
+        await session.request({ type: 'auth.login', ...(body.force ? { force: true } : {}) }, LOGIN_WAIT_MS),
+      ),
+    )
+  })
+  route('POST', '/v1/auth/login/code', async (request) => {
+    const user = await identity(request, env),
+      body = await readBody(request)
+    fields(body, ['attemptId', 'code'])
+    const attemptId = uuid(body.attemptId)
+    // Printable ASCII only: the code is typed into Claude's terminal and must not carry control characters.
+    if (typeof body.code !== 'string' || !/^[\x21-\x7e]{1,2048}$/.test(body.code)) fail('Invalid login code')
+    const session = authSession(user, request)
+    return result(
+      session.id,
+      await confirmed(session, await session.request({ type: 'auth.code', attemptId, code: body.code }, LOGIN_WAIT_MS)),
+    )
+  })
+  route('POST', '/v1/auth/cancel', async (request) => {
+    const user = await identity(request, env),
+      body = await readBody(request)
+    fields(body, ['attemptId'])
+    const session = authSession(user, request)
+    return result(session.id, await session.request({ type: 'auth.cancel', attemptId: uuid(body.attemptId) }, 30_000))
+  })
   route('POST', '/v1/auth/logout', async (request) => {
     const user = await identity(request, env)
     fields(await readBody(request), [])
-    const session = app.sessions.open({
-      id: `${user.userId}:auth`,
-      workspaceSlug: user.workspaceSlug,
-      keepAliveSeconds: AUTH_KEEP_ALIVE_SECONDS,
-    })
-    const reply = await session.request({ type: 'auth.logout' }, { timeoutMs: 45_000, signal: request.signal })
+    const session = authSession(user, request)
+    const reply = await session.request({ type: 'auth.logout' }, 45_000)
     if (reply.type === 'auth.status' && !reply.authenticated) await session.stop()
     return result(session.id, reply)
-  })
-  route('POST', '/v1/auth/complete', async (request) => {
-    const user = await identity(request, env)
-    fields(await readBody(request), [])
-    const session = app.sessions.open({
-      id: `${user.userId}:auth`,
-      workspaceSlug: user.workspaceSlug,
-      keepAliveSeconds: AUTH_KEEP_ALIVE_SECONDS,
-    })
-    return result(session.id, await checkAuth(session, request))
   })
   route('POST', '/v1/sessions', async (request) => {
     const user = await identity(request, env),
       settings = config(await readBody(request))
-    const session = app.sessions.open({
-      id: `${user.userId}:${crypto.randomUUID()}`,
-      workspaceSlug: user.workspaceSlug,
-      keepAliveSeconds: 300,
-    })
+    const session = openSession(
+      { id: `${user.userId}:${crypto.randomUUID()}`, workspaceSlug: user.workspaceSlug, keepAliveSeconds: 300 },
+      request.signal,
+    )
     return accepted(session.id, await session.dispatch({ type: 'configure', config: settings }))
   })
   route('POST', '/v1/messages', async (request) => {
@@ -186,10 +208,7 @@ export default defineApi<Command, Reply>(({ app, router, env }) => {
     const b = await readBody(request)
     fields(b, ['sessionId'])
     const session = await userSession(request, b.sessionId)
-    return result(
-      session.id,
-      await session.request({ type: 'snapshot' }, { timeoutMs: 30_000, signal: request.signal }),
-    )
+    return result(session.id, await session.request({ type: 'snapshot' }, 30_000))
   })
   route('GET', '/v1/events', async (request) => {
     const session = await userSession(request, new URL(request.url).searchParams.get('sessionId'))

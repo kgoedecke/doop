@@ -2,7 +2,7 @@
 
 This directory is Doop's Cantelop Edge API and native Claude Session service.
 Imported from `cantelop-claude-api` at commit
-`0d2fd96556228191ab5711b883a11117a5410c21`. Make future changes here.
+`33a1a0b15eb1d57746c9ade80ad685dd53bc1e18`. Make future changes here.
 It deploys independently of Doop's Express server to the
 `doop-claude-runtime` app named in `cantelop.json` (or your local manifest override). Moving the source does not move user data.
 
@@ -22,9 +22,7 @@ bun run cantelop:dev
 
 The service has its own Bun lockfile and TypeScript configurations. Its tests
 use Node's test runner; Doop's tests use Vitest. Both run in CI.
-The service's `src/contracts.ts` and `src/terminal-crypto.ts` are also consumed
-by Doop, so API events and encrypted login use the same definitions.
-These modules must remain independent of Node and the Cantelop SDK.
+The service's `src/contracts.ts` is independent of Node and the SDK. Doop calls the auth routes through its own backend.
 
 For a contributor deployment, run `cantelop login` followed by
 `bun run cantelop:setup` from the repository root. Setup creates a local app
@@ -55,8 +53,7 @@ Claude credentials and conversation state remain in existing Cantelop Workspaces
 
 - `src/api.ts`: `defineApi`, JWT verification, `app.workspaces.open`, `app.sessions.open`, dispatch, and authenticated event streaming. No local server or Docker daemon management.
 - `src/session.ts`: `defineSessionBehaviour`, managed activities for long-running turns, queue/steer/cancel handling, and recovery.
-- `src/login.ts`, `src/login-process.ts`, and `runtime/login-pty.py`: native login lifecycle and PTY relay.
-- `src/login-page.ts` and `src/terminal-crypto.ts`: login screen and encrypted terminal transport.
+- `src/login.ts`, `src/login-process.ts`, and `runtime/login-pty.py`: native login lifecycle and code entry.
 - `src/claude.ts`: native CLI subprocess, process-group cancellation, stream parsing, explicit tool/MCP settings, and native authentication status.
 - `src/state.ts`: atomic snapshots of configuration, queue, message status, and Claude conversation identity under `/workspace/.cantelop`.
 - `cantelop.json` and `docker/Dockerfile`: Edge/Session entrypoints and system dependencies. Cantelop supplies the runtime user, startup command, and `/workspace` mount.
@@ -65,21 +62,9 @@ Each application identity maps to a server-derived Workspace slug. Separate sess
 
 ## Authentication boundary
 
-Open **`/login`** on your App's origin. Enter an application access token from your identity system and select **Connect Claude**. The page opens the native Claude Code login in the user's auth Sandbox. Open the displayed Anthropic link, sign in with your subscription, and enter any completion code only when the native terminal asks for it. The page confirms success after checking `claude auth status`.
+Doop issues a short-lived ES256 JWT for each user. The hosted API verifies it and derives the user's Workspace and auth Session. Claude Code runs its unmodified `claude auth login` command with `CLAUDE_CONFIG_DIR=/workspace/.claude`; Doop never reads or exports Claude credentials.
 
-Application identity and Claude identity remain separate. Your backend issues an ES256 JWT with `sub`, `iss`, `aud`, and `exp` (optional `nbf`); Cantelop receives only its public verification key. The terminal runs the unmodified `claude auth login` command with `CLAUDE_CONFIG_DIR=/workspace/.claude`. Claude handles the OAuth exchange and persists its own credentials. The application does not implement an OAuth callback or extract Claude's tokens.
-
-The page is a small line-oriented login console, not a general shell. It uses a Python standard-library PTY helper installed in the runtime image. Input echo is disabled; sending an empty response presses Enter. Native terminal output is rendered as inert text, and only Anthropic-domain HTTPS links are made clickable. No external frontend assets or build step are required.
-
-Each login attempt has a ten-minute lifetime and a unique ID. Only one attempt can run in the user's deterministic auth Session. Cancellation terminates and reaps the native process group. Network reconnection uses Cantelop event replay while the page remains open. Closing or refreshing the page discards its temporary keys; cancel the old attempt or wait for expiry before starting another. Sandbox recovery emits `auth.reset`; unfinished login attempts are not resumed.
-
-### Terminal transport
-
-The SDK sends dispatch payloads through the platform and supports bounded event replay; it does not promise zero retention of platform payloads. Accordingly, the browser and auth Session negotiate a temporary P-256 ECDH key and use AES-256-GCM for **both input and output**. Cantelop dispatch and replay receive ciphertext. Private transport keys live only in browser/Session memory and are never saved in the Workspace. This protects stored transport payloads, not a compromised browser, runtime, or application server.
-
-Application code never logs terminal input/output or persists a terminal transcript. The helper discards stderr diagnostics. Claude itself owns its native configuration and any native diagnostic files. Authentication status and attempt metadata remain visible to the platform. Keep TLS enabled and apply your deployment's access/logging policies.
-
-Anthropic's [hosting conditions](https://code.claude.com/docs/en/legal-and-compliance#can-customers-offer-claude-code-in-their-products) describe hosting the unmodified binary under Commercial Terms with end-user authentication and billing. Its [credential conditions](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) distinguish native sign-in from a third-party Claude login or credential intermediary. This scaffold is designed around that distinction; it is not legal approval. Review the full terms for your deployment. Checked September 18, 2026.
+Login uses two calls. `POST /v1/auth/login` returns an Anthropic HTTPS sign-in URL and attempt ID. After signing in on Anthropic's site, the user pastes the one-time code into Doop. `POST /v1/auth/login/code` sends it to Claude Code and returns confirmed native auth status. The code uses PKCE, so it cannot be redeemed without the verifier held by Claude Code in the Sandbox. Raw terminal output stays in Session memory. Only one attempt runs per user's auth Session; it expires after ten minutes. `POST /v1/auth/cancel` stops it.
 
 ## Local setup
 
@@ -110,18 +95,14 @@ Use an ES256 JWT issued by your application authentication system as `USER_TOKEN
 
 ## API usage
 
-For interactive subscription login, use `/login`. Programmatic clients can implement the same terminal protocol:
+For interactive subscription login:
 
-1. `POST /v1/auth` with `{}` allocates the user's Workspace and returns HTTP 200 with the auth `sessionId`, Workspace identifiers, `/login` URL, `type: "auth.status"`, and `authenticated: boolean` from the native authentication check. No event subscription is needed for this check.
-2. Subscribe to `/v1/events?sessionId=...` **before** starting the terminal.
-3. Generate a temporary ECDH P-256 key pair. `POST /v1/auth` with `{ "attemptId": "<UUID>", "publicKey": <public JWK> }` starts login. Private JWK fields are rejected.
-4. `auth.started` returns the Session's public JWK and `expiresAt`. Derive the AES-GCM key using `src/terminal-crypto.ts`. Encrypted `auth.output` events carry `terminalSequence`, `iv`, and `data`. Decrypt with additional authenticated data `<attemptId>:output:<terminalSequence>`.
-5. Send encrypted terminal bytes to `POST /v1/auth/input` as `{attemptId, sequence, iv, data}`. Input sequence starts at 1; AAD is `<attemptId>:input:<sequence>`. IV is 12 random bytes; IV and ciphertext use standard base64. Input is limited to 4 KiB per frame and 32 KiB per attempt. Duplicate accepted sequences are ignored; gaps are rejected. No plaintext code field is accepted.
-6. `POST /v1/auth/cancel` with `{attemptId}` stops an attempt. `auth.finished` reports the outcome and native authentication status. `POST /v1/auth/complete` with `{}` returns HTTP 200 with `{sessionId, type: "auth.status", authenticated}` directly.
+1. `POST /v1/auth` with `{}` opens the user's Workspace and returns native `auth.status` directly.
+2. If signed out, `POST /v1/auth/login` with `{}` returns `{type: "auth.login", attemptId, url, expiresAt}`. Open only a validated Anthropic HTTPS URL.
+3. After the user signs in, `POST /v1/auth/login/code` with `{attemptId, code}` returns `{type: "auth.status", authenticated: true}` after Claude confirms sign-in. A rejected code returns `code_rejected` and can be retried. An expired attempt returns `login_not_active`.
+4. `POST /v1/auth/cancel` with `{attemptId}` stops an attempt. Use `{force: true}` with the login call when reauthentication is required even if stale credentials report signed in.
 
-After a successful `auth.finished` event, call `POST /v1/auth/complete`; the bundled login page does this automatically. This endpoint, the status-only `POST /v1/auth`, and a confirmed logout stop the auth Session's Sandbox using SDK 0.12's `session.stop()`. Cleanup completes before the API returns success; platform stop failures are returned for retry. Stopping preserves login credentials in the persistent Workspace, while logout removes them first. Unauthenticated checks leave the Sandbox available for login.
-
-The server derives the auth Session from the caller's JWT; clients cannot select a different user's terminal. The browser implementation in `src/login-page.ts` demonstrates the complete flow, including subscribing before dispatch and handling encrypted event replay.
+The API derives the auth Session from the caller's JWT. Successful status and code confirmation release its Sandbox after persisting credentials in the Workspace. A confirmed logout releases the Sandbox after native sign-out.
 
 Create a configured agent Session:
 
@@ -215,24 +196,24 @@ curl "$BASE_URL/v1/snapshot" -H "Authorization: Bearer $USER_TOKEN" \
 
 The HTTP 200 response contains `{sessionId, type: "session.state", configured, messages, truncated}` directly, with the latest 50 messages and prompt previews capped at 256 characters. It is a summary, not a full transcript API. Sandbox recovery still emits a `session.state` event.
 
-| Method | Route                      | Behaviour                                                       |
-| ------ | -------------------------- | --------------------------------------------------------------- |
-| GET    | `/health`                  | Public liveness                                                 |
-| GET    | `/v1/identity`             | Verify JWT identity without provisioning resources              |
-| GET    | `/login`                   | Native login page (API actions require a bearer token)          |
-| POST   | `/v1/auth`                 | Allocate Workspace, check auth, or start encrypted native login |
-| POST   | `/v1/auth/input`           | Send encrypted input to the caller’s login terminal             |
-| POST   | `/v1/auth/cancel`          | Cancel the caller’s active login attempt                        |
-| POST   | `/v1/auth/complete`        | Return native authentication status directly                    |
-| POST   | `/v1/sessions`             | Create and configure a Session                                  |
-| POST   | `/v1/messages`             | Queue or steer a message                                        |
-| POST   | `/v1/cancel`               | Cancel a queued or active message                               |
-| POST   | `/v1/snapshot`             | Return persisted Session summary directly                       |
-| GET    | `/v1/events?sessionId=...` | SDK SSE/WebSocket stream                                        |
+| Method | Route                      | Behaviour                                                    |
+| ------ | -------------------------- | ------------------------------------------------------------ |
+| GET    | `/health`                  | Public liveness                                              |
+| GET    | `/v1/identity`             | Verify JWT identity without provisioning resources           |
+| POST   | `/v1/auth`                 | Open Workspace and return native auth status                 |
+| POST   | `/v1/auth/login`           | Start native sign-in and return Anthropic URL and attempt ID |
+| POST   | `/v1/auth/login/code`      | Submit code and return confirmed native auth status          |
+| POST   | `/v1/auth/cancel`          | Cancel the caller's active login attempt                     |
+| POST   | `/v1/auth/logout`          | Sign out with native Claude Code                             |
+| POST   | `/v1/sessions`             | Create and configure a Session                               |
+| POST   | `/v1/messages`             | Queue or steer a message                                     |
+| POST   | `/v1/cancel`               | Cancel a queued or active message                            |
+| POST   | `/v1/snapshot`             | Return persisted Session summary directly                    |
+| GET    | `/v1/events?sessionId=...` | SDK SSE/WebSocket stream                                     |
 
-All API routes except health require an application JWT; the static login page is public. Workspace selection is derived from verified identity; clients cannot select another user's Workspace. Session ownership is checked before dispatch, requests, and event subscription.
+All API routes except health require an application JWT. Workspace selection is derived from verified identity; clients cannot select another user's Workspace. Session ownership is checked before dispatch, requests, and event subscription.
 
-Auth checks and snapshots use `session.request()` and return HTTP 200 with the result instead of a 202 receipt. Clients must read these response bodies instead of waiting for status/snapshot events. Requests wait up to 30 seconds; timeout returns HTTP 504 with `code: "request_wait_timeout"`. A timeout or disconnect stops waiting, not execution; these read-only checks can be repeated. Interactive login start/input/cancel, Session configuration, and model queue/steer/cancel remain asynchronous (202), with outcomes delivered as events. CLI 0.11.2 or newer supports local container request/reply verification. For this service, use the container dev script and follow the [fully local Doop setup](../README.md#fully-local-claude-development-no-tunnel). Local request/reply state is in memory and is lost when the CLI restarts.
+Auth checks, login, code submission, cancellation, and snapshots use `session.request()` and return their replies directly. Login errors are mapped to HTTP 409 (`login_not_active`), 422 (`code_rejected`), 502 (`login_failed`), or 504 (`login_timeout`). Newly created Workspace registration errors are retried with bounded backoff; request retries reuse the original message ID.
 
 ## Queue, cancellation, and durability
 
@@ -256,7 +237,7 @@ Before production: integrate your identity issuer and key rotation/revocation st
 
 ## Verification
 
-Tests exercise actual SDK route definitions, JWT/tenant checks, Workspace/Session dispatch, managed activity queue/steer/cancel behaviour, durable reactivation, output fragmentation, and native subprocess parsing/cancellation using a fake Claude executable. They do not call a model or use subscription credentials. The login tests use a fake interactive Claude executable, verify PTY input/cancellation, and execute the compiled browser page against the real API handlers with simulated native login. A real subscription authorization and model turn require the user’s own account; automated tests do not sign in as the user.
+Tests exercise actual SDK route definitions, JWT/tenant checks, Workspace/Session dispatch, managed activity queue/steer/cancel behaviour, durable reactivation, output fragmentation, and native subprocess parsing/cancellation using a fake Claude executable. They do not call a model or use subscription credentials. The login tests use a fake interactive Claude executable and verify PTY input, cancellation, and the two-call API. A real subscription authorization and model turn require the user’s own account; automated tests do not sign in as the user.
 
 ### Re-authentication
 
@@ -268,10 +249,7 @@ not emit `auth.required`; billing, rate-limit, and network failures retain norma
 failure handling.
 
 Clients should pause new work for the affected user and offer native sign-in.
-Pass `force: true` with the public-key handshake to `POST /v1/auth` to open a new
-login even when stale saved credentials still report signed in. Verify the
-matching `auth.finished` event reports `authenticated: true` and
-`outcome: succeeded` before clearing the pause. Interrupted work must not be
+Pass `force: true` to `POST /v1/auth/login` to open a new login even when stale saved credentials still report signed in. Clear the pause only after `POST /v1/auth/login/code` returns confirmed `authenticated: true`. Interrupted work must not be
 replayed automatically because earlier tool actions may already have completed.
 
 ### Signing out

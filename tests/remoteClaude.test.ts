@@ -5,9 +5,9 @@ import {
   remoteBearer,
   remoteIdentity,
   checkRemoteAuth,
-  checkRemoteLogin,
   remoteEvents,
   remotePost,
+  RemoteClaudeLoginError,
 } from '../server/remoteClaudeClient.ts'
 import { consumeClaudeEvents } from '../shared/remoteClaude.ts'
 import { LocalAgentRuns, type LocalHarnessRequest } from '../server/localAgentRuns.ts'
@@ -129,6 +129,23 @@ describe('hosted application identity and stream', () => {
     expect(fetcher).not.toHaveBeenCalled()
     await expect(remotePost('alice', '/v1/sessions', {})).rejects.toThrow('request failed (400)')
   })
+  it('passes through only known login error codes and hides upstream details', async () => {
+    configured()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ code: 'code_rejected', secret: 'hidden' }, { status: 422 })),
+    )
+    await expect(remotePost('alice', '/v1/auth/login/code', { attemptId: 'a', code: 'x' })).rejects.toMatchObject({
+      code: 'code_rejected',
+      status: 422,
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ code: 'unexpected', secret: 'hidden' }, { status: 400 })),
+    )
+    await expect(remotePost('alice', '/v1/auth/login/code', {})).rejects.toThrow('request failed (400)')
+    expect(new RemoteClaudeLoginError('code_rejected', 422).message).not.toContain('hidden')
+  })
   it('decodes split UTF-8 SSE frames and advances cursors after processing', async () => {
     const bytes = new TextEncoder().encode(
       'id: a:1\r\ndata: {"type":"claude","id":"run","event":{"text":"😀"}}\r\n\r\n',
@@ -201,38 +218,6 @@ it('reassembles bounded results and rejects bad fragments without mixing message
   expect(() =>
     result.accept({ type: 'claude.fragment', id: 'run', eventId: 'bad', total: 100000, index: 0, json: '' }),
   ).toThrow('Invalid')
-})
-
-it('verifies native login completion for the requested attempt only', async () => {
-  configured()
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      sse([
-        { data: { type: 'auth.finished', attemptId: 'old', authenticated: true, outcome: 'succeeded' } },
-        { data: { type: 'auth.finished', attemptId: 'new', authenticated: true, outcome: 'cancelled' } },
-      ]),
-    ),
-  )
-  expect(await checkRemoteLogin('alice', 'new')).toBe(false)
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () =>
-      sse([{ data: { type: 'auth.finished', attemptId: 'new', authenticated: true, outcome: 'succeeded' } }]),
-    ),
-  )
-  expect(await checkRemoteLogin('alice', 'new')).toBe(true)
-})
-
-it('replays login completion from the browser cursor before auth.finished', async () => {
-  configured()
-  const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
-    expect(options.headers).toMatchObject({ 'Last-Event-ID': 'login-stream:2' })
-    return sse([{ type: 'auth.finished', attemptId: 'new', authenticated: true, outcome: 'succeeded' }])
-  })
-  vi.stubGlobal('fetch', fetcher)
-  expect(await checkRemoteLogin('alice', 'new', 'login-stream:2')).toBe(true)
-  expect(fetcher).toHaveBeenCalledOnce()
 })
 
 it.each([429, 503])('retries transient stream HTTP %s without redispatching', async (status) => {

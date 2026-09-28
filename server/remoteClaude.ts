@@ -1,6 +1,4 @@
 import { Router } from 'express'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { CLAUDE_MODEL_IDS } from '../shared/localAgent.ts'
 import { isBanned, PUBLIC_ORIGIN } from './auth.ts'
@@ -14,9 +12,8 @@ import {
 } from './localAgentPreferences.ts'
 import {
   checkRemoteAuth,
-  checkRemoteLogin,
+  RemoteClaudeLoginError,
   remoteClaudeConfigured,
-  remoteFetch,
   remoteIdentity,
   remotePost,
 } from './remoteClaudeClient.ts'
@@ -64,8 +61,6 @@ remoteClaudeRouter.post('/select', (req, res, next) => {
   const parsed = z
     .object({
       model: z.enum(CLAUDE_MODEL_IDS),
-      loginAttemptId: z.string().uuid().optional(),
-      loginCursor: z.string().max(256).optional(),
     })
     .strict()
     .safeParse(req.body)
@@ -76,12 +71,7 @@ remoteClaudeRouter.post('/select', (req, res, next) => {
   void (async () => {
     const userId = req.user!.id
     const previous = await getLocalAgentPreference(userId)
-    if (
-      previous.remoteAuthRequired &&
-      (!parsed.data.loginAttemptId ||
-        previous.remoteAuthAttempt !== parsed.data.loginAttemptId ||
-        !(await checkRemoteLogin(userId, parsed.data.loginAttemptId, parsed.data.loginCursor)))
-    ) {
+    if (previous.remoteAuthRequired) {
       res.status(409).json({ error: 'Reconnect Claude to resume hosted tasks.' })
       return
     }
@@ -91,11 +81,6 @@ remoteClaudeRouter.post('/select', (req, res, next) => {
     }
     if (previous.transport !== 'remote') await localAgentRuns.cancel(userId)
     await saveLocalAgentPreference(userId, { enabled: true, model: parsed.data.model, transport: 'remote' })
-    await clearRemoteAuth(
-      userId,
-      previous.remoteAuthGeneration ?? 0,
-      previous.remoteAuthRequired ? parsed.data.loginAttemptId : undefined,
-    )
     res.json(await getLocalAgentPreference(userId))
     for (const canvas of store.canvases.values()) if (canAccessCanvas(userId, canvas)) onFeedback(canvas.id)
   })().catch(next)
@@ -129,89 +114,54 @@ remoteClaudeRouter.post('/stop', (req, res, next) => {
 })
 
 const attempt = z.string().uuid()
-const publicKey = z
-  .object({
-    kty: z.literal('EC'),
-    crv: z.literal('P-256'),
-    x: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
-    y: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
-    ext: z.boolean().optional(),
-    key_ops: z.array(z.string()).optional(),
-  })
-  .strict()
 const schemas = {
-  start: z.union([
-    z.object({}).strict(),
-    z.object({ attemptId: attempt, publicKey, force: z.boolean().optional() }).strict(),
-  ]),
-  input: z
-    .object({
-      attemptId: attempt,
-      sequence: z.number().int().positive(),
-      iv: z.string().regex(/^[A-Za-z0-9+/]{16}$/),
-      data: z
-        .string()
-        .min(24)
-        .max(8192)
-        .regex(/^[A-Za-z0-9+/]+={0,2}$/),
-    })
-    .strict(),
+  start: z.object({}).strict(),
+  code: z.object({ attemptId: attempt, code: z.string().regex(/^[\x21-\x7e]{1,2048}$/) }).strict(),
   cancel: z.object({ attemptId: attempt }).strict(),
 }
-for (const action of ['start', 'input', 'cancel'] as const) {
+for (const action of ['start', 'code', 'cancel'] as const) {
   remoteClaudeRouter.post(`/auth/${action}`, (req, res, next) => {
     const parsed = schemas[action].safeParse(req.body)
     if (!parsed.success) {
-      res.status(400).json({ error: 'Invalid encrypted login request.' })
+      res.status(400).json({ error: 'Invalid Claude sign-in request.' })
       return
     }
     void (async () => {
-      if (action === 'start' && 'attemptId' in parsed.data && 'publicKey' in parsed.data) {
+      if (action === 'start') {
         const preference = await getLocalAgentPreference(req.user!.id)
-        if (preference.remoteAuthRequired) {
-          await beginRemoteReauth(req.user!.id, parsed.data.attemptId)
-          Object.assign(parsed.data, { force: true })
-        }
+        const result = await remotePost(
+          req.user!.id,
+          '/v1/auth/login',
+          preference.remoteAuthRequired ? { force: true } : {},
+        )
+        if (result.sessionId !== `${remoteIdentity(req.user!.id)}:auth`)
+          throw new Error('Hosted Claude returned an invalid sign-in session.')
+        if (result.type === 'auth.login' && result.attemptId && result.url) {
+          if (preference.remoteAuthRequired) await beginRemoteReauth(req.user!.id, result.attemptId)
+          res.json({ attemptId: result.attemptId, url: result.url })
+        } else if (result.type === 'auth.status' && result.authenticated === true) res.json({ authenticated: true })
+        else throw new Error('Hosted Claude returned an invalid sign-in response.')
+        return
       }
-      const result = await remotePost(req.user!.id, action === 'start' ? '/v1/auth' : `/v1/auth/${action}`, parsed.data)
-      res.status(202).json({ sessionId: result.sessionId })
+      const result = await remotePost(
+        req.user!.id,
+        action === 'code' ? '/v1/auth/login/code' : '/v1/auth/cancel',
+        parsed.data,
+      )
+      if (result.sessionId !== `${remoteIdentity(req.user!.id)}:auth`)
+        throw new Error('Hosted Claude returned an invalid sign-in session.')
+      if (action === 'code') {
+        if (result.type !== 'auth.status' || result.authenticated !== true)
+          throw new Error('Claude sign-in could not be confirmed.')
+        const codeRequest = schemas.code.parse(req.body)
+        const preference = await getLocalAgentPreference(req.user!.id)
+        if (preference.remoteAuthRequired && preference.remoteAuthAttempt === codeRequest.attemptId)
+          await clearRemoteAuth(req.user!.id, preference.remoteAuthGeneration ?? 0, codeRequest.attemptId)
+        res.json({ authenticated: true })
+      } else res.json({ cancelled: result.type === 'auth.cancelled' })
     })().catch(next)
   })
 }
-// Only the caller's deterministic auth session is exposed to the browser.
-// No agent events, application JWTs, plaintext terminal input, or arbitrary URLs.
-remoteClaudeRouter.get('/events', (req, res, next) => {
-  const controller = new AbortController()
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(11 * 60_000)])
-  res.on('close', () => controller.abort())
-  void (async () => {
-    const cursor = req.headers['last-event-id']
-    if (typeof cursor === 'string' && cursor.length > 256) {
-      res.status(400).end()
-      return
-    }
-    const sessionId = `${remoteIdentity(req.user!.id)}:auth`
-    const upstream = await remoteFetch(req.user!.id, `/v1/events?sessionId=${encodeURIComponent(sessionId)}`, {
-      signal,
-      headers: typeof cursor === 'string' ? { 'Last-Event-ID': cursor } : {},
-    })
-    if (!upstream.ok || !upstream.body) {
-      res.status(502).json({ error: 'Claude login stream unavailable.' })
-      return
-    }
-    res.setHeader('Content-Type', 'text/event-stream')
-    res.setHeader('X-Accel-Buffering', 'no')
-    res.flushHeaders()
-    await pipeline(Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream), res, { signal })
-  })()
-    .catch((error: unknown) => {
-      if (controller.signal.aborted) return
-      if (res.headersSent) res.end()
-      else next(error)
-    })
-    .finally(() => controller.abort())
-})
-
 remoteClaudeRouter.use(
   (
     error: unknown,
@@ -223,6 +173,9 @@ remoteClaudeRouter.use(
       res.end()
       return
     }
-    res.status(502).json({ error: error instanceof Error ? error.message : 'Hosted Claude is unavailable. Try again.' })
+    res.status(error instanceof RemoteClaudeLoginError ? error.status : 502).json({
+      error: error instanceof Error ? error.message : 'Hosted Claude is unavailable. Try again.',
+      ...(error instanceof RemoteClaudeLoginError ? { code: error.code } : {}),
+    })
   },
 )

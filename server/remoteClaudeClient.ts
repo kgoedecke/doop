@@ -56,17 +56,27 @@ export async function remotePost(
   path: string,
   body: unknown,
   signal?: AbortSignal,
-): Promise<{ sessionId: string; messageId?: string; receiptId?: string; type?: string; authenticated?: boolean }> {
+): Promise<{
+  sessionId: string
+  messageId?: string
+  receiptId?: string
+  type?: string
+  authenticated?: boolean
+  attemptId?: string
+  url?: string
+}> {
   const json = JSON.stringify(body)
   if (Buffer.byteLength(json) > 48 * 1024)
     throw new Error('Hosted Claude request exceeds 48 KiB. Reduce the task context.')
-  // Request/reply checks can wait 30 seconds inside the API, before transport overhead.
+  // Login waits up to 45 seconds inside the API; leave time for transport overhead.
   const timeout = AbortSignal.timeout(
     path === '/v1/auth/logout'
       ? 60_000
-      : path === '/v1/auth' || path === '/v1/auth/complete' || path === '/v1/snapshot'
-        ? 45_000
-        : 30_000,
+      : path === '/v1/auth/login' || path === '/v1/auth/login/code'
+        ? 60_000
+        : path === '/v1/auth' || path === '/v1/snapshot'
+          ? 45_000
+          : 30_000,
   )
   const response = await remoteFetch(userId, path, {
     method: 'POST',
@@ -75,12 +85,40 @@ export async function remotePost(
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   })
   if (!response.ok) {
+    if (path === '/v1/auth/login/code' || path === '/v1/auth/login') {
+      const payload = (await response.json().catch(() => ({}))) as { code?: unknown }
+      const code = payload.code
+      if (
+        code === 'code_rejected' ||
+        code === 'login_not_active' ||
+        code === 'login_failed' ||
+        code === 'login_timeout'
+      )
+        throw new RemoteClaudeLoginError(code, response.status)
+    }
     if (response.status === 504)
       throw new Error('Hosted Claude did not respond in time. Try again; this does not mean you are signed out.')
     // Never expose upstream bodies: configuration can contain MCP credentials.
     throw new Error(`Hosted Claude request failed (${response.status}). Check the connection in Settings.`)
   }
   return response.json()
+}
+
+export class RemoteClaudeLoginError extends Error {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+  ) {
+    super(
+      code === 'code_rejected'
+        ? 'Claude did not accept that code. Try again.'
+        : code === 'login_not_active'
+          ? 'This sign-in attempt expired. Start again.'
+          : code === 'login_timeout'
+            ? 'Claude did not respond in time. Check the connection before retrying.'
+            : 'Claude sign-in did not complete. Start again.',
+    )
+  }
 }
 
 export class ClaudeStreamReset extends Error {}
@@ -174,31 +212,4 @@ export async function checkRemoteAuth(userId: string): Promise<boolean> {
   )
     throw new Error('Hosted Claude returned an invalid authentication status. Try again.')
   return reply.authenticated
-}
-
-/** Verify a native login completion without trusting the browser's success claim.
- * Streams without a cursor are live-only, so replay from the browser's last
- * cursor before `auth.finished`; a forged cursor can only fail the check. */
-export async function checkRemoteLogin(userId: string, attemptId: string, cursor = ''): Promise<boolean> {
-  const controller = new AbortController()
-  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)])
-  let succeeded = false
-  try {
-    await remoteEvents(
-      userId,
-      `${remoteIdentity(userId)}:auth`,
-      signal,
-      (event) => {
-        if (event.type === 'auth.finished' && event.attemptId === attemptId) {
-          succeeded = event.authenticated && event.outcome === 'succeeded'
-          controller.abort()
-        }
-      },
-      undefined,
-      cursor,
-    )
-    return succeeded
-  } finally {
-    controller.abort()
-  }
 }

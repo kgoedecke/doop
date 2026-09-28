@@ -8,8 +8,6 @@ const mocks = vi.hoisted(() => ({
   preference: vi.fn(),
   clearAuth: vi.fn(),
   beginAuth: vi.fn(),
-  login: vi.fn(),
-  fetch: vi.fn(),
   check: vi.fn(),
   identity: vi.fn(),
   save: vi.fn(),
@@ -20,9 +18,15 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('../server/remoteClaudeClient.ts', () => ({
   remotePost: mocks.post,
-  remoteFetch: mocks.fetch,
   checkRemoteAuth: mocks.check,
-  checkRemoteLogin: mocks.login,
+  RemoteClaudeLoginError: class extends Error {
+    constructor(
+      readonly code: string,
+      readonly status: number,
+    ) {
+      super(code)
+    }
+  },
   remoteIdentity: mocks.identity,
   remoteClaudeConfigured: () => true,
 }))
@@ -63,7 +67,12 @@ beforeEach(() => {
   mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
   mocks.banned = false
   mocks.impersonated = false
-  mocks.post.mockResolvedValue({ sessionId: 'alice:auth' })
+  mocks.post.mockResolvedValue({
+    sessionId: 'alice:auth',
+    type: 'auth.login',
+    attemptId: crypto.randomUUID(),
+    url: 'https://claude.ai/login',
+  })
   mocks.identity.mockReturnValue('alice')
   mocks.check.mockResolvedValue(true)
 })
@@ -73,17 +82,17 @@ const post = (path: string, body: unknown, headers = {}) =>
     headers: { 'Content-Type': 'application/json', 'X-Doop-User': 'alice', ...headers },
     body: JSON.stringify(body),
   })
-it('rejects plaintext credentials, private keys, and caller-selected sessions', async () => {
+it('accepts only the two-call Claude sign-in shape', async () => {
   for (const body of [
     { claudeToken: 'secret' },
     { attemptId: crypto.randomUUID(), publicKey: { d: 'private' } },
     { sessionId: 'bob:auth' },
   ])
     expect((await post('/auth/start', body)).status).toBe(400)
-  expect((await post('/auth/input', { code: 'plaintext' })).status).toBe(400)
+  expect((await post('/auth/code', { code: 'plaintext' })).status).toBe(400)
   expect(mocks.post).not.toHaveBeenCalled()
-  expect((await post('/auth/start', {})).status).toBe(202)
-  expect(mocks.post).toHaveBeenCalledExactlyOnceWith('alice', '/v1/auth', {})
+  expect((await post('/auth/start', {})).status).toBe(200)
+  expect(mocks.post).toHaveBeenCalledExactlyOnceWith('alice', '/v1/auth/login', {})
 })
 it('requires fresh native authentication before enabling the requester', async () => {
   mocks.check.mockResolvedValueOnce(false)
@@ -100,22 +109,8 @@ it('blocks cross-origin writes, bans, and impersonation before using hosted iden
   mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
   mocks.banned = false
   mocks.impersonated = true
-  expect((await fetch(origin + '/events', { headers: { 'X-Doop-User': 'alice' } })).status).toBe(403)
+  expect((await post('/auth/code', {}, { Origin: 'https://evil.example' })).status).toBe(403)
   expect(mocks.post).not.toHaveBeenCalled()
-  expect(mocks.fetch).not.toHaveBeenCalled()
-})
-it('always streams only the caller auth session and forwards the replay cursor', async () => {
-  mocks.fetch.mockResolvedValue(new Response('data: {"type":"auth.status","authenticated":false}\n\n'))
-  const response = await fetch(origin + '/events?sessionId=bob:agent', {
-    headers: { 'Last-Event-ID': 'stream:4', 'X-Doop-User': 'alice' },
-  })
-  expect(response.status).toBe(200)
-  await response.text()
-  expect(mocks.fetch).toHaveBeenCalledWith(
-    'alice',
-    '/v1/events?sessionId=alice%3Aauth',
-    expect.objectContaining({ headers: { 'Last-Event-ID': 'stream:4' } }),
-  )
 })
 
 it('rejects an old tab after the browser changes Doop accounts', async () => {
@@ -123,7 +118,7 @@ it('rejects an old tab after the browser changes Doop accounts', async () => {
   expect(mocks.post).not.toHaveBeenCalled()
 })
 
-it('requires verified fresh login completion before clearing a blocked account', async () => {
+it('clears blocked auth only after the upstream confirms the matching code', async () => {
   const attemptId = crypto.randomUUID()
   mocks.preference.mockResolvedValue({
     transport: 'remote',
@@ -133,21 +128,24 @@ it('requires verified fresh login completion before clearing a blocked account',
   })
   expect((await post('/select', { model: 'claude-sonnet-5' })).status).toBe(409)
   expect(mocks.clearAuth).not.toHaveBeenCalled()
-  mocks.login.mockResolvedValue(false)
-  expect((await post('/select', { model: 'claude-sonnet-5', loginAttemptId: attemptId })).status).toBe(409)
-  mocks.login.mockResolvedValue(true)
-  expect((await post('/select', { model: 'claude-sonnet-5', loginAttemptId: attemptId })).status).toBe(200)
+  mocks.post.mockResolvedValueOnce({ sessionId: 'alice:auth', type: 'auth.status', authenticated: true })
+  expect((await post('/auth/code', { attemptId, code: 'abc123' })).status).toBe(200)
+  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth/login/code', { attemptId, code: 'abc123' })
   expect(mocks.clearAuth).toHaveBeenCalledWith('alice', 0, attemptId)
-  expect(mocks.wake).toHaveBeenCalledWith('canvas')
 })
 
 it('forces a native re-login for a paused account and records its attempt', async () => {
   const attemptId = crypto.randomUUID()
   mocks.preference.mockResolvedValue({ remoteAuthRequired: true })
-  const publicKey = { kty: 'EC', crv: 'P-256', x: 'A'.repeat(43), y: 'B'.repeat(43) }
-  expect((await post('/auth/start', { attemptId, publicKey })).status).toBe(202)
+  mocks.post.mockResolvedValueOnce({
+    sessionId: 'alice:auth',
+    type: 'auth.login',
+    attemptId,
+    url: 'https://claude.ai/login',
+  })
+  expect((await post('/auth/start', {})).status).toBe(200)
   expect(mocks.beginAuth).toHaveBeenCalledWith('alice', attemptId)
-  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth', { attemptId, publicKey, force: true })
+  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth/login', { force: true })
 })
 
 it('disables and stops hosted tasks before confirming native sign-out', async () => {

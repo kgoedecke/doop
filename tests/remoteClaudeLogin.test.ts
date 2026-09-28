@@ -1,78 +1,54 @@
-import { afterEach, expect, it, vi } from 'vitest'
-import { terminalCrypto } from '../src/lib/claudeTerminalCrypto'
-const mocks = vi.hoisted(() => ({ auth: vi.fn() }))
-vi.mock('../src/lib/api', () => ({ api: { remoteClaudeAuth: mocks.auth } }))
-import { RemoteClaudeLogin, anthropicLinks, cleanTerminal, type LoginView } from '../src/lib/remoteClaudeLogin'
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.clearAllMocks()
+import { beforeEach, expect, it, vi } from 'vitest'
+const post = vi.hoisted(() => vi.fn())
+vi.mock('../src/lib/api', () => ({
+  api: { remoteClaudeAuth: post },
+  ApiError: class extends Error {
+    body: Record<string, unknown>
+    constructor(_status: number, text: string) {
+      super(text)
+      this.body = JSON.parse(text)
+    }
+  },
+}))
+import { ApiError } from '../src/lib/api'
+import { RemoteClaudeLogin, anthropicLink, type LoginView } from '../src/lib/remoteClaudeLogin'
+
+beforeEach(() => post.mockReset())
+
+it('accepts only an Anthropic HTTPS sign-in link', () => {
+  expect(anthropicLink('https://claude.ai/login')).toBe('https://claude.ai/login')
+  expect(anthropicLink('https://claude.ai.evil.example/login')).toBeUndefined()
+  expect(anthropicLink('http://claude.ai/login')).toBeUndefined()
 })
-it('uses an encrypted native login with ordered output, encrypted input, and no application bearer token in the browser', async () => {
-  const crypto = terminalCrypto(),
-    serverPair = await crypto.generate()
-  let controller!: ReadableStreamDefaultController<Uint8Array>
-  let key!: CryptoKey
-  let attemptId = ''
-  let decrypted = ''
-  let eventSequence = 0
-  const emit = (event: unknown) =>
-    controller.enqueue(
-      new TextEncoder().encode(
-        `id: login-stream:${++eventSequence}\ndata: ${JSON.stringify({ message_id: 'login-receipt', data: event })}\n\n`,
-      ),
-    )
-  const fetcher = vi.fn(
-    async () =>
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start(c) {
-            controller = c
-          },
-        }),
-      ),
-  )
-  vi.stubGlobal('fetch', fetcher)
-  mocks.auth.mockImplementation(async (userId: string, action: string, body: Record<string, unknown>) => {
-    expect(userId).toBe('alice')
-    if (action === 'start' && body.publicKey) {
-      expect(body.force).toBe(true)
-      attemptId = String(body.attemptId)
-      key = await crypto.derive(serverPair.privateKey, body.publicKey as JsonWebKey)
-      emit({ type: 'auth.started', attemptId, publicKey: serverPair.publicKey, expiresAt: Date.now() + 60000 })
-      const frame = await crypto.seal(key, 'Visit https://claude.ai/login', `${attemptId}:output:1`)
-      emit({ type: 'auth.output', attemptId, terminalSequence: 1, ...frame })
-    }
-    if (action === 'input') {
-      expect(body).not.toHaveProperty('code')
-      decrypted = await crypto.open(key, body as { iv: string; data: string }, `${attemptId}:input:1`)
-      emit({ type: 'auth.finished', attemptId, authenticated: true, outcome: 'succeeded' })
-    }
-    return { sessionId: 'alice:auth' }
-  })
+
+it('starts login, retries a rejected code, and connects after native confirmation', async () => {
+  const attemptId = crypto.randomUUID()
   const views: LoginView[] = []
-  const connected = vi.fn(async () => {})
+  const connected = vi.fn()
+  post
+    .mockResolvedValueOnce({ attemptId, url: 'https://claude.ai/login' })
+    .mockRejectedValueOnce(new ApiError(422, JSON.stringify({ code: 'code_rejected', error: 'Rejected' })))
+    .mockResolvedValueOnce({ authenticated: true })
   const login = new RemoteClaudeLogin('alice', (view) => views.push(view), connected)
-  try {
-    await login.start(true)
-    expect(mocks.auth).not.toHaveBeenCalledWith('alice', 'start', {})
-    await vi.waitFor(() => expect(views.at(-1)?.text).toContain('https://claude.ai/login'))
-    expect(views.at(-1)?.ready).toBe(true)
-    await login.send('private-code')
-    await vi.waitFor(() => expect(connected).toHaveBeenCalledOnce())
-    expect(connected).toHaveBeenCalledWith(attemptId, 'login-stream:2')
-    expect(decrypted).toBe('private-code\r')
-    expect(JSON.stringify(mocks.auth.mock.calls)).not.toContain('private-code')
-    expect(fetcher).toHaveBeenCalledWith(
-      '/api/remote-claude/events',
-      expect.objectContaining({ headers: { 'X-Doop-User': 'alice' } }),
-    )
-  } finally {
-    login.dispose()
-  }
+  await login.start()
+  expect(views.at(-1)).toMatchObject({ url: 'https://claude.ai/login', ready: true })
+  await login.send('wrong')
+  expect(views.at(-1)).toMatchObject({ ready: true, status: expect.stringContaining('Paste it again') })
+  await login.send('right')
+  expect(post).toHaveBeenNthCalledWith(2, 'alice', 'code', { attemptId, code: 'wrong' })
+  expect(post).toHaveBeenNthCalledWith(3, 'alice', 'code', { attemptId, code: 'right' })
+  expect(connected).toHaveBeenCalledOnce()
 })
-it('offers links only to Anthropic HTTPS hosts and strips terminal control sequences', () => {
-  const text =
-    'https://claude.ai/login https://claude.ai.evil.test/login https://claude.com@evil.test https://auth.anthropic.com/oauth http://claude.ai'
-  expect(anthropicLinks(text)).toEqual(['https://claude.ai/login', 'https://auth.anthropic.com/oauth'])
-  expect(cleanTerminal('\u001b[31mHello\u001b[0m')).toBe('Hello')
+
+it('cancels the active attempt without exposing terminal output', async () => {
+  const attemptId = crypto.randomUUID()
+  post.mockResolvedValueOnce({ attemptId, url: 'https://claude.ai/login' }).mockResolvedValueOnce({ cancelled: true })
+  const login = new RemoteClaudeLogin(
+    'alice',
+    () => {},
+    async () => {},
+  )
+  await login.start()
+  await login.cancel()
+  expect(post).toHaveBeenLastCalledWith('alice', 'cancel', { attemptId })
 })

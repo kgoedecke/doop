@@ -1,58 +1,59 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { Login } from '../src/login.js'
-import { terminalCrypto } from '../src/terminal-crypto.js'
+import { Login, signInLink } from '../src/login.js'
 import type { LoginLauncher } from '../src/login-process.js'
 import type { Command, Event, Reply } from '../src/contracts.js'
 import type { SessionContext, SessionActivityFunction } from '@cantelop/sdk/session'
-const cryptoBox = terminalCrypto()
-const until = async (predicate: () => boolean) => {
-  const end = Date.now() + 2000
-  while (!predicate()) {
-    if (Date.now() > end) throw new Error('Timeout')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
-async function fixture(timeout = 1000) {
-  const browser = await cryptoBox.generate(),
-    attemptId = crypto.randomUUID(),
-    events: Event[] = [],
-    written: string[] = []
-  let signedIn = false,
-    launches = 0,
+const LINK =
+  'https://claude.com/cai/oauth/authorize?code=true&client_id=test&response_type=code&code_challenge=challenge&code_challenge_method=S256&state=state'
+// Shape of `claude auth login` 2.1.267 output through the PTY helper, including its OSC 8 hyperlink.
+const NATIVE_OUTPUT = `Opening browser to sign in…\r\nIf the browser didn't open, visit: \x1b]8;;${LINK}\x07${LINK}\x1b]8;;\x07\r\nPaste code here if prompted > \x1b[?25h`
+type Answer = 'accept' | 'reject' | 'silent' | 'fail'
+function fixture({
+  timeout = 1000,
+  waitMs = 500,
+  signedIn = false,
+  answer = 'accept' as Answer,
+  output = NATIVE_OUTPUT,
+} = {}) {
+  const written: string[] = []
+  let launches = 0,
     active = false,
-    resolve!: (code: number) => void,
-    task = Promise.resolve()
-  const output = {
-    send: async (event: Event) => {
-      events.push(event)
-    },
-  }
-  let nativeOutput!: (text: string) => Promise<void>
+    task = Promise.resolve(),
+    authenticated = signedIn
   const launch: LoginLauncher = (signal, emit) => {
     launches++
-    nativeOutput = emit
+    let resolve!: (code: number) => void
     const done = new Promise<number>((r) => {
       resolve = r
     })
     signal.addEventListener('abort', () => resolve(1), { once: true })
     if (signal.aborted) resolve(1)
+    void (async () => {
+      for (let i = 0; i < output.length; i += 40) await emit(output.slice(i, i + 40))
+      if (!output.includes('Paste')) resolve(1)
+    })()
     return {
       done,
+      stop: () => resolve(1),
       write: async (text) => {
         written.push(text)
+        if (answer === 'accept') {
+          authenticated = true
+          resolve(0)
+        } else if (answer === 'fail') resolve(1)
+        else if (answer === 'reject') await emit('Invalid code\r\nPaste code here if prompted > ')
       },
-      stop: () => resolve(1),
     }
   }
-  const replies: Reply[] = []
   const login = new Login(
-    async () => signedIn,
+    async () => authenticated,
     launch,
     timeout,
     async () => {
-      signedIn = false
+      authenticated = false
     },
+    waitMs,
   )
   const activity = {
     get active() {
@@ -62,7 +63,17 @@ async function fixture(timeout = 1000) {
       assert.equal(active, false)
       active = true
       task = Promise.resolve()
-        .then(() => work({ signal: new AbortController().signal, output, send: () => {} }))
+        .then(() =>
+          work({
+            signal: new AbortController().signal,
+            output: {
+              send: async () => {
+                throw new Error('login must not stream')
+              },
+            },
+            send: () => {},
+          }),
+        )
         .then(() => {
           active = false
         })
@@ -70,12 +81,17 @@ async function fixture(timeout = 1000) {
     cancel: () => false,
     extend: () => {},
   }
-  const dispatch = (payload: Command, id = 'tenant:auth') =>
-    login.receive({
-      session: { id, workspaceSlug: 'tenant', keepAliveSeconds: 300 },
+  const request = async (payload: Command, id = 'tenant:auth') => {
+    const replies: Reply[] = []
+    await login.receive({
+      session: { id, workspaceSlug: 'tenant', keepAliveSeconds: 900 },
       env: {},
       message: { id: crypto.randomUUID(), sequence: 1, payload },
-      output,
+      output: {
+        send: async () => {
+          throw new Error('login must not stream')
+        },
+      },
       activity,
       reply: (value: Reply) => {
         replies.push(value)
@@ -83,159 +99,189 @@ async function fixture(timeout = 1000) {
       send: () => {},
       signal: new AbortController().signal,
     } as SessionContext<Command, Event, Reply>)
-  await dispatch({ type: 'auth.start', attemptId, publicKey: browser.publicKey })
-  await until(() => launches === 1)
-  const started = events.find((e) => e.type === 'auth.started')
-  assert.ok(started?.type === 'auth.started')
-  const key = await cryptoBox.derive(browser.privateKey, started.publicKey)
+    assert.equal(replies.length, 1)
+    return replies[0]!
+  }
+  const start = async () => {
+    const reply = await request({ type: 'auth.login' })
+    assert.equal(reply.type, 'auth.login')
+    return reply as Extract<Reply, { type: 'auth.login' }>
+  }
   return {
-    dispatch,
-    attemptId,
-    browser,
-    events,
+    request,
+    start,
     written,
-    key,
-    replies,
     get launches() {
       return launches
     },
-    output: async (text: string) => nativeOutput(text),
-    finish: async () => {
-      signedIn = true
-      resolve(0)
-      await task
-    },
-    stop: async () => {
-      await dispatch({ type: 'auth.cancel', attemptId })
-      await task
+    get active() {
+      return active
     },
     wait: () => task,
   }
 }
-test('native terminal traffic is encrypted; input is ordered and retry-safe', async () => {
-  const f = await fixture()
-  const frame = await cryptoBox.seal(f.key, 'private-login-code\r', `${f.attemptId}:input:1`)
-  const command: Command = { type: 'auth.input', attemptId: f.attemptId, sequence: 1, ...frame }
-  await f.dispatch(command)
-  await f.dispatch(command)
-  assert.deepEqual(f.written, ['private-login-code\r'])
-  await f.output('native response with private-login-code')
-  const event = f.events.find((e) => e.type === 'auth.output')
-  assert.ok(event?.type === 'auth.output')
-  assert.equal(
-    await cryptoBox.open(f.key, event, `${f.attemptId}:output:${event.terminalSequence}`),
-    'native response with private-login-code',
-  )
-  assert.ok(!JSON.stringify(f.events).includes('private-login-code'))
-  assert.ok(!JSON.stringify(command).includes('private-login-code'))
-  await f.finish()
-  assert.ok(f.events.some((e) => e.type === 'auth.finished' && e.authenticated && e.outcome === 'succeeded'))
-})
-test('reconnect does not start another process; competing and stale attempts cannot write', async () => {
-  const f = await fixture()
-  await f.dispatch({ type: 'auth.start', attemptId: f.attemptId, publicKey: f.browser.publicKey })
-  assert.equal(f.launches, 1)
-  await f.dispatch({ type: 'auth.start', attemptId: crypto.randomUUID(), publicKey: f.browser.publicKey })
-  assert.ok(f.events.some((e) => e.type === 'auth.error' && e.code === 'login_busy'))
-  const frame = await cryptoBox.seal(f.key, 'bad', `${f.attemptId}:input:1`)
-  await f.dispatch({ type: 'auth.input', attemptId: crypto.randomUUID(), sequence: 1, ...frame })
-  await f.dispatch({ type: 'auth.input', attemptId: f.attemptId, sequence: 2, ...frame })
-  assert.equal(f.written.length, 0)
-  await f.stop()
-  await f.dispatch({ type: 'auth.start', attemptId: f.attemptId, publicKey: f.browser.publicKey })
-  assert.equal(f.launches, 1)
-})
-test('ciphertext is bound to the attempt, direction, and sequence', async () => {
-  const f = await fixture()
-  const frame = await cryptoBox.seal(f.key, 'no', `${f.attemptId}:output:1`)
-  await f.dispatch({ type: 'auth.input', attemptId: f.attemptId, sequence: 1, ...frame })
-  assert.equal(f.written.length, 0)
-  assert.ok(f.events.some((e) => e.type === 'auth.error' && e.code === 'input_rejected'))
-  await f.stop()
-})
-test('expiry cancels native process and allows a fresh attempt', async () => {
-  const f = await fixture(50)
+
+test('login returns the native Anthropic link, and the code completes sign-in without streaming the terminal', async () => {
+  const f = fixture(),
+    started = await f.start()
+  assert.equal(started.url, LINK)
+  assert.match(started.attemptId, /^[0-9a-f-]{36}$/)
+  assert.ok(started.expiresAt > Date.now())
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId: started.attemptId, code: 'abc#def' }), {
+    type: 'auth.status',
+    authenticated: true,
+  })
+  assert.deepEqual(f.written, ['abc#def\r'])
   await f.wait()
-  assert.ok(f.events.some((e) => e.type === 'auth.finished' && e.outcome === 'expired'))
-  const id = crypto.randomUUID()
-  await f.dispatch({ type: 'auth.start', attemptId: id, publicKey: f.browser.publicKey })
-  await until(() => f.launches === 2)
-  await f.dispatch({ type: 'auth.cancel', attemptId: id })
-  await f.wait()
-})
-test('agent sessions cannot invoke native login or accept terminal input', async () => {
-  const f = await fixture()
-  await f.dispatch(
-    { type: 'auth.start', attemptId: crypto.randomUUID(), publicKey: f.browser.publicKey },
-    'tenant:agent',
-  )
-  assert.equal(f.launches, 1)
-  assert.ok(f.events.some((e) => e.type === 'error' && e.code === 'auth_session_required'))
-  await f.stop()
+  assert.equal(f.active, false)
 })
 
-test('forced reconnect opens the native login even when saved credentials appear signed in', async () => {
-  const f = await fixture()
-  await f.finish()
-  const next = crypto.randomUUID()
-  await f.dispatch({ type: 'auth.start', attemptId: next, publicKey: f.browser.publicKey, force: true })
-  await until(() => f.launches === 2)
-  await f.dispatch({ type: 'auth.cancel', attemptId: next })
-  await f.wait()
+test('repeating login while an attempt is active returns that attempt without relaunching', async () => {
+  const f = fixture(),
+    first = await f.start()
+  assert.deepEqual(await f.request({ type: 'auth.login' }), first)
+  assert.deepEqual(await f.request({ type: 'auth.login', force: true }), first)
+  assert.equal(f.launches, 1)
+  await f.request({ type: 'auth.cancel', attemptId: first.attemptId })
 })
 
-test('auth status uses one direct reply and does not emit an event or start interactive login', async () => {
-  for (const authenticated of [false, true]) {
-    const replies: Reply[] = []
-    const login = new Login(
-      async () => authenticated,
-      () => {
-        throw new Error('must not launch login')
-      },
-    )
-    await login.receive({
-      session: { id: 'tenant:auth', workspaceSlug: 'tenant', keepAliveSeconds: 900 },
-      env: {},
-      message: { id: crypto.randomUUID(), sequence: 1, payload: { type: 'auth.check' } },
-      signal: new AbortController().signal,
-      reply: (value) => {
-        replies.push(value)
-      },
-      send: () => {},
-      output: {
-        send: async () => {
-          throw new Error('status must not be streamed')
-        },
-      },
-      activity: {
-        active: false,
-        start: () => {
-          throw new Error('must not start an activity')
-        },
-        cancel: () => false,
-        extend: () => {},
-      },
-    })
-    assert.deepEqual(replies, [{ type: 'auth.status', authenticated }])
+test('login reports existing credentials unless forced', async () => {
+  const f = fixture({ signedIn: true })
+  assert.deepEqual(await f.request({ type: 'auth.login' }), { type: 'auth.status', authenticated: true })
+  assert.equal(f.launches, 0)
+  const forced = await f.request({ type: 'auth.login', force: true })
+  assert.equal(forced.type, 'auth.login')
+  assert.equal(f.launches, 1)
+})
+
+test('a rejected code keeps the attempt open for another try', async () => {
+  const f = fixture({ answer: 'reject' }),
+    { attemptId } = await f.start()
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'wrong' }), {
+    type: 'error',
+    code: 'code_rejected',
+  })
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'wrong-again' }), {
+    type: 'error',
+    code: 'code_rejected',
+  })
+  assert.deepEqual(f.written, ['wrong\r', 'wrong-again\r'])
+  await f.request({ type: 'auth.cancel', attemptId })
+})
+
+test('a code that ends Claude without credentials fails the attempt', async () => {
+  const f = fixture({ answer: 'fail' }),
+    { attemptId } = await f.start()
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'abc' }), {
+    type: 'error',
+    code: 'login_failed',
+  })
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'abc' }), {
+    type: 'error',
+    code: 'login_not_active',
+  })
+})
+
+test('a silent Claude times out the code wait but leaves the attempt running', async () => {
+  const f = fixture({ answer: 'silent', waitMs: 50 }),
+    { attemptId } = await f.start()
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'abc' }), {
+    type: 'error',
+    code: 'login_timeout',
+  })
+  assert.equal(f.active, true)
+  await f.request({ type: 'auth.cancel', attemptId })
+  assert.equal(f.active, false)
+})
+
+test('codes for unknown or stale attempts are never written to Claude', async () => {
+  const f = fixture(),
+    { attemptId } = await f.start()
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId: crypto.randomUUID(), code: 'abc' }), {
+    type: 'error',
+    code: 'login_not_active',
+  })
+  assert.deepEqual(await f.request({ type: 'auth.cancel', attemptId }), { type: 'auth.cancelled', attemptId })
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'abc' }), {
+    type: 'error',
+    code: 'login_not_active',
+  })
+  assert.deepEqual(f.written, [])
+})
+
+test('login fails and stops Claude when no sign-in link appears', async () => {
+  for (const output of ['Something went wrong\r\n', 'Paste code here if prompted > ']) {
+    const f = fixture({ output, waitMs: 50 })
+    assert.deepEqual(await f.request({ type: 'auth.login' }), { type: 'error', code: 'login_failed' })
+    await f.wait()
+    assert.equal(f.active, false)
   }
 })
 
-test('logout cancels pending login and requires a new native login', async () => {
-  const f = await fixture()
-  await f.dispatch({ type: 'auth.logout' })
+test('expiry ends the attempt and allows a fresh one', async () => {
+  const f = fixture({ timeout: 50 }),
+    { attemptId } = await f.start()
   await f.wait()
-  assert.deepEqual(f.replies, [{ type: 'auth.status', authenticated: false }])
-  assert.ok(f.events.some((e) => e.type === 'auth.finished' && e.outcome === 'cancelled'))
-  await f.dispatch({ type: 'auth.start', attemptId: crypto.randomUUID(), publicKey: f.browser.publicKey })
-  await until(() => f.launches === 2)
-  await f.dispatch({ type: 'auth.logout' })
-  await f.wait()
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'abc' }), {
+    type: 'error',
+    code: 'login_not_active',
+  })
+  const next = await f.start()
+  assert.notEqual(next.attemptId, attemptId)
+  assert.equal(f.launches, 2)
 })
-test('logout clears completed login replay and saved authentication', async () => {
-  const f = await fixture()
-  await f.finish()
-  await f.dispatch({ type: 'auth.logout' })
-  await f.dispatch({ type: 'auth.start', attemptId: f.attemptId, publicKey: f.browser.publicKey })
-  await until(() => f.launches === 2)
-  await f.stop()
+
+test('cancelling an unknown attempt is a no-op that leaves the active attempt running', async () => {
+  const f = fixture(),
+    { attemptId } = await f.start(),
+    other = crypto.randomUUID()
+  assert.deepEqual(await f.request({ type: 'auth.cancel', attemptId: other }), {
+    type: 'auth.cancelled',
+    attemptId: other,
+  })
+  assert.equal(f.active, true)
+  await f.request({ type: 'auth.cancel', attemptId })
+})
+
+test('logout cancels a pending login and signs out', async () => {
+  const f = fixture(),
+    { attemptId } = await f.start()
+  assert.deepEqual(await f.request({ type: 'auth.logout' }), { type: 'auth.status', authenticated: false })
+  assert.equal(f.active, false)
+  assert.deepEqual(await f.request({ type: 'auth.code', attemptId, code: 'abc' }), {
+    type: 'error',
+    code: 'login_not_active',
+  })
+})
+
+test('agent sessions cannot invoke native login', async () => {
+  const f = fixture()
+  for (const command of [
+    { type: 'auth.login' },
+    { type: 'auth.code', attemptId: crypto.randomUUID(), code: 'abc' },
+    { type: 'auth.check' },
+  ] as Command[])
+    assert.deepEqual(await f.request(command, 'tenant:agent'), { type: 'error', code: 'auth_session_required' })
+  assert.equal(f.launches, 0)
+})
+
+test('auth status replies directly without starting a login', async () => {
+  for (const signedIn of [false, true]) {
+    const f = fixture({ signedIn })
+    assert.deepEqual(await f.request({ type: 'auth.check' }), { type: 'auth.status', authenticated: signedIn })
+    assert.equal(f.launches, 0)
+  }
+})
+
+test('sign-in links are limited to complete HTTPS Anthropic URLs', () => {
+  assert.equal(signInLink(NATIVE_OUTPUT), LINK)
+  assert.equal(signInLink(`visit ${LINK.slice(0, 40)}`), undefined)
+  for (const url of [
+    'https://evil.example/claude.ai',
+    'http://claude.ai/x',
+    'https://user@claude.ai/x',
+    'https://claude.ai.evil.example/x',
+  ])
+    assert.equal(signInLink(`visit ${url}\r\n`), undefined)
+  assert.equal(signInLink('visit https://console.anthropic.com/oauth\r\n'), 'https://console.anthropic.com/oauth')
 })

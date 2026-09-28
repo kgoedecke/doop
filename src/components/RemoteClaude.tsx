@@ -3,7 +3,7 @@ import { authClient } from '../lib/auth'
 import { api, ApiError } from '../lib/api'
 import { useLocalAgent } from '../lib/localAgent'
 import { useStore } from '../lib/store'
-import { RemoteClaudeLogin, anthropicLinks, type LoginView } from '../lib/remoteClaudeLogin'
+import { RemoteClaudeLogin, type LoginView } from '../lib/remoteClaudeLogin'
 import { CLAUDE_MODELS, normalizeClaudeModel } from '../../shared/localAgent'
 import type { RemoteClaudeStatus } from '../../shared/remoteClaude'
 import { AgentIcon } from './AgentIcon'
@@ -74,8 +74,7 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
   const needsReconnect = active && !!status?.authRequired
   const model = normalizeClaudeModel(preference?.model)
   const selectedBlurb = CLAUDE_MODELS.find((option) => option.id === model)?.blurb
-  const signInUrl = view ? anthropicLinks(view.text).at(-1) : undefined
-  const codeRequested = !!view && /(?:paste|enter)[^\n]{0,50}\bcode\b/i.test(view.text)
+  const signInUrl = view?.url
   useEffect(() => {
     let disposed = false
     const refresh = () => {
@@ -114,8 +113,8 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
       setBusy(false)
     }
   }
-  async function select(selected = model, loginAttemptId?: string, loginCursor?: string) {
-    const saved = await api.selectRemoteClaude(userId, selected, loginAttemptId, loginCursor)
+  async function select(selected = model) {
+    const saved = await api.selectRemoteClaude(userId, selected)
     useLocalAgent.setState({ preference: saved })
     useStore.getState().allowanceChanged()
     setStatus(await api.remoteClaude(userId))
@@ -147,11 +146,9 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
       return
     }
     login.current?.dispose()
-    const connection = new RemoteClaudeLogin(userId, setView, (attemptId, cursor) =>
-      act(() => select(model, attemptId, cursor)),
-    )
+    const connection = new RemoteClaudeLogin(userId, setView, () => act(() => select(model)))
     login.current = connection
-    await connection.start(status?.authRequired ?? false)
+    await connection.start()
   }
   if (!status) return null
   if (!status.configured) return <UnavailableClaudePlanRow />
@@ -266,7 +263,7 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
               ) : null}
               <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
             </div>
-            {codeRequested && view.active && (
+            {view.ready && view.active && (
               <form
                 onSubmit={(event) => {
                   event.preventDefault()
@@ -286,7 +283,7 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
                   type="password"
                   autoComplete="off"
                   spellCheck={false}
-                  maxLength={1024}
+                  maxLength={2048}
                   disabled={!view.ready}
                   value={input}
                   aria-describedby="hosted-code-help"
@@ -300,43 +297,6 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
                 </Button>
               </form>
             )}
-            <details className="text-xs text-ink-soft">
-              <summary className="cursor-pointer">Troubleshooting details</summary>
-              <pre
-                className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-black/5 p-3"
-                aria-label="Native Claude login output"
-              >
-                {view.text}
-              </pre>
-              <form
-                className="mt-2 space-y-2"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  if (!view.ready) return
-                  const value = input
-                  setInput('')
-                  void login.current?.send(value)
-                }}
-              >
-                <label htmlFor="hosted-terminal-input" className="block">
-                  Other response requested by Claude
-                </label>
-                <Input
-                  id="hosted-terminal-input"
-                  type="password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  maxLength={1024}
-                  disabled={!view.ready}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                />
-                <p>Use this only for another terminal prompt. An empty response presses Enter.</p>
-                <Button disabled={!view.ready} type="submit" variant="ghost">
-                  Send response
-                </Button>
-              </form>
-            </details>
             <Button
               type="button"
               variant="bare"
