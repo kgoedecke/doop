@@ -14,14 +14,21 @@ const loginMocks = vi.hoisted(() => ({
   url: 'https://claude.com/oauth/authorize?test=1',
   send: vi.fn(),
   update: undefined as undefined | ((view: { url?: string; status: string; ready: boolean; active: boolean }) => void),
+  connected: undefined as undefined | ((preference: { enabled: boolean; transport: 'remote'; model: string }) => void),
 }))
 vi.mock('../src/lib/remoteClaudeLogin', async (original) => {
   const actual = await original<typeof import('../src/lib/remoteClaudeLogin')>()
   return {
     ...actual,
     RemoteClaudeLogin: class {
-      constructor(_user: string, update: typeof loginMocks.update) {
+      constructor(
+        _user: string,
+        _model: string,
+        update: typeof loginMocks.update,
+        connected: typeof loginMocks.connected,
+      ) {
         loginMocks.update = update
+        loginMocks.connected = connected
       }
       async start() {
         loginMocks.update?.({
@@ -80,7 +87,7 @@ const connect = () =>
   Array.from(container.querySelectorAll('button')).find((button) =>
     ['Connect', 'Check connection'].includes(button.textContent ?? ''),
   )!
-it('checks an enabled hosted connection before selecting it again', async () => {
+it('checks an enabled hosted connection without selecting it again', async () => {
   useLocalAgent.setState({ preference: { enabled: true, transport: 'remote', model: 'claude-sonnet-5' } })
   mocks.check.mockResolvedValue({ authenticated: true })
   mocks.select.mockResolvedValue({ enabled: true, transport: 'remote', model: 'claude-sonnet-5' })
@@ -91,7 +98,7 @@ it('checks an enabled hosted connection before selecting it again', async () => 
       .click(),
   )
   expect(mocks.check).toHaveBeenCalledWith('alice')
-  expect(mocks.select).toHaveBeenCalledWith('alice', 'claude-sonnet-5')
+  expect(mocks.select).not.toHaveBeenCalled()
   expect(useLocalAgent.getState().preference?.transport).toBe('remote')
   expect(container.textContent).toContain('Active · Connected')
   expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === 'Disconnect')).toBe(true)
@@ -147,6 +154,14 @@ it('shows the native sign-in link and code field', async () => {
   await act(async () => complete.click())
   expect(loginMocks.send).toHaveBeenCalledWith('test-code')
   expect(container.querySelector('[role="status"]')?.textContent).toBe('Verifying sign-in…')
+})
+it('uses the confirmed login selection without another API request', async () => {
+  await act(async () => root.render(<RemoteClaudeRow />))
+  await act(async () => connect().click())
+  await act(async () => loginMocks.connected?.({ enabled: true, transport: 'remote', model: 'claude-sonnet-5' }))
+  expect(mocks.select).not.toHaveBeenCalled()
+  expect(useLocalAgent.getState().preference?.transport).toBe('remote')
+  expect(container.textContent).toContain('Active · Connected')
 })
 it('waits for a valid link before showing the code field', async () => {
   mocks.check.mockResolvedValue({ authenticated: false })

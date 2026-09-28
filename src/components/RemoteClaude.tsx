@@ -4,7 +4,7 @@ import { api, ApiError } from '../lib/api'
 import { useLocalAgent } from '../lib/localAgent'
 import { useStore } from '../lib/store'
 import { RemoteClaudeLogin, type LoginView } from '../lib/remoteClaudeLogin'
-import { CLAUDE_MODELS, normalizeClaudeModel } from '../../shared/localAgent'
+import { CLAUDE_MODELS, normalizeClaudeModel, type LocalAgentPreference } from '../../shared/localAgent'
 import type { RemoteClaudeStatus } from '../../shared/remoteClaude'
 import { AgentIcon } from './AgentIcon'
 import { Button } from './ui/button'
@@ -113,13 +113,15 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
       setBusy(false)
     }
   }
-  async function select(selected = model) {
-    const saved = await api.selectRemoteClaude(userId, selected)
+  function applySelection(saved: LocalAgentPreference) {
     useLocalAgent.setState({ preference: saved })
     useStore.getState().allowanceChanged()
-    setStatus(await api.remoteClaude(userId))
+    setStatus((current) => current && { ...current, authRequired: false })
     setView(null)
     setLogoutPending(false)
+  }
+  async function select(nextModel = model) {
+    applySelection(await api.selectRemoteClaude(userId, nextModel))
   }
   async function disconnect() {
     try {
@@ -142,11 +144,10 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
   }
   async function connect() {
     if (active && !status?.authRequired && (await api.checkRemoteClaude(userId)).authenticated) {
-      await select()
       return
     }
     login.current?.dispose()
-    const connection = new RemoteClaudeLogin(userId, setView, () => act(() => select(model)))
+    const connection = new RemoteClaudeLogin(userId, model, setView, applySelection)
     login.current = connection
     await connection.start()
   }

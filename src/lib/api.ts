@@ -254,14 +254,17 @@ export const api = {
   stopRemoteClaude: (userId: string) =>
     req<{ ok: boolean }>('/api/remote-claude/stop', { method: 'POST', headers: { 'X-Doop-User': userId } }),
   remoteClaudeAuth: (userId: string, action: 'start' | 'code' | 'cancel', body: unknown) =>
-    req<{ authenticated?: boolean; attemptId?: string; url?: string; cancelled?: boolean }>(
-      `/api/remote-claude/auth/${action}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
-        body: JSON.stringify(body),
-      },
-    ),
+    req<{
+      authenticated?: boolean
+      attemptId?: string
+      url?: string
+      cancelled?: boolean
+      preference?: LocalAgentPreference
+    }>(`/api/remote-claude/auth/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
+      body: JSON.stringify(body),
+    }),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),

@@ -1,4 +1,5 @@
 import { api, ApiError } from './api'
+import type { LocalAgentPreference } from '../../shared/localAgent'
 
 export function anthropicLink(value: string): string | undefined {
   try {
@@ -29,8 +30,9 @@ export class RemoteClaudeLogin {
   private sending = false
   constructor(
     private userId: string,
+    private model: string,
     private update: (view: LoginView) => void,
-    private connected: () => Promise<void>,
+    private connected: (preference: LocalAgentPreference) => void,
   ) {}
   private view(status: string) {
     if (!this.controller.signal.aborted)
@@ -39,10 +41,11 @@ export class RemoteClaudeLogin {
   async start() {
     this.view('Starting Claude sign-in…')
     try {
-      const result = await api.remoteClaudeAuth(this.userId, 'start', {})
+      const result = await api.remoteClaudeAuth(this.userId, 'start', { model: this.model })
       this.controller.signal.throwIfAborted()
       if ('authenticated' in result && result.authenticated === true) {
-        await this.connected()
+        if (!result.preference) throw new Error('Doop did not confirm the Claude Plan selection.')
+        this.connected(result.preference)
         return
       }
       const url = typeof result.url === 'string' ? anthropicLink(result.url) : undefined
@@ -59,10 +62,14 @@ export class RemoteClaudeLogin {
     this.sending = true
     this.view('Sending the code to Claude and confirming sign-in…')
     try {
-      const result = await api.remoteClaudeAuth(this.userId, 'code', { attemptId: this.attemptId, code })
+      const result = await api.remoteClaudeAuth(this.userId, 'code', {
+        attemptId: this.attemptId,
+        code,
+        model: this.model,
+      })
       this.controller.signal.throwIfAborted()
-      if (result.authenticated !== true) throw new Error('Claude sign-in could not be confirmed.')
-      await this.connected()
+      if (result.authenticated !== true || !result.preference) throw new Error('Claude sign-in could not be confirmed.')
+      this.connected(result.preference)
     } catch (error) {
       if (error instanceof ApiError && error.body.code === 'code_rejected') {
         this.sending = false

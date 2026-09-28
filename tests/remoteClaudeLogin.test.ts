@@ -13,6 +13,8 @@ vi.mock('../src/lib/api', () => ({
 import { ApiError } from '../src/lib/api'
 import { RemoteClaudeLogin, anthropicLink, type LoginView } from '../src/lib/remoteClaudeLogin'
 
+const preference = { enabled: true, transport: 'remote' as const, model: 'claude-sonnet-5' }
+
 beforeEach(() => post.mockReset())
 
 it('accepts only an Anthropic HTTPS sign-in link', () => {
@@ -28,16 +30,26 @@ it('starts login, retries a rejected code, and connects after native confirmatio
   post
     .mockResolvedValueOnce({ attemptId, url: 'https://claude.ai/login' })
     .mockRejectedValueOnce(new ApiError(422, JSON.stringify({ code: 'code_rejected', error: 'Rejected' })))
-    .mockResolvedValueOnce({ authenticated: true })
-  const login = new RemoteClaudeLogin('alice', (view) => views.push(view), connected)
+    .mockResolvedValueOnce({ authenticated: true, preference })
+  const login = new RemoteClaudeLogin('alice', 'claude-sonnet-5', (view) => views.push(view), connected)
   await login.start()
   expect(views.at(-1)).toMatchObject({ url: 'https://claude.ai/login', ready: true })
   await login.send('wrong')
   expect(views.at(-1)).toMatchObject({ ready: true, status: expect.stringContaining('Paste it again') })
   await login.send('right')
-  expect(post).toHaveBeenNthCalledWith(2, 'alice', 'code', { attemptId, code: 'wrong' })
-  expect(post).toHaveBeenNthCalledWith(3, 'alice', 'code', { attemptId, code: 'right' })
-  expect(connected).toHaveBeenCalledOnce()
+  expect(post).toHaveBeenNthCalledWith(1, 'alice', 'start', { model: 'claude-sonnet-5' })
+  expect(post).toHaveBeenNthCalledWith(2, 'alice', 'code', { attemptId, code: 'wrong', model: 'claude-sonnet-5' })
+  expect(post).toHaveBeenNthCalledWith(3, 'alice', 'code', { attemptId, code: 'right', model: 'claude-sonnet-5' })
+  expect(connected).toHaveBeenCalledWith(preference)
+})
+
+it('uses an already confirmed sign-in without another status request', async () => {
+  const connected = vi.fn()
+  post.mockResolvedValueOnce({ authenticated: true, preference })
+  const login = new RemoteClaudeLogin('alice', 'claude-sonnet-5', () => {}, connected)
+  await login.start()
+  expect(post).toHaveBeenCalledExactlyOnceWith('alice', 'start', { model: 'claude-sonnet-5' })
+  expect(connected).toHaveBeenCalledWith(preference)
 })
 
 it('cancels the active attempt without exposing terminal output', async () => {
@@ -45,8 +57,9 @@ it('cancels the active attempt without exposing terminal output', async () => {
   post.mockResolvedValueOnce({ attemptId, url: 'https://claude.ai/login' }).mockResolvedValueOnce({ cancelled: true })
   const login = new RemoteClaudeLogin(
     'alice',
+    'claude-sonnet-5',
     () => {},
-    async () => {},
+    () => {},
   )
   await login.start()
   await login.cancel()
