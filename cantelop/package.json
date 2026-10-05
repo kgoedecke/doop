@@ -14,7 +14,7 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@cantelop/sdk": "0.12.0"
+    "@cantelop/sdk": "0.14.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",
