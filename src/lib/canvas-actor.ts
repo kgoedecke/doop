@@ -22,10 +22,54 @@ const pending = new Map<
   { resolve: (frame: Frame) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
 >()
 const reveals = new Map<string, ReturnType<typeof setTimeout>>()
+type UpdateBatch = {
+  patch: Partial<Frame>
+  waiters: { resolve: (frame: Frame) => void; reject: (error: unknown) => void }[]
+}
+const updates = new Map<string, { canvasId: string; next?: UpdateBatch }>()
+
+/** One save per frame in flight; keep only the newest values behind it. */
+export async function updateFrame(id: string, patch: Partial<Frame>): Promise<Frame> {
+  const canvasId = useStore.getState().canvas?.id
+  if (!canvasId) throw new Error('No canvas is open')
+  await connectFrames(canvasId)
+  if (connection?.id !== canvasId || useStore.getState().canvas?.id !== canvasId)
+    throw new Error('Canvas changed before the edit could be sent.')
+  return new Promise((resolve, reject) => {
+    const existing = updates.get(id)
+    const queue = existing ?? { canvasId }
+    const batch = (queue.next ??= { patch: {}, waiters: [] })
+    Object.assign(batch.patch, patch)
+    batch.waiters.push({ resolve, reject })
+    if (existing) return
+    updates.set(id, queue)
+    void (async () => {
+      while (queue.next && updates.get(id) === queue) {
+        const next = queue.next
+        queue.next = undefined
+        try {
+          const frame = await writeFrame({ type: 'update', id, patch: next.patch }, queue.canvasId)
+          for (const waiter of next.waiters) waiter.resolve(frame)
+        } catch (error) {
+          // A lost confirmation can mean the write committed. Never replay it
+          // or send queued work after a disconnect or canvas switch.
+          const queued = updates.get(id) === queue ? updates.get(id)?.next : undefined
+          for (const waiter of [...next.waiters, ...(queued?.waiters ?? [])]) waiter.reject(error)
+          break
+        }
+      }
+      if (updates.get(id) === queue) updates.delete(id)
+    })()
+  })
+}
 
 function showFrame(event: FrameChange) {
   const state = useStore.getState()
-  const frame = event.frame
+  // An older acknowledgement must not paint over this browser's newer edit.
+  const frame =
+    event.operation === 'update' && event.actor.clientId === getIdentity().clientId
+      ? { ...event.frame, ...updates.get(event.frame.id)?.next?.patch }
+      : event.frame
   clearTimeout(reveals.get(frame.id))
   reveals.delete(frame.id)
   if (event.operation === 'delete') {
@@ -103,7 +147,11 @@ function apply(event: FrameSnapshot | FrameChange) {
   } else {
     showFrame(event)
     if (event.activity) state.pushActivity(event.activity)
-    if (event.actor.clientId !== getIdentity().clientId && event.operation !== 'delete')
+    if (
+      event.actor.clientId !== getIdentity().clientId &&
+      event.operation !== 'delete' &&
+      !useStore.getState().streams[event.frame.id]
+    )
       state.flash(event.frame.id, event.actor.color)
   }
 }
@@ -111,6 +159,9 @@ function apply(event: FrameSnapshot | FrameChange) {
 export function disconnectFrames() {
   for (const timer of reveals.values()) clearTimeout(timer)
   reveals.clear()
+  for (const queue of updates.values())
+    for (const waiter of queue.next?.waiters ?? []) waiter.reject(new Error('Canvas connection closed.'))
+  updates.clear()
   if (connection) {
     connection.stopped = true
     clearTimeout(connection.retry)
@@ -183,7 +234,7 @@ export function connectFrames(id: string): Promise<void> {
             const frame = state.canvas?.id === id && state.canvas.frames.find((frame) => frame.id === event.frameId)
             if (frame && frame.updatedAt === event.updatedAt) {
               const { x, y, width, height } = event
-              state.patchFrameLocal(frame.id, { x, y, width, height })
+              state.patchFrameLocal(frame.id, { x, y, width, height }, true)
             }
           } else if (event.type === 'state_update' && event.changes.committed) apply(event.changes.committed)
           else if (event.type === 'error') {

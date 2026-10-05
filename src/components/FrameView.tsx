@@ -112,6 +112,10 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   const me = getIdentity().clientId
   const editors = Object.values(presences).filter((p) => p.activeFrameId === frame.id && p.clientId !== me)
   const [dragging, setDragging] = useState(false)
+  const animateGeometry = useStore((s) => s.frameMotion[frame.id]) && !dragging
+  // Follow the incoming 50ms samples, including the iframe during a resize.
+  const geometryTransition =
+    animateGeometry && 'motion-safe:transition-[left,top,width,height] motion-safe:duration-50 motion-safe:ease-linear'
   /* ⌥⇧-drag (Figma-style duplicate): the original stays behind, the copy
      rides the cursor — the doubled cursor shows from the moment ⌥⇧ is held */
   const [duping, setDuping] = useState(false)
@@ -267,7 +271,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     window.addEventListener('pointerup', onUp)
   }
 
-  const html = useThrottledValue(frame.html, 150)
+  const html = useThrottledValue(frame.html, stream ? 150 : 50)
   const remoteEditor = editors[0]
 
   /* The iframe loads a bootstrap once; HTML is posted in and DOM-morphed in
@@ -574,6 +578,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         <div
           className={cn(
             'group absolute',
+            geometryTransition,
             stream &&
               "before:pointer-events-none before:absolute before:-inset-[3px] before:rounded-[9px] before:border-2 before:border-dashed before:border-[var(--editing-color,var(--brand))] before:content-[''] before:animate-[stream-pulse_1.1s_ease-in-out_infinite]",
           )}
@@ -680,7 +685,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
           >
             <iframe
               ref={iframeRef}
-              className="block border-none bg-white"
+              className={cn('block border-none bg-white', geometryTransition)}
               title={frame.name}
               data-doop-frame=""
               sandbox="allow-scripts"

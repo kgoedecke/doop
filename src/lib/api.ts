@@ -1,4 +1,4 @@
-import { writeFrame } from './canvas-actor'
+import { updateFrame, writeFrame } from './canvas-actor'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type {
   ActivityItem,
@@ -374,7 +374,7 @@ export const api = {
   },
   createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) =>
     writeFrame({ type: 'create', input }, canvasId),
-  updateFrame: (frameId: string, patch: Partial<Frame>) => writeFrame({ type: 'update', id: frameId, patch }),
+  updateFrame,
   deleteFrame: (frameId: string) => writeFrame({ type: 'delete', id: frameId }),
   sendTaskFeedback: (taskId: string, text: string) =>
     req(`/api/tasks/${taskId}/feedback`, { method: 'POST', body: JSON.stringify({ text, from: getIdentity().name }) }),
