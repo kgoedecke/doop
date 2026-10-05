@@ -8,11 +8,9 @@ import * as storage from './storage.ts'
  * Uploaded image assets: bytes in object storage (server/storage.ts), one
  * metadata row per asset in the assets table (including the canvas it was
  * uploaded for). Frame HTML is the ground truth for which assets are still
- * in use, tracked as a projection in asset_refs: every durable frame write
- * re-extracts that frame's /a/<id> references (db/persist.ts), and boot
- * rebuilds the whole table from hydrated frames — so a failed fire-and-
- * forget write self-heals. Nothing is ever deleted; if cleanup is wanted
- * some day, asset_refs is the ledger to build it on.
+ * in use. Boot rebuilds asset_refs from actor snapshots. The projection
+ * is not kept current during direct actor edits, so future cleanup must
+ * consult actor state. Nothing is currently deleted.
  */
 
 export const MAX_ASSET_BYTES = 5 * 1024 * 1024

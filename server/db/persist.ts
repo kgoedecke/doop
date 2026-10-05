@@ -552,13 +552,13 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
 }
 
 /** Flush pending debounced frame writes (called on shutdown). */
-export async function flush(getFrame: (id: string) => Frame | undefined): Promise<void> {
+export async function flush(getFrame: (id: string) => Frame | undefined | Promise<Frame | undefined>): Promise<void> {
   const ids = [...frameTimers.keys()]
   for (const [, timer] of frameTimers) clearTimeout(timer)
   frameTimers.clear()
   await Promise.allSettled(
-    ids.map((id) => {
-      const f = getFrame(id)
+    ids.map(async (id) => {
+      const f = await getFrame(id)
       return f ? writeFrame(f) : Promise.resolve()
     }),
   )
@@ -582,6 +582,52 @@ export interface Hydrated {
 const LOG_CAP = 100
 /** the chat keeps more history than the other logs — it is the conversation */
 export const CHAT_LOG_CAP = 300
+
+/** Discover canvases created on another app server without rehydrating AI queues. */
+export async function loadCanvas(id: string): Promise<Canvas | undefined> {
+  const [c] = await db.select().from(t.canvases).where(eq(t.canvases.id, id))
+  if (!c) return undefined
+  const [frames, members, guidelines, references] = await Promise.all([
+    db.select().from(t.frames).where(eq(t.frames.canvasId, id)).orderBy(t.frames.createdAt),
+    db.select().from(t.canvasMembers).where(eq(t.canvasMembers.canvasId, id)),
+    db.select().from(t.guidelines).where(eq(t.guidelines.canvasId, id)).orderBy(t.guidelines.name),
+    db
+      .select()
+      .from(t.memoryReferences)
+      .where(eq(t.memoryReferences.canvasId, id))
+      .orderBy(desc(t.memoryReferences.pinnedAt)),
+  ])
+  return {
+    id,
+    name: c.name,
+    ownerId: c.ownerId ?? undefined,
+    linkAccess: c.linkAccess === 'edit' ? 'edit' : undefined,
+    publishedAt: c.publishedAt ?? undefined,
+    description: c.description ?? undefined,
+    category: isCommunityCategory(c.category) ? c.category : undefined,
+    copyCount: c.copyCount,
+    workspaceId: c.workspaceId ?? undefined,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    frames: frames.map((frame) => ({ ...frame, demo: frame.demo ?? undefined })),
+    memberIds: members.map((member) => member.userId),
+    guidelines: guidelines.map((g) => ({
+      name: g.name,
+      markdown: g.markdown,
+      title: g.title ?? undefined,
+      updatedAt: g.updatedAt,
+      updatedBy: g.updatedBy,
+      x: g.x ?? undefined,
+      y: g.y ?? undefined,
+    })),
+    references: references.map(({ canvasId: _canvasId, ...reference }) => reference),
+  }
+}
+
+export async function frameCanvasId(id: string): Promise<string | undefined> {
+  const [frame] = await db.select({ canvasId: t.frames.canvasId }).from(t.frames).where(eq(t.frames.id, id))
+  return frame?.canvasId
+}
 
 export async function hydrate(): Promise<Hydrated> {
   const [

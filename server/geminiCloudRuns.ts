@@ -12,7 +12,7 @@ export function geminiCloudWorkerFor(userId: string): GeminiCloudWorker | undefi
   const raw = process.env.DOOP_GEMINI_CLOUD_WORKERS
   if (!raw) return undefined
   try {
-    const workers = z.record(workerSchema).parse(JSON.parse(raw))
+    const workers = z.record(z.string(), workerSchema).parse(JSON.parse(raw))
     const entries = Object.values(workers)
     if (
       new Set(entries.map((worker) => worker.url)).size !== entries.length ||

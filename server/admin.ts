@@ -23,7 +23,7 @@ adminRouter.use((req, res, next) => {
 
 /** Every canvas on the instance, newest activity first, with its owner. */
 adminRouter.get('/canvases', async (req, res) => {
-  const { total, canvases } = store.listAllCanvases()
+  const { total, canvases } = await store.listAllCanvases()
   const ownerIds = [...new Set(canvases.map((c) => c.ownerId).filter((id): id is string => !!id))]
   const owners = ownerIds.length
     ? await db
@@ -41,7 +41,7 @@ adminRouter.get('/canvases', async (req, res) => {
 /** The three numbers worth knowing at a glance. */
 adminRouter.get('/stats', async (req, res) => {
   const [users] = await db.select({ n: count() }).from(authSchema.user)
-  const canvases = [...store.canvases.values()]
+  const canvases = (await Promise.all([...store.canvases.keys()].map((id) => store.syncCanvas(id)))).filter((c) => !!c)
   res.json({
     users: users?.n ?? 0,
     canvases: canvases.length,

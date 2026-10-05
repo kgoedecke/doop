@@ -11,6 +11,7 @@ import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
+import { prepareFrameSocket } from './frame-sync.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
@@ -55,9 +56,21 @@ import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
-import type { ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
+import type { Canvas, Frame, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = Number(process.env.PORT || 4400)
+
+function frameRoute(
+  handler: (req: express.Request<{ id: string }>, res: express.Response) => Promise<unknown>,
+): express.RequestHandler<{ id: string }> {
+  return (req, res, next) => {
+    void handler(req, res).catch((error) => {
+      console.error('[frame request]', error)
+      if (!res.headersSent) res.status(503).json({ error: 'canvas service unavailable' })
+      else next(error)
+    })
+  }
+}
 
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
@@ -83,11 +96,12 @@ let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
 }
+for (const canvas of data.canvases) await store.initializeFrames(canvas)
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canAccessCanvas reads membership
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
-seed()
+await seed()
 
 /* Never-attempted queued cards get their first pickup after boot. Hydration
    marks interrupted claimed cards as failed, so they are excluded until a
@@ -107,13 +121,11 @@ seed()
   if (pending.length) console.log(`[resident] ${pending.length} canvas(es) with new queued cards — starting after boot`)
 }
 
-/* asset bookkeeping (no deletion): every upload records its canvas, and
-   asset_refs tracks which frames reference which assets — kept in sync on
-   every durable frame write, rebuilt here from the frames hydrate just
-   loaded. Nothing is ever deleted; asset_refs is the ledger any future
-   cleanup would be built on. */
+/* Asset bookkeeping (no deletion): rebuild asset_refs from actor snapshots.
+   This is a boot-time projection, not a live ledger for asset cleanup. */
 {
-  const frames = data.canvases.flatMap((c) => c.frames)
+  const snapshots = await Promise.all(data.canvases.map((c) => store.syncCanvas(c.id)))
+  const frames = snapshots.flatMap((c) => c?.frames ?? [])
   reconcileAssetRefs(frames)
     .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
     .catch((e) => console.error('[assets] reconcile failed', e))
@@ -162,6 +174,8 @@ function send(ws: WebSocket, msg: ServerMessage) {
 }
 
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
+  // Frames are delivered by the actor directly; /ws retains Doop collaboration.
+  if (msg.type === 'frame:updated' || msg.type === 'frame:created' || msg.type === 'frame:deleted') return
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
     send(c.ws, msg)
@@ -312,45 +326,48 @@ app.use('/relay', async (req, res) => {
 /* render dispatch live in previews.ts — this route is HTTP only.      */
 /* ------------------------------------------------------------------ */
 
-app.get('/i/:id.:ext', async (req, res) => {
-  const { id, ext } = req.params as { id: string; ext: string }
-  if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
-  const frame = store.getFrame(id)
-  if (!frame) return res.status(404).end()
+app.get(
+  '/i/:id.:ext',
+  frameRoute(async (req, res) => {
+    const { id, ext } = req.params as { id: string; ext: string }
+    if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
+    const frame = await store.syncFrame(id)
+    if (!frame) return res.status(404).end()
 
-  let result: Awaited<ReturnType<typeof getImage>>
-  try {
-    result = await getImage(frame, {
-      ext,
-      scale: req.query.scale === '2' ? 2 : 1,
-      quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
-      /* ?preview — the dashboard-card variant; see previews.ts */
-      preview: req.query.preview !== undefined,
-      ip: req.ip ?? 'unknown',
-      /* the render limit targets anonymous hotlink abuse — a logged-in user
+    let result: Awaited<ReturnType<typeof getImage>>
+    try {
+      result = await getImage(frame, {
+        ext,
+        scale: req.query.scale === '2' ? 2 : 1,
+        quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
+        /* ?preview — the dashboard-card variant; see previews.ts */
+        preview: req.query.preview !== undefined,
+        ip: req.ip ?? 'unknown',
+        /* the render limit targets anonymous hotlink abuse — a logged-in user
          loading a dashboard of many canvases shouldn't hit it (and behind
          the Railway proxy many users can share one req.ip). Only called
          when the budget is exhausted, so cached serves stay auth-free. */
-      isAuthenticated: async () =>
-        !!(await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)),
-    })
-  } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })
-  }
-  if (result.status === 'rate-limited') {
-    res.set('Retry-After', '60')
-    return res.status(429).json({ error: 'render rate limit — cached URLs are unaffected' })
-  }
-  const { buf } = result
+        isAuthenticated: async () =>
+          !!(await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)),
+      })
+    } catch (e) {
+      return res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })
+    }
+    if (result.status === 'rate-limited') {
+      res.set('Retry-After', '60')
+      return res.status(429).json({ error: 'render rate limit — cached URLs are unaffected' })
+    }
+    const { buf } = result
 
-  res.set('Content-Type', ext === 'jpg' ? 'image/jpeg' : 'image/png')
-  res.set('Cache-Control', 'public, max-age=60')
-  if (req.query.download !== undefined) {
-    const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
-    res.set('Content-Disposition', `attachment; filename="${safe}.${ext}"`)
-  }
-  res.send(buf)
-})
+    res.set('Content-Type', ext === 'jpg' ? 'image/jpeg' : 'image/png')
+    res.set('Cache-Control', 'public, max-age=60')
+    if (req.query.download !== undefined) {
+      const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
+      res.set('Content-Disposition', `attachment; filename="${safe}.${ext}"`)
+    }
+    res.send(buf)
+  }),
+)
 
 /* ------------------------------------------------------------------ */
 /* Uploaded assets: /a/<assetId>.<ext> — written once by the upload_asset */
@@ -580,6 +597,25 @@ app.use('/api', async (req, res, next) => {
   }
 })
 
+app.use('/api/canvases/:canvasId', (req, res, next) => {
+  void store.syncCanvas(req.params.canvasId).then(
+    (canvas) => {
+      res.locals.canvas = canvas
+      next()
+    },
+    () => res.status(503).json({ error: 'canvas service unavailable' }),
+  )
+})
+app.use('/api/frames/:frameId', (req, res, next) => {
+  void store.syncFrame(req.params.frameId).then(
+    (frame) => {
+      res.locals.frame = frame
+      next()
+    },
+    () => res.status(503).json({ error: 'canvas service unavailable' }),
+  )
+})
+
 app.get('/api/me', async (req, res) => {
   const { id, name, email } = req.user!
   res.json({
@@ -600,7 +636,8 @@ app.get('/api/me', async (req, res) => {
    canvas) and run it through canAccessCanvas before touching anything.
    Both helpers write the error response themselves and return null. */
 function requireCanvas(req: express.Request, res: express.Response, canvasId: string) {
-  const c = store.getCanvas(canvasId)
+  const c = (res.locals.canvas?.id === canvasId ? res.locals.canvas : store.getCanvasMetadata(canvasId)) as
+    Canvas | undefined
   if (!c) {
     res.status(404).json({ error: 'not found' })
     return null
@@ -613,12 +650,12 @@ function requireCanvas(req: express.Request, res: express.Response, canvasId: st
 }
 
 function requireFrame(req: express.Request, res: express.Response, frameId: string) {
-  const frame = store.getFrame(frameId)
-  if (!frame) {
+  const frame = res.locals.frame as Frame | undefined
+  if (!frame || frame.id !== frameId) {
     res.status(404).json({ error: 'frame not found' })
     return null
   }
-  const c = store.getCanvas(frame.canvasId)
+  const c = store.getCanvasMetadata(frame.canvasId)
   if (!c || !canAccessCanvas(req.user!.id, c)) {
     res.status(403).json({ error: 'this canvas is private — ask the owner for access' })
     return null
@@ -824,9 +861,9 @@ app.delete('/api/agent-keys/:id', async (req, res) => {
   res.json({ ok: true })
 })
 
-app.get('/api/canvases', (req, res) =>
+app.get('/api/canvases', async (req, res) =>
   res.json(
-    workspaces.canvasesFor(req.user!.id).map((c) => {
+    (await workspaces.canvasesFor(req.user!.id)).map((c) => {
       /* which agents have worked on this canvas (most recent first), with
          the user whose token they connected under and when they last worked */
       const seen = new Map<string, { owner?: string; lastAt: number }>()
@@ -862,7 +899,7 @@ app.post('/api/canvases', (req, res) => {
 })
 
 app.post('/api/canvases/:id/duplicate', async (req, res) => {
-  const source = store.getCanvas(req.params.id)
+  const source = store.getCanvasMetadata(req.params.id)
   if (!source) return res.status(404).json({ error: 'not found' })
   if (!hasDurableCanvasAccess(req.user!.id, source)) return res.status(403).json({ error: 'access denied' })
   /* a copy stays in the workspace when the copier is a member of it and the
@@ -880,6 +917,28 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
     res.status(500).json({ error: 'could not duplicate canvas' })
   }
 })
+
+app.get(
+  '/api/canvases/:id/actor',
+  frameRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id)) return
+    const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 128) : undefined
+    const grant = await prepareFrameSocket({
+      actorId: req.params.id,
+      metadata: {
+        actor: {
+          name: req.user!.name,
+          kind: 'user',
+          color: colorFor(req.user!.name),
+          ...(clientId ? { clientId } : {}),
+        },
+        readOnly: !!req.impersonatedBy,
+      },
+      authorizationLifetimeMs: 60_000,
+    })
+    res.set('Cache-Control', 'no-store').json(grant)
+  }),
+)
 
 app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id)
@@ -939,29 +998,33 @@ app.post('/api/canvases/:id/claim', (req, res) => {
 })
 
 /* recent activity across all of the user's canvases, for the home dashboard */
-app.get('/api/home/activity', (req, res) => {
-  const canvases = workspaces.canvasesFor(req.user!.id)
-  const items = canvases.flatMap((c) =>
-    actions
-      .getActivity(c.id)
-      .slice(0, 20)
-      .map((a) => ({ ...a, canvasId: c.id, canvasName: c.name })),
-  )
+app.get('/api/home/activity', async (req, res) => {
+  const canvases = await workspaces.canvasesFor(req.user!.id)
+  const items = (
+    await Promise.all(
+      canvases.map(async (c) =>
+        (await actions.getActivity(c.id)).slice(0, 20).map((a) => ({ ...a, canvasId: c.id, canvasName: c.name })),
+      ),
+    )
+  ).flat()
   items.sort((a, b) => b.at - a.at)
   res.json(items.slice(0, 14))
 })
 
-app.delete('/api/canvases/:id', (req, res) => {
-  const c = store.getCanvas(req.params.id)
-  if (!c) return res.status(404).json({ error: 'not found' })
-  /* only the owner (or an admin of its workspace) may delete; unclaimed
+app.delete(
+  '/api/canvases/:id',
+  frameRoute(async (req, res) => {
+    const c = store.getCanvasMetadata(req.params.id)
+    if (!c) return res.status(404).json({ error: 'not found' })
+    /* only the owner (or an admin of its workspace) may delete; unclaimed
      (legacy) canvases are reachable only by direct link and must be claimed
      before they can be destroyed */
-  if (!c.ownerId) return res.status(403).json({ error: 'claim it first' })
-  if (!canManageCanvas(req.user!.id, c)) return res.status(403).json({ error: 'not yours' })
-  actions.deleteCanvas(c.id)
-  res.json({ ok: true })
-})
+    if (!c.ownerId) return res.status(403).json({ error: 'claim it first' })
+    if (!canManageCanvas(req.user!.id, c)) return res.status(403).json({ error: 'not yours' })
+    await actions.deleteCanvas(c.id)
+    res.json({ ok: true })
+  }),
+)
 
 app.patch('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id)
@@ -1286,7 +1349,7 @@ app.get('/api/canvases/:id/guidelines/:name/history', async (req, res) => {
   res.json(rows.map((v) => ({ markdown: v.markdown, savedAt: v.savedAt, savedBy: v.savedBy })))
 })
 
-app.put('/api/canvases/:id/guidelines/:name', (req, res) => {
+app.put('/api/canvases/:id/guidelines/:name', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id)) return
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
   const { markdown, x, y, title } = req.body ?? {}
@@ -1302,7 +1365,7 @@ app.put('/api/canvases/:id/guidelines/:name', (req, res) => {
   }
   try {
     const pos = typeof x === 'number' && typeof y === 'number' ? { x, y } : undefined
-    const doc = actions.setGuideline(
+    const doc = await actions.setGuideline(
       req.params.id,
       req.params.name,
       String(markdown ?? ''),
@@ -1318,11 +1381,11 @@ app.put('/api/canvases/:id/guidelines/:name', (req, res) => {
 })
 
 /* design memory: pin/unpin reference frames, accept/dismiss rule proposals */
-app.post('/api/canvases/:id/references', (req, res) => {
+app.post('/api/canvases/:id/references', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id)) return
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
   try {
-    const ref = actions.pinReference(req.params.id, String(req.body?.frameId ?? ''), actor)
+    const ref = await actions.pinReference(req.params.id, String(req.body?.frameId ?? ''), actor)
     if (!ref) return res.status(404).json({ error: 'canvas or frame not found' })
     res.json(ref)
   } catch (e) {
@@ -1338,10 +1401,10 @@ app.delete('/api/canvases/:id/references/:refId', (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/canvases/:id/proposals/:pid', (req, res) => {
+app.post('/api/canvases/:id/proposals/:pid', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id)) return
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const proposal = actions.resolveProposal(req.params.id, req.params.pid, !!req.body?.accept, actor)
+  const proposal = await actions.resolveProposal(req.params.id, req.params.pid, !!req.body?.accept, actor)
   if (!proposal) return res.status(404).json({ error: 'proposal not found' })
   res.json(proposal)
 })
@@ -1371,46 +1434,62 @@ app.post(
   },
 )
 
-app.post('/api/canvases/:id/frames', (req, res) => {
-  if (!requireCanvas(req, res, req.params.id)) return
-  const { name, x, y, width, height, html } = req.body ?? {}
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const frame = actions.createFrame(req.params.id, { name: String(name || 'Frame'), x, y, width, height, html }, actor)
-  if (!frame) return res.status(404).json({ error: 'canvas not found' })
-  res.json(frame)
-})
+app.post(
+  '/api/canvases/:id/frames',
+  frameRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id)) return
+    const { name, x, y, width, height, html } = req.body ?? {}
+    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    const frame = await actions.createFrame(
+      req.params.id,
+      { name: String(name || 'Frame'), x, y, width, height, html },
+      actor,
+    )
+    if (!frame) return res.status(404).json({ error: 'canvas not found' })
+    res.json(frame)
+  }),
+)
 
-app.patch('/api/frames/:id', (req, res) => {
-  if (!requireFrame(req, res, req.params.id)) return
-  const { actor: _ignored, ...patch } = req.body ?? {}
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const allowed = ['name', 'x', 'y', 'width', 'height', 'html'] as const
-  const clean: Record<string, unknown> = {}
-  for (const k of allowed) if (patch[k] !== undefined) clean[k] = patch[k]
-  const frame = actions.updateFrame(req.params.id, clean, actor)
-  if (!frame) return res.status(404).json({ error: 'frame not found' })
-  res.json(frame)
-})
+app.patch(
+  '/api/frames/:id',
+  frameRoute(async (req, res) => {
+    if (!requireFrame(req, res, req.params.id)) return
+    const { actor: _ignored, ...patch } = req.body ?? {}
+    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    const allowed = ['name', 'x', 'y', 'width', 'height', 'html'] as const
+    const clean: Record<string, unknown> = {}
+    for (const k of allowed) if (patch[k] !== undefined) clean[k] = patch[k]
+    const frame = await actions.updateFrame(req.params.id, clean, actor)
+    if (!frame) return res.status(404).json({ error: 'frame not found' })
+    res.json(frame)
+  }),
+)
 
-app.post('/api/frames/:id/append', (req, res) => {
-  if (!requireFrame(req, res, req.params.id)) return
-  const { html_chunk, start, done } = req.body ?? {}
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const frame = actions.appendFrameHtml(req.params.id, String(html_chunk ?? ''), actor, {
-    start: !!start,
-    done: !!done,
-  })
-  if (!frame) return res.status(404).json({ error: 'frame not found' })
-  res.json({ ok: true, htmlBytes: frame.html.length })
-})
+app.post(
+  '/api/frames/:id/append',
+  frameRoute(async (req, res) => {
+    if (!requireFrame(req, res, req.params.id)) return
+    const { html_chunk, start, done } = req.body ?? {}
+    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    const frame = await actions.appendFrameHtml(req.params.id, String(html_chunk ?? ''), actor, {
+      start: !!start,
+      done: !!done,
+    })
+    if (!frame) return res.status(404).json({ error: 'frame not found' })
+    res.json({ ok: true, htmlBytes: frame.html.length })
+  }),
+)
 
-app.delete('/api/frames/:id', (req, res) => {
-  if (!requireFrame(req, res, req.params.id)) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const frame = actions.deleteFrame(req.params.id, actor)
-  if (!frame) return res.status(404).json({ error: 'frame not found' })
-  res.json({ ok: true })
-})
+app.delete(
+  '/api/frames/:id',
+  frameRoute(async (req, res) => {
+    if (!requireFrame(req, res, req.params.id)) return
+    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    const frame = await actions.deleteFrame(req.params.id, actor)
+    if (!frame) return res.status(404).json({ error: 'frame not found' })
+    res.json({ ok: true })
+  }),
+)
 
 app.post('/api/frames/:id/comments', async (req, res) => {
   if (!requireFrame(req, res, req.params.id)) return
@@ -1423,7 +1502,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
-  const comment = actions.addElementComment(
+  const comment = await actions.addElementComment(
     req.params.id,
     { selector: String(selector ?? ''), snippet: String(snippet ?? ''), text: String(text ?? '') },
     req.user!.name,
@@ -1438,7 +1517,7 @@ app.post('/api/comments/:id/replies', async (req, res) => {
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId)) return
   const text = String(req.body?.text ?? '')
-  if (!text.trim() || !actions.openThread(req.params.id)) {
+  if (!text.trim() || !(await actions.openThread(req.params.id))) {
     return res.status(404).json({ error: 'thread resolved or empty text' })
   }
   /* same rule as a fresh comment: only an @mention costs a resident task */
@@ -1449,7 +1528,7 @@ app.post('/api/comments/:id/replies', async (req, res) => {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
-  const reply = actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
+  const reply = await actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
   if (!reply) {
     /* the thread closed while the meter was being written: give the task
        back — a failed refund is logged, never turned into a 500 */
@@ -1548,7 +1627,7 @@ app.post('/api/canvases/:id/import', async (req, res) => {
           continue
         }
         const imported = capture.page
-        const frame = actions.createFrame(
+        const frame = await actions.createFrame(
           canvas.id,
           {
             name: imported.title.slice(0, 80),
@@ -1582,7 +1661,7 @@ app.post('/api/canvases/:id/import', async (req, res) => {
     if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
     const imported = await importPage(url)
     const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-    const frame = actions.createFrame(
+    const frame = await actions.createFrame(
       canvas.id,
       { name: imported.title.slice(0, 80), width: imported.width, height: imported.height, html: imported.html },
       actor,
@@ -1602,7 +1681,7 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
   if (!gate.ok) {
     return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
   }
-  const card = actions.addQueuedCard(
+  const card = await actions.addQueuedCard(
     req.params.id,
     title,
     req.user!.name,
@@ -1631,7 +1710,7 @@ app.post('/api/canvases/:id/chat', async (req, res) => {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
-  const message = actions.addChatMessage(req.params.id, text, req.user!.name, req.user!.id)
+  const message = await actions.addChatMessage(req.params.id, text, req.user!.name, req.user!.id)
   if (!message) return res.status(404).json({ error: 'canvas not found or empty text' })
   res.json(message)
 })
@@ -1775,7 +1854,13 @@ wss.on('connection', (ws, upgradeReq) => {
         ws.close(4401, 'unauthorized')
         return
       }
-      const canvas = store.getCanvas(msg.canvasId)
+      let canvas
+      try {
+        canvas = await store.syncCanvas(msg.canvasId)
+      } catch {
+        ws.close(1013, 'canvas service unavailable')
+        return
+      }
       if (!canvas) {
         /* a typo'd id or a canvas someone just deleted: say so and close,
            instead of leaving the socket open with nothing ever coming back.
@@ -1805,7 +1890,7 @@ wss.on('connection', (ws, upgradeReq) => {
         type: 'init',
         canvas,
         presences: [...others, ...agents],
-        activity: actions.getActivity(msg.canvasId),
+        activity: await actions.getActivity(msg.canvasId),
         tasks: actions.getTasks(msg.canvasId),
         feedback: actions.getFeedback(msg.canvasId),
         comments: actions.getComments(msg.canvasId),

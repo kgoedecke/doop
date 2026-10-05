@@ -5,3 +5,6 @@ bun.lock
 CHANGELOG.md
 desktop/src-tauri/tauri.conf.json
 desktop/CHANGELOG.md
+
+# Reproduced byte-for-byte by the actor generator.
+generated/

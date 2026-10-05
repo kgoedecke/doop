@@ -130,7 +130,7 @@ async function play(canvasId: string) {
   actions.setAgentStatus(canvasId, actor, 'Sketching you a welcome…')
 
   await sleep(700)
-  const frame = actions.createFrame(
+  const frame = await actions.createFrame(
     canvasId,
     { name: 'Welcome to Doop', x: 120, y: 120, width: 760, height: 560, html: '', demo: true },
     actor,
@@ -139,7 +139,7 @@ async function play(canvasId: string) {
 
   for (let i = 0; i < WELCOME_HTML.length; i += CHUNK_SIZE) {
     const done = i + CHUNK_SIZE >= WELCOME_HTML.length
-    actions.appendFrameHtml(frame.id, WELCOME_HTML.slice(i, i + CHUNK_SIZE), actor, { start: i === 0, done })
+    await actions.appendFrameHtml(frame.id, WELCOME_HTML.slice(i, i + CHUNK_SIZE), actor, { start: i === 0, done })
     await sleep(CHUNK_MS)
   }
 

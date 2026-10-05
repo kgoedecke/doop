@@ -54,12 +54,8 @@ async function toItem(canvas: Canvas): Promise<CommunityItem> {
 /** Every listing, newest first. Sorting by trend is the client's choice —
  *  the whole gallery is small enough to ship at once. */
 communityRouter.get('/', async (_req, res) => {
-  const items = await Promise.all(
-    store
-      .listPublished()
-      .filter((c) => publishableFrames(c).length)
-      .map(toItem),
-  )
+  const canvases = await Promise.all(store.listPublished().map((c) => store.syncCanvas(c.id)))
+  const items = await Promise.all(canvases.filter((c): c is Canvas => !!c && !!publishableFrames(c).length).map(toItem))
   res.json(items)
 })
 
@@ -67,7 +63,7 @@ communityRouter.get('/', async (_req, res) => {
  *  name and drops the welcome tour; the source stays untouched apart from
  *  its copy count. */
 communityRouter.post('/:id/copy', async (req, res) => {
-  const source = store.getCanvas(req.params.id)
+  const source = store.getCanvasMetadata(req.params.id)
   if (!source || source.publishedAt === undefined) return res.status(404).json({ error: 'not in the gallery' })
   try {
     const copy = await store.duplicateCanvas(source.id, req.user!.id, req.user!.name, {

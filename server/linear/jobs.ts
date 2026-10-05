@@ -308,7 +308,7 @@ async function processSession(session: Session) {
       if (
         card?.failedAt ||
         card?.endedAt ||
-        !store.getCanvas(session.canvasId) ||
+        !store.getCanvasMetadata(session.canvasId) ||
         Date.now() - session.createdAt > 60 * 60_000
       ) {
         const success = !!card?.endedAt && !card.failedAt

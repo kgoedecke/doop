@@ -33,8 +33,8 @@ activity feed.
   style rules that every agent follows.
 - **Private by default** — invite collaborators by email or flip on link sharing per canvas;
   agents inherit exactly their human's access.
-- **Self-host in one command** — `docker compose up`, or `bun run dev` with zero configuration
-  (embedded Postgres, no external services required).
+- **Run locally with zero configuration** — `bun run dev` starts embedded Postgres and local
+  canvas actors. Production uses managed Terse alongside the existing Doop server and Postgres.
 
 ## Quickstart
 
@@ -45,18 +45,25 @@ bun run dev
 ```
 
 Doop builds and installs with [bun](https://bun.sh) (`bun.lock` is the only
-lockfile); the server itself runs on Node.
+lockfile); the server and local actor launcher require Node.js 22.19+.
 
 - Web app: **http://localhost:4300**
 - API + WebSocket + MCP server: **http://localhost:4400** (the web port proxies `/api`, `/ws`, `/mcp` to it)
 
-Everything works with no configuration: data persists to an embedded Postgres (PGlite) in `data/pg`,
+Everything works with no configuration: frames persist in local actors in `data/actors`,
+and accounts, canvas metadata, and collaboration records use embedded Postgres (PGlite) in `data/pg`,
 and every optional integration (SMTP, stock photos, object storage, analytics) degrades gracefully
 until its variable in [.env.example](.env.example) is set. The one you will most likely want is
 `ANTHROPIC_API_KEY`, which turns on the built-in [Doop Agent](#the-doop-agent) — agents you connect
 yourself over MCP need no key.
 
-Or self-host the production build with Docker:
+Actor changes use the checked-in client in `generated/actors`. Regenerate it from local source with
+`pnpm actors:generate`; `pnpm actors:check` fails when it is stale. These package scripts also run with
+`bun run`. `pnpm dev` regenerates on startup and when local actor source changes; CI, tests, and actor
+deployment check for drift. Commit regenerated files with the actor change. The install and lockfile
+remain on Bun; pnpm can run the package scripts without migrating dependencies.
+
+Or self-host the production build with Docker after configuring managed actors (see [Deploy](#deploy)):
 
 ```bash
 BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
@@ -388,15 +395,57 @@ Any container host works; Railway/Fly are the least friction:
    persistent volume mounted at `/app/data`.
 3. Set `BETTER_AUTH_SECRET` (long random string) and `BETTER_AUTH_URL` (the public origin,
    e.g. `https://doop.example.com`). Extra allowed origins: `TRUSTED_ORIGINS` (comma-separated).
-4. Health check: `GET /healthz`. The server trusts one proxy hop (`trust proxy`), so
+4. Deploy `CanvasFrames` to managed Terse and configure the two variables below.
+5. Health check: `GET /healthz`. The server trusts one proxy hop (`trust proxy`), so
    TLS termination at the platform edge works out of the box.
 
 Local sanity check of the exact production image:
 
 ```bash
 docker build -t doop .
-docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
+docker run -p 4400:4400 --env-file .env -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
 ```
+
+Create a managed project with `bunx terse-cli init`, then deploy with `bun run deploy:actors`
+(an existing `terse.config.json` path can be passed as an argument). Set these on the Doop server:
+
+```dotenv
+TERSE_ACTOR_URL=https://api.useterse.ai/PROJECT_ID/actors
+TERSE_API_KEY=PROJECT_SCOPED_KEY
+```
+
+The deployment script uploads only the actor source and its dependencies. Keep the project key
+on the server. Doop authorizes browser connections through the generated `ActorProxy`; browsers then
+edit frames over a direct actor WebSocket. Backend frame reads and writes use generated RPC.
+Doop's existing `/ws` connection continues to carry chat, presence, and other collaboration events.
+
+This first slice synchronizes frame edits across app servers. AI execution, queues, comments,
+presence, and canvas metadata retain their existing architecture.
+Frame state lives in the actor project. Existing SQL frame rows remain as the cutover source and
+lookup for legacy frame IDs; new frame state is not mirrored to SQL. Back up actor state
+alongside SQL and uploaded assets.
+
+For an existing PostgreSQL installation, rehearse on a restored backup and a separate actor project first.
+Deploy the actor code, then stop **all** old and new Doop servers/workers and let pending SQL saves finish.
+Take a database backup and retain uploaded assets. With `DATABASE_URL` and the destination actor settings exported:
+
+```bash
+bun run migrate:actors
+bun run migrate:actors --verify
+```
+
+Inside the production image, use `node_modules/.bin/tsx scripts/migrate-actors.ts` instead of
+`bun run migrate:actors`; append `--verify` for the second pass.
+
+The command locks frame/canvas tables against writes, imports each canvas once, and compares every frame
+field. It does not modify SQL or hydrate AI queues. If interrupted, rerun it with the same database and
+actor project; mismatches or actors already accepting edits stop the command without overwriting them.
+After both commands succeed, start the upgraded app with traffic still closed, check existing canvases,
+then reopen traffic. Production refuses to auto-import existing nonempty SQL frame data; local development
+still initializes it automatically. Keep writers stopped throughout: the SQL lock ends with the command.
+Before new writes, rollback can use the unchanged SQL database and old app; discard the partial actor
+project before retrying if SQL changes. After new actor writes, SQL no longer contains current frames, so reverting the app alone
+is not a safe rollback: actor state must first be reconciled and verified against SQL.
 
 ## Connect an AI agent
 
@@ -643,8 +692,12 @@ through identical plumbing.
 ## Contributing
 
 PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style.
-`bun run test` runs the integration suite (it boots the real server against a throwaway database);
-schema changes go through drizzle migrations (`npx drizzle-kit generate` after editing
+`bun run test` starts isolated local actors and runs the integration suite against throwaway databases.
+Set `DOOP_TEST_POSTGRES_URL` to a PostgreSQL admin connection to run `tests/canvas-sync.test.ts`;
+it creates and drops temporary databases for the two-server and interrupted-cutover proofs. CI runs these checks.
+To run it against a disposable managed project, export its `TERSE_ACTOR_URL` and `TERSE_API_KEY`
+and set `DOOP_TEST_ACTORS=external`. Tests do not load `.env`.
+Schema changes go through drizzle migrations (`npx drizzle-kit generate` after editing
 `server/db/schema.ts`). Security issues: see [SECURITY.md](SECURITY.md) — please report privately.
 
 ## License

@@ -20,14 +20,14 @@ export interface Server {
   dataDir: string
   /** Resolves after the child process exits; useful before reopening its data directory. */
   stopped: Promise<void>
-  stop(opts?: { keepData?: boolean }): void
+  stop(opts?: { keepData?: boolean; signal?: NodeJS.Signals }): void
 }
 
 export async function startServer(port: number, env: Record<string, string> = {}, reuseDir?: string): Promise<Server> {
   const dataDir = reuseDir ?? mkdtempSync(path.join(tmpdir(), 'doop-test-'))
   const proc: ChildProcess = spawn(
-    path.join(ROOT, 'node_modules', '.bin', 'tsx'),
-    [path.join(ROOT, 'server', 'index.ts')],
+    process.execPath,
+    ['--import', path.join(ROOT, 'node_modules/tsx/dist/loader.mjs'), path.join(ROOT, 'server', 'index.ts')],
     {
       cwd: dataDir, // PGlite persists to <cwd>/data — isolated per run
       env: { ...process.env, PORT: String(port), NODE_ENV: undefined as unknown as string, ...env },
@@ -52,8 +52,8 @@ export async function startServer(port: number, env: Record<string, string> = {}
     port,
     dataDir,
     stopped,
-    stop({ keepData }: { keepData?: boolean } = {}) {
-      proc.kill()
+    stop({ keepData, signal }: { keepData?: boolean; signal?: NodeJS.Signals } = {}) {
+      proc.kill(signal)
       if (!keepData) rmSync(dataDir, { recursive: true, force: true })
     },
   }

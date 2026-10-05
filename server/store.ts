@@ -1,21 +1,51 @@
 import { nanoid } from 'nanoid'
+import { frameActor } from './frame-sync.ts'
+import type { FrameInput, FramePatch } from '../src/actor.ts'
 import * as persist from './db/persist.ts'
-import type { Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
+import { colorFor } from '../shared/types.ts'
+import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
 
-/**
- * In-memory canvas/frame state — the hot path for reads, reveals and
- * broadcasts. Every committed mutation is mirrored to the database via
- * the write-through helpers in db/persist.ts; boot hydrates from there.
- */
+/** SQL owns canvas metadata. Every frame read and write goes through actor RPC. */
 class Store {
   canvases = new Map<string, Canvas>()
-  private frameIndex = new Map<string, string>() // frameId -> canvasId
+
+  async syncCanvas(id: string): Promise<Canvas | undefined> {
+    let canvas = this.canvases.get(id)
+    if (!canvas) {
+      const loaded = await persist.loadCanvas(id)
+      if (!loaded) return undefined
+      await this.initializeFrames(loaded)
+      this.init([loaded])
+      canvas = this.canvases.get(id)!
+    }
+    const snapshot = await frameActor(id).snapshot()
+    if (snapshot.deleted) {
+      this.canvases.delete(id)
+      return undefined
+    }
+    if (!snapshot.initialized) await frameActor(id).initialize([])
+    return {
+      ...canvas,
+      frames: snapshot.frames,
+      updatedAt: Math.max(canvas.updatedAt, ...snapshot.frames.map((frame) => frame.updatedAt)),
+    }
+  }
+
+  async initializeFrames(canvas: Canvas): Promise<void> {
+    const actor = frameActor(canvas.id)
+    const snapshot = await actor.snapshot()
+    if (snapshot.initialized) return
+    if (canvas.frames.length && process.env.NODE_ENV === 'production')
+      throw new Error('Existing SQL frames require bun run migrate:actors before production startup.')
+    await actor.initialize(canvas.frames)
+  }
+
+  async syncFrame(id: string): Promise<Frame | undefined> {
+    return this.getFrame(id)
+  }
 
   init(canvases: Canvas[]) {
-    for (const c of canvases) {
-      this.canvases.set(c.id, c)
-      for (const f of c.frames) this.frameIndex.set(f.id, c.id)
-    }
+    for (const c of canvases) this.canvases.set(c.id, { ...c, frames: [] })
   }
 
   /** The dashboard row for one canvas. `viewerId` decides only whether the
@@ -43,14 +73,16 @@ class Store {
    *  canvases are NOT listed — listing them to everyone leaked one user's
    *  work onto every other user's dashboard. They remain reachable by their
    *  unguessable id and claimable there. */
-  listCanvases(userId: string, workspaceIds: readonly string[] = []) {
-    return [...this.canvases.values()]
-      .filter(
-        (c) =>
-          c.ownerId === userId ||
-          c.memberIds?.includes(userId) ||
-          (c.workspaceId !== undefined && workspaceIds.includes(c.workspaceId)),
-      )
+  async listCanvases(userId: string, workspaceIds: readonly string[] = []) {
+    const visible = [...this.canvases.values()].filter(
+      (c) =>
+        c.ownerId === userId ||
+        c.memberIds?.includes(userId) ||
+        (c.workspaceId !== undefined && workspaceIds.includes(c.workspaceId)),
+    )
+    const snapshots = await Promise.all(visible.map((c) => this.syncCanvas(c.id)))
+    return snapshots
+      .filter((c): c is Canvas => !!c)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((c) => this.toMeta(c, userId))
   }
@@ -60,8 +92,9 @@ class Store {
    *  A deliberately separate method rather than a flag on listCanvases: a
    *  boolean parameter is the kind of thing that eventually gets passed
    *  `true` from a route that shouldn't. */
-  listAllCanvases(limit = 200) {
-    const all = [...this.canvases.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+  async listAllCanvases(limit = 200) {
+    const snapshots = await Promise.all([...this.canvases.keys()].map((id) => this.syncCanvas(id)))
+    const all = snapshots.filter((c): c is Canvas => !!c).sort((a, b) => b.updatedAt - a.updatedAt)
     return {
       total: all.length,
       canvases: all.slice(0, limit).map((c) => ({
@@ -93,12 +126,12 @@ class Store {
     by: string,
     options: { name?: string; dropDemo?: boolean; workspaceId?: string } = {},
   ): Promise<Canvas | undefined> {
-    const source = this.canvases.get(id)
+    const source = await this.syncCanvas(id)
     if (!source) return undefined
     const now = Date.now()
     const canvasId = nanoid(10)
     const sourceFrames = options.dropDemo ? source.frames.filter((frame) => !frame.demo) : source.frames
-    const frameIds = new Map(sourceFrames.map((frame) => [frame.id, nanoid(10)]))
+    const frameIds = new Map(sourceFrames.map((frame) => [frame.id, `${canvasId}.${nanoid(10)}`]))
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
@@ -126,24 +159,25 @@ class Store {
       ...(guidelines?.length ? { guidelines } : {}),
       ...(references?.length ? { references } : {}),
     }
-    await persist.saveCanvasCopy(canvas)
-    this.canvases.set(canvas.id, canvas)
-    for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
+    await persist.saveCanvasCopy({ ...canvas, frames: [] })
+    await frameActor(canvasId).initialize(frames)
+    this.init([canvas])
     return canvas
   }
 
-  getCanvas(id: string) {
+  getCanvasMetadata(id: string) {
     return this.canvases.get(id)
   }
 
   /** Remove a canvas and its frames from memory + database. */
-  deleteCanvas(id: string): Canvas | undefined {
-    const c = this.canvases.get(id)
+  async deleteCanvas(id: string): Promise<Canvas | undefined> {
+    const c = await this.syncCanvas(id)
     if (!c) return undefined
-    for (const f of c.frames) this.frameIndex.delete(f.id)
+    const deleted = c
+    await frameActor(id).destroy()
     this.canvases.delete(id)
     persist.deleteCanvas(id)
-    return c
+    return deleted
   }
 
   /** Take ownership of a pre-auth (unowned) canvas. No-op if already owned. */
@@ -275,14 +309,14 @@ class Store {
 
   /** Upsert a design doc by name. New docs without a position are auto-placed
    *  as a card to the left of the frames, stacked downward. */
-  setGuideline(
+  async setGuideline(
     canvasId: string,
     name: string,
     markdown: string,
     by: string,
     pos?: { x: number; y: number },
     title?: string,
-  ): GuidelineDoc | undefined {
+  ): Promise<GuidelineDoc | undefined> {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
     const docs = (c.guidelines ??= [])
@@ -295,7 +329,7 @@ class Store {
       if (pos) Object.assign(doc, pos)
       if (title !== undefined) doc.title = title || undefined
     } else {
-      const placed = pos ?? this.placeGuideline(c, docs.length)
+      const placed = pos ?? this.placeGuideline((await this.syncCanvas(canvasId)) ?? c, docs.length)
       doc = { name, markdown, ...(title ? { title } : {}), updatedAt: now, updatedBy: by, ...placed }
       docs.push(doc)
       docs.sort((a, b) => a.name.localeCompare(b.name))
@@ -373,80 +407,64 @@ class Store {
     return ref
   }
 
-  getFrame(frameId: string): Frame | undefined {
-    const canvasId = this.frameIndex.get(frameId)
+  async getFrame(frameId: string): Promise<Frame | undefined> {
+    // New IDs carry their canvas, so browser-created frames need no SQL index.
+    // Original Doop IDs retain their SQL lookup after the one-time import.
+    const canvasId = frameId.includes('.')
+      ? frameId.slice(0, frameId.indexOf('.'))
+      : await persist.frameCanvasId(frameId)
     if (!canvasId) return undefined
-    return this.canvases.get(canvasId)?.frames.find((f) => f.id === frameId)
+    return (await this.syncCanvas(canvasId))?.frames.find((frame) => frame.id === frameId)
   }
 
-  createFrame(
-    canvasId: string,
-    input: { name: string; x?: number; y?: number; width?: number; height?: number; html?: string; demo?: boolean },
-    by: string,
-  ): Frame | undefined {
-    const c = this.canvases.get(canvasId)
-    if (!c) return undefined
-    const now = Date.now()
-    // auto-place: to the right of the right-most frame
-    let x = input.x
-    let y = input.y
-    if (x === undefined || y === undefined) {
-      const rightmost = c.frames.reduce((mx, f) => Math.max(mx, f.x + f.width), 0)
-      x ??= c.frames.length ? rightmost + 80 : 120
-      y ??= 120
-    }
-    const frame: Frame = {
-      id: nanoid(10),
-      canvasId,
-      name: input.name,
-      x,
-      y,
-      width: input.width ?? 640,
-      height: input.height ?? 480,
-      html: input.html ?? '',
-      createdAt: now,
-      updatedAt: now,
-      updatedBy: by,
-    }
-    if (input.demo) frame.demo = true
-    c.frames.push(frame)
-    c.updatedAt = now
-    this.frameIndex.set(frame.id, canvasId)
-    persist.saveFrame(frame, true)
-    persist.saveCanvas(c)
-    return frame
+  async createFrame(canvasId: string, input: FrameInput, by: string, actor?: Actor): Promise<Frame | undefined> {
+    if (!(await this.syncCanvas(canvasId))) return undefined
+    return (
+      await frameActor(canvasId).write(
+        { type: 'create', input },
+        actor ?? { name: by, kind: 'user', color: colorFor(by) },
+      )
+    )?.frame
   }
 
-  updateFrame(
-    frameId: string,
-    patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
-    by: string,
-  ): Frame | undefined {
-    const frame = this.getFrame(frameId)
+  async updateFrame(frameId: string, patch: FramePatch, by: string, actor?: Actor): Promise<Frame | undefined> {
+    const frame = await this.syncFrame(frameId)
     if (!frame) return undefined
-    Object.assign(frame, patch)
-    frame.updatedAt = Date.now()
-    frame.updatedBy = by
-    const c = this.canvases.get(frame.canvasId)!
-    c.updatedAt = frame.updatedAt
-    persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
-    persist.saveCanvas(c)
-    return frame
+    return (
+      await frameActor(frame.canvasId).write(
+        { type: 'update', id: frameId, patch },
+        actor ?? { name: by, kind: 'user', color: colorFor(by) },
+      )
+    )?.frame
   }
 
-  deleteFrame(frameId: string): Frame | undefined {
-    const canvasId = this.frameIndex.get(frameId)
-    if (!canvasId) return undefined
-    const c = this.canvases.get(canvasId)
-    if (!c) return undefined
-    const idx = c.frames.findIndex((f) => f.id === frameId)
-    if (idx === -1) return undefined
-    const [frame] = c.frames.splice(idx, 1)
-    c.updatedAt = Date.now()
-    this.frameIndex.delete(frameId)
-    persist.deleteFrame(frameId)
-    persist.saveCanvas(c)
-    return frame
+  async appendFrameHtml(
+    frameId: string,
+    chunk: string,
+    start: boolean,
+    by: string,
+    actor?: Actor,
+    done = false,
+  ): Promise<Frame | undefined> {
+    const frame = await this.syncFrame(frameId)
+    if (!frame) return undefined
+    return (
+      await frameActor(frame.canvasId).write(
+        { type: 'append', id: frameId, chunk, start, done },
+        actor ?? { name: by, kind: 'user', color: colorFor(by) },
+      )
+    )?.frame
+  }
+
+  async deleteFrame(frameId: string, actor?: Actor): Promise<Frame | undefined> {
+    const frame = await this.syncFrame(frameId)
+    if (!frame) return undefined
+    return (
+      await frameActor(frame.canvasId).write(
+        { type: 'delete', id: frameId },
+        actor ?? { name: frame.updatedBy, kind: 'user', color: colorFor(frame.updatedBy) },
+      )
+    )?.frame
   }
 }
 
