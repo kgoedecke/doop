@@ -138,7 +138,7 @@ export function SelectField<T extends string>({
         onChange={(e) => onChange(e.target.value as T)}
       >
         {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-surface text-ink">
+          <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}

@@ -14,7 +14,7 @@ const badgeVariants = cva(
       tone: {
         default: 'border-line bg-paper-deep text-ink-soft',
         admin: 'border-accent-ink/40 bg-accent-ink/[0.08] text-accent-ink',
-        banned: 'border-[#8a5b00]/35 bg-[#ffb800]/[0.12] text-[#8a5b00]',
+        banned: 'border-warning-ink/35 bg-warning/[0.12] text-warning-ink',
         accent: 'border-accent-ink/40 bg-transparent text-accent-ink',
         outline: 'border-line bg-transparent text-ink-soft',
       },

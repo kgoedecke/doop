@@ -702,7 +702,7 @@ function PullNode({
               meta.connected ? 'text-ink-soft' : 'text-ink-faint',
             )}
           >
-            <span className={cn('size-[6px] rounded-full', meta.connected ? 'bg-[#3f9c52]' : 'bg-line')} />
+            <span className={cn('size-[6px] rounded-full', meta.connected ? 'bg-success' : 'bg-line')} />
             {meta.connected ? 'connected' : 'not connected'}
           </span>
         )}
@@ -805,7 +805,7 @@ function AgentNode({
               aria-checked={on}
               className={cn(
                 'gap-1 rounded-full px-2 py-1 text-[11.5px] text-ink-soft hover:border-ink-soft hover:bg-transparent',
-                on && 'border-ink bg-ink text-white hover:border-ink hover:bg-ink hover:text-white',
+                on && 'border-ink bg-ink text-paper hover:border-ink hover:bg-ink hover:text-paper',
               )}
               title={role.blurb}
               onClick={() => onChange({ roles: [role.id] })}
@@ -861,7 +861,7 @@ function StepPicker({ onPick, onCancel }: { onPick: (type: Step['type']) => void
         <button type="button" className={tile} onClick={() => onPick('agent')}>
           <span className="flex">
             {AGENT_ROLES.slice(0, 4).map((r, i) => (
-              <RoleMark key={r.id} role={r} size={22} className={cn(i > 0 && '-ml-1.5 ring-[1.5px] ring-white')} />
+              <RoleMark key={r.id} role={r} size={22} className={cn(i > 0 && '-ml-1.5 ring-[1.5px] ring-surface')} />
             ))}
           </span>
           <b className="text-[13px] font-semibold tracking-[-0.012em]">Agent task</b>

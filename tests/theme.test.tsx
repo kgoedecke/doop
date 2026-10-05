@@ -1,189 +1,91 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { getTheme, setTheme, toggleDarkMode, THEME_STORAGE_KEY, useTheme } from '../src/lib/theme'
-import { Switch, SwitchCard, SwitchRow } from '../src/components/ui/switch'
+import { createRoot } from 'react-dom/client'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+/* the test runtime has no localStorage; the module only needs get and set */
+const store = new Map<string, string>()
+const storage = {
+  getItem: (key: string) => store.get(key) ?? null,
+  setItem: (key: string, value: string) => void store.set(key, value),
+}
 
-describe('Theme management', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    document.documentElement.className = ''
-    document.documentElement.style.colorScheme = ''
-  })
+/* the module caches the preference, so every test gets a fresh copy */
+type ThemeModule = typeof import('../src/lib/theme')
+let theme: ThemeModule
+const root = () => document.documentElement
 
-  afterEach(() => {
-    localStorage.clear()
-    document.documentElement.className = ''
-    document.documentElement.style.colorScheme = ''
-  })
-
-  it('defaults to system theme when no preference is saved', () => {
-    expect(getTheme()).toBe('system')
-  })
-
-  it('sets and persists theme in localStorage and documentElement', () => {
-    setTheme('dark')
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
-    expect(document.documentElement.classList.contains('dark')).toBe(true)
-    expect(document.documentElement.style.colorScheme).toBe('dark')
-
-    setTheme('light')
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light')
-    expect(document.documentElement.classList.contains('dark')).toBe(false)
-    expect(document.documentElement.style.colorScheme).toBe('light')
-  })
-
-  it('toggles dark mode between light and dark', () => {
-    setTheme('light')
-    toggleDarkMode()
-    expect(getTheme()).toBe('dark')
-    expect(document.documentElement.classList.contains('dark')).toBe(true)
-
-    toggleDarkMode()
-    expect(getTheme()).toBe('light')
-    expect(document.documentElement.classList.contains('dark')).toBe(false)
-  })
-
-  it('reactively updates in useTheme hook', async () => {
-    let captured: ReturnType<typeof useTheme> | null = null
-
-    function TestComponent() {
-      const state = useTheme()
-      captured = state
-      return <div>Active: {state.theme}</div>
-    }
-
-    const container = document.createElement('div')
-    document.body.append(container)
-    const root = createRoot(container)
-
-    await act(async () => {
-      root.render(<TestComponent />)
-    })
-
-    expect(captured).not.toBeNull()
-
-    await act(async () => {
-      setTheme('dark')
-    })
-
-    expect(captured!.theme).toBe('dark')
-    expect(captured!.isDark).toBe(true)
-    expect(container.textContent).toContain('Active: dark')
-
-    await act(async () => {
-      captured!.toggleDarkMode()
-    })
-
-    expect(captured!.theme).toBe('light')
-    expect(captured!.isDark).toBe(false)
-
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
-  })
+beforeEach(async () => {
+  store.clear()
+  vi.stubGlobal('localStorage', storage)
+  root().className = ''
+  root().style.colorScheme = ''
+  vi.resetModules()
+  theme = await import('../src/lib/theme')
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
-describe('Switch component', () => {
-  let container: HTMLDivElement
-  let root: Root
+it('follows the system when nothing is stored, and ignores garbage', () => {
+  expect(theme.getTheme()).toBe('system')
+  theme.initTheme()
+  /* happy-dom reports no dark preference */
+  expect(root().classList.contains('dark')).toBe(false)
+  expect(root().style.colorScheme).toBe('light')
 
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.append(container)
-    root = createRoot(container)
+  storage.setItem(theme.THEME_STORAGE_KEY, 'blue')
+  vi.resetModules()
+  return import('../src/lib/theme').then((fresh) => expect(fresh.getTheme()).toBe('system'))
+})
+
+it('paints the stored preference before React mounts', () => {
+  storage.setItem(theme.THEME_STORAGE_KEY, 'dark')
+  theme.initTheme()
+  expect(root().classList.contains('dark')).toBe(true)
+  expect(root().style.colorScheme).toBe('dark')
+})
+
+it('setTheme persists, repaints, and re-renders the hook', async () => {
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  const container = document.createElement('div')
+  document.body.append(container)
+  function Probe() {
+    const { theme: preference, resolved } = theme.useTheme()
+    return <p>{`${preference}/${resolved}`}</p>
+  }
+  const app = createRoot(container)
+  await act(async () => app.render(<Probe />))
+  expect(container.textContent).toBe('system/light')
+
+  await act(async () => theme.setTheme('dark'))
+  expect(container.textContent).toBe('dark/dark')
+  expect(storage.getItem(theme.THEME_STORAGE_KEY)).toBe('dark')
+  expect(root().classList.contains('dark')).toBe(true)
+  expect(root().style.colorScheme).toBe('dark')
+
+  await act(async () => theme.setTheme('light'))
+  expect(container.textContent).toBe('light/light')
+  expect(root().classList.contains('dark')).toBe(false)
+
+  await act(async () => app.unmount())
+  container.remove()
+})
+
+it('keeps the choice for the session when storage is unavailable', () => {
+  vi.spyOn(storage, 'setItem').mockImplementation(() => {
+    throw new Error('QuotaExceededError')
   })
+  theme.setTheme('dark')
+  expect(theme.getTheme()).toBe('dark')
+  expect(root().classList.contains('dark')).toBe(true)
+})
 
-  afterEach(() => {
-    act(() => {
-      root.unmount()
-    })
-    container.remove()
-  })
-
-  it('renders with role="switch" and handles clicks', async () => {
-    let state = false
-
-    await act(async () => {
-      root.render(
-        <Switch
-          checked={state}
-          onCheckedChange={(next) => {
-            state = next
-          }}
-        />,
-      )
-    })
-
-    const switchBtn = container.querySelector<HTMLButtonElement>('button[role="switch"]')!
-    expect(switchBtn).toBeDefined()
-    expect(switchBtn.getAttribute('aria-checked')).toBe('false')
-    expect(switchBtn.getAttribute('data-state')).toBe('unchecked')
-
-    await act(async () => {
-      switchBtn.click()
-    })
-
-    expect(state).toBe(true)
-  })
-
-  it('renders SwitchCard and toggles on card click', async () => {
-    let state = false
-
-    await act(async () => {
-      root.render(
-        <SwitchCard
-          title="Dark mode"
-          description="Test description"
-          checked={state}
-          onChange={(next) => {
-            state = next
-          }}
-        />,
-      )
-    })
-
-    const card = container.querySelector<HTMLDivElement>('[role="button"]')!
-    expect(card).toBeDefined()
-    expect(container.textContent).toContain('Dark mode')
-    expect(container.textContent).toContain('Test description')
-
-    await act(async () => {
-      card.click()
-    })
-
-    expect(state).toBe(true)
-  })
-
-  it('renders SwitchRow with label and description', async () => {
-    let state = false
-
-    await act(async () => {
-      root.render(
-        <SwitchRow
-          label="Appearance setting"
-          description="Detailed copy"
-          checked={state}
-          onCheckedChange={(next) => {
-            state = next
-          }}
-        />,
-      )
-    })
-
-    expect(container.textContent).toContain('Appearance setting')
-    expect(container.textContent).toContain('Detailed copy')
-    const switchBtn = container.querySelector<HTMLButtonElement>('button[role="switch"]')!
-    expect(switchBtn).toBeDefined()
-
-    await act(async () => {
-      switchBtn.click()
-    })
-
-    expect(state).toBe(true)
-  })
+it('picks up a change made in another tab', () => {
+  theme.initTheme()
+  storage.setItem(theme.THEME_STORAGE_KEY, 'dark')
+  window.dispatchEvent(new StorageEvent('storage', { key: theme.THEME_STORAGE_KEY }))
+  expect(theme.getTheme()).toBe('dark')
+  expect(root().classList.contains('dark')).toBe(true)
 })

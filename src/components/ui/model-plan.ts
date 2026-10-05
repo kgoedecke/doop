@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 export const planRow = (live: boolean) =>
   cn(
     'flex gap-[14px] border-b border-line-soft px-[22px] py-[18px] last:border-b-0 max-md:gap-3 max-md:px-4 max-md:py-[17px]',
-    live && 'bg-[linear-gradient(90deg,rgba(63,156,82,0.05),transparent_40%)]',
+    live && 'bg-[linear-gradient(90deg,color-mix(in_srgb,var(--success)_5%,transparent),transparent_40%)]',
   )
 export const planMark = (live: boolean) =>
   cn(
@@ -15,7 +15,7 @@ export const planMark = (live: boolean) =>
 export const planPill = (on: boolean) =>
   cn(
     'rounded-full bg-paper-deep px-[9px] py-[3px] text-[11.5px] font-bold text-ink-faint',
-    on && 'bg-[#3f9c52]/15 text-[#2f7a3f] dark:text-[#52c46f]',
+    on && 'bg-success-ink/12 text-success-ink',
   )
 /* the model tiers as chips — the base .chip recipe reshaped into the picker */
 export const planAsCode =

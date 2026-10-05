@@ -44,7 +44,7 @@ function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
         </p>
         <div className="mt-[18px] flex flex-wrap gap-[9px]">
           {CLAUDE_MODELS.map((model) => (
-            <ToggleChip key={model.id} state="idle" className="bg-paper-deep text-ink-soft opacity-80">
+            <ToggleChip key={model.id} state="idle" className="bg-paper-deep text-ink-faint opacity-100">
               {model.name}
             </ToggleChip>
           ))}
@@ -158,7 +158,7 @@ export function LocalClaudeRow() {
               {CLAUDE_MODELS.map((model) => (
                 <ToggleChipItem key={model.id} value={model.id} title={model.blurb}>
                   {model.id === selectedModel && (
-                    <CheckIcon width={13} height={13} strokeWidth={2.5} color="#1a6b43" aria-hidden />
+                    <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
                   )}
                   {model.name}
                 </ToggleChipItem>

@@ -40,7 +40,7 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
      and say it even where there is no free tier to count (limit 0) */
   if (allowance.byoModel) {
     return (
-      <span className="text-[12px] text-[#1e7a4c]">
+      <span className="text-[12px] text-success-ink">
         Doop Agent on your{' '}
         {allowance.byoKind === 'gemini-cloud'
           ? 'Gemini cloud connection'

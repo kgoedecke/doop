@@ -194,7 +194,7 @@ function RefThumb({ reference }: { reference: MemoryReference }) {
   const scale = w / reference.width
   return (
     <span
-      className="block w-full overflow-hidden rounded-[8px] border border-line bg-white"
+      className="block w-full overflow-hidden rounded-[8px] border border-line bg-surface"
       style={{ height: Math.min(reference.height * scale, 150) }}
     >
       <iframe
@@ -248,7 +248,7 @@ function RefModal({
           colors, type and layout in new work
         </div>
         <div
-          className="mt-3.5 overflow-auto rounded-[12px] border border-line bg-white"
+          className="mt-3.5 overflow-auto rounded-[12px] border border-line bg-surface"
           style={{ height: Math.min(reference.height * scale, window.innerHeight * 0.55) }}
         >
           <iframe

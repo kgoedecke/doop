@@ -1,164 +1,113 @@
 import { useSyncExternalStore } from 'react'
 
+/** What a person asks for: a fixed look, or whatever the OS is set to. */
 export type Theme = 'light' | 'dark' | 'system'
+/** What the document is actually painted in. */
 export type ResolvedTheme = 'light' | 'dark'
 
+/* index.html reads this same key before the bundle loads, so a reload never
+   flashes the light theme — change one and change the other. The choice is
+   per browser, not per account: it is how this device looks, like zoom. */
 export const THEME_STORAGE_KEY = 'doop-theme'
 
-type ThemeListener = () => void
-const listeners = new Set<ThemeListener>()
+const DARK_QUERY = '(prefers-color-scheme: dark)'
 
-function notifyListeners() {
-  listeners.forEach((listener) => {
-    try {
-      listener()
-    } catch (err) {
-      console.error('Error in theme listener:', err)
-    }
-  })
+export function isTheme(value: unknown): value is Theme {
+  return value === 'light' || value === 'dark' || value === 'system'
 }
 
-/**
- * Returns the system theme preference ('dark' or 'light').
- */
-export function getSystemTheme(): ResolvedTheme {
-  if (typeof window === 'undefined') return 'light'
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
+/* The preference as set this session. Storage can be off limits (a locked
+   down webview, private browsing) and the switch must still work. */
+let active: Theme | null = null
+const listeners = new Set<() => void>()
 
-/**
- * Returns the currently configured theme preference ('light', 'dark', or 'system').
- * Defaults to 'system' if nothing is saved or if storage is inaccessible.
- */
-export function getTheme(): Theme {
-  if (typeof window === 'undefined') return 'system'
+function readStored(): Theme | null {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY)
-    if (stored === 'light' || stored === 'dark' || stored === 'system') {
-      return stored
-    }
+    return isTheme(stored) ? stored : null
   } catch {
-    // LocalStorage might be restricted
+    return null
   }
-  return 'system'
 }
 
-/**
- * Resolves any theme ('light', 'dark', or 'system') to the concrete 'light' or 'dark' mode.
- */
-export function resolveTheme(theme: Theme = getTheme()): ResolvedTheme {
-  return theme === 'system' ? getSystemTheme() : theme
+export function getTheme(): Theme {
+  if (!active) active = readStored() ?? 'system'
+  return active
 }
 
-/**
- * Returns the current concrete theme applied to the document ('light' or 'dark').
- */
-export function getResolvedTheme(): ResolvedTheme {
-  return resolveTheme(getTheme())
+function systemTheme(): ResolvedTheme {
+  return window.matchMedia(DARK_QUERY).matches ? 'dark' : 'light'
 }
 
-/**
- * Applies the given theme to the document HTML element and synchronizes color-scheme.
- */
-export function applyTheme(theme: Theme = getTheme()): ResolvedTheme {
+export function resolveTheme(theme: Theme): ResolvedTheme {
+  return theme === 'system' ? systemTheme() : theme
+}
+
+/* `.dark` on <html> flips the design tokens; color-scheme flips what the
+   browser draws itself — scrollbars, native selects, form controls. */
+function paint(theme: Theme): void {
   const resolved = resolveTheme(theme)
-  if (typeof document !== 'undefined') {
-    const root = document.documentElement
-    if (resolved === 'dark') {
-      root.classList.add('dark')
-      root.style.colorScheme = 'dark'
-    } else {
-      root.classList.remove('dark')
-      root.style.colorScheme = 'light'
-    }
-  }
-  return resolved
+  const root = document.documentElement
+  root.classList.toggle('dark', resolved === 'dark')
+  root.style.colorScheme = resolved
 }
 
-/**
- * Updates the user's theme preference, persists it to localStorage,
- * updates the document classes, and notifies all subscribers.
- */
+type ThemeState = { theme: Theme; resolved: ResolvedTheme }
+
+/* useSyncExternalStore wants the same object back until something changed,
+   so the snapshot is cached and dropped on every notification */
+let snapshot: ThemeState | null = null
+
+function getSnapshot(): ThemeState {
+  if (!snapshot) {
+    const theme = getTheme()
+    snapshot = { theme, resolved: resolveTheme(theme) }
+  }
+  return snapshot
+}
+
+function notify(): void {
+  snapshot = null
+  listeners.forEach((listener) => listener())
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
 export function setTheme(theme: Theme): void {
+  active = theme
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme)
   } catch {
-    // LocalStorage might be restricted
+    /* nowhere to keep it — the choice still holds until the tab closes */
   }
-  applyTheme(theme)
-  notifyListeners()
+  paint(theme)
+  notify()
 }
 
-/**
- * Convenience function to toggle between light and dark modes.
- */
-export function toggleDarkMode(): void {
-  const currentResolved = getResolvedTheme()
-  const nextTheme: Theme = currentResolved === 'dark' ? 'light' : 'dark'
-  setTheme(nextTheme)
-}
-
-function subscribe(listener: ThemeListener): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
-// Global browser listeners for system changes and cross-tab storage sync
-if (typeof window !== 'undefined') {
-  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-  const handleMediaChange = () => {
-    if (getTheme() === 'system') {
-      applyTheme('system')
-      notifyListeners()
-    }
-  }
-
-  if (typeof mediaQuery.addEventListener === 'function') {
-    mediaQuery.addEventListener('change', handleMediaChange)
-  } else if (typeof (mediaQuery as { addListener?: (cb: () => void) => void }).addListener === 'function') {
-    ;(mediaQuery as { addListener: (cb: () => void) => void }).addListener(handleMediaChange)
-  }
-
-  window.addEventListener('storage', (event) => {
-    if (event.key === THEME_STORAGE_KEY) {
-      applyTheme(getTheme())
-      notifyListeners()
-    }
+/** Paints the stored preference and keeps it in step with the OS and with
+ *  other tabs. Called once, before React mounts. */
+export function initTheme(): void {
+  paint(getTheme())
+  window.matchMedia(DARK_QUERY).addEventListener('change', () => {
+    if (getTheme() !== 'system') return
+    paint('system')
+    notify()
   })
-
-  // Ensure DOM matches preference on module evaluation
-  applyTheme()
+  /* another tab changed it (or cleared storage, where key is null) */
+  window.addEventListener('storage', (event) => {
+    if (event.key !== null && event.key !== THEME_STORAGE_KEY) return
+    active = null
+    paint(getTheme())
+    notify()
+  })
 }
 
-export interface UseThemeResult {
-  /** The configured preference: 'light', 'dark', or 'system' */
-  theme: Theme
-  /** The effective active theme: 'light' or 'dark' */
-  resolvedTheme: ResolvedTheme
-  /** True if dark mode is active */
-  isDark: boolean
-  /** Update the theme preference */
-  setTheme: (theme: Theme) => void
-  /** Toggle between light and dark */
-  toggleDarkMode: () => void
-}
-
-/**
- * React hook to read and manipulate the active theme.
- * Re-renders whenever the theme setting or system preference changes.
- */
-export function useTheme(): UseThemeResult {
-  const theme = useSyncExternalStore(subscribe, getTheme, () => 'system' as Theme)
-  const resolvedTheme = resolveTheme(theme)
-  const isDark = resolvedTheme === 'dark'
-
-  return {
-    theme,
-    resolvedTheme,
-    isDark,
-    setTheme,
-    toggleDarkMode,
-  }
+/** The preference, what it currently resolves to, and the setter. Re-renders
+ *  when the preference, the OS setting, or another tab changes it. */
+export function useTheme(): ThemeState & { setTheme: (theme: Theme) => void } {
+  const state = useSyncExternalStore(subscribe, getSnapshot)
+  return { ...state, setTheme }
 }

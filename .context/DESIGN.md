@@ -30,6 +30,19 @@ rather than hand-rolling primitives; it writes into `src/components/ui` per the 
 - `--shadow-card` / `--shadow-pop` - two-layer soft shadows (ambient + key) for cards and popped
   elements respectively.
 
+## Theme
+
+- Light is the default; `.dark` on `<html>` switches every token above. The shadcn semantic set
+  resolves through `--paper` / `--ink`, so `.dark` redefines only the primitives and shadows.
+- The preference (`light` / `dark` / `system`) lives in `localStorage` under `doop-theme`, per
+  browser. `index.html` paints it before the bundle loads; `src/lib/theme.ts` owns it after that
+  (`initTheme()` in `main.tsx`, `useTheme()` in components). Controls: Settings -> Appearance and
+  the account menu.
+- `--success` / `--success-ink` and `--warning` / `--warning-ink` are the status colours; use
+  them (`bg-success`, `text-success-ink`) rather than literal greens. Text on an ink fill is
+  `text-paper`, never `text-white`, so it flips with the theme. `text-white` is for brand and
+  accent fills and for dark overlays, which stay dark in both themes.
+
 ## Aliases (`components.json`)
 
 - `@/components` -> `src/components`, `@/components/ui` -> `src/components/ui`,

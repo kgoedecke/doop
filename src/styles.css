@@ -19,6 +19,10 @@
   --color-brand: var(--brand);
   --color-accent-ink: var(--accent-ink);
   --color-dot: var(--dot);
+  --color-success: var(--success);
+  --color-success-ink: var(--success-ink);
+  --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
   --font-ui: var(--font-ui);
   --font-display: var(--font-display);
   --font-mono: var(--font-mono);
@@ -85,7 +89,6 @@
 
 :root {
   color-scheme: light;
-
   /* Warm paper, not cold white: --paper is the backdrop, --surface the raised
      layer. They stay one step apart so panels and cards keep their edge. */
   --paper: #fdfdfc;
@@ -102,6 +105,12 @@
   --brand: #2743ee;
   --accent-ink: #d0341f;
   --dot: #ebe9e4;
+  /* Status: the fill (--success, --warning) tints and dots, the ink variant
+     is text that sits on paper. Both flip with the theme. */
+  --success: #3f9c52;
+  --success-ink: #1e7a4c;
+  --warning: #ffb800;
+  --warning-ink: #8a5b00;
   --font-ui: 'Instrument Sans', sans-serif;
   /* Display is the SAME sans as the UI — the chrome is quiet by design.
      Editorial serif is opt-in per element via `font-serif`, reserved for
@@ -237,7 +246,7 @@
     -webkit-text-size-adjust: 100%;
   }
   ::selection {
-    background: color-mix(in srgb, var(--brand) 28%, transparent);
+    background: color-mix(in srgb, var(--brand) 18%, transparent);
   }
   button:not(:disabled),
   [role='button']:not(:disabled) {
@@ -253,11 +262,9 @@
 
 .dark {
   color-scheme: dark;
-
-  /* Warm dark charcoal: editorial, quiet, and deep without the harshness
-     of pure OLED black (#000000). The layers maintain precise depth separation:
-     --paper is the canvas floor, --paper-deep the recessed rail/well, and
-     --surface the raised editorial sheet. */
+  /* Warm charcoal, not OLED black: the same three layers as the light paper,
+     one step apart, so panels keep their edge in the dark. The shadcn tokens
+     above resolve through these, so only the primitives are redefined. */
   --paper: #141413;
   --paper-deep: #191918;
   --surface: #20201e;
@@ -266,15 +273,17 @@
   --ink-faint: #706d66;
   --line: rgba(255, 255, 255, 0.12);
   --line-soft: rgba(255, 255, 255, 0.07);
-  /* Electric cursor blue tuned with high contrast and luminance for dark grounds;
-     accent ink is a softened editorial vermilion for alerts and errors. */
+  --dot: rgba(255, 255, 255, 0.07);
+  /* Cursor blue lifted for luminance on a dark ground; the failure red is
+     softened the same way. */
   --brand: #4a6bff;
   --accent-ink: #ff5c47;
-  --dot: rgba(255, 255, 255, 0.07);
-
-  /* Hairline elevation system: dark surfaces cannot rely on shadow darkening alone.
-     Each tier features a micro-translucent light catch hairline ring (0.5px) simulating
-     grazing light along physical card edges, backed by soft ambient depth. */
+  --success: #4caf60;
+  --success-ink: #6fd08e;
+  --warning: #ffb800;
+  --warning-ink: #e6b04a;
+  /* Dark surfaces cannot lift on shadow alone: each tier keeps a half-pixel
+     light-catch ring on top of a deeper ambient drop. */
   --shadow-card:
     0 0 0 0.5px rgba(255, 255, 255, 0.08), 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 28px -14px rgba(0, 0, 0, 0.55);
   --shadow-pop:
@@ -289,39 +298,6 @@
   --shadow-elevation-2:
     0 0 0 0.5px rgba(255, 255, 255, 0.11), 0 8px 16px -4px rgba(0, 0, 0, 0.5), 0 20px 40px -10px rgba(0, 0, 0, 0.65),
     0 32px 64px -18px rgba(0, 0, 0, 0.8);
-
-  /* Tailwind & shadcn semantic token harmonization */
-  --background: var(--paper);
-  --foreground: var(--ink);
-  --card: var(--surface);
-  --card-foreground: var(--ink);
-  --popover: var(--surface);
-  --popover-foreground: var(--ink);
-  --primary: var(--brand);
-  --primary-foreground: #ffffff;
-  --secondary: var(--paper-deep);
-  --secondary-foreground: var(--ink);
-  --muted: var(--paper-deep);
-  --muted-foreground: var(--ink-soft);
-  --accent: var(--paper-deep);
-  --accent-foreground: var(--ink);
-  --destructive: var(--accent-ink);
-  --border: var(--line);
-  --input: var(--line);
-  --ring: var(--brand);
-  --chart-1: #4a6bff;
-  --chart-2: #34d399;
-  --chart-3: #fbbf24;
-  --chart-4: #f472b6;
-  --chart-5: #a78bfa;
-  --sidebar: var(--surface);
-  --sidebar-foreground: var(--ink);
-  --sidebar-primary: var(--brand);
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: var(--paper-deep);
-  --sidebar-accent-foreground: var(--ink);
-  --sidebar-border: var(--line);
-  --sidebar-ring: var(--brand);
 }
 
 /* Keyframes: the one thing utilities cannot express. Components reference

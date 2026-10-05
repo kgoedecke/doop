@@ -6,7 +6,6 @@ import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Note } from './ui/note'
 import { Card, CardDescription, CardHeader, CardRow, CardTitle } from './ui/card'
-import { AppearanceSettings } from './AppearanceSettings'
 
 /* settings fields are a fixed column on desktop and full width on a phone */
 const settingsCard = 'mt-4 max-w-[1000px] overflow-hidden sm:mt-5'
@@ -127,7 +126,7 @@ export function AccountSettings() {
         >
           <span className="min-w-0 font-mono text-[13px] [overflow-wrap:anywhere]">{user?.email}</span>
           {user?.emailVerified ? (
-            <Badge className="border-[#3f9c52]/35 bg-[#3f9c52]/10 text-[10.5px] text-[#2f7a3f]">verified</Badge>
+            <Badge className="border-success/35 bg-success/10 text-[10.5px] text-success-ink">verified</Badge>
           ) : (
             <Badge className="text-[10.5px]">unverified</Badge>
           )}
@@ -183,8 +182,6 @@ export function AccountSettings() {
           )}
         </CardRow>
       </Card>
-
-      <AppearanceSettings embedded />
     </>
   )
 }
