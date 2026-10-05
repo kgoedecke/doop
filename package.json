@@ -18,7 +18,6 @@
     "doc-lint": "node scripts/doc-lint.mjs",
     "prepare": "husky || true",
     "deploy:actors": "node scripts/deploy-actors.mjs",
-    "migrate:actors": "tsx --env-file-if-exists=.env scripts/migrate-actors.ts",
     "actors:generate": "node scripts/generate-actors.mjs",
     "actors:check": "node scripts/generate-actors.mjs --check"
   },

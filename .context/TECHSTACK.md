@@ -24,14 +24,14 @@
 ## 3. Data and Persistence
 
 - PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - accounts, canvas metadata,
-  and collaboration records. Original frame rows remain only for cutover and legacy ID lookup.
+  and collaboration records. Original frame rows remain for lazy initialization and legacy ID lookup.
 - `durable-actors` 0.7.13 / `terse-sdk` 0.9.12 - one `CanvasFrames` actor per canvas owns
   frame state. Backend reads/writes use generated RPC; browsers edit and subscribe over an
   actor WebSocket authorized by `ActorProxy`. Doop `/ws` retains other collaboration events.
   `pnpm actors:generate` regenerates the client; `pnpm actors:check` verifies it in CI.
   `bun run dev` starts persistent local actors; production uses managed Terse.
-  Existing PostgreSQL frames use `bun run migrate:actors` with writers stopped; `--verify`
-  checks the imported state before production startup. The command leaves SQL and AI queues unchanged.
+  Existing SQL frames load once on first access if the actor is uninitialized; initialized empty or
+  deleted actors never reload SQL. Stop old SQL writers before upgrading; no bulk migration is needed.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).

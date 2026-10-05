@@ -583,12 +583,11 @@ const LOG_CAP = 100
 /** the chat keeps more history than the other logs — it is the conversation */
 export const CHAT_LOG_CAP = 300
 
-/** Discover canvases created on another app server without rehydrating AI queues. */
+/** Discover canvas metadata without rehydrating frames or AI queues. */
 export async function loadCanvas(id: string): Promise<Canvas | undefined> {
   const [c] = await db.select().from(t.canvases).where(eq(t.canvases.id, id))
   if (!c) return undefined
-  const [frames, members, guidelines, references] = await Promise.all([
-    db.select().from(t.frames).where(eq(t.frames.canvasId, id)).orderBy(t.frames.createdAt),
+  const [members, guidelines, references] = await Promise.all([
     db.select().from(t.canvasMembers).where(eq(t.canvasMembers.canvasId, id)),
     db.select().from(t.guidelines).where(eq(t.guidelines.canvasId, id)).orderBy(t.guidelines.name),
     db
@@ -609,7 +608,7 @@ export async function loadCanvas(id: string): Promise<Canvas | undefined> {
     workspaceId: c.workspaceId ?? undefined,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
-    frames: frames.map((frame) => ({ ...frame, demo: frame.demo ?? undefined })),
+    frames: [],
     memberIds: members.map((member) => member.userId),
     guidelines: guidelines.map((g) => ({
       name: g.name,
@@ -624,6 +623,12 @@ export async function loadCanvas(id: string): Promise<Canvas | undefined> {
   }
 }
 
+/** Read legacy frames only when their canvas actor has not been initialized. */
+export async function loadFrames(canvasId: string): Promise<Frame[]> {
+  const frames = await db.select().from(t.frames).where(eq(t.frames.canvasId, canvasId)).orderBy(t.frames.createdAt)
+  return frames.map((frame) => ({ ...frame, demo: frame.demo ?? undefined }))
+}
+
 export async function frameCanvasId(id: string): Promise<string | undefined> {
   const [frame] = await db.select({ canvasId: t.frames.canvasId }).from(t.frames).where(eq(t.frames.id, id))
   return frame?.canvasId
@@ -632,7 +637,6 @@ export async function frameCanvasId(id: string): Promise<string | undefined> {
 export async function hydrate(): Promise<Hydrated> {
   const [
     canvasRows,
-    frameRows,
     taskRows,
     feedbackRows,
     commentRows,
@@ -645,7 +649,6 @@ export async function hydrate(): Promise<Hydrated> {
     memberRows,
   ] = await Promise.all([
     db.select().from(t.canvases),
-    db.select().from(t.frames),
     db.select().from(t.tasks).orderBy(desc(t.tasks.startedAt)),
     db.select().from(t.feedback).orderBy(desc(t.feedback.at)),
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
@@ -677,8 +680,6 @@ export async function hydrate(): Promise<Hydrated> {
     const c = byId.get(m.canvasId)
     if (c) (c.memberIds ??= []).push(m.userId)
   }
-  for (const f of frameRows) byId.get(f.canvasId)?.frames.push({ ...f, demo: f.demo ?? undefined })
-  for (const c of canvases) c.frames.sort((a, b) => a.createdAt - b.createdAt)
   for (const r of referenceRows) {
     const c = byId.get(r.canvasId)
     if (!c) continue

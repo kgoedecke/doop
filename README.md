@@ -421,31 +421,21 @@ Doop's existing `/ws` connection continues to carry chat, presence, and other co
 
 This first slice synchronizes frame edits across app servers. AI execution, queues, comments,
 presence, and canvas metadata retain their existing architecture.
-Frame state lives in the actor project. Existing SQL frame rows remain as the cutover source and
+Frame state lives in the actor project. Existing SQL frame rows remain as the lazy-import source and
 lookup for legacy frame IDs; new frame state is not mirrored to SQL. Back up actor state
 alongside SQL and uploaded assets.
 
-For an existing PostgreSQL installation, rehearse on a restored backup and a separate actor project first.
-Deploy the actor code, then stop **all** old and new Doop servers/workers and let pending SQL saves finish.
-Take a database backup and retain uploaded assets. With `DATABASE_URL` and the destination actor settings exported:
+Existing canvases migrate lazily: the first frame read (including dashboard counts) or browser connection
+loads that canvas's SQL frames only if its actor is uninitialized. Initialization is guarded inside the actor,
+so simultaneous requests cannot overwrite an initialized canvas. Empty or deleted actors stay empty or deleted;
+SQL and actor errors fail the request rather than substituting an empty canvas. Startup does not scan actors
+or import every canvas, and no migration command is needed.
 
-```bash
-bun run migrate:actors
-bun run migrate:actors --verify
-```
-
-Inside the production image, use `node_modules/.bin/tsx scripts/migrate-actors.ts` instead of
-`bun run migrate:actors`; append `--verify` for the second pass.
-
-The command locks frame/canvas tables against writes, imports each canvas once, and compares every frame
-field. It does not modify SQL or hydrate AI queues. If interrupted, rerun it with the same database and
-actor project; mismatches or actors already accepting edits stop the command without overwriting them.
-After both commands succeed, start the upgraded app with traffic still closed, check existing canvases,
-then reopen traffic. Production refuses to auto-import existing nonempty SQL frame data; local development
-still initializes it automatically. Keep writers stopped throughout: the SQL lock ends with the command.
-Before new writes, rollback can use the unchanged SQL database and old app; discard the partial actor
-project before retrying if SQL changes. After new actor writes, SQL no longer contains current frames, so reverting the app alone
-is not a safe rollback: actor state must first be reconciled and verified against SQL.
+Before upgrading an existing installation, rehearse with a restored database and a separate actor project.
+Deploy the actor code, stop old SQL-writing servers/workers, let their pending saves finish, and back up SQL
+and assets. Then start the upgraded servers together, verify existing canvases, and reopen traffic.
+Old SQL writers must not run alongside actor writers. After new actor writes, SQL no longer has current
+frames, so reverting the app alone is not a safe rollback: actor state must first be reconciled with SQL.
 
 ## Connect an AI agent
 
@@ -694,7 +684,7 @@ through identical plumbing.
 PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style.
 `bun run test` starts isolated local actors and runs the integration suite against throwaway databases.
 Set `DOOP_TEST_POSTGRES_URL` to a PostgreSQL admin connection to run `tests/canvas-sync.test.ts`;
-it creates and drops temporary databases for the two-server and interrupted-cutover proofs. CI runs these checks.
+it creates and drops temporary databases for the two-server and lazy-initialization proofs. CI runs these checks.
 To run it against a disposable managed project, export its `TERSE_ACTOR_URL` and `TERSE_API_KEY`
 and set `DOOP_TEST_ACTORS=external`. Tests do not load `.env`.
 Schema changes go through drizzle migrations (`npx drizzle-kit generate` after editing

@@ -14,30 +14,23 @@ class Store {
     if (!canvas) {
       const loaded = await persist.loadCanvas(id)
       if (!loaded) return undefined
-      await this.initializeFrames(loaded)
       this.init([loaded])
       canvas = this.canvases.get(id)!
     }
-    const snapshot = await frameActor(id).snapshot()
+    const actor = frameActor(id)
+    let snapshot = await actor.snapshot()
+    // initialize() is guarded inside the actor: concurrent first reads cannot
+    // overwrite the winner. Empty and deleted actors never reload stale SQL.
+    if (!snapshot.initialized) snapshot = await actor.initialize(await persist.loadFrames(id))
     if (snapshot.deleted) {
       this.canvases.delete(id)
       return undefined
     }
-    if (!snapshot.initialized) await frameActor(id).initialize([])
     return {
       ...canvas,
       frames: snapshot.frames,
       updatedAt: Math.max(canvas.updatedAt, ...snapshot.frames.map((frame) => frame.updatedAt)),
     }
-  }
-
-  async initializeFrames(canvas: Canvas): Promise<void> {
-    const actor = frameActor(canvas.id)
-    const snapshot = await actor.snapshot()
-    if (snapshot.initialized) return
-    if (canvas.frames.length && process.env.NODE_ENV === 'production')
-      throw new Error('Existing SQL frames require bun run migrate:actors before production startup.')
-    await actor.initialize(canvas.frames)
   }
 
   async syncFrame(id: string): Promise<Frame | undefined> {

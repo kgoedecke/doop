@@ -1,8 +1,5 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { execFile, spawn } from 'node:child_process'
-import { promisify } from 'node:util'
-import path from 'node:path'
 import pg from 'pg'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
@@ -196,13 +193,13 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
 )
 
 it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
-  'cuts over existing SQL frames with interruption recovery, mismatch protection, and production startup',
+  'lazily initializes SQL frames once across production servers without reviving empty or deleted actors',
   async () => {
     const admin = new pg.Client({ connectionString: process.env.DOOP_TEST_POSTGRES_URL })
-    const database = `doop_cutover_${randomUUID().replaceAll('-', '')}`
+    const database = `doop_lazy_${randomUUID().replaceAll('-', '')}`
+    const servers: Server[] = []
     let created = false
     let sql: pg.Client | undefined
-    let server: Server | undefined
     try {
       await admin.connect()
       await admin.query(`CREATE DATABASE "${database}"`)
@@ -214,7 +211,7 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       const db = drizzle(sql)
       await migrate(db, { migrationsFolder: 'server/db/migrations' })
       const prefix = randomUUID()
-      const frames: Frame[] = Array.from({ length: 5 }, (_, index) => ({
+      const frames: Frame[] = Array.from({ length: 3 }, (_, index) => ({
         id: `${prefix}-frame-${index}`,
         canvasId: `${prefix}-${index}`,
         name: `Existing design ${index} — café`,
@@ -228,8 +225,9 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
         updatedBy: 'Existing author',
         ...(index === 0 ? {} : { demo: index === 1 }),
       }))
+      const emptyId = `${prefix}-empty`
       await db.insert(schema.canvases).values(
-        [...frames.map((frame) => frame.canvasId), `${prefix}-empty`].map((id) => ({
+        [...frames.map((frame) => frame.canvasId), emptyId].map((id) => ({
           id,
           name: 'Existing canvas',
           createdAt: 1_700_000_000_000,
@@ -237,101 +235,86 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
         })),
       )
       await db.insert(schema.frames).values(frames)
-      const apiPort = await port()
+      const portA = await port(),
+        portB = await port()
       const env = {
         DATABASE_URL: url.toString(),
         NODE_ENV: 'production',
-        PORT: String(apiPort),
-        BETTER_AUTH_SECRET: 'canvas-cutover-qa-shared-session-secret',
-        BETTER_AUTH_URL: `http://localhost:${apiPort}`,
+        BETTER_AUTH_SECRET: 'canvas-lazy-qa-shared-session-secret',
+        BETTER_AUTH_URL: `http://localhost:${portA}`,
+        TRUSTED_ORIGINS: `http://localhost:${portA},http://localhost:${portB}`,
       }
-      const args = [
-        '--import',
-        path.resolve('node_modules/tsx/dist/loader.mjs'),
-        path.resolve('scripts/migrate-actors.ts'),
-      ]
-      const options = { env: { ...process.env, ...env }, timeout: 60_000 }
-      const cutover = (...flags: string[]) => promisify(execFile)(process.execPath, [...args, ...flags], options)
-
-      // Production must not silently import frames, or mutate an empty actor.
-      await expect(
-        promisify(execFile)(process.execPath, [...args.slice(0, 2), path.resolve('server/index.ts')], options),
-      ).rejects.toThrow('migrate:actors')
-      expect((await frameActor(frames[0]!.canvasId).snapshot()).initialized).toBe(false)
-      await expect(cutover('--verify')).rejects.toThrow('uninitialized')
-      await db.insert(schema.tasks).values({
-        id: `${prefix}-task`,
-        canvasId: frames[0]!.canvasId,
-        agentName: 'Doop',
-        color: '#123456',
-        status: 'Existing task',
-        startedAt: 1_700_000_000_000,
-      })
-      // An active SQL writer prevents the migration from taking its stable snapshot.
-      await sql.query('BEGIN')
-      await sql.query('LOCK TABLE frames IN ROW EXCLUSIVE MODE')
-      await expect(cutover()).rejects.toThrow('could not obtain lock')
-      await sql.query('ROLLBACK')
-      const source = async () => ({
-        frames: (await sql!.query('SELECT * FROM frames ORDER BY id')).rows,
-        canvases: (await sql!.query('SELECT * FROM canvases ORDER BY id')).rows,
-        tasks: (await sql!.query('SELECT * FROM tasks ORDER BY id')).rows,
-      })
-      const before = await source()
-      // Kill the real command after its first completed canvas, then resume.
-      const interrupted = spawn(process.execPath, args, { env: options.env, stdio: ['ignore', 'pipe', 'pipe'] })
-      let output = ''
-      interrupted.stdout.on('data', (data) => {
-        output += String(data)
-        if (output.includes('[cutover] Verified canvas')) interrupted.kill('SIGKILL')
-      })
-      interrupted.stderr.resume()
-      const timer = setTimeout(() => interrupted.kill('SIGKILL'), 60_000)
-      try {
-        const signal = await new Promise<NodeJS.Signals | null>((resolve, reject) => {
-          interrupted.once('error', reject)
-          interrupted.once('exit', (_code, signal) => resolve(signal))
-        })
-        expect(signal).toBe('SIGKILL')
-      } finally {
-        clearTimeout(timer)
-      }
-      expect(output).toContain('[cutover] Verified canvas')
-      expect((await frameActor(`${prefix}-empty`).snapshot()).initialized).toBe(false)
-      expect((await cutover()).stdout).toContain('Verified 6 canvases and 5 frames')
-      expect((await cutover('--verify')).stdout).toContain('Verified 6 canvases and 5 frames')
-      expect(await source()).toEqual(before)
-      for (const frame of frames) expect((await frameActor(frame.canvasId).snapshot()).frames).toEqual([frame])
-
-      // A resumed import cannot replace a previously imported actor with different SQL.
-      await sql.query('UPDATE frames SET html=$1 WHERE id=$2', ['changed after import', frames[0]!.id])
-      await expect(cutover()).rejects.toThrow('SQL and actor frames differ')
-      expect((await frameActor(frames[0]!.canvasId).snapshot()).frames).toEqual([frames[0]])
-      await sql.query('UPDATE frames SET html=$1 WHERE id=$2', [frames[0]!.html, frames[0]!.id])
-      expect((await cutover()).stdout).toContain('Verified 6 canvases and 5 frames')
-
-      server = await startServer(apiPort, env)
-      const owner = new Client(server)
+      let a = await startServer(portA, env)
+      servers.push(a)
+      const b = await startServer(portB, env)
+      servers.push(b)
+      for (const frame of frames) expect((await frameActor(frame.canvasId).snapshot()).initialized).toBe(false)
+      expect((await frameActor(emptyId).snapshot()).initialized).toBe(false)
+      const owner = new Client(a)
       await json(
         owner.req('/api/auth/sign-up/email', {
           method: 'POST',
-          headers: { Origin: server.base },
-          body: JSON.stringify({ email: 'cutover@example.test', name: 'Owner', password: 'password12345' }),
+          headers: { Origin: a.base },
+          body: JSON.stringify({ email: 'lazy@example.test', name: 'Owner', password: 'password12345' }),
         }),
       )
-      const canvas = await json<Canvas>(owner.get(`/api/canvases/${frames[0]!.canvasId}`))
-      expect(canvas.frames).toEqual([frames[0]])
-      await json(owner.patch(`/api/frames/${frames[0]!.id}`, { x: 900 }))
-      expect((await frameActor(frames[0]!.canvasId).snapshot()).frames[0]).toMatchObject({
-        x: 900,
-        html: frames[0]!.html,
-      })
-      server.stop()
-      await server.stopped
-      await expect(cutover()).rejects.toThrow('already accepting edits')
+      const peer = new Client(b)
+      peer.cookies = new Map(owner.cookies)
+      // Read the current SQL rows on first access, not a stale boot snapshot.
+      const first = { ...frames[0]!, html: '<main>Updated after boot — 你好 🌱</main>' }
+      await sql.query('UPDATE frames SET html=$1 WHERE id=$2', [first.html, first.id])
+      const source = (await sql.query('SELECT * FROM frames ORDER BY id')).rows
+      const actor = frameActor(first.canvasId)
+      const opened = await Promise.all([
+        json<Canvas>(owner.get(`/api/canvases/${first.canvasId}`)),
+        json<Canvas>(peer.get(`/api/canvases/${first.canvasId}`)),
+      ])
+      for (const canvas of opened) expect(canvas.frames).toEqual([first])
+      expect((await sql.query('SELECT * FROM frames ORDER BY id')).rows).toEqual(source)
+      expect(await actor.snapshot()).toMatchObject({ initialized: true, revision: 0, frames: [first] })
+      await json(owner.patch(`/api/frames/${first.id}`, { x: 900 }))
+      expect((await actor.initialize([first])).frames[0]).toMatchObject({ x: 900, html: first.html })
+      await sql.query('UPDATE frames SET html=$1 WHERE id=$2', ['stale SQL', first.id])
+      expect((await json<Canvas>(peer.get(`/api/canvases/${first.canvasId}`))).frames[0]?.html).toBe(first.html)
+
+      // A failed source read leaves initialization retryable; existing actors
+      // keep working without consulting the legacy frame contents.
+      await sql.query('ALTER TABLE frames RENAME TO frames_unavailable')
+      try {
+        expect((await owner.get(`/api/canvases/${frames[1]!.canvasId}`)).status).toBe(503)
+        expect((await frameActor(frames[1]!.canvasId).snapshot()).initialized).toBe(false)
+        expect((await json<Canvas>(peer.get(`/api/canvases/${first.canvasId}`))).frames[0]?.x).toBe(900)
+      } finally {
+        await sql.query('ALTER TABLE frames_unavailable RENAME TO frames')
+      }
+      // A browser grant also passes through initialization before connecting.
+      await json(owner.get(`/api/canvases/${frames[1]!.canvasId}/actor`))
+      expect((await frameActor(frames[1]!.canvasId).snapshot()).frames).toEqual([frames[1]])
+      await json(owner.get(`/api/canvases/${emptyId}/actor`))
+      expect(await frameActor(emptyId).snapshot()).toMatchObject({ initialized: true, frames: [] })
+      await db.insert(schema.frames).values({ ...first, id: `${prefix}-late`, canvasId: emptyId })
+      expect((await json<Canvas>(peer.get(`/api/canvases/${emptyId}`))).frames).toEqual([])
+      await json(owner.delete(`/api/frames/${first.id}`))
+      expect((await actor.initialize([first])).frames).toEqual([])
+      await frameActor(frames[1]!.canvasId).destroy()
+      expect((await frameActor(frames[1]!.canvasId).initialize([frames[1]!])).deleted).toBe(true)
+      expect((await peer.get(`/api/canvases/${frames[1]!.canvasId}`)).status).toBe(404)
+
+      const dataDir = a.dataDir
+      a.stop({ keepData: true })
+      await a.stopped
+      a = await startServer(portA, env, dataDir)
+      servers.push(a)
+      const restored = new Client(a)
+      restored.cookies = new Map(owner.cookies)
+      expect((await json<Canvas>(restored.get(`/api/canvases/${first.canvasId}`))).frames).toEqual([])
+      expect((await json<Canvas>(restored.get(`/api/canvases/${emptyId}`))).frames).toEqual([])
+      expect((await restored.get(`/api/canvases/${frames[1]!.canvasId}`)).status).toBe(404)
+      expect((await frameActor(frames[2]!.canvasId).snapshot()).initialized).toBe(false)
+      expect((await json<Canvas>(restored.get(`/api/canvases/${frames[2]!.canvasId}`))).frames).toEqual([frames[2]])
     } finally {
-      server?.stop()
-      await server?.stopped
+      for (const server of servers) server.stop()
+      await Promise.all(servers.map((server) => server.stopped))
       await sql?.end()
       if (created) await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`)
       await admin.end()

@@ -8,9 +8,9 @@ import * as storage from './storage.ts'
  * Uploaded image assets: bytes in object storage (server/storage.ts), one
  * metadata row per asset in the assets table (including the canvas it was
  * uploaded for). Frame HTML is the ground truth for which assets are still
- * in use. Boot rebuilds asset_refs from actor snapshots. The projection
- * is not kept current during direct actor edits, so future cleanup must
- * consult actor state. Nothing is currently deleted.
+ * in use. Boot leaves asset_refs intact so it does not activate every canvas
+ * actor. The projection is not kept current during direct actor edits, so
+ * future cleanup must consult actor state. Nothing is currently deleted.
  */
 
 export const MAX_ASSET_BYTES = 5 * 1024 * 1024

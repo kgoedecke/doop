@@ -28,14 +28,7 @@ import { db, initDb } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
-import {
-  getAsset,
-  reconcileAssetRefs,
-  beginTicketUpload,
-  endTicketUpload,
-  createAsset,
-  MAX_ASSET_BYTES,
-} from './assets.ts'
+import { getAsset, beginTicketUpload, endTicketUpload, createAsset, MAX_ASSET_BYTES } from './assets.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
 import * as backgrounds from './backgrounds.ts'
@@ -96,7 +89,6 @@ let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
 }
-for (const canvas of data.canvases) await store.initializeFrames(canvas)
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canAccessCanvas reads membership
 billing.reportBillingConfig()
@@ -119,16 +111,6 @@ await seed()
     )
   })
   if (pending.length) console.log(`[resident] ${pending.length} canvas(es) with new queued cards — starting after boot`)
-}
-
-/* Asset bookkeeping (no deletion): rebuild asset_refs from actor snapshots.
-   This is a boot-time projection, not a live ledger for asset cleanup. */
-{
-  const snapshots = await Promise.all(data.canvases.map((c) => store.syncCanvas(c.id)))
-  const frames = snapshots.flatMap((c) => c?.frames ?? [])
-  reconcileAssetRefs(frames)
-    .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
-    .catch((e) => console.error('[assets] reconcile failed', e))
 }
 
 /* One stray rejection must never take down the multiplayer server: Node's
