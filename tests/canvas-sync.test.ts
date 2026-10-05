@@ -10,7 +10,7 @@ import WebSocket from 'ws'
 import { expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
-import type { FrameChange, FrameSnapshot, FrameWrite } from '../src/actor.ts'
+import type { FrameChange, FrameDrag, FrameSnapshot, FrameWrite } from '../src/actor.ts'
 import * as schema from '../server/db/schema.ts'
 import { frameActor, prepareFrameSocket } from '../server/frame-sync.ts'
 
@@ -76,16 +76,19 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
         const grant = await json<{ websocketUrl: string }>(client.get(`/api/canvases/${canvas.id}/actor`))
         const socket = new WebSocket(grant.websocketUrl)
         sockets.push(socket)
-        const events: (FrameSnapshot | FrameChange)[] = []
+        const events: (FrameSnapshot | FrameChange | FrameDrag)[] = []
         socket.on('error', () => {})
         socket.on('message', (data) => {
           const event = JSON.parse(String(data))
-          if (event.type === 'snapshot') events.push(event)
+          if (event.type === 'snapshot' || event.type === 'drag') events.push(event)
           if (event.type === 'state_update' && event.changes.committed) events.push(event.changes.committed)
         })
         await until(() => events.some((event) => event.type === 'snapshot'))
         return {
           events,
+          preview(drag: FrameDrag) {
+            socket.send(JSON.stringify(drag))
+          },
           async write(write: FrameWrite) {
             const requestId = randomUUID()
             socket.send(JSON.stringify({ type: 'write', requestId, write }))
@@ -99,6 +102,21 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       const frame = await left.write({ type: 'create', input: { name: 'Shared', html: '' } })
       expect(frame.updatedBy).toBe('Owner')
       await until(() => right.events.some((event) => event.type === 'change' && event.frame.id === frame.id))
+      const drag: FrameDrag = {
+        type: 'drag',
+        frameId: frame.id,
+        x: 300,
+        y: 250,
+        width: 750,
+        height: 500,
+        updatedAt: frame.updatedAt,
+      }
+      left.preview(drag)
+      await until(() => right.events.some((event) => event.type === 'drag' && event.x === 300))
+      expect(left.events.some((event) => event.type === 'drag')).toBe(false)
+      expect(await frameActor(canvas.id).snapshot()).toMatchObject({ revision: 1, frames: [frame] })
+      left.preview({ ...drag, width: -1 })
+      left.preview({ ...drag, frameId: 'another-canvas.frame' })
       const readOnly = await prepareFrameSocket({
         actorId: canvas.id,
         metadata: { actor: { name: 'Viewer', kind: 'user', color: '#123456' }, readOnly: true },
@@ -110,6 +128,7 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
         if (JSON.parse(String(data)).type === 'error') denied = true
       })
       await new Promise<void>((resolve) => viewer.once('open', resolve))
+      viewer.send(JSON.stringify({ ...drag, x: 999 }))
       viewer.send(JSON.stringify({ type: 'write', requestId: randomUUID(), write: { type: 'delete', id: frame.id } }))
       await until(() => denied)
       expect((await frameActor(canvas.id).snapshot()).frames).toEqual([frame])
@@ -133,6 +152,11 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
           events.some((event) => event.type === 'change' && event.frame.html === saved.html && event.frame.x === 450),
         )
       expect((await json<Canvas>(peer.get(`/api/canvases/${canvas.id}`))).frames).toEqual([saved])
+      // A delayed preview from before the durable edit must not move the frame back.
+      left.preview(drag)
+      saved = await left.write({ type: 'update', id: frame.id, patch: { y: 260 } })
+      await until(() => right.events.some((event) => event.type === 'change' && event.frame.y === 260))
+      expect(right.events.filter((event) => event.type === 'drag')).toEqual([drag])
       sql = new pg.Client({ connectionString: url.toString() })
       await sql.connect()
       expect((await sql.query('SELECT id FROM frames WHERE id=$1', [frame.id])).rowCount).toBe(0)

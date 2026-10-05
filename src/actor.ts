@@ -30,9 +30,10 @@ export type FrameChange = {
   streaming?: boolean
 }
 
-export type FrameCommand = { type: 'write'; requestId: string; write: FrameWrite } | { type: 'snapshot' }
+export type FrameDrag = { type: 'drag'; frameId: string } & Pick<Frame, 'x' | 'y' | 'width' | 'height' | 'updatedAt'>
+export type FrameCommand = { type: 'write'; requestId: string; write: FrameWrite } | { type: 'snapshot' } | FrameDrag
 export type FrameMetadata = { actor: Attribution; readOnly: boolean }
-export type FrameMessage = FrameSnapshot | { type: 'error'; requestId: string; message: string }
+export type FrameMessage = FrameSnapshot | FrameDrag | { type: 'error'; requestId: string; message: string }
 
 /** One writer for a canvas's frames. Accounts, canvas metadata and AI stay in Doop. */
 export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessage> {
@@ -51,6 +52,24 @@ export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessag
 
   override async onMessage(socket: ActorSocketOf<CanvasFrames>, command: FrameCommand) {
     if (command.type === 'snapshot') return socket.send(await this.snapshot())
+    if (command.type === 'drag') {
+      const frame = this.frames.find((frame) => frame.id === command.frameId)
+      if (
+        socket.metadata.readOnly ||
+        this.deleted ||
+        !frame ||
+        frame.updatedAt !== command.updatedAt ||
+        ![command.x, command.y, command.width, command.height].every(Number.isFinite) ||
+        command.width <= 0 ||
+        command.height <= 0
+      )
+        return
+      // Preview only: no persisted mutation or revision. A committed edit
+      // invalidates any delayed preview based on the previous frame version.
+      const { frameId, x, y, width, height, updatedAt } = command
+      this.broadcast({ type: 'drag', frameId, x, y, width, height, updatedAt }, { except: socket })
+      return
+    }
     try {
       if (socket.metadata.readOnly) throw new Error('This connection is read only')
       const change = await this.write(command.write, socket.metadata.actor, command.requestId)

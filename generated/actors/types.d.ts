@@ -69,9 +69,15 @@ type FrameCommand =
     | {
           type: "snapshot"
       }
+    | FrameDrag
+type FrameDrag = {
+    type: "drag"
+    frameId: string
+} & Pick<Frame, "x" | "y" | "width" | "height" | "updatedAt">
 type FrameInput = Pick<Frame, "name"> & Partial<Pick<Frame, "x" | "y" | "width" | "height" | "html" | "demo">>
 type FrameMessage =
     | FrameSnapshot
+    | FrameDrag
     | {
           type: "error"
           requestId: string

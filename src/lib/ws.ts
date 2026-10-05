@@ -139,9 +139,6 @@ function handle(msg: ServerMessage) {
     case 'comment':
       s.upsertComment(msg.comment)
       break
-    case 'frame:drag':
-      s.patchFrameLocal(msg.frameId, { x: msg.x, y: msg.y, width: msg.width, height: msg.height })
-      break
     case 'frame:streaming':
       s.setStream(msg.frameId, msg.active ? { name: msg.actor.name, color: msg.actor.color } : null)
       break

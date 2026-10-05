@@ -583,9 +583,8 @@ app.use('/api', async (req, res, next) => {
     if (!session) return res.status(401).json({ error: 'unauthorized' })
     req.user = session.user
     req.impersonatedBy = (session.session as { impersonatedBy?: string | null }).impersonatedBy ?? undefined
-    /* Viewing as someone else is read-only, full stop. Every doop mutation is
-       a non-GET REST call — the websocket after `join` carries only cursor,
-       editing and frame:drag — so this single rule covers the whole surface.
+    /* Viewing as someone else is read-only: block REST writes here, silence
+       collaboration events on /ws, and issue a read-only actor grant.
        better-auth's own routes are mounted earlier (/api/auth/*), so signing
        out and stop-impersonating are unaffected. */
     if (req.impersonatedBy && req.method !== 'GET') {
@@ -1936,21 +1935,6 @@ wss.on('connection', (ws, upgradeReq) => {
       case 'editing':
         presence.activeFrameId = msg.frameId
         broadcast(canvasId, { type: 'editing', clientId: presence.clientId, frameId: msg.frameId }, presence.clientId)
-        break
-      case 'frame:drag':
-        broadcast(
-          canvasId,
-          {
-            type: 'frame:drag',
-            clientId: presence.clientId,
-            frameId: msg.frameId,
-            x: msg.x,
-            y: msg.y,
-            width: msg.width,
-            height: msg.height,
-          },
-          presence.clientId,
-        )
         break
     }
   })

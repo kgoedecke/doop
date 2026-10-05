@@ -4,7 +4,7 @@ import { colorFor } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { registerFrameWindow, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
-import { sendWs } from '../lib/ws'
+import { previewFrame } from '../lib/canvas-actor'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
@@ -87,7 +87,7 @@ interface ProbeHit {
   rect: { x: number; y: number; width: number; height: number }
 }
 
-type DragRect = { id: string; x: number; y: number; width: number; height: number }
+type DragRect = Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height' | 'updatedAt'>
 
 interface HoverHit {
   tag: string
@@ -127,9 +127,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   function sendDrag(id: string, f: DragRect) {
     let send = dragSenders.get(id)
     if (!send) {
-      send = throttle((r: DragRect) => {
-        sendWs({ type: 'frame:drag', frameId: r.id, x: r.x, y: r.y, width: r.width, height: r.height })
-      }, 50)
+      send = throttle(previewFrame, 50)
       dragSenders.set(id, send)
     }
     send(f)
@@ -237,7 +235,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       const live = useStore.getState().canvas?.frames ?? []
       for (const g of group) {
         const f = live.find((x) => x.id === g.id)
-        if (f) sendDrag(f.id, { id: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
+        if (f) sendDrag(f.id, f)
       }
     }
     function onUp() {

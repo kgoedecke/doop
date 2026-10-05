@@ -129,6 +129,14 @@ export function refreshFrames() {
     connection.socket.send(JSON.stringify({ type: 'snapshot' } satisfies actors.CanvasFrames.Incoming))
 }
 
+export function previewFrame(frame: Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height' | 'updatedAt'>) {
+  if (connection?.id !== useStore.getState().canvas?.id || connection?.socket?.readyState !== WebSocket.OPEN) return
+  const { id: frameId, x, y, width, height, updatedAt } = frame
+  connection.socket.send(
+    JSON.stringify({ type: 'drag', frameId, x, y, width, height, updatedAt } satisfies actors.CanvasFrames.Incoming),
+  )
+}
+
 export function connectFrames(id: string): Promise<void> {
   if (connection?.id === id) return connection.ready
   disconnectFrames()
@@ -170,6 +178,13 @@ export function connectFrames(id: string): Promise<void> {
           if (event.type === 'snapshot') {
             apply(event)
             ready()
+          } else if (event.type === 'drag') {
+            const state = useStore.getState()
+            const frame = state.canvas?.id === id && state.canvas.frames.find((frame) => frame.id === event.frameId)
+            if (frame && frame.updatedAt === event.updatedAt) {
+              const { x, y, width, height } = event
+              state.patchFrameLocal(frame.id, { x, y, width, height })
+            }
           } else if (event.type === 'state_update' && event.changes.committed) apply(event.changes.committed)
           else if (event.type === 'error') {
             const request = pending.get(event.requestId)
