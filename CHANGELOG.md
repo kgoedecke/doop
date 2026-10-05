@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.7.0](https://github.com/kgoedecke/doop/compare/v0.6.0...v0.7.0) (2026-10-01)
+
+
+### Features
+
+* **agent:** add an opt-in Gemini cloud worker prototype ([#220](https://github.com/kgoedecke/doop/issues/220)) ([f154e92](https://github.com/kgoedecke/doop/commit/f154e929566c8522edbf8e4e7cee7e21822404ba))
+* **agents:** support OpenRouter and Gemini model accounts and an image-model registry ([#211](https://github.com/kgoedecke/doop/issues/211)) ([3253e88](https://github.com/kgoedecke/doop/commit/3253e885f27af81910957c4ed9c5bd964d72a10d))
+* **canvas:** export progress toast and desktop save panel for exports ([#221](https://github.com/kgoedecke/doop/issues/221)) ([34b65ca](https://github.com/kgoedecke/doop/commit/34b65cac24ba43a29e1b24e3cdc85c7fed116d0d))
+* **canvas:** move frame export options into a modal ([#219](https://github.com/kgoedecke/doop/issues/219)) ([aa6cb82](https://github.com/kgoedecke/doop/commit/aa6cb821f4b2cd84190dda473c88033dfc2359dc))
+* **canvas:** per-canvas chat with [@mentions](https://github.com/mentions) that assign agents ([#197](https://github.com/kgoedecke/doop/issues/197)) ([2c4f077](https://github.com/kgoedecke/doop/commit/2c4f077f4fe3cd5b0eeb4912d087e8dd0ad81cb6))
+* **canvas:** redesign the import modal as a source picker with one screen per source ([#208](https://github.com/kgoedecke/doop/issues/208)) ([e5eaafb](https://github.com/kgoedecke/doop/commit/e5eaafbe8777312063c4bb4ebdbd403c8956f5da))
+* **linear:** run Doop designs from delegated linear tickets ([#214](https://github.com/kgoedecke/doop/issues/214)) ([44c32ac](https://github.com/kgoedecke/doop/commit/44c32aca25d9cb051dc64a218f77100b987d6ed4))
+* **mcp:** agent keys for headless MCP clients (bearer auth) ([#213](https://github.com/kgoedecke/doop/issues/213)) ([33379d4](https://github.com/kgoedecke/doop/commit/33379d46451b66f038e07b7784e4cdb0ed4e0086))
+
+
+### Bug Fixes
+
+* **agents:** drop the hover-only 'Not available' label on task rows ([#200](https://github.com/kgoedecke/doop/issues/200)) ([fbfdd9a](https://github.com/kgoedecke/doop/commit/fbfdd9af5f210d2d2bf62b55577dfda20d9d2997))
+* **canvas:** drop icons from import screen primary actions ([#215](https://github.com/kgoedecke/doop/issues/215)) ([510a2da](https://github.com/kgoedecke/doop/commit/510a2da7e60d6a766ea7a23515f0e6ea2e673713))
+* **canvas:** keep a followed avatar's colour under the follow halo ([#162](https://github.com/kgoedecke/doop/issues/162)) ([77cb306](https://github.com/kgoedecke/doop/commit/77cb306aad47b9c901979c9d246105958458d7fb))
+* land a new frame in the middle of the current view ([#165](https://github.com/kgoedecke/doop/issues/165)) ([d540e7e](https://github.com/kgoedecke/doop/commit/d540e7e1a1d6199973abc7306fc7b226c176d1ca))
+* **linear:** simplify integration card and use official logo ([#222](https://github.com/kgoedecke/doop/issues/222)) ([f08782c](https://github.com/kgoedecke/doop/commit/f08782cac64ddd4c42fc1fa9563a2f66fda1416a))
+* **server:** bump undici to 8.x to stop an uncatchable parser crash ([#198](https://github.com/kgoedecke/doop/issues/198)) ([894b1a2](https://github.com/kgoedecke/doop/commit/894b1a2c2da2593c3474479932af5507d7ba7a2a))
+
 ## [0.6.0](https://github.com/kgoedecke/doop/compare/v0.5.0...v0.6.0) (2026-09-19)
 
 

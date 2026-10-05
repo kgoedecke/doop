@@ -303,7 +303,7 @@ it('creates, completes, runs and lists an automation for its owner only', async 
 
 it('reports Meta as not connected and not configured on a bare server', async () => {
   const status = await (await owner.get('/api/integrations')).json()
-  expect(status).toEqual({ meta: { enabled: false, connected: false } })
+  expect(status.meta).toEqual({ enabled: false, connected: false })
   expect((await owner.post('/api/integrations/meta/start')).status).toBe(400)
   /* a pull step without a connection fails with the one-click fix named */
   const canvas = await (await owner.post('/api/canvases', { name: 'Pulls' })).json()

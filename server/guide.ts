@@ -250,8 +250,9 @@ any public image URL. Source images in this order:
   illustration, a product render, a mascot — or your human asks for a
   generated image, generate one from a prompt. It returns a permanent URL on this origin
   plus a preview: look at the preview and judge it like any other asset before it goes
-  in. It runs on your human's connected ChatGPT subscription or OpenAI key (else the
-  server's key) and costs them quota or money, and takes 20–60 seconds, so write ONE
+  in. It draws with the image model your human picked in Settings (GPT Image, Nano
+  Banana or Seedream), on their connected account (else the server's key), and costs
+  them quota or money, and takes 20–60 seconds, so write ONE
   considered prompt — subject, style, composition, palette hexes, lighting, what to
   leave out — and refine a near miss by saying what was wrong rather than rolling the
   dice again. Match aspect to the slot (square, landscape, portrait). Images come back

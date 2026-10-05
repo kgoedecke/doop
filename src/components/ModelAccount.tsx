@@ -1,13 +1,13 @@
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
 import { AgentIcon } from './AgentIcon'
-import { CLAUDE_MODELS } from '../../shared/localAgent'
 import { LocalClaudeRow } from './LocalClaude'
 import { authClient } from '../lib/auth'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
 import { isDesktopShell } from '../lib/shell'
 import { useCallback, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { api } from '../lib/api'
-import type { DeviceFlow, ModelAccountStatus } from '../lib/api'
+import type { AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
 import { CodeBlock } from './ui/code-block'
@@ -15,8 +15,9 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Dot } from './ui/dot'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { CheckIcon } from './ui/icons'
+import { CheckIcon, ChevronDownIcon } from './ui/icons'
 
 /**
  * "Keep the Doop Agent running on my own subscription."
@@ -107,7 +108,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const [device, setDevice] = useState<DeviceFlow | null>(null)
   const [redirect, setRedirect] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [showKey, setShowKey] = useState<false | 'openai-key' | 'anthropic-key'>(false)
+  const [showKey, setShowKey] = useState<false | Exclude<ModelAccountKind, 'chatgpt'>>(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [switchFailed, setSwitchFailed] = useState(false)
@@ -252,7 +253,15 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     setBusy(true)
     setError('')
     try {
-      const next = await (showKey === 'anthropic-key' ? api.connectAnthropicKey(apiKey) : api.connectOpenAiKey(apiKey))
+      const connect =
+        showKey === 'anthropic-key'
+          ? api.connectAnthropicKey
+          : showKey === 'openrouter-key'
+            ? api.connectOpenRouterKey
+            : showKey === 'gemini-key'
+              ? api.connectGeminiKey
+              : api.connectOpenAiKey
+      const next = await connect(apiKey)
       if (account?.kind !== showKey) await selectServer()
       settle(next)
       posthog.capture('model_account_connected', { kind: showKey || 'openai-key' })
@@ -292,22 +301,65 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   if (!account) return null
 
-  const options = account.models ?? []
-  const chosen = options.find((m) => m.id === account.model)
+  const menuFor = (kind: ModelAccountKind): AgentModelOption[] => account.menus?.[kind] ?? []
+  const activeMenu = account.kind ? menuFor(account.kind) : []
+  const chosen = activeMenu.find((m) => m.id === account.model)
   const onChatgpt = account.connected && account.kind === 'chatgpt'
-  const onKey = account.connected && account.kind === 'openai-key'
-  const onClaudeKey = account.connected && account.kind === 'anthropic-key'
   /* only one account is stored per user, so connecting one replaces the other */
   const replaces = account.connected
 
-  /* On the connected row the chips ARE the model picker; on any other row they
-     only advertise what that plan can run, so they stay inert. */
-  const modelChips = (live: boolean, claude = false) => {
-    const models = claude ? CLAUDE_MODELS : options
+  /* On the connected row the picker changes the model; on any other row it
+     only advertises what that plan can run, so it stays inert. A roster too
+     big for a chip row (OpenRouter) becomes a dropdown instead. */
+  const modelPicker = (live: boolean, kind: ModelAccountKind) => {
+    const models = menuFor(kind)
+    if (models.length > 5) {
+      if (!live) {
+        return (
+          <p className="self-center text-[13px] leading-[1.55] text-ink-faint">
+            {models
+              .slice(0, 6)
+              .map((m) => m.name)
+              .join(' · ')}
+            {models.length > 6 ? ' and more' : ''}
+          </p>
+        )
+      }
+      const current = models.find((m) => m.id === account.model)
+      return (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              className="gap-[7px] rounded-[10px] border border-line px-3 text-[13px] font-medium text-ink"
+            >
+              {current?.name ?? account.model ?? 'Pick a model'}
+              {current?.vision === false && <NoVisionBadge />}
+              <ChevronDownIcon width={14} height={14} aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {models.map((m) => (
+              <DropdownMenuItem key={m.id} onSelect={() => void pickModel(m.id)}>
+                <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+                  <span className="flex items-center gap-[7px] text-ink">
+                    {m.name}
+                    {m.vision === false && <NoVisionBadge />}
+                  </span>
+                  <span className="text-[12px] leading-[1.45] text-ink-faint">{m.blurb}</span>
+                </span>
+                {m.id === account.model && <Tick />}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )
+    }
     return live ? (
       <ToggleChipGroup aria-label="Model" value={account.model ?? ''} onValueChange={pickModel} disabled={busy}>
         {models.map((m) => (
-          <ToggleChipItem key={m.id} value={m.id} title={m.blurb}>
+          <ToggleChipItem key={m.id} value={m.id} title={m.vision === false ? `${m.blurb} ${VISION_NOTE}` : m.blurb}>
             {m.id === account.model && <Tick />}
             {m.name}
           </ToggleChipItem>
@@ -326,6 +378,110 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           </ToggleChip>
         ))}
       </div>
+    )
+  }
+
+  /* Every key-connected provider wears the same section: title + pill, lede,
+     then either the live picker/rotate row, the key-entry flow, or the inert
+     capability row with a Connect button. */
+  const keySection = (cfg: {
+    kind: Exclude<ModelAccountKind, 'chatgpt'>
+    title: string
+    lede: string
+    mark: ReactNode
+    placeholder: string
+  }) => {
+    const live = account.connected && account.kind === cfg.kind
+    return (
+      <section className={planRow(live && !local?.enabled)} key={cfg.kind}>
+        <span className={planMark(live && !local?.enabled)}>{cfg.mark}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
+            <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
+              {cfg.title}
+            </h3>
+            <span className={planPill(live)}>
+              {live && showKey !== cfg.kind ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+            </span>
+          </div>
+          <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">{cfg.lede}</p>
+
+          {live && showKey !== cfg.kind ? (
+            <>
+              <div className={actionsRow}>
+                {modelPicker(true, cfg.kind)}
+                <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      setApiKey('')
+                      setShowKey(cfg.kind)
+                    }}
+                  >
+                    Rotate key
+                  </Button>
+                  {local?.enabled && (
+                    <Button
+                      disabled={busy}
+                      onClick={() => {
+                        selectServer().catch(fail)
+                      }}
+                    >
+                      Use instead
+                    </Button>
+                  )}
+                  <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
+              {chosen && (
+                <p className="mt-[10px] text-[13px] text-ink-faint">
+                  {chosen.blurb}
+                  {chosen.vision === false && ` ${VISION_NOTE}`}
+                </p>
+              )}
+            </>
+          ) : showKey === cfg.kind ? (
+            <div className={planFlow}>
+              <p className="mb-3 mt-2 text-[13px] leading-[1.55] text-ink-soft">
+                The key is stored on the server and never shown again.
+              </p>
+              <Input
+                className={maInput}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={cfg.placeholder}
+                type="password"
+                autoFocus
+                spellCheck={false}
+              />
+              <div className={maActions}>
+                <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
+                  {busy ? 'Saving…' : live ? 'Rotate key' : 'Save key'}
+                </Button>
+                <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className={actionsRow}>
+              {modelPicker(false, cfg.kind)}
+              <Button
+                className={rowBtn}
+                onClick={() => {
+                  setApiKey('')
+                  setShowKey(cfg.kind)
+                }}
+                disabled={busy}
+              >
+                {replaces ? 'Use instead' : 'Connect'}
+              </Button>
+            </div>
+          )}
+        </div>
+      </section>
     )
   }
 
@@ -368,7 +524,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             {onChatgpt ? (
               <>
                 <div className={actionsRow}>
-                  {modelChips(true)}
+                  {modelPicker(true, 'chatgpt')}
                   <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
                     {(local?.enabled || switchFailed) && (
                       <Button disabled={busy} onClick={() => activateChatgpt(account)}>
@@ -469,7 +625,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               </div>
             ) : (
               <div className={actionsRow}>
-                {modelChips(false)}
+                {modelPicker(false, 'chatgpt')}
                 <Button className={rowBtn} onClick={start} disabled={busy}>
                   {busy ? 'Opening…' : replaces ? 'Use instead' : 'Connect'}
                 </Button>
@@ -479,194 +635,38 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         </section>
       )}
 
-      <section className={planRow(onKey && !local?.enabled)}>
-        <span className={planMark(onKey && !local?.enabled)}>
-          <OpenAiMark />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
-            <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
-              OpenAI API key
-            </h3>
-            <span className={planPill(onKey)}>
-              {onKey && showKey !== 'openai-key'
-                ? local?.enabled
-                  ? 'Connected'
-                  : 'Active · Connected'
-                : 'Not connected'}
-            </span>
-          </div>
-          <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
-            Pay per token on your own OpenAI account — no ChatGPT subscription involved
-          </p>
+      {keySection({
+        kind: 'openai-key',
+        title: 'OpenAI API key',
+        lede: 'Pay per token on your own OpenAI account — no ChatGPT subscription involved',
+        mark: <OpenAiMark />,
+        placeholder: 'sk-…',
+      })}
 
-          {onKey && showKey !== 'openai-key' ? (
-            <>
-              <div className={actionsRow}>
-                {modelChips(true)}
-                <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      setApiKey('')
-                      setShowKey('openai-key')
-                    }}
-                  >
-                    Rotate key
-                  </Button>
-                  {local?.enabled && (
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        selectServer().catch(fail)
-                      }}
-                    >
-                      Use instead
-                    </Button>
-                  )}
-                  <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                    Disconnect
-                  </Button>
-                </div>
-              </div>
-              {chosen && <p className="mt-[10px] text-[13px] text-ink-faint">{chosen.blurb}</p>}
-            </>
-          ) : showKey === 'openai-key' ? (
-            <div className={planFlow}>
-              <p className="mb-3 mt-2 text-[13px] leading-[1.55] text-ink-soft">
-                The key is stored on the server and never shown again.
-              </p>
-              <Input
-                className={maInput}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-…"
-                type="password"
-                autoFocus
-                spellCheck={false}
-              />
-              <div className={maActions}>
-                <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
-                  {busy ? 'Saving…' : onKey ? 'Rotate key' : 'Save key'}
-                </Button>
-                <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className={actionsRow}>
-              {modelChips(false)}
-              <Button
-                className={rowBtn}
-                onClick={() => {
-                  setApiKey('')
-                  setShowKey('openai-key')
-                }}
-                disabled={busy}
-              >
-                {replaces ? 'Use instead' : 'Connect'}
-              </Button>
-            </div>
-          )}
-        </div>
-      </section>
+      {keySection({
+        kind: 'openrouter-key',
+        title: 'OpenRouter API key',
+        lede: 'One key for Kimi, Qwen, GLM, DeepSeek, MiniMax, Gemini and more — pay per token on your OpenRouter account',
+        mark: <OpenRouterMark />,
+        placeholder: 'sk-or-…',
+      })}
+
+      {keySection({
+        kind: 'gemini-key',
+        title: 'Gemini API key',
+        lede: 'Google’s Gemini models, plus Nano Banana image generation — pay per token on your Google AI account',
+        mark: <GeminiMark />,
+        placeholder: 'AIza…',
+      })}
 
       {desktop && <LocalClaudeRow />}
-      <section className={planRow(onClaudeKey && !local?.enabled)}>
-        <span className={planMark(onClaudeKey && !local?.enabled)}>
-          <AgentIcon name="claude" size={20} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
-            <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
-              Claude API key
-            </h3>
-            <span className={planPill(onClaudeKey)}>
-              {onClaudeKey && showKey !== 'anthropic-key'
-                ? local?.enabled
-                  ? 'Connected'
-                  : 'Active · Connected'
-                : 'Not connected'}
-            </span>
-          </div>
-          <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
-            Pay per token on your Anthropic account. Runs on Doop’s server.
-          </p>
-
-          {onClaudeKey && showKey !== 'anthropic-key' ? (
-            <>
-              <div className={actionsRow}>
-                {modelChips(true, true)}
-                <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      setApiKey('')
-                      setShowKey('anthropic-key')
-                    }}
-                  >
-                    Rotate key
-                  </Button>
-                  {local?.enabled && (
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        selectServer().catch(fail)
-                      }}
-                    >
-                      Use instead
-                    </Button>
-                  )}
-                  <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                    Disconnect
-                  </Button>
-                </div>
-              </div>
-              <p className="mt-[10px] text-[13px] text-ink-faint">
-                {CLAUDE_MODELS.find((model) => model.id === account.model)?.blurb}
-              </p>
-            </>
-          ) : showKey === 'anthropic-key' ? (
-            <div className={planFlow}>
-              <p className="mb-3 mt-2 text-[13px] leading-[1.55] text-ink-soft">
-                The key is stored on the server and never shown again.
-              </p>
-              <Input
-                className={maInput}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-ant-…"
-                type="password"
-                autoFocus
-                spellCheck={false}
-              />
-              <div className={maActions}>
-                <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
-                  {busy ? 'Saving…' : onClaudeKey ? 'Rotate key' : 'Save key'}
-                </Button>
-                <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className={actionsRow}>
-              {modelChips(false, true)}
-              <Button
-                className={rowBtn}
-                onClick={() => {
-                  setApiKey('')
-                  setShowKey('anthropic-key')
-                }}
-                disabled={busy}
-              >
-                {replaces ? 'Use instead' : 'Connect'}
-              </Button>
-            </div>
-          )}
-        </div>
-      </section>
+      {keySection({
+        kind: 'anthropic-key',
+        title: 'Claude API key',
+        lede: 'Pay per token on your Anthropic account. Runs on Doop’s server.',
+        mark: <AgentIcon name="claude" size={20} />,
+        placeholder: 'sk-ant-…',
+      })}
 
       {/* the browser cannot run the local CLI, so the plan closes the list as a pointer to the desktop app */}
       {!desktop && <LocalClaudeRow />}
@@ -675,8 +675,52 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   )
 }
 
+const VISION_NOTE = 'Text-only: this model can’t see screenshots, so designs aren’t visually reviewed.'
+
 function Tick() {
   return <CheckIcon width={13} height={13} strokeWidth={2.5} color="#1a6b43" aria-hidden />
+}
+
+function NoVisionBadge() {
+  return (
+    <span className="rounded-[5px] bg-paper-deep px-[6px] py-[1px] text-[10.5px] font-medium uppercase tracking-[0.04em] text-ink-faint">
+      no visual review
+    </span>
+  )
+}
+
+/** A forked-route glyph for OpenRouter, inlined like the other marks. */
+function OpenRouterMark() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      aria-hidden
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.1"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2 12h3.5c3 0 4.5-4.5 7.5-4.5h3" />
+      <path d="M2 12h3.5c3 0 4.5 4.5 7.5 4.5h3" />
+      <path d="M15 4.5l4 3-4 3" />
+      <path d="M15 13.5l4 3-4 3" />
+    </svg>
+  )
+}
+
+/** The Gemini four-point spark, inlined like the other marks. */
+function GeminiMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M12 1c.55 5.93 5.07 10.45 11 11-5.93.55-10.45 5.07-11 11-.55-5.93-5.07-10.45-11-11C6.93 11.45 11.45 6.93 12 1Z"
+      />
+    </svg>
+  )
 }
 
 /** OpenAI's mark, inlined so the page needs no external request. */

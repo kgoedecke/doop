@@ -62,6 +62,12 @@
 
 ## 9. Infrastructure and Deployment
 
+- Experimental Gemini cloud pilot: `server/geminiCloudRuns.ts` dispatches resident harness tasks
+  to per-user workers; `server/geminiCloudMcp.ts` exposes run-scoped canvas tools. The standalone
+  worker runs official Gemini CLI headlessly, with Google credentials retained in its own volume.
+  `workers/gemini/Dockerfile` builds the worker. Setup and limitations: `docs/gemini-cloud-pilot.md`.
+  `DOOP_GEMINI_CLOUD_WORKERS` enables operator-managed routing and BYO metering; unset by default.
+
 - Docker - `Dockerfile` + `docker-compose.yml`; `docker compose up` runs the app container
   (port 4400) and a `postgres:16-alpine` db container for self-hosting.
 
@@ -81,3 +87,11 @@
 - Husky 9.1.7 + lint-staged 17.3.0 - pre-commit hook runs `lint-staged` (`.husky/pre-commit`).
 - commitlint 21.2.2 (`@commitlint/config-conventional`) - conventional commit / PR title linting,
   config in `commitlint.config.js`.
+
+## OSS integration scope
+
+The integration registries currently register Linear only. Canvas imports offer websites, live-app
+sync and GitHub repositories; frame exports offer PNG/JPG with progress feedback and desktop saving.
+Figma, Canva and PSD are deferred. Migration 0019 is reserved for the deferred Figma integration;
+the OSS journal skips it while retaining the shared migration tags and timestamps for 0020–0022.
+Gemini cloud workers remain an operator-managed, opt-in pilot; see `docs/gemini-cloud-pilot.md`.

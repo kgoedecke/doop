@@ -1,4 +1,6 @@
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
+import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
+import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -17,6 +19,7 @@ import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
 import { integrationsRouter } from './integrations.ts'
+import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
@@ -33,6 +36,7 @@ import {
   MAX_ASSET_BYTES,
 } from './assets.ts'
 import * as ingest from './ingest.ts'
+import * as agentKeys from './agentKeys.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as storage from './storage.ts'
 import * as github from './github.ts'
@@ -42,8 +46,12 @@ import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
 import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
-import { serverImageGenEnabled } from './imageGen.ts'
+import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
+import { setImagePref } from './imagePrefs.ts'
 import { AGENT_MODELS } from './openaiAgent.ts'
+import { CLAUDE_MODELS } from '../shared/localAgent.ts'
+import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
+import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
@@ -481,7 +489,14 @@ app.post('/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, re
   })
 })
 
+for (const extension of extensions) {
+  if (extension.webhookRouter) app.use(`/webhooks/${extension.id}`, extension.webhookRouter())
+}
+
 app.use(express.json({ limit: '10mb' }))
+app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
+  handleGeminiCloudMcp(req, res).catch(next)
+})
 app.all('/local-agent/mcp/:id', (req, res, next) => {
   handleLocalAgentMcp(req, res).catch(next)
 })
@@ -630,11 +645,21 @@ app.get('/api/agent-allowance', (req, res) => {
 /* ---- the user's own model account: what keeps the Doop Agent running once
    the free tasks are gone. Tokens live server-side and are never returned. */
 
+/* one curated menu per account kind, with the vision flag the picker renders;
+   the pre-roster providers all see images */
+const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
+  chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
+  'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
+  'anthropic-key': CLAUDE_MODELS.map((m) => ({ ...m, vision: true })),
+  'openrouter-key': OPENROUTER_MODELS,
+  'gemini-key': GEMINI_MODELS,
+}
+
 /* Every route that returns an account status returns the SAME shape: the
-   client re-renders straight from the response, so dropping the model list on
+   client re-renders straight from the response, so dropping the menus on
    a PATCH would collapse the picker until the next reload. */
 function accountView(status: modelAccounts.AccountStatus) {
-  return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), models: AGENT_MODELS }
+  return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
 }
 
 app.get('/api/model-account', (req, res) => {
@@ -731,9 +756,72 @@ app.post('/api/model-account/anthropic-key', async (req, res) => {
   }
 })
 
+/* the two wide-roster keys share the anthropic-key route's shape, including
+   switching off the local-CLI preference so the new account is not shadowed */
+for (const kind of ['openrouter-key', 'gemini-key'] as const) {
+  const connect = kind === 'openrouter-key' ? modelAccounts.connectOpenRouterKey : modelAccounts.connectGeminiKey
+  app.post(`/api/model-account/${kind}`, async (req, res) => {
+    try {
+      const previous = await modelAccounts.getAccount(req.user!.id)
+      const status = await connect(req.user!.id, String(req.body?.apiKey ?? ''))
+      if (previous?.kind !== kind) {
+        const preference = await getLocalAgentPreference(req.user!.id)
+        await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
+      }
+      res.json(accountView(status))
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
+    }
+  })
+}
+
 app.delete('/api/model-account', async (req, res) => {
   await modelAccounts.disconnect(req.user!.id)
   res.json(accountView({ connected: false }))
+})
+
+/* ---- which image model generate_image draws with (the shared registry;
+   entries the payer cannot run are shown but disabled) */
+
+app.get('/api/image-model', (req, res) => {
+  imageModelAvailability(req.user!.id)
+    .then((models) => res.json({ models }))
+    .catch(() => res.status(500).json({ error: 'image models unavailable' }))
+})
+
+app.put('/api/image-model', async (req, res) => {
+  try {
+    const model = String(req.body?.model ?? '')
+    const models = await imageModelAvailability(req.user!.id)
+    const entry = models.find((m) => m.id === model)
+    if (!entry) throw new Error('unknown image model')
+    if (!entry.available) throw new Error('that image model is not available on your account or this server')
+    await setImagePref(req.user!.id, model)
+    res.json({ models: await imageModelAvailability(req.user!.id) })
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the image model' })
+  }
+})
+
+/* ---- Agent keys: account-scoped bearer credentials for /mcp, the headless
+   agent path (see server/agentKeys.ts). The secret appears exactly once, in
+   the create response; the list carries only each key's start. The /api
+   session gate above means impersonating admins can look but not mint. */
+
+app.get('/api/agent-keys', async (req, res) => {
+  res.json(await agentKeys.listAgentKeys(req.user!.id))
+})
+
+app.post('/api/agent-keys', async (req, res) => {
+  const key = await agentKeys.createAgentKey(req.user!.id, String(req.body?.name ?? ''))
+  if (!key) return res.status(400).json({ error: 'agent key limit reached — revoke one you no longer use' })
+  res.json(key)
+})
+
+app.delete('/api/agent-keys/:id', async (req, res) => {
+  if (!(await agentKeys.deleteAgentKey(req.user!.id, req.params.id)))
+    return res.status(404).json({ error: 'agent key not found' })
+  res.json({ ok: true })
 })
 
 app.get('/api/canvases', (req, res) =>
@@ -1145,6 +1233,14 @@ async function withConnectionLock<T>(connectionId: string, fn: () => Promise<T>)
 app.post('/api/canvases/:id/github/:connId/import', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
+  // The pilot owns this user's routing. Reject before analysis, metering or
+  // queueing instead of accepting cards that its canvas-only harness cannot run.
+  if (geminiCloudWorkerFor(req.user!.id)) {
+    return res.status(409).json({
+      error:
+        'Repository imports are unavailable while the Gemini cloud pilot is selected. Ask your operator to disable the pilot, then select a provider that supports repository imports.',
+    })
+  }
   const conn = await github.getConnection(c.id, req.params.connId)
   if (!conn) return res.status(404).json({ error: 'connection not found' })
   if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
@@ -1519,6 +1615,27 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
   res.json(card)
 })
 
+/* the canvas chat: a plain message is free; one that @mentions resident
+   agents queues a card for them and is metered like any other card */
+app.post('/api/canvases/:id/chat', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id)) return
+  /* the same cut addChatMessage applies, so a mention past the cap is
+     never metered for a card that then does not exist */
+  const text = String(req.body?.text ?? '')
+    .trim()
+    .slice(0, actions.MAX_CHAT_CHARS)
+  if (!text) return res.status(400).json({ error: 'empty text' })
+  if (mentionedRole(text)) {
+    const gate = await allowance.consumeResidentTask(req.user!.id)
+    if (!gate.ok) {
+      return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+    }
+  }
+  const message = actions.addChatMessage(req.params.id, text, req.user!.name, req.user!.id)
+  if (!message) return res.status(404).json({ error: 'canvas not found or empty text' })
+  res.json(message)
+})
+
 app.post('/api/canvases/:canvasId/cards/:id/done', (req, res) => {
   if (!requireCanvas(req, res, req.params.canvasId)) return
   const card = actions.completeCard(req.params.canvasId, req.params.id)
@@ -1692,6 +1809,7 @@ wss.on('connection', (ws, upgradeReq) => {
         tasks: actions.getTasks(msg.canvasId),
         feedback: actions.getFeedback(msg.canvasId),
         comments: actions.getComments(msg.canvasId),
+        chat: actions.getChat(msg.canvasId),
         decisions: actions.getDecisions(msg.canvasId),
         proposals: actions.getProposals(msg.canvasId),
         selfColor: presence.color,
@@ -1781,4 +1899,5 @@ server.listen(PORT, () => {
   )
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()
+  for (const extension of extensions) extension.startWorker?.()
 })

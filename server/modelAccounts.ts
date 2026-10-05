@@ -4,6 +4,12 @@ import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
 import { CLAUDE_MODEL_IDS, normalizeClaudeModel } from '../shared/localAgent.ts'
+import {
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_OPENROUTER_MODEL,
+  GEMINI_MODELS,
+  OPENROUTER_MODELS,
+} from '../shared/modelMenu.ts'
 import { isKnownModel, modelFor } from './openaiAgent.ts'
 
 /**
@@ -46,9 +52,15 @@ const REDIRECT_URI = process.env.CHATGPT_OAUTH_REDIRECT_URI || 'http://localhost
    fetch — an ordinary product User-Agent passes where no header at all does */
 const AUTH_USER_AGENT = process.env.CHATGPT_AUTH_USER_AGENT || 'doop/0.1 (+https://doop.design)'
 
-export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key'
+export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
 
-const ACCOUNT_KINDS: readonly string[] = ['chatgpt', 'openai-key', 'anthropic-key'] satisfies AccountKind[]
+const ACCOUNT_KINDS: readonly string[] = [
+  'chatgpt',
+  'openai-key',
+  'anthropic-key',
+  'openrouter-key',
+  'gemini-key',
+] satisfies AccountKind[]
 
 export interface ModelAccount {
   userId: string
@@ -125,16 +137,51 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
   }
 }
 
+const DEFAULT_OPENROUTER = process.env.DOOP_AGENT_OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL
+const DEFAULT_GEMINI = process.env.DOOP_AGENT_GEMINI_MODEL || DEFAULT_GEMINI_MODEL
+
+/* per-kind model policy: how a stored (possibly unset or stale) model id
+   resolves to the one that will run, and which ids the picker may set */
+const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKnown(model: string): boolean }> = {
+  chatgpt: { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
+  'openai-key': { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
+  'anthropic-key': {
+    resolve: normalizeClaudeModel,
+    isKnown: (model) => CLAUDE_MODEL_IDS.some((id) => id === model),
+  },
+  'openrouter-key': {
+    resolve: (model) => model || DEFAULT_OPENROUTER,
+    isKnown: (model) => OPENROUTER_MODELS.some((option) => option.id === model),
+  },
+  'gemini-key': {
+    resolve: (model) => model || DEFAULT_GEMINI,
+    isKnown: (model) => GEMINI_MODELS.some((option) => option.id === model),
+  },
+}
+
 export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
-  return account.kind === 'anthropic-key' ? normalizeClaudeModel(account.model) : modelFor(account)
+  return MODEL_POLICY[account.kind].resolve(account.model)
+}
+
+/** Whether the model this account resolves to can see images. An id off the
+ *  curated menu (a server env override) is trusted to have vision except on
+ *  OpenRouter, whose roster mixes text-only models — there the conservative
+ *  answer is a degraded run rather than a 400 on the first screenshot. */
+export function accountVisionFor(account: Pick<ModelAccount, 'kind' | 'model'>): boolean {
+  const model = accountModelFor(account)
+  const menu =
+    account.kind === 'openrouter-key' ? OPENROUTER_MODELS : account.kind === 'gemini-key' ? GEMINI_MODELS : null
+  if (!menu) return true
+  const option = menu.find((entry) => entry.id === model)
+  if (option) return option.vision
+  return account.kind !== 'openrouter-key'
 }
 
 /** Change which model tier this account runs on. */
 export async function setAccountModel(userId: string, model: string): Promise<AccountStatus> {
   const account = await getAccount(userId)
   if (!account) throw new Error('no model account connected')
-  const known = account.kind === 'anthropic-key' ? CLAUDE_MODEL_IDS.some((id) => id === model) : isKnownModel(model)
-  if (!known) throw new Error('unknown model')
+  if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
   await save({ ...account, model })
   return getStatus(userId)
 }
@@ -656,31 +703,59 @@ export function startCallbackCatcher(): Promise<boolean> {
   })
 }
 
-export async function connectApiKey(userId: string, apiKey: string): Promise<AccountStatus> {
+/* what a plausible key looks like, per provider — a shape check only, never a
+   live call; the first run surfaces a bad key as ModelAuthError anyway */
+const KEY_SHAPES: Partial<Record<AccountKind, { test(key: string): boolean; hint: string }>> = {
+  'openai-key': {
+    test: (key) => key.startsWith('sk-'),
+    hint: 'That does not look like an OpenAI API key (they start with "sk-")',
+  },
+  'anthropic-key': {
+    test: (key) => key.startsWith('sk-ant-') && !/\s/.test(key),
+    hint: 'That does not look like an Anthropic API key (they start with "sk-ant-")',
+  },
+  'openrouter-key': {
+    test: (key) => key.startsWith('sk-or-') && !/\s/.test(key),
+    hint: 'That does not look like an OpenRouter API key (they start with "sk-or-")',
+  },
+  'gemini-key': {
+    /* Google issues "AIza…" keys today, but the prefix is not contractual —
+       accept any single long token rather than rejecting a future format */
+    test: (key) => key.length >= 30 && !/\s/.test(key),
+    hint: 'That does not look like a Gemini API key (a long single token, usually starting with "AIza")',
+  },
+}
+
+async function connectKey(userId: string, kind: AccountKind, apiKey: string): Promise<AccountStatus> {
   const key = apiKey.trim()
-  if (!key.startsWith('sk-')) throw new Error('That does not look like an OpenAI API key (they start with "sk-")')
+  const shape = KEY_SHAPES[kind]
+  if (!shape) throw new Error(`${kind} accounts do not connect with an API key`)
+  if (!shape.test(key)) throw new Error(shape.hint)
   const previous = await getAccount(userId)
   await save({
     userId,
-    kind: 'openai-key',
+    kind,
     apiKey: key,
-    model: previous?.kind === 'openai-key' ? previous.model : undefined,
+    /* a rotation keeps the chosen model; switching providers resets it */
+    model: previous?.kind === kind ? previous.model : undefined,
   })
   return getStatus(userId)
 }
 
-export async function connectAnthropicKey(userId: string, apiKey: string): Promise<AccountStatus> {
-  const key = apiKey.trim()
-  if (!key.startsWith('sk-ant-') || /\s/.test(key))
-    throw new Error('That does not look like an Anthropic API key (they start with "sk-ant-")')
-  const previous = await getAccount(userId)
-  await save({
-    userId,
-    kind: 'anthropic-key',
-    apiKey: key,
-    model: previous?.kind === 'anthropic-key' ? previous.model : undefined,
-  })
-  return getStatus(userId)
+export function connectApiKey(userId: string, apiKey: string): Promise<AccountStatus> {
+  return connectKey(userId, 'openai-key', apiKey)
+}
+
+export function connectAnthropicKey(userId: string, apiKey: string): Promise<AccountStatus> {
+  return connectKey(userId, 'anthropic-key', apiKey)
+}
+
+export function connectOpenRouterKey(userId: string, apiKey: string): Promise<AccountStatus> {
+  return connectKey(userId, 'openrouter-key', apiKey)
+}
+
+export function connectGeminiKey(userId: string, apiKey: string): Promise<AccountStatus> {
+  return connectKey(userId, 'gemini-key', apiKey)
 }
 
 /* refreshes are per-user serialized: two runs starting together must not both

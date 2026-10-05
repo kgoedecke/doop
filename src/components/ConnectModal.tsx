@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { navigate } from '../App'
 import { useStore } from '../lib/store'
 import { roleByAgentName } from '../../shared/agents'
 import { Button } from './ui/button'
@@ -62,6 +63,21 @@ export function ConnectBody({ canvasId }: { canvasId?: string }) {
 
       <h3 className={stepHeading}>Any other MCP client (streamable HTTP)</h3>
       <CodeBlock text={jsonConfig} />
+
+      <h3 className={stepHeading}>Headless agent — no browser to sign in with</h3>
+      <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
+        A Mastra workflow, n8n, or CI can’t complete the OAuth approval. Mint an agent key in{' '}
+        <button
+          type="button"
+          className="font-medium text-accent-ink underline underline-offset-2"
+          onClick={() =>
+            navigate(`/settings?pane=keys${canvasId ? `&from=${encodeURIComponent(`/c/${canvasId}`)}` : ''}`)
+          }
+        >
+          Settings → Agent keys
+        </button>{' '}
+        and send it as <code>Authorization: Bearer dpk_…</code> — the key acts as you, on the canvases you can reach.
+      </p>
 
       {prompt && (
         <>

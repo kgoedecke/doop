@@ -4,11 +4,12 @@ import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { openCanvasTab } from '../lib/desktop'
 import { ModelAccountPanel } from '../components/ModelAccount'
+import { ImageModelCard } from '../components/ImageModelCard'
 import { useAllowance } from '../components/TeamAllowance'
+import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import { AccountSettings } from '../components/AccountSettings'
-import { AppearanceSettings } from '../components/AppearanceSettings'
-import { AccountMenu, ConnectCard, IconBack, IconChevron, IconSpark, IconUser } from '../components/DashShell'
-import { MoonIcon } from '../components/ui/icons'
+import { AgentKeys } from '../components/AgentKeys'
+import { AccountMenu, ConnectCard, IconBack, IconChevron, IconKey, IconSpark, IconUser } from '../components/DashShell'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { Wordmark } from '../components/ui/wordmark'
@@ -26,7 +27,13 @@ import {
   DashTitle,
 } from '../components/ui/dash'
 
-type Pane = 'agent' | 'account' | 'appearance'
+type Pane = 'agent' | 'keys' | 'account'
+
+/** ?pane= deep-links a section — the connect modal sends people to ?pane=keys. */
+function initialPane(): Pane {
+  const pane = new URLSearchParams(location.search).get('pane')
+  return pane === 'keys' || pane === 'account' ? pane : 'agent'
+}
 
 /**
  * Account settings. Today it holds one thing — which model account the Doop
@@ -40,7 +47,7 @@ type Pane = 'agent' | 'account' | 'appearance'
 export function Settings() {
   /* the sub-nav switches panes rather than scrolling to an anchor — on a page
      this short an anchor jump looks like nothing happened */
-  const [pane, setPane] = useState<Pane>('agent')
+  const [pane, setPane] = useState<Pane>(initialPane)
   const { allowance, refresh } = useAllowance()
   const left = allowance ? Math.max(0, allowance.limit - allowance.used) : null
   /* arriving from a canvas (the free-tier wall) should not cost you your
@@ -56,9 +63,11 @@ export function Settings() {
 
   const meter = allowance
     ? allowance.byoModel
-      ? allowance.byoKind === 'claude-local'
-        ? 'Claude CLI selected — runs on your connected desktop.'
-        : `Running on your ${allowance.byoKind === 'anthropic-key' ? 'Claude API key' : allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT subscription'}.`
+      ? allowance.byoKind === 'gemini-cloud'
+        ? 'Gemini cloud pilot selected — connection managed by your operator.'
+        : allowance.byoKind === 'claude-local'
+          ? 'Claude CLI selected — runs on your connected desktop.'
+          : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
       : allowance.limit <= 0
         ? 'No free tasks on this server — connect an account to use the Doop Agent.'
         : left === 0
@@ -83,6 +92,9 @@ export function Settings() {
         <nav className="flex flex-col gap-0.5">
           <DashNavItem icon={<IconSpark />} active={pane === 'agent'} onClick={() => setPane('agent')}>
             Doop Agent
+          </DashNavItem>
+          <DashNavItem icon={<IconKey />} active={pane === 'keys'} onClick={() => setPane('keys')}>
+            Agent keys
           </DashNavItem>
           <DashNavItem icon={<IconUser />} active={pane === 'account'} onClick={() => setPane('account')}>
             Your account
@@ -121,15 +133,13 @@ export function Settings() {
         <DashContent>
           <div className="flex items-start gap-4 md:items-end">
             <div>
-              <DashTitle>
-                {pane === 'agent' ? 'Doop Agent' : pane === 'account' ? 'Your account' : 'Appearance'}
-              </DashTitle>
+              <DashTitle>{pane === 'agent' ? 'Doop Agent' : pane === 'keys' ? 'Agent keys' : 'Your account'}</DashTitle>
               <DashSubtitle>
                 {pane === 'agent'
                   ? 'Which model account the agent runs on, for every canvas you work on.'
-                  : pane === 'account'
-                    ? 'Who you are on every canvas — and how you get back into this one.'
-                    : 'Customize theme, dark mode, and interface display preferences.'}
+                  : pane === 'keys'
+                    ? 'Bearer credentials that let headless agents design as you.'
+                    : 'Who you are on every canvas — and how you get back into this one.'}
               </DashSubtitle>
             </div>
           </div>
@@ -138,6 +148,9 @@ export function Settings() {
             <TabsList className="h-10 w-full border border-line bg-surface p-1 shadow-card">
               <TabsTrigger value="agent">
                 <IconSpark /> Doop Agent
+              </TabsTrigger>
+              <TabsTrigger value="keys">
+                <IconKey /> Agent keys
               </TabsTrigger>
               <TabsTrigger value="account">
                 <IconUser /> Account
@@ -173,8 +186,11 @@ export function Settings() {
                 </CardHeader>
                 <ModelAccountPanel onChange={refresh} />
               </Card>
+              <ImageModelCard />
             </>
-          ) : pane === 'account' ? (
+          ) : pane === 'keys' ? (
+            <AgentKeys />
+          ) : (
             <AccountSettings />
           ) : (
             <AppearanceSettings />

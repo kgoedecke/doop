@@ -28,6 +28,7 @@ import {
   GearIcon,
   GridIcon,
   HelpIcon,
+  KeyIcon,
   ListIcon,
   LogOutIcon,
   PulseIcon,
@@ -167,6 +168,7 @@ const rail = { width: 15, height: 15, 'aria-hidden': true } as const
 export const IconGrid = () => <GridIcon {...rail} />
 export const IconList = () => <ListIcon {...rail} />
 export const IconUser = () => <UserIcon {...rail} />
+export const IconKey = () => <KeyIcon {...rail} />
 export const IconShare = () => <UsersIcon {...rail} />
 /** the gallery: a compass — designs to steer by */
 export const IconCommunity = () => <CompassIcon {...rail} />

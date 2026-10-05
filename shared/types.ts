@@ -402,6 +402,28 @@ export interface ElementComment {
   parentId?: string
 }
 
+/** One line in the canvas chat: a human or agent talking to the room. A
+ *  message that @mentions resident agents also queues a board card for them
+ *  (linked through `taskId`), so a request typed in the chat is assigned the
+ *  moment it is sent, and the agents answer back in the same thread. */
+export interface ChatMessage {
+  id: string
+  canvasId: string
+  from: string
+  fromKind: ActorKind
+  /** account id of the human who wrote it — decides which model credential runs the card */
+  fromUserId?: string
+  color: string
+  text: string
+  at: number
+  /** role ids the text @mentions, in order — the pipeline of the queued card */
+  mentions?: string[]
+  /** the board card this message queued, when it addressed an agent */
+  taskId?: string
+  /** an agent's answer: the message it replies to */
+  replyToId?: string
+}
+
 export interface ActivityItem {
   id: string
   actorName: string
@@ -439,6 +461,7 @@ export type ServerMessage =
       tasks: AgentTask[]
       feedback: TaskFeedback[]
       comments: ElementComment[]
+      chat: ChatMessage[]
       decisions: DesignDecision[]
       proposals: MemoryProposal[]
       selfColor: string
@@ -454,6 +477,7 @@ export type ServerMessage =
   | { type: 'task'; task: AgentTask }
   | { type: 'feedback'; feedback: TaskFeedback }
   | { type: 'comment'; comment: ElementComment }
+  | { type: 'chat'; message: ChatMessage }
   | { type: 'frame:drag'; clientId: string; frameId: string; x: number; y: number; width: number; height: number }
   | { type: 'frame:created'; frame: Frame; actor: Actor }
   | { type: 'frame:updated'; frame: Frame; actor: Actor }

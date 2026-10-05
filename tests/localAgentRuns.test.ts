@@ -105,3 +105,21 @@ it('keeps queued canvas runs alive while another canvas occupies the desktop', a
   await runs.finish(next.id, 'alice', 'desktop', { success: true, text: 'Second' })
   expect((await second).success).toBe(true)
 })
+
+it('stops a canceled canvas run without stopping another run on the same account', async () => {
+  const runs = new LocalAgentRuns()
+  let canceled = false
+  const execute = vi.fn(harness().execute)
+  const first = runs.start('alice', 'default', { ...harness(execute), isCanceled: () => canceled })
+  const second = runs.start('alice', 'default', harness())
+  const job = runs.poll('alice', 'desktop')!
+  canceled = true
+  await expect(runs.execute(job.id, job.token, 'create_frame', {})).rejects.toThrow()
+  expect(execute).not.toHaveBeenCalled()
+  await runs.expire()
+  expect(await first).toEqual({ success: false, text: 'Task stopped.' })
+  const next = runs.poll('alice', 'desktop')!
+  expect(next.id).not.toBe(job.id)
+  await runs.finish(next.id, 'alice', 'desktop', { success: true, text: 'Done' })
+  expect((await second).success).toBe(true)
+})
