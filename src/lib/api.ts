@@ -1,4 +1,5 @@
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type {
   ActivityItem,
   ChatMessage,
@@ -259,6 +260,9 @@ export async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  notificationSettings: () => req<NotificationSettings>('/api/notifications'),
+  setNotificationPrefs: (prefs: NotificationPrefs) =>
+    req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),

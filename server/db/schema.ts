@@ -614,6 +614,15 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
   model: text('model').notNull().default('default'),
 })
 
+/** Per-user notification switches. No row means everything is on: comment
+ *  email is opt-out, so the person who shared a review link hears about the
+ *  feedback without first finding a setting. */
+export const notificationPrefs = pgTable('notification_prefs', {
+  userId: text('user_id').primaryKey(),
+  commentEmails: boolean('comment_emails').notNull().default(true),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
 /** Which image model generate_image draws with, per user. Separate from
  *  model_accounts because a server-tier user (no account row) still picks
  *  among the server-enabled image models. */

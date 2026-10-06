@@ -13,6 +13,9 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
+import { onCanvasEvent } from './events.ts'
+import * as commentNotifications from './commentNotifications.ts'
+import { notificationsRouter } from './notifications.ts'
 import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
 import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN, loginProvidersConfig } from './auth.ts'
 import { adminRouter } from './admin.ts'
@@ -236,6 +239,8 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
+/* after the room has been told: email for the people who were not in it */
+onCanvasEvent(commentNotifications.onCanvasEvent)
 
 /* ------------------------------------------------- http api */
 
@@ -627,6 +632,7 @@ function requireFrame(req: express.Request, res: express.Response, frameId: stri
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/notifications', notificationsRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)

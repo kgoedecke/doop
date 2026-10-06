@@ -13,6 +13,7 @@ import {
   stripMentions,
 } from '../shared/agents.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
+import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
   ActorKind,
@@ -646,6 +647,12 @@ function postComment(
        an API key). Dynamic import: resident depends on this module. */
     import('./resident.ts').then((r) => r.onFeedback(frame.canvasId)).catch(() => {})
   }
+  emitCanvasEvent(frame.canvasId, {
+    type: anchor.parentId ? 'comment.replied' : 'comment.created',
+    comment,
+    frame,
+    actorKind: kind,
+  })
   return comment
 }
 

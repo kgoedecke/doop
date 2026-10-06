@@ -27,6 +27,14 @@ import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
 import { RoleMark } from './RoleMark'
 
+/** ?comment=<rootId> — the link in a comment email. The thread opens once
+ *  Stage has selected the linked frame (deselection closes popovers, and on
+ *  first paint no frame is selected yet). Frames that do not hold the
+ *  comment ignore it: only a root with that id ever renders an open popover. */
+function deepLinkedThread(): string | null {
+  return new URLSearchParams(location.search).get('comment')
+}
+
 /* Counter-scale contract: chrome that keeps constant on-screen size divides
    by the `--zoom` variable the Stage publishes (capped at 2.4× when zoomed
    far out). Preserve these expressions exactly. */
@@ -310,6 +318,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
   const [composing, setComposing] = useState(false)
   const [openThread, setOpenThread] = useState<string | null>(null)
+  const [linkedThread, setLinkedThread] = useState<string | null>(deepLinkedThread)
   const [pinPos, setPinPos] = useState<Record<string, { x: number; y: number } | null>>({})
   const probeReq = useRef(0)
   const probeTimer = useRef<number | null>(null)
@@ -394,6 +403,11 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   if (wasSelected !== selected) {
     setWasSelected(selected)
     if (!selected) setProbe(null)
+    else if (linkedThread) {
+      /* the emailed thread, now that selection will not close it again */
+      setOpenThread(linkedThread)
+      setLinkedThread(null)
+    }
   }
 
   /* the outlined element is shared with the Layers panel through the store:

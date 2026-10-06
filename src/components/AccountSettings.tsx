@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
+import { api } from '../lib/api'
+import type { NotificationSettings } from '../../shared/notifications'
 import { posthog } from '../lib/posthog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
 import { Note } from './ui/note'
+import { Checkbox } from './ui/checkbox'
 import { Card, CardDescription, CardHeader, CardRow, CardTitle } from './ui/card'
 
 /* settings fields are a fixed column on desktop and full width on a phone */
@@ -35,6 +38,16 @@ export function AccountSettings() {
 
   const [verifyNote, setVerifyNote] = useState('')
 
+  /* null until the server has answered — the switch renders inert meanwhile */
+  const [notify, setNotify] = useState<NotificationSettings | null>(null)
+  const [notifyError, setNotifyError] = useState('')
+  /* one save at a time: two in flight could land out of order and show the older choice */
+  const [savingNotify, setSavingNotify] = useState(false)
+  const refreshNotify = useCallback(() => {
+    api.notificationSettings().then(setNotify, () => {})
+  }, [])
+  useEffect(refreshNotify, [refreshNotify])
+
   async function saveName() {
     setSavingName(true)
     setNameNote('')
@@ -64,6 +77,22 @@ export function AccountSettings() {
     setCurrent('')
     setNext('')
     setPwNote('Password updated — every other session was signed out')
+  }
+
+  async function setCommentEmails(on: boolean) {
+    if (!notify || savingNotify) return
+    setSavingNotify(true)
+    setNotify({ ...notify, commentEmails: on })
+    setNotifyError('')
+    try {
+      setNotify(await api.setNotificationPrefs({ commentEmails: on }))
+      posthog.capture('comment_emails_toggled', { on })
+    } catch {
+      setNotifyError('That could not be saved — try again')
+      refreshNotify()
+    } finally {
+      setSavingNotify(false)
+    }
   }
 
   async function resendVerification() {
@@ -131,6 +160,35 @@ export function AccountSettings() {
             <Badge className="text-[10.5px]">unverified</Badge>
           )}
           {verifyNote && <Note tone="success">{verifyNote}</Note>}
+        </CardRow>
+      </Card>
+
+      <Card className={settingsCard}>
+        <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+          <CardDescription>
+            Email about what happens on your canvases while you are not looking at them. Your own comments never trigger
+            one.
+          </CardDescription>
+        </CardHeader>
+        <CardRow label="Comment emails">
+          <label className="relative flex cursor-pointer items-center gap-2.5 text-[13px] text-ink">
+            <Checkbox
+              checked={notify?.commentEmails ?? true}
+              disabled={!notify || !notify.emailConfigured || savingNotify}
+              onChange={(e) => void setCommentEmails(e.target.checked)}
+              aria-label="Email me about new comments and replies"
+            />
+            <span>
+              New comments and replies on canvases you own, were invited to, or wrote in — bundled into one email per
+              canvas every couple of minutes.
+            </span>
+          </label>
+          {notify && !notify.emailConfigured ? (
+            <Note>This doop has no email set up (SMTP_HOST), so nothing is sent either way.</Note>
+          ) : notifyError ? (
+            <Note tone="error">{notifyError}</Note>
+          ) : null}
         </CardRow>
       </Card>
 
