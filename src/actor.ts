@@ -42,7 +42,7 @@ export type IndexSnapshot = {
   initialized: boolean
   deleted: boolean
 }
-export type IndexCommand = { type: 'snapshot' } | { type: 'reorder'; frameIds: string[]; requestId: string }
+export type IndexCommand = { type: 'snapshot' }
 
 function indexTable(db: ActorDatabase): true {
   db.exec(
@@ -53,7 +53,7 @@ function indexTable(db: ActorDatabase): true {
 
 /** A canvas owns only frame membership and order. */
 @Compute({ cpu: 1, memoryMiB: 256 })
-export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapshot | SyncError> {
+export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapshot> {
   @Persisted private initialized = false
   @Persisted private deleted = false
   @Persisted private revision = 0
@@ -66,16 +66,6 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
 
   override async onMessage(socket: ActorSocketOf<CanvasIndex>, command: IndexCommand) {
     if (command.type === 'snapshot') return socket.send(await this.snapshot())
-    try {
-      if (socket.metadata.readOnly) throw new Error('This connection is read only')
-      await this.reorder(command.frameIds)
-    } catch (error) {
-      socket.send({
-        type: 'error',
-        requestId: command.requestId,
-        message: error instanceof Error ? error.message : 'Reorder failed',
-      })
-    }
   }
 
   async initialize(frameIds: string[] = []): Promise<IndexSnapshot> {
@@ -119,22 +109,6 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
     this.revision++
     this.committed = await this.snapshot()
     return true
-  }
-
-  async reorder(frameIds: string[]): Promise<void> {
-    const current = await this.snapshot()
-    if (!this.initialized || this.deleted) throw new Error('Canvas not found')
-    const ids = new Set(frameIds)
-    if (
-      ids.size !== frameIds.length ||
-      ids.size !== current.frameIds.length ||
-      current.frameIds.some((id) => !ids.has(id))
-    )
-      throw new Error('Reorder must contain every current frame exactly once')
-    for (const [position, id] of frameIds.entries())
-      this.db.exec('UPDATE entries SET position = ? WHERE id = ?', position, id)
-    this.revision++
-    this.committed = await this.snapshot()
   }
 
   async remove(id: string): Promise<boolean> {

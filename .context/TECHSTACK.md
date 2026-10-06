@@ -3,8 +3,8 @@
 ## 1. Language and Runtime
 
 - TypeScript 5.5.3 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
-- Node.js - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step, both in dev
-  (`tsx watch`) and prod (`NODE_ENV=production tsx server/index.ts`).
+- Node.js 22.19+ - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step.
+  `bun run dev` and `bun run start` launch the server and start local actors unless managed actors are configured.
 - Bun 1.3.10 - pinned via `packageManager` in `package.json`; used as the package manager and
   script runner, not as the server runtime.
 - Rust (stable) - `desktop/src-tauri`, the Tauri desktop shell.
@@ -18,29 +18,14 @@
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
-- `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, chat,
-  activity feed) over one room per canvas.
+- `ws` 8.18.0 - WebSocket server for cursors, presence, and collaboration over one room per canvas;
+  frame edits use separate actor subscriptions.
 
 ## 3. Data and Persistence
 
-- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - accounts, canvas metadata,
-  and collaboration records. Pending metadata writes drain during normal shutdown.
-- `durable-actors` 0.7.15 / `terse-sdk` 0.9.14 - one `CanvasIndex` actor per canvas owns
-  ordered frame IDs; one `FrameActor` per frame owns the complete frame, including HTML, name,
-  geometry, timestamps, and revision. Both use actor-local SQLite and
-  `@Compute({ cpu: 1, memoryMiB: 256 })`. The index never stores frame attributes or HTML.
-  Backend reads/writes use generated RPC. Browsers subscribe directly to the index and individual
-  frames through server-authorized WebSockets. Up to four initial frame connections are established
-  concurrently; all established subscriptions remain live. Revisions and reconnects are independent.
-  Doop `/ws` carries canvas metadata and other collaboration events, without frame HTML.
-  `@Persisted @Emittable committed` delivers edits after persistence; pointer previews use broadcast
-  from the corresponding frame actor. Mixed HTML/geometry edits have one atomic frame commit;
-  canvas exports assemble independent frame snapshots.
-  Creation initializes the frame before publishing membership. Deletion records an index tombstone
-  before retiring the frame; later access retries pending cleanup in the background.
-  No legacy actors, SQL frame imports, JSON imports, or migration paths remain.
-  `pnpm actors:generate` regenerates the client; `pnpm actors:check` verifies it in CI.
-  `bun run dev` starts persistent local actors; production uses managed Terse.
+- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - canvas metadata and collaboration.
+- `durable-actors` / `terse-sdk` - `CanvasIndex` owns ordered frame IDs; `FrameActor` owns each whole
+  frame. Both use 1 CPU and 256 MiB; local actors start automatically unless managed actors are configured.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).
@@ -57,14 +42,13 @@
 
 ## 6. Build and Dependency Management
 
-- Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
---frozen-lockfile` in CI.
+- Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install --frozen-lockfile` in CI.
 - Vite 5.3.3 - frontend build tool (`vite build`).
 
 ## 7. Testing Stack
 
-- Vitest 4.1.11 - unit/integration tests across `server/` and `src/`; run via `bun run test`
-  (`vitest run`). Tests live in `tests/`.
+- Vitest 4.1.11 - unit/integration tests across `server/` and `src/`; `bun run test` starts isolated
+  actors and runs Vitest. `DOOP_TEST_POSTGRES_URL` enables the two-server sync test. Tests live in `tests/`.
 
 ## 8. CI/CD and Delivery
 

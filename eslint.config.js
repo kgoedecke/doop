@@ -44,9 +44,7 @@ export default tseslint.config(
     files: ['scripts/**/*.{js,mjs}'],
     languageOptions: {
       globals: Object.fromEntries(
-        'process console Buffer URL fetch AbortController AbortSignal setTimeout clearTimeout'
-          .split(' ')
-          .map((g) => [g, 'readonly']),
+        'process console Buffer URL setTimeout clearTimeout'.split(' ').map((g) => [g, 'readonly']),
       ),
     },
   },

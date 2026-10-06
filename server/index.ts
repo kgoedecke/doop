@@ -12,6 +12,7 @@ import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
 import { prepareCanvasSocket, prepareFrameSocket } from './frame-sync.ts'
+import { browserActorGrant, upgradeActorSocket } from './actor-socket.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
@@ -913,7 +914,7 @@ app.get(
       },
       authorizationLifetimeMs: 60_000,
     })
-    res.set('Cache-Control', 'no-store').json(grant)
+    res.set('Cache-Control', 'no-store').json(browserActorGrant(grant, req))
   }),
 )
 
@@ -935,7 +936,7 @@ app.get(
       },
       authorizationLifetimeMs: 60_000,
     })
-    res.set('Cache-Control', 'no-store').json(grant)
+    res.set('Cache-Control', 'no-store').json(browserActorGrant(grant, req))
   }),
 )
 
@@ -1838,7 +1839,12 @@ if (process.env.NODE_ENV === 'production') {
 /* ------------------------------------------------- websocket */
 
 const server = http.createServer(app)
-const wss = new WebSocketServer({ server, path: '/ws' })
+const wss = new WebSocketServer({ noServer: true })
+server.on('upgrade', (req, socket, head) => {
+  if (upgradeActorSocket(req, socket, head)) return
+  if (new URL(req.url ?? '/', 'http://localhost').pathname !== '/ws') return socket.destroy()
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+})
 
 wss.on('connection', (ws, upgradeReq) => {
   /* the session cookie rides the upgrade request; resolve it once */

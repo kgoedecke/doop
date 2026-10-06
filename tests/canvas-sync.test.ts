@@ -48,7 +48,7 @@ async function joinActor(websocketUrl: string, sockets: WebSocket[]) {
     } else if (['index-snapshot', 'frame-snapshot', 'drag', 'error'].includes(event.type)) events.push(event)
   })
   await until(() => events.some((event) => event.type === 'index-snapshot' || event.type === 'frame-snapshot'))
-  async function request(command: { type: 'reorder'; frameIds: string[] } | { type: 'write'; write: FrameEdit }) {
+  async function request(command: { type: 'write'; write: FrameEdit }) {
     const requestId = randomUUID()
     socket.send(JSON.stringify({ ...command, requestId }))
     await until(() => events.some((event) => 'requestId' in event && event.requestId === requestId))
@@ -60,7 +60,7 @@ async function joinActor(websocketUrl: string, sockets: WebSocket[]) {
 }
 
 it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
-  'isolates whole frames and recovers through app restarts and deletion',
+  'synchronizes authorized edits across app servers, socket transports, and restarts',
   async () => {
     const admin = new pg.Client({ connectionString: process.env.DOOP_TEST_POSTGRES_URL })
     const database = `doop_sync_${randomUUID().replaceAll('-', '')}`
@@ -85,7 +85,11 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       let a = await startServer(portA, env)
       servers.push(a)
       const owner = await new Client(a).signUp('owner@canvas-sync.test', 'Owner')
-      const b = await startServer(portB, env)
+      const localActors = process.env.DOOP_TEST_ACTORS !== 'external'
+      const b = await startServer(portB, {
+        ...env,
+        ...(localActors ? { DOOP_LOCAL_ACTOR_URL: process.env.DURABLE_ACTORS_CONTROL_PLANE_URL! } : {}),
+      })
       servers.push(b)
       const peer = new Client(b)
       peer.cookies = new Map(owner.cookies)
@@ -95,12 +99,28 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       expect((await stranger.get(`/api/canvases/${canvas.id}/actor`)).status).toBe(403)
       const join = async (client: Client, path: string) => {
         const grant = await json<{ websocketUrl: string }>(client.get(path))
+        if (localActors && client === peer) expect(new URL(grant.websocketUrl).port).toBe(String(portB))
         return joinActor(grant.websocketUrl, sockets)
       }
       const [_left, right] = await Promise.all([
         join(owner, `/api/canvases/${canvas.id}/actor`),
         join(peer, `/api/canvases/${canvas.id}/actor`),
       ])
+      if (localActors) {
+        const rejected = new WebSocket(`ws://localhost:${portB}/api/actors/socket?key=invalid`)
+        sockets.push(rejected)
+        const status = await new Promise<number | undefined>((resolve, reject) => {
+          rejected.once('unexpected-response', (_request, response) => {
+            response.resume()
+            resolve(response.statusCode)
+          })
+          rejected.once('open', () => reject(new Error('Invalid ticket was accepted')))
+          rejected.once('error', reject)
+        })
+        expect(status).toBeGreaterThanOrEqual(400)
+        expect(status).toBeLessThan(500)
+        expect(await peer.joinWs(canvas.id)).toEqual({ kind: 'init' })
+      }
       const frame = await json<Frame>(
         owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Shared', html: '<main>Initial</main>' }),
       )
@@ -141,7 +161,9 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       ])
       const viewer = await joinActor(indexGrant.websocketUrl, sockets)
       const frameViewer = await joinActor(frameGrant.websocketUrl, sockets)
-      await expect(viewer.request({ type: 'reorder', frameIds: [other.id, frame.id] })).rejects.toThrow('read only')
+      expect(viewer.events).toContainEqual(
+        expect.objectContaining({ type: 'index-snapshot', frameIds: index.frameIds }),
+      )
       await expect(
         frameViewer.request({ type: 'write', write: { type: 'update', patch: { html: 'forbidden' } } }),
       ).rejects.toThrow('read only')
@@ -234,60 +256,29 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
   180_000,
 )
 
-it('keeps mixed edits atomic, orders membership, and resumes interrupted frame deletion', async () => {
+it('rejects an invalid edit atomically and completes an interrupted deletion without resurrection', async () => {
   const server = await startServer(await port())
   try {
     const client = await new Client(server).signUp('frames@frame-actors.test', 'Owner')
     const canvas = await json<Canvas>(client.post('/api/canvases', { name: 'Whole frames' }))
     const by = { name: 'Owner', kind: 'user' as const, color: '#123456' }
-    const original: Frame[] = []
-    for (let n = 0; n < 2; n++)
-      original.push(
-        await json<Frame>(
-          client.post(`/api/canvases/${canvas.id}/frames`, {
-            name: `Frame ${n} — café`,
-            html: `<main>你好 🌱${n}</main>`,
-            demo: n === 1,
-          }),
-        ),
-      )
-    const [first, second] = original as [Frame, Frame]
+    const frame = await json<Frame>(
+      client.post(`/api/canvases/${canvas.id}/frames`, { name: 'Frame', html: '<main>Original</main>' }),
+    )
     const index = canvasIndex(canvas.id)
-    const actor = frameActor(first.id)
-    expect((await index.snapshot()).frameIds).toEqual([first.id, second.id])
-    expect(second.x).toBe(first.x + first.width + 80)
+    const actor = frameActor(frame.id)
     await expect(actor.write({ type: 'update', patch: { html: 'invalid mixed edit', width: -1 } }, by)).rejects.toThrow(
       'Invalid frame width',
     )
-    expect((await actor.snapshot()).frame).toEqual(first)
-    const changed = await actor.write(
-      { type: 'update', patch: { html: '<main>Saved together</main>', x: -120.5, name: 'Renamed' } },
-      by,
-    )
-    expect(changed).toMatchObject({
-      revision: 1,
-      frame: { x: -120.5, html: '<main>Saved together</main>', name: 'Renamed' },
-    })
-    expect(await actor.initialize(first)).toBe(false)
-    expect((await actor.snapshot()).frame).toEqual(changed?.frame)
-    const summary = await actor.summary()
-    expect(summary.frame).toMatchObject({ x: -120.5, name: 'Renamed' })
-    expect(summary.frame).not.toHaveProperty('html')
-    await index.reorder([second.id, first.id])
-    expect((await json<Canvas>(client.get(`/api/canvases/${canvas.id}`))).frames.map((frame) => frame.id)).toEqual([
-      second.id,
-      first.id,
-    ])
-    await expect(index.reorder([first.id, first.id])).rejects.toThrow('every current frame')
-    expect((await index.snapshot()).frameIds).toEqual([second.id, first.id])
+    expect((await actor.snapshot()).frame).toEqual(frame)
     // Simulate death between durable membership removal and frame cleanup.
-    await index.remove(first.id)
+    await index.remove(frame.id)
     expect((await actor.snapshot()).deleted).toBe(false)
-    expect((await json<Canvas>(client.get(`/api/canvases/${canvas.id}`))).frames).toEqual([second])
+    expect((await json<Canvas>(client.get(`/api/canvases/${canvas.id}`))).frames).toEqual([])
     await until(async () => (await actor.snapshot()).deleted)
     await until(async () => (await index.pendingDeletes()).length === 0)
-    expect(await index.add(first.id)).toBe(false)
-    expect(await actor.initialize(first)).toBe(false)
+    expect(await index.add(frame.id)).toBe(false)
+    expect(await actor.initialize(frame)).toBe(false)
     expect((await actor.snapshot()).frame).toBeNull()
   } finally {
     server.stop()

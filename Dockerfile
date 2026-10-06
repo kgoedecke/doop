@@ -45,14 +45,18 @@ ENV NODE_ENV=production \
     CHROME_NO_SANDBOX=1 \
     PORT=4400
 
+COPY --from=build /usr/local/bin/bun /usr/local/bin/bun
 COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY generated ./generated
 COPY server ./server
 COPY shared ./shared
+COPY src/actor.ts ./src/actor.ts
+COPY scripts/run-with-actors.mjs ./scripts/
+ENV DURABLE_ACTORS_CACHE_DIR=/opt/durable-actors
+RUN node --input-type=module -e "import { fetchRuntimeExecutablePath } from './node_modules/durable-actors/dist/runtimeInstaller.js'; await fetchRuntimeExecutablePath()"
 
 EXPOSE 4400
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-# the installed binary rather than npx: npm is not what resolves packages here
-CMD ["node_modules/.bin/tsx", "server/index.ts"]
+CMD ["node", "scripts/run-with-actors.mjs", "start"]

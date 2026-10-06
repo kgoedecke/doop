@@ -27,7 +27,6 @@ export const actors = {
                     { name: "initialize", result: "value" },
                     { name: "pendingDeletes", result: "value" },
                     { name: "remove", result: "value" },
-                    { name: "reorder", result: "void" },
                     { name: "snapshot", result: "value" }
                 ],
                 transport

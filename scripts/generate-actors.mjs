@@ -48,7 +48,7 @@ export async function generateActors(check = false) {
       const expected = await readFile(path.join(staging, file), 'utf8')
       const actual = await readFile(path.join(output, file), 'utf8').catch(() => undefined)
       if (expected === actual) continue
-      if (check) throw new Error(`Stale generated actor client: ${file}. Run pnpm actors:generate.`)
+      if (check) throw new Error(`Stale generated actor client: ${file}. Run bun run actors:generate.`)
       await writeFile(path.join(output, file), expected)
     }
     console.log(`[actors] Generated client ${check ? 'is current' : 'updated'}.`)

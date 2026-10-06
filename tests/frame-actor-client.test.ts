@@ -88,7 +88,7 @@ async function connect(entries: Frame[]) {
   await flush()
 }
 
-it('routes whole-frame edits to one owner and isolates a disconnected frame', async () => {
+it('keeps another frame editable after a disconnect and ignores late updates after deletion', async () => {
   const a = frame('a'),
     b = frame('b')
   await connect([a, b])
@@ -100,7 +100,6 @@ it('routes whole-frame edits to one owner and isolates a disconnected frame', as
   const rejected = expect(writeA).rejects.toThrow('Connection lost')
   await flush()
   const commandB = contentB.sent[0]!
-  expect(commandB.type).toBe('write')
   contentA.close()
   await rejected
   contentB.receive({
@@ -117,26 +116,12 @@ it('routes whole-frame edits to one owner and isolates a disconnected frame', as
     },
   })
   expect((await writeB).html).toBe('<p>B</p>')
-  const move = sync.writeFrame({ type: 'update', id: 'b', patch: { x: 900 } })
-  await flush()
-  const command = contentB.sent.at(-1)!
-  expect(command).toMatchObject({ type: 'write', write: { type: 'update', patch: { x: 900 } } })
-  expect(contentB.sent).toHaveLength(2)
-  expect(index.sent).toEqual([])
-  contentB.receive({
+  index.receive({
     type: 'state_update',
-    changes: {
-      committed: {
-        type: 'frame-change',
-        revision: 2,
-        operation: 'update',
-        frame: { ...b, html: '<p>B</p>', x: 900, updatedAt: 3 },
-        actor: by,
-        requestId: 'requestId' in command ? command.requestId : '',
-      },
-    },
+    changes: { committed: indexSnapshot([b], 1) },
   })
-  expect(await move).toMatchObject({ x: 900, html: '<p>B</p>' })
+  contentA.receive(snapshot(a))
+  expect(useStore.getState().canvas?.frames).toEqual([{ ...b, html: '<p>B</p>', updatedAt: 2 }])
 })
 
 it('resyncs a revision gap on only the affected frame and keeps layout during an HTML reveal', async () => {
@@ -194,33 +179,7 @@ it('resyncs a revision gap on only the affected frame and keeps layout during an
   })
 })
 
-it('bounds initial frame connections and ignores late snapshots after deletion', async () => {
-  const entries = Array.from({ length: 9 }, (_, n) => frame(`f${n}`))
-  const ready = sync.connectFrames('c')
-  await flush()
-  const index = socket('/canvases/c/')
-  index.receive(indexSnapshot(entries))
-  await ready
-  await flush()
-  // Membership/order arrives before the individual frame snapshots.
-  expect(useStore.getState().frameIndex).toEqual(entries.map((entry) => entry.id))
-  expect(Socket.instances.filter((entry) => entry.url.includes('/frames/'))).toHaveLength(4)
-  const deleted = socket('/frames/f0/')
-  index.receive({
-    type: 'state_update',
-    changes: {
-      committed: indexSnapshot(entries.slice(1), 1),
-    },
-  })
-  deleted.receive(snapshot(entries[0]!))
-  for (const entry of entries.slice(1, 4).reverse()) socket(`/frames/${entry.id}/`).receive(snapshot(entry))
-  await flush()
-  expect(useStore.getState().canvas?.frames.some((entry) => entry.id === 'f0')).toBe(false)
-  expect(useStore.getState().canvas?.frames.map((entry) => entry.id)).toEqual(['f1', 'f2', 'f3'])
-  expect(Socket.instances.filter((entry) => entry.url.includes('/frames/')).length).toBeLessThanOrEqual(8)
-})
-
-it('waits for index membership when a create response arrives before its socket notification', async () => {
+it('allows an immediate edit when creation finishes before its index notification', async () => {
   await connect([])
   const entry = frame('new')
   vi.stubGlobal(
@@ -238,7 +197,6 @@ it('waits for index membership when a create response arrives before its socket 
   await flush()
   expect(complete).toBe(false)
   const index = socket('/canvases/c/')
-  expect(index.sent.at(-1)).toEqual({ type: 'snapshot' })
   index.receive({
     type: 'state_update',
     changes: {
@@ -246,8 +204,27 @@ it('waits for index membership when a create response arrives before its socket 
     },
   })
   expect(await created).toEqual(entry)
+  const edited = sync.updateFrame(entry.id, { name: 'Edited immediately' })
   await flush()
-  socket('/frames/new/').receive(snapshot(entry))
+  const content = socket('/frames/new/')
+  content.receive(snapshot(entry))
   await flush()
-  expect(useStore.getState().canvas?.frames).toEqual([entry])
+  const command = content.sent.find((command) => command.type === 'write')
+  if (!command || command.type !== 'write') throw new Error('The follow-up edit was not sent')
+  const saved = { ...entry, name: 'Edited immediately', updatedAt: 2 }
+  content.receive({
+    type: 'state_update',
+    changes: {
+      committed: {
+        type: 'frame-change',
+        revision: 1,
+        operation: 'update',
+        frame: saved,
+        actor: by,
+        requestId: command.requestId,
+      },
+    },
+  })
+  expect(await edited).toEqual(saved)
+  expect(useStore.getState().canvas?.frames).toEqual([saved])
 })

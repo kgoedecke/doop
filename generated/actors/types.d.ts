@@ -6,7 +6,7 @@ export interface ActorTypes {
 interface $CanvasIndexContract {
     Metadata: FrameMetadata
     Incoming: IndexCommand
-    Outgoing: IndexSnapshot | SyncError
+    Outgoing: IndexSnapshot
     State: {
         committed: IndexSnapshot | null
     }
@@ -18,14 +18,13 @@ interface $CanvasIndexContract {
         initialize(frameIds?: string[]): Promise<IndexSnapshot>
         pendingDeletes(): Promise<string[]>
         remove(id: string): Promise<boolean>
-        reorder(frameIds: string[]): Promise<void>
         snapshot(): Promise<IndexSnapshot>
     }
 }
 interface $FrameActorContract {
     Metadata: FrameMetadata$1
     Incoming: FrameCommand
-    Outgoing: FrameSnapshot | FrameDrag | SyncError$1
+    Outgoing: FrameSnapshot | FrameDrag | SyncError
     State: {
         committed: FrameChange | FrameSnapshot | null
     }
@@ -126,15 +125,9 @@ type FrameSnapshot = {
     deleted: boolean
     activity: ActivityItem[]
 }
-type IndexCommand =
-    | {
-          type: "snapshot"
-      }
-    | {
-          type: "reorder"
-          frameIds: string[]
-          requestId: string
-      }
+type IndexCommand = {
+    type: "snapshot"
+}
 type IndexSnapshot = {
     type: "index-snapshot"
     revision: number
@@ -143,11 +136,6 @@ type IndexSnapshot = {
     deleted: boolean
 }
 type SyncError = {
-    type: "error"
-    requestId: string
-    message: string
-}
-type SyncError$1 = {
     type: "error"
     requestId: string
     message: string

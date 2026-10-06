@@ -89,10 +89,6 @@ export declare namespace actors {
                 Args: Parameters<Stub["remove"]>
                 Result: Awaited<ReturnType<Stub["remove"]>>
             }
-            ["reorder"]: {
-                Args: Parameters<Stub["reorder"]>
-                Result: Awaited<ReturnType<Stub["reorder"]>>
-            }
             ["snapshot"]: {
                 Args: Parameters<Stub["snapshot"]>
                 Result: Awaited<ReturnType<Stub["snapshot"]>>
@@ -133,10 +129,6 @@ export declare namespace actors {
             namespace remove {
                 type Args = $MethodTypes["remove"]["Args"]
                 type Result = $MethodTypes["remove"]["Result"]
-            }
-            namespace reorder {
-                type Args = $MethodTypes["reorder"]["Args"]
-                type Result = $MethodTypes["reorder"]["Result"]
             }
             namespace snapshot {
                 type Args = $MethodTypes["snapshot"]["Args"]
