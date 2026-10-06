@@ -54,7 +54,7 @@ async function toItem(canvas: Canvas): Promise<CommunityItem> {
 /** Every listing, newest first. Sorting by trend is the client's choice —
  *  the whole gallery is small enough to ship at once. */
 communityRouter.get('/', async (_req, res) => {
-  const canvases = await Promise.all(store.listPublished().map((c) => store.syncCanvas(c.id)))
+  const canvases = await Promise.all(store.listPublished().map((c) => store.syncCanvas(c.id, 'summary')))
   const items = await Promise.all(canvases.filter((c): c is Canvas => !!c && !!publishableFrames(c).length).map(toItem))
   res.json(items)
 })

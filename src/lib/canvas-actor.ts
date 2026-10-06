@@ -1,27 +1,58 @@
-import type { actors } from '../../generated/actors/index.js'
-import type { FrameChange, FrameSnapshot, FrameWrite } from '../actor'
-import type { Frame } from '../../shared/types'
+import type {
+  ContentChange,
+  ContentCommand,
+  ContentSnapshot,
+  FrameChange,
+  FrameWrite,
+  IndexChange,
+  IndexCommand,
+  IndexSnapshot,
+} from '../actor'
+import type { ActivityItem, Frame } from '../../shared/types'
+import { composeFrame, type FrameContent, type FrameLayout } from '../../shared/frame-state'
 import { getIdentity } from './identity'
 import { useStore } from './store'
 import { healPartialHtml } from '../../shared/frame-html'
 
-type Incoming = actors.CanvasFrames.Outgoing
-type Committed = actors.CanvasFrames.State['committed']
-let connection:
-  | {
-      id: string
-      socket?: WebSocket
-      ready: Promise<void>
-      revision: number
-      stopped: boolean
-      retry?: ReturnType<typeof setTimeout>
-    }
-  | undefined
+type Connection = {
+  id: string
+  canvasId: string
+  kind: 'index' | 'content'
+  socket?: WebSocket
+  ready: Promise<void>
+  revision: number
+  stopped: boolean
+  retry?: ReturnType<typeof setTimeout>
+  cancel?: () => void
+}
+let connection: Connection | undefined
+const frames = new Map<string, Connection>()
+const layouts = new Map<string, FrameLayout>()
+const contents = new Map<string, FrameContent>()
 const pending = new Map<
   string,
-  { resolve: (frame: Frame) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+  {
+    connection: Connection
+    resolve: (frame: Frame) => void
+    reject: (error: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }
 >()
 const reveals = new Map<string, ReturnType<typeof setTimeout>>()
+// Initial grants/snapshots are bounded; established sockets stay independent.
+let opening = 0
+const waiting: (() => void)[] = []
+async function slot<T>(work: () => Promise<T>): Promise<T> {
+  if (opening >= 4) await new Promise<void>((resolve) => waiting.push(resolve))
+  else opening++
+  try {
+    return await work()
+  } finally {
+    const next = waiting.shift()
+    if (next) next()
+    else opening--
+  }
+}
 type UpdateBatch = {
   patch: Partial<Frame>
   waiters: { resolve: (frame: Frame) => void; reject: (error: unknown) => void }[]
@@ -33,7 +64,7 @@ export async function updateFrame(id: string, patch: Partial<Frame>): Promise<Fr
   const canvasId = useStore.getState().canvas?.id
   if (!canvasId) throw new Error('No canvas is open')
   await connectFrames(canvasId)
-  if (connection?.id !== canvasId || useStore.getState().canvas?.id !== canvasId)
+  if (connection?.canvasId !== canvasId || useStore.getState().canvas?.id !== canvasId)
     throw new Error('Canvas changed before the edit could be sent.')
   return new Promise((resolve, reject) => {
     const existing = updates.get(id)
@@ -63,6 +94,13 @@ export async function updateFrame(id: string, patch: Partial<Frame>): Promise<Fr
   })
 }
 
+function paint(frame: Frame) {
+  const layout = layouts.get(frame.id)
+  if (!layout) return
+  // Content reveal timers must keep the latest independently committed layout.
+  useStore.getState().upsertFrame(composeFrame(layout, frame))
+}
+
 function showFrame(event: FrameChange) {
   const state = useStore.getState()
   // An older acknowledgement must not paint over this browser's newer edit.
@@ -78,7 +116,7 @@ function showFrame(event: FrameChange) {
   }
   if (event.operation === 'append') {
     state.setStream(frame.id, event.streaming ? { name: event.actor.name, color: event.actor.color } : null)
-    state.upsertFrame(event.streaming ? { ...frame, html: healPartialHtml(frame.html) } : frame)
+    paint(event.streaming ? { ...frame, html: healPartialHtml(frame.html) } : frame)
     return
   }
   const previous = state.canvas?.frames.find((candidate) => candidate.id === frame.id)?.html ?? ''
@@ -92,7 +130,7 @@ function showFrame(event: FrameChange) {
     (shown >= frame.html.length * 0.5 && shown >= previous.length * 0.5)
   ) {
     state.setStream(frame.id, null)
-    state.upsertFrame(frame)
+    paint(frame)
     return
   }
   const deadline = Date.now() + Math.min(5000, Math.max(2500, (frame.html.length - shown) / 8))
@@ -100,9 +138,7 @@ function showFrame(event: FrameChange) {
   const tick = () => {
     const ticks = Math.max(1, Math.ceil((deadline - Date.now()) / 80))
     shown = Math.min(frame.html.length, shown + Math.ceil((frame.html.length - shown) / ticks))
-    state.upsertFrame(
-      shown === frame.html.length ? frame : { ...frame, html: healPartialHtml(frame.html.slice(0, shown)) },
-    )
+    paint(shown === frame.html.length ? frame : { ...frame, html: healPartialHtml(frame.html.slice(0, shown)) })
     if (shown < frame.html.length) reveals.set(frame.id, setTimeout(tick, 80))
     else {
       reveals.delete(frame.id)
@@ -112,185 +148,383 @@ function showFrame(event: FrameChange) {
   tick()
 }
 
-function apply(event: FrameSnapshot | FrameChange) {
-  const current = connection
-  if (!current) return
-  if (event.type === 'change' && event.requestId) {
-    const request = pending.get(event.requestId)
-    if (request) {
-      clearTimeout(request.timer)
-      pending.delete(event.requestId)
-      request.resolve(event.frame)
-    }
+function mergeActivity(items: ActivityItem[]) {
+  const state = useStore.getState()
+  const merged = new Map([...state.activity, ...items].map((item) => [item.id, item]))
+  state.setActivity([...merged.values()].sort((a, b) => b.at - a.at).slice(0, 100))
+}
+
+function assembled(id: string): Frame | undefined {
+  const layout = layouts.get(id),
+    content = contents.get(id)
+  return layout && content ? composeFrame(layout, content) : undefined
+}
+
+function acknowledge(requestId: string | undefined, frame: Frame | undefined) {
+  if (!requestId || !frame) return
+  const request = pending.get(requestId)
+  if (!request) return
+  clearTimeout(request.timer)
+  pending.delete(requestId)
+  request.resolve(frame)
+}
+
+function rejectPending(current: Connection, error: Error) {
+  for (const [id, request] of pending) {
+    if (request.connection !== current) continue
+    clearTimeout(request.timer)
+    pending.delete(id)
+    request.reject(error)
   }
+}
+
+function stop(current: Connection) {
+  current.stopped = true
+  clearTimeout(current.retry)
+  current.cancel?.()
+  current.socket?.close()
+  rejectPending(current, new Error('Connection closed; reload to check whether your edit was saved.'))
+}
+
+function remove(id: string) {
+  const current = frames.get(id)
+  if (current) stop(current)
+  frames.delete(id)
+  layouts.delete(id)
+  useStore.getState().setFrameIndex([...layouts.values()])
+  contents.delete(id)
+  clearTimeout(reveals.get(id))
+  reveals.delete(id)
+  useStore.getState().removeFrame(id)
+}
+
+function applyIndex(event: IndexSnapshot | IndexChange, current: Connection) {
   if (event.revision < current.revision) return
-  if (event.type === 'change' && event.revision > current.revision + 1) {
-    current.socket?.send(JSON.stringify({ type: 'snapshot' } satisfies actors.CanvasFrames.Incoming))
+  if (event.type === 'index-change' && event.revision > current.revision + 1) {
+    current.socket?.send(JSON.stringify({ type: 'snapshot' }))
+    // The committed acknowledgement is still valid even when a resync is due.
+    const content = contents.get(event.frame.id)
+    acknowledge(event.requestId, content && composeFrame(event.frame, content))
     return
   }
   current.revision = event.revision
-  const state = useStore.getState()
-  if (state.canvas?.id !== current.id) return
-  if (event.type === 'snapshot') {
-    for (const timer of reveals.values()) clearTimeout(timer)
-    reveals.clear()
-    for (const id of Object.keys(state.streams)) state.setStream(id, null)
+  if (event.type === 'index-snapshot') {
     if (event.deleted) {
+      disconnectFrames()
       location.href = '/'
       return
     }
-    for (const frame of state.canvas.frames)
-      if (!event.frames.some((next) => next.id === frame.id)) state.removeFrame(frame.id)
-    for (const frame of event.frames) state.upsertFrame(frame)
-    const activity = new Map([...state.activity, ...event.activity].map((item) => [item.id, item]))
-    state.setActivity([...activity.values()].sort((a, b) => b.at - a.at).slice(0, 100))
+    const ids = new Set(event.frames.map((frame) => frame.id))
+    for (const id of layouts.keys()) if (!ids.has(id)) remove(id)
+    for (const frame of useStore.getState().canvas?.frames ?? []) if (!ids.has(frame.id)) remove(frame.id)
+    layouts.clear()
+    for (const layout of event.frames) layouts.set(layout.id, layout)
+    useStore.getState().setFrameIndex(event.frames)
+    mergeActivity(event.activity)
+    for (const layout of event.frames) {
+      const frame = assembled(layout.id)
+      if (frame) useStore.getState().upsertFrame(frame)
+      void connectContent(layout.id).catch((error) => console.error('[frame]', error))
+    }
+    return
+  }
+  if (event.operation === 'delete') {
+    remove(event.frame.id)
+    return
+  }
+  layouts.set(event.frame.id, event.frame)
+  useStore.getState().setFrameIndex([...layouts.values()])
+  const frame = assembled(event.frame.id)
+  if (frame) {
+    const queued = event.actor.clientId === getIdentity().clientId ? updates.get(frame.id)?.next?.patch : undefined
+    // Layout events must not replace a streaming HTML reveal with full content.
+    const { x, y, width, height, updatedAt, updatedBy } = frame
+    useStore.getState().patchFrameLocal(frame.id, { x, y, width, height, updatedAt, updatedBy, ...queued })
+    acknowledge(event.requestId, frame)
+  }
+  void connectContent(event.frame.id).catch((error) => console.error('[frame]', error))
+}
+
+function applyContent(event: ContentSnapshot | ContentChange, current: Connection) {
+  if (!layouts.has(current.id)) return
+  if (event.type === 'frame-change') {
+    const layout = layouts.get(current.id)!
+    acknowledge(event.requestId, composeFrame(layout, event.frame))
+  }
+  if (event.revision < current.revision) return
+  if (event.type === 'frame-change' && event.revision > current.revision + 1) {
+    current.socket?.send(JSON.stringify({ type: 'snapshot' }))
+    return
+  }
+  current.revision = event.revision
+  if (!event.frame || (event.type === 'frame-snapshot' && event.deleted)) {
+    remove(current.id)
+    connection?.socket?.send(JSON.stringify({ type: 'snapshot' }))
+    return
+  }
+  contents.set(current.id, event.frame)
+  const frame = assembled(current.id)!
+  if (event.type === 'frame-snapshot') {
+    clearTimeout(reveals.get(frame.id))
+    reveals.delete(frame.id)
+    useStore.getState().setStream(frame.id, null)
+    useStore.getState().upsertFrame(frame)
+    mergeActivity(event.activity)
   } else {
-    showFrame(event)
-    if (event.activity) state.pushActivity(event.activity)
-    if (
-      event.actor.clientId !== getIdentity().clientId &&
-      event.operation !== 'delete' &&
-      !useStore.getState().streams[event.frame.id]
-    )
-      state.flash(event.frame.id, event.actor.color)
+    showFrame({ ...event, type: 'change', frame })
+    if (event.activity) mergeActivity([event.activity])
+    if (event.actor.clientId !== getIdentity().clientId && !useStore.getState().streams[frame.id])
+      useStore.getState().flash(frame.id, event.actor.color)
   }
 }
 
-export function disconnectFrames() {
-  for (const timer of reveals.values()) clearTimeout(timer)
-  reveals.clear()
-  for (const queue of updates.values())
-    for (const waiter of queue.next?.waiters ?? []) waiter.reject(new Error('Canvas connection closed.'))
-  updates.clear()
-  if (connection) {
-    connection.stopped = true
-    clearTimeout(connection.retry)
-    connection.socket?.close()
-    connection = undefined
-  }
-  for (const request of pending.values()) {
-    clearTimeout(request.timer)
-    request.reject(new Error('Canvas connection closed. Reload to check whether your edit was saved.'))
-  }
-  pending.clear()
+function open(current: Connection): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const abort = new AbortController()
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      current.cancel = undefined
+      if (error) reject(error)
+      else resolve()
+    }
+    const timeout = setTimeout(() => {
+      finish(new Error('Frame connection timed out'))
+      abort.abort()
+      current.socket?.close()
+      retry()
+    }, 30_000)
+    current.cancel = () => {
+      abort.abort()
+      finish(new Error('Frame connection cancelled'))
+    }
+    const retry = () => {
+      if (current.stopped || current.retry) return
+      current.ready = new Promise<void>((resolveRetry, rejectRetry) => {
+        current.retry = setTimeout(() => {
+          current.retry = undefined
+          const reconnect = () => open(current)
+          void (current.kind === 'content' ? slot(reconnect) : reconnect()).then(resolveRetry, rejectRetry)
+        }, 1000)
+      })
+      void current.ready.catch(() => {})
+    }
+    void (async () => {
+      if (current.stopped) throw new Error('Connection cancelled')
+      const path = current.kind === 'index' ? 'canvases' : 'frames'
+      const response = await fetch(
+        `/api/${path}/${encodeURIComponent(current.id)}/actor?clientId=${encodeURIComponent(getIdentity().clientId)}`,
+        { signal: abort.signal },
+      )
+      if (!response.ok) {
+        if ([401, 403, 404].includes(response.status)) current.stopped = true
+        throw new Error(`Frame access denied (${response.status})`)
+      }
+      const grant = (await response.json()) as { websocketUrl: string }
+      if (current.stopped || settled) throw new Error('Connection cancelled')
+      const socket = new WebSocket(grant.websocketUrl)
+      current.socket = socket
+      socket.onmessage = ({ data }) => {
+        if (current.stopped || current.socket !== socket || connection?.canvasId !== current.canvasId) return
+        const event = JSON.parse(String(data)) as
+          | IndexSnapshot
+          | ContentSnapshot
+          | { type: 'drag'; frameId: string; x: number; y: number; width: number; height: number; updatedAt: number }
+          | { type: 'state' }
+          | {
+              type: 'state_update'
+              changes: { committed?: IndexChange | IndexSnapshot | ContentChange | ContentSnapshot }
+            }
+          | { type: 'error'; requestId: string; message: string }
+        if (event.type === 'index-snapshot') {
+          applyIndex(event, current)
+          finish()
+        } else if (event.type === 'frame-snapshot') {
+          applyContent(event, current)
+          finish()
+        } else if (event.type === 'state_update' && event.changes.committed) {
+          const change = event.changes.committed
+          if (change.type === 'index-change' || change.type === 'index-snapshot') applyIndex(change, current)
+          else applyContent(change, current)
+        } else if (event.type === 'drag') {
+          // Preview validity follows the layout owner's clock, not content edits.
+          if (layouts.get(event.frameId)?.updatedAt === event.updatedAt) {
+            const { x, y, width, height } = event
+            useStore.getState().patchFrameLocal(event.frameId, { x, y, width, height }, true)
+          }
+        } else if (event.type === 'error') {
+          const request = pending.get(event.requestId)
+          if (request?.connection === current) {
+            clearTimeout(request.timer)
+            pending.delete(event.requestId)
+            request.reject(new Error(event.message))
+          }
+        }
+      }
+      socket.onerror = () => {
+        finish(new Error('Frame connection failed'))
+        socket.close()
+      }
+      socket.onclose = () => {
+        if (current.socket !== socket) return
+        finish(new Error('Frame connection closed'))
+        rejectPending(current, new Error('Connection lost; reload to check whether your edit was saved.'))
+        retry()
+      }
+    })().catch((error: Error) => {
+      finish(error)
+      retry()
+    })
+  })
 }
 
-export function refreshFrames() {
-  if (connection?.socket?.readyState === WebSocket.OPEN)
-    connection.socket.send(JSON.stringify({ type: 'snapshot' } satisfies actors.CanvasFrames.Incoming))
-}
-
-export function previewFrame(frame: Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height' | 'updatedAt'>) {
-  if (connection?.id !== useStore.getState().canvas?.id || connection?.socket?.readyState !== WebSocket.OPEN) return
-  const { id: frameId, x, y, width, height, updatedAt } = frame
-  connection.socket.send(
-    JSON.stringify({ type: 'drag', frameId, x, y, width, height, updatedAt } satisfies actors.CanvasFrames.Incoming),
-  )
+function connectContent(id: string): Promise<void> {
+  const existing = frames.get(id)
+  if (existing) return existing.ready
+  const canvasId = connection?.canvasId
+  if (!canvasId || !layouts.has(id)) return Promise.reject(new Error('Frame is no longer on this canvas'))
+  const current: Connection = { id, canvasId, kind: 'content', ready: Promise.resolve(), revision: -1, stopped: false }
+  frames.set(id, current)
+  current.ready = slot(() => open(current))
+  return current.ready
 }
 
 export function connectFrames(id: string): Promise<void> {
   if (connection?.id === id) return connection.ready
   disconnectFrames()
-  const current = { id, ready: Promise.resolve(), revision: -1, stopped: false } as NonNullable<typeof connection>
-  connection = current
-  function open(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Canvas connection timed out'))
-        current.socket?.close()
-      }, 30_000)
-      const ready = () => {
-        clearTimeout(timeout)
-        resolve()
-      }
-      const failed = (error: Error) => {
-        clearTimeout(timeout)
-        reject(error)
-      }
-      void (async () => {
-        const response = await fetch(
-          `/api/canvases/${encodeURIComponent(id)}/actor?clientId=${encodeURIComponent(getIdentity().clientId)}`,
-        )
-        if (!response.ok) {
-          if ([401, 403, 404].includes(response.status)) current.stopped = true
-          throw new Error(`Canvas access denied (${response.status})`)
-        }
-        const grant = (await response.json()) as { websocketUrl: string }
-        if (current.stopped) {
-          failed(new Error('Canvas connection cancelled'))
-          return
-        }
-        const socket = new WebSocket(grant.websocketUrl)
-        current.socket = socket
-        socket.onmessage = ({ data }) => {
-          if (current.stopped || current.socket !== socket) return
-          const event = JSON.parse(String(data)) as
-            Incoming | { type: 'state' } | { type: 'state_update'; changes: { committed?: Committed } }
-          if (event.type === 'snapshot') {
-            apply(event)
-            ready()
-          } else if (event.type === 'drag') {
-            const state = useStore.getState()
-            const frame = state.canvas?.id === id && state.canvas.frames.find((frame) => frame.id === event.frameId)
-            if (frame && frame.updatedAt === event.updatedAt) {
-              const { x, y, width, height } = event
-              state.patchFrameLocal(frame.id, { x, y, width, height }, true)
-            }
-          } else if (event.type === 'state_update' && event.changes.committed) apply(event.changes.committed)
-          else if (event.type === 'error') {
-            const request = pending.get(event.requestId)
-            if (request) {
-              clearTimeout(request.timer)
-              pending.delete(event.requestId)
-              request.reject(new Error(event.message))
-            }
-          }
-        }
-        socket.onerror = () => failed(new Error('Canvas connection failed'))
-        socket.onclose = () => {
-          failed(new Error('Canvas connection closed'))
-          if (current.stopped) return
-          for (const request of pending.values()) {
-            clearTimeout(request.timer)
-            request.reject(new Error('Connection lost; reload to check whether your edit was saved.'))
-          }
-          pending.clear()
-          current.ready = new Promise((resolveRetry, rejectRetry) => {
-            current.retry = setTimeout(() => {
-              void open().then(resolveRetry, rejectRetry)
-            }, 1000)
-          })
-          void current.ready.catch(() => {})
-        }
-      })().catch((error: Error) => {
-        failed(error)
-        if (!current.stopped) {
-          current.ready = new Promise((resolveRetry, rejectRetry) => {
-            current.retry = setTimeout(() => {
-              void open().then(resolveRetry, rejectRetry)
-            }, 1000)
-          })
-          void current.ready.catch(() => {})
-        }
-      })
-    })
+  const current: Connection = {
+    id,
+    canvasId: id,
+    kind: 'index',
+    ready: Promise.resolve(),
+    revision: -1,
+    stopped: false,
   }
-  current.ready = open()
+  connection = current
+  current.ready = open(current)
   return current.ready
+}
+
+export function disconnectFrames() {
+  if (connection) stop(connection)
+  for (const current of frames.values()) stop(current)
+  connection = undefined
+  frames.clear()
+  layouts.clear()
+  useStore.getState().setFrameIndex(null)
+  contents.clear()
+  for (const timer of reveals.values()) clearTimeout(timer)
+  reveals.clear()
+  for (const queue of updates.values())
+    for (const waiter of queue.next?.waiters ?? []) waiter.reject(new Error('Canvas connection closed.'))
+  updates.clear()
+}
+
+export function refreshFrames() {
+  for (const current of [connection, ...frames.values()])
+    if (current?.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify({ type: 'snapshot' }))
+}
+
+export function previewFrame(frame: Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height' | 'updatedAt'>) {
+  if (connection?.canvasId !== useStore.getState().canvas?.id || connection?.socket?.readyState !== WebSocket.OPEN)
+    return
+  const layout = layouts.get(frame.id)
+  if (!layout) return
+  const { id: frameId, x, y, width, height } = frame
+  connection.socket.send(
+    JSON.stringify({ type: 'drag', frameId, x, y, width, height, updatedAt: layout.updatedAt } satisfies IndexCommand),
+  )
+}
+
+async function send(current: Connection, command: ContentCommand | IndexCommand): Promise<Frame> {
+  if (!('requestId' in command)) throw new Error('Missing edit request ID')
+  const socket = current.socket
+  if (current.stopped || socket?.readyState !== WebSocket.OPEN)
+    throw new Error('Frame is reconnecting; try again shortly')
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pending.delete(command.requestId)
+      reject(new Error('Edit confirmation timed out; reload to check whether it was saved.'))
+    }, 30_000)
+    pending.set(command.requestId, { connection: current, resolve, reject, timer })
+    socket.send(JSON.stringify(command))
+  })
+}
+
+function waitForMembership(id: string, canvasId: string): Promise<void> {
+  if (connection?.canvasId === canvasId && layouts.has(id)) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      unsubscribe()
+      reject(new Error('Frame creation confirmation timed out; reload to check whether it was saved.'))
+    }, 30_000)
+    const unsubscribe = useStore.subscribe(() => {
+      if (connection?.canvasId === canvasId && !layouts.has(id)) return
+      clearTimeout(timeout)
+      unsubscribe()
+      if (connection?.canvasId !== canvasId) reject(new Error('Canvas changed before the frame was ready.'))
+      else resolve()
+    })
+    connection?.socket?.send(JSON.stringify({ type: 'snapshot' }))
+  })
 }
 
 export async function writeFrame(write: FrameWrite, canvasId = useStore.getState().canvas?.id): Promise<Frame> {
   if (!canvasId) throw new Error('No canvas is open')
   await connectFrames(canvasId)
-  const socket = connection?.socket
-  if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Canvas is reconnecting; try again shortly')
-  const requestId = crypto.randomUUID()
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pending.delete(requestId)
-      reject(new Error('Edit confirmation timed out; reload to check whether it was saved.'))
-    }, 30_000)
-    pending.set(requestId, { resolve, reject, timer })
-    socket.send(JSON.stringify({ type: 'write', requestId, write } satisfies actors.CanvasFrames.Incoming))
-  })
+  if (connection?.canvasId !== canvasId) throw new Error('Canvas changed before the edit could be sent')
+  if (write.type === 'create' || write.type === 'delete') {
+    if (write.type === 'create') write.id ??= `${canvasId}.${crypto.randomUUID()}`
+    const path =
+      write.type === 'create'
+        ? `/api/canvases/${encodeURIComponent(canvasId)}/frames`
+        : `/api/frames/${encodeURIComponent(write.id)}`
+    const previous = write.type === 'delete' ? assembled(write.id) : undefined
+    const response = await fetch(path, {
+      method: write.type === 'create' ? 'POST' : 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      ...(write.type === 'create' ? { body: JSON.stringify({ ...write.input, id: write.id }) } : {}),
+    })
+    if (!response.ok) throw new Error((await response.json()).error || 'Frame edit failed')
+    if (write.type === 'create') {
+      const frame = (await response.json()) as Frame
+      // REST can finish before the independent index socket sees membership.
+      // Do not let the caller's immediate next edit race that notification.
+      await waitForMembership(frame.id, canvasId)
+      return frame
+    }
+    if (!previous) throw new Error('Frame not found')
+    return previous
+  }
+  await connectContent(write.id)
+  const current = frames.get(write.id)
+  if (!current || current.canvasId !== canvasId || connection?.canvasId !== canvasId)
+    throw new Error('Frame connection changed')
+  if (write.type === 'append')
+    return send(current, {
+      type: 'write',
+      write: { type: 'append', chunk: write.chunk, start: write.start, done: write.done },
+      requestId: crypto.randomUUID(),
+    })
+  let result = assembled(write.id)
+  if (write.patch.name !== undefined || write.patch.html !== undefined)
+    result = await send(current, {
+      type: 'write',
+      write: { type: 'update', patch: { name: write.patch.name, html: write.patch.html } },
+      requestId: crypto.randomUUID(),
+    })
+  const { x, y, width, height } = write.patch
+  if ([x, y, width, height].some((value) => value !== undefined)) {
+    if (connection?.canvasId !== canvasId) throw new Error('Canvas connection changed')
+    result = await send(connection, {
+      type: 'layout',
+      id: write.id,
+      patch: { x, y, width, height },
+      requestId: crypto.randomUUID(),
+    })
+  }
+  if (!result) throw new Error('Frame not found')
+  return result
 }

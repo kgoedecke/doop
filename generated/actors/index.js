@@ -22,6 +22,8 @@ export const actors = {
                 [
                     { name: "destroy", result: "void" },
                     { name: "initialize", result: "value" },
+                    { name: "migrationFrame", result: "value" },
+                    { name: "migrationIndex", result: "value" },
                     { name: "snapshot", result: "value" },
                     { name: "write", result: "value" }
                 ],
@@ -36,6 +38,59 @@ export const actors = {
         prepareWebsocket(authorization) {
             return new ActorProxy().handle({ ...authorization, actorName: "CanvasFrames" })
         }
+    },
+    ["CanvasIndex"]: {
+        get(actorId, transport) {
+            return $createActorStub(
+                "CanvasIndex",
+                actorId,
+                [
+                    { name: "add", result: "value" },
+                    { name: "confirmDelete", result: "void" },
+                    { name: "destroy", result: "void" },
+                    { name: "getFrame", result: "value" },
+                    { name: "initialize", result: "value" },
+                    { name: "pendingDeletes", result: "value" },
+                    { name: "remove", result: "value" },
+                    { name: "snapshot", result: "value" },
+                    { name: "status", result: "value" },
+                    { name: "updateLayout", result: "value" }
+                ],
+                transport
+            )
+        },
+        /**
+         * Allow a frontend connection after your backend checks the user's access.
+         * @example
+         * const grant = await actors.CanvasIndex.prepareWebsocket({ actorId: "actor-id", metadata })
+         */
+        prepareWebsocket(authorization) {
+            return new ActorProxy().handle({ ...authorization, actorName: "CanvasIndex" })
+        }
+    },
+    ["FrameContentActor"]: {
+        get(actorId, transport) {
+            return $createActorStub(
+                "FrameContentActor",
+                actorId,
+                [
+                    { name: "destroy", result: "void" },
+                    { name: "initialize", result: "value" },
+                    { name: "snapshot", result: "value" },
+                    { name: "summary", result: "value" },
+                    { name: "write", result: "value" }
+                ],
+                transport
+            )
+        },
+        /**
+         * Allow a frontend connection after your backend checks the user's access.
+         * @example
+         * const grant = await actors.FrameContentActor.prepareWebsocket({ actorId: "actor-id", metadata })
+         */
+        prepareWebsocket(authorization) {
+            return new ActorProxy().handle({ ...authorization, actorName: "FrameContentActor" })
+        }
     }
 }
 /**
@@ -45,7 +100,7 @@ export const actors = {
  */
 export class ActorProxy extends $SocketProxy {
     constructor() {
-        super({ ["CanvasFrames"]: {} })
+        super({ ["CanvasFrames"]: {}, ["CanvasIndex"]: {}, ["FrameContentActor"]: {} })
     }
     handle(authorization) {
         return super.handle(authorization)

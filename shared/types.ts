@@ -477,9 +477,6 @@ export type ServerMessage =
   | { type: 'feedback'; feedback: TaskFeedback }
   | { type: 'comment'; comment: ElementComment }
   | { type: 'chat'; message: ChatMessage }
-  | { type: 'frame:created'; frame: Frame; actor: Actor }
-  | { type: 'frame:updated'; frame: Frame; actor: Actor }
-  | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */

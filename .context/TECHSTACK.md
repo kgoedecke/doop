@@ -25,17 +25,25 @@
 
 - PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - accounts, canvas metadata,
   and collaboration records. Original frame rows remain for lazy initialization and legacy ID lookup.
-- `durable-actors` 0.7.13 / `terse-sdk` 0.9.12 - one `CanvasFrames` actor per canvas owns
-  frame state. Backend reads/writes use generated RPC; browsers edit and subscribe over an
-  actor WebSocket authorized by `ActorProxy`. Doop `/ws` retains other collaboration events.
+- `durable-actors` 0.7.15 / `terse-sdk` 0.9.14 - one `CanvasIndex` actor per canvas owns
+  membership and layout; one `FrameContentActor` per frame owns HTML, name, revision, and content edits.
+  Both use actor-local SQLite. The index never stores or returns HTML. `@Compute` allocates 256 MiB
+  to the index and 512 MiB to content actors (provisional sizing, not a measured minimum).
+  Backend reads/writes use generated RPC. Browsers subscribe directly to the index and individual
+  frames through server-authorized WebSockets. Up to four initial frame connections are established
+  concurrently; this is not a cap on live subscriptions. Revisions and reconnects are independent.
+  Doop `/ws` carries canvas metadata and other collaboration events, without frame HTML.
+  `@Persisted @Emittable committed` delivers edits after persistence; pointer previews use broadcast.
+  Creation initializes content before publishing membership. Deletion records an index tombstone
+  before retiring content; later access retries pending cleanup in the background without blocking
+  other frames. Mixed content/layout edits span two
+  commits and do not provide a canvas-wide atomic snapshot.
+  `CanvasFrames` remains only as the migration source for the previous architecture. First access
+  freezes its writers, exports a lightweight index, and copies HTML one frame at a time into idempotent
+  frame initializers. If that legacy actor was never initialized, SQL supplies the source instead.
+  The new index is published last. Empty/deleted actors do not reload SQL; errors leave cutover retryable.
   `pnpm actors:generate` regenerates the client; `pnpm actors:check` verifies it in CI.
   `bun run dev` starts persistent local actors; production uses managed Terse.
-  Existing SQL frames load once on first access if the actor is uninitialized; initialized empty or
-  deleted actors never reload SQL. Stop old SQL writers before upgrading; no bulk migration is needed.
-  Inside the actor each frame is a row in actor-local SQLite (`this.db`), not a `@Persisted` array:
-  the runtime re-serializes every persisted field after a successful call, so an array made a
-  one-frame edit rewrite the whole canvas. Only `revision`, `initialized`, `deleted`, the capped
-  `activity` log and the emittable `committed` change stay fields.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).

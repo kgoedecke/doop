@@ -7,9 +7,23 @@ import WebSocket from 'ws'
 import { expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
-import type { FrameChange, FrameDrag, FrameSnapshot, FrameWrite } from '../src/actor.ts'
+import type {
+  ContentChange,
+  ContentSnapshot,
+  ContentWrite,
+  FrameDrag,
+  IndexChange,
+  IndexSnapshot,
+} from '../src/actor.ts'
+import { contentOf, layoutOf, type LayoutPatch } from '../shared/frame-state.ts'
 import * as schema from '../server/db/schema.ts'
-import { frameActor, prepareFrameSocket } from '../server/frame-sync.ts'
+import {
+  canvasIndex,
+  frameActor,
+  legacyCanvasActor,
+  prepareCanvasSocket,
+  prepareFrameSocket,
+} from '../server/frame-sync.ts'
 
 async function port() {
   const server = createServer()
@@ -34,13 +48,46 @@ async function json<T>(request: Promise<Response>): Promise<T> {
   return body as T
 }
 
+type SyncEvent =
+  | IndexSnapshot
+  | IndexChange
+  | ContentSnapshot
+  | ContentChange
+  | FrameDrag
+  | { type: 'error'; requestId: string; message: string }
+
+async function joinActor(websocketUrl: string, sockets: WebSocket[]) {
+  const socket = new WebSocket(websocketUrl)
+  sockets.push(socket)
+  const events: SyncEvent[] = []
+  socket.on('error', () => {})
+  socket.on('message', (data) => {
+    const event = JSON.parse(String(data)) as SyncEvent | { type: 'state_update'; changes: { committed?: SyncEvent } }
+    if (event.type === 'state_update') {
+      if (event.changes.committed) events.push(event.changes.committed)
+    } else if (['index-snapshot', 'frame-snapshot', 'drag', 'error'].includes(event.type)) events.push(event)
+  })
+  await until(() => events.some((event) => event.type === 'index-snapshot' || event.type === 'frame-snapshot'))
+  async function request(
+    command: { type: 'layout'; id: string; patch: LayoutPatch } | { type: 'write'; write: ContentWrite },
+  ) {
+    const requestId = randomUUID()
+    socket.send(JSON.stringify({ ...command, requestId }))
+    await until(() => events.some((event) => 'requestId' in event && event.requestId === requestId))
+    const event = events.find((event) => 'requestId' in event && event.requestId === requestId)!
+    if (event.type === 'error') throw new Error(event.message)
+    return event
+  }
+  return { socket, events, request }
+}
+
 it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
-  'edits over authorized browser sockets, reads by backend RPC, and recovers after an app restart',
+  'isolates frame content, syncs layout separately, and recovers through app restarts and deletion',
   async () => {
     const admin = new pg.Client({ connectionString: process.env.DOOP_TEST_POSTGRES_URL })
     const database = `doop_sync_${randomUUID().replaceAll('-', '')}`
-    const servers: Server[] = []
-    const sockets: WebSocket[] = []
+    const servers: Server[] = [],
+      sockets: WebSocket[] = []
     let created = false
     let sql: pg.Client | undefined
     try {
@@ -64,41 +111,39 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       servers.push(b)
       const peer = new Client(b)
       peer.cookies = new Map(owner.cookies)
-      // Create after both replicas boot: discovery must use the existing SQL metadata.
-      const canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Actor proof' }))
-      expect((await new Client(a).get(`/api/canvases/${canvas.id}/actor`)).status).toBe(401)
+      const canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Frame actors' }))
       const stranger = await new Client(a).signUp('stranger@canvas-sync.test', 'Stranger')
+      expect((await new Client(a).get(`/api/canvases/${canvas.id}/actor`)).status).toBe(401)
       expect((await stranger.get(`/api/canvases/${canvas.id}/actor`)).status).toBe(403)
-      async function join(client: Client) {
-        const grant = await json<{ websocketUrl: string }>(client.get(`/api/canvases/${canvas.id}/actor`))
-        const socket = new WebSocket(grant.websocketUrl)
-        sockets.push(socket)
-        const events: (FrameSnapshot | FrameChange | FrameDrag)[] = []
-        socket.on('error', () => {})
-        socket.on('message', (data) => {
-          const event = JSON.parse(String(data))
-          if (event.type === 'snapshot' || event.type === 'drag') events.push(event)
-          if (event.type === 'state_update' && event.changes.committed) events.push(event.changes.committed)
-        })
-        await until(() => events.some((event) => event.type === 'snapshot'))
-        return {
-          events,
-          preview(drag: FrameDrag) {
-            socket.send(JSON.stringify(drag))
-          },
-          async write(write: FrameWrite) {
-            const requestId = randomUUID()
-            socket.send(JSON.stringify({ type: 'write', requestId, write }))
-            await until(() => events.some((event) => event.type === 'change' && event.requestId === requestId))
-            return (events.find((event) => event.type === 'change' && event.requestId === requestId) as FrameChange)
-              .frame
-          },
-        }
+      const join = async (client: Client, path: string) => {
+        const grant = await json<{ websocketUrl: string }>(client.get(path))
+        return joinActor(grant.websocketUrl, sockets)
       }
-      const [left, right] = await Promise.all([join(owner), join(peer)])
-      const frame = await left.write({ type: 'create', input: { name: 'Shared', html: '' } })
-      expect(frame.updatedBy).toBe('Owner')
-      await until(() => right.events.some((event) => event.type === 'change' && event.frame.id === frame.id))
+      const [left, right] = await Promise.all([
+        join(owner, `/api/canvases/${canvas.id}/actor`),
+        join(peer, `/api/canvases/${canvas.id}/actor`),
+      ])
+      const frame = await json<Frame>(
+        owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Shared', html: '<main>Initial</main>' }),
+      )
+      const other = await json<Frame>(
+        owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Independent', html: '<p>Other</p>' }),
+      )
+      // Retrying the same creation ID cannot duplicate or overwrite content.
+      const replay = await json<Frame>(
+        owner.post(`/api/canvases/${canvas.id}/frames`, { id: frame.id, name: 'Ignored retry', html: 'stale' }),
+      )
+      expect(replay).toEqual(frame)
+      expect((await stranger.get(`/api/frames/${frame.id}/actor`)).status).toBe(403)
+      const [contentLeft, contentRight, contentOther] = await Promise.all([
+        join(owner, `/api/frames/${frame.id}/actor`),
+        join(peer, `/api/frames/${frame.id}/actor`),
+        join(owner, `/api/frames/${other.id}/actor`),
+      ])
+      const index = await canvasIndex(canvas.id).snapshot()
+      expect(index.frames).toEqual([layoutOf(frame), layoutOf(other)])
+      expect(JSON.stringify(index)).not.toContain('html')
+      expect(JSON.stringify(index)).not.toContain('Initial')
       const drag: FrameDrag = {
         type: 'drag',
         frameId: frame.id,
@@ -108,78 +153,93 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
         height: 500,
         updatedAt: frame.updatedAt,
       }
-      left.preview(drag)
+      left.socket.send(JSON.stringify(drag))
       await until(() => right.events.some((event) => event.type === 'drag' && event.x === 300))
       expect(left.events.some((event) => event.type === 'drag')).toBe(false)
-      expect(await frameActor(canvas.id).snapshot()).toMatchObject({ revision: 1, frames: [frame] })
-      left.preview({ ...drag, width: -1 })
-      left.preview({ ...drag, frameId: 'another-canvas.frame' })
-      const readOnly = await prepareFrameSocket({
-        actorId: canvas.id,
-        metadata: { actor: { name: 'Viewer', kind: 'user', color: '#123456' }, readOnly: true },
-      })
-      const viewer = new WebSocket(readOnly.websocketUrl)
-      sockets.push(viewer)
-      let denied = false
-      viewer.on('message', (data) => {
-        if (JSON.parse(String(data)).type === 'error') denied = true
-      })
-      await new Promise<void>((resolve) => viewer.once('open', resolve))
-      viewer.send(JSON.stringify({ ...drag, x: 999 }))
-      viewer.send(JSON.stringify({ type: 'write', requestId: randomUUID(), write: { type: 'delete', id: frame.id } }))
-      await until(() => denied)
-      expect((await frameActor(canvas.id).snapshot()).frames).toEqual([frame])
-      await json(owner.post(`/api/frames/${frame.id}/append`, { html_chunk: '<main>', start: true }))
-      // Untyped browser payloads must not replace frame identity or ownership.
-      const patch = { x: 450, width: 777, id: 'forged', canvasId: 'another-canvas' }
+      const metadata = { actor: { name: 'Viewer', kind: 'user' as const, color: '#123456' }, readOnly: true }
+      const [indexGrant, contentGrant] = await Promise.all([
+        prepareCanvasSocket({ actorId: canvas.id, metadata }),
+        prepareFrameSocket({ actorId: frame.id, metadata }),
+      ])
+      const viewer = await joinActor(indexGrant.websocketUrl, sockets)
+      const contentViewer = await joinActor(contentGrant.websocketUrl, sockets)
+      await expect(viewer.request({ type: 'layout', id: frame.id, patch: { x: 999 } })).rejects.toThrow('read only')
+      await expect(
+        contentViewer.request({ type: 'write', write: { type: 'update', patch: { html: 'forbidden' } } }),
+      ).rejects.toThrow('read only')
+      const forged = { x: 450, width: 777, id: 'forged', canvasId: 'another-canvas', html: 'forbidden' }
       await Promise.all([
-        json(owner.post(`/api/frames/${frame.id}/append`, { html_chunk: '<h1>Live</h1>' })),
-        right.write({ type: 'update', id: frame.id, patch }),
+        contentLeft.request({ type: 'write', write: { type: 'append', chunk: '<main>', start: true } }),
+        right.request({ type: 'layout', id: frame.id, patch: forged }),
+        contentOther.request({ type: 'write', write: { type: 'update', patch: { html: '<p>Independent edit</p>' } } }),
       ])
       await Promise.all([
         json(owner.post(`/api/frames/${frame.id}/append`, { html_chunk: '<p>First</p>' })),
         json(peer.post(`/api/frames/${frame.id}/append`, { html_chunk: '<p>Second</p>' })),
       ])
       await json(owner.post(`/api/frames/${frame.id}/append`, { html_chunk: '</main>', done: true }))
-      let saved = (await json<Canvas>(owner.get(`/api/canvases/${canvas.id}`))).frames[0]!
-      expect(saved).toMatchObject({ x: 450, width: 777 })
-      for (const text of ['<h1>Live</h1>', '<p>First</p>', '<p>Second</p>']) expect(saved.html).toContain(text)
-      for (const { events } of [left, right])
-        await until(() =>
-          events.some((event) => event.type === 'change' && event.frame.html === saved.html && event.frame.x === 450),
-        )
-      expect((await json<Canvas>(peer.get(`/api/canvases/${canvas.id}`))).frames).toEqual([saved])
-      // A delayed preview from before the durable edit must not move the frame back.
-      left.preview(drag)
-      saved = await left.write({ type: 'update', id: frame.id, patch: { y: 260 } })
-      await until(() => right.events.some((event) => event.type === 'change' && event.frame.y === 260))
+      let saved = (await json<Canvas>(owner.get(`/api/canvases/${canvas.id}`))).frames.find((f) => f.id === frame.id)!
+      expect(saved).toMatchObject({ id: frame.id, canvasId: canvas.id, x: 450, width: 777 })
+      expect(saved.html).toContain('<p>First</p>')
+      expect(saved.html).toContain('<p>Second</p>')
+      await until(() =>
+        contentRight.events.some((event) => event.type === 'frame-change' && event.frame.html === saved.html),
+      )
+      expect(
+        contentOther.events
+          .filter((event) => event.type === 'frame-change')
+          .every((event) => event.type === 'frame-change' && event.frame.id === other.id),
+      ).toBe(true)
+      expect((await canvasIndex(canvas.id).snapshot()).revision).toBe(index.revision + 1)
+      expect((await frameActor(other.id).snapshot()).revision).toBe(1)
+      left.socket.send(JSON.stringify(drag)) // stale layout preview
+      await right.request({ type: 'layout', id: frame.id, patch: { y: 260 } })
       expect(right.events.filter((event) => event.type === 'drag')).toEqual([drag])
+      // No full canvas payload travels over the collaboration socket.
+      const room = new WebSocket(`ws://localhost:${portA}/ws`, { headers: { Cookie: owner.header() } })
+      sockets.push(room)
+      const initial = new Promise<Canvas>((resolve) =>
+        room.on('message', (data) => {
+          const event = JSON.parse(String(data)) as { type: string; canvas: Canvas }
+          if (event.type === 'init') resolve(event.canvas)
+        }),
+      )
+      await new Promise<void>((resolve) => room.once('open', resolve))
+      room.send(JSON.stringify({ type: 'join', canvasId: canvas.id, clientId: 'test', name: 'Owner', kind: 'user' }))
+      expect((await initial).frames).toEqual([])
       sql = new pg.Client({ connectionString: url.toString() })
       await sql.connect()
       expect((await sql.query('SELECT id FROM frames WHERE id=$1', [frame.id])).rowCount).toBe(0)
-      // SQL is only the cutover source; a stale row cannot become current state.
       await drizzle(sql)
         .insert(schema.frames)
-        .values({ ...saved, html: '<p>Stale SQL copy</p>', x: 0 })
+        .values({ ...saved, html: '<p>Stale SQL</p>' })
       const dataDir = a.dataDir
       a.stop({ keepData: true, signal: 'SIGKILL' })
       await a.stopped
-      // The browser's actor connection survives the Doop server that issued it.
-      saved = await left.write({ type: 'update', id: frame.id, patch: { x: 900 } })
-      expect((await json<Canvas>(peer.get(`/api/canvases/${canvas.id}`))).frames).toEqual([saved])
+      await contentLeft.request({ type: 'write', write: { type: 'update', patch: { name: 'Edited with app down' } } })
+      await left.request({ type: 'layout', id: frame.id, patch: { x: 900 } })
+      saved = (await json<Canvas>(peer.get(`/api/canvases/${canvas.id}`))).frames.find((f) => f.id === frame.id)!
+      expect(saved).toMatchObject({ name: 'Edited with app down', x: 900, y: 260 })
       a = await startServer(portA, env, dataDir)
       servers.push(a)
       const restored = new Client(a)
       restored.cookies = new Map(owner.cookies)
-      expect((await json<Canvas>(restored.get(`/api/canvases/${canvas.id}`))).frames).toEqual([saved])
-      const rejoined = await join(restored)
-      expect(rejoined.events[0]).toMatchObject({ type: 'snapshot', frames: [saved] })
-      await rejoined.write({ type: 'delete', id: frame.id })
-      await until(() => right.events.some((event) => event.type === 'change' && event.operation === 'delete'))
-      expect((await json<Canvas>(peer.get(`/api/canvases/${canvas.id}`))).frames).toEqual([])
+      expect(
+        (await json<Canvas>(restored.get(`/api/canvases/${canvas.id}`))).frames.find((f) => f.id === frame.id),
+      ).toEqual(saved)
+      const rejoined = await join(restored, `/api/frames/${frame.id}/actor`)
+      expect(rejoined.events[0]).toEqual(await frameActor(frame.id).snapshot())
+      await json(restored.delete(`/api/frames/${frame.id}`))
+      await until(() => right.events.some((event) => event.type === 'index-change' && event.operation === 'delete'))
+      await until(() => contentRight.events.some((event) => event.type === 'frame-snapshot' && event.deleted))
+      expect((await restored.get(`/api/frames/${frame.id}/actor`)).status).toBe(404)
+      await frameActor(frame.id).initialize(contentOf(frame))
+      expect((await frameActor(frame.id).snapshot()).deleted).toBe(true)
       await json(restored.delete(`/api/canvases/${canvas.id}`))
-      await until(() => right.events.some((event) => event.type === 'snapshot' && event.deleted))
+      await until(() => right.events.some((event) => event.type === 'index-snapshot' && event.deleted))
+      expect((await frameActor(other.id).snapshot()).deleted).toBe(true)
       expect((await peer.get(`/api/canvases/${canvas.id}`)).status).toBe(404)
+      expect((await peer.get(`/api/canvases/${canvas.id}/actor`)).status).toBe(404)
     } finally {
       for (const socket of sockets) socket.terminate()
       for (const server of servers) server.stop()
@@ -189,7 +249,7 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       await admin.end()
     }
   },
-  120_000,
+  180_000,
 )
 
 it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
@@ -248,8 +308,8 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       servers.push(a)
       const b = await startServer(portB, env)
       servers.push(b)
-      for (const frame of frames) expect((await frameActor(frame.canvasId).snapshot()).initialized).toBe(false)
-      expect((await frameActor(emptyId).snapshot()).initialized).toBe(false)
+      for (const frame of frames) expect((await canvasIndex(frame.canvasId).snapshot()).initialized).toBe(false)
+      expect((await canvasIndex(emptyId).snapshot()).initialized).toBe(false)
       const owner = new Client(a)
       await json(
         owner.req('/api/auth/sign-up/email', {
@@ -264,16 +324,16 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       const first = { ...frames[0]!, html: '<main>Updated after boot — 你好 🌱</main>' }
       await sql.query('UPDATE frames SET html=$1 WHERE id=$2', [first.html, first.id])
       const source = (await sql.query('SELECT * FROM frames ORDER BY id')).rows
-      const actor = frameActor(first.canvasId)
+      const actor = canvasIndex(first.canvasId)
       const opened = await Promise.all([
         json<Canvas>(owner.get(`/api/canvases/${first.canvasId}`)),
         json<Canvas>(peer.get(`/api/canvases/${first.canvasId}`)),
       ])
       for (const canvas of opened) expect(canvas.frames).toEqual([first])
       expect((await sql.query('SELECT * FROM frames ORDER BY id')).rows).toEqual(source)
-      expect(await actor.snapshot()).toMatchObject({ initialized: true, revision: 0, frames: [first] })
+      expect(await actor.snapshot()).toMatchObject({ initialized: true, revision: 0, frames: [layoutOf(first)] })
       await json(owner.patch(`/api/frames/${first.id}`, { x: 900 }))
-      expect((await actor.initialize([first])).frames[0]).toMatchObject({ x: 900, html: first.html })
+      expect((await actor.initialize([layoutOf(first)])).frames[0]).toMatchObject({ x: 900 })
       await sql.query('UPDATE frames SET html=$1 WHERE id=$2', ['stale SQL', first.id])
       expect((await json<Canvas>(peer.get(`/api/canvases/${first.canvasId}`))).frames[0]?.html).toBe(first.html)
 
@@ -282,22 +342,22 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       await sql.query('ALTER TABLE frames RENAME TO frames_unavailable')
       try {
         expect((await owner.get(`/api/canvases/${frames[1]!.canvasId}`)).status).toBe(503)
-        expect((await frameActor(frames[1]!.canvasId).snapshot()).initialized).toBe(false)
+        expect((await canvasIndex(frames[1]!.canvasId).snapshot()).initialized).toBe(false)
         expect((await json<Canvas>(peer.get(`/api/canvases/${first.canvasId}`))).frames[0]?.x).toBe(900)
       } finally {
         await sql.query('ALTER TABLE frames_unavailable RENAME TO frames')
       }
       // A browser grant also passes through initialization before connecting.
       await json(owner.get(`/api/canvases/${frames[1]!.canvasId}/actor`))
-      expect((await frameActor(frames[1]!.canvasId).snapshot()).frames).toEqual([frames[1]])
+      expect((await canvasIndex(frames[1]!.canvasId).snapshot()).frames).toEqual([layoutOf(frames[1]!)])
       await json(owner.get(`/api/canvases/${emptyId}/actor`))
-      expect(await frameActor(emptyId).snapshot()).toMatchObject({ initialized: true, frames: [] })
+      expect(await canvasIndex(emptyId).snapshot()).toMatchObject({ initialized: true, frames: [] })
       await db.insert(schema.frames).values({ ...first, id: `${prefix}-late`, canvasId: emptyId })
       expect((await json<Canvas>(peer.get(`/api/canvases/${emptyId}`))).frames).toEqual([])
       await json(owner.delete(`/api/frames/${first.id}`))
-      expect((await actor.initialize([first])).frames).toEqual([])
-      await frameActor(frames[1]!.canvasId).destroy()
-      expect((await frameActor(frames[1]!.canvasId).initialize([frames[1]!])).deleted).toBe(true)
+      expect((await actor.initialize([layoutOf(first)])).frames).toEqual([])
+      await canvasIndex(frames[1]!.canvasId).destroy()
+      expect((await canvasIndex(frames[1]!.canvasId).initialize([layoutOf(frames[1]!)])).deleted).toBe(true)
       expect((await peer.get(`/api/canvases/${frames[1]!.canvasId}`)).status).toBe(404)
 
       const dataDir = a.dataDir
@@ -310,7 +370,7 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
       expect((await json<Canvas>(restored.get(`/api/canvases/${first.canvasId}`))).frames).toEqual([])
       expect((await json<Canvas>(restored.get(`/api/canvases/${emptyId}`))).frames).toEqual([])
       expect((await restored.get(`/api/canvases/${frames[1]!.canvasId}`)).status).toBe(404)
-      expect((await frameActor(frames[2]!.canvasId).snapshot()).initialized).toBe(false)
+      expect((await canvasIndex(frames[2]!.canvasId).snapshot()).initialized).toBe(false)
       expect((await json<Canvas>(restored.get(`/api/canvases/${frames[2]!.canvasId}`))).frames).toEqual([frames[2]])
     } finally {
       for (const server of servers) server.stop()
@@ -322,3 +382,54 @@ it.skipIf(!process.env.DOOP_TEST_POSTGRES_URL)(
   },
   180_000,
 )
+
+it('resumes a frozen legacy-actor migration and pending frame cleanup without restoring stale content', async () => {
+  const server = await startServer(await port())
+  try {
+    const client = await new Client(server).signUp('migration@frame-actors.test', 'Owner')
+    const canvas = await json<Canvas>(client.post('/api/canvases', { name: 'Legacy actor' }))
+    const by = { name: 'Owner', kind: 'user' as const, color: '#123456' }
+    const original: Frame[] = Array.from({ length: 2 }, (_, n) => ({
+      id: `${canvas.id}.legacy-${n}`,
+      canvasId: canvas.id,
+      name: `Legacy ${n}`,
+      html: `<main>${'x'.repeat(100_000)}${n}</main>`,
+      x: 120 + n * 720,
+      y: 120,
+      width: 640,
+      height: 480,
+      createdAt: 100 + n,
+      updatedAt: 200 + n,
+      updatedBy: 'Owner',
+    }))
+    const legacy = legacyCanvasActor(canvas.id)
+    await legacy.initialize(original)
+    const exported = await legacy.migrationIndex()
+    expect(exported.frames).toEqual(original.map(layoutOf))
+    expect(JSON.stringify(exported)).not.toContain('html')
+    await expect(
+      legacy.write({ type: 'update', id: original[0]!.id, patch: { html: 'late legacy write' } }, by),
+    ).rejects.toThrow()
+    // Simulate process death after only the first frame was copied. A retry
+    // must preserve that actor, even when its current content differs.
+    await frameActor(original[0]!.id).initialize(contentOf(original[0]!))
+    await frameActor(original[0]!.id).write({ type: 'update', patch: { html: '<main>Already copied</main>' } }, by)
+    const restored = await json<Canvas>(client.get(`/api/canvases/${canvas.id}`))
+    expect(restored.frames[0]?.html).toBe('<main>Already copied</main>')
+    expect(restored.frames[1]).toEqual(original[1])
+    expect((await canvasIndex(canvas.id).snapshot()).frames).toEqual(original.map(layoutOf))
+    // Simulate death between durable membership removal and content cleanup.
+    await canvasIndex(canvas.id).remove(original[0]!.id, by)
+    expect((await frameActor(original[0]!.id).snapshot()).deleted).toBe(false)
+    const remaining = await json<Canvas>(client.get(`/api/canvases/${canvas.id}`))
+    expect(remaining.frames).toEqual([original[1]])
+    await until(async () => (await frameActor(original[0]!.id).snapshot()).deleted)
+    await until(async () => (await canvasIndex(canvas.id).pendingDeletes()).length === 0)
+    expect(await canvasIndex(canvas.id).add(original[0]!.id, { createdAt: 100 }, by)).toBeNull()
+    await frameActor(original[0]!.id).initialize(contentOf(original[0]!))
+    expect((await frameActor(original[0]!.id).snapshot()).frame).toBeNull()
+  } finally {
+    server.stop()
+    await server.stopped
+  }
+}, 120_000)

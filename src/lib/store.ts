@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { FrameLayout } from '../../shared/frame-state'
 import type {
   ActivityItem,
   AgentTask,
@@ -36,6 +37,8 @@ function loadChatSeen(canvasId: string): number {
 
 interface State {
   canvas: Canvas | null
+  /** Geometry arrives before content so fitting/deep links do not wait for HTML. */
+  frameIndex: FrameLayout[] | null
   /** View-only interpolation for incoming geometry; local edits stay immediate. */
   frameMotion: Record<string, boolean>
   presences: Record<string, Presence>
@@ -115,6 +118,7 @@ interface State {
   following: string | null
 
   setCanvas(c: Canvas | null): void
+  setFrameIndex(frames: FrameLayout[] | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
   setUpdateReady(v: boolean): void
@@ -196,8 +200,18 @@ function readLayersOpen(): boolean {
   }
 }
 
+function orderFrames(frames: Frame[], index: FrameLayout[] | null): Frame[] {
+  const positions = new Map(index?.map((entry, position) => [entry.id, position]))
+  return frames.sort(
+    (a, b) =>
+      (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
+      a.createdAt - b.createdAt,
+  )
+}
+
 export const useStore = create<State>((set, get) => ({
   canvas: null,
+  frameIndex: null,
   frameMotion: {},
   presences: {},
   cursors: {},
@@ -231,7 +245,17 @@ export const useStore = create<State>((set, get) => ({
   flashes: {},
   streams: {},
 
-  setCanvas: (canvas) => set({ canvas, frameMotion: {} }),
+  setCanvas: (canvas) =>
+    set((state) => ({
+      canvas,
+      frameMotion: {},
+      frameIndex: state.canvas?.id === canvas?.id ? state.frameIndex : null,
+    })),
+  setFrameIndex: (frameIndex) =>
+    set((state) => ({
+      frameIndex,
+      canvas: state.canvas ? { ...state.canvas, frames: orderFrames([...state.canvas.frames], frameIndex) } : null,
+    })),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
   setUpdateReady: (updateReady) => set({ updateReady }),
@@ -320,7 +344,7 @@ export const useStore = create<State>((set, get) => ({
       if (!s.canvas) return {}
       const frames = s.canvas.frames.some((x) => x.id === f.id)
         ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
-        : [...s.canvas.frames, f]
+        : orderFrames([...s.canvas.frames, f], s.frameIndex)
       return { canvas: { ...s.canvas, frames } }
     }),
   patchFrameLocal: (frameId, patch, animate = false) =>

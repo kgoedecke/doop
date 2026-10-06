@@ -1,6 +1,4 @@
-import { healPartialHtml } from '../shared/frame-html.ts'
-export { healPartialHtml } from '../shared/frame-html.ts'
-import { frameActor } from './frame-sync.ts'
+import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
 import { nanoid } from 'nanoid'
 import { store } from './store.ts'
 import * as persist from './db/persist.ts'
@@ -37,8 +35,9 @@ import type {
 } from '../shared/types.ts'
 
 /**
- * Mutations shared by the REST API and the MCP tools. Every mutation
- * appends to the canvas activity log and broadcasts to the ws room.
+ * Mutations shared by the REST API and the MCP tools. Frame actors deliver
+ * saved edits; this module broadcasts activity, tasks and other collaboration
+ * events to Doop's WebSocket rooms.
  */
 
 type Broadcast = (canvasId: string, msg: ServerMessage, excludeClientId?: string) => void
@@ -121,9 +120,11 @@ function failInterruptedWork() {
   }
 }
 
-export async function getActivity(canvasId: string): Promise<ActivityItem[]> {
-  const { activity } = await frameActor(canvasId).snapshot()
-  return [...(activityLog.get(canvasId) ?? []), ...activity].sort((a, b) => b.at - a.at).slice(0, 100)
+export async function getActivity(canvasId: string, includeFrames = true): Promise<ActivityItem[]> {
+  const { frames, activity } = await canvasIndex(canvasId).snapshot()
+  const summaries = includeFrames ? await mapFrames(frames, (frame) => frameActor(frame.id).summary()) : []
+  const items = [...(activityLog.get(canvasId) ?? []), ...activity, ...summaries.flatMap((summary) => summary.activity)]
+  return [...new Map(items.map((item) => [item.id, item])).values()].sort((a, b) => b.at - a.at).slice(0, 100)
 }
 
 function logActivity(canvasId: string, actor: Actor, message: string, frameId?: string) {
@@ -1098,17 +1099,9 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
 }
 
 /* ------------------------------------------------------------------ */
-/* Live rendering of agent writes.                                     */
-/*                                                                     */
-/* Streams (append_frame_html): every chunk broadcasts the moment it   */
-/* arrives — viewers track the agent's real progress with no artificial*/
-/* pacing. Stream state only carries the "designing…" badge, the       */
-/* escape latch, and a timeout for agents that never send done=true.   */
-/*                                                                     */
-/* One-shot writes (set_frame_html, agent create_frame with html) play */
-/* back as a short typewriter reveal so a paste reads as designing     */
-/* rather than blinking in — drained against a fixed deadline so       */
-/* playback time never grows with document size.                       */
+/* Agent stream tracking: the "designing…" badge, HTML escape latch,   */
+/* and timeout for agents that never send done=true. Actors deliver    */
+/* frame contents; browsers handle partial HTML and one-shot reveals.  */
 /* ------------------------------------------------------------------ */
 
 interface StreamState {
@@ -1168,12 +1161,6 @@ export async function appendFrameHtml(
   s.lastActivity = Date.now()
   s.escaped = escaped
 
-  /* the chunk renders the moment it arrives — viewers see the agent's real progress */
-  broadcast(frame.canvasId, {
-    type: 'frame:updated',
-    frame: opts.done ? frame : { ...frame, html: healPartialHtml(frame.html) },
-    actor,
-  })
   if (opts.done) await finishStream(frameId, true)
 
   touch(frame.canvasId, actor, frameId)
@@ -1186,9 +1173,10 @@ export async function createFrame(
   canvasId: string,
   input: { name: string; x?: number; y?: number; width?: number; height?: number; html?: string; demo?: boolean },
   actor: Actor,
+  id?: string,
 ): Promise<Frame | undefined> {
   if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
-  const frame = await store.createFrame(canvasId, input, actor.name, actor)
+  const frame = await store.createFrame(canvasId, input, actor.name, actor, id)
   if (!frame) return undefined
   if (actor.kind === 'agent' && frame.html) {
     autoTask(canvasId, actor, `Designing “${frame.name}”`, frame.id)
@@ -1229,13 +1217,11 @@ export async function updateFrame(
 }
 
 export async function deleteFrame(frameId: string, actor: Actor): Promise<Frame | undefined> {
-  /* close any live stream or playback while the frame still exists,
-     so their auto “Designing…” tasks end with it */
+  /* Finish stream tracking while the frame still exists so its task can end. */
   await finishStream(frameId, false)
   const frame = await store.deleteFrame(frameId, actor)
   if (!frame) return undefined
   thumbs.purge(frameId)
-  broadcast(frame.canvasId, { type: 'frame:deleted', frameId, actor })
   logActivity(frame.canvasId, actor, `deleted frame “${frame.name}”`, frame.id)
   touch(frame.canvasId, actor, null)
   return frame

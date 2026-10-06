@@ -7,6 +7,7 @@ import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
+import type { FrameLayout } from '../../shared/frame-state.ts'
 import type {
   ActivityItem,
   AgentTask,
@@ -627,6 +628,31 @@ export async function loadCanvas(id: string): Promise<Canvas | undefined> {
 export async function loadFrames(canvasId: string): Promise<Frame[]> {
   const frames = await db.select().from(t.frames).where(eq(t.frames.canvasId, canvasId)).orderBy(t.frames.createdAt)
   return frames.map((frame) => ({ ...frame, demo: frame.demo ?? undefined }))
+}
+
+export async function loadFrameIndex(canvasId: string): Promise<FrameLayout[]> {
+  const rows = await db
+    .select({
+      id: t.frames.id,
+      canvasId: t.frames.canvasId,
+      x: t.frames.x,
+      y: t.frames.y,
+      width: t.frames.width,
+      height: t.frames.height,
+      createdAt: t.frames.createdAt,
+      updatedAt: t.frames.updatedAt,
+      updatedBy: t.frames.updatedBy,
+      demo: t.frames.demo,
+    })
+    .from(t.frames)
+    .where(eq(t.frames.canvasId, canvasId))
+    .orderBy(t.frames.createdAt)
+  return rows.map((frame) => ({ ...frame, demo: frame.demo ?? undefined }))
+}
+
+export async function loadFrame(id: string): Promise<Frame | undefined> {
+  const [frame] = await db.select().from(t.frames).where(eq(t.frames.id, id))
+  return frame ? { ...frame, demo: frame.demo ?? undefined } : undefined
 }
 
 export async function frameCanvasId(id: string): Promise<string | undefined> {

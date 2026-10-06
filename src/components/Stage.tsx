@@ -35,6 +35,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   const zoomLabelRef = useRef<HTMLSpanElement>(null)
   const setViewport = useStore((s) => s.setViewport)
   const canvas = useStore((s) => s.canvas)
+  const frameIndex = useStore((s) => s.frameIndex)
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
   const [panning, setPanning] = useState(false)
@@ -230,7 +231,12 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     const el = ref.current
     const c = useStore.getState().canvas
     if (!el || !c) return
-    const boxes = c.frames.map((f) => ({ x: f.x, y: f.y - 30, w: f.width, h: f.height + 30 }))
+    const boxes = (useStore.getState().frameIndex ?? c.frames).map((f) => ({
+      x: f.x,
+      y: f.y - 30,
+      w: f.width,
+      h: f.height + 30,
+    }))
     if (!boxes.length) {
       setViewport({ x: 80, y: 80, zoom: 1 })
       return
@@ -255,13 +261,13 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
 
   /* zoom-to-fit once the canvas arrives — unless the URL deep-links a frame */
   useEffect(() => {
-    if (!canvas || fitted.current) return
+    if (!canvas || !frameIndex || fitted.current) return
     fitted.current = true
     const focusId = new URLSearchParams(location.search).get('frame')
-    const target = focusId ? canvas.frames.find((f) => f.id === focusId) : null
+    const target = focusId ? frameIndex.find((f) => f.id === focusId) : null
     if (target) focusFrame(target)
     else fit()
-  }, [canvas, fit, focusFrame])
+  }, [canvas, frameIndex, fit, focusFrame])
 
   /* wheel: pan / pinch-zoom — needs a non-passive listener. Trackpads fire
      wheel events faster than the display refreshes, so deltas accumulate and

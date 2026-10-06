@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
-import { frameActor } from './frame-sync.ts'
+import { canvasIndex, frameActor, legacyCanvasActor, mapFrames } from './frame-sync.ts'
 import type { FrameInput, FramePatch } from '../src/actor.ts'
+import { composeFrame, contentOf, layoutOf, type FrameLayout } from '../shared/frame-state.ts'
 import * as persist from './db/persist.ts'
 import { colorFor } from '../shared/types.ts'
 import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
@@ -8,8 +9,9 @@ import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryRefer
 /** SQL owns canvas metadata. Every frame read and write goes through actor RPC. */
 class Store {
   canvases = new Map<string, Canvas>()
+  private cleaning = new Map<string, Promise<void>>()
 
-  async syncCanvas(id: string): Promise<Canvas | undefined> {
+  private async loadCanvasMetadata(id: string): Promise<Canvas | undefined> {
     let canvas = this.canvases.get(id)
     if (!canvas) {
       const loaded = await persist.loadCanvas(id)
@@ -17,19 +19,72 @@ class Store {
       this.init([loaded])
       canvas = this.canvases.get(id)!
     }
-    const actor = frameActor(id)
-    let snapshot = await actor.snapshot()
-    // initialize() is guarded inside the actor: concurrent first reads cannot
-    // overwrite the winner. Empty and deleted actors never reload stale SQL.
-    if (!snapshot.initialized) snapshot = await actor.initialize(await persist.loadFrames(id))
-    if (snapshot.deleted) {
-      this.canvases.delete(id)
-      return undefined
+    return canvas
+  }
+
+  /** Resume interrupted cutovers without overwriting already initialized frames.
+   * The legacy actor freezes before exporting anything; HTML moves one frame at
+   * a time, and the index becomes visible only after every frame is durable. */
+  private async ensureIndex(id: string): Promise<boolean> {
+    const index = canvasIndex(id)
+    let status = await index.status()
+    if (!status.initialized) {
+      const legacy = await legacyCanvasActor(id).migrationIndex()
+      const layouts = legacy.initialized ? legacy.frames : await persist.loadFrameIndex(id)
+      if (!legacy.deleted)
+        await mapFrames(layouts, async (layout) => {
+          const frame = legacy.initialized
+            ? await legacyCanvasActor(id).migrationFrame(layout.id)
+            : await persist.loadFrame(layout.id)
+          if (!frame) throw new Error(`Missing frame during migration: ${layout.id}`)
+          await frameActor(layout.id).initialize(contentOf(frame))
+        })
+      status = await index.initialize(layouts, legacy.activity, legacy.deleted)
     }
+    // Removal is durable before cleanup. A later request resumes cleanup after
+    // an app crash; tombstones prevent retries from bringing a frame back.
+    if (!this.cleaning.has(id)) {
+      const cleanup = this.cleanupFrames(id)
+        .catch((error) => console.error('[frame cleanup]', error))
+        .finally(() => this.cleaning.delete(id))
+      this.cleaning.set(id, cleanup)
+    }
+    if (status.deleted) this.canvases.delete(id)
+    return !status.deleted
+  }
+
+  private async cleanupFrames(id: string): Promise<void> {
+    const index = canvasIndex(id)
+    await mapFrames(await index.pendingDeletes(), async (frameId) => {
+      await frameActor(frameId).destroy()
+      await index.confirmDelete(frameId)
+    })
+  }
+
+  async syncCanvas(id: string, mode: 'full' | 'summary' | 'index' = 'full'): Promise<Canvas | undefined> {
+    const canvas = await this.loadCanvasMetadata(id)
+    if (!canvas || !(await this.ensureIndex(id))) return undefined
+    const snapshot = await canvasIndex(id).snapshot()
+    if (snapshot.deleted) return undefined
+    const frames =
+      mode === 'index'
+        ? snapshot.frames.map((layout) => ({ ...layout, name: '', html: '' }))
+        : await mapFrames(snapshot.frames, async (layout) => {
+            const content =
+              mode === 'full'
+                ? (await frameActor(layout.id).snapshot()).frame
+                : (await frameActor(layout.id).summary()).frame
+            if (!content) {
+              if (!(await canvasIndex(id).getFrame(layout.id))) return undefined // concurrent deletion
+              throw new Error(`Frame content unavailable: ${layout.id}`)
+            }
+            return composeFrame(layout, { html: '', ...content })
+          })
+    const present = frames.filter((frame): frame is Frame => !!frame)
     return {
       ...canvas,
-      frames: snapshot.frames,
-      updatedAt: Math.max(canvas.updatedAt, ...snapshot.frames.map((frame) => frame.updatedAt)),
+      frames: present,
+      updatedAt: present.reduce((latest, frame) => Math.max(latest, frame.updatedAt), canvas.updatedAt),
     }
   }
 
@@ -73,7 +128,7 @@ class Store {
         c.memberIds?.includes(userId) ||
         (c.workspaceId !== undefined && workspaceIds.includes(c.workspaceId)),
     )
-    const snapshots = await Promise.all(visible.map((c) => this.syncCanvas(c.id)))
+    const snapshots = await mapFrames(visible, (c) => this.syncCanvas(c.id, 'summary'))
     return snapshots
       .filter((c): c is Canvas => !!c)
       .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -86,7 +141,7 @@ class Store {
    *  boolean parameter is the kind of thing that eventually gets passed
    *  `true` from a route that shouldn't. */
   async listAllCanvases(limit = 200) {
-    const snapshots = await Promise.all([...this.canvases.keys()].map((id) => this.syncCanvas(id)))
+    const snapshots = await mapFrames([...this.canvases.keys()], (id) => this.syncCanvas(id, 'summary'))
     const all = snapshots.filter((c): c is Canvas => !!c).sort((a, b) => b.updatedAt - a.updatedAt)
     return {
       total: all.length,
@@ -153,7 +208,8 @@ class Store {
       ...(references?.length ? { references } : {}),
     }
     await persist.saveCanvasCopy({ ...canvas, frames: [] })
-    await frameActor(canvasId).initialize(frames)
+    await mapFrames(frames, (frame) => frameActor(frame.id).initialize(contentOf(frame)))
+    await canvasIndex(canvasId).initialize(frames.map(layoutOf))
     this.init([canvas])
     return canvas
   }
@@ -164,10 +220,11 @@ class Store {
 
   /** Remove a canvas and its frames from memory + database. */
   async deleteCanvas(id: string): Promise<Canvas | undefined> {
-    const c = await this.syncCanvas(id)
+    const c = await this.syncCanvas(id, 'index')
     if (!c) return undefined
     const deleted = c
-    await frameActor(id).destroy()
+    await canvasIndex(id).destroy()
+    await this.cleanupFrames(id)
     this.canvases.delete(id)
     persist.deleteCanvas(id)
     return deleted
@@ -400,35 +457,80 @@ class Store {
     return ref
   }
 
-  async getFrame(frameId: string): Promise<Frame | undefined> {
+  async getFrameLayout(frameId: string): Promise<FrameLayout | undefined> {
     // New IDs carry their canvas, so browser-created frames need no SQL index.
     // Original Doop IDs retain their SQL lookup after the one-time import.
     const canvasId = frameId.includes('.')
       ? frameId.slice(0, frameId.indexOf('.'))
       : await persist.frameCanvasId(frameId)
-    if (!canvasId) return undefined
-    return (await this.syncCanvas(canvasId))?.frames.find((frame) => frame.id === frameId)
+    if (!canvasId || !(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureIndex(canvasId))) return undefined
+    return (await canvasIndex(canvasId).getFrame(frameId)) ?? undefined
   }
 
-  async createFrame(canvasId: string, input: FrameInput, by: string, actor?: Actor): Promise<Frame | undefined> {
-    if (!(await this.syncCanvas(canvasId))) return undefined
-    return (
-      await frameActor(canvasId).write(
-        { type: 'create', input },
-        actor ?? { name: by, kind: 'user', color: colorFor(by) },
-      )
-    )?.frame
+  async getFrame(frameId: string): Promise<Frame | undefined> {
+    const layout = await this.getFrameLayout(frameId)
+    if (!layout) return undefined
+    const { frame } = await frameActor(frameId).snapshot()
+    if (!frame) {
+      if (!(await canvasIndex(layout.canvasId).getFrame(frameId))) return undefined
+      throw new Error(`Frame content unavailable: ${frameId}`)
+    }
+    return composeFrame(layout, frame)
+  }
+
+  async createFrame(
+    canvasId: string,
+    input: FrameInput,
+    by: string,
+    actor?: Actor,
+    creationId?: string,
+  ): Promise<Frame | undefined> {
+    if (!(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureIndex(canvasId))) return undefined
+    const id = creationId ?? `${canvasId}.${nanoid(10)}`
+    if (!id.startsWith(`${canvasId}.`) || !/^[A-Za-z0-9._-]{1,128}$/.test(id)) throw new Error('Invalid frame ID')
+    for (const key of ['x', 'y', 'width', 'height'] as const) {
+      const value = input[key]
+      if (value !== undefined && (!Number.isFinite(value) || ((key === 'width' || key === 'height') && value <= 0)))
+        throw new Error(`Invalid frame ${key}`)
+    }
+    const now = Date.now()
+    let content = { id, canvasId, name: input.name, html: input.html ?? '', updatedAt: now, updatedBy: by }
+    if (!(await frameActor(id).initialize(content))) {
+      const existing = (await frameActor(id).snapshot()).frame
+      if (!existing) return undefined
+      content = existing
+    }
+    const { x, y, width, height, demo } = input
+    const layout = await canvasIndex(canvasId).add(
+      id,
+      { x, y, width, height, demo, createdAt: content.updatedAt },
+      actor ?? { name: by, kind: 'user', color: colorFor(by) },
+    )
+    if (!layout) {
+      await frameActor(id).destroy()
+      return undefined
+    }
+    return composeFrame(layout, content)
   }
 
   async updateFrame(frameId: string, patch: FramePatch, by: string, actor?: Actor): Promise<Frame | undefined> {
-    const frame = await this.syncFrame(frameId)
-    if (!frame) return undefined
-    return (
-      await frameActor(frame.canvasId).write(
-        { type: 'update', id: frameId, patch },
-        actor ?? { name: by, kind: 'user', color: colorFor(by) },
-      )
-    )?.frame
+    let layout = await this.getFrameLayout(frameId)
+    if (!layout) return undefined
+    const attribution = actor ?? { name: by, kind: 'user' as const, color: colorFor(by) }
+    // Mixed layout/content requests have two commits. Never retry an ambiguous
+    // result automatically; a fresh read reconciles the two owners.
+    let content
+    if (patch.name !== undefined || patch.html !== undefined)
+      content = (
+        await frameActor(frameId).write({ type: 'update', patch: { name: patch.name, html: patch.html } }, attribution)
+      )?.frame
+    else content = (await frameActor(frameId).snapshot()).frame
+    if (['x', 'y', 'width', 'height'].some((key) => patch[key as keyof FramePatch] !== undefined)) {
+      const { x, y, width, height } = patch
+      layout =
+        (await canvasIndex(layout.canvasId).updateLayout(frameId, { x, y, width, height }, attribution)) ?? undefined
+    }
+    return layout && content ? composeFrame(layout, content) : undefined
   }
 
   async appendFrameHtml(
@@ -439,25 +541,25 @@ class Store {
     actor?: Actor,
     done = false,
   ): Promise<Frame | undefined> {
-    const frame = await this.syncFrame(frameId)
-    if (!frame) return undefined
-    return (
-      await frameActor(frame.canvasId).write(
-        { type: 'append', id: frameId, chunk, start, done },
-        actor ?? { name: by, kind: 'user', color: colorFor(by) },
-      )
-    )?.frame
+    const layout = await this.getFrameLayout(frameId)
+    if (!layout) return undefined
+    const change = await frameActor(frameId).write(
+      { type: 'append', chunk, start, done },
+      actor ?? { name: by, kind: 'user', color: colorFor(by) },
+    )
+    return change ? composeFrame(layout, change.frame) : undefined
   }
 
   async deleteFrame(frameId: string, actor?: Actor): Promise<Frame | undefined> {
     const frame = await this.syncFrame(frameId)
     if (!frame) return undefined
-    return (
-      await frameActor(frame.canvasId).write(
-        { type: 'delete', id: frameId },
-        actor ?? { name: frame.updatedBy, kind: 'user', color: colorFor(frame.updatedBy) },
-      )
-    )?.frame
+    await canvasIndex(frame.canvasId).remove(
+      frameId,
+      actor ?? { name: frame.updatedBy, kind: 'user', color: colorFor(frame.updatedBy) },
+    )
+    await frameActor(frameId).destroy()
+    await canvasIndex(frame.canvasId).confirmDelete(frameId)
+    return frame
   }
 }
 

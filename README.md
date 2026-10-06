@@ -397,7 +397,7 @@ Any container host works; Railway/Fly are the least friction:
    persistent volume mounted at `/app/data`.
 3. Set `BETTER_AUTH_SECRET` (long random string) and `BETTER_AUTH_URL` (the public origin,
    e.g. `https://doop.example.com`). Extra allowed origins: `TRUSTED_ORIGINS` (comma-separated).
-4. Deploy `CanvasFrames` to managed Terse and configure the two variables below.
+4. Deploy the actors to managed Terse and configure the two variables below.
 5. Health check: `GET /healthz`. The server trusts one proxy hop (`trust proxy`), so
    TLS termination at the platform edge works out of the box.
 
@@ -417,25 +417,39 @@ TERSE_API_KEY=PROJECT_SCOPED_KEY
 ```
 
 The deployment script uploads only the actor source and its dependencies. Keep the project key
-on the server. Doop authorizes browser connections through the generated `ActorProxy`; browsers then
-edit frames over a direct actor WebSocket. Backend frame reads and writes use generated RPC.
-Doop's existing `/ws` connection continues to carry chat, presence, and other collaboration events.
+on the server. Doop authorizes browser connections through the generated `ActorProxy`.
+A `CanvasIndex` actor owns frame membership and layout; a separate `FrameContentActor` owns each
+frame's HTML, name, and content revision. Browsers subscribe to both and compose frames locally.
+The index never stores HTML. Starting frame connections is limited to four concurrent handshakes;
+all established subscriptions remain live. A content revision gap or reconnect affects that frame only.
+Backend frame reads and writes use generated RPC. Doop's `/ws` connection carries canvas metadata,
+chat, presence, and other collaboration events without a full-canvas HTML snapshot.
 
-This first slice synchronizes frame edits across app servers. AI execution, queues, comments,
-presence, and canvas metadata retain their existing architecture.
-Frame state lives in the actor project. Existing SQL frame rows remain as the lazy-import source and
-lookup for legacy frame IDs; new frame state is not mirrored to SQL. Back up actor state
-alongside SQL and uploaded assets.
+The index uses `@Compute({ cpu: 1, memoryMiB: 256 })`; content actors use 512 MiB while smaller budgets
+are evaluated. These are provisional allocations. Frame HTML remains capped at 3 MB, but encoding,
+subscriptions, and runtime overhead also consume memory.
 
-Existing canvases migrate lazily: the first frame read (including dashboard counts) or browser connection
-loads that canvas's SQL frames only if its actor is uninitialized. Initialization is guarded inside the actor,
-so simultaneous requests cannot overwrite an initialized canvas. Empty or deleted actors stay empty or deleted;
-SQL and actor errors fail the request rather than substituting an empty canvas. Startup does not scan actors
-or import every canvas, and no migration command is needed.
+Creating a frame initializes its content before publishing membership. Removing it records a tombstone
+before deleting its content; subsequent access retries interrupted cleanup. Browser creates use a stable
+frame ID so a repeated request cannot create another membership entry. Layout and content have separate
+revisions: a request changing both has two commits, and canvas exports assemble independent frame reads.
+The compatibility REST canvas endpoint still returns full HTML for explicit callers; it is not the browser's
+initial sync path. Dashboard/gallery summaries omit HTML. AI execution, queues, comments, presence,
+and canvas metadata retain their existing architecture.
+
+Existing canvases migrate lazily. `CanvasFrames` remains deployed as the frozen migration source:
+first access fences its old writers and exports metadata, then copies one frame's HTML per request into
+idempotent frame initializers. The new index becomes visible only after all content is durable. If the old
+actor was never initialized, the same bounded copy reads legacy SQL rows instead. Interrupted copies
+resume without overwriting initialized frame actors. Empty or deleted actors never reload stale SQL.
+Legacy rows are retained as a migration source and legacy-ID lookup; new edits are not mirrored to SQL.
+Back up actor state alongside SQL and uploaded assets. Do not remove the legacy actor class while any
+canvases still need migration.
 
 Before upgrading an existing installation, rehearse with a restored database and a separate actor project.
-Deploy the actor code, stop old SQL-writing servers/workers, let their pending saves finish, and back up SQL
-and assets. Then start the upgraded servers together, verify existing canvases, and reopen traffic.
+Deploy the actor code, stop old servers/workers, let pending saves finish, and back up SQL, actor state,
+and assets. Then start the upgraded servers together, reload browsers to use the new subscriptions,
+verify existing canvases, and reopen traffic. Once a canvas is cut over, legacy actor writes are rejected.
 Old SQL writers must not run alongside actor writers. After new actor writes, SQL no longer has current
 frames, so reverting the app alone is not a safe rollback: actor state must first be reconciled with SQL.
 

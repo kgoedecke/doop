@@ -11,7 +11,7 @@ import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
-import { prepareFrameSocket } from './frame-sync.ts'
+import { prepareCanvasSocket, prepareFrameSocket } from './frame-sync.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
@@ -156,8 +156,6 @@ function send(ws: WebSocket, msg: ServerMessage) {
 }
 
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
-  // Frames are delivered by the actor directly; /ws retains Doop collaboration.
-  if (msg.type === 'frame:updated' || msg.type === 'frame:created' || msg.type === 'frame:deleted') return
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
     send(c.ws, msg)
@@ -579,7 +577,10 @@ app.use('/api', async (req, res, next) => {
 })
 
 app.use('/api/canvases/:canvasId', (req, res, next) => {
-  void store.syncCanvas(req.params.canvasId).then(
+  // These legacy import views inspect markers embedded in HTML. Other routes
+  // need only membership/layout; explicit full-canvas GET loads content later.
+  const content = ['/sync-keys', '/sync-flow', '/github'].includes(req.path) && req.method === 'GET'
+  void store.syncCanvas(req.params.canvasId, content ? 'full' : 'index').then(
     (canvas) => {
       res.locals.canvas = canvas
       next()
@@ -588,7 +589,7 @@ app.use('/api/canvases/:canvasId', (req, res, next) => {
   )
 })
 app.use('/api/frames/:frameId', (req, res, next) => {
-  void store.syncFrame(req.params.frameId).then(
+  void (req.path === '/actor' ? store.getFrameLayout(req.params.frameId) : store.syncFrame(req.params.frameId)).then(
     (frame) => {
       res.locals.frame = frame
       next()
@@ -904,6 +905,28 @@ app.get(
   frameRoute(async (req, res) => {
     if (!requireCanvas(req, res, req.params.id)) return
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 128) : undefined
+    const grant = await prepareCanvasSocket({
+      actorId: req.params.id,
+      metadata: {
+        actor: {
+          name: req.user!.name,
+          kind: 'user',
+          color: colorFor(req.user!.name),
+          ...(clientId ? { clientId } : {}),
+        },
+        readOnly: !!req.impersonatedBy,
+      },
+      authorizationLifetimeMs: 60_000,
+    })
+    res.set('Cache-Control', 'no-store').json(grant)
+  }),
+)
+
+app.get(
+  '/api/frames/:id/actor',
+  frameRoute(async (req, res) => {
+    if (!requireFrame(req, res, req.params.id)) return
+    const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 128) : undefined
     const grant = await prepareFrameSocket({
       actorId: req.params.id,
       metadata: {
@@ -921,10 +944,15 @@ app.get(
   }),
 )
 
-app.get('/api/canvases/:id', (req, res) => {
-  const c = requireCanvas(req, res, req.params.id)
-  if (c) res.json(c)
-})
+app.get(
+  '/api/canvases/:id',
+  frameRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id)) return
+    const canvas = await store.syncCanvas(req.params.id)
+    if (!canvas) return res.status(404).json({ error: 'not found' })
+    res.json(canvas)
+  }),
+)
 
 /* Community gallery listing — the owner's call alone, like link access.
    PUT both lists and re-describes; DELETE takes it down. */
@@ -1425,6 +1453,7 @@ app.post(
       req.params.id,
       { name: String(name || 'Frame'), x, y, width, height, html },
       actor,
+      typeof req.body?.id === 'string' ? req.body.id : undefined,
     )
     if (!frame) return res.status(404).json({ error: 'canvas not found' })
     res.json(frame)
@@ -1837,7 +1866,7 @@ wss.on('connection', (ws, upgradeReq) => {
       }
       let canvas
       try {
-        canvas = await store.syncCanvas(msg.canvasId)
+        canvas = await store.syncCanvas(msg.canvasId, 'index')
       } catch {
         ws.close(1013, 'canvas service unavailable')
         return
@@ -1869,9 +1898,10 @@ wss.on('connection', (ws, upgradeReq) => {
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
       send(ws, {
         type: 'init',
-        canvas,
+        canvas: { ...canvas, frames: [] },
         presences: [...others, ...agents],
-        activity: await actions.getActivity(msg.canvasId),
+        // Per-frame activity arrives with each frame's initial subscription.
+        activity: await actions.getActivity(msg.canvasId, false),
         tasks: actions.getTasks(msg.canvasId),
         feedback: actions.getFeedback(msg.canvasId),
         comments: actions.getComments(msg.canvasId),
