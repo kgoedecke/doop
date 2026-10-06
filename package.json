@@ -7,6 +7,7 @@
   "packageManager": "bun@1.3.10",
   "scripts": {
     "dev": "node scripts/run-with-actors.mjs dev",
+    "dev:logs": "node scripts/run-with-actors.mjs dev --actor-logs",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",

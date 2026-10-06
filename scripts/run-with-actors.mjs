@@ -59,6 +59,14 @@ export function actorEnvironment(environment, connection) {
   }
 }
 
+/** `durable-actors dev` logs every control-plane request at info on
+ *  `durable_actors::dev`. `RUST_LOG` replaces that filter. `startLocalActors({ quiet: true })`
+ *  would also hide runtime errors, so this keeps error output and drops the request log. */
+export function actorRequestLogFilter(environment, actorLogs) {
+  if (actorLogs || environment.RUST_LOG !== undefined) return undefined
+  return 'durable_actors=error'
+}
+
 async function startManagedActors(options) {
   // The SDK spawns using process.env, not an options.env. Keep runtime download
   // overrides, but never inherit hosted storage/provider/credential settings.
@@ -73,14 +81,19 @@ async function startManagedActors(options) {
       delete process.env[key]
     }
   }
+  const requestLogFilter = actorRequestLogFilter(process.env, options.actorLogs)
+  if (requestLogFilter) process.env.RUST_LOG = requestLogFilter
+  const runtime = { ...options }
+  delete runtime.actorLogs
   try {
-    return await startLocalActors(options)
+    return await startLocalActors(runtime)
   } finally {
+    if (requestLogFilter) delete process.env.RUST_LOG
     Object.assign(process.env, inherited)
   }
 }
 
-export async function prepareActors({ test = false, environment = process.env } = {}) {
+export async function prepareActors({ test = false, environment = process.env, actorLogs = false } = {}) {
   if (test) environment = testEnvironment(environment)
   // Tests are isolated even if the developer's shell points at production.
   // External testing is opt-in and must target a disposable QA project.
@@ -111,6 +124,7 @@ export async function prepareActors({ test = false, environment = process.env } 
       port,
       dataDir: temporary || environment.DOOP_ACTORS_DATA_DIR || 'data/actors',
       startupTimeoutMs: 120_000,
+      actorLogs,
     })
     console.log(`[actors] ${test ? 'Isolated test' : 'Local'} runtime ready at ${runtime.connection.controlPlaneUrl}`)
     let stopped
@@ -134,6 +148,8 @@ async function main() {
   const [mode, ...args] = process.argv.slice(2)
   if (!['dev', 'test'].includes(mode)) throw new Error('Expected dev or test.')
   const test = mode === 'test'
+  const actorLogs = args.includes('--actor-logs')
+  const forwarded = args.filter((arg) => arg !== '--actor-logs')
   // Do not import a developer's .env into CI/tests. Shell values still win in dev.
   if (!test) {
     try {
@@ -150,21 +166,27 @@ async function main() {
   let reloadTimer
   let reloading = Promise.resolve()
 
-  async function stopChild(child) {
+  function signalChild(child, signal) {
     if (!child.pid) return
-    const exited =
-      child.exitCode !== null || child.signalCode !== null
-        ? Promise.resolve()
-        : new Promise((resolve) => child.once('exit', resolve))
-    const kill = (signal) => {
-      try {
-        process.kill(-child.pid, signal)
-      } catch (error) {
-        if (error.code !== 'ESRCH') throw error
-      }
+    try {
+      child.kill(signal)
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error
     }
-    kill('SIGTERM')
-    const timer = setTimeout(() => kill('SIGKILL'), 10_000)
+  }
+
+  function childExited(child) {
+    return new Promise((resolve) => {
+      child.once('exit', resolve)
+      if (child.exitCode !== null || child.signalCode !== null) resolve()
+    })
+  }
+
+  async function stopChild(child) {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null) return
+    const exited = childExited(child)
+    signalChild(child, 'SIGTERM')
+    const timer = setTimeout(() => signalChild(child, 'SIGKILL'), 3_000)
     try {
       await exited
     } finally {
@@ -172,30 +194,45 @@ async function main() {
     }
   }
 
+  function forceExit(code) {
+    for (const child of children) signalChild(child, 'SIGKILL')
+    process.exit(code)
+  }
+
   async function stop(code) {
     if (stopping) return
     stopping = true
+    const forced = setTimeout(() => forceExit(code), 8_000)
+    forced.unref()
     process.exitCode = code
     clearTimeout(reloadTimer)
     reloadController.abort()
     for (const watcher of watchers) watcher.close()
     await Promise.all([...children].map(stopChild))
-    await reloading
-    await actors?.stop()
+    await Promise.race([reloading.catch(() => {}), delay(1_000)])
+    // The runtime is in this process group, so Ctrl+C may already have stopped it.
+    await actors?.stop().catch(() => {})
+    clearTimeout(forced)
+    process.exit(code)
   }
+  let signals = 0
   for (const [signal, code] of [
     ['SIGINT', 130],
     ['SIGTERM', 143],
   ])
-    process.once(signal, () => {
+    process.on(signal, () => {
+      signals += 1
+      if (signals > 1) forceExit(code)
       void stop(code).catch((error) => {
         console.error(error)
-        process.exitCode = 1
+        forceExit(1)
       })
     })
 
   function launch(command) {
-    const child = spawn(process.execPath, command, { cwd: root, env: actors.env, stdio: 'inherit', detached: true })
+    // Stay in the terminal's process group. A detached child calls setsid(), so
+    // Ctrl+C never reaches it, and killing the launcher leaves the dev servers running.
+    const child = spawn(process.execPath, command, { cwd: root, env: actors.env, stdio: 'inherit' })
     children.add(child)
     child.once('error', (error) => {
       children.delete(child)
@@ -210,7 +247,7 @@ async function main() {
 
   try {
     await generateActors(test)
-    actors = await prepareActors({ test })
+    actors = await prepareActors({ test, actorLogs })
     if (stopping) {
       await actors.stop()
     } else {
@@ -222,6 +259,7 @@ async function main() {
           }
         },
         (error) => {
+          if (stopping) return
           console.error(error)
           void stop(1)
         },
@@ -275,8 +313,8 @@ async function main() {
             watchers.push(watcher)
           }
         launch(['node_modules/tsx/dist/cli.mjs', 'watch', 'server/index.ts'])
-        launch(['node_modules/vite/bin/vite.js', '--strictPort', ...args])
-      } else launch(['node_modules/vitest/vitest.mjs', 'run', ...args])
+        launch(['node_modules/vite/bin/vite.js', '--strictPort', ...forwarded])
+      } else launch(['node_modules/vitest/vitest.mjs', 'run', ...forwarded])
     }
   } catch (error) {
     console.error(error)

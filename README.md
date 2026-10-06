@@ -50,6 +50,8 @@ lockfile); the server and local actor launcher require Node.js 22.19+.
 - Web app: **http://localhost:4300**
 - API + WebSocket + MCP server: **http://localhost:4400** (the web port proxies `/api`, `/ws`, `/mcp` to it)
 
+`bun run dev` leaves the local actor runtime's per-request log off. `bun run dev:logs` turns that log on.
+
 Everything works with no configuration: frames persist in local actors in `data/actors`,
 and accounts, canvas metadata, and collaboration records use embedded Postgres (PGlite) in `data/pg`,
 and every optional integration (SMTP, stock photos, object storage, analytics) degrades gracefully
