@@ -32,6 +32,10 @@
   `bun run dev` starts persistent local actors; production uses managed Terse.
   Existing SQL frames load once on first access if the actor is uninitialized; initialized empty or
   deleted actors never reload SQL. Stop old SQL writers before upgrading; no bulk migration is needed.
+  Inside the actor each frame is a row in actor-local SQLite (`this.db`), not a `@Persisted` array:
+  the runtime re-serializes every persisted field after a successful call, so an array made a
+  one-frame edit rewrite the whole canvas. Only `revision`, `initialized`, `deleted`, the capped
+  `activity` log and the emittable `committed` change stay fields.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).

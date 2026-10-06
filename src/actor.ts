@@ -1,4 +1,4 @@
-import { Actor, Emittable, Persisted, type ActorSocketOf } from 'durable-actors'
+import { Actor, Emittable, Ephemeral, Persisted, type ActorDatabase, type ActorSocketOf } from 'durable-actors'
 import type { ActivityItem, Actor as Attribution, Frame } from '../shared/types.js'
 import { repairEscapedHtml } from '../server/escapedHtml.js'
 import { MAX_FRAME_HTML_BYTES } from '../server/limits.js'
@@ -35,13 +35,65 @@ export type FrameCommand = { type: 'write'; requestId: string; write: FrameWrite
 export type FrameMetadata = { actor: Attribution; readOnly: boolean }
 export type FrameMessage = FrameSnapshot | FrameDrag | { type: 'error'; requestId: string; message: string }
 
+/** A frame's canvas is always its actor, so canvasId is derived, not stored. */
+type FrameRow = Omit<Frame, 'canvasId' | 'demo'> & { demo: number | null }
+const COLUMNS = 'id, name, x, y, width, height, html, createdAt, updatedAt, updatedBy, demo'
+
+/* Actor methods must all be async, so the row helpers live out here: they are
+   synchronous SQLite calls and reading them as such keeps the writes obvious. */
+
+function ensureTable(db: ActorDatabase): true {
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS frames (id TEXT PRIMARY KEY, name TEXT NOT NULL, x REAL NOT NULL, ' +
+      'y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL, html TEXT NOT NULL, ' +
+      'createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, updatedBy TEXT NOT NULL, ' +
+      // NULL, 0 and 1 keep `demo` absent, false and true distinct across a round trip.
+      'demo INTEGER)',
+  )
+  return true
+}
+
+function toFrame(canvasId: string, { demo, ...row }: FrameRow): Frame {
+  return { ...row, canvasId, ...(demo === null ? {} : { demo: demo === 1 }) }
+}
+
+function findFrame(db: ActorDatabase, canvasId: string, id: string): Frame | undefined {
+  const [row] = db.exec<FrameRow>(`SELECT ${COLUMNS} FROM frames WHERE id = ?`, id)
+  return row && toFrame(canvasId, row)
+}
+
+function insertFrame(db: ActorDatabase, frame: Frame) {
+  db.exec(
+    `INSERT INTO frames (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    frame.id,
+    frame.name,
+    frame.x,
+    frame.y,
+    frame.width,
+    frame.height,
+    frame.html,
+    frame.createdAt,
+    frame.updatedAt,
+    frame.updatedBy,
+    frame.demo === undefined ? null : frame.demo ? 1 : 0,
+  )
+}
+
 /** One writer for a canvas's frames. Accounts, canvas metadata and AI stay in Doop. */
 export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessage> {
-  @Persisted private frames: Frame[] = []
+  /* Frames are SQLite rows, not a @Persisted array. The runtime re-serializes
+     every persisted field after each successful call, so holding the array here
+     made editing one frame rewrite — and replicate — every frame on the canvas,
+     which is quadratic over a streaming append. A row keeps an edit proportional
+     to the frame it touches. Scalars and the capped activity log stay fields:
+     they are small, and `committed` must be one to reach browsers. */
   @Persisted private revision = 0
   @Persisted private initialized = false
   @Persisted private deleted = false
   @Persisted private activity: ActivityItem[] = []
+  /* A failed call rolls the database back and rebuilds the instance, resetting
+     this with it, so the table is never assumed into existence. */
+  @Ephemeral private ready = false
   // Emitted by the runtime after persistence. broadcast()/send() are live output,
   // so they must not be used as an acknowledgment of a durable frame edit.
   @Persisted @Emittable committed: FrameChange | FrameSnapshot | null = null
@@ -53,12 +105,17 @@ export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessag
   override async onMessage(socket: ActorSocketOf<CanvasFrames>, command: FrameCommand) {
     if (command.type === 'snapshot') return socket.send(await this.snapshot())
     if (command.type === 'drag') {
-      const frame = this.frames.find((frame) => frame.id === command.frameId)
+      if (!this.ready) this.ready = ensureTable(this.db)
+      // Drags arrive at pointer rate: read the one column the guard needs.
+      const [current] = this.db.exec<{ updatedAt: number }>(
+        'SELECT updatedAt FROM frames WHERE id = ?',
+        command.frameId,
+      )
       if (
         socket.metadata.readOnly ||
         this.deleted ||
-        !frame ||
-        frame.updatedAt !== command.updatedAt ||
+        !current ||
+        current.updatedAt !== command.updatedAt ||
         ![command.x, command.y, command.width, command.height].every(Number.isFinite) ||
         command.width <= 0 ||
         command.height <= 0
@@ -84,19 +141,23 @@ export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessag
   }
 
   async initialize(frames: Frame[]): Promise<FrameSnapshot> {
+    if (!this.ready) this.ready = ensureTable(this.db)
     if (!this.initialized) {
       if (frames.some((frame) => frame.canvasId !== this.id)) throw new Error('Canvas ID mismatch')
-      this.frames = frames
+      for (const frame of frames) insertFrame(this.db, frame)
       this.initialized = true
     }
     return this.snapshot()
   }
 
   async snapshot(): Promise<FrameSnapshot> {
+    if (!this.ready) this.ready = ensureTable(this.db)
+    // rowid breaks createdAt ties in insertion order, matching the SQL source.
+    const rows = this.db.exec<FrameRow>(`SELECT ${COLUMNS} FROM frames ORDER BY createdAt, rowid`)
     return {
       type: 'snapshot',
       revision: this.revision,
-      frames: this.frames,
+      frames: rows.map((row) => toFrame(this.id, row)),
       initialized: this.initialized,
       deleted: this.deleted,
       activity: this.activity,
@@ -105,9 +166,10 @@ export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessag
 
   async write(write: FrameWrite, by: Attribution, requestId?: string): Promise<FrameChange | null> {
     if (!this.initialized || this.deleted) return null
+    if (!this.ready) this.ready = ensureTable(this.db)
     const id = write.type === 'create' ? (write.id ?? `${this.id}.${crypto.randomUUID()}`) : write.id
-    let frame = this.frames.find((frame) => frame.id === id)
-    const before = frame
+    const before = findFrame(this.db, this.id, id)
+    let frame = before
     const input = write.type === 'create' ? write.input : write.type === 'update' ? write.patch : undefined
     if (input) {
       for (const key of ['x', 'y', 'width', 'height'] as const)
@@ -121,16 +183,20 @@ export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessag
     const html = write.type === 'append' ? (write.start ? '' : (frame?.html ?? '')) + write.chunk : input?.html
     if (html !== undefined && new TextEncoder().encode(html).length > MAX_FRAME_HTML_BYTES)
       throw new Error('Frame HTML is too large')
-    const now = Math.max(Date.now(), ...this.frames.map((frame) => frame.updatedAt + 1))
+    const [clock] = this.db.exec<{ latest: number | null }>('SELECT MAX(updatedAt) AS latest FROM frames')
+    const now = clock?.latest == null ? Date.now() : Math.max(Date.now(), clock.latest + 1)
     if (write.type === 'create') {
       if (frame) throw new Error('Frame already exists')
       if (!id.startsWith(`${this.id}.`)) throw new Error('New frame IDs must belong to this canvas')
       const input = write.input
+      const [placement] = this.db.exec<{ total: number; edge: number | null }>(
+        'SELECT COUNT(*) AS total, MAX(x + width) AS edge FROM frames',
+      )
       frame = {
         id,
         canvasId: this.id,
         name: input.name,
-        x: input.x ?? (this.frames.length ? Math.max(...this.frames.map((frame) => frame.x + frame.width)) + 80 : 120),
+        x: input.x ?? (placement?.total ? placement.edge! + 80 : 120),
         y: input.y ?? 120,
         width: input.width ?? 640,
         height: input.height ?? 480,
@@ -140,21 +206,33 @@ export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessag
         updatedBy: by.name,
         ...(input.demo ? { demo: true } : {}),
       }
-      this.frames = [...this.frames, frame]
+      insertFrame(this.db, frame)
     } else {
       if (!frame) return null
-      if (write.type === 'delete') this.frames = this.frames.filter((frame) => frame.id !== write.id)
+      if (write.type === 'delete') this.db.exec('DELETE FROM frames WHERE id = ?', id)
       else {
         const patch =
           write.type === 'append'
-            ? { html: (write.start ? '' : frame.html) + write.chunk }
+            ? { html: html! }
             : Object.fromEntries(
                 Object.entries(write.patch).filter(([key]) =>
                   ['name', 'x', 'y', 'width', 'height', 'html'].includes(key),
                 ),
               )
         frame = { ...frame, ...patch, updatedAt: now, updatedBy: by.name }
-        this.frames = this.frames.map((previous) => (previous.id === frame!.id ? frame! : previous))
+        this.db.exec(
+          'UPDATE frames SET name = ?, x = ?, y = ?, width = ?, height = ?, html = ?, updatedAt = ?, ' +
+            'updatedBy = ? WHERE id = ?',
+          frame.name,
+          frame.x,
+          frame.y,
+          frame.width,
+          frame.height,
+          frame.html,
+          frame.updatedAt,
+          frame.updatedBy,
+          id,
+        )
       }
     }
     const change: FrameChange = {
@@ -195,9 +273,10 @@ export class CanvasFrames extends Actor<FrameMetadata, FrameCommand, FrameMessag
   }
 
   async destroy(): Promise<void> {
+    if (!this.ready) this.ready = ensureTable(this.db)
+    this.db.exec('DELETE FROM frames')
     this.deleted = true
     this.initialized = true
-    this.frames = []
     this.revision++
     this.committed = await this.snapshot()
   }
