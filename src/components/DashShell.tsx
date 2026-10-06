@@ -42,6 +42,7 @@ import {
   SparkIcon,
   UserIcon,
   UsersIcon,
+  BellIcon,
 } from './ui/icons'
 
 /** Pieces the signed-in shell repeats on every page: the account menu in the
@@ -187,6 +188,7 @@ export const IconGrid = () => <GridIcon {...rail} />
 export const IconList = () => <ListIcon {...rail} />
 export const IconUser = () => <UserIcon {...rail} />
 export const IconKey = () => <KeyIcon {...rail} />
+export const IconWebhooks = () => <BellIcon {...rail} />
 export const IconShare = () => <UsersIcon {...rail} />
 /** the gallery: a compass — designs to steer by */
 export const IconCommunity = () => <CompassIcon {...rail} />

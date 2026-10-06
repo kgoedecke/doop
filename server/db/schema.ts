@@ -623,6 +623,30 @@ export const notificationPrefs = pgTable('notification_prefs', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
 
+/** Outbound webhooks: per-user endpoints told about events on the canvases
+ *  that user durably has access to (owner, invited, workspace). The secret
+ *  signs every delivery (HMAC), so it is stored as-is, like an integration
+ *  token. Delivery health lives on the row so the settings page can show it. */
+export const webhooks = pgTable(
+  'webhooks',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    url: text('url').notNull(),
+    secret: text('secret').notNull(),
+    /** subscribed event names (shared/webhooks.ts WEBHOOK_EVENTS) */
+    events: jsonb('events').$type<string[]>().notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    lastStatus: integer('last_status'),
+    lastAt: bigint('last_at', { mode: 'number' }),
+    lastError: text('last_error'),
+    /** consecutive failed deliveries; the hook pauses itself past a ceiling */
+    failures: integer('failures').notNull().default(0),
+  },
+  (t) => [index('webhooks_user_idx').on(t.userId)],
+)
+
 /** Which image model generate_image draws with, per user. Separate from
  *  model_accounts because a server-tier user (no account row) still picks
  *  among the server-enabled image models. */

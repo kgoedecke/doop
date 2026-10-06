@@ -743,6 +743,7 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
         })
       }
     }
+    emitCanvasEvent(canvasId, { type: 'comment.resolved', comment: c, frame: store.getFrame(c.frameId), by })
     return c
   }
   return undefined
@@ -1070,17 +1071,21 @@ export function completeCard(canvasId: string, cardId: string): AgentTask | unde
   card.endedAt = Date.now()
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
+  emitCanvasEvent(canvasId, { type: 'task.completed', task: card })
   return card
 }
 
-/** An unsuccessful card stays paused until a human explicitly retries it. */
+/** An unsuccessful card stays paused until a human explicitly retries it.
+ *  Failing it again before that retry changes nothing — the first reason
+ *  stands, and the failure is announced once. */
 export function failCard(canvasId: string, cardId: string, reason: string): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
-  if (!card || card.endedAt) return card
+  if (!card || card.endedAt || card.failedAt) return card
   card.failedAt = Date.now()
   card.failureReason = reason
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
+  emitCanvasEvent(canvasId, { type: 'task.failed', task: card, reason })
   return card
 }
 
@@ -1280,6 +1285,7 @@ export function createFrame(
   }
   logActivity(canvasId, actor, `created frame “${frame.name}”`, frame.id)
   touch(canvasId, actor, frame.id)
+  emitCanvasEvent(canvasId, { type: 'frame.created', frame, actor })
   return frame
 }
 

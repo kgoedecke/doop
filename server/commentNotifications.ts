@@ -4,6 +4,7 @@ import { workspaceMemberIds } from './workspaces.ts'
 import { canAccessCanvas } from './access.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { mailableForComments, type Mailable } from './notificationPrefs.ts'
+import { commentLink, settingsLink } from './links.ts'
 import type { CanvasEvent } from './events.ts'
 import type { ActorKind, Canvas, ElementComment } from '../shared/types.ts'
 
@@ -28,8 +29,6 @@ import type { ActorKind, Canvas, ElementComment } from '../shared/types.ts'
  */
 
 export const COALESCE_MS = 2 * 60_000
-
-const ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
 
 export interface PendingComment {
   comment: ElementComment
@@ -101,14 +100,6 @@ async function flush(key: string) {
   }
 }
 
-/** Deep link that opens the canvas on the frame with the thread expanded
- *  (Stage honours ?frame=, FrameView honours ?comment= — the ROOT's id, since
- *  only roots have pins). */
-export function commentLink(comment: ElementComment): string {
-  const root = comment.parentId ?? comment.id
-  return `${ORIGIN}/c/${comment.canvasId}?frame=${encodeURIComponent(comment.frameId)}&comment=${encodeURIComponent(root)}`
-}
-
 const quote = (s: string) => `“${s}”`
 
 /** One plain-text email for everything that landed on a canvas during the window. */
@@ -133,7 +124,7 @@ export function digest(
       return `${comment.from} ${verb} ${quote(frameName)}:\n\n  ${quote(text.replace(/\n/g, '\n  '))}\n  ${commentLink(comment)}`
     })
     .join('\n\n')
-  const text = `Hi ${person.name || 'there'},\n\n${body}\n\n—\nYou get this because you collaborate on ${quote(canvas.name)}. Turn comment emails off under Settings → Your account: ${ORIGIN}/settings?pane=account\n`
+  const text = `Hi ${person.name || 'there'},\n\n${body}\n\n—\nYou get this because you collaborate on ${quote(canvas.name)}. Turn comment emails off under Settings → Your account: ${settingsLink('account')}\n`
   return { to: person.email, subject, text }
 }
 
