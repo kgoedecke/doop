@@ -35,7 +35,7 @@ export function IntegrationCard({
             connected ? 'text-ink-soft' : 'text-ink-faint',
           )}
         >
-          <span className={cn('size-[7px] rounded-full', connected ? 'bg-[#3f9c52]' : 'bg-line')} />
+          <span className={cn('size-[7px] rounded-full', connected ? 'bg-success' : 'bg-line')} />
           {connected ? 'connected' : 'not connected'}
         </span>
       </div>

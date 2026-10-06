@@ -1,0 +1,122 @@
+<!doctype html>
+<!--
+  Source for the macOS DMG window background (desktop/src-tauri/dmg/background.png).
+
+  The window is 660x400 points. Tauri's DMG bundler drops the app icon at (180,170) and the
+  Applications folder link at (480,170), both 128pt icons with their label underneath, so this
+  page leaves those two spots empty and draws the arrow and the instruction around them. Finder
+  counts the title bar inside those 400 points, so the bottom ~40pt of the image are clipped:
+  keep everything that matters above y=350.
+
+  Re-render after editing (from desktop/src-tauri; needs Google Chrome and network access for
+  the web fonts):
+
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+      --hide-scrollbars --window-size=660,400 --force-device-scale-factor=2 \
+      --virtual-time-budget=10000 --screenshot=dmg/background.png dmg/background.html
+    sips -s dpiWidth 144 -s dpiHeight 144 dmg/background.png
+
+  The 144 dpi tag is what makes Finder show the 1320x800 pixel image at 660x400 points, so it is
+  crisp on Retina displays and still the right size on non-Retina ones.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>doop DMG background</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500&family=Bricolage+Grotesque:wght@600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --paper: #f7f7f9;
+        --paper-deep: #eeeef2;
+        --ink: #17171b;
+        --ink-soft: #55555e;
+        --brand: #e5533c;
+      }
+      html,
+      body {
+        margin: 0;
+        width: 660px;
+        height: 400px;
+        overflow: hidden;
+      }
+      body {
+        position: relative;
+        background:
+          radial-gradient(420px 260px at 50% 100%, rgba(229, 83, 60, 0.1), transparent 70%),
+          linear-gradient(180deg, var(--paper) 0%, var(--paper-deep) 100%);
+        font-family:
+          'Archivo',
+          system-ui,
+          -apple-system,
+          sans-serif;
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+      }
+      .title {
+        position: absolute;
+        top: 36px;
+        left: 0;
+        right: 0;
+        margin: 0;
+        text-align: center;
+        font-family: 'Bricolage Grotesque', 'Archivo', system-ui, sans-serif;
+        font-weight: 600;
+        font-size: 24px;
+        letter-spacing: -0.01em;
+      }
+      .arrow {
+        position: absolute;
+        left: 258px;
+        top: 142px;
+        width: 144px;
+        height: 56px;
+      }
+      .hint {
+        position: absolute;
+        top: 288px;
+        left: 0;
+        right: 0;
+        margin: 0;
+        text-align: center;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--ink-soft);
+      }
+      .hint strong {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .fine {
+        position: absolute;
+        top: 318px;
+        left: 0;
+        right: 0;
+        margin: 0;
+        text-align: center;
+        font-size: 11.5px;
+        color: var(--ink-soft);
+        opacity: 0.8;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 class="title">Install doop</h1>
+    <svg class="arrow" viewBox="0 0 144 56" fill="none" aria-hidden="true">
+      <path d="M8 28 H 128" stroke="var(--brand)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+      <path
+        d="M110 10 L 130 28 L 110 46"
+        stroke="var(--brand)"
+        stroke-width="5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+    <p class="hint">Drag <strong>doop</strong> into the <strong>Applications</strong> folder to install it.</p>
+    <p class="fine">Then open it from Launchpad or Spotlight. You can eject this disk afterwards.</p>
+  </body>
+</html>

@@ -40,7 +40,7 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
      and say it even where there is no free tier to count (limit 0) */
   if (allowance.byoModel) {
     return (
-      <span className="text-[12px] text-[#1e7a4c]">
+      <span className="text-[12px] text-success-ink">
         Doop Agent on your{' '}
         {allowance.byoKind === 'gemini-cloud'
           ? 'Gemini cloud connection'
@@ -55,11 +55,7 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
   /* no free tier on this server: say what connecting gets them instead of
      counting tasks that don't exist */
   if (allowance.limit <= 0) {
-    return (
-      <span className="text-[12px] text-ink-faint">
-        The Doop Agent runs on your ChatGPT subscription — connect it in Settings
-      </span>
-    )
+    return <span className="text-[12px] text-ink-faint">Connect a plan in Settings to use the Doop Agent</span>
   }
   const left = Math.max(0, allowance.limit - allowance.used)
   return (
@@ -92,7 +88,7 @@ export function LimitWall({
     <Modal size="lg" onClose={onClose}>
       <>
         <ModalTitle>
-          {hadFreeTier ? 'Your free Doop Agent tasks are used up' : 'The Doop Agent runs on your ChatGPT subscription'}
+          {hadFreeTier ? 'Your free Doop Agent tasks are used up' : 'Connect a plan to use the Doop Agent'}
         </ModalTitle>
         <ModalLede>
           {hadFreeTier ? (
@@ -102,8 +98,8 @@ export function LimitWall({
             </>
           ) : (
             <>
-              Connect your <b>ChatGPT subscription</b> and the Doop Agent designs on your canvases — your plan, no
-              separate bill, nothing metered.
+              The Doop Agent designs on your canvases using a subscription you already have. Connect <b>ChatGPT</b> once
+              and every task runs on your plan — nothing metered, no separate bill.
             </>
           )}
         </ModalLede>
@@ -118,7 +114,7 @@ export function LimitWall({
               navigate(`/settings?from=${encodeURIComponent(`/c/${canvasId}`)}`)
             }}
           >
-            Connect your subscription
+            Connect your plan
           </Button>
         </ModalActions>
 

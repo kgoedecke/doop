@@ -678,7 +678,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 const VISION_NOTE = 'Text-only: this model can’t see screenshots, so designs aren’t visually reviewed.'
 
 function Tick() {
-  return <CheckIcon width={13} height={13} strokeWidth={2.5} color="#1a6b43" aria-hidden />
+  return <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
 }
 
 function NoVisionBadge() {

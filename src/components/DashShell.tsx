@@ -4,16 +4,21 @@ import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { useMe } from '../lib/me'
 import { isDesktopShell } from '../lib/shell'
+import { isTheme, useTheme } from '../lib/theme'
 import { AgentIcon } from './AgentIcon'
 import { ConnectModal } from './ConnectModal'
+import { themeOptions } from './ThemePicker'
 import { CodeBlock } from './ui/code-block'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCaption,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
@@ -31,6 +36,7 @@ import {
   KeyIcon,
   ListIcon,
   LogOutIcon,
+  MoonIcon,
   PulseIcon,
   ShieldIcon,
   SparkIcon,
@@ -53,13 +59,14 @@ export function initials(name?: string): string {
 export function AccountMenu() {
   const { data: session } = authClient.useSession()
   const me = useMe(session?.user.id)
+  const { theme, setTheme } = useTheme()
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant="bare"
-          className="grid size-10 flex-none place-items-center rounded-[10px] bg-ink font-display text-[12.5px] font-bold text-white hover:bg-ink hover:text-white hover:opacity-90 sm:size-[34px]"
+          className="grid size-10 flex-none place-items-center rounded-[10px] bg-ink font-display text-[12.5px] font-bold text-paper hover:bg-ink hover:text-paper hover:opacity-90 sm:size-[34px]"
           aria-label="Account"
         >
           {initials(session?.user.name)}
@@ -104,6 +111,17 @@ export function AccountMenu() {
             <IconHelp /> Help &amp; docs
           </a>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {/* the theme is one click from every page; picking one keeps the menu
+            open so the change can be seen, and judged, before it closes */}
+        <DropdownMenuCaption>Appearance</DropdownMenuCaption>
+        <DropdownMenuRadioGroup value={theme} onValueChange={(next) => isTheme(next) && setTheme(next)}>
+          {themeOptions.map(({ value, label, Icon }) => (
+            <DropdownMenuRadioItem key={value} value={value} onSelect={(e) => e.preventDefault()}>
+              <Icon {...rail} /> {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           tone="danger"
@@ -185,5 +203,7 @@ export const IconGear = () => <GearIcon {...rail} />
 export const IconShield = () => <ShieldIcon {...rail} />
 export const IconHelp = () => <HelpIcon {...rail} />
 export const IconOut = () => <LogOutIcon {...rail} />
+/** the appearance pane: a half moon, the theme switch's own glyph */
+export const IconTheme = () => <MoonIcon {...rail} />
 export const IconBack = () => <ChevronLeftIcon width={14} height={14} aria-hidden />
 export const IconChevron = () => <ChevronRightIcon width={12} height={12} aria-hidden />

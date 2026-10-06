@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/input'
 import { Modal, ModalActions, ModalLede, ModalTitle } from '../../components/ui/modal'
 import { DisconnectButton, IntegrationCard } from '../ui'
 import linearLogo from './logo.svg'
+import { cn } from '@/lib/utils'
 
 interface LinearStatus {
   connected: boolean
@@ -24,10 +25,8 @@ function LinearTile({ size = 24, className }: { size?: number; className?: strin
   return (
     <span
       aria-hidden
-      className={className}
+      className={cn('inline-grid flex-none place-items-center', className)}
       style={{
-        display: 'inline-grid',
-        placeItems: 'center',
         width: size,
         height: size,
         borderRadius: Math.round(size * 0.29),

@@ -76,7 +76,9 @@ export function ImageModelCard() {
             }
             return (
               <ToggleChipItem key={option.id} value={option.id} title={option.blurb}>
-                {status.selected && <CheckIcon width={13} height={13} strokeWidth={2.5} color="#1a6b43" aria-hidden />}
+                {status.selected && (
+                  <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
+                )}
                 {option.name}
               </ToggleChipItem>
             )
