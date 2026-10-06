@@ -1,15 +1,5 @@
-import type {
-  ContentChange,
-  ContentCommand,
-  ContentSnapshot,
-  FrameChange,
-  FrameWrite,
-  IndexChange,
-  IndexCommand,
-  IndexSnapshot,
-} from '../actor'
+import type { FrameChange, FrameCommand, FrameSnapshot, FrameWrite, IndexSnapshot } from '../actor'
 import type { ActivityItem, Frame } from '../../shared/types'
-import { composeFrame, type FrameContent, type FrameLayout } from '../../shared/frame-state'
 import { getIdentity } from './identity'
 import { useStore } from './store'
 import { healPartialHtml } from '../../shared/frame-html'
@@ -17,7 +7,7 @@ import { healPartialHtml } from '../../shared/frame-html'
 type Connection = {
   id: string
   canvasId: string
-  kind: 'index' | 'content'
+  kind: 'index' | 'frame'
   socket?: WebSocket
   ready: Promise<void>
   revision: number
@@ -27,8 +17,8 @@ type Connection = {
 }
 let connection: Connection | undefined
 const frames = new Map<string, Connection>()
-const layouts = new Map<string, FrameLayout>()
-const contents = new Map<string, FrameContent>()
+const members = new Set<string>()
+const savedFrames = new Map<string, Frame>()
 const pending = new Map<
   string,
   {
@@ -95,10 +85,7 @@ export async function updateFrame(id: string, patch: Partial<Frame>): Promise<Fr
 }
 
 function paint(frame: Frame) {
-  const layout = layouts.get(frame.id)
-  if (!layout) return
-  // Content reveal timers must keep the latest independently committed layout.
-  useStore.getState().upsertFrame(composeFrame(layout, frame))
+  if (members.has(frame.id)) useStore.getState().upsertFrame(frame)
 }
 
 function showFrame(event: FrameChange) {
@@ -110,10 +97,6 @@ function showFrame(event: FrameChange) {
       : event.frame
   clearTimeout(reveals.get(frame.id))
   reveals.delete(frame.id)
-  if (event.operation === 'delete') {
-    state.removeFrame(frame.id)
-    return
-  }
   if (event.operation === 'append') {
     state.setStream(frame.id, event.streaming ? { name: event.actor.name, color: event.actor.color } : null)
     paint(event.streaming ? { ...frame, html: healPartialHtml(frame.html) } : frame)
@@ -154,12 +137,6 @@ function mergeActivity(items: ActivityItem[]) {
   state.setActivity([...merged.values()].sort((a, b) => b.at - a.at).slice(0, 100))
 }
 
-function assembled(id: string): Frame | undefined {
-  const layout = layouts.get(id),
-    content = contents.get(id)
-  return layout && content ? composeFrame(layout, content) : undefined
-}
-
 function acknowledge(requestId: string | undefined, frame: Frame | undefined) {
   if (!requestId || !frame) return
   const request = pending.get(requestId)
@@ -190,67 +167,38 @@ function remove(id: string) {
   const current = frames.get(id)
   if (current) stop(current)
   frames.delete(id)
-  layouts.delete(id)
-  useStore.getState().setFrameIndex([...layouts.values()])
-  contents.delete(id)
+  members.delete(id)
+  useStore.getState().setFrameIndex([...members])
+  savedFrames.delete(id)
   clearTimeout(reveals.get(id))
   reveals.delete(id)
   useStore.getState().removeFrame(id)
 }
 
-function applyIndex(event: IndexSnapshot | IndexChange, current: Connection) {
+function applyIndex(event: IndexSnapshot, current: Connection) {
   if (event.revision < current.revision) return
-  if (event.type === 'index-change' && event.revision > current.revision + 1) {
-    current.socket?.send(JSON.stringify({ type: 'snapshot' }))
-    // The committed acknowledgement is still valid even when a resync is due.
-    const content = contents.get(event.frame.id)
-    acknowledge(event.requestId, content && composeFrame(event.frame, content))
-    return
-  }
   current.revision = event.revision
-  if (event.type === 'index-snapshot') {
-    if (event.deleted) {
-      disconnectFrames()
-      location.href = '/'
-      return
-    }
-    const ids = new Set(event.frames.map((frame) => frame.id))
-    for (const id of layouts.keys()) if (!ids.has(id)) remove(id)
-    for (const frame of useStore.getState().canvas?.frames ?? []) if (!ids.has(frame.id)) remove(frame.id)
-    layouts.clear()
-    for (const layout of event.frames) layouts.set(layout.id, layout)
-    useStore.getState().setFrameIndex(event.frames)
-    mergeActivity(event.activity)
-    for (const layout of event.frames) {
-      const frame = assembled(layout.id)
-      if (frame) useStore.getState().upsertFrame(frame)
-      void connectContent(layout.id).catch((error) => console.error('[frame]', error))
-    }
+  if (event.deleted) {
+    disconnectFrames()
+    location.href = '/'
     return
   }
-  if (event.operation === 'delete') {
-    remove(event.frame.id)
-    return
+  const ids = new Set(event.frameIds)
+  for (const id of members) if (!ids.has(id)) remove(id)
+  for (const frame of useStore.getState().canvas?.frames ?? []) if (!ids.has(frame.id)) remove(frame.id)
+  members.clear()
+  for (const id of event.frameIds) members.add(id)
+  useStore.getState().setFrameIndex(event.frameIds)
+  for (const id of event.frameIds) {
+    const frame = savedFrames.get(id)
+    if (frame && !useStore.getState().canvas?.frames.some((entry) => entry.id === id)) paint(frame)
+    void connectFrame(id).catch((error) => console.error('[frame]', error))
   }
-  layouts.set(event.frame.id, event.frame)
-  useStore.getState().setFrameIndex([...layouts.values()])
-  const frame = assembled(event.frame.id)
-  if (frame) {
-    const queued = event.actor.clientId === getIdentity().clientId ? updates.get(frame.id)?.next?.patch : undefined
-    // Layout events must not replace a streaming HTML reveal with full content.
-    const { x, y, width, height, updatedAt, updatedBy } = frame
-    useStore.getState().patchFrameLocal(frame.id, { x, y, width, height, updatedAt, updatedBy, ...queued })
-    acknowledge(event.requestId, frame)
-  }
-  void connectContent(event.frame.id).catch((error) => console.error('[frame]', error))
 }
 
-function applyContent(event: ContentSnapshot | ContentChange, current: Connection) {
-  if (!layouts.has(current.id)) return
-  if (event.type === 'frame-change') {
-    const layout = layouts.get(current.id)!
-    acknowledge(event.requestId, composeFrame(layout, event.frame))
-  }
+function applyFrame(event: FrameSnapshot | FrameChange, current: Connection) {
+  if (!members.has(current.id)) return
+  if (event.type === 'frame-change') acknowledge(event.requestId, event.frame)
   if (event.revision < current.revision) return
   if (event.type === 'frame-change' && event.revision > current.revision + 1) {
     current.socket?.send(JSON.stringify({ type: 'snapshot' }))
@@ -262,16 +210,16 @@ function applyContent(event: ContentSnapshot | ContentChange, current: Connectio
     connection?.socket?.send(JSON.stringify({ type: 'snapshot' }))
     return
   }
-  contents.set(current.id, event.frame)
-  const frame = assembled(current.id)!
+  const frame = event.frame
+  savedFrames.set(current.id, frame)
   if (event.type === 'frame-snapshot') {
     clearTimeout(reveals.get(frame.id))
     reveals.delete(frame.id)
     useStore.getState().setStream(frame.id, null)
-    useStore.getState().upsertFrame(frame)
+    paint(frame)
     mergeActivity(event.activity)
   } else {
-    showFrame({ ...event, type: 'change', frame })
+    showFrame(event)
     if (event.activity) mergeActivity([event.activity])
     if (event.actor.clientId !== getIdentity().clientId && !useStore.getState().streams[frame.id])
       useStore.getState().flash(frame.id, event.actor.color)
@@ -306,7 +254,7 @@ function open(current: Connection): Promise<void> {
         current.retry = setTimeout(() => {
           current.retry = undefined
           const reconnect = () => open(current)
-          void (current.kind === 'content' ? slot(reconnect) : reconnect()).then(resolveRetry, rejectRetry)
+          void (current.kind === 'frame' ? slot(reconnect) : reconnect()).then(resolveRetry, rejectRetry)
         }, 1000)
       })
       void current.ready.catch(() => {})
@@ -330,27 +278,27 @@ function open(current: Connection): Promise<void> {
         if (current.stopped || current.socket !== socket || connection?.canvasId !== current.canvasId) return
         const event = JSON.parse(String(data)) as
           | IndexSnapshot
-          | ContentSnapshot
+          | FrameSnapshot
           | { type: 'drag'; frameId: string; x: number; y: number; width: number; height: number; updatedAt: number }
           | { type: 'state' }
           | {
               type: 'state_update'
-              changes: { committed?: IndexChange | IndexSnapshot | ContentChange | ContentSnapshot }
+              changes: { committed?: IndexSnapshot | FrameChange | FrameSnapshot }
             }
           | { type: 'error'; requestId: string; message: string }
         if (event.type === 'index-snapshot') {
           applyIndex(event, current)
           finish()
         } else if (event.type === 'frame-snapshot') {
-          applyContent(event, current)
+          applyFrame(event, current)
           finish()
         } else if (event.type === 'state_update' && event.changes.committed) {
           const change = event.changes.committed
-          if (change.type === 'index-change' || change.type === 'index-snapshot') applyIndex(change, current)
-          else applyContent(change, current)
+          if (change.type === 'index-snapshot') applyIndex(change, current)
+          else applyFrame(change, current)
         } else if (event.type === 'drag') {
-          // Preview validity follows the layout owner's clock, not content edits.
-          if (layouts.get(event.frameId)?.updatedAt === event.updatedAt) {
+          // Any committed frame edit invalidates previews from its previous version.
+          if (event.frameId === current.id && savedFrames.get(event.frameId)?.updatedAt === event.updatedAt) {
             const { x, y, width, height } = event
             useStore.getState().patchFrameLocal(event.frameId, { x, y, width, height }, true)
           }
@@ -380,12 +328,12 @@ function open(current: Connection): Promise<void> {
   })
 }
 
-function connectContent(id: string): Promise<void> {
+function connectFrame(id: string): Promise<void> {
   const existing = frames.get(id)
   if (existing) return existing.ready
   const canvasId = connection?.canvasId
-  if (!canvasId || !layouts.has(id)) return Promise.reject(new Error('Frame is no longer on this canvas'))
-  const current: Connection = { id, canvasId, kind: 'content', ready: Promise.resolve(), revision: -1, stopped: false }
+  if (!canvasId || !members.has(id)) return Promise.reject(new Error('Frame is no longer on this canvas'))
+  const current: Connection = { id, canvasId, kind: 'frame', ready: Promise.resolve(), revision: -1, stopped: false }
   frames.set(id, current)
   current.ready = slot(() => open(current))
   return current.ready
@@ -412,9 +360,9 @@ export function disconnectFrames() {
   for (const current of frames.values()) stop(current)
   connection = undefined
   frames.clear()
-  layouts.clear()
+  members.clear()
   useStore.getState().setFrameIndex(null)
-  contents.clear()
+  savedFrames.clear()
   for (const timer of reveals.values()) clearTimeout(timer)
   reveals.clear()
   for (const queue of updates.values())
@@ -428,18 +376,17 @@ export function refreshFrames() {
 }
 
 export function previewFrame(frame: Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height' | 'updatedAt'>) {
-  if (connection?.canvasId !== useStore.getState().canvas?.id || connection?.socket?.readyState !== WebSocket.OPEN)
+  const current = frames.get(frame.id)
+  const saved = savedFrames.get(frame.id)
+  if (current?.canvasId !== useStore.getState().canvas?.id || current?.socket?.readyState !== WebSocket.OPEN || !saved)
     return
-  const layout = layouts.get(frame.id)
-  if (!layout) return
   const { id: frameId, x, y, width, height } = frame
-  connection.socket.send(
-    JSON.stringify({ type: 'drag', frameId, x, y, width, height, updatedAt: layout.updatedAt } satisfies IndexCommand),
+  current.socket.send(
+    JSON.stringify({ type: 'drag', frameId, x, y, width, height, updatedAt: saved.updatedAt } satisfies FrameCommand),
   )
 }
 
-async function send(current: Connection, command: ContentCommand | IndexCommand): Promise<Frame> {
-  if (!('requestId' in command)) throw new Error('Missing edit request ID')
+async function send(current: Connection, command: Extract<FrameCommand, { type: 'write' }>): Promise<Frame> {
   const socket = current.socket
   if (current.stopped || socket?.readyState !== WebSocket.OPEN)
     throw new Error('Frame is reconnecting; try again shortly')
@@ -454,14 +401,14 @@ async function send(current: Connection, command: ContentCommand | IndexCommand)
 }
 
 function waitForMembership(id: string, canvasId: string): Promise<void> {
-  if (connection?.canvasId === canvasId && layouts.has(id)) return Promise.resolve()
+  if (connection?.canvasId === canvasId && members.has(id)) return Promise.resolve()
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       unsubscribe()
       reject(new Error('Frame creation confirmation timed out; reload to check whether it was saved.'))
     }, 30_000)
     const unsubscribe = useStore.subscribe(() => {
-      if (connection?.canvasId === canvasId && !layouts.has(id)) return
+      if (connection?.canvasId === canvasId && !members.has(id)) return
       clearTimeout(timeout)
       unsubscribe()
       if (connection?.canvasId !== canvasId) reject(new Error('Canvas changed before the frame was ready.'))
@@ -481,7 +428,7 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
       write.type === 'create'
         ? `/api/canvases/${encodeURIComponent(canvasId)}/frames`
         : `/api/frames/${encodeURIComponent(write.id)}`
-    const previous = write.type === 'delete' ? assembled(write.id) : undefined
+    const previous = write.type === 'delete' ? savedFrames.get(write.id) : undefined
     const response = await fetch(path, {
       method: write.type === 'create' ? 'POST' : 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -498,7 +445,7 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
     if (!previous) throw new Error('Frame not found')
     return previous
   }
-  await connectContent(write.id)
+  await connectFrame(write.id)
   const current = frames.get(write.id)
   if (!current || current.canvasId !== canvasId || connection?.canvasId !== canvasId)
     throw new Error('Frame connection changed')
@@ -508,23 +455,9 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
       write: { type: 'append', chunk: write.chunk, start: write.start, done: write.done },
       requestId: crypto.randomUUID(),
     })
-  let result = assembled(write.id)
-  if (write.patch.name !== undefined || write.patch.html !== undefined)
-    result = await send(current, {
-      type: 'write',
-      write: { type: 'update', patch: { name: write.patch.name, html: write.patch.html } },
-      requestId: crypto.randomUUID(),
-    })
-  const { x, y, width, height } = write.patch
-  if ([x, y, width, height].some((value) => value !== undefined)) {
-    if (connection?.canvasId !== canvasId) throw new Error('Canvas connection changed')
-    result = await send(connection, {
-      type: 'layout',
-      id: write.id,
-      patch: { x, y, width, height },
-      requestId: crypto.randomUUID(),
-    })
-  }
-  if (!result) throw new Error('Frame not found')
-  return result
+  return send(current, {
+    type: 'write',
+    write: { type: 'update', patch: write.patch },
+    requestId: crypto.randomUUID(),
+  })
 }

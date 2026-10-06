@@ -18,30 +18,27 @@
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
-- `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
+- `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, chat,
   activity feed) over one room per canvas.
 
 ## 3. Data and Persistence
 
 - PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - accounts, canvas metadata,
-  and collaboration records. Original frame rows remain for lazy initialization and legacy ID lookup.
+  and collaboration records. Pending metadata writes drain during normal shutdown.
 - `durable-actors` 0.7.15 / `terse-sdk` 0.9.14 - one `CanvasIndex` actor per canvas owns
-  membership and layout; one `FrameContentActor` per frame owns HTML, name, revision, and content edits.
-  Both use actor-local SQLite. The index never stores or returns HTML. `@Compute` allocates 256 MiB
-  to the index and 512 MiB to content actors (provisional sizing, not a measured minimum).
+  ordered frame IDs; one `FrameActor` per frame owns the complete frame, including HTML, name,
+  geometry, timestamps, and revision. Both use actor-local SQLite and
+  `@Compute({ cpu: 1, memoryMiB: 256 })`. The index never stores frame attributes or HTML.
   Backend reads/writes use generated RPC. Browsers subscribe directly to the index and individual
   frames through server-authorized WebSockets. Up to four initial frame connections are established
-  concurrently; this is not a cap on live subscriptions. Revisions and reconnects are independent.
+  concurrently; all established subscriptions remain live. Revisions and reconnects are independent.
   Doop `/ws` carries canvas metadata and other collaboration events, without frame HTML.
-  `@Persisted @Emittable committed` delivers edits after persistence; pointer previews use broadcast.
-  Creation initializes content before publishing membership. Deletion records an index tombstone
-  before retiring content; later access retries pending cleanup in the background without blocking
-  other frames. Mixed content/layout edits span two
-  commits and do not provide a canvas-wide atomic snapshot.
-  `CanvasFrames` remains only as the migration source for the previous architecture. First access
-  freezes its writers, exports a lightweight index, and copies HTML one frame at a time into idempotent
-  frame initializers. If that legacy actor was never initialized, SQL supplies the source instead.
-  The new index is published last. Empty/deleted actors do not reload SQL; errors leave cutover retryable.
+  `@Persisted @Emittable committed` delivers edits after persistence; pointer previews use broadcast
+  from the corresponding frame actor. Mixed HTML/geometry edits have one atomic frame commit;
+  canvas exports assemble independent frame snapshots.
+  Creation initializes the frame before publishing membership. Deletion records an index tombstone
+  before retiring the frame; later access retries pending cleanup in the background.
+  No legacy actors, SQL frame imports, JSON imports, or migration paths remain.
   `pnpm actors:generate` regenerates the client; `pnpm actors:check` verifies it in CI.
   `bun run dev` starts persistent local actors; production uses managed Terse.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and

@@ -80,15 +80,12 @@ const BUILD_ID = (() => {
   }
 })()
 
-/* boot: connect the DB, hydrate memory, import pre-DB store.json once */
+/* boot: connect the DB and hydrate canvas metadata and collaboration state */
 await initDb()
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
-let data = await persist.hydrate()
-if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
-  data = await persist.hydrate()
-}
+const data = await persist.hydrate()
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canAccessCanvas reads membership
 billing.reportBillingConfig()
@@ -121,15 +118,11 @@ process.on('unhandledRejection', (reason) => {
   console.error('[unhandled-rejection]', reason)
 })
 
-/* flush debounced frame writes before the process dies — with a hard-exit
-   timeout so a wedged DB can never keep the process (and the port) alive */
+// Frame writes are durable in their actors; drain pending SQL metadata writes.
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.once(sig, () => {
     setTimeout(() => process.exit(0), 1500).unref()
-    persist
-      .flush((id) => store.getFrame(id))
-      .catch((err) => console.error('flush on shutdown failed', err))
-      .finally(() => process.exit(0))
+    void persist.flush().finally(() => process.exit(0))
   })
 }
 
@@ -578,9 +571,9 @@ app.use('/api', async (req, res, next) => {
 
 app.use('/api/canvases/:canvasId', (req, res, next) => {
   // These legacy import views inspect markers embedded in HTML. Other routes
-  // need only membership/layout; explicit full-canvas GET loads content later.
+  // use frame summaries; actor grants only need membership.
   const content = ['/sync-keys', '/sync-flow', '/github'].includes(req.path) && req.method === 'GET'
-  void store.syncCanvas(req.params.canvasId, content ? 'full' : 'index').then(
+  void store.syncCanvas(req.params.canvasId, content ? 'full' : req.path === '/actor' ? 'index' : 'summary').then(
     (canvas) => {
       res.locals.canvas = canvas
       next()
@@ -589,7 +582,9 @@ app.use('/api/canvases/:canvasId', (req, res, next) => {
   )
 })
 app.use('/api/frames/:frameId', (req, res, next) => {
-  void (req.path === '/actor' ? store.getFrameLayout(req.params.frameId) : store.syncFrame(req.params.frameId)).then(
+  void (
+    req.path === '/actor' ? store.getFrameMembership(req.params.frameId) : store.syncFrame(req.params.frameId)
+  ).then(
     (frame) => {
       res.locals.frame = frame
       next()

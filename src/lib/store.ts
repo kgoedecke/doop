@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import type { FrameLayout } from '../../shared/frame-state'
 import type {
   ActivityItem,
   AgentTask,
@@ -37,8 +36,8 @@ function loadChatSeen(canvasId: string): number {
 
 interface State {
   canvas: Canvas | null
-  /** Geometry arrives before content so fitting/deep links do not wait for HTML. */
-  frameIndex: FrameLayout[] | null
+  /** Membership order is available before individual frame snapshots arrive. */
+  frameIndex: string[] | null
   /** View-only interpolation for incoming geometry; local edits stay immediate. */
   frameMotion: Record<string, boolean>
   presences: Record<string, Presence>
@@ -118,7 +117,7 @@ interface State {
   following: string | null
 
   setCanvas(c: Canvas | null): void
-  setFrameIndex(frames: FrameLayout[] | null): void
+  setFrameIndex(frames: string[] | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
   setUpdateReady(v: boolean): void
@@ -200,8 +199,8 @@ function readLayersOpen(): boolean {
   }
 }
 
-function orderFrames(frames: Frame[], index: FrameLayout[] | null): Frame[] {
-  const positions = new Map(index?.map((entry, position) => [entry.id, position]))
+function orderFrames(frames: Frame[], index: string[] | null): Frame[] {
+  const positions = new Map(index?.map((entry, position) => [entry, position]))
   return frames.sort(
     (a, b) =>
       (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||

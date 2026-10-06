@@ -231,7 +231,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     const el = ref.current
     const c = useStore.getState().canvas
     if (!el || !c) return
-    const boxes = (useStore.getState().frameIndex ?? c.frames).map((f) => ({
+    const boxes = c.frames.map((f) => ({
       x: f.x,
       y: f.y - 30,
       w: f.width,
@@ -262,9 +262,11 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   /* zoom-to-fit once the canvas arrives — unless the URL deep-links a frame */
   useEffect(() => {
     if (!canvas || !frameIndex || fitted.current) return
-    fitted.current = true
     const focusId = new URLSearchParams(location.search).get('frame')
-    const target = focusId ? frameIndex.find((f) => f.id === focusId) : null
+    const target = focusId ? canvas.frames.find((f) => f.id === focusId) : null
+    const loaded = new Set(canvas.frames.map((frame) => frame.id))
+    if (!target && frameIndex.some((id) => !loaded.has(id))) return
+    fitted.current = true
     if (target) focusFrame(target)
     else fit()
   }, [canvas, frameIndex, fit, focusFrame])

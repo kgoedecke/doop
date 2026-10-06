@@ -11,34 +11,9 @@ import { createActorStub as $createActorStub, SocketProxy as $SocketProxy } from
 /**
  * Call actor methods from your backend.
  * @example
- * const actor = actors.CanvasFrames.get("actor-id")
+ * const actor = actors.CanvasIndex.get("actor-id")
  */
 export const actors = {
-    ["CanvasFrames"]: {
-        get(actorId, transport) {
-            return $createActorStub(
-                "CanvasFrames",
-                actorId,
-                [
-                    { name: "destroy", result: "void" },
-                    { name: "initialize", result: "value" },
-                    { name: "migrationFrame", result: "value" },
-                    { name: "migrationIndex", result: "value" },
-                    { name: "snapshot", result: "value" },
-                    { name: "write", result: "value" }
-                ],
-                transport
-            )
-        },
-        /**
-         * Allow a frontend connection after your backend checks the user's access.
-         * @example
-         * const grant = await actors.CanvasFrames.prepareWebsocket({ actorId: "actor-id", metadata })
-         */
-        prepareWebsocket(authorization) {
-            return new ActorProxy().handle({ ...authorization, actorName: "CanvasFrames" })
-        }
-    },
     ["CanvasIndex"]: {
         get(actorId, transport) {
             return $createActorStub(
@@ -48,13 +23,12 @@ export const actors = {
                     { name: "add", result: "value" },
                     { name: "confirmDelete", result: "void" },
                     { name: "destroy", result: "void" },
-                    { name: "getFrame", result: "value" },
+                    { name: "has", result: "value" },
                     { name: "initialize", result: "value" },
                     { name: "pendingDeletes", result: "value" },
                     { name: "remove", result: "value" },
-                    { name: "snapshot", result: "value" },
-                    { name: "status", result: "value" },
-                    { name: "updateLayout", result: "value" }
+                    { name: "reorder", result: "void" },
+                    { name: "snapshot", result: "value" }
                 ],
                 transport
             )
@@ -68,10 +42,10 @@ export const actors = {
             return new ActorProxy().handle({ ...authorization, actorName: "CanvasIndex" })
         }
     },
-    ["FrameContentActor"]: {
+    ["FrameActor"]: {
         get(actorId, transport) {
             return $createActorStub(
-                "FrameContentActor",
+                "FrameActor",
                 actorId,
                 [
                     { name: "destroy", result: "void" },
@@ -86,21 +60,21 @@ export const actors = {
         /**
          * Allow a frontend connection after your backend checks the user's access.
          * @example
-         * const grant = await actors.FrameContentActor.prepareWebsocket({ actorId: "actor-id", metadata })
+         * const grant = await actors.FrameActor.prepareWebsocket({ actorId: "actor-id", metadata })
          */
         prepareWebsocket(authorization) {
-            return new ActorProxy().handle({ ...authorization, actorName: "FrameContentActor" })
+            return new ActorProxy().handle({ ...authorization, actorName: "FrameActor" })
         }
     }
 }
 /**
  * Allow a frontend connection after your backend checks the user's access.
  * @example
- * const grant = await ActorProxy.handle({ actorName: "CanvasFrames", actorId: "actor-id", metadata })
+ * const grant = await ActorProxy.handle({ actorName: "CanvasIndex", actorId: "actor-id", metadata })
  */
 export class ActorProxy extends $SocketProxy {
     constructor() {
-        super({ ["CanvasFrames"]: {}, ["CanvasIndex"]: {}, ["FrameContentActor"]: {} })
+        super({ ["CanvasIndex"]: {}, ["FrameActor"]: {} })
     }
     handle(authorization) {
         return super.handle(authorization)

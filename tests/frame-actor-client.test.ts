@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types'
-import { contentOf, layoutOf } from '../shared/frame-state'
-import type { ContentCommand, IndexCommand } from '../src/actor'
+import type { FrameCommand, IndexCommand } from '../src/actor'
 
 vi.mock('../src/lib/identity', () => ({ getIdentity: () => ({ clientId: 'me', name: 'Me' }) }))
 class Socket {
   static OPEN = 1
   static instances: Socket[] = []
   readyState = 1
-  sent: (ContentCommand | IndexCommand)[] = []
+  sent: (FrameCommand | IndexCommand)[] = []
   onmessage?: (event: { data: string }) => void
   onclose?: () => void
   onerror?: () => void
@@ -16,7 +15,7 @@ class Socket {
     Socket.instances.push(this)
   }
   send(data: string) {
-    this.sent.push(JSON.parse(data) as ContentCommand | IndexCommand)
+    this.sent.push(JSON.parse(data) as FrameCommand | IndexCommand)
   }
   receive(event: unknown) {
     this.onmessage?.({ data: JSON.stringify(event) })
@@ -53,14 +52,14 @@ const socket = (path: string) => Socket.instances.find((candidate) => candidate.
 const snapshot = (entry: Frame) => ({
   type: 'frame-snapshot',
   revision: 0,
-  frame: contentOf(entry),
+  frame: entry,
   deleted: false,
   activity: [],
 })
 const indexSnapshot = (entries: Frame[], revision = 0) => ({
   type: 'index-snapshot',
   revision,
-  frames: entries.map(layoutOf),
+  frameIds: entries.map((entry) => entry.id),
   initialized: true,
   deleted: false,
   activity: [],
@@ -89,7 +88,7 @@ async function connect(entries: Frame[]) {
   await flush()
 }
 
-it('routes layout and content to separate owners and isolates a disconnected frame', async () => {
+it('routes whole-frame edits to one owner and isolates a disconnected frame', async () => {
   const a = frame('a'),
     b = frame('b')
   await connect([a, b])
@@ -111,7 +110,7 @@ it('routes layout and content to separate owners and isolates a disconnected fra
         type: 'frame-change',
         revision: 1,
         operation: 'update',
-        frame: { ...contentOf(b), html: '<p>B</p>', updatedAt: 2 },
+        frame: { ...b, html: '<p>B</p>', updatedAt: 2 },
         actor: by,
         requestId: 'requestId' in commandB ? commandB.requestId : '',
       },
@@ -120,17 +119,18 @@ it('routes layout and content to separate owners and isolates a disconnected fra
   expect((await writeB).html).toBe('<p>B</p>')
   const move = sync.writeFrame({ type: 'update', id: 'b', patch: { x: 900 } })
   await flush()
-  const command = index.sent.at(-1)!
-  expect(command).toMatchObject({ type: 'layout', id: 'b', patch: { x: 900 } })
-  expect(contentB.sent).toHaveLength(1)
-  index.receive({
+  const command = contentB.sent.at(-1)!
+  expect(command).toMatchObject({ type: 'write', write: { type: 'update', patch: { x: 900 } } })
+  expect(contentB.sent).toHaveLength(2)
+  expect(index.sent).toEqual([])
+  contentB.receive({
     type: 'state_update',
     changes: {
       committed: {
-        type: 'index-change',
-        revision: 1,
+        type: 'frame-change',
+        revision: 2,
         operation: 'update',
-        frame: { ...layoutOf(b), x: 900, updatedAt: 3 },
+        frame: { ...b, html: '<p>B</p>', x: 900, updatedAt: 3 },
         actor: by,
         requestId: 'requestId' in command ? command.requestId : '',
       },
@@ -154,7 +154,7 @@ it('resyncs a revision gap on only the affected frame and keeps layout during an
         type: 'frame-change',
         revision: 3,
         operation: 'update',
-        frame: { ...contentOf(a), html: '<main>gap</main>' },
+        frame: { ...a, html: '<main>gap</main>' },
         actor: by,
       },
     },
@@ -170,19 +170,19 @@ it('resyncs a revision gap on only the affected frame and keeps layout during an
         type: 'frame-change',
         revision: 4,
         operation: 'update',
-        frame: { ...contentOf(a), html: '<main>Brand new generated design</main>', updatedAt: 2 },
+        frame: { ...a, html: '<main>Brand new generated design</main>', updatedAt: 2 },
         actor: { ...by, kind: 'agent', clientId: 'agent' },
       },
     },
   })
-  index.receive({
+  contentA.receive({
     type: 'state_update',
     changes: {
       committed: {
-        type: 'index-change',
-        revision: 1,
+        type: 'frame-change',
+        revision: 5,
         operation: 'update',
-        frame: { ...layoutOf(a), x: 800, updatedAt: 3 },
+        frame: { ...a, html: '<main>Brand new generated design</main>', x: 800, updatedAt: 3 },
         actor: by,
       },
     },
@@ -202,14 +202,14 @@ it('bounds initial frame connections and ignores late snapshots after deletion',
   index.receive(indexSnapshot(entries))
   await ready
   await flush()
-  // Fitting/deep links can use every frame's bounds before any HTML arrives.
-  expect(useStore.getState().frameIndex).toEqual(entries.map(layoutOf))
+  // Membership/order arrives before the individual frame snapshots.
+  expect(useStore.getState().frameIndex).toEqual(entries.map((entry) => entry.id))
   expect(Socket.instances.filter((entry) => entry.url.includes('/frames/'))).toHaveLength(4)
   const deleted = socket('/frames/f0/')
   index.receive({
     type: 'state_update',
     changes: {
-      committed: { type: 'index-change', revision: 1, operation: 'delete', frame: layoutOf(entries[0]!), actor: by },
+      committed: indexSnapshot(entries.slice(1), 1),
     },
   })
   deleted.receive(snapshot(entries[0]!))
@@ -242,7 +242,7 @@ it('waits for index membership when a create response arrives before its socket 
   index.receive({
     type: 'state_update',
     changes: {
-      committed: { type: 'index-change', revision: 1, operation: 'create', frame: layoutOf(entry), actor: by },
+      committed: indexSnapshot([entry], 1),
     },
   })
   expect(await created).toEqual(entry)

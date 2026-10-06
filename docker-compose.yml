@@ -1,5 +1,5 @@
 # Self-host with managed Terse actors: `docker compose up` → http://localhost:4400
-# Set TERSE_ACTOR_URL and TERSE_API_KEY after deploying CanvasFrames (README).
+# Set TERSE_ACTOR_URL and TERSE_API_KEY after deploying CanvasIndex and FrameActor (README).
 # Set BETTER_AUTH_SECRET (any long random string) before running in earnest:
 #   BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d
 services:

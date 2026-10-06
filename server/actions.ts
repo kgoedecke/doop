@@ -121,9 +121,9 @@ function failInterruptedWork() {
 }
 
 export async function getActivity(canvasId: string, includeFrames = true): Promise<ActivityItem[]> {
-  const { frames, activity } = await canvasIndex(canvasId).snapshot()
-  const summaries = includeFrames ? await mapFrames(frames, (frame) => frameActor(frame.id).summary()) : []
-  const items = [...(activityLog.get(canvasId) ?? []), ...activity, ...summaries.flatMap((summary) => summary.activity)]
+  const { frameIds } = await canvasIndex(canvasId).snapshot()
+  const summaries = includeFrames ? await mapFrames(frameIds, (id) => frameActor(id).summary()) : []
+  const items = [...(activityLog.get(canvasId) ?? []), ...summaries.flatMap((summary) => summary.activity)]
   return [...new Map(items.map((item) => [item.id, item])).values()].sort((a, b) => b.at - a.at).slice(0, 100)
 }
 
@@ -1176,7 +1176,7 @@ export async function createFrame(
   id?: string,
 ): Promise<Frame | undefined> {
   if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
-  const frame = await store.createFrame(canvasId, input, actor.name, actor, id)
+  const frame = await store.createFrame(canvasId, input, actor.name, id)
   if (!frame) return undefined
   if (actor.kind === 'agent' && frame.html) {
     autoTask(canvasId, actor, `Designing “${frame.name}”`, frame.id)
@@ -1219,7 +1219,7 @@ export async function updateFrame(
 export async function deleteFrame(frameId: string, actor: Actor): Promise<Frame | undefined> {
   /* Finish stream tracking while the frame still exists so its task can end. */
   await finishStream(frameId, false)
-  const frame = await store.deleteFrame(frameId, actor)
+  const frame = await store.deleteFrame(frameId)
   if (!frame) return undefined
   thumbs.purge(frameId)
   logActivity(frame.canvasId, actor, `deleted frame “${frame.name}”`, frame.id)
