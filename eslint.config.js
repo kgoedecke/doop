@@ -39,12 +39,14 @@ export default tseslint.config(
     },
   },
   {
-    /* repo maintenance scripts: plain ESM run directly by node, so they get
-       node globals rather than the browser set */
-    files: ['scripts/**/*.{js,mjs}'],
+    /* repo maintenance scripts and the iOS dev helpers: plain ESM run directly
+       by node, so they get node globals rather than the browser set */
+    files: ['scripts/**/*.{js,mjs}', 'ios/scripts/**/*.{js,mjs}'],
     languageOptions: {
       globals: Object.fromEntries(
-        'process console Buffer URL setTimeout clearTimeout'.split(' ').map((g) => [g, 'readonly']),
+        'process console Buffer URL fetch setTimeout clearTimeout setInterval clearInterval'
+          .split(' ')
+          .map((g) => [g, 'readonly']),
       ),
     },
   },

@@ -12,6 +12,30 @@ import {
 } from 'drizzle-orm/pg-core'
 import type { Schedule, Step } from '../../shared/automations.ts'
 
+/** ActivityKit tokens are delivery secrets: never return them through read APIs. */
+export const liveActivities = pgTable('live_activities', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  canvasId: text('canvas_id').notNull(),
+  token: text('token').notNull().unique(),
+  environment: text('environment').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  lastPayload: text('last_payload'),
+  lastTimestamp: bigint('last_timestamp', { mode: 'number' }).notNull().default(0),
+})
+
+/** Push-to-start tokens (iOS 17.2+): one per device and server origin, so the
+ *  server can start a Live Activity for an agent task on any canvas the user
+ *  belongs to, app open or not. Delivery secrets like the update tokens above. */
+export const liveActivityStarters = pgTable('live_activity_starters', {
+  token: text('token').primaryKey(),
+  userId: text('user_id').notNull(),
+  environment: text('environment').notNull(),
+  /** the server origin string the app uses, echoed into the activity's attributes */
+  origin: text('origin').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+})
+
 /**
  * One Postgres-dialect schema for every environment: PGlite (embedded, file
  * in ./data) during development, a managed Postgres via DATABASE_URL in

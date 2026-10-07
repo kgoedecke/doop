@@ -1,0 +1,509 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		000000000000000000000300 /* Blitz/BlitzDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000310 /* Blitz/BlitzDocument.swift */; };
+		000000000000000000000305 /* Blitz/AgentMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000315 /* Blitz/AgentMark.swift */; };
+		000000000000000000000301 /* Blitz/BlitzCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000311 /* Blitz/BlitzCanvasView.swift */; };
+		000000000000000000000302 /* Blitz/CanvasStress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000313 /* Blitz/CanvasStress.swift */; };
+		0000000000000000000000C8 /* DoopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* DoopApp.swift */; };
+		0000000000000000000000CA /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* ContentView.swift */; };
+		0000000000000000000000CB /* Core/ServerAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000067 /* Core/ServerAddress.swift */; };
+		0000000000000000000000CC /* Core/ExportDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000068 /* Core/ExportDirectory.swift */; };
+		0000000000000000000000D2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000006E /* Assets.xcassets */; };
+		000000000000000000000332 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000330 /* PrivacyInfo.xcprivacy */; };
+		000000000000000000000333 /* DoopActivity/PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000331 /* DoopActivity/PrivacyInfo.xcprivacy */; };
+		000000000000000000000190 /* Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000012C /* Core/Models.swift */; };
+		000000000000000000000191 /* DoopClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000012D /* DoopClient.swift */; };
+		000000000000000000000192 /* CanvasModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000012E /* CanvasModel.swift */; };
+		000000000000000000000194 /* NativeCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000130 /* NativeCanvasView.swift */; };
+		000000000000000000000262 /* Doop/Core/AgentActivityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000258 /* Doop/Core/AgentActivityState.swift */; };
+		000000000000000000000263 /* Shared/AgentActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000259 /* Shared/AgentActivityAttributes.swift */; };
+		000000000000000000000264 /* Doop/AgentLiveActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025A /* Doop/AgentLiveActivities.swift */; };
+		000000000000000000000265 /* Doop/GlassDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025B /* Doop/GlassDock.swift */; };
+		00000000000000000000026C /* Doop/Core/AgentActivityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000258 /* Doop/Core/AgentActivityState.swift */; };
+		00000000000000000000026D /* Shared/AgentActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000259 /* Shared/AgentActivityAttributes.swift */; };
+		00000000000000000000026E /* DoopActivity/DoopActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025C /* DoopActivity/DoopActivity.swift */; };
+		00000000000000000000026F /* Doop/Core/Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000025D /* Doop/Core/Models.swift */; };
+		000000000000000000000277 /* DoopActivity.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 000000000000000000000276 /* DoopActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		000000000000000000000284 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000000000280;
+			remoteInfo = DoopActivity;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000000000278 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				000000000000000000000277 /* DoopActivity.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		000000000000000000000310 /* Blitz/BlitzDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Blitz/BlitzDocument.swift; sourceTree = "<group>"; };
+		000000000000000000000315 /* Blitz/AgentMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Blitz/AgentMark.swift; sourceTree = "<group>"; };
+		000000000000000000000311 /* Blitz/BlitzCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Blitz/BlitzCanvasView.swift; sourceTree = "<group>"; };
+		000000000000000000000313 /* Blitz/CanvasStress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Blitz/CanvasStress.swift; sourceTree = "<group>"; };
+		000000000000000000000312 /* doopblitz.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = doopblitz.h; path = BlitzKit/include/doopblitz.h; sourceTree = SOURCE_ROOT; };
+		000000000000000000000064 /* DoopApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoopApp.swift; sourceTree = "<group>"; };
+		000000000000000000000330 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		000000000000000000000331 /* DoopActivity/PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = DoopActivity/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		000000000000000000000066 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		000000000000000000000067 /* Core/ServerAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ServerAddress.swift; sourceTree = "<group>"; };
+		000000000000000000000068 /* Core/ExportDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/ExportDirectory.swift; sourceTree = "<group>"; };
+		00000000000000000000006E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		00000000000000000000006F /* Doop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Doop.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		00000000000000000000012C /* Core/Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/Models.swift; sourceTree = "<group>"; };
+		00000000000000000000012D /* DoopClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoopClient.swift; sourceTree = "<group>"; };
+		00000000000000000000012E /* CanvasModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasModel.swift; sourceTree = "<group>"; };
+		000000000000000000000130 /* NativeCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCanvasView.swift; sourceTree = "<group>"; };
+		000000000000000000000258 /* Doop/Core/AgentActivityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Doop/Core/AgentActivityState.swift; sourceTree = SOURCE_ROOT; };
+		000000000000000000000259 /* Shared/AgentActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/AgentActivityAttributes.swift; sourceTree = SOURCE_ROOT; };
+		00000000000000000000025A /* Doop/AgentLiveActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Doop/AgentLiveActivities.swift; sourceTree = SOURCE_ROOT; };
+		00000000000000000000025B /* Doop/GlassDock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Doop/GlassDock.swift; sourceTree = SOURCE_ROOT; };
+		00000000000000000000025C /* DoopActivity/DoopActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoopActivity/DoopActivity.swift; sourceTree = SOURCE_ROOT; };
+		00000000000000000000025D /* Doop/Core/Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Doop/Core/Models.swift; sourceTree = SOURCE_ROOT; };
+		000000000000000000000276 /* DoopActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = DoopActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		000000000000000000000008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000283 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		000000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				000000000000000000000258 /* Doop/Core/AgentActivityState.swift */,
+				000000000000000000000259 /* Shared/AgentActivityAttributes.swift */,
+				00000000000000000000025A /* Doop/AgentLiveActivities.swift */,
+				00000000000000000000025B /* Doop/GlassDock.swift */,
+				00000000000000000000025C /* DoopActivity/DoopActivity.swift */,
+				000000000000000000000331 /* DoopActivity/PrivacyInfo.xcprivacy */,
+				00000000000000000000025D /* Doop/Core/Models.swift */,
+				000000000000000000000003 /* Doop */,
+				000000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		000000000000000000000003 /* Doop */ = {
+			isa = PBXGroup;
+			children = (
+				00000000000000000000012C /* Core/Models.swift */,
+				00000000000000000000012D /* DoopClient.swift */,
+				00000000000000000000012E /* CanvasModel.swift */,
+				000000000000000000000130 /* NativeCanvasView.swift */,
+				000000000000000000000310 /* Blitz/BlitzDocument.swift */,
+				000000000000000000000315 /* Blitz/AgentMark.swift */,
+				000000000000000000000311 /* Blitz/BlitzCanvasView.swift */,
+				000000000000000000000313 /* Blitz/CanvasStress.swift */,
+				000000000000000000000312 /* doopblitz.h */,
+				000000000000000000000064 /* DoopApp.swift */,
+				000000000000000000000330 /* PrivacyInfo.xcprivacy */,
+				000000000000000000000066 /* ContentView.swift */,
+				000000000000000000000067 /* Core/ServerAddress.swift */,
+				000000000000000000000068 /* Core/ExportDirectory.swift */,
+				00000000000000000000006E /* Assets.xcassets */,
+			);
+			path = Doop;
+			sourceTree = "<group>";
+		};
+		000000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				00000000000000000000006F /* Doop.app */,
+				000000000000000000000276 /* DoopActivity.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		000000000000000000000005 /* Doop */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 00000000000000000000000B /* Build configuration list for PBXNativeTarget "Doop" */;
+			buildPhases = (
+				000000000000000000000320 /* Build Blitz library */,
+				000000000000000000000006 /* Sources */,
+				000000000000000000000007 /* Resources */,
+				000000000000000000000008 /* Frameworks */,
+				000000000000000000000278 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				000000000000000000000285 /* PBXTargetDependency */,
+			);
+			name = Doop;
+			productName = Doop;
+			productReference = 00000000000000000000006F /* Doop.app */;
+			productType = "com.apple.product-type.application";
+		};
+		000000000000000000000280 /* DoopActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 00000000000000000000028A /* Build configuration list for PBXNativeTarget "DoopActivity" */;
+			buildPhases = (
+				000000000000000000000281 /* Sources */,
+				000000000000000000000282 /* Resources */,
+				000000000000000000000283 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DoopActivity;
+			productName = DoopActivity;
+			productReference = 000000000000000000000276 /* DoopActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		000000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 00000000000000000000000A /* Build configuration list for PBXProject "Doop" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 000000000000000000000002;
+			productRefGroup = 000000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				000000000000000000000005 /* Doop */,
+				000000000000000000000280 /* DoopActivity */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		000000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0000000000000000000000D2 /* Assets.xcassets in Resources */,
+				000000000000000000000332 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000282 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000333 /* DoopActivity/PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		000000000000000000000320 /* Build Blitz library */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build Blitz library";
+			outputPaths = (
+				"$(SRCROOT)/BlitzKit/lib/$(PLATFORM_NAME)/libdoopblitz.a",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"$SRCROOT/BlitzKit/build.sh\" \"$PLATFORM_NAME\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		000000000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				000000000000000000000262 /* Doop/Core/AgentActivityState.swift in Sources */,
+				000000000000000000000263 /* Shared/AgentActivityAttributes.swift in Sources */,
+				000000000000000000000264 /* Doop/AgentLiveActivities.swift in Sources */,
+				000000000000000000000265 /* Doop/GlassDock.swift in Sources */,
+				000000000000000000000190 /* Core/Models.swift in Sources */,
+				000000000000000000000191 /* DoopClient.swift in Sources */,
+				000000000000000000000192 /* CanvasModel.swift in Sources */,
+				000000000000000000000194 /* NativeCanvasView.swift in Sources */,
+				000000000000000000000300 /* Blitz/BlitzDocument.swift in Sources */,
+				000000000000000000000305 /* Blitz/AgentMark.swift in Sources */,
+				000000000000000000000301 /* Blitz/BlitzCanvasView.swift in Sources */,
+				000000000000000000000302 /* Blitz/CanvasStress.swift in Sources */,
+				0000000000000000000000C8 /* DoopApp.swift in Sources */,
+				0000000000000000000000CA /* ContentView.swift in Sources */,
+				0000000000000000000000CB /* Core/ServerAddress.swift in Sources */,
+				0000000000000000000000CC /* Core/ExportDirectory.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000281 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00000000000000000000026C /* Doop/Core/AgentActivityState.swift in Sources */,
+				00000000000000000000026D /* Shared/AgentActivityAttributes.swift in Sources */,
+				00000000000000000000026E /* DoopActivity/DoopActivity.swift in Sources */,
+				00000000000000000000026F /* Doop/Core/Models.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		000000000000000000000285 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000000000280 /* DoopActivity */;
+			targetProxy = 000000000000000000000284 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		000000000000000000000014 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		000000000000000000000015 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		000000000000000000000016 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Doop/DoopDebug.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = N29YR8ZK97;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = doop;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/BlitzKit/lib/$(PLATFORM_NAME)";
+				OTHER_LDFLAGS = (
+					"-ldoopblitz",
+					"-lc++",
+					"-framework",
+					Security,
+					"-framework",
+					CoreText,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreFoundation,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					UIKit,
+					"-framework",
+					Metal,
+				);
+				SWIFT_OBJC_BRIDGING_HEADER = BlitzKit/include/doopblitz.h;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		000000000000000000000017 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Doop/DoopRelease.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = N29YR8ZK97;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = doop;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/BlitzKit/lib/$(PLATFORM_NAME)";
+				OTHER_LDFLAGS = (
+					"-ldoopblitz",
+					"-lc++",
+					"-framework",
+					Security,
+					"-framework",
+					CoreText,
+					"-framework",
+					CoreGraphics,
+					"-framework",
+					CoreFoundation,
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					ImageIO,
+					"-framework",
+					MobileCoreServices,
+					"-framework",
+					UIKit,
+					"-framework",
+					Metal,
+				);
+				SWIFT_OBJC_BRIDGING_HEADER = BlitzKit/include/doopblitz.h;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		00000000000000000000028B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N29YR8ZK97;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DoopActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Doop Agent Status";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios.activity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		00000000000000000000028C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N29YR8ZK97;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DoopActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Doop Agent Status";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios.activity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		00000000000000000000000A /* Build configuration list for PBXProject "Doop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000000014 /* Debug */,
+				000000000000000000000015 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		00000000000000000000000B /* Build configuration list for PBXNativeTarget "Doop" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000000000016 /* Debug */,
+				000000000000000000000017 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		00000000000000000000028A /* Build configuration list for PBXNativeTarget "DoopActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				00000000000000000000028B /* Debug */,
+				00000000000000000000028C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 000000000000000000000001 /* Project object */;
+}

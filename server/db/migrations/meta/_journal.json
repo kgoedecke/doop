@@ -169,6 +169,13 @@
       "when": 1791216598941,
       "tag": "0024_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791371888951,
+      "tag": "0025_live_activities",
+      "breakpoints": true
     }
   ]
 }

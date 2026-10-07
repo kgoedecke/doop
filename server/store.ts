@@ -60,6 +60,12 @@ class Store {
    *  A deliberately separate method rather than a flag on listCanvases: a
    *  boolean parameter is the kind of thing that eventually gets passed
    *  `true` from a route that shouldn't. */
+  /** Every canvas, unfiltered and unsummarised, for server-side loops that
+   *  apply their own access check per user (Live Activity push-to-start). */
+  allCanvases(): Canvas[] {
+    return [...this.canvases.values()]
+  }
+
   listAllCanvases(limit = 200) {
     const all = [...this.canvases.values()].sort((a, b) => b.updatedAt - a.updatedAt)
     return {

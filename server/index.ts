@@ -13,6 +13,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
+import { liveActivitiesRouter, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
 import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
@@ -58,6 +59,7 @@ import { CLAUDE_MODELS } from '../shared/localAgent.ts'
 import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
+import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import type { ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
@@ -643,6 +645,8 @@ app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)
 app.use('/api/integrations', integrationsRouter)
 app.use('/api/workspaces', workspaces.workspacesRouter)
+app.use('/api/live-activities', liveActivitiesRouter)
+startLiveActivityDelivery()
 app.use('/api/billing', billing.billingRouter)
 
 /* free-tier meter for the resident team: {used, limit, connected, byoModel} */
@@ -845,7 +849,11 @@ app.get('/api/canvases', (req, res) =>
         if (!t.agentName) continue // unclaimed board cards have no agent yet
         if (!seen.has(t.agentName)) seen.set(t.agentName, { owner: t.owner, lastAt: t.startedAt })
       }
-      return { ...c, agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })) }
+      return {
+        ...c,
+        agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })),
+        activeTasks: activeAgentTasks(actions.getTasks(c.id)),
+      }
     }),
   ),
 )

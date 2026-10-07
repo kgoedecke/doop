@@ -82,6 +82,13 @@ Connect Linear from **Integrations** to read issues through MCP or install Doop 
 agent. Delegated tickets create a canvas and a design card, then report the result back to Linear.
 See [Linear setup](docs/linear.md) for OAuth and webhook configuration.
 
+## iPhone and iPad app
+
+The SwiftUI iOS app lives in [`ios/`](ios/README.md). Open `ios/Doop.xcodeproj`
+in Xcode to run it against Doop Cloud or your own HTTPS server. It uses SwiftUI for the app interface and a native canvas that
+renders frames with the Blitz HTML/CSS engine (Rust, no WebKit), over the same REST API and WebSocket rooms. The app is in development;
+see the iOS README for validation status and remaining release requirements.
+
 ## Hook up Claude Code
 
 One command connects Claude Code (or any MCP client) to your canvas:

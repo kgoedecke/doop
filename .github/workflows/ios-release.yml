@@ -1,0 +1,99 @@
+# Ships the iOS app to TestFlight / App Store Connect.
+# - Tag `ios-v*` → archives a signed Release build and uploads it to App Store
+#   Connect, where it appears in TestFlight. Release to the store from there.
+# - Manual dispatch → same archive and upload (for a build without a tag).
+# - PRs touching this file → archive only, unsigned, so the pipeline stays valid.
+#
+# Signing uses Xcode cloud-managed ("automatic") signing driven by an App Store
+# Connect API key, so no certificates or profiles are stored in the repo. Secrets:
+#   APP_STORE_CONNECT_KEY_ID      the key id shown in App Store Connect → Users and Access → Integrations
+#   APP_STORE_CONNECT_ISSUER_ID   the issuer id on the same page
+#   APP_STORE_CONNECT_PRIVATE_KEY the .p8 contents (the key needs the App Manager role)
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD
+#                                 a base64 .p12 of an Apple Distribution certificate, and its password
+# The build number is the workflow run number, so every upload is unique.
+name: iOS Release
+
+on:
+  push:
+    tags: ['ios-v*']
+  workflow_dispatch:
+  pull_request:
+    paths: ['.github/workflows/ios-release.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: macos-15
+    env:
+      ARCHIVE: ios/DerivedData/Doop.xcarchive
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Use the newest Xcode on the runner
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "Selecting $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch, 2026-10-01
+        with:
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ios/BlitzKit/rust
+      - name: Install the distribution certificate
+        if: github.event_name != 'pull_request'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          security import "$RUNNER_TEMP/dist.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "" "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+      - name: Write the App Store Connect API key
+        if: github.event_name != 'pull_request'
+        env:
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > "$RUNNER_TEMP/keys/AuthKey.p8"
+      - name: Archive (signed)
+        if: github.event_name != 'pull_request'
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: >-
+          xcodebuild -project ios/Doop.xcodeproj -scheme Doop -configuration Release
+          -sdk iphoneos -destination 'generic/platform=iOS'
+          -derivedDataPath ios/DerivedData -archivePath "$ARCHIVE"
+          -allowProvisioningUpdates
+          -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8"
+          -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
+          CURRENT_PROJECT_VERSION=${{ github.run_number }}
+          archive
+      - name: Archive (unsigned, pipeline check)
+        if: github.event_name == 'pull_request'
+        run: >-
+          xcodebuild -project ios/Doop.xcodeproj -scheme Doop -configuration Release
+          -sdk iphoneos -destination 'generic/platform=iOS'
+          -derivedDataPath ios/DerivedData -archivePath "$ARCHIVE"
+          CODE_SIGNING_ALLOWED=NO archive
+      - name: Upload to App Store Connect
+        if: github.event_name != 'pull_request'
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: >-
+          xcodebuild -exportArchive -archivePath "$ARCHIVE"
+          -exportOptionsPlist ios/ExportOptions.plist -exportPath ios/DerivedData/export
+          -allowProvisioningUpdates
+          -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey.p8"
+          -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
