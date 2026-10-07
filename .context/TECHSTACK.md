@@ -3,8 +3,9 @@
 ## 1. Language and Runtime
 
 - TypeScript 5.5.3 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
-- Node.js 22.19+ - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step.
-  `bun run dev` and `bun run start` launch the server and start local actors unless managed actors are configured.
+- Node.js - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step.
+  `bun run dev` starts local actors unless an external actor API is configured.
+  `bun run start` requires `TERSE_ACTOR_URL` for a separately hosted actor API with a public WebSocket endpoint.
 - Bun 1.3.10 - pinned via `packageManager` in `package.json`; used as the package manager and
   script runner, not as the server runtime.
 - Rust (stable) - `desktop/src-tauri`, the Tauri desktop shell.
@@ -23,9 +24,12 @@
 
 ## 3. Data and Persistence
 
-- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - canvas metadata and collaboration.
-- `durable-actors` / `terse-sdk` - `CanvasIndex` owns ordered frame IDs; `FrameActor` owns each whole
-  frame. Both use 1 CPU and 256 MiB; local actors start automatically unless managed actors are configured.
+- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - primary database, including
+  ordered frame membership and lifecycle bookkeeping. `LISTEN/NOTIFY` updates membership across app servers;
+  the app WebSocket delivers snapshots to browsers. PGlite uses in-process notifications in development.
+- `durable-actors` - `FrameActor` owns each whole frame, using 1 CPU and 256 MiB.
+  Local actors start automatically in development/tests;
+  production requires a separate actor API, with browser WebSockets connecting directly to it.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).
@@ -48,7 +52,8 @@
 ## 7. Testing Stack
 
 - Vitest 4.1.11 - unit/integration tests across `server/` and `src/`; `bun run test` starts isolated
-  actors and runs Vitest. `DOOP_TEST_POSTGRES_URL` enables the two-server sync test. Tests live in `tests/`.
+  actors and runs Vitest. `DOOP_TEST_POSTGRES_URL` enables the two-server sync test, including
+  membership notification reconnection and concurrent creation. Tests live in `tests/`.
 
 ## 8. CI/CD and Delivery
 
@@ -70,7 +75,8 @@
   `DOOP_GEMINI_CLOUD_WORKERS` enables operator-managed routing and BYO metering; unset by default.
 
 - Docker - `Dockerfile` + `docker-compose.yml`; `docker compose up` runs the app container
-  (port 4400) and a `postgres:16-alpine` db container for self-hosting.
+  (port 4400) and a `postgres:16-alpine` db container for self-hosting. Actors run separately,
+  configured through `TERSE_ACTOR_URL` and `TERSE_API_KEY`.
 
 ## 10. Frontend Stack
 

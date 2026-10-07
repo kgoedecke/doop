@@ -45,13 +45,14 @@ export function actorEnvironment(environment, connection) {
     if (
       /^DURABLE_(ACTORS|OBJECT)_/.test(key) ||
       /^TERSE_(ACTOR_URL|API_KEY)$/.test(key) ||
-      /^DOOP_ACTORS_(INTERNAL_KEY|URL|API_KEY)$/.test(key) ||
-      key === 'DOOP_LOCAL_ACTOR_URL'
+      /^DOOP_ACTORS_(INTERNAL_KEY|URL|API_KEY)$/.test(key)
     )
       delete env[key]
   }
   return {
     ...env,
+    TERSE_ACTOR_URL: `${connection.controlPlaneUrl}/v1/projects/${connection.projectId}/actors`,
+    TERSE_API_KEY: connection.apiKey || '',
     DURABLE_ACTORS_CONTROL_PLANE_URL: connection.controlPlaneUrl,
     DURABLE_ACTORS_PROJECT_ID: connection.projectId,
     ...(connection.apiKey ? { DURABLE_ACTORS_SECRET: connection.apiKey } : {}),
@@ -66,8 +67,7 @@ async function startManagedActors(options) {
     if (
       (/^DURABLE_(ACTORS|OBJECT)_/.test(key) && !['DURABLE_ACTORS_BINARY', 'DURABLE_ACTORS_CACHE_DIR'].includes(key)) ||
       /^TERSE_(ACTOR_URL|API_KEY)$/.test(key) ||
-      /^DOOP_ACTORS_(INTERNAL_KEY|URL|API_KEY)$/.test(key) ||
-      key === 'DOOP_LOCAL_ACTOR_URL'
+      /^DOOP_ACTORS_(INTERNAL_KEY|URL|API_KEY)$/.test(key)
     ) {
       inherited[key] = process.env[key]
       delete process.env[key]
@@ -128,7 +128,7 @@ export async function prepareActors({ test = false, environment = process.env } 
 
 async function main() {
   const [mode, ...args] = process.argv.slice(2)
-  if (!['dev', 'test', 'start'].includes(mode)) throw new Error('Expected dev, test, or start.')
+  if (!['dev', 'test'].includes(mode)) throw new Error('Expected dev or test.')
   const test = mode === 'test'
   // Do not import a developer's .env into CI/tests. Shell values still win in dev.
   if (!test) {
@@ -219,7 +219,6 @@ async function main() {
 
   try {
     actors = await prepareActors({ test })
-    if (mode === 'start' && actors.owned) actors.env.DOOP_LOCAL_ACTOR_URL = actors.env.DURABLE_ACTORS_CONTROL_PLANE_URL
     if (stopping) {
       await actors.stop()
     } else {
@@ -239,8 +238,7 @@ async function main() {
       if (mode === 'dev') {
         launch(['node_modules/tsx/dist/cli.mjs', 'watch', 'server/index.ts'])
         launch(['node_modules/vite/bin/vite.js', '--strictPort', ...args])
-      } else if (mode === 'start') launch(['--import', 'tsx', 'server/index.ts'])
-      else launch(['node_modules/vitest/vitest.mjs', 'run', ...args])
+      } else launch(['node_modules/vitest/vitest.mjs', 'run', ...args])
     }
   } catch (error) {
     console.error(error)

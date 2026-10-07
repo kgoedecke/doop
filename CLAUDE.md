@@ -26,7 +26,8 @@ bun install
 bun run dev   # zero-config: embedded Postgres (pglite), server + web concurrently
 ```
 
-Or self-host via Docker: `docker compose up` (real Postgres, port 4400).
+Or self-host via Docker: set `TERSE_ACTOR_URL` and `TERSE_API_KEY` for a separately hosted actor
+API with a public WebSocket endpoint, then `docker compose up` (real Postgres, port 4400).
 
 ## Project layout
 

@@ -52,11 +52,7 @@ COPY --from=build /app/dist ./dist
 COPY generated ./generated
 COPY server ./server
 COPY shared ./shared
-COPY src/actor.ts ./src/actor.ts
-COPY scripts/run-with-actors.mjs ./scripts/
-ENV DURABLE_ACTORS_CACHE_DIR=/opt/durable-actors
-RUN node --input-type=module -e "import { fetchRuntimeExecutablePath } from './node_modules/durable-actors/dist/runtimeInstaller.js'; await fetchRuntimeExecutablePath()"
 
 EXPOSE 4400
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "scripts/run-with-actors.mjs", "start"]
+CMD ["node", "--import", "tsx", "server/index.ts"]

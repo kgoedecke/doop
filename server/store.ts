@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
-import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
+import { frameActor, mapFrames } from './frame-sync.ts'
 import type { FrameInput, FramePatch } from '../src/actor.ts'
+import { frameRegistry, pendingFrameCanvases } from './frame-registry.ts'
 import * as persist from './db/persist.ts'
 import { colorFor, createFrameId } from '../shared/types.ts'
 import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
@@ -21,32 +22,54 @@ class Store {
     return canvas
   }
 
-  private async ensureIndex(id: string): Promise<boolean> {
-    const status = await canvasIndex(id).initialize()
+  private async ensureMembership(id: string): Promise<boolean> {
+    const status = await frameRegistry(id).snapshot()
     // Removal is durable before cleanup. A later request resumes cleanup after
     // an app crash; tombstones prevent retries from bringing a frame back.
-    if (!this.cleaning.has(id)) {
-      const cleanup = this.cleanupFrames(id)
-        .catch((error) => console.error('[frame cleanup]', error))
-        .finally(() => this.cleaning.delete(id))
-      this.cleaning.set(id, cleanup)
-    }
+    void this.recoverCanvasFrames(id)
     if (status.deleted) this.canvases.delete(id)
     return !status.deleted
   }
 
+  private recoverCanvasFrames(id: string): Promise<void> {
+    const existing = this.cleaning.get(id)
+    if (existing) return existing
+    const cleanup = this.cleanupFrames(id)
+      .catch((error) => console.error('[frame cleanup]', error))
+      .finally(() => this.cleaning.delete(id))
+    this.cleaning.set(id, cleanup)
+    return cleanup
+  }
+
+  async recoverFrames(): Promise<void> {
+    try {
+      await mapFrames(await pendingFrameCanvases(), (id) => this.recoverCanvasFrames(id))
+    } catch (error) {
+      console.error('[frame recovery]', error)
+    }
+  }
+
   private async cleanupFrames(id: string): Promise<void> {
-    const index = canvasIndex(id)
-    await mapFrames(await index.pendingDeletes(), async (frameId) => {
-      await frameActor(frameId).destroy()
-      await index.confirmDelete(frameId)
+    const index = frameRegistry(id)
+    await mapFrames(await index.pending(), async ({ id: frameId, status }) => {
+      const actor = frameActor(frameId)
+      if (status === 'creating') {
+        const snapshot = await actor.snapshot()
+        if (snapshot.deleted) {
+          await index.remove(frameId)
+          await index.confirmDelete(frameId)
+        } else if (snapshot.frame && !(await index.activate(frameId))) await actor.destroy()
+      } else {
+        await actor.destroy()
+        await index.confirmDelete(frameId)
+      }
     })
   }
 
   async syncCanvas(id: string, mode: 'full' | 'summary' | 'index' = 'full'): Promise<Canvas | undefined> {
     const canvas = await this.loadCanvasMetadata(id)
-    if (!canvas || !(await this.ensureIndex(id))) return undefined
-    const snapshot = await canvasIndex(id).snapshot()
+    if (!canvas || !(await this.ensureMembership(id))) return undefined
+    const snapshot = await frameRegistry(id).snapshot()
     if (snapshot.deleted) return undefined
     const frames =
       mode === 'index'
@@ -57,7 +80,7 @@ class Store {
                 ? (await frameActor(frameId).snapshot()).frame
                 : (await frameActor(frameId).summary()).frame
             if (!frame) {
-              if (!(await canvasIndex(id).has(frameId))) return undefined // concurrent deletion
+              if (!(await frameRegistry(id).has(frameId))) return undefined // concurrent deletion
               throw new Error(`Frame unavailable: ${frameId}`)
             }
             return { html: '', ...frame }
@@ -190,8 +213,11 @@ class Store {
       ...(references?.length ? { references } : {}),
     }
     await persist.saveCanvasCopy({ ...canvas, frames: [] })
-    await mapFrames(frames, (frame) => frameActor(frame.id).initialize(frame))
-    await canvasIndex(canvasId).initialize(frames.map((frame) => frame.id))
+    for (const frame of frames) {
+      await frameRegistry(canvasId).reserve(frame.id)
+      await frameActor(frame.id).initialize(frame)
+      await frameRegistry(canvasId).activate(frame.id)
+    }
     this.init([canvas])
     return canvas
   }
@@ -205,7 +231,7 @@ class Store {
     const c = await this.syncCanvas(id, 'summary')
     if (!c) return undefined
     const deleted = c
-    await canvasIndex(id).destroy()
+    await frameRegistry(id).destroy()
     await this.cleanupFrames(id)
     this.canvases.delete(id)
     persist.deleteCanvas(id)
@@ -445,10 +471,10 @@ class Store {
       !frameId.includes('.') ||
       !canvasId ||
       !(await this.loadCanvasMetadata(canvasId)) ||
-      !(await this.ensureIndex(canvasId))
+      !(await this.ensureMembership(canvasId))
     )
       return undefined
-    return (await canvasIndex(canvasId).has(frameId)) ? { id: frameId, canvasId } : undefined
+    return (await frameRegistry(canvasId).has(frameId)) ? { id: frameId, canvasId } : undefined
   }
 
   async getFrame(frameId: string): Promise<Frame | undefined> {
@@ -456,19 +482,19 @@ class Store {
     if (!membership) return undefined
     const { frame } = await frameActor(frameId).snapshot()
     if (!frame) {
-      if (!(await canvasIndex(membership.canvasId).has(frameId))) return undefined
+      if (!(await frameRegistry(membership.canvasId).has(frameId))) return undefined
       throw new Error(`Frame unavailable: ${frameId}`)
     }
     return frame
   }
 
   async createFrame(canvasId: string, input: FrameInput, by: string, creationId?: string): Promise<Frame | undefined> {
-    if (!(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureIndex(canvasId))) return undefined
+    if (!(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureMembership(canvasId))) return undefined
     const id = creationId ?? createFrameId(canvasId, input.name, nanoid(10))
     if (!id.startsWith(`${canvasId}.`) || !/^[A-Za-z0-9._-]{1,128}$/.test(id)) throw new Error('Invalid frame ID')
     let x = input.x
     if (x === undefined) {
-      const { frameIds } = await canvasIndex(canvasId).snapshot()
+      const { frameIds } = await frameRegistry(canvasId).snapshot()
       const summaries = await mapFrames(frameIds, (id) => frameActor(id).summary())
       const edges = summaries.flatMap(({ frame }) => (frame ? [frame.x + frame.width] : []))
       x = edges.length ? Math.max(...edges) + 80 : 120
@@ -488,11 +514,12 @@ class Store {
       updatedBy: by,
       ...(input.demo === undefined ? {} : { demo: input.demo }),
     }
+    if (!(await frameRegistry(canvasId).reserve(id))) return undefined
     const actor = frameActor(id)
     await actor.initialize(frame)
     const saved = (await actor.snapshot()).frame
     if (!saved) return undefined
-    if (!(await canvasIndex(canvasId).add(id))) {
+    if (!(await frameRegistry(canvasId).activate(id))) {
       await actor.destroy()
       return undefined
     }
@@ -529,9 +556,9 @@ class Store {
   async deleteFrame(frameId: string): Promise<Frame | undefined> {
     const frame = await this.syncFrame(frameId)
     if (!frame) return undefined
-    await canvasIndex(frame.canvasId).remove(frameId)
+    await frameRegistry(frame.canvasId).remove(frameId)
     await frameActor(frameId).destroy()
-    await canvasIndex(frame.canvasId).confirmDelete(frameId)
+    await frameRegistry(frame.canvasId).confirmDelete(frameId)
     return frame
   }
 }

@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../server/db/index.ts', () => import('./fixtures/frame-db.ts'))
+afterAll(async () => {
+  await (await import('./fixtures/frame-db.ts')).close()
+})
 
 /* The queue mirrors into Postgres and broadcasts; this test only cares about
    the text a card carries. */

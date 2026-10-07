@@ -457,6 +457,14 @@ export interface PeerViewport {
 
 /* ---- websocket protocol ---- */
 
+export type FrameIndex = {
+  type: 'frame-index'
+  canvasId: string
+  revision: number
+  frameIds: string[]
+  deleted: boolean
+}
+
 export type ClientMessage =
   | { type: 'join'; canvasId: string; clientId: string; name: string; kind: ActorKind }
   | { type: 'cursor'; x: number; y: number }
@@ -464,6 +472,7 @@ export type ClientMessage =
   | { type: 'editing'; frameId: string | null }
 
 export type ServerMessage =
+  | FrameIndex
   | {
       type: 'init'
       canvas: Canvas

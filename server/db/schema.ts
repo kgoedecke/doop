@@ -16,8 +16,9 @@ import type { Schedule, Step } from '../../shared/automations.ts'
  * One Postgres-dialect schema for every environment: PGlite (embedded, file
  * in ./data) during development, a managed Postgres via DATABASE_URL in
  * production. Timestamps are epoch-ms bigints to match the in-memory types.
- * No FK constraints — memory is the source of truth and writes are async
- * fire-and-forget, so we don't want ordering between them to matter.
+ * Metadata/collaboration writes are mirrored asynchronously, without FKs.
+ * Frame membership is SQL-authoritative and updated in awaited transactions;
+ * its tombstones survive deletion of the canvas metadata.
  */
 
 export const canvases = pgTable('canvases', {
@@ -139,6 +140,27 @@ export const frames = pgTable(
     demo: boolean('demo'),
   },
   (t) => [index('frames_canvas_idx').on(t.canvasId)],
+)
+
+/** Durable membership revisions and canvas tombstones survive metadata cleanup. */
+export const canvasFrameState = pgTable('canvas_frame_state', {
+  canvasId: text('canvas_id').primaryKey(),
+  revision: bigint('revision', { mode: 'number' }).notNull().default(0),
+  deleted: boolean('deleted').notNull().default(false),
+})
+
+export const frameMemberships = pgTable(
+  'frame_memberships',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    position: bigint('position', { mode: 'number' }).notNull(),
+    status: text('status', { enum: ['creating', 'active', 'deleting', 'deleted'] }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('frame_memberships_position_idx').on(t.canvasId, t.position),
+    index('frame_memberships_status_idx').on(t.canvasId, t.status),
+  ],
 )
 
 /** Design-sync keys: the write-only capability behind the /ingest endpoint.

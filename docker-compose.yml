@@ -1,4 +1,5 @@
-# One-command self-host: `docker compose up` → http://localhost:4400
+# Self-host: configure TERSE_ACTOR_URL and TERSE_API_KEY for a separate actor API,
+# then `docker compose up` → http://localhost:4400.
 # Set BETTER_AUTH_SECRET (any long random string) before running in earnest:
 #   BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d
 services:
@@ -8,7 +9,7 @@ services:
       - '4400:4400'
     environment:
       DATABASE_URL: postgres://doop:doop@db:5432/doop
-      TERSE_ACTOR_URL: ${TERSE_ACTOR_URL:-}
+      TERSE_ACTOR_URL: ${TERSE_ACTOR_URL:?Set TERSE_ACTOR_URL to your separately hosted actor API}
       TERSE_API_KEY: ${TERSE_API_KEY:-}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me-please-not-for-production}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:4400}

@@ -16,24 +16,9 @@ import type { ActorRpcTransport as $ActorRpcTransport, ProxyActor, SocketGrant a
 /**
  * Types for actor state and socket messages.
  * @example
- * type State = actors.CanvasIndex.State
+ * type State = actors.FrameActor.State
  */
 export declare namespace actors {
-    namespace CanvasIndex {
-        type Metadata = $ActorTypes["CanvasIndex"]["Metadata"]
-        type Incoming = $ActorTypes["CanvasIndex"]["Incoming"]
-        type Outgoing = $ActorTypes["CanvasIndex"]["Outgoing"]
-        type State = $ActorTypes["CanvasIndex"]["State"]
-        interface Authorization {
-            actorName: "CanvasIndex"
-            actorId: string
-            metadata: Metadata
-            clientLocation?: {
-                latitude: number
-                longitude: number
-            }
-        }
-    }
     namespace FrameActor {
         type Metadata = $ActorTypes["FrameActor"]["Metadata"]
         type Incoming = $ActorTypes["FrameActor"]["Incoming"]
@@ -53,87 +38,9 @@ export declare namespace actors {
 /**
  * Types for actor state and methods.
  * @example
- * type State = actors.CanvasIndex.State
+ * type State = actors.FrameActor.State
  */
 export declare namespace actors {
-    namespace CanvasIndex {
-        type Stub = $ActorTypes["CanvasIndex"]["Methods"]
-        interface $MethodTypes {
-            ["add"]: {
-                Args: Parameters<Stub["add"]>
-                Result: Awaited<ReturnType<Stub["add"]>>
-            }
-            ["confirmDelete"]: {
-                Args: Parameters<Stub["confirmDelete"]>
-                Result: Awaited<ReturnType<Stub["confirmDelete"]>>
-            }
-            ["destroy"]: {
-                Args: Parameters<Stub["destroy"]>
-                Result: Awaited<ReturnType<Stub["destroy"]>>
-            }
-            ["has"]: {
-                Args: Parameters<Stub["has"]>
-                Result: Awaited<ReturnType<Stub["has"]>>
-            }
-            ["initialize"]: {
-                Args: Parameters<Stub["initialize"]>
-                Result: Awaited<ReturnType<Stub["initialize"]>>
-            }
-            ["pendingDeletes"]: {
-                Args: Parameters<Stub["pendingDeletes"]>
-                Result: Awaited<ReturnType<Stub["pendingDeletes"]>>
-            }
-            ["remove"]: {
-                Args: Parameters<Stub["remove"]>
-                Result: Awaited<ReturnType<Stub["remove"]>>
-            }
-            ["snapshot"]: {
-                Args: Parameters<Stub["snapshot"]>
-                Result: Awaited<ReturnType<Stub["snapshot"]>>
-            }
-        }
-        interface Methods extends $MethodTypes {}
-        /**
-         * Types for a method's arguments and return value.
-         * @example
-         * type Args = actors.CanvasIndex.Methods["add"]["Args"]
-         * type Result = actors.CanvasIndex.Methods["add"]["Result"]
-         */
-        namespace Methods {
-            namespace add {
-                type Args = $MethodTypes["add"]["Args"]
-                type Result = $MethodTypes["add"]["Result"]
-            }
-            namespace confirmDelete {
-                type Args = $MethodTypes["confirmDelete"]["Args"]
-                type Result = $MethodTypes["confirmDelete"]["Result"]
-            }
-            namespace destroy {
-                type Args = $MethodTypes["destroy"]["Args"]
-                type Result = $MethodTypes["destroy"]["Result"]
-            }
-            namespace has {
-                type Args = $MethodTypes["has"]["Args"]
-                type Result = $MethodTypes["has"]["Result"]
-            }
-            namespace initialize {
-                type Args = $MethodTypes["initialize"]["Args"]
-                type Result = $MethodTypes["initialize"]["Result"]
-            }
-            namespace pendingDeletes {
-                type Args = $MethodTypes["pendingDeletes"]["Args"]
-                type Result = $MethodTypes["pendingDeletes"]["Result"]
-            }
-            namespace remove {
-                type Args = $MethodTypes["remove"]["Args"]
-                type Result = $MethodTypes["remove"]["Result"]
-            }
-            namespace snapshot {
-                type Args = $MethodTypes["snapshot"]["Args"]
-                type Result = $MethodTypes["snapshot"]["Result"]
-            }
-        }
-    }
     namespace FrameActor {
         type Stub = $ActorTypes["FrameActor"]["Methods"]
         interface $MethodTypes {
@@ -192,20 +99,9 @@ export declare namespace actors {
 /**
  * Call actor methods from your backend.
  * @example
- * const actor = actors.CanvasIndex.get("actor-id")
+ * const actor = actors.FrameActor.get("actor-id")
  */
 export declare const actors: {
-    CanvasIndex: {
-        get(actorId: string, transport?: $ActorRpcTransport): actors.CanvasIndex.Stub
-        /**
-         * Allow a frontend connection after your backend checks the user's access.
-         * @example
-         * const grant = await actors.CanvasIndex.prepareWebsocket({ actorId: "actor-id", metadata })
-         */
-        prepareWebsocket(
-            authorization: { actorId: string; metadata: actors.CanvasIndex.Metadata }
-        ): Promise<$SocketGrant>
-    }
     FrameActor: {
         get(actorId: string, transport?: $ActorRpcTransport): actors.FrameActor.Stub
         /**
@@ -221,16 +117,15 @@ export declare const actors: {
 /**
  * The actor and connection details approved by your backend.
  * @example
- * const authorization: ActorAuthorization = { actorName: "CanvasIndex", actorId: "actor-id", metadata }
+ * const authorization: ActorAuthorization = { actorName: "FrameActor", actorId: "actor-id", metadata }
  */
-export type ActorAuthorization = actors.CanvasIndex.Authorization | actors.FrameActor.Authorization
+export type ActorAuthorization = actors.FrameActor.Authorization
 /**
  * Allow a frontend connection after your backend checks the user's access.
  * @example
- * const grant = await ActorProxy.handle({ actorName: "CanvasIndex", actorId: "actor-id", metadata })
+ * const grant = await ActorProxy.handle({ actorName: "FrameActor", actorId: "actor-id", metadata })
  */
 export declare class ActorProxy extends $SocketProxy<{
-    ["CanvasIndex"]: ProxyActor<actors.CanvasIndex.Metadata>
     ["FrameActor"]: ProxyActor<actors.FrameActor.Metadata>
 }> {
     constructor(

@@ -1,4 +1,5 @@
-import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
+import { frameActor, mapFrames } from './frame-sync.ts'
+import { frameRegistry } from './frame-registry.ts'
 import { nanoid } from 'nanoid'
 import { store } from './store.ts'
 import * as persist from './db/persist.ts'
@@ -121,7 +122,7 @@ function failInterruptedWork() {
 }
 
 export async function getActivity(canvasId: string, includeFrames = true): Promise<ActivityItem[]> {
-  const { frameIds } = await canvasIndex(canvasId).snapshot()
+  const { frameIds } = includeFrames ? await frameRegistry(canvasId).snapshot() : { frameIds: [] }
   const summaries = includeFrames ? await mapFrames(frameIds, (id) => frameActor(id).summary()) : []
   const items = [...(activityLog.get(canvasId) ?? []), ...summaries.flatMap((summary) => summary.activity)]
   return [...new Map(items.map((item) => [item.id, item])).values()].sort((a, b) => b.at - a.at).slice(0, 100)

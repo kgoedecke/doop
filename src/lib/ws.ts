@@ -1,4 +1,4 @@
-import { connectFrames, disconnectFrames, refreshFrames } from './canvas-actor'
+import { connectFrames, disconnectFrames, refreshFrames, applyFrameIndex } from './canvas-actor'
 import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
 import { getIdentity } from './identity'
@@ -91,6 +91,9 @@ function handle(msg: ServerMessage) {
   const s = useStore.getState()
   const me = getIdentity().clientId
   switch (msg.type) {
+    case 'frame-index':
+      applyFrameIndex(msg)
+      break
     case 'init':
       /* a reconnect that lands on a different build means this page is
          running a stale bundle — offer a reload instead of forcing one,

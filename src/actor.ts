@@ -35,112 +35,6 @@ export type FrameCommand = { type: 'snapshot' } | FrameDrag | { type: 'write'; w
 export type FrameMetadata = { actor: Attribution; readOnly: boolean }
 type SyncError = { type: 'error'; requestId: string; message: string }
 
-export type IndexSnapshot = {
-  type: 'index-snapshot'
-  revision: number
-  frameIds: string[]
-  initialized: boolean
-  deleted: boolean
-}
-export type IndexCommand = { type: 'snapshot' }
-
-function indexTable(db: ActorDatabase): true {
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS entries (id TEXT PRIMARY KEY, position INTEGER NOT NULL, removed INTEGER NOT NULL DEFAULT 0)',
-  )
-  return true
-}
-
-/** A canvas owns only frame membership and order. */
-@Compute({ cpu: 1, memoryMiB: 256 })
-export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapshot> {
-  @Persisted private initialized = false
-  @Persisted private deleted = false
-  @Persisted private revision = 0
-  @Ephemeral private ready = false
-  @Persisted @Emittable committed: IndexSnapshot | null = null
-
-  override async onConnect(socket: ActorSocketOf<CanvasIndex>) {
-    socket.send(await this.snapshot())
-  }
-
-  override async onMessage(socket: ActorSocketOf<CanvasIndex>, command: IndexCommand) {
-    if (command.type === 'snapshot') return socket.send(await this.snapshot())
-  }
-
-  async initialize(frameIds: string[] = []): Promise<IndexSnapshot> {
-    if (!this.ready) this.ready = indexTable(this.db)
-    if (!this.initialized) {
-      for (const [position, id] of frameIds.entries()) {
-        if (!id.startsWith(`${this.id}.`)) throw new Error('Frame ID must belong to this canvas')
-        this.db.exec('INSERT INTO entries (id, position) VALUES (?, ?)', id, position)
-      }
-      this.initialized = true
-    }
-    return this.snapshot()
-  }
-
-  async snapshot(): Promise<IndexSnapshot> {
-    if (!this.ready) this.ready = indexTable(this.db)
-    return {
-      type: 'index-snapshot',
-      revision: this.revision,
-      initialized: this.initialized,
-      deleted: this.deleted,
-      frameIds: this.db
-        .exec<{ id: string }>('SELECT id FROM entries WHERE removed = 0 ORDER BY position')
-        .map((row) => row.id),
-    }
-  }
-
-  async has(id: string): Promise<boolean> {
-    if (!this.initialized || this.deleted) return false
-    if (!this.ready) this.ready = indexTable(this.db)
-    return this.db.exec('SELECT id FROM entries WHERE id = ? AND removed = 0', id).length > 0
-  }
-
-  async add(id: string): Promise<boolean> {
-    if (!this.initialized || this.deleted) return false
-    if (!id.startsWith(`${this.id}.`)) throw new Error('Frame ID must belong to this canvas')
-    if (!this.ready) this.ready = indexTable(this.db)
-    const [existing] = this.db.exec<{ removed: number }>('SELECT removed FROM entries WHERE id = ?', id)
-    if (existing) return existing.removed === 0
-    this.db.exec('INSERT INTO entries (id, position) SELECT ?, COALESCE(MAX(position), -1) + 1 FROM entries', id)
-    this.revision++
-    this.committed = await this.snapshot()
-    return true
-  }
-
-  async remove(id: string): Promise<boolean> {
-    if (!(await this.has(id))) return false
-    // Keep tombstones so retrying a create cannot resurrect a deleted ID.
-    this.db.exec('UPDATE entries SET removed = 1 WHERE id = ?', id)
-    this.revision++
-    this.committed = await this.snapshot()
-    return true
-  }
-
-  async pendingDeletes(): Promise<string[]> {
-    if (!this.ready) this.ready = indexTable(this.db)
-    return this.db.exec<{ id: string }>('SELECT id FROM entries WHERE removed = 1').map((row) => row.id)
-  }
-
-  async confirmDelete(id: string): Promise<void> {
-    if (!this.ready) this.ready = indexTable(this.db)
-    this.db.exec('UPDATE entries SET removed = 2 WHERE id = ? AND removed = 1', id)
-  }
-
-  async destroy(): Promise<void> {
-    if (this.deleted) return
-    if (!this.ready) this.ready = indexTable(this.db)
-    this.db.exec('UPDATE entries SET removed = 1 WHERE removed = 0')
-    this.deleted = true
-    this.initialized = true
-    this.revision++
-    this.committed = await this.snapshot()
-  }
-}
-
 type FrameRow = Omit<Frame, 'demo'> & { demo: number | null }
 const SUMMARY_COLUMNS = 'id, canvasId, name, x, y, width, height, createdAt, updatedAt, updatedBy, demo'
 const COLUMNS = `${SUMMARY_COLUMNS}, html`
@@ -169,7 +63,7 @@ function validateFrame(frame: Frame) {
 }
 
 /** The whole frame has one writer, one invocation queue, and one revision. */
-@Compute({ cpu: 1, memoryMiB: 256 })
+@Compute({ cpu: 1, memoryMiB: 256, idleTimeoutMs: 5000 })
 export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot | FrameDrag | SyncError> {
   @Persisted private initialized = false
   @Persisted private deleted = false

@@ -33,7 +33,7 @@ activity feed.
   style rules that every agent follows.
 - **Private by default** — invite collaborators by email or flip on link sharing per canvas;
   agents inherit exactly their human's access.
-- **Self-host in one command** — `docker compose up`, or `bun run dev` with zero configuration
+- **Self-host** — configure a separate actor API, then `docker compose up`; develop locally with zero-config `bun run dev`
   (embedded Postgres, no external services required).
 
 ## Quickstart
@@ -57,14 +57,15 @@ until its variable in [.env.example](.env.example) is set. The one you will most
 `ANTHROPIC_API_KEY`, which turns on the built-in [Doop Agent](#the-doop-agent) — agents you connect
 yourself over MCP need no key.
 
-Or self-host the production build with Docker:
+To self-host the production build, first configure `TERSE_ACTOR_URL` and `TERSE_API_KEY` in `.env`
+for a separately hosted actor API whose WebSocket endpoint is publicly reachable. Then start Docker:
 
 ```bash
 BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
 ```
 
-Production build without Docker: `bun run build && bun run start` (single server on :4400 serving
-everything). Set `DATABASE_URL` to use a real Postgres — same code path as PGlite.
+Production build without Docker: `bun run build && bun run start` (app server on :4400, using the
+same actor configuration from `.env`). Set `DATABASE_URL` to use a real Postgres — same code path as PGlite.
 
 Prefer not to run anything? **[doop.design](https://doop.design)** is the hosted version.
 
@@ -389,23 +390,28 @@ Any container host works; Railway/Fly are the least friction:
    persistent volume mounted at `/app/data`.
 3. Set `BETTER_AUTH_SECRET` (long random string) and `BETTER_AUTH_URL` (the public origin,
    e.g. `https://doop.example.com`). Extra allowed origins: `TRUSTED_ORIGINS` (comma-separated).
-4. Health check: `GET /healthz`. The server trusts one proxy hop (`trust proxy`), so
+4. Set `TERSE_ACTOR_URL` and `TERSE_API_KEY` for a separately hosted actor API. Its WebSocket
+   endpoint must be publicly reachable by browsers; use `wss://` when the app uses HTTPS.
+   Production startup requires `TERSE_ACTOR_URL` and does not start a local actor runtime.
+5. Health check: `GET /healthz`. The server trusts one proxy hop (`trust proxy`), so
    TLS termination at the platform edge works out of the box.
 
-Local sanity check of the exact production image:
+Local sanity check of the exact production image, with the actor settings in `.env`:
 
 ```bash
 docker build -t doop .
-docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
+docker run --env-file .env -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
 ```
 
 To use managed actors, create a project with `bunx terse-cli init`, then run `bun run deploy:actors`
 (or pass an existing `terse.config.json` path). Set `TERSE_ACTOR_URL` and `TERSE_API_KEY` on the Doop
-server; otherwise local actors start automatically. Multiple app instances must share a managed actor
-project; each local runtime has its own frame storage. Back up `data/actors` alongside SQL and uploaded
-assets when self-hosting with local actors.
+server. You can also use your own separately hosted actor API. Doop checks canvas access and issues
+short-lived actor tickets; browsers connect directly to the WebSocket URL returned by that API.
+The actor API key stays on the server. Doop does not relay actor WebSocket traffic or expose an
+actor runtime for you. Multiple app instances must share the same actor project. Back up actor
+storage alongside SQL and uploaded assets. Automatic local actors are limited to development and tests.
 
-Existing SQL frame rows and older canvas-wide actor state are not imported by this branch.
+Existing SQL frame rows and older canvas/index actor state are not imported by this development branch.
 
 ## Connect an AI agent
 
@@ -646,8 +652,11 @@ no reach into the app. Each iframe loads a small bootstrap once; new HTML is `po
 **DOM-morphed in place** (`src/lib/frameRuntime.ts`), so updates and streaming ticks never white-flash
 the frame with a full document reload. Changed `<script>`s re-execute; unchanged styles/fonts are
 untouched. Frame actors deliver edits and drag previews over WebSocket subscriptions; the per-canvas
-`/ws` room carries chat, presence, and other collaboration events. Browser edits go directly to frame
-actors, while REST/MCP edits reach the same actors through the server.
+`/ws` room carries frame membership, chat, presence, and other collaboration events. PostgreSQL owns
+the ordered frame registry and creation/deletion bookkeeping; `LISTEN/NOTIFY` tells app servers to
+reload membership after changes, and listeners reload open canvases after reconnecting. Browser edits
+go directly to frame actors, while REST/MCP edits reach the same actors through the server. There is
+no canvas index actor.
 
 ## Contributing
 

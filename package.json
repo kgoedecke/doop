@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node scripts/run-with-actors.mjs dev",
     "build": "vite build",
-    "start": "NODE_ENV=production node scripts/run-with-actors.mjs start",
+    "start": "NODE_ENV=production node --env-file-if-exists=.env --import tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-with-actors.mjs test",
     "lint": "eslint . --max-warnings 0",

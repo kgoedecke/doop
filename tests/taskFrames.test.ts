@@ -1,5 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Actor } from '../shared/types'
+
+vi.mock('../server/db/index.ts', () => import('./fixtures/frame-db.ts'))
+afterAll(async () => {
+  await (await import('./fixtures/frame-db.ts')).close()
+})
 
 /* Tasks mirror into Postgres and broadcast; this test only cares about the
    frames a task remembers. */
