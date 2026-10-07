@@ -17,6 +17,18 @@ export interface Frame {
   demo?: boolean
 }
 
+/** Include the initial name for observability; renaming a frame never changes its ID. */
+export function createFrameId(canvasId: string, name: string, suffix: string): string {
+  const label = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, '')
+  return `${canvasId}.${label || 'frame'}.${suffix}`
+}
+
 export interface CanvasMeta {
   id: string
   name: string

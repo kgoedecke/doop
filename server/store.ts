@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid'
 import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
 import type { FrameInput, FramePatch } from '../src/actor.ts'
 import * as persist from './db/persist.ts'
-import { colorFor } from '../shared/types.ts'
+import { colorFor, createFrameId } from '../shared/types.ts'
 import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
 
 /** SQL owns canvas metadata. Every frame read and write goes through actor RPC. */
@@ -161,7 +161,7 @@ class Store {
     const now = Date.now()
     const canvasId = nanoid(10)
     const sourceFrames = options.dropDemo ? source.frames.filter((frame) => !frame.demo) : source.frames
-    const frameIds = new Map(sourceFrames.map((frame) => [frame.id, `${canvasId}.${nanoid(10)}`]))
+    const frameIds = new Map(sourceFrames.map((frame) => [frame.id, createFrameId(canvasId, frame.name, nanoid(10))]))
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
@@ -464,7 +464,7 @@ class Store {
 
   async createFrame(canvasId: string, input: FrameInput, by: string, creationId?: string): Promise<Frame | undefined> {
     if (!(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureIndex(canvasId))) return undefined
-    const id = creationId ?? `${canvasId}.${nanoid(10)}`
+    const id = creationId ?? createFrameId(canvasId, input.name, nanoid(10))
     if (!id.startsWith(`${canvasId}.`) || !/^[A-Za-z0-9._-]{1,128}$/.test(id)) throw new Error('Invalid frame ID')
     let x = input.x
     if (x === undefined) {

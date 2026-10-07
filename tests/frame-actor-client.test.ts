@@ -196,6 +196,8 @@ it('allows an immediate edit when creation finishes before its index notificatio
   })
   await flush()
   expect(complete).toBe(false)
+  const createRequest = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')![1]!
+  expect(JSON.parse(createRequest.body as string).id).toMatch(/^c\.new\.[a-f0-9-]{36}$/)
   const index = socket('/canvases/c/')
   index.receive({
     type: 'state_update',

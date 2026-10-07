@@ -1,5 +1,6 @@
 import type { FrameChange, FrameCommand, FrameSnapshot, FrameWrite, IndexSnapshot } from '../actor'
 import type { ActivityItem, Frame } from '../../shared/types'
+import { createFrameId } from '../../shared/types'
 import { getIdentity } from './identity'
 import { useStore } from './store'
 import { healPartialHtml } from '../../shared/frame-html'
@@ -423,7 +424,7 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
   await connectFrames(canvasId)
   if (connection?.canvasId !== canvasId) throw new Error('Canvas changed before the edit could be sent')
   if (write.type === 'create' || write.type === 'delete') {
-    if (write.type === 'create') write.id ??= `${canvasId}.${crypto.randomUUID()}`
+    if (write.type === 'create') write.id ??= createFrameId(canvasId, write.input.name, crypto.randomUUID())
     const path =
       write.type === 'create'
         ? `/api/canvases/${encodeURIComponent(canvasId)}/frames`
