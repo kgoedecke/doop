@@ -34,8 +34,8 @@ const buttonVariants = cva(
         'danger-solid': 'border-accent-ink bg-accent-ink text-white hover:border-ink hover:bg-ink hover:text-paper',
         /* flat ink fill: compact affordances inside cards */
         solid: 'border-transparent bg-ink text-paper hover:bg-ink/90 disabled:opacity-40',
-        /* sits on a dark surface — the element toolbar over a frame */
-        inverse: 'border-transparent bg-transparent text-white hover:bg-white/15',
+        /* sits on an ink surface — foreground and hover invert with the theme */
+        inverse: 'border-transparent bg-transparent text-paper hover:bg-paper/15',
       },
       size: {
         pill: 'rounded-full px-2 py-[3px] text-[11px] font-bold',
