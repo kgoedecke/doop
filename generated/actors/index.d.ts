@@ -32,7 +32,6 @@ export declare namespace actors {
                 latitude: number
                 longitude: number
             }
-            authorizationLifetimeMs?: number
         }
     }
     namespace FrameActor {
@@ -48,7 +47,6 @@ export declare namespace actors {
                 latitude: number
                 longitude: number
             }
-            authorizationLifetimeMs?: number
         }
     }
 }
@@ -205,7 +203,7 @@ export declare const actors: {
          * const grant = await actors.CanvasIndex.prepareWebsocket({ actorId: "actor-id", metadata })
          */
         prepareWebsocket(
-            authorization: { actorId: string; metadata: actors.CanvasIndex.Metadata; authorizationLifetimeMs?: number }
+            authorization: { actorId: string; metadata: actors.CanvasIndex.Metadata }
         ): Promise<$SocketGrant>
     }
     FrameActor: {
@@ -216,7 +214,7 @@ export declare const actors: {
          * const grant = await actors.FrameActor.prepareWebsocket({ actorId: "actor-id", metadata })
          */
         prepareWebsocket(
-            authorization: { actorId: string; metadata: actors.FrameActor.Metadata; authorizationLifetimeMs?: number }
+            authorization: { actorId: string; metadata: actors.FrameActor.Metadata }
         ): Promise<$SocketGrant>
     }
 }

@@ -912,7 +912,6 @@ app.get(
         },
         readOnly: !!req.impersonatedBy,
       },
-      authorizationLifetimeMs: 60_000,
     })
     res.set('Cache-Control', 'no-store').json(browserActorGrant(grant, req))
   }),
@@ -934,7 +933,6 @@ app.get(
         },
         readOnly: !!req.impersonatedBy,
       },
-      authorizationLifetimeMs: 60_000,
     })
     res.set('Cache-Control', 'no-store').json(browserActorGrant(grant, req))
   }),
