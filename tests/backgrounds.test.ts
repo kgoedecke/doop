@@ -266,3 +266,14 @@ describe('fetchThumb', () => {
     expect(await fetchThumb('abc')).toBeNull()
   })
 })
+
+describe('background entry embeddings plumbing', () => {
+  it('supports optional embedding field on BackgroundEntry', () => {
+    const e = entry({ id: 'embedded', embedding: [0.1, 0.2, 0.3] })
+    expect(e.embedding).toEqual([0.1, 0.2, 0.3])
+    setCatalogForTests([e])
+    const res = browseBackgrounds({}, ORIGIN)
+    expect(res.results[0]?.embedding).toEqual([0.1, 0.2, 0.3])
+    setCatalogForTests([])
+  })
+})

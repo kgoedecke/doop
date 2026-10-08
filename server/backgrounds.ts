@@ -9,6 +9,7 @@ import sharp from 'sharp'
 import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
+import * as voyage from './voyage.ts'
 
 /**
  * Curated background library for hero sections, section bands and bento
@@ -78,6 +79,8 @@ export interface BackgroundEntry extends BackgroundTags {
   avg_color: string
   enabled: boolean
   created_at: number
+  /** Voyage voyage-multimodal-3 multimodal embedding vector */
+  embedding?: number[] | null
 }
 
 export interface BackgroundSearchOptions {
@@ -125,6 +128,7 @@ function fromRow(row: typeof t.backgrounds.$inferSelect): BackgroundEntry {
     description: row.description,
     enabled: row.enabled,
     created_at: row.createdAt,
+    embedding: (row.embedding as number[] | null) ?? null,
   }
 }
 
@@ -144,6 +148,7 @@ function toRow(entry: BackgroundEntry): typeof t.backgrounds.$inferInsert {
     description: entry.description,
     enabled: entry.enabled,
     createdAt: entry.created_at,
+    embedding: entry.embedding ?? null,
   }
 }
 
@@ -669,6 +674,14 @@ export async function createBackground(bytes: Buffer, opts: CreateOptions = {}):
       error = e instanceof Error ? e.message : 'tagging failed'
     }
   }
+  let embedding: number[] | null = null
+  if (voyage.embeddingEnabled()) {
+    try {
+      embedding = await voyage.embedImage(prepared.tagging)
+    } catch (e) {
+      console.warn(`[backgrounds] embedding failed: ${e instanceof Error ? e.message : e}`)
+    }
+  }
   const entry: BackgroundEntry = {
     id: nanoid(10),
     source: prepared.source,
@@ -678,6 +691,7 @@ export async function createBackground(bytes: Buffer, opts: CreateOptions = {}):
     ...(tags ?? blankTags(prepared)),
     enabled: Boolean(tags),
     created_at: Date.now(),
+    embedding,
   }
   /* objects first, row second: an orphaned object is harmless, a row
      without bytes would serve 404s */
@@ -690,15 +704,16 @@ export async function createBackground(bytes: Buffer, opts: CreateOptions = {}):
 
 export async function updateBackground(
   id: string,
-  patch: Partial<BackgroundTags> & { enabled?: boolean },
+  patch: Partial<BackgroundTags> & { enabled?: boolean; embedding?: number[] | null },
 ): Promise<BackgroundEntry | null> {
   const current = catalog.find((e) => e.id === id)
   if (!current) return null
   const tags = normalizeTags({ ...current, ...patch })
   const enabled = typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled
+  const embedding = patch.embedding !== undefined ? patch.embedding : current.embedding
   await db
     .update(t.backgrounds)
-    .set(toRow({ ...current, ...tags, enabled }))
+    .set(toRow({ ...current, ...tags, enabled, embedding }))
     .where(eq(t.backgrounds.id, id))
   await reload()
   return catalog.find((e) => e.id === id) ?? null
@@ -712,7 +727,15 @@ export async function retagBackground(id: string): Promise<BackgroundEntry | nul
   if (!display) throw new Error('image bytes are missing from storage')
   const jpeg = await sharp(display).resize({ width: TAGGING_WIDTH }).jpeg({ quality: 80 }).toBuffer()
   const tags = await tagWithModel(jpeg)
-  return updateBackground(id, { ...tags, enabled: true })
+  let embedding: number[] | null = current.embedding ?? null
+  if (voyage.embeddingEnabled()) {
+    try {
+      embedding = (await voyage.embedImage(jpeg)) ?? embedding
+    } catch {
+      /* non-fatal */
+    }
+  }
+  return updateBackground(id, { ...tags, enabled: true, embedding })
 }
 
 export async function deleteBackground(id: string): Promise<boolean> {

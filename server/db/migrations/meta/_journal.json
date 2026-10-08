@@ -176,6 +176,13 @@
       "when": 1791371888951,
       "tag": "0025_live_activities",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791449944752,
+      "tag": "0026_happy_karen_page",
+      "breakpoints": true
     }
   ]
 }
