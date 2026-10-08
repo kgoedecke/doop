@@ -158,6 +158,7 @@ final class AppModel: ObservableObject {
             canvases = items.sorted { $0.updatedAt > $1.updatedAt }
             workspaces = groups.workspaces
             error = nil
+            await AgentLiveActivities.shared.reconcile(canvases: items, client: client)
         } catch {
             guard self.client === client else { return }
             if (error as? APIError)?.status == 401 { user = nil; canvases = []; workspaces = [] }
