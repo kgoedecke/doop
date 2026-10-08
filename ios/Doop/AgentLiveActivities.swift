@@ -88,13 +88,21 @@ final class AgentLiveActivities {
         }
     }
 
+    /// "sandbox" when the app is signed with a development profile (Xcode runs, ad hoc
+    /// installs), "production" for TestFlight and App Store builds. The build configuration
+    /// cannot tell: a Release build installed from Xcode still gets sandbox tokens.
+    static let apnsEnvironment: String = {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url) else { return "production" }
+        let profile = String(decoding: data, as: UTF8.self)
+        let pattern = #"<key>aps-environment</key>\s*<string>(\w+)</string>"#
+        guard let match = profile.range(of: pattern, options: .regularExpression) else { return "production" }
+        return profile[match].contains("development") ? "sandbox" : "production"
+    }()
+
     @available(iOS 16.2, *)
     private func register(_ token: Data, activity: Activity<AgentActivityAttributes>, client: DoopClient) async {
-        #if DEBUG
-        let environment = "sandbox"
-        #else
-        let environment = "production"
-        #endif
+        let environment = Self.apnsEnvironment
         for attempt in 0..<4 {
             if Task.isCancelled { return }
             do {
@@ -181,11 +189,7 @@ final class AgentLiveActivities {
         let hex = token.map { String(format: "%02x", $0) }.joined()
         guard !hex.isEmpty else { return }
         startTokens[origin] = hex
-        #if DEBUG
-        let environment = "sandbox"
-        #else
-        let environment = "production"
-        #endif
+        let environment = Self.apnsEnvironment
         do {
             _ = try await client.data("/api/live-activities/push-to-start", method: "PUT", body: ["token": hex, "environment": environment, "origin": origin])
             registeredStartTokens[origin] = hex
