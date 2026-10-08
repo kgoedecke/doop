@@ -13,8 +13,7 @@ enum AgentMark {
     /// The mark for an agent name: brand icons for Claude and Codex/GPT, the
     /// Doop mark for the built-in roles and unknown MCP clients.
     static func path(for name: String) -> CGPath {
-        let n = name.lowercased()
-        let key = n.contains("claude") ? "claude" : (n.contains("codex") || n.contains("gpt")) ? "openai" : "doop"
+        let key = brand(for: name)
         if let cached = cache[key] { return cached }
         let path: CGPath
         switch key {
@@ -26,8 +25,14 @@ enum AgentMark {
         return path
     }
 
+    /// Which mark an agent name gets: "claude", "openai", or "doop".
+    static func brand(for name: String) -> String {
+        let n = name.lowercased()
+        return n.contains("claude") ? "claude" : (n.contains("codex") || n.contains("gpt")) ? "openai" : "doop"
+    }
+
     /// The Doop mark: a half disc with a dot at its foot (viewBox 42 32 118 137, translated by 14).
-    private static func doopMark() -> CGPath {
+    static func doopMark() -> CGPath {
         let p = CGMutablePath()
         p.move(to: CGPoint(x: 92, y: 36))
         p.addArc(center: CGPoint(x: 92, y: 100), radius: 64, startAngle: -.pi / 2, endAngle: .pi / 2, clockwise: false)

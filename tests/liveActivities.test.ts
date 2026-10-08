@@ -72,6 +72,28 @@ describe('agent badge state', () => {
       agentActivityState('Canvas', [task({ failedAt: 2000, failureReason: 'Provider unavailable' })]),
     ).toMatchObject({ phase: 'failed', status: 'Provider unavailable' })
   })
+  it('keeps the last two statuses of a run as finished steps', () => {
+    const run = [
+      task({ id: 'a', status: 'Reading the brief', startedAt: 1000, endedAt: 5000 }),
+      task({ id: 'b', status: 'Laying out the hero', startedAt: 5000, endedAt: 9000 }),
+      task({ id: 'c', status: 'Picking colors', startedAt: 9000, endedAt: 12000 }),
+      task({ id: 'd', status: 'Tightening copy', startedAt: 12000 }),
+    ]
+    expect(agentActivityState('Canvas', run)).toMatchObject({
+      status: 'Tightening copy',
+      steps: ['Laying out the hero', 'Picking colors'],
+      startedAt: 1,
+    })
+    expect(agentActivityState('Canvas', [run[3]!])).toMatchObject({ steps: [], startedAt: 12 })
+  })
+  it('starts a new run after a gap or another agent', () => {
+    const state = agentActivityState('Canvas', [
+      task({ id: 'old', status: 'Yesterday', startedAt: 1000, endedAt: 2000 }),
+      task({ id: 'other', agentName: 'Codex', status: 'Elsewhere', startedAt: 60_000, endedAt: 61_000 }),
+      task({ id: 'now', status: 'Today', startedAt: 60_000 }),
+    ])
+    expect(state).toMatchObject({ status: 'Today', steps: [], startedAt: 60 })
+  })
   it('shows actual pipeline stages and bounds user content for APNs', () => {
     const state = agentActivityState('📐'.repeat(500), [
       task({ status: '🪄'.repeat(1000), pipeline: ['doop', 'brand'], stage: 1 }),

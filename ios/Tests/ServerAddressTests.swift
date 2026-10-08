@@ -101,6 +101,12 @@ struct ServerAddressChecks {
         checkEqual(terminal.phase, "failed")
         checkEqual(terminal.status, "Could not connect")
         checkFalse(terminal.isActive)
+        let run = try tasks(#"[{"id":"a","agentName":"Claude","status":"Reading the brief","startedAt":1000,"endedAt":5000},{"id":"b","agentName":"Claude","status":"Laying out the hero","startedAt":5000,"endedAt":9000},{"id":"c","agentName":"Claude","status":"Picking colors","startedAt":9000,"endedAt":12000},{"id":"d","agentName":"Claude","status":"Tightening copy","startedAt":12000}]"#)
+        let steps = AgentActivityState.summarize(canvasName: "Canvas", tasks: run)!
+        checkEqual(steps.steps, ["Laying out the hero", "Picking colors"])
+        checkEqual(steps.startedAt, 1)
+        let first = AgentActivityState.summarize(canvasName: "Canvas", tasks: [run[3]])!
+        checkEqual(first.steps, [])
         let data = try JSONEncoder().encode(state)
         checkEqual(try JSONDecoder().decode(AgentActivityState.self, from: data), state)
     }

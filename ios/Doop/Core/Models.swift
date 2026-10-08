@@ -39,9 +39,11 @@ public struct DesignFrame: Codable, Identifiable, Equatable {
 public struct CanvasTask: Codable, Identifiable, Hashable {
     public var id: String
     public var agentName: String
+    public var owner: String?
     public var status: String
     public var startedAt: Double
     public var endedAt: Double?
+    public var runStartedAt: Double?
     public var failedAt: Double?
     public var failureReason: String?
     public var queuedBy: String?
