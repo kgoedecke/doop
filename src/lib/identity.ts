@@ -4,16 +4,22 @@ import { nanoid } from 'nanoid'
    browsers; fall back to a per-session store so identity still works. */
 const memory = new Map<string, string>()
 const storage = {
+  /* A value that only made it into memory (the write threw, e.g. quota
+     exceeded, while reads still work) wins over localStorage, so one session
+     keeps one identity instead of minting a new one per read. */
   get(key: string): string | null {
+    const remembered = memory.get(key)
+    if (remembered !== undefined) return remembered
     try {
       return localStorage.getItem(key)
     } catch {
-      return memory.get(key) ?? null
+      return null
     }
   },
   set(key: string, value: string) {
     try {
       localStorage.setItem(key, value)
+      memory.delete(key)
     } catch {
       memory.set(key, value)
     }
