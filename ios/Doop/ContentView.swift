@@ -500,6 +500,7 @@ struct WorkingAgentsView: View {
                 return
             }
             canvases = result; updatedAt = Date(); error = nil
+            await AgentLiveActivities.shared.reconcile(canvases: result, client: client)
         } catch {
             guard !Task.isCancelled else { return }
             canvases = []; updatedAt = nil

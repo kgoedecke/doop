@@ -208,6 +208,45 @@ final class AgentLiveActivities {
         startTokens[origin] = nil
     }
 
+    /// Fresh task lists for the user's canvases: close any activity whose canvas has
+    /// no running task left. The server sends the end event too, but only once the
+    /// agent's silence timeout has passed; the app knows sooner and can say so.
+    /// End the activities of canvases the server just reported idle. The caller
+    /// fetched `canvases` a moment ago, so an activity still narrating a task on
+    /// one of them missed its end event (the phone slept, the push was dropped).
+    /// Activities are snapshotted before the first await; one whose content
+    /// changed since received a fresh push and is left to the server. Server-side
+    /// cleanup runs detached so a slow request never holds up the refresh.
+    func reconcile(canvases: [CanvasSummary], client: DoopClient) async {
+        guard #available(iOS 16.2, *) else { return }
+        // An older server omits activeTasks; that must not read as "everything idle".
+        guard !canvases.isEmpty, canvases.allSatisfy({ $0.activeTasks != nil }) else { return }
+        let origin = client.server.origin.absoluteString
+        let idle = Set(canvases.filter { $0.activeTasks?.isEmpty ?? false }.map(\.id))
+        let stale = Activity<AgentActivityAttributes>.activities
+            .filter { $0.attributes.serverOrigin == origin && idle.contains($0.attributes.canvasID) }
+            .filter { $0.activityState == .active || $0.activityState == .stale }
+            .map { (activity: $0, seen: $0.content.state) }
+            .filter { $0.seen.isActive }
+        var ended: [String] = []
+        for (activity, seen) in stale {
+            guard activity.content.state == seen else { continue }
+            var state = seen
+            state.phase = "finished"
+            state.status = "Finished"
+            state.activeCount = 0
+            let key = origin + "/" + activity.attributes.canvasID
+            workers.removeValue(forKey: key)?.cancel(); pending[key] = nil
+            tokenObservers.removeValue(forKey: activity.id)?.cancel()
+            await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: .after(Date().addingTimeInterval(60)))
+            ended.append(activity.id)
+        }
+        guard !ended.isEmpty else { return }
+        Task {
+            for id in ended { _ = try? await client.data("/api/live-activities/\(id)", method: "DELETE") }
+        }
+    }
+
     func endAll(client: DoopClient) async {
         let origin = client.server.origin.absoluteString
         for key in workers.keys.filter({ $0.hasPrefix(origin + "/") }) {
