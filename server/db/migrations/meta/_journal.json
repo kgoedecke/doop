@@ -176,6 +176,20 @@
       "when": 1791371888951,
       "tag": "0025_live_activities",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791388595515,
+      "tag": "0026_canvas_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791419435419,
+      "tag": "0027_persist_legacy_page_membership",
+      "breakpoints": true
     }
   ]
 }

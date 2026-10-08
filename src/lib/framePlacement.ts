@@ -58,7 +58,14 @@ function stageViewportSize(): { width: number; height: number } {
  */
 export async function createCenteredFrame(canvasId: string, name: string, html: string): Promise<Frame> {
   const { x, y } = frameCenterPosition(useStore.getState().viewport, stageViewportSize(), DEFAULT_FRAME_SIZE)
-  const frame = await api.createFrame(canvasId, { name, html, x, y, ...DEFAULT_FRAME_SIZE })
+  const frame = await api.createFrame(canvasId, {
+    name,
+    html,
+    x,
+    y,
+    pageId: useStore.getState().activePageId ?? undefined,
+    ...DEFAULT_FRAME_SIZE,
+  })
   posthog.capture('frame_created')
   recordCreate(frame)
   return frame

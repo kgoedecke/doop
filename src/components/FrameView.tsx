@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { ElementComment, Frame } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { useStore } from '../lib/store'
+import { currentPageCanvas } from '../lib/pages'
 import { registerFrameWindow, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
 import { sendWs } from '../lib/ws'
@@ -182,7 +183,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     let dupDropped = false
     if (duplicating) setDuping(true)
     /* a move carries every selected frame along; a resize is this frame only */
-    const frames = useStore.getState().canvas?.frames ?? []
+    const frames = currentPageCanvas()?.frames ?? []
     const selectedIds = mode === 'move' ? useStore.getState().selectedIds : [frame.id]
     const group = frames
       .filter((f) => selectedIds.includes(f.id))
@@ -228,7 +229,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
          except that a ⌥⇧ duplicate-drag holds ⌥ for the whole gesture, and
          the copy should land on the guides like any other move. Frames
          riding along in the group are not neighbours. */
-      const others = useStore.getState().canvas?.frames.filter((f) => !groupIds.has(f.id)) ?? []
+      const others = currentPageCanvas()?.frames.filter((f) => !groupIds.has(f.id)) ?? []
       const free = ev.altKey && !duplicating
       const snapped = free ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom)
       useStore.getState().setSnapGuides(snapped.guides)

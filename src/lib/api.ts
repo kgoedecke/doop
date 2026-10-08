@@ -1,3 +1,4 @@
+import { useStore } from './store'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
@@ -384,10 +385,24 @@ export const api = {
     }
     return res.json() as Promise<{ url: string; mime: string; size: number }>
   },
+  setPages: (
+    canvasId: string,
+    pages: import('../../shared/types').CanvasPageInfo[],
+    expectedPages: import('../../shared/types').CanvasPageInfo[],
+  ) =>
+    req<import('../../shared/types').CanvasPageInfo[]>(`/api/canvases/${canvasId}/pages`, {
+      method: 'PUT',
+      body: JSON.stringify({ pages, expectedPages }),
+    }),
   createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) =>
     req<Frame>(`/api/canvases/${canvasId}/frames`, {
       method: 'POST',
-      body: JSON.stringify({ ...input, actor: actor() }),
+      body: JSON.stringify({
+        pageId:
+          useStore.getState().canvas?.id === canvasId ? (useStore.getState().activePageId ?? undefined) : undefined,
+        ...input,
+        actor: actor(),
+      }),
     }),
   updateFrame: (frameId: string, patch: Partial<Frame>) =>
     req<Frame>('/api/frames/' + frameId, { method: 'PATCH', body: JSON.stringify({ ...patch, actor: actor() }) }),

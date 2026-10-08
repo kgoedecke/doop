@@ -1,3 +1,4 @@
+import { canvasPages } from '../../shared/pages'
 import { useStore } from '../lib/store'
 import { AgentIcon } from './AgentIcon'
 
@@ -11,9 +12,10 @@ import { AgentIcon } from './AgentIcon'
  */
 export function GhostFrames() {
   const canvas = useStore((s) => s.canvas)
+  const activePageId = useStore((s) => s.activePageId)
   const presences = useStore((s) => s.presences)
   const tasks = useStore((s) => s.tasks)
-  if (!canvas) return null
+  if (!canvas || activePageId !== canvasPages(canvas)[0]!.id) return null
   const working = Object.values(presences).filter(
     (p) =>
       p.kind === 'agent' &&

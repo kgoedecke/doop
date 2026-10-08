@@ -152,6 +152,9 @@ function handle(msg: ServerMessage) {
     case 'frame:deleted':
       s.removeFrame(msg.frameId)
       break
+    case 'canvas:pages':
+      s.setPages(msg.pages)
+      break
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
       break

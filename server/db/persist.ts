@@ -38,6 +38,7 @@ function swallow(p: Promise<unknown>) {
 function canvasColumns(c: Canvas) {
   return {
     name: c.name,
+    pages: c.pages ?? null,
     ownerId: c.ownerId ?? null,
     linkAccess: c.linkAccess ?? null,
     publishedAt: c.publishedAt ?? null,
@@ -69,6 +70,7 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
         c.frames.map((frame) => ({
           id: frame.id,
           canvasId: frame.canvasId,
+          pageId: frame.pageId ?? null,
           name: frame.name,
           x: frame.x,
           y: frame.y,
@@ -295,6 +297,7 @@ async function writeFrame(f: Frame) {
   const row = {
     id: f.id,
     canvasId: f.canvasId,
+    pageId: f.pageId ?? null,
     name: f.name,
     x: f.x,
     y: f.y,
@@ -615,6 +618,7 @@ export async function hydrate(): Promise<Hydrated> {
   const canvases: Canvas[] = canvasRows.map((c) => ({
     id: c.id,
     name: c.name,
+    pages: c.pages ?? undefined,
     ownerId: c.ownerId ?? undefined,
     linkAccess: c.linkAccess === 'edit' ? 'edit' : undefined,
     ...(c.publishedAt != null ? { publishedAt: c.publishedAt } : {}),
@@ -631,7 +635,8 @@ export async function hydrate(): Promise<Hydrated> {
     const c = byId.get(m.canvasId)
     if (c) (c.memberIds ??= []).push(m.userId)
   }
-  for (const f of frameRows) byId.get(f.canvasId)?.frames.push({ ...f, demo: f.demo ?? undefined })
+  for (const f of frameRows)
+    byId.get(f.canvasId)?.frames.push({ ...f, pageId: f.pageId ?? undefined, demo: f.demo ?? undefined })
   for (const c of canvases) c.frames.sort((a, b) => a.createdAt - b.createdAt)
   for (const r of referenceRows) {
     const c = byId.get(r.canvasId)

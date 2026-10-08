@@ -1,3 +1,4 @@
+import { canvasPages, samePages } from '../shared/pages.ts'
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
@@ -1391,11 +1392,54 @@ app.post(
   },
 )
 
+app.put('/api/canvases/:id/pages', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id)
+  if (!canvas) return
+  const pages = req.body?.pages
+  if (
+    !Array.isArray(pages) ||
+    !pages.length ||
+    pages.length > 100 ||
+    pages.some(
+      (p) =>
+        !p ||
+        typeof p.id !== 'string' ||
+        !p.id.trim() ||
+        p.id.length > 100 ||
+        typeof p.name !== 'string' ||
+        !p.name.trim() ||
+        p.name.length > 100,
+    ) ||
+    new Set(pages.map((p) => p.id)).size !== pages.length
+  ) {
+    return res.status(400).json({ error: 'Provide 1–100 pages with unique IDs and names of up to 100 characters.' })
+  }
+  if (!samePages(req.body?.expectedPages, canvasPages(canvas)))
+    return res
+      .status(409)
+      .json({ error: 'Pages changed since you opened them. Please try again.', pages: canvasPages(canvas) })
+  const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
+  if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId)))) {
+    return res.status(400).json({ error: 'Move the frames to another page before deleting this page.' })
+  }
+  const clean = pages.map((p) => ({ id: p.id, name: p.name.trim() }))
+  store.setPages(canvas.id, clean)
+  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  broadcast(canvas.id, { type: 'canvas:pages', pages: clean, actor })
+  res.json(clean)
+})
+
 app.post('/api/canvases/:id/frames', (req, res) => {
   if (!requireCanvas(req, res, req.params.id)) return
-  const { name, x, y, width, height, html } = req.body ?? {}
+  const { name, pageId, x, y, width, height, html } = req.body ?? {}
+  if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
+    return res.status(400).json({ error: 'page not found' })
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const frame = actions.createFrame(req.params.id, { name: String(name || 'Frame'), x, y, width, height, html }, actor)
+  const frame = actions.createFrame(
+    req.params.id,
+    { name: String(name || 'Frame'), pageId, x, y, width, height, html },
+    actor,
+  )
   if (!frame) return res.status(404).json({ error: 'canvas not found' })
   res.json(frame)
 })
@@ -1404,7 +1448,12 @@ app.patch('/api/frames/:id', (req, res) => {
   if (!requireFrame(req, res, req.params.id)) return
   const { actor: _ignored, ...patch } = req.body ?? {}
   const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const allowed = ['name', 'x', 'y', 'width', 'height', 'html'] as const
+  if (
+    patch.pageId !== undefined &&
+    !store.getCanvas(store.getFrame(req.params.id)!.canvasId)?.pages?.some((p) => p.id === patch.pageId)
+  )
+    return res.status(400).json({ error: 'page not found' })
+  const allowed = ['name', 'pageId', 'x', 'y', 'width', 'height', 'html'] as const
   const clean: Record<string, unknown> = {}
   for (const k of allowed) if (patch[k] !== undefined) clean[k] = patch[k]
   const frame = actions.updateFrame(req.params.id, clean, actor)

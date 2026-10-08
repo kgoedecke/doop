@@ -10,6 +10,7 @@ import {
   primaryKey,
   jsonb,
 } from 'drizzle-orm/pg-core'
+import type { CanvasPageInfo } from '../../shared/types.ts'
 import type { Schedule, Step } from '../../shared/automations.ts'
 
 /** ActivityKit tokens are delivery secrets: never return them through read APIs. */
@@ -45,6 +46,7 @@ export const liveActivityStarters = pgTable('live_activity_starters', {
  */
 
 export const canvases = pgTable('canvases', {
+  pages: jsonb('pages').$type<CanvasPageInfo[]>(),
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerId: text('owner_id'),
@@ -148,6 +150,7 @@ export const canvasMembers = pgTable(
 export const frames = pgTable(
   'frames',
   {
+    pageId: text('page_id'),
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
     name: text('name').notNull(),

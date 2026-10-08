@@ -1267,9 +1267,23 @@ export function appendFrameHtml(
 
 /* ------------------------------------------------------------------ */
 
+export function setCanvasPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[], actor: Actor) {
+  store.setPages(canvasId, pages)
+  broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+}
+
 export function createFrame(
   canvasId: string,
-  input: { name: string; x?: number; y?: number; width?: number; height?: number; html?: string; demo?: boolean },
+  input: {
+    name: string
+    pageId?: string
+    x?: number
+    y?: number
+    width?: number
+    height?: number
+    html?: string
+    demo?: boolean
+  },
   actor: Actor,
 ): Frame | undefined {
   if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
@@ -1291,7 +1305,7 @@ export function createFrame(
 
 export function updateFrame(
   frameId: string,
-  patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
+  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
   actor: Actor,
 ): Frame | undefined {
   const before = store.getFrame(frameId)
@@ -1299,7 +1313,8 @@ export function updateFrame(
   if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
   const prevName = before.name
   const prevHtml = before.html
-  const frame = store.updateFrame(frameId, patch, actor.name)!
+  const frame = store.updateFrame(frameId, patch, actor.name)
+  if (!frame) return undefined
 
   const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
   if (htmlChanged && actor.kind === 'agent') {

@@ -5,9 +5,17 @@ import type { PeerViewport } from './types'
  *  a follower's transform at NaN or infinity. */
 export function isPeerViewport(v: unknown): v is PeerViewport {
   if (!v || typeof v !== 'object') return false
-  const { x, y, zoom, width, height } = v as Record<string, unknown>
+  const { x, y, zoom, width, height, pageId } = v as Record<string, unknown>
   const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
   return (
-    finite(x) && finite(y) && finite(zoom) && zoom > 0 && finite(width) && width > 0 && finite(height) && height > 0
+    (pageId === undefined || (typeof pageId === 'string' && pageId.length <= 100)) &&
+    finite(x) &&
+    finite(y) &&
+    finite(zoom) &&
+    zoom > 0 &&
+    finite(width) &&
+    width > 0 &&
+    finite(height) &&
+    height > 0
   )
 }
