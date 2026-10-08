@@ -36,7 +36,9 @@ const canvas = (frames: Frame[]): Canvas => ({
   updatedAt: 0,
 })
 
-describe.skipIf(!findBrowserPath())('page camera and snapping', () => {
+/* The first load transforms the whole app through a cold Vite dev server, which
+   on a CI runner regularly takes longer than the 5 s default test timeout. */
+describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_000 }, () => {
   let vite: ViteDevServer
   let browser: Browser
   let page: Page
