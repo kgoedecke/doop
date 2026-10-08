@@ -271,16 +271,18 @@ paths race. Sign-out retires the token.
 Use your Apple APNs signing key; keep it out of source control. Enable Push
 Notifications for the app's registered identifier and sign both app and widget
 extension with your team. If changing the app bundle ID, update the extension ID
-and `DOOP_APNS_BUNDLE_ID` too. Debug builds register sandbox tokens; Release uses
-production. The server checks durable canvas membership on registration and every
+and `DOOP_APNS_BUNDLE_ID` too. The app reports `sandbox` or `production` from the
+`aps-environment` entitlement in its embedded provisioning profile (development-signed
+builds from Xcode get sandbox tokens whatever the build configuration; TestFlight and
+App Store builds get production tokens). The server checks durable canvas membership on registration and every
 update, coalesces updates, removes expired/invalid registrations, and ends activity
 access after revocation. Share-link-only visitors cannot register background updates.
 
-Starting an activity requires opening the canvas in the foreground; push-to-start
-is not implemented. Without push configuration, the last local status becomes
+Without push configuration, starting an activity requires opening the canvas in the
+foreground (push-to-start needs the APNs key), and the last local status becomes
 stale after two minutes and asks the user to reopen Doop. Sign-out/server changes
 end local activities. Apple controls delivery timing and activity availability.
-APNs delivery on a signed physical device remains to be verified with real credentials.
+APNs delivery was verified on a physical iPhone against doop.design on 2026-10-08.
 
 Server checks: `bunx vitest run tests/liveActivities.test.ts tests/liveActivityDelivery.test.ts`.
 
