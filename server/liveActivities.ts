@@ -17,6 +17,40 @@ const registration = z.object({
 })
 
 liveActivitiesRouter.get('/config', (_req, res) => res.json({ enabled: apnsConfigured() }))
+// Registered before `/:id`, which would otherwise swallow the literal path.
+const starter = z.object({
+  token: z.string().regex(/^[a-f0-9]{32,512}$/),
+  environment: z.enum(['sandbox', 'production']),
+  origin: z.string().url().max(200),
+})
+/** A push-to-start token: lets the server open an activity for any canvas the
+ *  user belongs to. Refreshed on every app launch; retired after 30 days. */
+liveActivitiesRouter.put('/push-to-start', async (req, res) => {
+  const parsed = starter.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'invalid push-to-start registration' })
+  if (!apnsConfigured())
+    return res.status(503).json({ error: 'Live Activity push delivery is not configured on this server' })
+  const values = { ...parsed.data, userId: req.user!.id, expiresAt: Date.now() + 30 * 24 * 60 * 60_000 }
+  await db
+    .insert(liveActivityStarters)
+    .values(values)
+    .onConflictDoUpdate({
+      target: liveActivityStarters.token,
+      set: {
+        userId: values.userId,
+        environment: values.environment,
+        origin: values.origin,
+        expiresAt: values.expiresAt,
+      },
+    })
+  res.json({ ok: true })
+})
+liveActivitiesRouter.delete('/push-to-start/:token', async (req, res) => {
+  await db
+    .delete(liveActivityStarters)
+    .where(and(eq(liveActivityStarters.token, req.params.token), eq(liveActivityStarters.userId, req.user!.id)))
+  res.json({ ok: true })
+})
 liveActivitiesRouter.put('/:id', async (req, res) => {
   const parsed = registration.safeParse(req.body)
   if (!parsed.success || !/^[\w-]{1,100}$/.test(req.params.id))
@@ -53,39 +87,6 @@ liveActivitiesRouter.put('/:id', async (req, res) => {
   } catch {
     res.status(409).json({ error: 'could not register live activity' })
   }
-})
-const starter = z.object({
-  token: z.string().regex(/^[a-f0-9]{32,512}$/),
-  environment: z.enum(['sandbox', 'production']),
-  origin: z.string().url().max(200),
-})
-/** A push-to-start token: lets the server open an activity for any canvas the
- *  user belongs to. Refreshed on every app launch; retired after 30 days. */
-liveActivitiesRouter.put('/push-to-start', async (req, res) => {
-  const parsed = starter.safeParse(req.body)
-  if (!parsed.success) return res.status(400).json({ error: 'invalid push-to-start registration' })
-  if (!apnsConfigured())
-    return res.status(503).json({ error: 'Live Activity push delivery is not configured on this server' })
-  const values = { ...parsed.data, userId: req.user!.id, expiresAt: Date.now() + 30 * 24 * 60 * 60_000 }
-  await db
-    .insert(liveActivityStarters)
-    .values(values)
-    .onConflictDoUpdate({
-      target: liveActivityStarters.token,
-      set: {
-        userId: values.userId,
-        environment: values.environment,
-        origin: values.origin,
-        expiresAt: values.expiresAt,
-      },
-    })
-  res.json({ ok: true })
-})
-liveActivitiesRouter.delete('/push-to-start/:token', async (req, res) => {
-  await db
-    .delete(liveActivityStarters)
-    .where(and(eq(liveActivityStarters.token, req.params.token), eq(liveActivityStarters.userId, req.user!.id)))
-  res.json({ ok: true })
 })
 liveActivitiesRouter.delete('/:id', async (req, res) => {
   await db
@@ -167,6 +168,7 @@ export async function deliverLiveActivities(send = sendLiveActivityPush) {
       }
       try {
         const status = await send(row.token, row.environment, { aps })
+        if (status !== 200) console.warn(`[live-activities] ${aps.event} push returned ${status}`)
         if (status === 410 || status === 400 || (status === 200 && ended)) {
           await db.delete(liveActivities).where(eq(liveActivities.id, row.id))
         } else if (status === 200) {
@@ -218,6 +220,7 @@ async function startLiveActivities(send: typeof sendLiveActivityPush, deadline: 
       }
       try {
         const status = await send(device.token, device.environment, { aps }, 10)
+        if (status !== 200) console.warn(`[live-activities] start push returned ${status}`)
         if (status === 200) announced.set(`${device.token}/${canvas.id}`, state.startedAt)
         else if (status === 410 || status === 400) {
           await db.delete(liveActivityStarters).where(eq(liveActivityStarters.token, device.token))

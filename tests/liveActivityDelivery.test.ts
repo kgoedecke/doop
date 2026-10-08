@@ -3,6 +3,8 @@ import { PGlite } from '@electric-sql/pglite'
 import { drizzle } from 'drizzle-orm/pglite'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { readFileSync } from 'node:fs'
+import type { AddressInfo } from 'node:net'
+import express from 'express'
 import * as schema from '../server/db/schema.ts'
 
 const rig = vi.hoisted(() => ({
@@ -21,7 +23,7 @@ vi.mock('../server/store.ts', () => ({ store: { getCanvas: rig.getCanvas, allCan
 vi.mock('../server/actions.ts', () => ({ getTasks: rig.getTasks }))
 vi.mock('../server/access.ts', () => ({ hasDurableCanvasAccess: rig.allowed }))
 vi.mock('../server/apns.ts', () => ({ apnsConfigured: () => true, sendLiveActivityPush: vi.fn() }))
-import { deliverLiveActivities, resetLiveActivityStarts } from '../server/liveActivities.ts'
+import { deliverLiveActivities, liveActivitiesRouter, resetLiveActivityStarts } from '../server/liveActivities.ts'
 
 const pg = new PGlite()
 beforeAll(async () => {
@@ -168,4 +170,32 @@ it('bounds concurrency and stops at the run deadline, leaving the rest for the n
     late.push(n)
   })
   expect(late).toEqual([])
+})
+
+it('registers push-to-start tokens on their own route instead of the activity id route', async () => {
+  const app = express()
+  app.use(express.json())
+  app.use((req, _res, next) => {
+    req.user = { id: 'u' } as typeof req.user
+    next()
+  })
+  app.use('/api/live-activities', liveActivitiesRouter)
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise((resolve) => server.once('listening', resolve))
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/live-activities`
+  try {
+    const token = 'cd'.repeat(32)
+    const put = await fetch(`${base}/push-to-start`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, environment: 'production', origin: 'https://doop.design' }),
+    })
+    expect(put.status).toBe(200)
+    expect(await rig.db.select().from(schema.liveActivityStarters)).toMatchObject([{ token, userId: 'u' }])
+    const del = await fetch(`${base}/push-to-start/${token}`, { method: 'DELETE' })
+    expect(del.status).toBe(200)
+    expect(await rig.db.select().from(schema.liveActivityStarters)).toHaveLength(0)
+  } finally {
+    server.close()
+  }
 })
