@@ -17,7 +17,13 @@ class Store {
       c.pages = canvasPages(c)
       this.canvases.set(c.id, c)
       for (const f of c.frames) {
-        f.pageId ??= c.pages[0]!.id
+        /* A frame whose page is gone (the server died between a frame move
+           and the page's deletion: moves persist on a debounce, pages at
+           once) rejoins the first page instead of vanishing from every page. */
+        if (!f.pageId || !c.pages.some((page) => page.id === f.pageId)) {
+          f.pageId = c.pages[0]!.id
+          persist.saveFrame(f, true)
+        }
         this.frameIndex.set(f.id, c.id)
       }
     }
