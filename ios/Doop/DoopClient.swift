@@ -150,6 +150,7 @@ final class AppModel: ObservableObject {
 
     func reload() async {
         let client = self.client
+        let openBefore = await AgentLiveActivities.shared.openActivityIDs(client: client)
         do {
             async let library: [CanvasSummary] = client.get("/api/canvases")
             async let spaces: WorkspaceList = client.get("/api/workspaces")
@@ -158,7 +159,7 @@ final class AppModel: ObservableObject {
             canvases = items.sorted { $0.updatedAt > $1.updatedAt }
             workspaces = groups.workspaces
             error = nil
-            await AgentLiveActivities.shared.reconcile(canvases: items, client: client)
+            await AgentLiveActivities.shared.reconcile(canvases: items, openBefore: openBefore, client: client)
         } catch {
             guard self.client === client else { return }
             if (error as? APIError)?.status == 401 { user = nil; canvases = []; workspaces = [] }

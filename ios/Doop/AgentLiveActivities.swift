@@ -208,22 +208,34 @@ final class AgentLiveActivities {
         startTokens[origin] = nil
     }
 
+    /// The activities open for this server right now. A caller about to fetch the
+    /// task lists takes this first and hands it to `reconcile`, so an activity that
+    /// opens while the request is in flight (a task that began after the server
+    /// built its answer) is not mistaken for one the server reported idle.
+    func openActivityIDs(client: DoopClient) -> Set<String> {
+        guard #available(iOS 16.2, *) else { return [] }
+        let origin = client.server.origin.absoluteString
+        return Set(Activity<AgentActivityAttributes>.activities.filter { $0.attributes.serverOrigin == origin }.map(\.id))
+    }
+
     /// Fresh task lists for the user's canvases: close any activity whose canvas has
     /// no running task left. The server sends the end event too, but only once the
     /// agent's silence timeout has passed; the app knows sooner and can say so.
     /// End the activities of canvases the server just reported idle. The caller
     /// fetched `canvases` a moment ago, so an activity still narrating a task on
     /// one of them missed its end event (the phone slept, the push was dropped).
-    /// Activities are snapshotted before the first await; one whose content
-    /// changed since received a fresh push and is left to the server. Server-side
-    /// cleanup runs detached so a slow request never holds up the refresh.
-    func reconcile(canvases: [CanvasSummary], client: DoopClient) async {
+    /// Only activities in `openBefore` (taken before the fetch) qualify, and one
+    /// whose content changed since the snapshot received a fresh push and is left
+    /// to the server. Server-side cleanup runs detached so a slow request never
+    /// holds up the refresh.
+    func reconcile(canvases: [CanvasSummary], openBefore: Set<String>, client: DoopClient) async {
         guard #available(iOS 16.2, *) else { return }
         // An older server omits activeTasks; that must not read as "everything idle".
         guard !canvases.isEmpty, canvases.allSatisfy({ $0.activeTasks != nil }) else { return }
         let origin = client.server.origin.absoluteString
         let idle = Set(canvases.filter { $0.activeTasks?.isEmpty ?? false }.map(\.id))
         let stale = Activity<AgentActivityAttributes>.activities
+            .filter { openBefore.contains($0.id) }
             .filter { $0.attributes.serverOrigin == origin && idle.contains($0.attributes.canvasID) }
             .filter { $0.activityState == .active || $0.activityState == .stale }
             .map { (activity: $0, seen: $0.content.state) }

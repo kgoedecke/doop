@@ -489,6 +489,7 @@ struct WorkingAgentsView: View {
     }
 
     @MainActor private func refresh() async {
+        let openBefore = AgentLiveActivities.shared.openActivityIDs(client: client)
         do {
             let result: [CanvasSummary] = try await client.get("/api/canvases")
             guard !Task.isCancelled else { return }
@@ -500,7 +501,7 @@ struct WorkingAgentsView: View {
                 return
             }
             canvases = result; updatedAt = Date(); error = nil
-            await AgentLiveActivities.shared.reconcile(canvases: result, client: client)
+            await AgentLiveActivities.shared.reconcile(canvases: result, openBefore: openBefore, client: client)
         } catch {
             guard !Task.isCancelled else { return }
             canvases = []; updatedAt = nil
