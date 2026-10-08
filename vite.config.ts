@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,9 @@ const api = `http://localhost:${apiPort}`
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  test: {
+    setupFiles: ['tests/setup.ts'],
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
