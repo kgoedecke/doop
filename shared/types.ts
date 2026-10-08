@@ -296,6 +296,10 @@ export interface AgentTask {
   endedAt?: number
   /** inferred by the server from frame edits (agent never called set_status) */
   auto?: boolean
+  /** when the run this status belongs to began: carried from each status to
+   *  the next, so the Live Activity's start survives the task log's trim.
+   *  Live only — after a restart the start is rebuilt from the retained log */
+  runStartedAt?: number
   /** frames the agent edited while this task was open, most recent last —
    *  lets the Agents panel jump the camera to where the work happened */
   frameIds?: string[]

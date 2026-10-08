@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		000000000000000000000300 /* Blitz/BlitzDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000310 /* Blitz/BlitzDocument.swift */; };
 		000000000000000000000305 /* Blitz/AgentMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000315 /* Blitz/AgentMark.swift */; };
+		000000000000000000000340 /* Blitz/AgentMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000315 /* Blitz/AgentMark.swift */; };
 		000000000000000000000301 /* Blitz/BlitzCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000311 /* Blitz/BlitzCanvasView.swift */; };
 		000000000000000000000302 /* Blitz/CanvasStress.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000313 /* Blitz/CanvasStress.swift */; };
 		0000000000000000000000C8 /* DoopApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* DoopApp.swift */; };
@@ -286,6 +287,7 @@
 				00000000000000000000026D /* Shared/AgentActivityAttributes.swift in Sources */,
 				00000000000000000000026E /* DoopActivity/DoopActivity.swift in Sources */,
 				00000000000000000000026F /* Doop/Core/Models.swift in Sources */,
+				000000000000000000000340 /* Blitz/AgentMark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

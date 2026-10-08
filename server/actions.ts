@@ -274,6 +274,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
      narrates work ON a card, it doesn't end it */
   const open = list.find((t) => sameAgent(t, actor) && !t.endedAt && !t.queuedBy)
   if (open?.status === clean) return // same status re-posted: nothing new
+  const runStartedAt = open ? (open.runStartedAt ?? open.startedAt) : undefined
   if (open) {
     open.endedAt = Date.now()
     persist.saveTask(canvasId, open)
@@ -287,6 +288,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
       color: actor.color,
       status: clean,
       startedAt: Date.now(),
+      ...(runStartedAt ? { runStartedAt } : {}),
     }
     list.unshift(task)
     if (list.length > 100) list.length = 100
