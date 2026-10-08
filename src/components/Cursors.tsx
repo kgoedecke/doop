@@ -8,6 +8,7 @@ import { AgentIcon } from './AgentIcon'
 export const Cursors = memo(function Cursors() {
   const cursors = useStore((s) => s.cursors)
   const presences = useStore((s) => s.presences)
+  const activePageId = useStore((s) => s.activePageId)
   const me = getIdentity().clientId
 
   return (
@@ -15,7 +16,7 @@ export const Cursors = memo(function Cursors() {
       {Object.entries(cursors).map(([clientId, pos]) => {
         if (clientId === me) return null
         const p = presences[clientId]
-        if (!p) return null
+        if (!p || (p.viewport?.pageId && p.viewport.pageId !== activePageId)) return null
         return (
           <div
             key={clientId}

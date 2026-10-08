@@ -3,6 +3,8 @@ import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 export interface Frame {
   id: string
   canvasId: string
+  /** Unset on legacy frames: belongs to the first page. */
+  pageId?: string
   name: string
   x: number
   y: number
@@ -74,6 +76,11 @@ export interface CommunityItem {
   frames: { id: string; name: string; width: number; height: number }[]
 }
 
+export interface CanvasPageInfo {
+  id: string
+  name: string
+}
+
 export interface Canvas {
   id: string
   name: string
@@ -101,6 +108,7 @@ export interface Canvas {
   createdAt: number
   updatedAt: number
   frames: Frame[]
+  pages?: CanvasPageInfo[]
   /** named design docs (brand rules, style recipes) every actor on the canvas follows */
   guidelines?: GuidelineDoc[]
   /** frames pinned to Memory as style exemplars — HTML snapshotted at pin time */
@@ -436,6 +444,7 @@ export interface ActivityItem {
 
 /** A client's camera: world→screen transform plus the stage size it fills. */
 export interface PeerViewport {
+  pageId?: string
   x: number
   y: number
   zoom: number
@@ -484,6 +493,7 @@ export type ServerMessage =
   | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
+  | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
   /** a frame was pinned to (reference set) or unpinned from (null) Memory */
