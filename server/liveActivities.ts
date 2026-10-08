@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type NextFunction, type Request, type Response } from 'express'
 import { and, eq, lt } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from './db/index.ts'
@@ -10,6 +10,18 @@ import { agentActivityState } from '../shared/agentActivity.ts'
 import { apnsConfigured, sendLiveActivityPush } from './apns.ts'
 
 export const liveActivitiesRouter = Router()
+
+/** Request log for the Live Activity endpoints. Mounted ahead of the API auth
+ *  middleware so a registration that fails with 401 (the app launched in the
+ *  background before its session was restored) shows up next to the 400/403/503
+ *  answers from this router. Logs the method, route shape and status; never a token. */
+export function logLiveActivityRequests(req: Request, res: Response, next: NextFunction) {
+  res.on('finish', () => {
+    const path = req.path.replace(/[a-f0-9]{32,}/g, '<token>')
+    console.log(`[live-activities] ${req.method} ${path} -> ${res.statusCode}`)
+  })
+  next()
+}
 const registration = z.object({
   canvasId: z.string().min(1).max(100),
   token: z.string().regex(/^[a-f0-9]{32,512}$/),
