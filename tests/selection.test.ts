@@ -145,6 +145,9 @@ describe('review follow-ups', () => {
       { frameId: 'a', before: { x: 0 }, after: { x: 1 } },
       { frameId: 'b', before: { x: 0 }, after: { x: 1 } },
     ])
+    /* the store holds the applied state, as it does after a real drag */
+    useStore.getState().patchFrameLocal('a', { x: 1 })
+    useStore.getState().patchFrameLocal('b', { x: 1 })
     api.updateFrame.mockImplementationOnce(async (id: string) => {
       if (id === 'a') throw new Error('boom')
       return {}
