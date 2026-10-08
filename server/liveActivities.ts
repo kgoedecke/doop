@@ -180,7 +180,7 @@ export async function deliverLiveActivities(send = sendLiveActivityPush) {
       }
       try {
         const status = await send(row.token, row.environment, { aps })
-        if (status !== 200) console.warn(`[live-activities] ${aps.event} push returned ${status}`)
+        console.log(`[live-activities] ${aps.event} push for ${row.id} -> ${status} (${content.phase})`)
         if (status === 410 || status === 400 || (status === 200 && ended)) {
           await db.delete(liveActivities).where(eq(liveActivities.id, row.id))
         } else if (status === 200) {
@@ -190,13 +190,19 @@ export async function deliverLiveActivities(send = sendLiveActivityPush) {
             .where(eq(liveActivities.id, row.id))
         }
         // Transient errors retain the row; the next tick retries. Never log the token.
-      } catch {
-        /* APNs/network failure must not affect canvas mutations. */
+      } catch (err) {
+        /* APNs/network failure must not affect canvas mutations; the row stays for the next tick. */
+        console.log(`[live-activities] ${aps.event} push for ${row.id} failed (${content.phase}): ${describe(err)}`)
       }
     })
   } finally {
     processing = false
   }
+}
+
+/** Error text for the delivery log: message only, never a token or payload. */
+function describe(err: unknown) {
+  return err instanceof Error ? err.message : String(err)
 }
 
 /** Open an activity on every registered device for each agent task that just
@@ -228,18 +234,21 @@ async function startLiveActivities(send: typeof sendLiveActivityPush, deadline: 
         'attributes-type': 'AgentActivityAttributes',
         attributes: { canvasID: canvas.id, serverOrigin: device.origin },
         alert: { title: state.canvasName, body: `${state.agentName}: ${state.status}` },
-        'stale-date': now + 120,
+        // The first update can only follow once the woken app has registered the
+        // activity's token, which takes a minute or two on a sleeping phone.
+        'stale-date': now + 300,
       }
       try {
         const status = await send(device.token, device.environment, { aps }, 10)
-        if (status !== 200) console.warn(`[live-activities] start push returned ${status}`)
+        console.log(`[live-activities] start push for canvas ${canvas.id} -> ${status} (${state.phase})`)
         if (status === 200) announced.set(`${device.token}/${canvas.id}`, state.startedAt)
         else if (status === 410 || status === 400) {
           await db.delete(liveActivityStarters).where(eq(liveActivityStarters.token, device.token))
           break
         }
-      } catch {
+      } catch (err) {
         /* retried on the next tick */
+        console.log(`[live-activities] start push for canvas ${canvas.id} failed (${state.phase}): ${describe(err)}`)
       }
     }
   })
