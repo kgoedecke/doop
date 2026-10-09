@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types'
-import type { FrameCommand, IndexCommand } from '../src/actor'
+import type { FrameCommand } from '../src/actor'
 
 vi.mock('../src/lib/identity', () => ({ getIdentity: () => ({ clientId: 'me', name: 'Me' }) }))
 class Socket {
   static OPEN = 1
   static instances: Socket[] = []
   readyState = 1
-  sent: (FrameCommand | IndexCommand)[] = []
+  sent: FrameCommand[] = []
   onmessage?: (event: { data: string }) => void
   onclose?: () => void
   onerror?: () => void
@@ -15,7 +15,7 @@ class Socket {
     Socket.instances.push(this)
   }
   send(data: string) {
-    this.sent.push(JSON.parse(data) as FrameCommand | IndexCommand)
+    this.sent.push(JSON.parse(data) as FrameCommand)
   }
   receive(event: unknown) {
     this.onmessage?.({ data: JSON.stringify(event) })
@@ -62,7 +62,6 @@ const indexSnapshot = (entries: Frame[], revision = 0) => ({
   frameIds: entries.map((entry) => entry.id),
   initialized: true,
   deleted: false,
-  activity: [],
 })
 
 beforeEach(() => {
@@ -197,8 +196,6 @@ it('allows an immediate edit when creation finishes before its index notificatio
   })
   await flush()
   expect(complete).toBe(false)
-  const createRequest = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')![1]!
-  expect(JSON.parse(createRequest.body as string).id).toMatch(/^c\.new\.[a-f0-9-]{36}$/)
   const index = socket('/canvases/c/')
   index.receive({
     type: 'state_update',

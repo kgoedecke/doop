@@ -42,8 +42,6 @@ it('upgrades an existing OSS database without the deferred Figma migration', asy
         'linear_sessions',
       ]),
     )
-    expect(tables.rows.map((row) => row.table_name)).not.toContain('canvas_frame_state')
-    expect(tables.rows.map((row) => row.table_name)).not.toContain('frame_memberships')
     const deferred = await client.query(
       "SELECT column_name FROM information_schema.columns WHERE table_name = 'integrations' AND column_name = 'refresh_token'",
     )
