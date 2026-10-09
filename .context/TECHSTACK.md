@@ -53,8 +53,7 @@
 ## 7. Testing Stack
 
 - Vitest 4.1.11 - unit/integration tests across `server/` and `src/`; `bun run test` starts isolated
-  actors and runs Vitest. `DOOP_TEST_POSTGRES_URL` enables the two-server sync test, including
-  membership notification reconnection and concurrent creation. Tests live in `tests/`.
+  actors and runs Vitest against throwaway PGlite databases. Tests live in `tests/`.
 
 ## 8. CI/CD and Delivery
 

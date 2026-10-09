@@ -669,10 +669,8 @@ Deletion tombstones prevent stale SQL data or retried requests from bringing fra
 
 PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style.
 After actor changes, run `bun run actors:generate`, commit the generated client, and restart `bun run dev`.
-`bun run test` starts isolated local actors and real servers against throwaway databases. Set
-`DOOP_TEST_POSTGRES_URL` to a PostgreSQL connection with permission to create databases to include the
-two-server sync test; CI supplies this connection. Schema changes go through drizzle migrations
-(`npx drizzle-kit generate` after editing
+`bun run test` starts isolated local actors and real servers against throwaway databases.
+Schema changes go through drizzle migrations (`npx drizzle-kit generate` after editing
 `server/db/schema.ts`). Security issues: see [SECURITY.md](SECURITY.md) — please report privately.
 
 ## License
