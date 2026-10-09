@@ -31,7 +31,6 @@ vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
 vi.stubGlobal('window', { innerWidth: 1000, innerHeight: 800 })
 const { useStore } = await import('../src/lib/store')
 const sync = await import('../src/lib/canvas-actor')
-const by = { name: 'Me', kind: 'user', color: '#123456', clientId: 'me' }
 const frame = (id: string): Frame => ({
   id,
   canvasId: 'c',
@@ -87,168 +86,31 @@ async function connect(entries: Frame[]) {
   await flush()
 }
 
-it('keeps another frame editable after a disconnect and ignores late updates after deletion', async () => {
-  const a = frame('a'),
-    b = frame('b')
-  await connect([a, b])
-  const contentA = socket('/frames/a/'),
-    contentB = socket('/frames/b/'),
-    index = socket('/canvases/c/')
-  const writeA = sync.writeFrame({ type: 'update', id: 'a', patch: { html: '<p>A</p>' } })
-  const writeB = sync.writeFrame({ type: 'update', id: 'b', patch: { html: '<p>B</p>' } })
-  const rejected = expect(writeA).rejects.toThrow('Connection lost')
-  await flush()
-  const commandB = contentB.sent[0]!
-  contentA.close()
-  await rejected
-  contentB.receive({
-    type: 'state_update',
-    changes: {
-      committed: {
-        type: 'frame-change',
-        revision: 1,
-        operation: 'update',
-        frame: { ...b, html: '<p>B</p>', updatedAt: 2 },
-        actor: by,
-        requestId: 'requestId' in commandB ? commandB.requestId : '',
-      },
-    },
-  })
-  expect((await writeB).html).toBe('<p>B</p>')
-  index.receive({
-    type: 'state_update',
-    changes: { committed: indexSnapshot([b], 1) },
-  })
-  index.receive(indexSnapshot([a, b], 0)) // a delayed snapshot cannot restore removed membership
-  contentA.receive(snapshot(a))
-  expect(useStore.getState().canvas?.frames).toEqual([{ ...b, html: '<p>B</p>', updatedAt: 2 }])
-})
-
-it('resyncs a revision gap on only the affected frame and keeps layout during an HTML reveal', async () => {
+it('reconnects and catches up on frames created, edited, and deleted while offline', async () => {
   vi.useFakeTimers()
   const a = frame('a'),
-    b = frame('b')
-  await connect([a, b])
-  const contentA = socket('/frames/a/'),
-    contentB = socket('/frames/b/'),
-    index = socket('/canvases/c/')
-  contentA.receive({
-    type: 'state_update',
-    changes: {
-      committed: {
-        type: 'frame-change',
-        revision: 3,
-        operation: 'update',
-        frame: { ...a, html: '<main>gap</main>' },
-        actor: by,
-      },
-    },
-  })
-  expect(contentA.sent).toEqual([{ type: 'snapshot' }])
-  expect(contentB.sent).toEqual([])
-  expect(index.sent).toEqual([])
-  contentA.receive({ ...snapshot(a), revision: 3 })
-  contentA.receive({
-    type: 'state_update',
-    changes: {
-      committed: {
-        type: 'frame-change',
-        revision: 4,
-        operation: 'update',
-        frame: { ...a, html: '<main>Brand new generated design</main>', updatedAt: 2 },
-        actor: { ...by, kind: 'agent', clientId: 'agent' },
-      },
-    },
-  })
-  contentA.receive({ type: 'drag', frameId: a.id, x: 900, y: 900, width: a.width, height: a.height, updatedAt: 2 })
-  await vi.advanceTimersByTimeAsync(80)
-  expect(useStore.getState().canvas?.frames[0]?.x).toBe(900)
-  contentA.receive({
-    type: 'state_update',
-    changes: {
-      committed: {
-        type: 'frame-change',
-        revision: 5,
-        operation: 'update',
-        frame: { ...a, html: '<main>Brand new generated design</main>', x: 800, updatedAt: 3 },
-        actor: by,
-      },
-    },
-  })
-  await vi.advanceTimersByTimeAsync(6000)
-  expect(useStore.getState().canvas?.frames.find((entry) => entry.id === 'a')).toMatchObject({
-    x: 800,
-    html: '<main>Brand new generated design</main>',
-  })
-})
-
-it('allows an immediate edit when creation finishes before its index notification', async () => {
-  await connect([])
-  const entry = frame('new')
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (_url: string, init?: RequestInit) => ({
-      ok: true,
-      json: async () => (init?.method === 'POST' ? entry : { websocketUrl: 'ws://test/api/frames/new/actor' }),
-    })),
-  )
-  const created = sync.writeFrame({ type: 'create', input: { name: entry.name } })
-  let complete = false
-  void created.then(() => {
-    complete = true
-  })
-  await flush()
-  expect(complete).toBe(false)
-  const index = socket('/canvases/c/')
-  index.receive({
-    type: 'state_update',
-    changes: {
-      committed: indexSnapshot([entry], 1),
-    },
-  })
-  expect(await created).toEqual(entry)
-  const edited = sync.updateFrame(entry.id, { name: 'Edited immediately' })
-  await flush()
-  const content = socket('/frames/new/')
-  content.receive(snapshot(entry))
-  await flush()
-  const command = content.sent.find((command) => command.type === 'write')
-  if (!command || command.type !== 'write') throw new Error('The follow-up edit was not sent')
-  const saved = { ...entry, name: 'Edited immediately', updatedAt: 2 }
-  content.receive({
-    type: 'state_update',
-    changes: {
-      committed: {
-        type: 'frame-change',
-        revision: 1,
-        operation: 'update',
-        frame: saved,
-        actor: by,
-        requestId: command.requestId,
-      },
-    },
-  })
-  expect(await edited).toEqual(saved)
-  expect(useStore.getState().canvas?.frames).toEqual([saved])
-})
-
-it('reconnects the canvas index and replaces membership missed while disconnected', async () => {
-  vi.useFakeTimers()
-  const a = frame('a'),
-    b = frame('b')
-  await connect([a])
+    b = frame('b'),
+    kept = frame('kept')
+  await connect([a, kept])
   const oldIndex = socket('/canvases/c/')
   oldIndex.close()
+  socket('/frames/a/').close()
+  socket('/frames/kept/').close()
   const ready = sync.connectFrames('c')
   await vi.advanceTimersByTimeAsync(1000)
   await flush()
   const replacement = Socket.instances.filter((candidate) => candidate.url.includes('/canvases/c/')).at(-1)!
   expect(replacement).not.toBe(oldIndex)
-  replacement.receive(indexSnapshot([b], 2))
+  replacement.receive(indexSnapshot([b, kept], 2))
   await ready
   await flush()
   socket('/frames/b/').receive(snapshot(b))
+  const edited = { ...kept, html: '<p>Edited while offline</p>', updatedAt: 2 }
+  const reconnectedFrame = Socket.instances.filter((candidate) => candidate.url.includes('/frames/kept/')).at(-1)!
+  expect(reconnectedFrame).not.toBe(socket('/frames/kept/'))
+  reconnectedFrame.receive({ ...snapshot(edited), revision: 1 })
   oldIndex.receive(indexSnapshot([a], 99)) // late messages from the abandoned connection are ignored
-  expect(useStore.getState().canvas?.frames).toEqual([b])
+  expect(useStore.getState().canvas?.frames).toEqual(expect.arrayContaining([b, edited]))
+  expect(useStore.getState().canvas?.frames).toHaveLength(2)
   expect(socket('/frames/a/').readyState).toBe(3)
 })

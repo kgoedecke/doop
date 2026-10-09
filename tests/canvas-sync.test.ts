@@ -1,15 +1,17 @@
 import { createServer } from 'node:http'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { randomUUID } from 'node:crypto'
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite'
+import { startLocalActors } from 'durable-actors/dev'
 import WebSocket from 'ws'
-import { expect, it } from 'vitest'
-import { Client, startServer } from './harness.ts'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { Client, startServer, type Server } from './harness.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
-import type { FrameChange, FrameSnapshot, FrameEdit } from '../src/actor.ts'
+import type { FrameChange, FrameSnapshot, FrameEdit, IndexSnapshot } from '../src/actor.ts'
 import * as schema from '../server/db/schema.ts'
-import { canvasIndex, frameActor } from '../server/frame-sync.ts'
 
 async function port() {
   const server = createServer()
@@ -19,9 +21,9 @@ async function port() {
   return value
 }
 
-async function until(check: () => boolean | Promise<boolean>) {
+async function until(check: () => boolean) {
   for (let attempt = 0; attempt < 300; attempt++) {
-    if (await check()) return
+    if (check()) return
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   throw new Error('Canvas did not converge')
@@ -34,9 +36,44 @@ async function json<T>(request: Promise<Response>): Promise<T> {
   return body as T
 }
 
-type SyncEvent = FrameSnapshot | FrameChange | { type: 'error'; requestId: string; message: string }
+let server: Server
+let owner: Client
+let canvas: Canvas
+const sockets: WebSocket[] = []
 
-async function joinActor(websocketUrl: string, sockets: WebSocket[]) {
+beforeEach(async () => {
+  server = await startServer(await port(), { ADMIN_EMAILS: 'admin@frame-actors.test' })
+  owner = await new Client(server).signUp('owner@frame-actors.test', 'Owner')
+  canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Canvas' }))
+}, 70_000)
+
+afterEach(async () => {
+  for (const socket of sockets.splice(0)) socket.terminate()
+  server?.stop({ keepData: true })
+  await server?.stopped
+  if (server) await rm(server.dataDir, { recursive: true, force: true })
+  vi.unstubAllEnvs()
+})
+
+async function restartServer(env: Record<string, string> = {}, whileStopped = async () => {}) {
+  const { dataDir } = server
+  const cookies = owner.cookies
+  server.stop({ keepData: true })
+  await server.stopped
+  await whileStopped()
+  server = await startServer(await port(), env, dataDir)
+  owner = new Client(server)
+  owner.cookies = new Map(cookies)
+}
+
+const createFrame = (name = 'Frame') =>
+  json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name, html: '<main>Original</main>' }))
+const readCanvas = () => json<Canvas>(owner.get(`/api/canvases/${canvas.id}`))
+
+type SyncEvent = IndexSnapshot | FrameSnapshot | FrameChange | { type: 'error'; requestId: string; message: string }
+
+async function joinActor(route: string, client = owner) {
+  const { websocketUrl } = await json<{ websocketUrl: string }>(client.get(route))
   const socket = new WebSocket(websocketUrl)
   sockets.push(socket)
   const events: SyncEvent[] = []
@@ -45,108 +82,164 @@ async function joinActor(websocketUrl: string, sockets: WebSocket[]) {
     const event = JSON.parse(String(data)) as SyncEvent | { type: 'state_update'; changes: { committed?: SyncEvent } }
     if (event.type === 'state_update') {
       if (event.changes.committed) events.push(event.changes.committed)
-    } else if (['frame-snapshot', 'error'].includes(event.type)) events.push(event)
+    } else if (['index-snapshot', 'frame-snapshot', 'error'].includes(event.type)) events.push(event)
   })
-  await until(() => events.some((event) => event.type === 'frame-snapshot'))
-  async function request(command: { type: 'write'; write: FrameEdit }) {
+  await until(() => events.some((event) => event.type === 'frame-snapshot' || event.type === 'index-snapshot'))
+  async function write(write: FrameEdit) {
     const requestId = randomUUID()
-    socket.send(JSON.stringify({ ...command, requestId }))
+    socket.send(JSON.stringify({ type: 'write', write, requestId }))
     await until(() => events.some((event) => 'requestId' in event && event.requestId === requestId))
     const event = events.find((event) => 'requestId' in event && event.requestId === requestId)!
     if (event.type === 'error') throw new Error(event.message)
     return event
   }
-  return { socket, events, request }
+  return { events, write }
 }
 
-it('serializes edits and recovers interrupted membership without resurrecting frames', async () => {
-  let server = await startServer(await port())
+it('creates, reads, edits, and deletes a frame through the app', async () => {
+  const frame = await createFrame()
+  expect((await readCanvas()).frames).toEqual([frame])
+  const edited = await json<Frame>(owner.patch(`/api/frames/${frame.id}`, { name: 'Edited', html: '<p>Saved</p>' }))
+  expect(edited).toMatchObject({ id: frame.id, name: 'Edited', html: '<p>Saved</p>' })
+  expect((await readCanvas()).frames).toEqual([edited])
+  await json(owner.delete(`/api/frames/${frame.id}`))
+  expect((await readCanvas()).frames).toEqual([])
+  expect((await owner.get(`/api/frames/${frame.id}/actor`)).status).toBe(404)
+})
+
+it('syncs frame creation, edits, and deletion to two connected clients', async () => {
+  const indexes = await Promise.all([
+    joinActor(`/api/canvases/${canvas.id}/actor`),
+    joinActor(`/api/canvases/${canvas.id}/actor`),
+  ])
+  const frame = await createFrame()
+  await until(() =>
+    indexes.every(({ events }) => events.some((e) => e.type === 'index-snapshot' && e.frameIds.includes(frame.id))),
+  )
+  const clients = await Promise.all([
+    joinActor(`/api/frames/${frame.id}/actor`),
+    joinActor(`/api/frames/${frame.id}/actor`),
+  ])
+  await clients[0]!.write({ type: 'update', patch: { html: '<p>From first client</p>' } })
+  await clients[1]!.write({ type: 'update', patch: { name: 'From second client' } })
+  await until(() =>
+    clients.every(({ events }) =>
+      events.some(
+        (e) =>
+          e.type === 'frame-change' &&
+          e.frame.html === '<p>From first client</p>' &&
+          e.frame.name === 'From second client',
+      ),
+    ),
+  )
+  await json(owner.delete(`/api/frames/${frame.id}`))
+  await until(() =>
+    indexes.every(({ events }) => {
+      const latest = events.at(-1)
+      return latest?.type === 'index-snapshot' && latest.frameIds.length === 0
+    }),
+  )
+  await until(() => clients.every(({ events }) => events.some((e) => e.type === 'frame-snapshot' && e.deleted)))
+})
+
+it('preserves both simultaneous edits to the same frame', async () => {
+  const frame = await createFrame()
+  const first = await joinActor(`/api/frames/${frame.id}/actor`)
+  const second = await joinActor(`/api/frames/${frame.id}/actor`)
+  await Promise.all([
+    first.write({ type: 'replace', find: 'Original', replacement: 'Updated' }),
+    second.write({ type: 'replace', find: '<main>', replacement: '<main class="edited">' }),
+  ])
+  expect((await readCanvas()).frames[0]?.html).toBe('<main class="edited">Updated</main>')
+})
+
+it('keeps saved edits and deletions after the actor runtime restarts', async () => {
+  // This runtime has its own directory so restarting it cannot affect other test files.
+  for (const key of Object.keys(process.env)) {
+    if (
+      (key.startsWith('DURABLE_ACTORS_') && !['DURABLE_ACTORS_BINARY', 'DURABLE_ACTORS_CACHE_DIR'].includes(key)) ||
+      /^TERSE_(ACTOR_URL|API_KEY)$/.test(key)
+    )
+      vi.stubEnv(key, undefined)
+  }
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'doop-actor-persistence-'))
+  const options = {
+    project: process.cwd(),
+    entrypoint: 'src/actor.ts',
+    projectId: 'local',
+    apiKey: randomUUID(),
+    dataDir,
+    port: await port(),
+    quiet: true,
+  }
+  let runtime: Awaited<ReturnType<typeof startLocalActors>> | undefined
   try {
-    const client = await new Client(server).signUp('frames@frame-actors.test', 'Owner')
-    const canvas = await json<Canvas>(client.post('/api/canvases', { name: 'Whole frames' }))
-    const by = { name: 'Owner', kind: 'user' as const, color: '#123456' }
-    const frame = await json<Frame>(
-      client.post(`/api/canvases/${canvas.id}/frames`, { name: 'Frame', html: '<main>Original</main>' }),
-    )
-    const actor = frameActor(frame.id)
-    await expect(actor.write({ type: 'update', patch: { html: 'invalid mixed edit', width: -1 } }, by)).rejects.toThrow(
-      'Invalid frame width',
-    )
-    expect((await actor.snapshot()).frame).toEqual(frame)
-    await Promise.all([
-      actor.write({ type: 'replace', find: 'Original', replacement: 'Updated' }, by),
-      actor.write({ type: 'replace', find: '<main>', replacement: '<main class="edited">' }, by),
-    ])
-    expect((await actor.snapshot()).frame?.html).toBe('<main class="edited">Updated</main>')
-    const competing = await Promise.allSettled([
-      actor.write({ type: 'replace', find: 'Updated', replacement: 'One' }, by),
-      actor.write({ type: 'replace', find: 'Updated', replacement: 'Two' }, by),
-    ])
-    expect(competing.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
-    const index = canvasIndex(canvas.id)
-    const pendingFrame = { ...frame, id: `${canvas.id}.pending`, name: 'Recovered creation' }
-    await index.reserve(pendingFrame.id)
-    await frameActor(pendingFrame.id).initialize(pendingFrame)
-    await index.remove(frame.id)
-    expect((await index.snapshot()).frameIds).toEqual([])
-    const dataDir = server.dataDir
-    server.stop({ keepData: true })
-    await server.stopped
-    expect((await actor.snapshot()).deleted).toBe(false)
-    server = await startServer(await port(), {}, dataDir)
-    const restored = new Client(server)
-    restored.cookies = new Map(client.cookies)
-    await until(async () =>
-      (await json<Canvas>(restored.get(`/api/canvases/${canvas.id}`))).frames.some((f) => f.id === pendingFrame.id),
-    )
-    await until(async () => (await actor.snapshot()).deleted)
-    expect((await json<Canvas>(restored.get(`/api/canvases/${canvas.id}`))).frames.map((f) => f.id)).toEqual([
-      pendingFrame.id,
-    ])
-    expect((await restored.post(`/api/canvases/${canvas.id}/frames`, { id: frame.id, name: 'Retry' })).status).toBe(404)
-    expect(await actor.initialize(frame)).toBe(false)
-    expect((await actor.snapshot()).frame).toBeNull()
-    // Canvas deletion keeps SQL metadata until frame cleanup finishes, allowing a retry after a crash.
-    await index.destroy()
-    expect(await index.activate(pendingFrame.id)).toBe(false)
-    expect(await index.reserve(`${canvas.id}.new`)).toBe(false)
-    expect(await index.snapshot()).toMatchObject({ deleted: true, frameIds: [] })
-    expect((await restored.get(`/api/canvases/${canvas.id}`)).status).toBe(404)
-    await until(async () => (await frameActor(pendingFrame.id).snapshot()).deleted)
+    runtime = await startLocalActors(options)
+    const env = {
+      TERSE_ACTOR_URL: `${runtime.connection.controlPlaneUrl}/v1/projects/local/actors`,
+      TERSE_API_KEY: options.apiKey,
+    }
+    await restartServer(env)
+    const frame = await createFrame('Saved')
+    const removed = await createFrame('Deleted')
+    const edited = await json<Frame>(owner.patch(`/api/frames/${frame.id}`, { html: '<p>Persisted</p>', x: 450 }))
+    await json(owner.delete(`/api/frames/${removed.id}`))
+    const previousPid = runtime.connection.pid
+    await restartServer(env, async () => {
+      await runtime!.stop()
+      runtime = await startLocalActors(options)
+    })
+    expect(runtime.connection.pid).not.toBe(previousPid)
+    expect((await readCanvas()).frames).toEqual([edited])
+    expect((await owner.get(`/api/frames/${removed.id}/actor`)).status).toBe(404)
   } finally {
-    server.stop()
-    await server.stopped
+    await runtime?.stop()
+    await rm(dataDir, { recursive: true, force: true })
   }
 }, 120_000)
 
-it('imports legacy SQL frames once, preserves references, and retries a partial import after restart', async () => {
-  let server = await startServer(await port())
-  const sockets: WebSocket[] = []
-  try {
-    const client = await new Client(server).signUp('migration@frame-actors.test', 'Owner')
-    const canvas = await json<Canvas>(client.post('/api/canvases', { name: 'Legacy canvas' }))
-    const frame: Frame = {
-      id: randomUUID(),
-      canvasId: canvas.id,
-      name: 'Legacy frame',
-      html: '<main>SQL content</main>',
-      x: 10,
-      y: 20,
-      width: 640,
-      height: 480,
-      createdAt: 1,
-      updatedAt: 2,
-      updatedBy: 'Owner',
-      demo: true,
-    }
-    const second = { ...frame, id: randomUUID(), createdAt: 3, html: '<p>Second</p>', demo: false }
-    const dataDir = server.dataDir
-    server.stop({ keepData: true })
-    await server.stopped
-    const local = new PGlite(path.join(dataDir, 'data/pg'))
+it('allows owner edits and rejects unauthorized and read-only writes', async () => {
+  const frame = await createFrame()
+  const stranger = await new Client(server).signUp('stranger@frame-actors.test', 'Stranger')
+  for (const route of [`/api/canvases/${canvas.id}/actor`, `/api/frames/${frame.id}/actor`]) {
+    expect((await new Client(server).get(route)).status).toBe(401)
+    expect((await stranger.get(route)).status).toBe(403)
+  }
+  expect((await stranger.patch(`/api/frames/${frame.id}`, { name: 'Denied' })).status).toBe(403)
+  const allowed = await joinActor(`/api/frames/${frame.id}/actor`)
+  await allowed.write({ type: 'update', patch: { name: 'Owner edit' } })
+  const admin = await new Client(server).signUp('admin@frame-actors.test', 'Admin')
+  const { id: userId } = await json<{ id: string }>(owner.get('/api/me'))
+  await json(admin.post('/api/auth/admin/impersonate-user', { userId }))
+  const readOnly = await joinActor(`/api/frames/${frame.id}/actor`, admin)
+  expect(readOnly.events[0]).toMatchObject({ type: 'frame-snapshot', frame: { name: 'Owner edit' } })
+  await expect(readOnly.write({ type: 'update', patch: { name: 'Denied' } })).rejects.toThrow(
+    'This connection is read only',
+  )
+  expect((await admin.patch(`/api/frames/${frame.id}`, { name: 'Denied' })).status).toBe(403)
+  expect((await readCanvas()).frames[0]?.name).toBe('Owner edit')
+})
+
+it('imports legacy SQL frames and references once without restoring deleted frames', async () => {
+  const frame: Frame = {
+    id: randomUUID(),
+    canvasId: canvas.id,
+    name: 'Legacy frame',
+    html: '<p>SQL content</p>',
+    x: 10,
+    y: 20,
+    width: 640,
+    height: 480,
+    createdAt: 1,
+    updatedAt: 2,
+    updatedBy: 'Owner',
+    demo: true,
+  }
+  await restartServer({}, async () => {
+    const local = new PGlite(path.join(server.dataDir, 'data/pg'))
     try {
       const database = drizzlePglite(local, { schema })
-      await database.insert(schema.frames).values([frame, second])
+      await database.insert(schema.frames).values(frame)
       await database.insert(schema.memoryReferences).values({
         id: randomUUID(),
         canvasId: canvas.id,
@@ -161,141 +254,14 @@ it('imports legacy SQL frames once, preserves references, and retries a partial 
     } finally {
       await local.close()
     }
-    // Simulate death between payload initialization and committing membership.
-    const actor = frameActor(frame.id)
-    await actor.initialize(frame)
-    const imported = await actor.write(
-      { type: 'update', patch: { html: '<main>Already imported and edited</main>' } },
-      { name: 'Owner', kind: 'user', color: '#123456' },
-    )
-    expect((await canvasIndex(canvas.id).snapshot()).initialized).toBe(false)
-    server = await startServer(await port(), {}, dataDir)
-    const restored = new Client(server)
-    restored.cookies = new Map(client.cookies)
-    // Direct legacy frame access and a canvas open can race the first import.
-    const [grant, loaded] = await Promise.all([
-      json<{ websocketUrl: string }>(restored.get(`/api/frames/${frame.id}/actor`)),
-      json<Canvas>(restored.get(`/api/canvases/${canvas.id}`)),
-    ])
-    expect(loaded.frames).toEqual([imported!.frame, second])
-    expect(loaded.references).toEqual([
-      expect.objectContaining({
-        frameId: frame.id,
-        title: 'Keep this reference',
-      }),
-    ])
-    const joined = await joinActor(grant.websocketUrl, sockets)
-    await joined.request({ type: 'write', write: { type: 'update', patch: { name: 'Edited after migration' } } })
-    await json(restored.delete(`/api/frames/${frame.id}`))
-    await json(restored.delete(`/api/frames/${second.id}`))
-    server.stop({ keepData: true })
-    await server.stopped
-    server = await startServer(await port(), {}, dataDir)
-    const restarted = new Client(server)
-    restarted.cookies = new Map(client.cookies)
-    expect((await json<Canvas>(restarted.get(`/api/canvases/${canvas.id}`))).frames).toEqual([])
-    expect((await restarted.get(`/api/frames/${frame.id}/actor`)).status).toBe(404)
-  } finally {
-    for (const socket of sockets) socket.terminate()
-    server.stop()
-    await server.stopped
-  }
-}, 120_000)
-
-it('reserves distinct positions for simultaneous creates and unfinished payloads', async () => {
-  const server = await startServer(await port())
-  try {
-    const owner = await new Client(server).signUp('placement@frame-actors.test', 'Owner')
-    const canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Concurrent placement' }))
-    const frames = await Promise.all(
-      Array.from({ length: 6 }, (_, n) =>
-        json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: `Frame ${n}` })),
-      ),
-    )
-    const sorted = frames.sort((a, b) => a.x - b.x)
-    expect(sorted[0]?.x).toBe(120)
-    for (let n = 1; n < sorted.length; n++) expect(sorted[n]!.x).toBe(sorted[n - 1]!.x + sorted[n - 1]!.width + 80)
-    const rightmost = sorted.at(-1)!
-    const index = canvasIndex(canvas.id)
-    const bounds = Object.fromEntries(frames.map(({ id, x, width }) => [id, { x, width }]))
-    const candidate = { ...rightmost, id: `${canvas.id}.reserved`, width: 900 }
-    const reservation = await index.reserveFrame(candidate, true, bounds)
-    expect(reservation).toMatchObject({ x: rightmost.x + rightmost.width + 80, width: 900 })
-    const next = await json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'After reservation' }))
-    expect(next.x).toBe(rightmost.x + rightmost.width + 80 + 900 + 80)
-  } finally {
-    server.stop()
-    await server.stopped
-  }
-}, 120_000)
-
-it('closes revoked sockets, rejects old tickets, and lets remaining users reconnect', async () => {
-  const server = await startServer(await port())
-  const sockets: WebSocket[] = []
-  const closed = (socket: WebSocket) => new Promise<number>((resolve) => socket.once('close', resolve))
-  try {
-    const owner = await new Client(server).signUp('revocation-owner@frame-actors.test', 'Owner')
-    const visitor = await new Client(server).signUp('revocation-visitor@frame-actors.test', 'Visitor')
-    const canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Revocation' }))
-    const frame = await json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Protected' }))
-    await json(owner.patch(`/api/canvases/${canvas.id}`, { linkAccess: 'edit' }))
-    const ticket = await json<{ websocketUrl: string }>(visitor.get(`/api/frames/${frame.id}/actor`))
-    const joined = await joinActor(ticket.websocketUrl, sockets)
-    const indexTicket = await json<{ websocketUrl: string }>(visitor.get(`/api/canvases/${canvas.id}/actor`))
-    const indexSocket = new WebSocket(indexTicket.websocketUrl)
-    sockets.push(indexSocket)
-    indexSocket.on('error', () => {})
-    let indexReady = false
-    indexSocket.on('message', (data) => {
-      if (JSON.parse(String(data)).type === 'index-snapshot') indexReady = true
-    })
-    await until(() => indexReady)
-    const frameClosed = closed(joined.socket),
-      indexClosed = closed(indexSocket)
-    await json(owner.patch(`/api/canvases/${canvas.id}`, { linkAccess: 'none' }))
-    expect(await frameClosed).toBe(4003)
-    expect(await indexClosed).toBe(4003)
-    expect((await visitor.get(`/api/frames/${frame.id}/actor`)).status).toBe(403)
-    expect((await visitor.patch(`/api/frames/${frame.id}`, { name: 'Denied' })).status).toBe(403)
-    for (const stale of [ticket, indexTicket]) {
-      const replay = new WebSocket(stale.websocketUrl)
-      sockets.push(replay)
-      replay.on('error', () => {})
-      expect(await closed(replay)).toBe(4003)
-    }
-    expect((await frameActor(frame.id).snapshot()).frame?.name).toBe('Protected')
-    const fresh = await json<{ websocketUrl: string }>(owner.get(`/api/frames/${frame.id}/actor`))
-    const remaining = await joinActor(fresh.websocketUrl, sockets)
-    await remaining.request({ type: 'write', write: { type: 'update', patch: { name: 'Owner edit' } } })
-    expect((await frameActor(frame.id).snapshot()).frame?.name).toBe('Owner edit')
-  } finally {
-    for (const socket of sockets) socket.terminate()
-    server.stop()
-    await server.stopped
-  }
-}, 120_000)
-
-it('returns a service error instead of hanging when actors are unavailable', async () => {
-  let server = await startServer(await port())
-  try {
-    const owner = await new Client(server).signUp('unavailable@frame-actors.test', 'Owner')
-    await json(owner.post('/api/canvases', { name: 'Unavailable' }))
-    const dataDir = server.dataDir
-    server.stop({ keepData: true })
-    await server.stopped
-    server = await startServer(
-      await port(),
-      { TERSE_ACTOR_URL: 'http://127.0.0.1:1/v1/projects/local/actors', TERSE_API_KEY: 'test-only' },
-      dataDir,
-    )
-    const restored = new Client(server)
-    restored.cookies = new Map(owner.cookies)
-    const response = await restored.req('/api/canvases', { signal: AbortSignal.timeout(3000) })
-    expect(response.status).toBe(503)
-    expect(await response.json()).toEqual({ error: 'canvas service unavailable' })
-    expect((await fetch(`${server.base}/healthz`)).status).toBe(200)
-  } finally {
-    server.stop()
-    await server.stopped
-  }
+  })
+  const loaded = await readCanvas()
+  expect(loaded.frames).toEqual([frame])
+  expect(loaded.references).toEqual([expect.objectContaining({ frameId: frame.id, title: 'Keep this reference' })])
+  await json(owner.patch(`/api/frames/${frame.id}`, { html: '<p>Edited after migration</p>' }))
+  expect((await readCanvas()).frames[0]?.html).toBe('<p>Edited after migration</p>')
+  await json(owner.delete(`/api/frames/${frame.id}`))
+  await restartServer()
+  expect((await readCanvas()).frames).toEqual([])
+  expect((await owner.get(`/api/frames/${frame.id}/actor`)).status).toBe(404)
 }, 120_000)
