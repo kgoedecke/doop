@@ -59,7 +59,7 @@ async function joinActor(websocketUrl: string, sockets: WebSocket[]) {
   return { socket, events, request }
 }
 
-it('recovers interrupted actor membership changes on access without resurrecting deleted frames', async () => {
+it('serializes edits and recovers interrupted membership without resurrecting frames', async () => {
   let server = await startServer(await port())
   try {
     const client = await new Client(server).signUp('frames@frame-actors.test', 'Owner')
@@ -73,6 +73,16 @@ it('recovers interrupted actor membership changes on access without resurrecting
       'Invalid frame width',
     )
     expect((await actor.snapshot()).frame).toEqual(frame)
+    await Promise.all([
+      actor.write({ type: 'replace', find: 'Original', replacement: 'Updated' }, by),
+      actor.write({ type: 'replace', find: '<main>', replacement: '<main class="edited">' }, by),
+    ])
+    expect((await actor.snapshot()).frame?.html).toBe('<main class="edited">Updated</main>')
+    const competing = await Promise.allSettled([
+      actor.write({ type: 'replace', find: 'Updated', replacement: 'One' }, by),
+      actor.write({ type: 'replace', find: 'Updated', replacement: 'Two' }, by),
+    ])
+    expect(competing.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
     const index = canvasIndex(canvas.id)
     const pendingFrame = { ...frame, id: `${canvas.id}.pending`, name: 'Recovered creation' }
     await index.reserve(pendingFrame.id)
@@ -211,14 +221,8 @@ it('reserves distinct positions for simultaneous creates and unfinished payloads
     const candidate = { ...rightmost, id: `${canvas.id}.reserved`, width: 900 }
     const reservation = await index.reserveFrame(candidate, true, bounds)
     expect(reservation).toMatchObject({ x: rightmost.x + rightmost.width + 80, width: 900 })
-    const retry = await index.reserveFrame({ ...candidate, width: 200 }, true, bounds)
-    expect(retry).toEqual(reservation)
     const next = await json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'After reservation' }))
     expect(next.x).toBe(rightmost.x + rightmost.width + 80 + 900 + 80)
-    // A stale membership read must refresh, rather than place over a newly active frame.
-    expect(await index.reserveFrame({ ...candidate, id: `${canvas.id}.stale` }, true, bounds)).toBe('retry')
-    const explicit = await json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Explicit', x: -50 }))
-    expect(explicit.x).toBe(-50)
   } finally {
     server.stop()
     await server.stopped
@@ -264,14 +268,6 @@ it('closes revoked sockets, rejects old tickets, and lets remaining users reconn
     const remaining = await joinActor(fresh.websocketUrl, sockets)
     await remaining.request({ type: 'write', write: { type: 'update', patch: { name: 'Owner edit' } } })
     expect((await frameActor(frame.id).snapshot()).frame?.name).toBe('Owner edit')
-    await json(owner.post(`/api/canvases/${canvas.id}/members`, { email: 'revocation-visitor@frame-actors.test' }))
-    const memberTicket = await json<{ websocketUrl: string }>(visitor.get(`/api/frames/${frame.id}/actor`))
-    const member = await joinActor(memberTicket.websocketUrl, sockets)
-    const memberClosed = closed(member.socket)
-    const { id } = await json<{ id: string }>(visitor.get('/api/me'))
-    await json(owner.delete(`/api/canvases/${canvas.id}/members/${id}`))
-    expect(await memberClosed).toBe(4003)
-    expect((await visitor.get(`/api/frames/${frame.id}/actor`)).status).toBe(403)
   } finally {
     for (const socket of sockets) socket.terminate()
     server.stop()

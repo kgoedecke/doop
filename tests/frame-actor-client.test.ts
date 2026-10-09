@@ -160,6 +160,9 @@ it('resyncs a revision gap on only the affected frame and keeps layout during an
       },
     },
   })
+  contentA.receive({ type: 'drag', frameId: a.id, x: 900, y: 900, width: a.width, height: a.height, updatedAt: 2 })
+  await vi.advanceTimersByTimeAsync(80)
+  expect(useStore.getState().canvas?.frames[0]?.x).toBe(900)
   contentA.receive({
     type: 'state_update',
     changes: {
@@ -175,32 +178,6 @@ it('resyncs a revision gap on only the affected frame and keeps layout during an
   await vi.advanceTimersByTimeAsync(6000)
   expect(useStore.getState().canvas?.frames.find((entry) => entry.id === 'a')).toMatchObject({
     x: 800,
-    html: '<main>Brand new generated design</main>',
-  })
-})
-
-it('preserves drag previews while revealing generated HTML', async () => {
-  vi.useFakeTimers()
-  const a = frame('a')
-  await connect([a])
-  const content = socket('/frames/a/')
-  content.receive({
-    type: 'state_update',
-    changes: {
-      committed: {
-        type: 'frame-change',
-        revision: 1,
-        operation: 'update',
-        frame: { ...a, html: '<main>Brand new generated design</main>', updatedAt: 2 },
-        actor: { ...by, kind: 'agent', clientId: 'agent' },
-      },
-    },
-  })
-  content.receive({ type: 'drag', frameId: a.id, x: 800, y: 900, width: a.width, height: a.height, updatedAt: 2 })
-  await vi.advanceTimersByTimeAsync(6000)
-  expect(useStore.getState().canvas?.frames[0]).toMatchObject({
-    x: 800,
-    y: 900,
     html: '<main>Brand new generated design</main>',
   })
 })

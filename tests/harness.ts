@@ -20,7 +20,7 @@ export interface Server {
   dataDir: string
   /** Resolves after the child process exits; useful before reopening its data directory. */
   stopped: Promise<void>
-  stop(opts?: { keepData?: boolean; signal?: NodeJS.Signals }): void
+  stop(opts?: { keepData?: boolean }): void
 }
 
 export async function startServer(port: number, env: Record<string, string> = {}, reuseDir?: string): Promise<Server> {
@@ -52,8 +52,8 @@ export async function startServer(port: number, env: Record<string, string> = {}
     port,
     dataDir,
     stopped,
-    stop({ keepData, signal }: { keepData?: boolean; signal?: NodeJS.Signals } = {}) {
-      proc.kill(signal)
+    stop({ keepData }: { keepData?: boolean } = {}) {
+      proc.kill()
       if (!keepData) rmSync(dataDir, { recursive: true, force: true })
     },
   }
