@@ -45,7 +45,6 @@ ENV NODE_ENV=production \
     CHROME_NO_SANDBOX=1 \
     PORT=4400
 
-COPY --from=build /usr/local/bin/bun /usr/local/bin/bun
 COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

@@ -82,13 +82,6 @@ export function endTicketUpload(token: string, success: boolean): void {
   }
 }
 
-/** Asset ids referenced by a piece of frame HTML (/a/<id>.<ext> URLs). */
-export function extractAssetIds(html: string): Set<string> {
-  const ids = new Set<string>()
-  for (const [, id] of html.matchAll(/\/a\/([A-Za-z0-9_-]+)\.[a-z0-9]+/g)) if (id) ids.add(id)
-  return ids
-}
-
 export interface AssetMeta {
   id: string
   mime: string
@@ -167,18 +160,4 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
     return Buffer.concat(chunks)
   }
   throw new Error('too many redirects')
-}
-
-/** Replace asset_refs from a complete frame snapshot supplied by the caller. */
-export async function reconcileAssetRefs(frames: { id: string; html: string }[]): Promise<number> {
-  const rows: { assetId: string; frameId: string }[] = []
-  for (const f of frames) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })
-  await db.delete(t.assetRefs)
-  for (let i = 0; i < rows.length; i += 1000) {
-    await db
-      .insert(t.assetRefs)
-      .values(rows.slice(i, i + 1000))
-      .onConflictDoNothing()
-  }
-  return rows.length
 }
