@@ -10,7 +10,32 @@ import {
   primaryKey,
   jsonb,
 } from 'drizzle-orm/pg-core'
+import type { CanvasPageInfo } from '../../shared/types.ts'
 import type { Schedule, Step } from '../../shared/automations.ts'
+
+/** ActivityKit tokens are delivery secrets: never return them through read APIs. */
+export const liveActivities = pgTable('live_activities', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  canvasId: text('canvas_id').notNull(),
+  token: text('token').notNull().unique(),
+  environment: text('environment').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  lastPayload: text('last_payload'),
+  lastTimestamp: bigint('last_timestamp', { mode: 'number' }).notNull().default(0),
+})
+
+/** Push-to-start tokens (iOS 17.2+): one per device and server origin, so the
+ *  server can start a Live Activity for an agent task on any canvas the user
+ *  belongs to, app open or not. Delivery secrets like the update tokens above. */
+export const liveActivityStarters = pgTable('live_activity_starters', {
+  token: text('token').primaryKey(),
+  userId: text('user_id').notNull(),
+  environment: text('environment').notNull(),
+  /** the server origin string the app uses, echoed into the activity's attributes */
+  origin: text('origin').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+})
 
 /**
  * One Postgres-dialect schema for every environment: PGlite (embedded, file
@@ -21,6 +46,7 @@ import type { Schedule, Step } from '../../shared/automations.ts'
  */
 
 export const canvases = pgTable('canvases', {
+  pages: jsonb('pages').$type<CanvasPageInfo[]>(),
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerId: text('owner_id'),
@@ -124,6 +150,7 @@ export const canvasMembers = pgTable(
 export const frames = pgTable(
   'frames',
   {
+    pageId: text('page_id'),
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
     name: text('name').notNull(),
@@ -610,6 +637,39 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
   enabled: boolean('enabled').notNull().default(false),
   model: text('model').notNull().default('default'),
 })
+
+/** Per-user notification switches. No row means everything is on: comment
+ *  email is opt-out, so the person who shared a review link hears about the
+ *  feedback without first finding a setting. */
+export const notificationPrefs = pgTable('notification_prefs', {
+  userId: text('user_id').primaryKey(),
+  commentEmails: boolean('comment_emails').notNull().default(true),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** Outbound webhooks: per-user endpoints told about events on the canvases
+ *  that user durably has access to (owner, invited, workspace). The secret
+ *  signs every delivery (HMAC), so it is stored as-is, like an integration
+ *  token. Delivery health lives on the row so the settings page can show it. */
+export const webhooks = pgTable(
+  'webhooks',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    url: text('url').notNull(),
+    secret: text('secret').notNull(),
+    /** subscribed event names (shared/webhooks.ts WEBHOOK_EVENTS) */
+    events: jsonb('events').$type<string[]>().notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    lastStatus: integer('last_status'),
+    lastAt: bigint('last_at', { mode: 'number' }),
+    lastError: text('last_error'),
+    /** consecutive failed deliveries; the hook pauses itself past a ceiling */
+    failures: integer('failures').notNull().default(0),
+  },
+  (t) => [index('webhooks_user_idx').on(t.userId)],
+)
 
 /** Which image model generate_image draws with, per user. Separate from
  *  model_accounts because a server-tier user (no account row) still picks

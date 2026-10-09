@@ -155,6 +155,41 @@
       "when": 1790243905494,
       "tag": "0022_linear_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791215906582,
+      "tag": "0023_notification_prefs",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791216598941,
+      "tag": "0024_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791371888951,
+      "tag": "0025_live_activities",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791388595515,
+      "tag": "0026_canvas_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791419435419,
+      "tag": "0027_persist_legacy_page_membership",
+      "breakpoints": true
     }
   ]
 }

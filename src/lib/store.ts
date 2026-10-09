@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { canvasPages, framePageId } from '../../shared/pages'
 import type {
   ActivityItem,
   AgentTask,
@@ -116,6 +117,9 @@ interface State {
    *  follow); any camera move of our own lets go */
   following: string | null
 
+  activePageId: string | null
+  setActivePage(id: string): void
+  setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
   setCanvas(c: Canvas | null): void
   setFrameIndex(frames: string[] | null): void
   setConnected(v: boolean): void
@@ -212,6 +216,7 @@ export const useStore = create<State>((set, get) => ({
   canvas: null,
   frameIndex: null,
   frameMotion: {},
+  activePageId: null,
   presences: {},
   cursors: {},
   activity: [],
@@ -245,11 +250,54 @@ export const useStore = create<State>((set, get) => ({
   streams: {},
 
   setCanvas: (canvas) =>
-    set((state) => ({
+    set((s) => ({
       canvas,
       frameMotion: {},
-      frameIndex: state.canvas?.id === canvas?.id ? state.frameIndex : null,
+      frameIndex: s.canvas?.id === canvas?.id ? s.frameIndex : null,
+      activePageId: canvas
+        ? canvas.id === s.canvas?.id && canvasPages(canvas).some((p) => p.id === s.activePageId)
+          ? s.activePageId
+          : canvasPages(canvas)[0]!.id
+        : null,
     })),
+  setActivePage: (id) =>
+    set((s) => {
+      if (!s.canvas || !canvasPages(s.canvas).some((p) => p.id === id) || s.activePageId === id) return {}
+      return {
+        activePageId: id,
+        selectedId: null,
+        selectedIds: [],
+        selectedElement: null,
+        elementPanelOpen: false,
+        inspectorOpen: false,
+        ctxMenu: null,
+        following: null,
+        snapGuides: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }
+    }),
+  setPages: (pages, canvasId) =>
+    set((s) => {
+      if (!s.canvas || (canvasId !== undefined && s.canvas.id !== canvasId)) return {}
+      const firstId = canvasPages(s.canvas)[0]!.id
+      const canvas = { ...s.canvas, pages, frames: s.canvas.frames.map((f) => ({ ...f, pageId: f.pageId ?? firstId })) }
+      const activePageId = pages.some((p) => p.id === s.activePageId) ? s.activePageId : pages[0]!.id
+      return {
+        canvas,
+        activePageId,
+        ...(activePageId !== s.activePageId
+          ? {
+              selectedId: null,
+              selectedIds: [],
+              selectedElement: null,
+              inspectorOpen: false,
+              elementPanelOpen: false,
+              ctxMenu: null,
+              following: null,
+            }
+          : {}),
+      }
+    }),
   setFrameIndex: (frameIndex) =>
     set((state) => ({
       frameIndex,
@@ -280,7 +328,11 @@ export const useStore = create<State>((set, get) => ({
       if (!p) return {}
       return { presences: { ...s.presences, [clientId]: { ...p, viewport } } }
     }),
-  setFollowing: (following) => set({ following }),
+  setFollowing: (following) => {
+    const pageId = following ? get().presences[following]?.viewport?.pageId : undefined
+    if (pageId) get().setActivePage(pageId)
+    set({ following })
+  },
   setViewportFollowing: (viewport) => set({ viewport }),
   setCursor: (clientId, x, y) => set((s) => ({ cursors: { ...s.cursors, [clientId]: { x, y } } })),
   setEditing: (clientId, frameId) =>
@@ -340,11 +392,23 @@ export const useStore = create<State>((set, get) => ({
     }),
   upsertFrame: (f) =>
     set((s) => {
-      if (!s.canvas) return {}
+      if (!s.canvas || f.canvasId !== s.canvas.id) return {}
       const frames = s.canvas.frames.some((x) => x.id === f.id)
         ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
         : orderFrames([...s.canvas.frames, f], s.frameIndex)
-      return { canvas: { ...s.canvas, frames } }
+      const hidden = s.selectedIds.includes(f.id) && framePageId(s.canvas, f) !== s.activePageId
+      return {
+        canvas: { ...s.canvas, frames },
+        ...(hidden
+          ? {
+              selectedIds: s.selectedIds.filter((id) => id !== f.id),
+              selectedId: null,
+              selectedElement: null,
+              inspectorOpen: false,
+              elementPanelOpen: false,
+            }
+          : {}),
+      }
     }),
   patchFrameLocal: (frameId, patch, animate = false) =>
     set((s) => {
@@ -432,18 +496,27 @@ export const useStore = create<State>((set, get) => ({
   },
   setLimitWall: (limitWall) => set({ limitWall }),
   allowanceChanged: () => set((s) => ({ allowanceVersion: s.allowanceVersion + 1 })),
-  requestFlyTo: (frameId) => set({ flyTo: { frameId, at: Date.now() } }),
+  requestFlyTo: (frameId) => {
+    const s = get()
+    const frame = s.canvas?.frames.find((f) => f.id === frameId)
+    if (frame && s.canvas) s.setActivePage(framePageId(s.canvas, frame))
+    set({ flyTo: { frameId, at: Date.now() } })
+  },
   requestFlyToPoint: (x, y) => set({ flyTo: { point: { x, y }, at: Date.now() } }),
   /* selecting a different frame (or deselecting) closes the Inspector — the
      panel must not follow surface clicks, paste, or undo onto another frame.
      Re-selecting the same frame keeps an open panel open. */
-  select: (selectedId) =>
+  select: (selectedId) => {
+    const state = get()
+    const frame = state.canvas?.frames.find((f) => f.id === selectedId)
+    if (frame && state.canvas) state.setActivePage(framePageId(state.canvas, frame))
     set((s) => {
       const selectedIds = selectedId ? [selectedId] : []
       return s.selectedId === selectedId
         ? { selectedId, selectedIds }
         : { selectedId, selectedIds, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
-    }),
+    })
+  },
   toggleSelect: (id) =>
     set((s) => {
       const selectedIds = s.selectedIds.includes(id) ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id]
@@ -452,13 +525,17 @@ export const useStore = create<State>((set, get) => ({
         ? { selectedIds }
         : { selectedIds, selectedId, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
     }),
-  selectMany: (ids) =>
+  selectMany: (ids) => {
+    const state = get()
+    const frame = state.canvas?.frames.find((f) => f.id === ids[ids.length - 1])
+    if (frame && state.canvas) state.setActivePage(framePageId(state.canvas, frame))
     set((s) => {
       const selectedId = ids[ids.length - 1] ?? null
       return selectedId === s.selectedId
         ? { selectedIds: ids }
         : { selectedIds: ids, selectedId, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
-    }),
+    })
+  },
   setPanMode: (panMode) => set({ panMode }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),

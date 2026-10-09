@@ -1,3 +1,4 @@
+import { canvasPages, samePages } from '../shared/pages.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { Request, Response } from 'express'
@@ -136,23 +137,25 @@ function withFeedback<T extends { content: { type: 'text' | 'image'; [k: string]
   return result
 }
 
-/* upload rate limit per connecting user, mirroring the page-import route */
+/* Per-connecting-user rate limits, each overridable by environment variable
+   for self-hosted instances that want a looser cap (see .env.example). The
+   defaults are the conservative values that suit the hosted service. */
 const uploadHits = new Map<string, number[]>()
-const UPLOADS_PER_MIN = 15
+const UPLOADS_PER_MIN = Number(process.env.MCP_UPLOADS_PER_MIN || 15)
 
 /* photo search burns the shared Pexels quota (200 req/hour on the free tier) */
 const searchHits = new Map<string, number[]>()
-const SEARCHES_PER_MIN = 12
+const SEARCHES_PER_MIN = Number(process.env.MCP_SEARCHES_PER_MIN || 12)
 
 /* generation spends the payer's subscription quota or money — keep a burst
    of retries from draining it */
 const generateHits = new Map<string, number[]>()
-const GENERATIONS_PER_MIN = 6
+const GENERATIONS_PER_MIN = Number(process.env.MCP_GENERATIONS_PER_MIN || 6)
 
 /* importing writes a potentially large HTML frame, so keep it at the same
    conservative per-user rate as the browser UI's import endpoint */
 const importHits = new Map<string, number[]>()
-const IMPORTS_PER_MIN = 5
+const IMPORTS_PER_MIN = Number(process.env.MCP_IMPORTS_PER_MIN || 5)
 
 const agentName = z
   .string()
@@ -161,6 +164,7 @@ const agentName = z
   )
 
 function frameSummary(f: {
+  pageId?: string
   id: string
   name: string
   x: number
@@ -174,6 +178,7 @@ function frameSummary(f: {
 }) {
   return {
     id: f.id,
+    pageId: f.pageId,
     name: f.name,
     ...(f.demo ? { demo: true } : {}),
     x: f.x,
@@ -361,6 +366,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         text({
           id: c.id,
           name: c.name,
+          pages: c.pages,
           /* demo frames (the Doop welcome show, seeded examples) are product
              content, not user work — hidden so agents never mistake them for
              the canvas's established style */
@@ -719,12 +725,45 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   )
 
   server.registerTool(
+    'set_canvas_pages',
+    {
+      description:
+        'Create, rename, reorder or delete canvas pages. Send the complete ordered page list with stable IDs (read get_canvas first). A page containing frames cannot be deleted: move its frames with update_frame first.',
+      inputSchema: {
+        canvas_id: z.string(),
+        expectedPages: z
+          .array(z.object({ id: z.string(), name: z.string() }))
+          .describe('Exact ordered pages returned by get_canvas; protects collaborators from overwritten changes'),
+        pages: z
+          .array(z.object({ id: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100) }))
+          .min(1)
+          .max(100),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, pages, expectedPages, agent_name }) => {
+      const canvas = await canvasFor(canvas_id)
+      if (!canvas) return noCanvas(canvas_id)
+      if (!samePages(expectedPages, canvasPages(store.getCanvasMetadata(canvas_id)!)))
+        return err('Pages changed. Read get_canvas again before saving.')
+      if (new Set(pages.map((p) => p.id)).size !== pages.length) return err('Page IDs must be unique')
+      const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
+      if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId))))
+        return err('Move frames before deleting their page')
+      const actor = actorFrom(agent_name)
+      actions.setCanvasPages(canvas_id, pages, actor)
+      return text({ ok: true, pages })
+    },
+  )
+
+  server.registerTool(
     'create_frame',
     {
       description:
         'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (inline <style> and <script> allowed, no external network access needed). If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live.',
       inputSchema: {
         canvas_id: z.string(),
+        pageId: z.string().optional().describe('Target page ID from get_canvas; defaults to the first page'),
         name: z.string().describe('Frame title, e.g. "Landing hero" or "Pricing card"'),
         html: z
           .string()
@@ -738,9 +777,13 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, name, html, x, y, width, height, agent_name }) => {
+    async ({ canvas_id, pageId, name, html, x, y, width, height, agent_name }) => {
       if (!(await canvasFor(canvas_id))) return noCanvas(canvas_id)
-      const frame = await actions.createFrame(canvas_id, { name, html, x, y, width, height }, actorFrom(agent_name))
+      const frame = await actions.createFrame(
+        canvas_id,
+        { name, pageId, html, x, y, width, height },
+        actorFrom(agent_name),
+      )
       if (!frame) return noCanvas(canvas_id)
       const result = withEscapeNote(
         frame.html.length > 0
@@ -1421,9 +1464,10 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   server.registerTool(
     'update_frame',
     {
-      description: 'Update frame metadata: rename it or move/resize it on the canvas.',
+      description: 'Update frame metadata: rename it, move/resize it, or move it to another page using pageId.',
       inputSchema: {
         frame_id: z.string(),
+        pageId: z.string().optional(),
         name: z.string().optional(),
         x: z.number().optional(),
         y: z.number().optional(),

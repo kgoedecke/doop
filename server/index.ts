@@ -1,3 +1,4 @@
+import { canvasPages, samePages } from '../shared/pages.ts'
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
@@ -15,6 +16,12 @@ import { canvasIndex, frameActor, prepareCanvasSocket, prepareFrameSocket } from
 import { actorRoute as frameRoute } from './actor-route.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
+import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
+import { onCanvasEvent } from './events.ts'
+import * as commentNotifications from './commentNotifications.ts'
+import { notificationsRouter } from './notifications.ts'
+import * as webhooks from './webhooks.ts'
+import { webhooksRouter } from './webhookRoutes.ts'
 import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
 import { auth, initAuth, syncAdmins, getUserName, PUBLIC_ORIGIN, loginProvidersConfig } from './auth.ts'
 import { adminRouter } from './admin.ts'
@@ -48,6 +55,7 @@ import { CLAUDE_MODELS } from '../shared/localAgent.ts'
 import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
+import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import type { Canvas, Frame, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
@@ -77,6 +85,7 @@ await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
 const data = await persist.hydrate()
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canAccessCanvas reads membership
+await webhooks.hydrateWebhooks()
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
 await seed()
@@ -212,6 +221,9 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
+/* after the room has been told: email for the people who were not in it */
+onCanvasEvent(commentNotifications.onCanvasEvent)
+onCanvasEvent(webhooks.onCanvasEvent)
 
 /* ------------------------------------------------- http api */
 
@@ -539,6 +551,7 @@ declare global {
     }
   }
 }
+app.use('/api/live-activities', logLiveActivityRequests)
 app.use('/api', async (req, res, next) => {
   try {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
@@ -628,11 +641,15 @@ function requireFrame(req: express.Request, res: express.Response, frameId: stri
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/notifications', notificationsRouter)
+app.use('/api/webhooks', webhooksRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)
 app.use('/api/integrations', integrationsRouter)
 app.use('/api/workspaces', workspaces.workspacesRouter)
+app.use('/api/live-activities', liveActivitiesRouter)
+startLiveActivityDelivery()
 app.use('/api/billing', billing.billingRouter)
 
 /* free-tier meter for the resident team: {used, limit, connected, byoModel} */
@@ -837,7 +854,11 @@ app.get(
           if (!t.agentName) continue // unclaimed board cards have no agent yet
           if (!seen.has(t.agentName)) seen.set(t.agentName, { owner: t.owner, lastAt: t.startedAt })
         }
-        return { ...c, agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })) }
+        return {
+          ...c,
+          agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })),
+          activeTasks: activeAgentTasks(actions.getTasks(c.id)),
+        }
       }),
     ),
   ),
@@ -1446,15 +1467,60 @@ app.post(
   },
 )
 
+app.put(
+  '/api/canvases/:id/pages',
+  frameRoute(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id)
+    if (!canvas) return
+    const loaded = await store.syncCanvas(canvas.id, 'summary')
+    if (!loaded) return res.status(404).json({ error: 'canvas not found' })
+    const pages = req.body?.pages
+    if (
+      !Array.isArray(pages) ||
+      !pages.length ||
+      pages.length > 100 ||
+      pages.some(
+        (p) =>
+          !p ||
+          typeof p.id !== 'string' ||
+          !p.id.trim() ||
+          p.id.length > 100 ||
+          typeof p.name !== 'string' ||
+          !p.name.trim() ||
+          p.name.length > 100,
+      ) ||
+      new Set(pages.map((p) => p.id)).size !== pages.length
+    ) {
+      return res.status(400).json({ error: 'Provide 1–100 pages with unique IDs and names of up to 100 characters.' })
+    }
+    if (!samePages(req.body?.expectedPages, canvasPages(store.getCanvasMetadata(canvas.id)!)))
+      return res.status(409).json({
+        error: 'Pages changed since you opened them. Please try again.',
+        pages: canvasPages(store.getCanvasMetadata(canvas.id)!),
+      })
+    const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
+    if (loaded.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId)))) {
+      return res.status(400).json({ error: 'Move the frames to another page before deleting this page.' })
+    }
+    const clean = pages.map((p) => ({ id: p.id, name: p.name.trim() }))
+    store.setPages(canvas.id, clean)
+    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    broadcast(canvas.id, { type: 'canvas:pages', pages: clean, actor })
+    res.json(clean)
+  }),
+)
+
 app.post(
   '/api/canvases/:id/frames',
   frameRoute(async (req, res) => {
     if (!requireCanvas(req, res, req.params.id)) return
-    const { name, x, y, width, height, html } = req.body ?? {}
+    const { name, pageId, x, y, width, height, html } = req.body ?? {}
+    if (pageId !== undefined && !store.getCanvasMetadata(req.params.id)?.pages?.some((page) => page.id === pageId))
+      return res.status(400).json({ error: 'page not found' })
     const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
     const frame = await actions.createFrame(
       req.params.id,
-      { name: String(name || 'Frame'), x, y, width, height, html },
+      { name: String(name || 'Frame'), pageId, x, y, width, height, html },
       actor,
       typeof req.body?.id === 'string' ? req.body.id : undefined,
     )
@@ -1466,10 +1532,16 @@ app.post(
 app.patch(
   '/api/frames/:id',
   frameRoute(async (req, res) => {
-    if (!requireFrame(req, res, req.params.id)) return
+    const current = requireFrame(req, res, req.params.id)
+    if (!current) return
     const { actor: _ignored, ...patch } = req.body ?? {}
     const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-    const allowed = ['name', 'x', 'y', 'width', 'height', 'html'] as const
+    if (
+      patch.pageId !== undefined &&
+      !store.getCanvasMetadata(current.canvasId)?.pages?.some((page) => page.id === patch.pageId)
+    )
+      return res.status(400).json({ error: 'page not found' })
+    const allowed = ['name', 'pageId', 'x', 'y', 'width', 'height', 'html'] as const
     const clean: Record<string, unknown> = {}
     for (const k of allowed) if (patch[k] !== undefined) clean[k] = patch[k]
     const frame = await actions.updateFrame(req.params.id, clean, actor)

@@ -426,6 +426,16 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
   if (!canvasId) throw new Error('No canvas is open')
   await connectFrames(canvasId)
   if (connection?.canvasId !== canvasId) throw new Error('Canvas changed before the edit could be sent')
+  // Page membership is validated by the app; the actor still broadcasts the committed frame.
+  if (write.type === 'update' && write.patch.pageId !== undefined) {
+    const response = await fetch(`/api/frames/${encodeURIComponent(write.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(write.patch),
+    })
+    if (!response.ok) throw new Error((await response.json()).error || 'Frame edit failed')
+    return response.json() as Promise<Frame>
+  }
   if (write.type === 'create' || write.type === 'delete') {
     if (write.type === 'create') write.id ??= `${canvasId}.${crypto.randomUUID()}`
     const path =

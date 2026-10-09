@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { ModelAccount } from './modelAccounts.ts'
+import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
 
 /**
  * Runs one Doop Agent turn on OpenAI, speaking the Anthropic message shape
@@ -323,7 +324,7 @@ export async function readEventStream(res: Response): Promise<ResponseBody> {
     }
   }
   if (failure) throw isModelUnavailable(failure) ? new ModelUnavailableError(failure) : new Error(failure)
-  if (!final) throw new Error('OpenAI stream ended without a completed response')
+  if (!final) throw new ModelStreamInterruptedError('OpenAI stream ended without a completed response')
   return final.output?.length ? final : { ...final, output: streamed }
 }
 

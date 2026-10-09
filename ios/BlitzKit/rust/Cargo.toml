@@ -1,0 +1,47 @@
+[package]
+name = "doopblitz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "C ABI around the Blitz HTML/CSS engine for the doop iOS canvas"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "0f60502ea724ef703b34220b3847bb3483f70b5f", default-features = false, features = ["default"] }
+# Same taffy as the pinned Blitz workspace: the bridge re-rounds layout on the device-pixel grid.
+taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "49152ca29664f9687c714c7732d88ff07d62110a", default-features = false, features = ["std", "content_size"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "0f60502ea724ef703b34220b3847bb3483f70b5f", default-features = false }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "0f60502ea724ef703b34220b3847bb3483f70b5f", default-features = false, features = ["svg"] }
+blitz-net = { git = "https://github.com/DioxusLabs/blitz", rev = "0f60502ea724ef703b34220b3847bb3483f70b5f", default-features = false, features = ["cache"] }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "0f60502ea724ef703b34220b3847bb3483f70b5f", default-features = false }
+# Same parley revision as the pinned Blitz commit, for one shared font context.
+parley = { git = "https://github.com/linebender/parley", rev = "718dcb721941fd8e72128833122d31f5a4e80504", default-features = false, features = ["std", "system"] }
+anyrender = "0.14"
+anyrender_vello_cpu = { version = "0.18", features = ["multithreading"], optional = true }
+# Skia paints filter, backdrop-filter and drop-shadow, which the Vello CPU backend skips.
+anyrender_skia = { version = "0.12", optional = true }
+skia-safe = { version = "0.153", optional = true }
+peniko = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+# blitz-dom decodes raster images with `image` but leaves the codecs to feature
+# unification; a standalone crate has to turn them on or PNGs paint blank.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+serde_json = "1"
+
+# Local fix for CSS filter scaling; see vendor/blitz-paint/Cargo.toml.
+[patch."https://github.com/DioxusLabs/blitz"]
+blitz-paint = { path = "../vendor/blitz-paint" }
+
+[features]
+default = ["skia"]
+skia = ["dep:anyrender_skia", "dep:skia-safe"]
+vello-cpu = ["dep:anyrender_vello_cpu"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+panic = "abort"
+strip = true

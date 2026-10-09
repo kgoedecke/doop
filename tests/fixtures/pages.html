@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { Stage } from '/src/components/Stage.tsx'
+      import { useStore } from '/src/lib/store.ts'
+      import { api } from '/src/lib/api.ts'
+      import '/src/styles.css'
+      // This camera fixture supplies loaded frames and an HTTP save stub; actor transport has its own tests.
+      api.updateFrame = async (id, patch) => {
+        const response = await fetch(`/api/frames/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        })
+        return response.json()
+      }
+      window.seedPages = (canvas) => {
+        useStore.getState().setCanvas(canvas)
+        useStore.getState().setFrameIndex(canvas.frames.map((frame) => frame.id))
+      }
+      window.pageState = () => ({
+        activePageId: useStore.getState().activePageId,
+        viewport: useStore.getState().viewport,
+        selectedId: useStore.getState().selectedId,
+      })
+      createRoot(document.getElementById('root')).render(React.createElement(Stage, { onAddFrame: () => {} }))
+    </script>
+  </body>
+</html>

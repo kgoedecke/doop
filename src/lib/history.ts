@@ -1,4 +1,5 @@
-import type { Frame } from '../../shared/types'
+import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
+import type { CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
@@ -7,10 +8,18 @@ import { posthog } from './posthog'
  *  inverse through the normal API, so every collaborator sees it live —
  *  remote actors' work is never undone from here. */
 
-type Patch = Partial<Pick<Frame, 'name' | 'html' | 'x' | 'y' | 'width' | 'height'>>
-type Snapshot = Pick<Frame, 'canvasId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height'>
+type Patch = Partial<Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height'>>
+type Snapshot = Pick<Frame, 'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height'>
 
 type Entry =
+  | {
+      type: 'pages'
+      canvasId: string
+      before: CanvasPageInfo[]
+      after: CanvasPageInfo[]
+      activeBefore: string | null
+      activeAfter: string | null
+    }
   | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number }
   | { type: 'create'; frameId: string; snapshot: Snapshot }
   | { type: 'delete'; frameId: string; snapshot: Snapshot }
@@ -25,7 +34,8 @@ const COALESCE_MS = 1500
 
 let undoStack: Entry[] = []
 let redoStack: Entry[] = []
-let busy = false
+let historyQueue: Promise<void> = Promise.resolve()
+let historyVersion = 0
 /* saves still in flight from a drag: undo/redo wait for them so the inverse
    write never lands before (and gets overwritten by) the original */
 let inflight: Promise<unknown> = Promise.resolve()
@@ -35,6 +45,7 @@ export function trackSave(p: Promise<unknown>) {
 }
 
 export function clearHistory() {
+  historyVersion++
   undoStack = []
   redoStack = []
 }
@@ -46,7 +57,16 @@ function push(entry: Entry) {
 }
 
 function snapshot(f: Frame): Snapshot {
-  return { canvasId: f.canvasId, name: f.name, html: f.html, x: f.x, y: f.y, width: f.width, height: f.height }
+  return {
+    canvasId: f.canvasId,
+    pageId: f.pageId,
+    name: f.name,
+    html: f.html,
+    x: f.x,
+    y: f.y,
+    width: f.width,
+    height: f.height,
+  }
 }
 
 type UpdateEntry = Extract<Entry, { type: 'update' }>
@@ -91,6 +111,24 @@ export function recordUpdates(items: { frameId: string; before: Patch; after: Pa
   push(rest.length ? { type: 'group', entries } : first)
 }
 
+export function recordPages(
+  canvasId: string,
+  before: CanvasPageInfo[],
+  after: CanvasPageInfo[],
+  activeBefore: string | null,
+  activeAfter: string | null,
+) {
+  if (samePages(before, after)) return
+  push({
+    type: 'pages',
+    canvasId,
+    before: before.map((p) => ({ ...p })),
+    after: after.map((p) => ({ ...p })),
+    activeBefore,
+    activeAfter,
+  })
+}
+
 export function recordCreate(frame: Frame) {
   push({ type: 'create', frameId: frame.id, snapshot: snapshot(frame) })
 }
@@ -122,22 +160,29 @@ export function deleteFramesTracked(frames: Frame[]) {
 function remapId(oldId: string, newId: string) {
   const visit = (e: Entry) => {
     if (e.type === 'group') e.entries.forEach(visit)
-    else if (e.frameId === oldId) e.frameId = newId
+    else if (e.type !== 'pages' && e.frameId === oldId) e.frameId = newId
   }
   for (const e of [...undoStack, ...redoStack]) visit(e)
 }
 
 async function recreate(e: { frameId: string; snapshot: Snapshot }) {
   const { canvasId, ...rest } = e.snapshot
+  const canvas = useStore.getState().canvas
+  if (!canvas || canvas.id !== canvasId) throw new Error('Canvas changed')
+  const pages = canvasPages(canvas)
+  if (!rest.pageId || !pages.some((p) => p.id === rest.pageId)) rest.pageId = pages[0]!.id
   const f = await api.createFrame(canvasId, rest)
+  useStore.getState().upsertFrame(f)
   remapId(e.frameId, f.id)
   e.frameId = f.id
 }
 
-/* the frames an applied entry brought back (a redone create, an undone
-   delete): they become the selection, as a group when several returned */
-function recreatedIds(e: Entry, direction: 'undo' | 'redo'): string[] {
-  if (e.type === 'group') return e.entries.flatMap((child) => recreatedIds(child, direction))
+/* Recreated frames and frames moved between pages become the selection,
+   so undo/redo displays the page where the affected designs now live. */
+function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
+  if (e.type === 'group') return e.entries.flatMap((child) => selectionIds(child, direction))
+  if (e.type === 'pages') return []
+  if (e.type === 'update' && 'pageId' in (direction === 'redo' ? e.after : e.before)) return [e.frameId]
   const recreated = e.type === (direction === 'redo' ? 'create' : 'delete')
   return recreated ? [e.frameId] : []
 }
@@ -158,15 +203,43 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     return rest.length ? { type: 'group', entries: ok } : first
   }
   const forward = direction === 'redo'
-  if (e.type === 'update') {
-    const patch = forward ? e.after : e.before
+  if (e.type === 'pages') {
+    const state = useStore.getState()
+    const canvas = state.canvas
+    if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+    const expected = canvasPages(canvas)
+    const next = applyPageChanges(expected, forward ? e.before : e.after, forward ? e.after : e.before)
+    const saved = await api.setPages(canvas.id, next, expected)
+    const current = useStore.getState()
+    if (current.canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    if (samePages(canvasPages(current.canvas), expected) || samePages(canvasPages(current.canvas), saved)) {
+      current.setPages(saved, canvas.id)
+      const active = forward ? e.activeAfter : e.activeBefore
+      if (active) current.setActivePage(active)
+    }
+  } else if (e.type === 'update') {
+    const patch = { ...(forward ? e.after : e.before) }
+    const canvas = useStore.getState().canvas
+    if (patch.pageId !== undefined && canvas) {
+      const pages = canvasPages(canvas)
+      if (!pages.some((page) => page.id === patch.pageId)) patch.pageId = pages[0]!.id
+    }
+    const frame = canvas?.frames.find((frame) => frame.id === e.frameId)
+    const rollback = frame
+      ? (Object.fromEntries(Object.keys(patch).map((key) => [key, frame[key as keyof Frame]])) as Patch)
+      : forward
+        ? e.before
+        : e.after
     useStore.getState().patchFrameLocal(e.frameId, patch)
     try {
       await api.updateFrame(e.frameId, patch)
+      // Remember the actual fallback so the opposite operation stays reversible.
+      if (forward) e.after = patch
+      else e.before = patch
     } catch (err) {
       /* the server kept the old value — put the local copy back in step
          with it rather than leave a client-only position behind */
-      useStore.getState().patchFrameLocal(e.frameId, forward ? e.before : e.after)
+      useStore.getState().patchFrameLocal(e.frameId, rollback)
       throw err
     }
   } else if ((e.type === 'create') === forward) {
@@ -177,27 +250,39 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
   return e
 }
 
-async function step(direction: 'undo' | 'redo') {
-  if (busy) return
-  const [from, to] = direction === 'undo' ? [undoStack, redoStack] : [redoStack, undoStack]
-  const e = from.pop()
-  if (!e) return
-  busy = true
+async function applyStep(direction: 'undo' | 'redo', version: number) {
+  let entry: Entry | undefined
   try {
     await inflight
-    const applied = await apply(e, direction)
+    if (version !== historyVersion) return
+    const from = direction === 'undo' ? undoStack : redoStack
+    entry = from.pop()
+    if (!entry) return
+    const applied = await apply(entry, direction)
+    if (version !== historyVersion) return
     if (applied) {
+      const to = direction === 'undo' ? redoStack : undoStack
       to.push(applied)
-      const ids = recreatedIds(applied, direction)
+      const ids = selectionIds(applied, direction)
       if (ids.length) useStore.getState().selectMany(ids)
       posthog.capture(direction === 'undo' ? 'canvas_undo' : 'canvas_redo')
     }
   } catch (err) {
+    if (entry?.type === 'pages' && useStore.getState().canvas?.id === entry.canvasId) {
+      const from = direction === 'undo' ? undoStack : redoStack
+      from.push(entry)
+      useStore.getState().pushNotice(err instanceof Error ? err.message : 'Could not undo page change')
+    }
     /* the frame is gone or the canvas moved on — drop the entry */
     console.error(`${direction} failed`, err)
-  } finally {
-    busy = false
   }
+}
+
+function step(direction: 'undo' | 'redo') {
+  // Actor updates can paint before the API confirms a save; keep quick keyboard steps in order.
+  const version = historyVersion
+  historyQueue = historyQueue.then(() => applyStep(direction, version))
+  return historyQueue
 }
 
 export function undo() {

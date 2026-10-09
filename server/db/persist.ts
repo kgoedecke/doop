@@ -42,6 +42,7 @@ export async function flush(): Promise<void> {
 function canvasColumns(c: Canvas) {
   return {
     name: c.name,
+    pages: c.pages ?? null,
     ownerId: c.ownerId ?? null,
     linkAccess: c.linkAccess ?? null,
     publishedAt: c.publishedAt ?? null,
@@ -484,8 +485,8 @@ export async function loadLegacyFrameIds(canvasId: string): Promise<string[]> {
 export async function loadLegacyFrame(id: string): Promise<Frame | undefined> {
   const [row] = await db.select().from(t.frames).where(eq(t.frames.id, id))
   if (!row) return undefined
-  const { demo, ...frame } = row
-  return { ...frame, ...(demo === null ? {} : { demo }) }
+  const { demo, pageId, ...frame } = row
+  return { ...frame, ...(demo === null ? {} : { demo }), ...(pageId === null ? {} : { pageId }) }
 }
 
 export async function legacyFrameCanvasId(id: string): Promise<string | undefined> {
@@ -563,6 +564,7 @@ export async function hydrate(): Promise<Hydrated> {
   const canvases: Canvas[] = canvasRows.map((c) => ({
     id: c.id,
     name: c.name,
+    pages: c.pages ?? undefined,
     ownerId: c.ownerId ?? undefined,
     linkAccess: c.linkAccess === 'edit' ? 'edit' : undefined,
     ...(c.publishedAt != null ? { publishedAt: c.publishedAt } : {}),

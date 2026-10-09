@@ -17,14 +17,14 @@ export function CodePanel({ code }: { code: string }) {
       <Button
         variant="inverse"
         size="sm"
-        className="absolute right-2 top-[7px] rounded-md bg-white/[0.12] px-[9px] py-[3px] text-[11px] hover:bg-white/[0.22]"
+        className="absolute right-2 top-[7px] rounded-md bg-paper/[0.12] px-[9px] py-[3px] text-[11px] hover:bg-paper/[0.22]"
         onClick={copy}
       >
         {copied ? 'Copied!' : 'Copy'}
       </Button>
       <pre
         data-stage-scroll
-        className="max-h-[260px] overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-[#d9e2ec] [font-family:ui-monospace,monospace] [word-break:break-word]"
+        className="max-h-[260px] overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-paper [font-family:ui-monospace,monospace] [word-break:break-word]"
       >
         {code}
       </pre>

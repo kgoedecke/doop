@@ -8,3 +8,11 @@ desktop/CHANGELOG.md
 
 # Reproduced byte-for-byte by the actor generator.
 generated/
+# Real frames captured verbatim as Blitz bridge test fixtures
+ios/BlitzKit/rust/tests/*.html
+
+# iOS build outputs (nested .gitignore entries that Prettier does not read)
+ios/DerivedData*/
+ios/.build/
+ios/BlitzKit/rust/target/
+ios/BlitzKit/lib/

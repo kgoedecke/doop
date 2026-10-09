@@ -14,6 +14,7 @@ import {
   stripMentions,
 } from '../shared/agents.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
+import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
   ActorKind,
@@ -278,6 +279,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
      narrates work ON a card, it doesn't end it */
   const open = list.find((t) => sameAgent(t, actor) && !t.endedAt && !t.queuedBy)
   if (open?.status === clean) return // same status re-posted: nothing new
+  const runStartedAt = open ? (open.runStartedAt ?? open.startedAt) : undefined
   if (open) {
     open.endedAt = Date.now()
     persist.saveTask(canvasId, open)
@@ -291,6 +293,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
       color: actor.color,
       status: clean,
       startedAt: Date.now(),
+      ...(runStartedAt ? { runStartedAt } : {}),
     }
     list.unshift(task)
     if (list.length > 100) list.length = 100
@@ -652,6 +655,12 @@ function postComment(
        an API key). Dynamic import: resident depends on this module. */
     import('./resident.ts').then((r) => r.onFeedback(frame.canvasId)).catch(() => {})
   }
+  emitCanvasEvent(frame.canvasId, {
+    type: anchor.parentId ? 'comment.replied' : 'comment.created',
+    comment,
+    frame,
+    actorKind: kind,
+  })
   return comment
 }
 
@@ -742,6 +751,11 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
         })
       }
     }
+    // Notification delivery must not hold up resolving the thread.
+    void store.getFrame(c.frameId).then(
+      (frame) => emitCanvasEvent(canvasId, { type: 'comment.resolved', comment: c, frame, by }),
+      () => emitCanvasEvent(canvasId, { type: 'comment.resolved', comment: c, frame: undefined, by }),
+    )
     return c
   }
   return undefined
@@ -1083,17 +1097,21 @@ export function completeCard(canvasId: string, cardId: string): AgentTask | unde
   card.endedAt = Date.now()
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
+  emitCanvasEvent(canvasId, { type: 'task.completed', task: card })
   return card
 }
 
-/** An unsuccessful card stays paused until a human explicitly retries it. */
+/** An unsuccessful card stays paused until a human explicitly retries it.
+ *  Failing it again before that retry changes nothing — the first reason
+ *  stands, and the failure is announced once. */
 export function failCard(canvasId: string, cardId: string, reason: string): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
-  if (!card || card.endedAt) return card
+  if (!card || card.endedAt || card.failedAt) return card
   card.failedAt = Date.now()
   card.failureReason = reason
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
+  emitCanvasEvent(canvasId, { type: 'task.failed', task: card, reason })
   return card
 }
 
@@ -1209,9 +1227,23 @@ export async function appendFrameHtml(
 
 /* ------------------------------------------------------------------ */
 
+export function setCanvasPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[], actor: Actor) {
+  store.setPages(canvasId, pages)
+  broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+}
+
 export async function createFrame(
   canvasId: string,
-  input: { name: string; x?: number; y?: number; width?: number; height?: number; html?: string; demo?: boolean },
+  input: {
+    name: string
+    pageId?: string
+    x?: number
+    y?: number
+    width?: number
+    height?: number
+    html?: string
+    demo?: boolean
+  },
   actor: Actor,
   id?: string,
 ): Promise<Frame | undefined> {
@@ -1223,12 +1255,13 @@ export async function createFrame(
   }
   logActivity(canvasId, actor, `created frame “${frame.name}”`, frame.id)
   touch(canvasId, actor, frame.id)
+  emitCanvasEvent(canvasId, { type: 'frame.created', frame, actor })
   return frame
 }
 
 export async function updateFrame(
   frameId: string,
-  patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
+  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
   actor: Actor,
 ): Promise<Frame | undefined> {
   return orderedFrame(frameId, async () => {

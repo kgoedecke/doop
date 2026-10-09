@@ -10,6 +10,7 @@ import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import { AccountSettings } from '../components/AccountSettings'
 import { AppearanceSettings } from '../components/AppearanceSettings'
 import { AgentKeys } from '../components/AgentKeys'
+import { Webhooks } from '../components/Webhooks'
 import {
   AccountMenu,
   ConnectCard,
@@ -19,6 +20,7 @@ import {
   IconSpark,
   IconTheme,
   IconUser,
+  IconWebhooks,
 } from '../components/DashShell'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
@@ -37,12 +39,16 @@ import {
   DashTitle,
 } from '../components/ui/dash'
 
-type Pane = 'agent' | 'keys' | 'account' | 'appearance'
+type Pane = 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
 
 /* the heading over each pane, and the line under it */
 const panes: Record<Pane, { title: string; blurb: string }> = {
   agent: { title: 'Doop Agent', blurb: 'Which model account the agent runs on, for every canvas you work on.' },
   keys: { title: 'Agent keys', blurb: 'Bearer credentials that let headless agents design as you.' },
+  webhooks: {
+    title: 'Webhooks',
+    blurb: 'HTTP calls to your systems when something happens on a canvas you can open.',
+  },
   account: { title: 'Your account', blurb: 'Who you are on every canvas — and how you get back into this one.' },
   appearance: {
     title: 'Appearance',
@@ -121,6 +127,9 @@ export function Settings() {
           <DashNavItem icon={<IconKey />} active={pane === 'keys'} onClick={() => setPane('keys')}>
             Agent keys
           </DashNavItem>
+          <DashNavItem icon={<IconWebhooks />} active={pane === 'webhooks'} onClick={() => setPane('webhooks')}>
+            Webhooks
+          </DashNavItem>
           <DashNavItem icon={<IconUser />} active={pane === 'account'} onClick={() => setPane('account')}>
             Your account
           </DashNavItem>
@@ -171,6 +180,9 @@ export function Settings() {
               <TabsTrigger value="keys">
                 <IconKey /> Agent keys
               </TabsTrigger>
+              <TabsTrigger value="webhooks">
+                <IconWebhooks /> Webhooks
+              </TabsTrigger>
               <TabsTrigger value="account">
                 <IconUser /> Account
               </TabsTrigger>
@@ -209,6 +221,8 @@ export function Settings() {
             </>
           ) : pane === 'keys' ? (
             <AgentKeys />
+          ) : pane === 'webhooks' ? (
+            <Webhooks />
           ) : pane === 'account' ? (
             <AccountSettings />
           ) : (

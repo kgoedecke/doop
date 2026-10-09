@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
 import type { FrameInput, FramePatch } from '../src/actor.ts'
+import { canvasPages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
 import { colorFor } from '../shared/types.ts'
 import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
@@ -31,7 +32,9 @@ class Store {
       await mapFrames(ids, async (frameId) => {
         const frame = await persist.loadLegacyFrame(frameId)
         if (!frame || frame.canvasId !== id) throw new Error(`Legacy frame unavailable: ${frameId}`)
-        await frameActor(frameId).initialize(frame)
+        const pages = canvasPages(this.canvases.get(id)!)
+        const pageId = pages.some((page) => page.id === frame.pageId) ? frame.pageId : pages[0]!.id
+        await frameActor(frameId).initialize({ ...frame, pageId })
       })
       // Each actor initializes once. Concurrent imports and retries after a crash
       // cannot overwrite edits or reset an already initialized index.
@@ -91,7 +94,7 @@ class Store {
               if (!(await canvasIndex(id).has(frameId))) return undefined // concurrent deletion
               throw new Error(`Frame unavailable: ${frameId}`)
             }
-            return { html: '', ...frame }
+            return this.withPage({ html: '', ...frame }, canvas)
           })
     const present = frames.filter((frame): frame is Frame => !!frame)
     return {
@@ -102,7 +105,26 @@ class Store {
   }
 
   init(canvases: Canvas[]) {
-    for (const c of canvases) this.canvases.set(c.id, { ...c, frames: [] })
+    for (const c of canvases) this.canvases.set(c.id, { ...c, pages: canvasPages(c), frames: [] })
+  }
+
+  /** Older actors and orphaned frames rejoin the first page on their next read. */
+  private async withPage(frame: Frame, canvas: Canvas): Promise<Frame> {
+    const pages = canvasPages(canvas)
+    if (pages.some((page) => page.id === frame.pageId)) return frame
+    return (
+      (
+        await frameActor(frame.id).write(
+          { type: 'update', patch: { pageId: pages[0]!.id } },
+          { name: frame.updatedBy, kind: 'user', color: colorFor(frame.updatedBy) },
+        )
+      )?.frame ?? frame
+    )
+  }
+
+  /** Metadata for server loops such as Live Activity push-to-start. */
+  allCanvases(): Canvas[] {
+    return [...this.canvases.values()]
   }
 
   /** The dashboard row for one canvas. `viewerId` decides only whether the
@@ -167,6 +189,7 @@ class Store {
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
     this.canvases.set(canvas.id, canvas)
+    canvas.pages = canvasPages(canvas)
     persist.saveCanvas(canvas)
     return canvas
   }
@@ -212,6 +235,7 @@ class Store {
       createdAt: now,
       updatedAt: now,
       frames,
+      pages: canvasPages(source).map((page) => ({ ...page })),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
       ...(references?.length ? { references } : {}),
@@ -229,6 +253,15 @@ class Store {
 
   getCanvasMetadata(id: string) {
     return this.canvases.get(id)
+  }
+
+  setPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[]) {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return undefined
+    canvas.pages = pages
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return pages
   }
 
   /** Invalidate issued tickets as well as sockets, before an access change answers. */
@@ -509,17 +542,22 @@ class Store {
       if (!(await canvasIndex(membership.canvasId).has(frameId))) return undefined
       throw new Error(`Frame unavailable: ${frameId}`)
     }
-    return frame
+    return this.withPage(frame, this.canvases.get(membership.canvasId)!)
   }
 
   async createFrame(canvasId: string, input: FrameInput, by: string, creationId?: string): Promise<Frame | undefined> {
-    if (!(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureMembership(canvasId))) return undefined
+    const metadata = await this.loadCanvasMetadata(canvasId)
+    if (!metadata || !(await this.ensureMembership(canvasId))) return undefined
+    const pages = canvasPages(metadata)
+    const pageId = input.pageId ?? pages[0]!.id
+    if (!pages.some((page) => page.id === pageId)) return undefined
     const id = creationId ?? `${canvasId}.${nanoid(10)}`
     if (!id.startsWith(`${canvasId}.`) || !/^[A-Za-z0-9._-]{1,128}$/.test(id)) throw new Error('Invalid frame ID')
     const now = Date.now()
     const candidate: Frame = {
       id,
       canvasId,
+      pageId,
       name: input.name,
       html: input.html ?? '',
       x: input.x ?? 120,
@@ -535,7 +573,9 @@ class Store {
     let frame: Frame | 'retry' | null
     do {
       const canvas = input.x === undefined ? await this.syncCanvas(canvasId, 'summary') : undefined
-      const observed = Object.fromEntries((canvas?.frames ?? []).map(({ id, x, width }) => [id, { x, width }]))
+      const observed = Object.fromEntries(
+        (canvas?.frames ?? []).map(({ id, x, width, pageId }) => [id, { x, width, pageId }]),
+      )
       frame = await index.reserveFrame(candidate, input.x === undefined, observed)
     } while (frame === 'retry')
     if (!frame) return undefined
@@ -551,7 +591,13 @@ class Store {
   }
 
   async updateFrame(frameId: string, patch: FramePatch, by: string, actor?: Actor): Promise<Frame | undefined> {
-    if (!(await this.getFrameMembership(frameId))) return undefined
+    const membership = await this.getFrameMembership(frameId)
+    if (!membership) return undefined
+    if (
+      patch.pageId !== undefined &&
+      !canvasPages(this.canvases.get(membership.canvasId)!).some((page) => page.id === patch.pageId)
+    )
+      return undefined
     return (
       await frameActor(frameId).write(
         { type: 'update', patch },

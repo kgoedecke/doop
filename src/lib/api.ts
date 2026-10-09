@@ -1,5 +1,8 @@
 import { updateFrame, writeFrame } from './canvas-actor'
+import { useStore } from './store'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
+import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
 import type {
   ActivityItem,
   ChatMessage,
@@ -260,6 +263,17 @@ export async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listWebhooks: () => req<WebhookInfo[]>('/api/webhooks'),
+  createWebhook: (input: { url: string; events: WebhookEventType[] }) =>
+    req<WebhookInfo & { secret: string }>('/api/webhooks', { method: 'POST', body: JSON.stringify(input) }),
+  updateWebhook: (id: string, patch: { url?: string; events?: WebhookEventType[]; enabled?: boolean }) =>
+    req<WebhookInfo>(`/api/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteWebhook: (id: string) => req<{ ok: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
+  rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
+  testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
+  notificationSettings: () => req<NotificationSettings>('/api/notifications'),
+  setNotificationPrefs: (prefs: NotificationPrefs) =>
+    req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),
@@ -372,8 +386,27 @@ export const api = {
     }
     return res.json() as Promise<{ url: string; mime: string; size: number }>
   },
+  setPages: (
+    canvasId: string,
+    pages: import('../../shared/types').CanvasPageInfo[],
+    expectedPages: import('../../shared/types').CanvasPageInfo[],
+  ) =>
+    req<import('../../shared/types').CanvasPageInfo[]>(`/api/canvases/${canvasId}/pages`, {
+      method: 'PUT',
+      body: JSON.stringify({ pages, expectedPages }),
+    }),
   createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) =>
-    writeFrame({ type: 'create', input }, canvasId),
+    writeFrame(
+      {
+        type: 'create',
+        input: {
+          pageId:
+            useStore.getState().canvas?.id === canvasId ? (useStore.getState().activePageId ?? undefined) : undefined,
+          ...input,
+        },
+      },
+      canvasId,
+    ),
   updateFrame,
   deleteFrame: (frameId: string) => writeFrame({ type: 'delete', id: frameId }),
   sendTaskFeedback: (taskId: string, text: string) =>

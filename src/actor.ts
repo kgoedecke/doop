@@ -3,8 +3,9 @@ import { repairEscapedHtml } from '../server/escapedHtml.js'
 import { MAX_FRAME_HTML_BYTES } from '../server/limits.js'
 import type { ActivityItem, Actor as Attribution, Frame } from '../shared/types.js'
 
-export type FrameInput = Pick<Frame, 'name'> & Partial<Pick<Frame, 'x' | 'y' | 'width' | 'height' | 'html' | 'demo'>>
-export type FramePatch = Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>
+export type FrameInput = Pick<Frame, 'name'> &
+  Partial<Pick<Frame, 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'demo'>>
+export type FramePatch = Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html'>>
 export type FrameWrite =
   | { type: 'create'; id?: string; input: FrameInput }
   | { type: 'update'; id: string; patch: FramePatch }
@@ -36,8 +37,8 @@ export type FrameCommand = { type: 'snapshot' } | FrameDrag | { type: 'write'; w
 export type FrameMetadata = { actor: Attribution; readOnly: boolean; accessVersion?: number }
 type SyncError = { type: 'error'; requestId: string; message: string }
 
-type FrameRow = Omit<Frame, 'demo'> & { demo: number | null }
-const SUMMARY_COLUMNS = 'id, canvasId, name, x, y, width, height, createdAt, updatedAt, updatedBy, demo'
+type FrameRow = Omit<Frame, 'demo' | 'pageId'> & { demo: number | null; pageId: string | null }
+const SUMMARY_COLUMNS = 'id, canvasId, name, x, y, width, height, createdAt, updatedAt, updatedBy, demo, pageId'
 const COLUMNS = `${SUMMARY_COLUMNS}, html`
 function frameTable(db: ActorDatabase): true {
   db.exec(
@@ -45,10 +46,12 @@ function frameTable(db: ActorDatabase): true {
       'x REAL NOT NULL, y REAL NOT NULL, width REAL NOT NULL, height REAL NOT NULL, html TEXT NOT NULL, ' +
       'createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, updatedBy TEXT NOT NULL, demo INTEGER)',
   )
+  if (!db.exec<{ name: string }>('PRAGMA table_info(frame)').some((column) => column.name === 'pageId'))
+    db.exec('ALTER TABLE frame ADD COLUMN pageId TEXT')
   return true
 }
-function decodeRow<T extends { demo: number | null }>({ demo, ...row }: T) {
-  return { ...row, ...(demo === null ? {} : { demo: demo === 1 }) }
+function decodeRow<T extends { demo: number | null; pageId: string | null }>({ demo, pageId, ...row }: T) {
+  return { ...row, ...(demo === null ? {} : { demo: demo === 1 }), ...(pageId === null ? {} : { pageId }) }
 }
 function readFrame(db: ActorDatabase): Frame | null {
   const [row] = db.exec<FrameRow>(`SELECT ${COLUMNS} FROM frame`)
@@ -85,7 +88,7 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
   @Persisted private deleted = false
   @Persisted private revision = 0
   @Persisted private accessRevision = 0
-  @Persisted private reservedBounds: Record<string, { x: number; width: number }> = {}
+  @Persisted private reservedBounds: Record<string, { x: number; width: number; pageId?: string }> = {}
   @Ephemeral private ready = false
   @Persisted @Emittable committed: IndexSnapshot | null = null
 
@@ -156,7 +159,7 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
   async reserveFrame(
     frame: Frame,
     automatic: boolean,
-    observed: Record<string, { x: number; width: number }>,
+    observed: Record<string, { x: number; width: number; pageId?: string }>,
   ): Promise<Frame | 'retry' | null> {
     validateFrame(frame)
     if (!this.initialized || this.deleted) return null
@@ -172,11 +175,14 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
       // A create may have activated since the caller read the canvas. Refresh before deciding.
       if (automatic && entry.status === 'active' && !observed[entry.id]) return 'retry'
       const bounds = entry.status === 'creating' ? this.reservedBounds[entry.id] : observed[entry.id]
-      if (bounds) edges.push(bounds.x + bounds.width)
+      if (bounds && bounds.pageId === frame.pageId) edges.push(bounds.x + bounds.width)
     }
     if (automatic) frame = { ...frame, x: edges.length ? Math.max(...edges) + 80 : 120 }
     if (!(await this.reserve(frame.id))) return null
-    this.reservedBounds = { ...this.reservedBounds, [frame.id]: { x: frame.x, width: frame.width } }
+    this.reservedBounds = {
+      ...this.reservedBounds,
+      [frame.id]: { x: frame.x, width: frame.width, pageId: frame.pageId },
+    }
     return frame
   }
 
@@ -270,6 +276,9 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
     }
     try {
       if (socket.metadata.readOnly) throw new Error('This connection is read only')
+      // Page changes use the app API, which validates SQL-owned canvas pages.
+      if (command.write.type === 'update' && command.write.patch.pageId !== undefined)
+        throw new Error('Page changes must use the frame API')
       if (!(await this.write(command.write, socket.metadata.actor, command.requestId)))
         throw new Error('Frame not found')
     } catch (error) {
@@ -298,7 +307,7 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
     validateFrame(frame)
     if (!this.ready) this.ready = frameTable(this.db)
     this.db.exec(
-      `INSERT INTO frame (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO frame (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       frame.id,
       frame.canvasId,
       frame.name,
@@ -310,6 +319,7 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
       frame.updatedAt,
       frame.updatedBy,
       frame.demo === undefined ? null : frame.demo ? 1 : 0,
+      frame.pageId ?? null,
       frame.html,
     )
     this.initialized = true
@@ -352,7 +362,8 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
           ? { html: before.html.replace(write.find, write.replacement) }
           : Object.fromEntries(
               Object.entries(write.patch).filter(
-                ([key, value]) => ['name', 'x', 'y', 'width', 'height', 'html'].includes(key) && value !== undefined,
+                ([key, value]) =>
+                  ['name', 'pageId', 'x', 'y', 'width', 'height', 'html'].includes(key) && value !== undefined,
               ),
             )
     if (write.type !== 'append' && patch.html !== undefined) patch.html = repairEscapedHtml(patch.html)
@@ -360,7 +371,7 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
     validateFrame(frame)
     const { name, html } = frame
     this.db.exec(
-      'UPDATE frame SET name = ?, x = ?, y = ?, width = ?, height = ?, html = ?, updatedAt = ?, updatedBy = ? WHERE id = ?',
+      'UPDATE frame SET name = ?, x = ?, y = ?, width = ?, height = ?, html = ?, updatedAt = ?, updatedBy = ?, pageId = ? WHERE id = ?',
       name,
       frame.x,
       frame.y,
@@ -369,6 +380,7 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
       html,
       frame.updatedAt,
       by.name,
+      frame.pageId ?? null,
       this.id,
     )
     const change: FrameChange = {

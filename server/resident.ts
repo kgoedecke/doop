@@ -16,10 +16,11 @@ import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
 import { DESIGN_BRIEF, DESIGN_QUALITY } from './guide.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
-import type { AgentTask, Frame } from '../shared/types.ts'
+import type { Actor, AgentTask, Frame } from '../shared/types.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
+import { retryModelTurn } from './modelTurnRetry.ts'
 
 /**
  * The resident design team: a server-side Claude tool loop, run once per
@@ -509,12 +510,29 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       } else
         for (let turn = 0; turn < maxTurns; turn++) {
           if (canceled()) return 'ran'
-          const res = await model.run({
-            maxTokens: 16000,
-            system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
-            tools: TOOLS,
-            messages,
-          })
+          /* the status showing when the connection dropped, so a recovered
+             run picks its narration back up instead of staying "reconnecting" */
+          let interruptedStatus: string | undefined
+          const res = await retryModelTurn(
+            () =>
+              model.run({
+                maxTokens: 16000,
+                system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
+                tools: TOOLS,
+                messages,
+              }),
+            {
+              isCanceled: canceled,
+              onRetry: (attempt) => {
+                interruptedStatus ??= currentStatus(canvasId, actor)
+                console.warn(
+                  `[resident] model connection interrupted canvas=${canvasId} turn=${turn + 1} retry=${attempt}`,
+                )
+                actions.setAgentStatus(canvasId, actor, `Model connection interrupted — reconnecting (${attempt}/2)…`)
+              },
+            },
+          )
+          if (interruptedStatus !== undefined) actions.setAgentStatus(canvasId, actor, interruptedStatus)
 
           if (canceled()) return 'ran'
           if (res.stop_reason === 'refusal') {
@@ -617,6 +635,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           break
         }
     } catch (err) {
+      /* a stopped run's cards are already failed; whatever its last turn
+         threw is noise, not a crash to report */
+      if (canceled()) return 'ran'
       /* An API/tool crash becomes a visible, manually retryable failure. */
       crashed = true
       /* a dead credential is the one crash a human can actually fix, so it
@@ -721,6 +742,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     actions.setAgentStatus(canvasId, actor, '')
   }
   return 'ran'
+}
+
+/** What the agent's panel entry currently says, or '' when nothing is open. */
+function currentStatus(canvasId: string, actor: Actor): string {
+  return actions.getTasks(canvasId).find((t) => t.agentName === actor.name && !t.endedAt && !t.queuedBy)?.status ?? ''
 }
 
 const TOOLS: Anthropic.Tool[] = [

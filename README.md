@@ -27,6 +27,11 @@ activity feed.
   to connect. Runs on the server's `ANTHROPIC_API_KEY` for a handful of free tasks, then on the
   **ChatGPT subscription** (or OpenAI key) each user connects ([setup](#the-doop-agent)); the
   first-canvas welcome performance is scripted and runs without any of it.
+- **Pages within a canvas** — organize frames into named pages from the Layers panel. Add, rename,
+  drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
+  Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
+  with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
+  `expectedPages` to protect collaborators), and target frames with `pageId`.
 - **True multiplayer** — live cursors, presence, per-frame editing indicators, undo/redo, comments
   pinned to elements, and an activity feed.
 - **Design memory** — pin exemplar frames, capture decisions, and let the distiller propose durable
@@ -83,6 +88,13 @@ render; the desktop app opens its native save panel.
 Connect Linear from **Integrations** to read issues through MCP or install Doop as a delegated
 agent. Delegated tickets create a canvas and a design card, then report the result back to Linear.
 See [Linear setup](docs/linear.md) for OAuth and webhook configuration.
+
+## iPhone and iPad app
+
+The SwiftUI iOS app lives in [`ios/`](ios/README.md). Open `ios/Doop.xcodeproj`
+in Xcode to run it against Doop Cloud or your own HTTPS server. It uses SwiftUI for the app interface and a native canvas that
+renders frames with the Blitz HTML/CSS engine (Rust, no WebKit), over the same REST API and WebSocket rooms. The app is in development;
+see the iOS README for validation status and remaining release requirements.
 
 ## Hook up Claude Code
 

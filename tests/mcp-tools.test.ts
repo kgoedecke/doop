@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 
 interface ToolInputSchema {
@@ -88,4 +88,48 @@ describe('MCP generate_image tool contract', () => {
       await server.close()
     }
   })
+})
+
+it('requires the original page list and rejects stale agent replacements', async () => {
+  const { store } = await import('../server/store.ts')
+  const canvas = {
+    id: 'mcp-page-conflict',
+    ownerId: 'test-owner-id',
+    name: 'Pages',
+    pages: [
+      { id: 'first', name: 'Main' },
+      { id: 'collaborator', name: 'New' },
+    ],
+    frames: [],
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  store.canvases.set(canvas.id, canvas)
+  const syncCanvas = vi.spyOn(store, 'syncCanvas').mockResolvedValue(canvas)
+  const server = buildMcpServer('Test Owner', 'test-owner-id')
+  const client = new Client({ name: 'pages-test', version: '1.0.0' })
+  const [a, b] = InMemoryTransport.createLinkedPair()
+  await server.connect(b)
+  await client.connect(a)
+  try {
+    const tool = (await client.listTools()).tools.find((tool) => tool.name === 'set_canvas_pages')!
+    expect(tool.inputSchema.required).toContain('expectedPages')
+    const result = await client.callTool({
+      name: 'set_canvas_pages',
+      arguments: {
+        canvas_id: canvas.id,
+        pages: [{ id: 'first', name: 'Renamed' }],
+        expectedPages: [{ id: 'first', name: 'Main' }],
+        agent_name: 'Agent',
+      },
+    })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toContain('Pages changed')
+    expect(canvas.pages).toHaveLength(2)
+  } finally {
+    syncCanvas.mockRestore()
+    store.canvases.delete(canvas.id)
+    await client.close()
+    await server.close()
+  }
 })

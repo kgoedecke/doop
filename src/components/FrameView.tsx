@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { ElementComment, Frame } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { useStore } from '../lib/store'
+import { currentPageCanvas } from '../lib/pages'
 import { registerFrameWindow, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
 import { previewFrame } from '../lib/canvas-actor'
@@ -26,6 +27,14 @@ import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
 import { RoleMark } from './RoleMark'
+
+/** ?comment=<rootId> — the link in a comment email. The thread opens once
+ *  Stage has selected the linked frame (deselection closes popovers, and on
+ *  first paint no frame is selected yet). Frames that do not hold the
+ *  comment ignore it: only a root with that id ever renders an open popover. */
+function deepLinkedThread(): string | null {
+  return new URLSearchParams(location.search).get('comment')
+}
 
 /* Counter-scale contract: chrome that keeps constant on-screen size divides
    by the `--zoom` variable the Stage publishes (capped at 2.4× when zoomed
@@ -176,7 +185,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     let dupDropped = false
     if (duplicating) setDuping(true)
     /* a move carries every selected frame along; a resize is this frame only */
-    const frames = useStore.getState().canvas?.frames ?? []
+    const frames = currentPageCanvas()?.frames ?? []
     const selectedIds = mode === 'move' ? useStore.getState().selectedIds : [frame.id]
     const group = frames
       .filter((f) => selectedIds.includes(f.id))
@@ -222,7 +231,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
          except that a ⌥⇧ duplicate-drag holds ⌥ for the whole gesture, and
          the copy should land on the guides like any other move. Frames
          riding along in the group are not neighbours. */
-      const others = useStore.getState().canvas?.frames.filter((f) => !groupIds.has(f.id)) ?? []
+      const others = currentPageCanvas()?.frames.filter((f) => !groupIds.has(f.id)) ?? []
       const free = ev.altKey && !duplicating
       const snapped = free ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom)
       useStore.getState().setSnapGuides(snapped.guides)
@@ -312,6 +321,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
   const [composing, setComposing] = useState(false)
   const [openThread, setOpenThread] = useState<string | null>(null)
+  const [linkedThread, setLinkedThread] = useState<string | null>(deepLinkedThread)
   const [pinPos, setPinPos] = useState<Record<string, { x: number; y: number } | null>>({})
   const probeReq = useRef(0)
   const probeTimer = useRef<number | null>(null)
@@ -396,6 +406,11 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
   if (wasSelected !== selected) {
     setWasSelected(selected)
     if (!selected) setProbe(null)
+    else if (linkedThread) {
+      /* the emailed thread, now that selection will not close it again */
+      setOpenThread(linkedThread)
+      setLinkedThread(null)
+    }
   }
 
   /* the outlined element is shared with the Layers panel through the store:
@@ -843,7 +858,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                     {!composing ? (
                       <>
                         <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop animate-[chip-in_0.18s_ease]">
-                          <span className="rounded-[5px] bg-white/[0.14] px-[5px] py-px text-[11px] font-bold text-white [font-family:ui-monospace,monospace]">
+                          <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px text-[11px] font-bold text-paper [font-family:ui-monospace,monospace]">
                             {anchor.tag}
                           </span>
                           <Button

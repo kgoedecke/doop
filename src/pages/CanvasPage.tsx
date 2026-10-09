@@ -26,6 +26,7 @@ import { PromptBar } from '../components/PromptBar'
 import { WorkingNow } from '../components/WorkingNow'
 import { SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
+import { PagesPanel } from '../components/PagesPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
 import {
@@ -509,9 +510,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <div className="border-b border-line-soft px-5 py-4 pr-14">
                 <SheetTitle className="font-display text-lg font-extrabold">Canvas actions</SheetTitle>
                 <SheetDescription className="mt-1 text-xs text-ink-soft">
-                  Import, share, or change your account settings.
+                  Organize pages, import, share, or change your account settings.
                 </SheetDescription>
               </div>
+              <PagesPanel />
               <div className="grid gap-2 p-4">
                 <Button
                   variant="ghost"

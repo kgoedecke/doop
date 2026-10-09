@@ -256,7 +256,7 @@ it('imports legacy SQL frames and references once without restoring deleted fram
     }
   })
   const loaded = await readCanvas()
-  expect(loaded.frames).toEqual([frame])
+  expect(loaded.frames).toEqual([{ ...frame, pageId: canvas.pages![0]!.id }])
   expect(loaded.references).toEqual([expect.objectContaining({ frameId: frame.id, title: 'Keep this reference' })])
   await json(owner.patch(`/api/frames/${frame.id}`, { html: '<p>Edited after migration</p>' }))
   expect((await readCanvas()).frames[0]?.html).toBe('<p>Edited after migration</p>')

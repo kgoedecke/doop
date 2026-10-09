@@ -31,6 +31,7 @@ interface $CanvasIndexContract {
                 {
                     x: number
                     width: number
+                    pageId?: string
                 }
             >
         ): Promise<Frame | "retry" | null>
@@ -79,6 +80,8 @@ interface Actor {
 interface Frame {
     id: string
     canvasId: string
+    /** Unset on legacy frames: belongs to the first page. */
+    pageId?: string
     name: string
     x: number
     y: number
@@ -143,7 +146,7 @@ type FrameMetadata$1 = {
     readOnly: boolean
     accessVersion?: number
 }
-type FramePatch = Partial<Pick<Frame, "name" | "x" | "y" | "width" | "height" | "html">>
+type FramePatch = Partial<Pick<Frame, "name" | "pageId" | "x" | "y" | "width" | "height" | "html">>
 type FrameSnapshot = {
     type: "frame-snapshot"
     revision: number
