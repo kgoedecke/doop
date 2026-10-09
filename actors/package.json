@@ -1,0 +1,12 @@
+{
+  "name": "doop-actors",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "durable-actors": "0.7.16"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.3"
+  }
+}

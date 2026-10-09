@@ -411,7 +411,8 @@ The actor API key stays on the server. Doop does not relay actor WebSocket traff
 actor runtime for you. Multiple app instances must share the same actor project. Back up actor
 storage alongside SQL and uploaded assets. Automatic local actors are limited to development and tests.
 
-Existing SQL frame rows and older canvas/index actor state are not imported by this development branch.
+Actor deployment uses the source list in `scripts/deploy-actors.mjs` and the package settings in
+`actors/`. Add new actor source dependencies to that list when introducing imports.
 
 ## Connect an AI agent
 

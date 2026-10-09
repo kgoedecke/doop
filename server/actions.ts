@@ -1140,7 +1140,7 @@ export async function appendFrameHtml(
   actor: Actor,
   opts: { start?: boolean; done?: boolean } = {},
 ): Promise<Frame | undefined> {
-  const before = await store.syncFrame(frameId)
+  const before = await store.getFrame(frameId)
   if (!before) return undefined
 
   const starting = opts.start || !streams.has(frameId)
@@ -1193,7 +1193,7 @@ export async function updateFrame(
   patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
   actor: Actor,
 ): Promise<Frame | undefined> {
-  const before = await store.syncFrame(frameId)
+  const before = await store.getFrame(frameId)
   if (!before) return undefined
   if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
   const prevName = before.name

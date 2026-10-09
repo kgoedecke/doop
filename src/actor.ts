@@ -8,7 +8,6 @@ export type FramePatch = Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'hei
 export type FrameWrite =
   | { type: 'create'; id?: string; input: FrameInput }
   | { type: 'update'; id: string; patch: FramePatch }
-  | { type: 'append'; id: string; chunk: string; start: boolean; done?: boolean }
   | { type: 'delete'; id: string }
 
 export type FrameEdit =

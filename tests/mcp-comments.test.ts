@@ -97,7 +97,6 @@ function stubStore(canvases: Canvas[], frames: Frame[]) {
   vi.spyOn(store, 'getCanvasMetadata').mockImplementation((id: string) => canvases.find((c) => c.id === id))
   vi.spyOn(store, 'getFrame').mockImplementation(async (id: string) => frames.find((f) => f.id === id))
   vi.spyOn(store, 'syncCanvas').mockImplementation(async (id: string) => store.getCanvasMetadata(id))
-  vi.spyOn(store, 'syncFrame').mockImplementation(async (id: string) => store.getFrame(id))
 }
 
 beforeEach(() => {

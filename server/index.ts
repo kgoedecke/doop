@@ -304,7 +304,7 @@ app.get(
   frameRoute(async (req, res) => {
     const { id, ext } = req.params as { id: string; ext: string }
     if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
-    const frame = await store.syncFrame(id)
+    const frame = await store.getFrame(id)
     if (!frame) return res.status(404).end()
 
     let result: Awaited<ReturnType<typeof getImage>>
@@ -582,9 +582,7 @@ app.use('/api/canvases/:canvasId', (req, res, next) => {
   )
 })
 app.use('/api/frames/:frameId', (req, res, next) => {
-  void (
-    req.path === '/actor' ? store.getFrameMembership(req.params.frameId) : store.syncFrame(req.params.frameId)
-  ).then(
+  void (req.path === '/actor' ? store.getFrameMembership(req.params.frameId) : store.getFrame(req.params.frameId)).then(
     (frame) => {
       res.locals.frame = frame
       next()

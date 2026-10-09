@@ -38,36 +38,14 @@ export function testEnvironment(environment) {
   return env
 }
 
-export function actorEnvironment(environment, connection) {
-  const env = { ...environment }
-  // SDK aliases and inherited credentials must never override a managed runtime.
-  for (const key of Object.keys(env)) {
-    if (
-      /^DURABLE_(ACTORS|OBJECT)_/.test(key) ||
-      /^TERSE_(ACTOR_URL|API_KEY)$/.test(key) ||
-      /^DOOP_ACTORS_(INTERNAL_KEY|URL|API_KEY)$/.test(key)
-    )
-      delete env[key]
-  }
-  return {
-    ...env,
-    TERSE_ACTOR_URL: `${connection.controlPlaneUrl}/v1/projects/${connection.projectId}/actors`,
-    TERSE_API_KEY: connection.apiKey || '',
-    DURABLE_ACTORS_CONTROL_PLANE_URL: connection.controlPlaneUrl,
-    DURABLE_ACTORS_PROJECT_ID: connection.projectId,
-    ...(connection.apiKey ? { DURABLE_ACTORS_SECRET: connection.apiKey } : {}),
-  }
-}
-
 async function startManagedActors(options) {
   // The SDK spawns using process.env, not an options.env. Keep runtime download
   // overrides, but never inherit hosted storage/provider/credential settings.
   const inherited = {}
   for (const key of Object.keys(process.env)) {
     if (
-      (/^DURABLE_(ACTORS|OBJECT)_/.test(key) && !['DURABLE_ACTORS_BINARY', 'DURABLE_ACTORS_CACHE_DIR'].includes(key)) ||
-      /^TERSE_(ACTOR_URL|API_KEY)$/.test(key) ||
-      /^DOOP_ACTORS_(INTERNAL_KEY|URL|API_KEY)$/.test(key)
+      (/^DURABLE_ACTORS_/.test(key) && !['DURABLE_ACTORS_BINARY', 'DURABLE_ACTORS_CACHE_DIR'].includes(key)) ||
+      /^TERSE_(ACTOR_URL|API_KEY)$/.test(key)
     ) {
       inherited[key] = process.env[key]
       delete process.env[key]
@@ -82,18 +60,8 @@ async function startManagedActors(options) {
 
 export async function prepareActors({ test = false, environment = process.env } = {}) {
   if (test) environment = testEnvironment(environment)
-  // Tests are isolated even if the developer's shell points at production.
-  // External testing is opt-in and must target a disposable QA project.
-  if (test && environment.DOOP_TEST_ACTORS && !['local', 'external'].includes(environment.DOOP_TEST_ACTORS))
-    throw new Error('DOOP_TEST_ACTORS must be local or external.')
-  const external = test
-    ? environment.DOOP_TEST_ACTORS === 'external'
-    : !!(environment.TERSE_ACTOR_URL || environment.DURABLE_ACTORS_CONTROL_PLANE_URL)
-  if (external) {
-    if (!environment.TERSE_ACTOR_URL && !environment.DURABLE_ACTORS_CONTROL_PLANE_URL)
-      throw new Error('External actor mode requires DURABLE_ACTORS_CONTROL_PLANE_URL or TERSE_ACTOR_URL.')
-    return { env: { ...environment }, owned: false, stop: async () => {} }
-  }
+  // Tests always own an isolated runtime, even when the shell targets production.
+  if (!test && environment.TERSE_ACTOR_URL) return { env: { ...environment }, stop: async () => {} }
   const temporary = test ? await mkdtemp(path.join(tmpdir(), 'doop-actors-')) : undefined
   const port = test ? 0 : Number(environment.DOOP_ACTORS_PORT || 7100)
   if (!Number.isInteger(port) || port < 0 || port > 65535)
@@ -111,8 +79,11 @@ export async function prepareActors({ test = false, environment = process.env } 
     console.log(`[actors] ${test ? 'Isolated test' : 'Local'} runtime ready at ${runtime.connection.controlPlaneUrl}`)
     let stopped
     return {
-      env: actorEnvironment(environment, runtime.connection),
-      owned: true,
+      env: {
+        ...environment,
+        TERSE_ACTOR_URL: `${runtime.connection.controlPlaneUrl}/v1/projects/${runtime.connection.projectId}/actors`,
+        TERSE_API_KEY: runtime.connection.apiKey || '',
+      },
       closed: runtime.closed,
       stop: () =>
         (stopped ??= (async () => {

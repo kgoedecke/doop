@@ -202,7 +202,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
     return c && canAccessCanvas(ownerId, c) ? c : undefined
   }
   const frameFor = async (frameId: string) => {
-    const f = await store.syncFrame(frameId)
+    const f = await store.getFrame(frameId)
     if (!f) return undefined
     return (await canvasFor(f.canvasId)) ? f : undefined
   }
