@@ -22,8 +22,6 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
-    volumes:
-      - doop-data:/app/data
     depends_on:
       db:
         condition: service_healthy
@@ -45,5 +43,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  doop-data:
   doop-pg:
