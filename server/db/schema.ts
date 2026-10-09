@@ -17,8 +17,7 @@ import type { Schedule, Step } from '../../shared/automations.ts'
  * in ./data) during development, a managed Postgres via DATABASE_URL in
  * production. Timestamps are epoch-ms bigints to match the in-memory types.
  * Metadata/collaboration writes are mirrored asynchronously, without FKs.
- * Frame membership is SQL-authoritative and updated in awaited transactions;
- * its tombstones survive deletion of the canvas metadata.
+ * Actors own frames and their membership; SQL frame rows are a legacy import source.
  */
 
 export const canvases = pgTable('canvases', {
@@ -351,9 +350,8 @@ export const chatMessages = pgTable(
 )
 
 /** Uploaded image assets: metadata only — bytes live in object storage (or
- *  ./data/assets in dev). canvas_id is a housekeeping hint, not ownership:
- *  liveness comes from asset_refs, so a URL copied to another canvas keeps
- *  its asset alive. */
+ *  ./data/assets in dev). canvas_id records the upload destination; frame
+ *  HTML in actors determines which assets are in use. */
 export const assets = pgTable(
   'assets',
   {
@@ -369,10 +367,8 @@ export const assets = pgTable(
   (t) => [index('assets_canvas_idx').on(t.canvasId)],
 )
 
-/** Which frames reference which assets — a projection of frame HTML, synced
- *  on every durable frame write (recomputed from the frame's full HTML, so
- *  it cannot drift like a counter would) and rebuilt at boot. GC is then an
- *  indexed anti-join here instead of a scan over all HTML. */
+/** Legacy projection of frame HTML. Actor edits do not update this table;
+ *  it cannot determine whether an asset is safe to delete. */
 export const assetRefs = pgTable(
   'asset_refs',
   {

@@ -143,7 +143,6 @@ async function play(canvasId: string) {
     await sleep(CHUNK_MS)
   }
 
-  /* wait for the reveal to catch up (~500 chars/s) before signing off */
   await sleep(Math.min(20_000, WELCOME_HTML.length * 2 + 3000))
   actions.setAgentStatus(canvasId, actor, 'Done — connect your own agent next')
   await sleep(6000)

@@ -22,9 +22,8 @@ import type {
 } from '../../shared/types.ts'
 
 /**
- * Write-through persistence: the in-memory maps stay the source of truth and
- * the hot path; every committed mutation is mirrored here asynchronously.
- * Nothing on the live path (presence, cursors, reveal ticks) awaits the DB.
+ * Canvas metadata and collaboration state are mirrored from in-memory maps
+ * to SQL asynchronously. Frames are persisted by their actors.
  */
 
 const pendingWrites = new Set<Promise<unknown>>()
@@ -63,8 +62,7 @@ export function saveCanvas(c: Canvas) {
   )
 }
 
-/** Persist a newly duplicated canvas as one unit. Unlike ordinary live edits,
- * duplication must not report success until every copied row is durable. */
+/** Persist a duplicated canvas's metadata, guidelines and references together. */
 export async function saveCanvasCopy(c: Canvas): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.insert(t.canvases).values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })

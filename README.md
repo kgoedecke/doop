@@ -28,7 +28,7 @@ activity feed.
   **ChatGPT subscription** (or OpenAI key) each user connects ([setup](#the-doop-agent)); the
   first-canvas welcome performance is scripted and runs without any of it.
 - **True multiplayer** — live cursors, presence, per-frame editing indicators, undo/redo, comments
-  pinned to elements, and an activity feed, all over one WebSocket room.
+  pinned to elements, and an activity feed.
 - **Design memory** — pin exemplar frames, capture decisions, and let the distiller propose durable
   style rules that every agent follows.
 - **Private by default** — invite collaborators by email or flip on link sharing per canvas;
@@ -490,18 +490,15 @@ is redacted before upload (`data-doop-sync-ignore` excludes an element entirely)
 credential: it can only write frames to its one canvas, so revoking it in the Share dialog cuts the
 app off instantly. Endpoint: `POST /ingest/<key>` (CORS-open, no cookies).
 
-### How streaming looks (server-side smoothing)
+### How streaming looks
 
-Agent HTML lands in the store immediately, but viewers see it through a **typewriter reveal**: the server
-broadcasts the accumulated HTML at a steady rate (~500 chars/s, accelerating to clear backlogs in ~8s),
-so even an agent that sends few large chunks — or a one-shot `set_frame_html` / `create_frame` with
-full HTML — plays back as a smooth live stream. Mid-reveal HTML is _healed_ before broadcast: a trailing
-half-written tag is dropped, an unclosed `<script>` is cut (never run half-written JS), and an unclosed
-`<style>` is closed so content paints instead of blanking. Human edits from the inspector bypass the
-reveal (and a human html edit cancels any open reveal — the human takes over).
+Frame actors persist agent HTML and send it to subscribed browsers. Appended chunks render as they
+arrive; large agent updates get a browser-side **typewriter reveal**. Partial HTML is _healed_ before
+rendering: trailing incomplete tags and scripts are dropped, and unclosed styles are closed.
+Human edits bypass the reveal. The reveal changes only presentation; actor reads return saved HTML.
 
 While a stream/reveal is open the frame gets a pulsing dashed border and a "✦ <agent> is designing…"
-chip; "finished designing" logs when the reveal completes. A stale stream auto-closes after 30s.
+chip; "finished designing" logs when the agent sends `done=true`. A stale stream auto-closes after 30s.
 There is also a REST equivalent: `POST /api/frames/:id/append` with `{ html_chunk, start?, done?, actor? }`.
 
 ### How agents learn the workflow
@@ -611,7 +608,7 @@ free. `resolve_comment` also costs nothing.
 - **Infinite canvas** — wheel to pan, `⌘`/`ctrl` + wheel (or pinch) to zoom, drag the background to pan,
   zoom-to-fit; dot grid tracks the viewport.
 - **Frames** — drag to move, corner handle to resize, click to select. The right-hand inspector edits
-  name/position/size and the raw HTML with debounced live saves. `⌫` deletes the selected frame.
+  name/position/size and the raw HTML with live saves batched every 50ms. `⌫` deletes the selected frame.
 - **Multiplayer** — live cursors with name tags, presence avatars, per-frame "who's editing" indicators,
   colored flash when a remote actor changes a frame, drag positions streamed live, auto-reconnect.
 - **Activity feed** — every create/edit/rename/delete, by whom (user or agent), with timestamps.
@@ -623,13 +620,15 @@ free. `resolve_comment` also costs nothing.
 ```
 server/          Node (tsx) — one process on :4400
   index.ts       Express REST API + ws rooms + presence + static serving (prod)
-  store.ts       In-memory canvas/frame state (hot path), write-through to the DB
-  db/            Drizzle schema + PGlite/Postgres connection + write-through persistence
+  store.ts       Canvas metadata cache + frame access through actor RPC
+  db/            PGlite/Postgres application records + legacy frame imports
   actions.ts     Shared mutations: broadcast + activity log + agent presence
   mcp.ts         MCP server (@modelcontextprotocol/sdk), stateless streamable HTTP at /mcp
   seed.ts        Demo canvas on first run
 shared/types.ts  Store + ws protocol types shared by server and client
 src/             React + Vite + zustand client on :4300
+  actor.ts       CanvasIndex membership and FrameActor state, persisted in actor SQLite
+  lib/canvas-actor.ts  Browser subscriptions and edits over actor WebSockets
   components/ui/ The component system — every styled primitive lives here
   styles.css     Design tokens, the base reset, and keyframes. Nothing else.
 ```
@@ -656,7 +655,7 @@ untouched. Each canvas has a small `CanvasIndex` actor holding ordered frame IDs
 bookkeeping. Browsers subscribe directly to this index and to one `FrameActor` per frame; reconnecting
 loads a fresh snapshot. Browser edits go directly to frame actors, while REST/MCP edits reach the same
 actors through the server. The `/ws` room carries chat, presence, and other collaboration events.
-PostgreSQL keeps the existing application records; frame membership needs no new SQL tables or listeners.
+PostgreSQL stores canvas metadata and collaboration records; actors own frames and their membership.
 
 On first canvas access, existing SQL frames are automatically copied into frame actors before the index
 is initialized. IDs and references stay unchanged. Imports can be retried after a crash and never overwrite

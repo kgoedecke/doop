@@ -8,7 +8,7 @@ import * as storage from './storage.ts'
  * Uploaded image assets: bytes in object storage (server/storage.ts), one
  * metadata row per asset in the assets table (including the canvas it was
  * uploaded for). Frame HTML is the ground truth for which assets are still
- * in use. Boot leaves asset_refs intact so it does not activate every canvas
+ * in use. Boot leaves asset_refs intact so it does not activate every frame
  * actor. The projection is not kept current during direct actor edits, so
  * future cleanup must consult actor state. Nothing is currently deleted.
  */
@@ -169,10 +169,7 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
   throw new Error('too many redirects')
 }
 
-/** Rebuild the asset_refs projection from a full set of frames — called at
- *  boot with the frames hydrate just loaded (no extra I/O), which both
- *  backfills pre-existing content and heals any drift from failed
- *  write-through. Incremental upkeep afterwards lives in db/persist.ts. */
+/** Replace asset_refs from a complete frame snapshot supplied by the caller. */
 export async function reconcileAssetRefs(frames: { id: string; html: string }[]): Promise<number> {
   const rows: { assetId: string; frameId: string }[] = []
   for (const f of frames) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })

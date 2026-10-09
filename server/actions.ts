@@ -1278,7 +1278,6 @@ export function replaceFrameHtml(
 
 export async function deleteFrame(frameId: string, actor: Actor): Promise<Frame | undefined> {
   return orderedFrame(frameId, async () => {
-    /* Finish stream tracking while the frame still exists so its task can end. */
     finishStream(frameId, false)
     const frame = await store.deleteFrame(frameId)
     if (!frame) return undefined
