@@ -13,6 +13,7 @@ import type {
   DesignDecision,
   ElementComment,
   GuidelineDoc,
+  Frame,
   MemoryProposal,
   MemoryReference,
   RepoCardKind,
@@ -471,6 +472,28 @@ export interface Hydrated {
 const LOG_CAP = 100
 /** the chat keeps more history than the other logs — it is the conversation */
 export const CHAT_LOG_CAP = 300
+
+/** Read-only bridge for existing installs; actors become authoritative on first access. */
+export async function loadLegacyFrameIds(canvasId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: t.frames.id })
+    .from(t.frames)
+    .where(eq(t.frames.canvasId, canvasId))
+    .orderBy(t.frames.createdAt, t.frames.id)
+  return rows.map((row) => row.id)
+}
+
+export async function loadLegacyFrame(id: string): Promise<Frame | undefined> {
+  const [row] = await db.select().from(t.frames).where(eq(t.frames.id, id))
+  if (!row) return undefined
+  const { demo, ...frame } = row
+  return { ...frame, ...(demo === null ? {} : { demo }) }
+}
+
+export async function legacyFrameCanvasId(id: string): Promise<string | undefined> {
+  const [row] = await db.select({ canvasId: t.frames.canvasId }).from(t.frames).where(eq(t.frames.id, id))
+  return row?.canvasId
+}
 
 /** Discover canvas metadata without rehydrating frames or AI queues. */
 export async function loadCanvas(id: string): Promise<Canvas | undefined> {

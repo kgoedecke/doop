@@ -24,10 +24,11 @@
 
 ## 3. Data and Persistence
 
-- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - primary database, including
-  ordered frame membership and lifecycle bookkeeping. `LISTEN/NOTIFY` updates membership across app servers;
-  the app WebSocket delivers snapshots to browsers. PGlite uses in-process notifications in development.
-- `durable-actors` - `FrameActor` owns each whole frame, using 1 CPU and 256 MiB.
+- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - existing application records.
+  Legacy frame rows are imported automatically on first canvas access, preserving IDs and references.
+- `durable-actors` - `CanvasIndex` owns ordered frame IDs and lifecycle bookkeeping;
+  `FrameActor` owns each whole frame. Each uses 1 CPU and 256 MiB. Browser subscriptions go directly
+  to both actor types, with fresh snapshots on reconnect and no SQL notification plumbing.
   Local actors start automatically in development/tests;
   production requires a separate actor API, with browser WebSockets connecting directly to it.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and

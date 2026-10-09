@@ -62,6 +62,131 @@ function validateFrame(frame: Frame) {
       throw new Error(`Invalid frame ${key}`)
 }
 
+export type IndexSnapshot = {
+  type: 'index-snapshot'
+  revision: number
+  frameIds: string[]
+  initialized: boolean
+  deleted: boolean
+}
+export type IndexCommand = { type: 'snapshot' }
+type IndexEntry = { id: string; status: 'creating' | 'active' | 'deleting' | 'deleted' }
+
+function indexTable(db: ActorDatabase): true {
+  db.exec('CREATE TABLE IF NOT EXISTS entries (id TEXT PRIMARY KEY, position INTEGER NOT NULL, status TEXT NOT NULL)')
+  return true
+}
+
+/** Canvas membership is serialized separately from each frame's content. */
+@Compute({ cpu: 1, memoryMiB: 256, idleTimeoutMs: 5000 })
+export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapshot> {
+  @Persisted private initialized = false
+  @Persisted private deleted = false
+  @Persisted private revision = 0
+  @Ephemeral private ready = false
+  @Persisted @Emittable committed: IndexSnapshot | null = null
+
+  override async onConnect(socket: ActorSocketOf<CanvasIndex>) {
+    socket.send(await this.snapshot())
+  }
+
+  override async onMessage(socket: ActorSocketOf<CanvasIndex>, command: IndexCommand) {
+    if (command.type === 'snapshot') socket.send(await this.snapshot())
+  }
+
+  /** Called only after legacy frame payloads have been copied. Retrying cannot reset membership. */
+  async initialize(frameIds: string[] = []): Promise<IndexSnapshot> {
+    if (!this.initialized) {
+      if (!this.ready) this.ready = indexTable(this.db)
+      for (const [position, id] of frameIds.entries())
+        this.db.exec("INSERT INTO entries (id, position, status) VALUES (?, ?, 'active')", id, position)
+      this.initialized = true
+      this.committed = await this.snapshot()
+    }
+    return this.snapshot()
+  }
+
+  async snapshot(): Promise<IndexSnapshot> {
+    if (!this.ready) this.ready = indexTable(this.db)
+    return {
+      type: 'index-snapshot',
+      revision: this.revision,
+      initialized: this.initialized,
+      deleted: this.deleted,
+      frameIds: this.db
+        .exec<{ id: string }>("SELECT id FROM entries WHERE status = 'active' ORDER BY position")
+        .map((row) => row.id),
+    }
+  }
+
+  async has(id: string): Promise<boolean> {
+    if (!this.ready) this.ready = indexTable(this.db)
+    return !this.deleted && !!this.db.exec("SELECT id FROM entries WHERE id = ? AND status = 'active'", id).length
+  }
+
+  /** Record intent before initializing the frame, so a later access can finish an interrupted create. */
+  async reserve(id: string): Promise<boolean> {
+    if (!id.startsWith(`${this.id}.`)) throw new Error('Frame ID must belong to this canvas')
+    if (!this.initialized || this.deleted) return false
+    if (!this.ready) this.ready = indexTable(this.db)
+    const [existing] = this.db.exec<IndexEntry>('SELECT id, status FROM entries WHERE id = ?', id)
+    if (existing) return existing.status === 'creating' || existing.status === 'active'
+    this.db.exec(
+      "INSERT INTO entries (id, position, status) SELECT ?, COALESCE(MAX(position), -1) + 1, 'creating' FROM entries",
+      id,
+    )
+    return true
+  }
+
+  async activate(id: string): Promise<boolean> {
+    if (this.deleted) return false
+    if (!this.ready) this.ready = indexTable(this.db)
+    const [entry] = this.db.exec<IndexEntry>('SELECT id, status FROM entries WHERE id = ?', id)
+    if (!entry || (entry.status !== 'creating' && entry.status !== 'active')) return false
+    if (entry.status === 'creating') {
+      this.db.exec("UPDATE entries SET status = 'active' WHERE id = ?", id)
+      this.revision++
+      this.committed = await this.snapshot()
+    }
+    return true
+  }
+
+  async remove(id: string): Promise<boolean> {
+    if (!this.ready) this.ready = indexTable(this.db)
+    const removed = this.db.exec(
+      "UPDATE entries SET status = 'deleting' WHERE id = ? AND status IN ('creating', 'active') RETURNING id",
+      id,
+    )
+    if (!removed.length) return false
+    this.revision++
+    this.committed = await this.snapshot()
+    return true
+  }
+
+  async pending(): Promise<IndexEntry[]> {
+    if (!this.ready) this.ready = indexTable(this.db)
+    return this.db.exec<IndexEntry>(
+      "SELECT id, status FROM entries WHERE status IN ('creating', 'deleting') ORDER BY position",
+    )
+  }
+
+  async confirmDelete(id: string): Promise<void> {
+    if (!this.ready) this.ready = indexTable(this.db)
+    // Keep the tombstone so creation retries and legacy imports cannot resurrect the frame.
+    this.db.exec("UPDATE entries SET status = 'deleted' WHERE id = ? AND status = 'deleting'", id)
+  }
+
+  async destroy(): Promise<void> {
+    if (this.deleted) return
+    if (!this.ready) this.ready = indexTable(this.db)
+    this.db.exec("UPDATE entries SET status = 'deleting' WHERE status IN ('creating', 'active')")
+    this.initialized = true
+    this.deleted = true
+    this.revision++
+    this.committed = await this.snapshot()
+  }
+}
+
 /** The whole frame has one writer, one invocation queue, and one revision. */
 @Compute({ cpu: 1, memoryMiB: 256, idleTimeoutMs: 5000 })
 export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot | FrameDrag | SyncError> {
@@ -112,7 +237,7 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
   async initialize(frame: Frame): Promise<boolean> {
     if (this.initialized) return false
     if (frame.id !== this.id) throw new Error('Frame ID mismatch')
-    if (!frame.id.startsWith(`${frame.canvasId}.`)) throw new Error('Canvas ID mismatch')
+    // Legacy SQL frames keep their original IDs. Only trusted backend RPC can initialize.
     frame = { ...frame, html: repairEscapedHtml(frame.html) }
     validateFrame(frame)
     if (!this.ready) this.ready = frameTable(this.db)

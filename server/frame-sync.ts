@@ -12,6 +12,8 @@ if (!process.env.TERSE_ACTOR_URL && process.env.DURABLE_ACTORS_CONTROL_PLANE_URL
   process.env.TERSE_API_KEY = process.env.DURABLE_ACTORS_SECRET
 }
 
+export const canvasIndex = actors.CanvasIndex.get
+export const prepareCanvasSocket = actors.CanvasIndex.prepareWebsocket
 export const frameActor = actors.FrameActor.get
 export const prepareFrameSocket = actors.FrameActor.prepareWebsocket
 

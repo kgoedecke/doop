@@ -1,13 +1,10 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('../server/db/index.ts', () => import('./fixtures/frame-db.ts'))
-afterAll(async () => {
-  await (await import('./fixtures/frame-db.ts')).close()
-})
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /* The queue mirrors into Postgres and broadcasts; this test only cares about
    the text a card carries. */
 vi.mock('../server/db/persist.ts', () => ({
+  loadLegacyFrameIds: async () => [],
+  legacyFrameCanvasId: async () => undefined,
   saveTask: () => {},
   saveFeedback: () => {},
   saveComment: () => {},

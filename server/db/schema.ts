@@ -142,27 +142,6 @@ export const frames = pgTable(
   (t) => [index('frames_canvas_idx').on(t.canvasId)],
 )
 
-/** Durable membership revisions and canvas tombstones survive metadata cleanup. */
-export const canvasFrameState = pgTable('canvas_frame_state', {
-  canvasId: text('canvas_id').primaryKey(),
-  revision: bigint('revision', { mode: 'number' }).notNull().default(0),
-  deleted: boolean('deleted').notNull().default(false),
-})
-
-export const frameMemberships = pgTable(
-  'frame_memberships',
-  {
-    id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
-    position: bigint('position', { mode: 'number' }).notNull(),
-    status: text('status', { enum: ['creating', 'active', 'deleting', 'deleted'] }).notNull(),
-  },
-  (t) => [
-    uniqueIndex('frame_memberships_position_idx').on(t.canvasId, t.position),
-    index('frame_memberships_status_idx').on(t.canvasId, t.status),
-  ],
-)
-
 /** Design-sync keys: the write-only capability behind the /ingest endpoint.
  *  An app embeds the doop-sync snippet with a key's secret, and its live
  *  screens land on ONE canvas as frames — the secret grants no reads and no

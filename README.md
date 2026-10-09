@@ -651,12 +651,18 @@ Frame HTML renders in `<iframe sandbox="allow-scripts">` — scripts run, but no
 no reach into the app. Each iframe loads a small bootstrap once; new HTML is `postMessage`d in and
 **DOM-morphed in place** (`src/lib/frameRuntime.ts`), so updates and streaming ticks never white-flash
 the frame with a full document reload. Changed `<script>`s re-execute; unchanged styles/fonts are
-untouched. Frame actors deliver edits and drag previews over WebSocket subscriptions; the per-canvas
-`/ws` room carries frame membership, chat, presence, and other collaboration events. PostgreSQL owns
-the ordered frame registry and creation/deletion bookkeeping; `LISTEN/NOTIFY` tells app servers to
-reload membership after changes, and listeners reload open canvases after reconnecting. Browser edits
-go directly to frame actors, while REST/MCP edits reach the same actors through the server. There is
-no canvas index actor.
+untouched. Each canvas has a small `CanvasIndex` actor holding ordered frame IDs and creation/deletion
+bookkeeping. Browsers subscribe directly to this index and to one `FrameActor` per frame; reconnecting
+loads a fresh snapshot. Browser edits go directly to frame actors, while REST/MCP edits reach the same
+actors through the server. The `/ws` room carries chat, presence, and other collaboration events.
+PostgreSQL keeps the existing application records; frame membership needs no new SQL tables or listeners.
+
+On first canvas access, existing SQL frames are automatically copied into frame actors before the index
+is initialized. IDs and references stay unchanged. Imports can be retried after a crash and never overwrite
+initialized actors. Stop old app instances before deploying this version so they cannot keep writing to
+SQL after a canvas moves to actors. No separate frame backfill is needed; retain legacy SQL rows for now.
+Interrupted creates with saved payloads and pending deletions finish on the next canvas access.
+Deletion tombstones prevent stale SQL data or retried requests from bringing frames back.
 
 ## Contributing
 

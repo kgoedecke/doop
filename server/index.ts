@@ -11,9 +11,7 @@ import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
-import { prepareFrameSocket } from './frame-sync.ts'
-import { frameRegistry } from './frame-registry.ts'
-import { startFrameNotifications, subscribeMembershipChanges } from './frame-notifications.ts'
+import { prepareCanvasSocket, prepareFrameSocket } from './frame-sync.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
@@ -124,7 +122,6 @@ process.on('unhandledRejection', (reason) => {
 
 interface Conn {
   ws: WebSocket
-  initialized?: boolean
   canvasId: string
   presence: Presence
   /** an admin viewing as someone else: receives updates, emits nothing.
@@ -143,44 +140,11 @@ function send(ws: WebSocket, msg: ServerMessage) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg))
 }
 
-async function sendFrameIndex(ws: WebSocket, canvasId: string) {
-  try {
-    const snapshot = await frameRegistry(canvasId).snapshot()
-    const conn = conns.get(ws)
-    if (conn?.canvasId === canvasId && conn.initialized) send(ws, snapshot)
-  } catch (error) {
-    console.error('[frame membership]', error)
-    ws.close(1013, 'canvas service unavailable')
-  }
-}
-
-subscribeMembershipChanges((canvasId) => {
-  const ids = canvasId ? [canvasId] : [...new Set([...conns.values()].map((c) => c.canvasId))]
-  for (const id of ids) {
-    const recipients = room(id).filter((c) => c.initialized)
-    if (!recipients.length) continue
-    void frameRegistry(id)
-      .snapshot()
-      .then((snapshot) => {
-        for (const { ws } of recipients) if (conns.get(ws)?.canvasId === id) send(ws, snapshot)
-      })
-      .catch((error) => {
-        console.error('[frame membership]', error)
-        for (const { ws } of recipients) ws.close(1013, 'canvas service unavailable')
-      })
-  }
-})
-const stopFrameNotifications = await startFrameNotifications()
-const frameRecovery = setInterval(() => void store.recoverFrames(), 5000)
-frameRecovery.unref()
-void store.recoverFrames()
-
 // Frame writes are durable in their actors; drain pending SQL metadata writes.
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.once(sig, () => {
     setTimeout(() => process.exit(0), 1500).unref()
-    clearInterval(frameRecovery)
-    void Promise.all([persist.flush(), stopFrameNotifications()]).finally(() => process.exit(0))
+    void persist.flush().finally(() => process.exit(0))
   })
 }
 
@@ -609,7 +573,7 @@ app.use('/api/canvases/:canvasId', (req, res, next) => {
   // These legacy import views inspect markers embedded in HTML. Other routes
   // use frame summaries; actor grants only need membership.
   const content = ['/sync-keys', '/sync-flow', '/github'].includes(req.path) && req.method === 'GET'
-  void store.syncCanvas(req.params.canvasId, content ? 'full' : req.path === '/frame-index' ? 'index' : 'summary').then(
+  void store.syncCanvas(req.params.canvasId, content ? 'full' : req.path === '/actor' ? 'index' : 'summary').then(
     (canvas) => {
       res.locals.canvas = canvas
       next()
@@ -932,10 +896,17 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
 })
 
 app.get(
-  '/api/canvases/:id/frame-index',
+  '/api/canvases/:id/actor',
   frameRoute(async (req, res) => {
     if (!requireCanvas(req, res, req.params.id)) return
-    res.set('Cache-Control', 'no-store').json(await frameRegistry(req.params.id).snapshot())
+    const grant = await prepareCanvasSocket({
+      actorId: req.params.id,
+      metadata: {
+        actor: { name: req.user!.name, kind: 'user', color: colorFor(req.user!.name) },
+        readOnly: true,
+      },
+    })
+    res.set('Cache-Control', 'no-store').json(grant)
   }),
 )
 
@@ -1931,9 +1902,6 @@ wss.on('connection', (ws, upgradeReq) => {
         selfColor: presence.color,
         serverBuild: BUILD_ID,
       })
-      const joined = conns.get(ws)
-      if (joined?.canvasId === msg.canvasId) joined.initialized = true
-      await sendFrameIndex(ws, msg.canvasId)
       /* An admin looking at a canvas must not act on it. Announcing presence
          would impersonate the owner in the room; maybePlay would have the
          demo agent perform on an untouched signup canvas; the card kick would

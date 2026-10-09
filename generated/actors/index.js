@@ -11,9 +11,37 @@ import { createActorStub as $createActorStub, SocketProxy as $SocketProxy } from
 /**
  * Call actor methods from your backend.
  * @example
- * const actor = actors.FrameActor.get("actor-id")
+ * const actor = actors.CanvasIndex.get("actor-id")
  */
 export const actors = {
+    ["CanvasIndex"]: {
+        get(actorId, transport) {
+            return $createActorStub(
+                "CanvasIndex",
+                actorId,
+                [
+                    { name: "activate", result: "value" },
+                    { name: "confirmDelete", result: "void" },
+                    { name: "destroy", result: "void" },
+                    { name: "has", result: "value" },
+                    { name: "initialize", result: "value" },
+                    { name: "pending", result: "value" },
+                    { name: "remove", result: "value" },
+                    { name: "reserve", result: "value" },
+                    { name: "snapshot", result: "value" }
+                ],
+                transport
+            )
+        },
+        /**
+         * Allow a frontend connection after your backend checks the user's access.
+         * @example
+         * const grant = await actors.CanvasIndex.prepareWebsocket({ actorId: "actor-id", metadata })
+         */
+        prepareWebsocket(authorization) {
+            return new ActorProxy().handle({ ...authorization, actorName: "CanvasIndex" })
+        }
+    },
     ["FrameActor"]: {
         get(actorId, transport) {
             return $createActorStub(
@@ -42,11 +70,11 @@ export const actors = {
 /**
  * Allow a frontend connection after your backend checks the user's access.
  * @example
- * const grant = await ActorProxy.handle({ actorName: "FrameActor", actorId: "actor-id", metadata })
+ * const grant = await ActorProxy.handle({ actorName: "CanvasIndex", actorId: "actor-id", metadata })
  */
 export class ActorProxy extends $SocketProxy {
     constructor() {
-        super({ ["FrameActor"]: {} })
+        super({ ["CanvasIndex"]: {}, ["FrameActor"]: {} })
     }
     handle(authorization) {
         return super.handle(authorization)
