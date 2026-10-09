@@ -11,7 +11,9 @@ export type FrameWrite =
   | { type: 'delete'; id: string }
 
 export type FrameEdit =
-  { type: 'update'; patch: FramePatch } | { type: 'append'; chunk: string; start: boolean; done?: boolean }
+  | { type: 'update'; patch: FramePatch }
+  | { type: 'replace'; find: string; replacement: string }
+  | { type: 'append'; chunk: string; start: boolean; done?: boolean }
 export type FrameSnapshot = {
   type: 'frame-snapshot'
   revision: number
@@ -31,7 +33,7 @@ export type FrameChange = {
 }
 export type FrameDrag = { type: 'drag'; frameId: string } & Pick<Frame, 'x' | 'y' | 'width' | 'height' | 'updatedAt'>
 export type FrameCommand = { type: 'snapshot' } | FrameDrag | { type: 'write'; write: FrameEdit; requestId: string }
-export type FrameMetadata = { actor: Attribution; readOnly: boolean }
+export type FrameMetadata = { actor: Attribution; readOnly: boolean; accessVersion?: number }
 type SyncError = { type: 'error'; requestId: string; message: string }
 
 type FrameRow = Omit<Frame, 'demo'> & { demo: number | null }
@@ -82,15 +84,28 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
   @Persisted private initialized = false
   @Persisted private deleted = false
   @Persisted private revision = 0
+  @Persisted private accessRevision = 0
+  @Persisted private reservedBounds: Record<string, { x: number; width: number }> = {}
   @Ephemeral private ready = false
   @Persisted @Emittable committed: IndexSnapshot | null = null
 
   override async onConnect(socket: ActorSocketOf<CanvasIndex>) {
+    if ((socket.metadata.accessVersion ?? 0) !== this.accessRevision) return socket.reject(4003, 'Access changed')
     socket.send(await this.snapshot())
   }
 
   override async onMessage(socket: ActorSocketOf<CanvasIndex>, command: IndexCommand) {
+    if ((socket.metadata.accessVersion ?? 0) !== this.accessRevision) return socket.close(4003, 'Access changed')
     if (command.type === 'snapshot') socket.send(await this.snapshot())
+  }
+
+  async accessVersion(): Promise<number> {
+    return this.accessRevision
+  }
+
+  async revokeAccess(): Promise<void> {
+    this.accessRevision++
+    for (const socket of await this.getConnections()) socket.close(4003, 'Access changed')
   }
 
   /** Called only after legacy frame payloads have been copied. Retrying cannot reset membership. */
@@ -137,6 +152,34 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
     return true
   }
 
+  /** Calculate and reserve placement together, including creates whose payload is still in flight. */
+  async reserveFrame(
+    frame: Frame,
+    automatic: boolean,
+    observed: Record<string, { x: number; width: number }>,
+  ): Promise<Frame | 'retry' | null> {
+    validateFrame(frame)
+    if (!this.initialized || this.deleted) return null
+    if (!this.ready) this.ready = indexTable(this.db)
+    const [existing] = this.db.exec<IndexEntry>('SELECT id, status FROM entries WHERE id = ?', frame.id)
+    if (existing?.status === 'active') return frame
+    if (existing && existing.status !== 'creating') return null
+    const reserved = this.reservedBounds[frame.id]
+    if (reserved) return { ...frame, ...reserved }
+    const entries = this.db.exec<IndexEntry>("SELECT id, status FROM entries WHERE status IN ('creating', 'active')")
+    const edges: number[] = []
+    for (const entry of entries) {
+      // A create may have activated since the caller read the canvas. Refresh before deciding.
+      if (automatic && entry.status === 'active' && !observed[entry.id]) return 'retry'
+      const bounds = entry.status === 'creating' ? this.reservedBounds[entry.id] : observed[entry.id]
+      if (bounds) edges.push(bounds.x + bounds.width)
+    }
+    if (automatic) frame = { ...frame, x: edges.length ? Math.max(...edges) + 80 : 120 }
+    if (!(await this.reserve(frame.id))) return null
+    this.reservedBounds = { ...this.reservedBounds, [frame.id]: { x: frame.x, width: frame.width } }
+    return frame
+  }
+
   async activate(id: string): Promise<boolean> {
     if (this.deleted) return false
     if (!this.ready) this.ready = indexTable(this.db)
@@ -144,6 +187,7 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
     if (!entry || (entry.status !== 'creating' && entry.status !== 'active')) return false
     if (entry.status === 'creating') {
       this.db.exec("UPDATE entries SET status = 'active' WHERE id = ?", id)
+      delete this.reservedBounds[id]
       this.revision++
       this.committed = await this.snapshot()
     }
@@ -173,6 +217,7 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
     if (!this.ready) this.ready = indexTable(this.db)
     // Keep the tombstone so creation retries and legacy imports cannot resurrect the frame.
     this.db.exec("UPDATE entries SET status = 'deleted' WHERE id = ? AND status = 'deleting'", id)
+    delete this.reservedBounds[id]
   }
 
   async destroy(): Promise<void> {
@@ -192,15 +237,18 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
   @Persisted private initialized = false
   @Persisted private deleted = false
   @Persisted private revision = 0
+  @Persisted private accessRevision = 0
   @Persisted private activity: ActivityItem[] = []
   @Ephemeral private ready = false
   @Persisted @Emittable committed: FrameChange | FrameSnapshot | null = null
 
   override async onConnect(socket: ActorSocketOf<FrameActor>) {
+    if ((socket.metadata.accessVersion ?? 0) !== this.accessRevision) return socket.reject(4003, 'Access changed')
     socket.send(await this.snapshot())
   }
 
   override async onMessage(socket: ActorSocketOf<FrameActor>, command: FrameCommand) {
+    if ((socket.metadata.accessVersion ?? 0) !== this.accessRevision) return socket.close(4003, 'Access changed')
     if (command.type === 'snapshot') return socket.send(await this.snapshot())
     if (command.type === 'drag') {
       if (!this.ready) this.ready = frameTable(this.db)
@@ -231,6 +279,15 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
         message: error instanceof Error ? error.message : 'Frame edit failed',
       })
     }
+  }
+
+  async accessVersion(): Promise<number> {
+    return this.accessRevision
+  }
+
+  async revokeAccess(): Promise<void> {
+    this.accessRevision++
+    for (const socket of await this.getConnections()) socket.close(4003, 'Access changed')
   }
 
   async initialize(frame: Frame): Promise<boolean> {
@@ -282,15 +339,23 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
     if (!this.ready) this.ready = frameTable(this.db)
     const before = readFrame(this.db)
     if (!before) return null
+    if (write.type === 'replace') {
+      if (!write.find) throw new Error('find must be a non-empty exact HTML string')
+      const count = before.html.split(write.find).length - 1
+      if (count === 0) throw new Error('find text not found in the frame HTML. Read the current HTML and retry.')
+      if (count > 1) throw new Error('find text occurs more than once. Include more surrounding context.')
+    }
     const patch: FramePatch =
       write.type === 'append'
         ? { html: (write.start ? '' : before.html) + write.chunk }
-        : Object.fromEntries(
-            Object.entries(write.patch).filter(
-              ([key, value]) => ['name', 'x', 'y', 'width', 'height', 'html'].includes(key) && value !== undefined,
-            ),
-          )
-    if (write.type === 'update' && patch.html !== undefined) patch.html = repairEscapedHtml(patch.html)
+        : write.type === 'replace'
+          ? { html: before.html.replace(write.find, write.replacement) }
+          : Object.fromEntries(
+              Object.entries(write.patch).filter(
+                ([key, value]) => ['name', 'x', 'y', 'width', 'height', 'html'].includes(key) && value !== undefined,
+              ),
+            )
+    if (write.type !== 'append' && patch.html !== undefined) patch.html = repairEscapedHtml(patch.html)
     const frame = { ...before, ...patch, updatedAt: Math.max(Date.now(), before.updatedAt + 1), updatedBy: by.name }
     validateFrame(frame)
     const { name, html } = frame

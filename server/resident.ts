@@ -1162,11 +1162,8 @@ async function execTool(
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
         if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
-        const count = f.html.split(input.find).length - 1
-        if (count === 0) return fail('"find" text not found — call get_frame_html and copy the exact text')
-        if (count > 1)
-          return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
-        await actions.updateFrame(input.frame_id, { html: f.html.replace(input.find, input.replace) }, actor)
+        if (!(await actions.replaceFrameHtml(input.frame_id, input.find, input.replace, actor)))
+          return fail('frame not found on this canvas')
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
         return ok('applied')

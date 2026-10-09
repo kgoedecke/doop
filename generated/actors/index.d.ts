@@ -59,6 +59,10 @@ export declare namespace actors {
     namespace CanvasIndex {
         type Stub = $ActorTypes["CanvasIndex"]["Methods"]
         interface $MethodTypes {
+            ["accessVersion"]: {
+                Args: Parameters<Stub["accessVersion"]>
+                Result: Awaited<ReturnType<Stub["accessVersion"]>>
+            }
             ["activate"]: {
                 Args: Parameters<Stub["activate"]>
                 Result: Awaited<ReturnType<Stub["activate"]>>
@@ -91,6 +95,14 @@ export declare namespace actors {
                 Args: Parameters<Stub["reserve"]>
                 Result: Awaited<ReturnType<Stub["reserve"]>>
             }
+            ["reserveFrame"]: {
+                Args: Parameters<Stub["reserveFrame"]>
+                Result: Awaited<ReturnType<Stub["reserveFrame"]>>
+            }
+            ["revokeAccess"]: {
+                Args: Parameters<Stub["revokeAccess"]>
+                Result: Awaited<ReturnType<Stub["revokeAccess"]>>
+            }
             ["snapshot"]: {
                 Args: Parameters<Stub["snapshot"]>
                 Result: Awaited<ReturnType<Stub["snapshot"]>>
@@ -100,10 +112,14 @@ export declare namespace actors {
         /**
          * Types for a method's arguments and return value.
          * @example
-         * type Args = actors.CanvasIndex.Methods["activate"]["Args"]
-         * type Result = actors.CanvasIndex.Methods["activate"]["Result"]
+         * type Args = actors.CanvasIndex.Methods["accessVersion"]["Args"]
+         * type Result = actors.CanvasIndex.Methods["accessVersion"]["Result"]
          */
         namespace Methods {
+            namespace accessVersion {
+                type Args = $MethodTypes["accessVersion"]["Args"]
+                type Result = $MethodTypes["accessVersion"]["Result"]
+            }
             namespace activate {
                 type Args = $MethodTypes["activate"]["Args"]
                 type Result = $MethodTypes["activate"]["Result"]
@@ -136,6 +152,14 @@ export declare namespace actors {
                 type Args = $MethodTypes["reserve"]["Args"]
                 type Result = $MethodTypes["reserve"]["Result"]
             }
+            namespace reserveFrame {
+                type Args = $MethodTypes["reserveFrame"]["Args"]
+                type Result = $MethodTypes["reserveFrame"]["Result"]
+            }
+            namespace revokeAccess {
+                type Args = $MethodTypes["revokeAccess"]["Args"]
+                type Result = $MethodTypes["revokeAccess"]["Result"]
+            }
             namespace snapshot {
                 type Args = $MethodTypes["snapshot"]["Args"]
                 type Result = $MethodTypes["snapshot"]["Result"]
@@ -145,6 +169,10 @@ export declare namespace actors {
     namespace FrameActor {
         type Stub = $ActorTypes["FrameActor"]["Methods"]
         interface $MethodTypes {
+            ["accessVersion"]: {
+                Args: Parameters<Stub["accessVersion"]>
+                Result: Awaited<ReturnType<Stub["accessVersion"]>>
+            }
             ["destroy"]: {
                 Args: Parameters<Stub["destroy"]>
                 Result: Awaited<ReturnType<Stub["destroy"]>>
@@ -152,6 +180,10 @@ export declare namespace actors {
             ["initialize"]: {
                 Args: Parameters<Stub["initialize"]>
                 Result: Awaited<ReturnType<Stub["initialize"]>>
+            }
+            ["revokeAccess"]: {
+                Args: Parameters<Stub["revokeAccess"]>
+                Result: Awaited<ReturnType<Stub["revokeAccess"]>>
             }
             ["snapshot"]: {
                 Args: Parameters<Stub["snapshot"]>
@@ -170,10 +202,14 @@ export declare namespace actors {
         /**
          * Types for a method's arguments and return value.
          * @example
-         * type Args = actors.FrameActor.Methods["destroy"]["Args"]
-         * type Result = actors.FrameActor.Methods["destroy"]["Result"]
+         * type Args = actors.FrameActor.Methods["accessVersion"]["Args"]
+         * type Result = actors.FrameActor.Methods["accessVersion"]["Result"]
          */
         namespace Methods {
+            namespace accessVersion {
+                type Args = $MethodTypes["accessVersion"]["Args"]
+                type Result = $MethodTypes["accessVersion"]["Result"]
+            }
             namespace destroy {
                 type Args = $MethodTypes["destroy"]["Args"]
                 type Result = $MethodTypes["destroy"]["Result"]
@@ -181,6 +217,10 @@ export declare namespace actors {
             namespace initialize {
                 type Args = $MethodTypes["initialize"]["Args"]
                 type Result = $MethodTypes["initialize"]["Result"]
+            }
+            namespace revokeAccess {
+                type Args = $MethodTypes["revokeAccess"]["Args"]
+                type Result = $MethodTypes["revokeAccess"]["Result"]
             }
             namespace snapshot {
                 type Args = $MethodTypes["snapshot"]["Args"]

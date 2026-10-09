@@ -5,6 +5,8 @@ import * as persist from './db/persist.ts'
 import { colorFor } from '../shared/types.ts'
 import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
 
+export const MAX_GUIDELINE_DOCS = 20
+
 /** SQL owns canvas metadata. Every frame read and write goes through actor RPC. */
 class Store {
   canvases = new Map<string, Canvas>()
@@ -229,6 +231,15 @@ class Store {
     return this.canvases.get(id)
   }
 
+  /** Invalidate issued tickets as well as sockets, before an access change answers. */
+  async revokeCanvasAccess(id: string): Promise<void> {
+    if (!(await this.ensureMembership(id))) return
+    const index = canvasIndex(id)
+    const { frameIds } = await index.snapshot()
+    await index.revokeAccess()
+    await mapFrames(frameIds, (frameId) => frameActor(frameId).revokeAccess())
+  }
+
   /** Remove a canvas and its frames from memory + database. */
   async deleteCanvas(id: string): Promise<Canvas | undefined> {
     const c = await this.syncCanvas(id, 'summary')
@@ -242,23 +253,25 @@ class Store {
   }
 
   /** Take ownership of a pre-auth (unowned) canvas. No-op if already owned. */
-  claimCanvas(id: string, userId: string): Canvas | undefined {
+  async claimCanvas(id: string, userId: string): Promise<Canvas | undefined> {
     const c = this.canvases.get(id)
     if (!c || c.ownerId) return undefined
     c.ownerId = userId
     persist.saveCanvas(c)
+    await this.revokeCanvasAccess(id)
     return c
   }
 
   /** Owner-set link policy ('none' is the default and stored as unset).
    *  Deliberately does not bump updatedAt — a privacy toggle is not a
    *  design edit. */
-  setLinkAccess(id: string, mode: 'edit' | 'none'): Canvas | undefined {
+  async setLinkAccess(id: string, mode: 'edit' | 'none'): Promise<Canvas | undefined> {
     const c = this.canvases.get(id)
     if (!c) return undefined
     if (mode === 'edit') c.linkAccess = 'edit'
     else delete c.linkAccess
     persist.saveCanvas(c)
+    await this.revokeCanvasAccess(id)
     return c
   }
 
@@ -267,12 +280,13 @@ class Store {
   /** File a canvas in a workspace, or take it back to its owner's personal
    *  space (undefined). Access checks are the caller's; like the privacy
    *  toggles this is not a design edit, so updatedAt stays put. */
-  setWorkspace(id: string, workspaceId: string | undefined): Canvas | undefined {
+  async setWorkspace(id: string, workspaceId: string | undefined): Promise<Canvas | undefined> {
     const c = this.canvases.get(id)
     if (!c) return undefined
     if (workspaceId) c.workspaceId = workspaceId
     else delete c.workspaceId
     persist.saveCanvas(c)
+    await this.revokeCanvasAccess(id)
     return c
   }
 
@@ -283,13 +297,16 @@ class Store {
   }
 
   /** A workspace is going away: every canvas in it becomes personal again. */
-  detachWorkspace(workspaceId: string): void {
+  async detachWorkspace(workspaceId: string): Promise<void> {
+    const changed: string[] = []
     for (const c of this.canvases.values()) {
       if (c.workspaceId === workspaceId) {
         delete c.workspaceId
         persist.saveCanvas(c)
+        changed.push(c.id)
       }
     }
+    await mapFrames(changed, (id) => this.revokeCanvasAccess(id))
   }
 
   /* ---- community gallery ---- */
@@ -346,12 +363,13 @@ class Store {
     return c
   }
 
-  removeMember(canvasId: string, userId: string): boolean {
+  async removeMember(canvasId: string, userId: string): Promise<boolean> {
     const c = this.canvases.get(canvasId)
     const idx = c?.memberIds?.indexOf(userId) ?? -1
     if (!c || idx === -1) return false
     c.memberIds!.splice(idx, 1)
     persist.deleteMember(canvasId, userId)
+    await this.revokeCanvasAccess(canvasId)
     return true
   }
 
@@ -378,6 +396,12 @@ class Store {
     pos?: { x: number; y: number },
     title?: string,
   ): Promise<GuidelineDoc | undefined> {
+    const current = this.canvases.get(canvasId)
+    if (!current) return undefined
+    const placementCanvas =
+      !pos && !current.guidelines?.some((doc) => doc.name === name)
+        ? await this.syncCanvas(canvasId, 'summary')
+        : undefined
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
     const docs = (c.guidelines ??= [])
@@ -390,7 +414,9 @@ class Store {
       if (pos) Object.assign(doc, pos)
       if (title !== undefined) doc.title = title || undefined
     } else {
-      const placed = pos ?? this.placeGuideline((await this.syncCanvas(canvasId)) ?? c, docs.length)
+      if (docs.length >= MAX_GUIDELINE_DOCS)
+        throw new Error(`this canvas already has ${MAX_GUIDELINE_DOCS} design guides — delete one first`)
+      const placed = pos ?? this.placeGuideline(placementCanvas ?? c, docs.length)
       doc = { name, markdown, ...(title ? { title } : {}), updatedAt: now, updatedBy: by, ...placed }
       docs.push(doc)
       docs.sort((a, b) => a.name.localeCompare(b.name))
@@ -490,20 +516,13 @@ class Store {
     if (!(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureMembership(canvasId))) return undefined
     const id = creationId ?? `${canvasId}.${nanoid(10)}`
     if (!id.startsWith(`${canvasId}.`) || !/^[A-Za-z0-9._-]{1,128}$/.test(id)) throw new Error('Invalid frame ID')
-    let x = input.x
-    if (x === undefined) {
-      const { frameIds } = await canvasIndex(canvasId).snapshot()
-      const summaries = await mapFrames(frameIds, (id) => frameActor(id).summary())
-      const edges = summaries.flatMap(({ frame }) => (frame ? [frame.x + frame.width] : []))
-      x = edges.length ? Math.max(...edges) + 80 : 120
-    }
     const now = Date.now()
-    const frame: Frame = {
+    const candidate: Frame = {
       id,
       canvasId,
       name: input.name,
       html: input.html ?? '',
-      x,
+      x: input.x ?? 120,
       y: input.y ?? 120,
       width: input.width ?? 640,
       height: input.height ?? 480,
@@ -512,7 +531,14 @@ class Store {
       updatedBy: by,
       ...(input.demo === undefined ? {} : { demo: input.demo }),
     }
-    if (!(await canvasIndex(canvasId).reserve(id))) return undefined
+    const index = canvasIndex(canvasId)
+    let frame: Frame | 'retry' | null
+    do {
+      const canvas = input.x === undefined ? await this.syncCanvas(canvasId, 'summary') : undefined
+      const observed = Object.fromEntries((canvas?.frames ?? []).map(({ id, x, width }) => [id, { x, width }]))
+      frame = await index.reserveFrame(candidate, input.x === undefined, observed)
+    } while (frame === 'retry')
+    if (!frame) return undefined
     const actor = frameActor(id)
     await actor.initialize(frame)
     const saved = (await actor.snapshot()).frame
@@ -532,6 +558,11 @@ class Store {
         actor ?? { name: by, kind: 'user', color: colorFor(by) },
       )
     )?.frame
+  }
+
+  async replaceFrameHtml(frameId: string, find: string, replacement: string, actor: Actor): Promise<Frame | undefined> {
+    if (!(await this.getFrameMembership(frameId))) return undefined
+    return (await frameActor(frameId).write({ type: 'replace', find, replacement }, actor))?.frame
   }
 
   async appendFrameHtml(

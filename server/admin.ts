@@ -1,4 +1,5 @@
 import express from 'express'
+import { actorRoute as frameRoute } from './actor-route.ts'
 import { inArray, count } from 'drizzle-orm'
 import { store } from './store.ts'
 import { isAdmin } from './access.ts'
@@ -22,32 +23,40 @@ adminRouter.use((req, res, next) => {
 })
 
 /** Every canvas on the instance, newest activity first, with its owner. */
-adminRouter.get('/canvases', async (req, res) => {
-  const { total, canvases } = await store.listAllCanvases()
-  const ownerIds = [...new Set(canvases.map((c) => c.ownerId).filter((id): id is string => !!id))]
-  const owners = ownerIds.length
-    ? await db
-        .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
-        .from(authSchema.user)
-        .where(inArray(authSchema.user.id, ownerIds))
-    : []
-  const byId = new Map(owners.map((o) => [o.id, o]))
-  res.json({
-    total,
-    canvases: canvases.map((c) => ({ ...c, owner: c.ownerId ? byId.get(c.ownerId) : undefined })),
-  })
-})
+adminRouter.get(
+  '/canvases',
+  frameRoute(async (req, res) => {
+    const { total, canvases } = await store.listAllCanvases()
+    const ownerIds = [...new Set(canvases.map((c) => c.ownerId).filter((id): id is string => !!id))]
+    const owners = ownerIds.length
+      ? await db
+          .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+          .from(authSchema.user)
+          .where(inArray(authSchema.user.id, ownerIds))
+      : []
+    const byId = new Map(owners.map((o) => [o.id, o]))
+    res.json({
+      total,
+      canvases: canvases.map((c) => ({ ...c, owner: c.ownerId ? byId.get(c.ownerId) : undefined })),
+    })
+  }),
+)
 
 /** The three numbers worth knowing at a glance. */
-adminRouter.get('/stats', async (req, res) => {
-  const [users] = await db.select({ n: count() }).from(authSchema.user)
-  const canvases = (await Promise.all([...store.canvases.keys()].map((id) => store.syncCanvas(id)))).filter((c) => !!c)
-  res.json({
-    users: users?.n ?? 0,
-    canvases: canvases.length,
-    frames: canvases.reduce((n, c) => n + c.frames.length, 0),
-  })
-})
+adminRouter.get(
+  '/stats',
+  frameRoute(async (req, res) => {
+    const [users] = await db.select({ n: count() }).from(authSchema.user)
+    const canvases = (await Promise.all([...store.canvases.keys()].map((id) => store.syncCanvas(id)))).filter(
+      (c) => !!c,
+    )
+    res.json({
+      users: users?.n ?? 0,
+      canvases: canvases.length,
+      frames: canvases.reduce((n, c) => n + c.frames.length, 0),
+    })
+  }),
+)
 
 /** Accounts, for the "view as" picker and (later) ban/role management. */
 adminRouter.get('/users', async (req, res) => {

@@ -118,10 +118,13 @@ function showFrame(event: FrameChange) {
   }
   const deadline = Date.now() + Math.min(5000, Math.max(2500, (frame.html.length - shown) / 8))
   state.setStream(frame.id, { name: event.actor.name, color: event.actor.color })
+  paint({ ...frame, html: healPartialHtml(frame.html.slice(0, shown)) })
   const tick = () => {
     const ticks = Math.max(1, Math.ceil((deadline - Date.now()) / 80))
     shown = Math.min(frame.html.length, shown + Math.ceil((frame.html.length - shown) / ticks))
-    paint(shown === frame.html.length ? frame : { ...frame, html: healPartialHtml(frame.html.slice(0, shown)) })
+    const live = useStore.getState().canvas?.frames.find((entry) => entry.id === frame.id)
+    if (!live) return
+    paint({ ...live, html: shown === frame.html.length ? frame.html : healPartialHtml(frame.html.slice(0, shown)) })
     if (shown < frame.html.length) reveals.set(frame.id, setTimeout(tick, 80))
     else {
       reveals.delete(frame.id)

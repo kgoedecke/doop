@@ -20,6 +20,7 @@ export const actors = {
                 "CanvasIndex",
                 actorId,
                 [
+                    { name: "accessVersion", result: "value" },
                     { name: "activate", result: "value" },
                     { name: "confirmDelete", result: "void" },
                     { name: "destroy", result: "void" },
@@ -28,6 +29,8 @@ export const actors = {
                     { name: "pending", result: "value" },
                     { name: "remove", result: "value" },
                     { name: "reserve", result: "value" },
+                    { name: "reserveFrame", result: "value" },
+                    { name: "revokeAccess", result: "void" },
                     { name: "snapshot", result: "value" }
                 ],
                 transport
@@ -48,8 +51,10 @@ export const actors = {
                 "FrameActor",
                 actorId,
                 [
+                    { name: "accessVersion", result: "value" },
                     { name: "destroy", result: "void" },
                     { name: "initialize", result: "value" },
+                    { name: "revokeAccess", result: "void" },
                     { name: "snapshot", result: "value" },
                     { name: "summary", result: "value" },
                     { name: "write", result: "value" }

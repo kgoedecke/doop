@@ -179,6 +179,32 @@ it('resyncs a revision gap on only the affected frame and keeps layout during an
   })
 })
 
+it('preserves drag previews while revealing generated HTML', async () => {
+  vi.useFakeTimers()
+  const a = frame('a')
+  await connect([a])
+  const content = socket('/frames/a/')
+  content.receive({
+    type: 'state_update',
+    changes: {
+      committed: {
+        type: 'frame-change',
+        revision: 1,
+        operation: 'update',
+        frame: { ...a, html: '<main>Brand new generated design</main>', updatedAt: 2 },
+        actor: { ...by, kind: 'agent', clientId: 'agent' },
+      },
+    },
+  })
+  content.receive({ type: 'drag', frameId: a.id, x: 800, y: 900, width: a.width, height: a.height, updatedAt: 2 })
+  await vi.advanceTimersByTimeAsync(6000)
+  expect(useStore.getState().canvas?.frames[0]).toMatchObject({
+    x: 800,
+    y: 900,
+    html: '<main>Brand new generated design</main>',
+  })
+})
+
 it('allows an immediate edit when creation finishes before its index notification', async () => {
   await connect([])
   const entry = frame('new')

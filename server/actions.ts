@@ -1,5 +1,4 @@
-import { frameActor, mapFrames } from './frame-sync.ts'
-import { canvasIndex } from './frame-sync.ts'
+import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
 import { nanoid } from 'nanoid'
 import { store } from './store.ts'
 import * as persist from './db/persist.ts'
@@ -581,6 +580,7 @@ export async function replyToComment(
   const open = await openThread(commentId)
   if (!open) return undefined
   const { root, frame } = open
+  if (root.resolvedAt) return undefined
   return postComment(
     frame,
     { selector: root.selector, snippet: root.snippet, parentId: root.id },
@@ -600,7 +600,7 @@ export async function openThread(commentId: string): Promise<{ root: ElementComm
   const root = parent.parentId ? findComment(parent.parentId) : parent
   if (!root || root.resolvedAt) return undefined
   const frame = await store.getFrame(root.frameId)
-  if (!frame) return undefined
+  if (!frame || root.resolvedAt) return undefined
   return { root, frame }
 }
 
@@ -780,9 +780,10 @@ function trackTaskFrame(canvasId: string, actor: Actor, frameId: string) {
    they are visibly doing, so the Tasks panel is never silently empty. */
 function autoTask(canvasId: string, actor: Actor, status: string, frameId: string) {
   const list = taskLog.get(canvasId) ?? []
-  if (list.some((t) => sameAgent(t, actor) && !t.endedAt)) {
+  const open = list.find((t) => sameAgent(t, actor) && !t.endedAt)
+  if (open) {
     trackTaskFrame(canvasId, actor, frameId) // any open task wins — it just gains the frame
-    return
+    return open.auto ? open : undefined
   }
   const task: AgentTask = {
     id: nanoid(8),
@@ -799,15 +800,27 @@ function autoTask(canvasId: string, actor: Actor, status: string, frameId: strin
   taskLog.set(canvasId, list)
   persist.saveTask(canvasId, task)
   broadcast(canvasId, { type: 'task', task })
+  return task
 }
 
-function endAutoTask(canvasId: string, actor: Actor) {
-  const open = (taskLog.get(canvasId) ?? []).find((t) => sameAgent(t, actor) && !t.endedAt && t.auto)
+const autoTaskTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function endAutoTask(canvasId: string, taskId?: string) {
+  if (!taskId || [...streams.values()].some((stream) => stream.taskId === taskId)) return
+  clearTimeout(autoTaskTimers.get(taskId))
+  autoTaskTimers.delete(taskId)
+  const open = (taskLog.get(canvasId) ?? []).find((t) => t.id === taskId && !t.endedAt && t.auto)
   if (open) {
     open.endedAt = Date.now()
     persist.saveTask(canvasId, open)
     broadcast(canvasId, { type: 'task', task: open })
   }
+}
+
+function scheduleAutoTaskEnd(canvasId: string, task?: AgentTask) {
+  if (!task) return
+  clearTimeout(autoTaskTimers.get(task.id))
+  autoTaskTimers.set(task.id, setTimeout(() => endAutoTask(canvasId, task.id), 5000).unref())
 }
 
 /** Close an agent's open tasks, e.g. when its presence expires. */
@@ -1107,6 +1120,9 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
 
 interface StreamState {
   actor: Actor
+  canvasId: string
+  frameName: string
+  taskId?: string
   /** the opening chunk was HTML-escaped: decode every chunk of this stream */
   escaped: boolean
   lastActivity: number
@@ -1116,21 +1132,31 @@ const streams = new Map<string, StreamState>() // frameId -> state
 
 const STREAM_IDLE_MS = 30_000
 
-async function finishStream(frameId: string, logDone: boolean) {
+function finishStream(frameId: string, logDone: boolean) {
   const s = streams.get(frameId)
   if (!s) return
   streams.delete(frameId)
-  const frame = await store.getFrame(frameId)
-  if (!frame) return
-  broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: false, actor: s.actor })
-  if (logDone) logActivity(frame.canvasId, s.actor, `finished designing “${frame.name}”`, frameId)
-  endAutoTask(frame.canvasId, s.actor)
+  broadcast(s.canvasId, { type: 'frame:streaming', frameId, active: false, actor: s.actor })
+  if (logDone) logActivity(s.canvasId, s.actor, `finished designing “${s.frameName}”`, frameId)
+  endAutoTask(s.canvasId, s.taskId)
+}
+
+// Content mutations run in the actor. Keep this server's stream/task side effects in the same order.
+const frameOperations = new Map<string, Promise<unknown>>()
+function orderedFrame<T>(id: string, run: () => Promise<T>): Promise<T> {
+  const operation = (frameOperations.get(id) ?? Promise.resolve()).catch(() => {}).then(run)
+  frameOperations.set(id, operation)
+  void operation
+    .finally(() => {
+      if (frameOperations.get(id) === operation) frameOperations.delete(id)
+    })
+    .catch(() => {})
+  return operation
 }
 
 setInterval(() => {
   for (const [frameId, stream] of streams) {
-    if (Date.now() - stream.lastActivity > STREAM_IDLE_MS)
-      void finishStream(frameId, false).catch((error) => console.error('[stream]', error))
+    if (!frameOperations.has(frameId) && Date.now() - stream.lastActivity > STREAM_IDLE_MS) finishStream(frameId, false)
   }
 }, 1000)
 
@@ -1140,32 +1166,45 @@ export async function appendFrameHtml(
   actor: Actor,
   opts: { start?: boolean; done?: boolean } = {},
 ): Promise<Frame | undefined> {
-  const before = await store.getFrame(frameId)
-  if (!before) return undefined
+  return orderedFrame(frameId, async () => {
+    const before = await store.getFrame(frameId)
+    if (!before) return undefined
 
-  const starting = opts.start || !streams.has(frameId)
-  /* an agent that escapes its opening chunk escapes the whole stream, so latch
+    const starting = opts.start || !streams.has(frameId)
+    /* an agent that escapes its opening chunk escapes the whole stream, so latch
      the verdict there: a chunk mid-design can hold a legitimate `&lt;` (a code
      sample) and must never be sniffed on its own */
-  const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
-  const piece = escaped ? decodeEscapedHtml(chunk) : chunk
-  const frame = (await store.appendFrameHtml(frameId, piece, !!opts.start, actor.name, actor, !!opts.done))!
-  if (!frame) return undefined
+    const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
+    const piece = escaped ? decodeEscapedHtml(chunk) : chunk
+    const frame = (await store.appendFrameHtml(frameId, piece, !!opts.start, actor.name, actor, !!opts.done))!
+    if (!frame) return undefined
 
-  if (starting) {
-    streams.set(frameId, { actor, escaped, lastActivity: Date.now() })
-    broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: true, actor })
-    logActivity(frame.canvasId, actor, `is designing “${frame.name}” live…`, frameId)
-    autoTask(frame.canvasId, actor, `Designing “${frame.name}”`, frameId)
-  }
-  const s = streams.get(frameId)!
-  s.lastActivity = Date.now()
-  s.escaped = escaped
+    if (starting) {
+      const task = autoTask(frame.canvasId, actor, `Designing “${frame.name}”`, frameId)
+      if (task) {
+        clearTimeout(autoTaskTimers.get(task.id))
+        autoTaskTimers.delete(task.id)
+      }
+      streams.set(frameId, {
+        actor,
+        canvasId: frame.canvasId,
+        frameName: frame.name,
+        taskId: task?.id,
+        escaped,
+        lastActivity: Date.now(),
+      })
+      broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: true, actor })
+      logActivity(frame.canvasId, actor, `is designing “${frame.name}” live…`, frameId)
+    }
+    const s = streams.get(frameId)!
+    s.lastActivity = Date.now()
+    s.escaped = escaped
 
-  if (opts.done) await finishStream(frameId, true)
+    if (opts.done) finishStream(frameId, true)
 
-  touch(frame.canvasId, actor, frameId)
-  return frame
+    touch(frame.canvasId, actor, frameId)
+    return frame
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -1180,8 +1219,7 @@ export async function createFrame(
   const frame = await store.createFrame(canvasId, input, actor.name, id)
   if (!frame) return undefined
   if (actor.kind === 'agent' && frame.html) {
-    autoTask(canvasId, actor, `Designing “${frame.name}”`, frame.id)
-    setTimeout(() => endAutoTask(canvasId, actor), 5000).unref()
+    scheduleAutoTaskEnd(canvasId, autoTask(canvasId, actor, `Designing “${frame.name}”`, frame.id))
   }
   logActivity(canvasId, actor, `created frame “${frame.name}”`, frame.id)
   touch(canvasId, actor, frame.id)
@@ -1193,39 +1231,62 @@ export async function updateFrame(
   patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
   actor: Actor,
 ): Promise<Frame | undefined> {
-  const before = await store.getFrame(frameId)
-  if (!before) return undefined
-  if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
-  const prevName = before.name
-  const prevHtml = before.html
-  const frame = (await store.updateFrame(frameId, patch, actor.name, actor))!
-  if (!frame) return undefined
+  return orderedFrame(frameId, async () => {
+    const before = await store.getFrame(frameId)
+    if (!before) return undefined
+    if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
+    const prevName = before.name
+    const prevHtml = before.html
+    const frame = (await store.updateFrame(frameId, patch, actor.name, actor))!
+    if (!frame) return undefined
 
-  const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
-  if (htmlChanged) {
-    await finishStream(frameId, false)
-    logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
-    if (actor.kind === 'agent') {
-      autoTask(frame.canvasId, actor, `Redesigning “${frame.name}”`, frameId)
-      setTimeout(() => endAutoTask(frame.canvasId, actor), 5000).unref()
+    const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
+    if (htmlChanged) {
+      finishStream(frameId, false)
+      logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
+      if (actor.kind === 'agent') {
+        scheduleAutoTaskEnd(frame.canvasId, autoTask(frame.canvasId, actor, `Redesigning “${frame.name}”`, frameId))
+      }
+    } else if (patch.name !== undefined && patch.name !== prevName) {
+      logActivity(frame.canvasId, actor, `renamed “${prevName}” to “${frame.name}”`, frame.id)
     }
-  } else if (patch.name !== undefined && patch.name !== prevName) {
-    logActivity(frame.canvasId, actor, `renamed “${prevName}” to “${frame.name}”`, frame.id)
-  }
 
-  touch(frame.canvasId, actor, frame.id)
-  return frame
+    touch(frame.canvasId, actor, frame.id)
+    return frame
+  })
+}
+
+export function replaceFrameHtml(
+  frameId: string,
+  find: string,
+  replacement: string,
+  actor: Actor,
+): Promise<Frame | undefined> {
+  return orderedFrame(frameId, async () => {
+    const frame = await store.replaceFrameHtml(frameId, find, replacement, actor)
+    if (!frame) return undefined
+    if (find !== replacement) {
+      finishStream(frameId, false)
+      logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frameId)
+      if (actor.kind === 'agent')
+        scheduleAutoTaskEnd(frame.canvasId, autoTask(frame.canvasId, actor, `Redesigning “${frame.name}”`, frameId))
+    }
+    touch(frame.canvasId, actor, frameId)
+    return frame
+  })
 }
 
 export async function deleteFrame(frameId: string, actor: Actor): Promise<Frame | undefined> {
-  /* Finish stream tracking while the frame still exists so its task can end. */
-  await finishStream(frameId, false)
-  const frame = await store.deleteFrame(frameId)
-  if (!frame) return undefined
-  thumbs.purge(frameId)
-  logActivity(frame.canvasId, actor, `deleted frame “${frame.name}”`, frame.id)
-  touch(frame.canvasId, actor, null)
-  return frame
+  return orderedFrame(frameId, async () => {
+    /* Finish stream tracking while the frame still exists so its task can end. */
+    finishStream(frameId, false)
+    const frame = await store.deleteFrame(frameId)
+    if (!frame) return undefined
+    thumbs.purge(frameId)
+    logActivity(frame.canvasId, actor, `deleted frame “${frame.name}”`, frame.id)
+    touch(frame.canvasId, actor, null)
+    return frame
+  })
 }
 
 /** Remove a canvas with everything attached to it; viewers are told to leave. */
@@ -1259,7 +1320,7 @@ export function renameCanvas(canvasId: string, name: string, actor: Actor) {
 /* ------------------------------------------------------------------ */
 
 export const MAX_GUIDELINE_CHARS = 24_000
-export const MAX_GUIDELINE_DOCS = 20
+export { MAX_GUIDELINE_DOCS } from './store.ts'
 export const GUIDELINE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 export const MAX_GUIDELINE_TITLE_CHARS = 80
 
@@ -1308,9 +1369,6 @@ export async function setGuideline(
     return null
   }
 
-  const existing = store.getGuidelines(canvasId)
-  if (!existing.some((d) => d.name === slug) && existing.length >= MAX_GUIDELINE_DOCS)
-    throw new Error(`this canvas already has ${MAX_GUIDELINE_DOCS} design guides — delete one first`)
   const doc = await store.setGuideline(canvasId, slug, clean, actor.name, pos, cleanTitle)
   if (!doc) return undefined
   persist.saveGuidelineVersion(canvasId, slug, clean, actor.name, doc.updatedAt)

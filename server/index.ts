@@ -11,7 +11,8 @@ import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { store } from './store.ts'
-import { prepareCanvasSocket, prepareFrameSocket } from './frame-sync.ts'
+import { canvasIndex, frameActor, prepareCanvasSocket, prepareFrameSocket } from './frame-sync.ts'
+import { actorRoute as frameRoute } from './actor-route.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas, canManageCanvas, hasDurableCanvasAccess, isAdmin } from './access.ts'
@@ -52,18 +53,6 @@ import { isPeerViewport } from '../shared/viewport.ts'
 import type { Canvas, Frame, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = Number(process.env.PORT || 4400)
-
-function frameRoute(
-  handler: (req: express.Request<{ id: string }>, res: express.Response) => Promise<unknown>,
-): express.RequestHandler<{ id: string }> {
-  return (req, res, next) => {
-    void handler(req, res).catch((error) => {
-      console.error('[frame request]', error)
-      if (!res.headersSent) res.status(503).json({ error: 'canvas service unavailable' })
-      else next(error)
-    })
-  }
-}
 
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
@@ -836,18 +825,21 @@ app.delete('/api/agent-keys/:id', async (req, res) => {
   res.json({ ok: true })
 })
 
-app.get('/api/canvases', async (req, res) =>
-  res.json(
-    (await workspaces.canvasesFor(req.user!.id)).map((c) => {
-      /* which agents have worked on this canvas (most recent first), with
+app.get(
+  '/api/canvases',
+  frameRoute(async (req, res) =>
+    res.json(
+      (await workspaces.canvasesFor(req.user!.id)).map((c) => {
+        /* which agents have worked on this canvas (most recent first), with
          the user whose token they connected under and when they last worked */
-      const seen = new Map<string, { owner?: string; lastAt: number }>()
-      for (const t of actions.getTasks(c.id)) {
-        if (!t.agentName) continue // unclaimed board cards have no agent yet
-        if (!seen.has(t.agentName)) seen.set(t.agentName, { owner: t.owner, lastAt: t.startedAt })
-      }
-      return { ...c, agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })) }
-    }),
+        const seen = new Map<string, { owner?: string; lastAt: number }>()
+        for (const t of actions.getTasks(c.id)) {
+          if (!t.agentName) continue // unclaimed board cards have no agent yet
+          if (!seen.has(t.agentName)) seen.set(t.agentName, { owner: t.owner, lastAt: t.startedAt })
+        }
+        return { ...c, agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })) }
+      }),
+    ),
   ),
 )
 
@@ -897,11 +889,15 @@ app.get(
   '/api/canvases/:id/actor',
   frameRoute(async (req, res) => {
     if (!requireCanvas(req, res, req.params.id)) return
+    const accessVersion = await canvasIndex(req.params.id).accessVersion()
+    const current = store.getCanvasMetadata(req.params.id)
+    if (!current || !canAccessCanvas(req.user!.id, current)) return res.status(403).json({ error: 'access changed' })
     const grant = await prepareCanvasSocket({
       actorId: req.params.id,
       metadata: {
         actor: { name: req.user!.name, kind: 'user', color: colorFor(req.user!.name) },
         readOnly: true,
+        accessVersion,
       },
     })
     res.set('Cache-Control', 'no-store').json(grant)
@@ -911,6 +907,8 @@ app.get(
 app.get(
   '/api/frames/:id/actor',
   frameRoute(async (req, res) => {
+    if (!requireFrame(req, res, req.params.id)) return
+    const accessVersion = await frameActor(req.params.id).accessVersion()
     if (!requireFrame(req, res, req.params.id)) return
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 128) : undefined
     const grant = await prepareFrameSocket({
@@ -923,6 +921,7 @@ app.get(
           ...(clientId ? { clientId } : {}),
         },
         readOnly: !!req.impersonatedBy,
+        accessVersion,
       },
     })
     res.set('Cache-Control', 'no-store').json(grant)
@@ -964,46 +963,55 @@ app.delete('/api/canvases/:id/publish', (req, res) => {
    may grow) or back out to its owner's personal space (the owner, or a
    workspace admin). Moving is an access change, not an edit: every member
    of the target workspace can open it from now on. */
-app.put('/api/canvases/:id/workspace', (req, res) => {
-  const c = requireCanvas(req, res, req.params.id)
-  if (!c) return
-  const target = req.body?.workspaceId
-  if (target !== null && typeof target !== 'string')
-    return res.status(400).json({ error: 'workspaceId must be a workspace id or null' })
-  if (!canManageCanvas(req.user!.id, c))
-    return res.status(403).json({ error: 'only the canvas owner or a workspace admin can move it' })
-  if (target !== null) {
-    if (target === c.workspaceId) return res.json({ ok: true })
-    /* an admin's say over a workspace canvas ends at moving it out: re-homing
+app.put(
+  '/api/canvases/:id/workspace',
+  frameRoute(async (req, res) => {
+    const c = requireCanvas(req, res, req.params.id)
+    if (!c) return
+    const target = req.body?.workspaceId
+    if (target !== null && typeof target !== 'string')
+      return res.status(400).json({ error: 'workspaceId must be a workspace id or null' })
+    if (!canManageCanvas(req.user!.id, c))
+      return res.status(403).json({ error: 'only the canvas owner or a workspace admin can move it' })
+    if (target !== null) {
+      if (target === c.workspaceId) return res.json({ ok: true })
+      /* an admin's say over a workspace canvas ends at moving it out: re-homing
        it into another workspace — one the owner may not even belong to — is
        the owner's call alone */
-    if (c.ownerId !== req.user!.id)
-      return res.status(403).json({ error: 'only the canvas owner can move it into a workspace' })
-    if (!requireGrowableWorkspace(req, res, target)) return
-  }
-  store.setWorkspace(c.id, target ?? undefined)
-  res.json({ ok: true })
-})
+      if (c.ownerId !== req.user!.id)
+        return res.status(403).json({ error: 'only the canvas owner can move it into a workspace' })
+      if (!requireGrowableWorkspace(req, res, target)) return
+    }
+    await store.setWorkspace(c.id, target ?? undefined)
+    res.json({ ok: true })
+  }),
+)
 
-app.post('/api/canvases/:id/claim', (req, res) => {
-  const c = store.claimCanvas(req.params.id, req.user!.id)
-  if (!c) return res.status(409).json({ error: 'not found or already owned' })
-  res.json({ ok: true })
-})
+app.post(
+  '/api/canvases/:id/claim',
+  frameRoute(async (req, res) => {
+    const c = await store.claimCanvas(req.params.id, req.user!.id)
+    if (!c) return res.status(409).json({ error: 'not found or already owned' })
+    res.json({ ok: true })
+  }),
+)
 
 /* recent activity across all of the user's canvases, for the home dashboard */
-app.get('/api/home/activity', async (req, res) => {
-  const canvases = await workspaces.canvasesFor(req.user!.id)
-  const items = (
-    await Promise.all(
-      canvases.map(async (c) =>
-        (await actions.getActivity(c.id)).slice(0, 20).map((a) => ({ ...a, canvasId: c.id, canvasName: c.name })),
-      ),
-    )
-  ).flat()
-  items.sort((a, b) => b.at - a.at)
-  res.json(items.slice(0, 14))
-})
+app.get(
+  '/api/home/activity',
+  frameRoute(async (req, res) => {
+    const canvases = await workspaces.canvasesFor(req.user!.id)
+    const items = (
+      await Promise.all(
+        canvases.map(async (c) =>
+          (await actions.getActivity(c.id)).slice(0, 20).map((a) => ({ ...a, canvasId: c.id, canvasName: c.name })),
+        ),
+      )
+    ).flat()
+    items.sort((a, b) => b.at - a.at)
+    res.json(items.slice(0, 14))
+  }),
+)
 
 app.delete(
   '/api/canvases/:id',
@@ -1020,23 +1028,26 @@ app.delete(
   }),
 )
 
-app.patch('/api/canvases/:id', (req, res) => {
-  const c = requireCanvas(req, res, req.params.id)
-  if (!c) return
-  const { name, linkAccess } = req.body ?? {}
-  /* the link policy is the owner's alone — collaborators can rename, not lock */
-  if (linkAccess !== undefined) {
-    if (c.ownerId !== req.user!.id) return res.status(403).json({ error: 'only the owner can change link access' })
-    if (linkAccess !== 'edit' && linkAccess !== 'none')
-      return res.status(400).json({ error: 'linkAccess must be "edit" or "none"' })
-    store.setLinkAccess(c.id, linkAccess)
-  }
-  if (typeof name === 'string' && name.trim()) {
-    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-    actions.renameCanvas(c.id, name.trim(), actor)
-  }
-  res.json({ ok: true })
-})
+app.patch(
+  '/api/canvases/:id',
+  frameRoute(async (req, res) => {
+    const c = requireCanvas(req, res, req.params.id)
+    if (!c) return
+    const { name, linkAccess } = req.body ?? {}
+    /* the link policy is the owner's alone — collaborators can rename, not lock */
+    if (linkAccess !== undefined) {
+      if (c.ownerId !== req.user!.id) return res.status(403).json({ error: 'only the owner can change link access' })
+      if (linkAccess !== 'edit' && linkAccess !== 'none')
+        return res.status(400).json({ error: 'linkAccess must be "edit" or "none"' })
+      await store.setLinkAccess(c.id, linkAccess)
+    }
+    if (typeof name === 'string' && name.trim()) {
+      const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+      actions.renameCanvas(c.id, name.trim(), actor)
+    }
+    res.json({ ok: true })
+  }),
+)
 
 /* ------------------------------------------------------------------ */
 /* Collaborators: Figma-style invites. The owner invites existing doop */
@@ -1082,14 +1093,18 @@ app.post('/api/canvases/:id/members', async (req, res) => {
   res.json({ userId: row.id, name: row.name, email: row.email, owner: false })
 })
 
-app.delete('/api/canvases/:id/members/:userId', (req, res) => {
-  const c = requireCanvas(req, res, req.params.id)
-  if (!c) return
-  if (c.ownerId !== req.user!.id && req.params.userId !== req.user!.id)
-    return res.status(403).json({ error: 'only the owner can remove collaborators' })
-  if (!store.removeMember(c.id, req.params.userId)) return res.status(404).json({ error: 'not a collaborator' })
-  res.json({ ok: true })
-})
+app.delete(
+  '/api/canvases/:id/members/:userId',
+  frameRoute<{ id: string; userId: string }>(async (req, res) => {
+    const c = requireCanvas(req, res, req.params.id)
+    if (!c) return
+    if (c.ownerId !== req.user!.id && req.params.userId !== req.user!.id)
+      return res.status(403).json({ error: 'only the owner can remove collaborators' })
+    if (!(await store.removeMember(c.id, req.params.userId)))
+      return res.status(404).json({ error: 'not a collaborator' })
+    res.json({ ok: true })
+  }),
+)
 
 /* ---- design-sync keys: mint/list/revoke the write-only snippet creds.
    Owner and invited members only — NOT link-edit visitors. A key is a
@@ -1395,13 +1410,16 @@ app.delete('/api/canvases/:id/references/:refId', (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/canvases/:id/proposals/:pid', async (req, res) => {
-  if (!requireCanvas(req, res, req.params.id)) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
-  const proposal = await actions.resolveProposal(req.params.id, req.params.pid, !!req.body?.accept, actor)
-  if (!proposal) return res.status(404).json({ error: 'proposal not found' })
-  res.json(proposal)
-})
+app.post(
+  '/api/canvases/:id/proposals/:pid',
+  frameRoute<{ id: string; pid: string }>(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id)) return
+    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    const proposal = await actions.resolveProposal(req.params.id, req.params.pid, !!req.body?.accept, actor)
+    if (!proposal) return res.status(404).json({ error: 'proposal not found' })
+    res.json(proposal)
+  }),
+)
 
 /* Browser asset uploads (paste / drop): raw image bytes in, permanent /a/
    URL out. Same createAsset pipeline as the MCP ticket flow — the bytes are
@@ -1486,56 +1504,62 @@ app.delete(
   }),
 )
 
-app.post('/api/frames/:id/comments', async (req, res) => {
-  if (!requireFrame(req, res, req.params.id)) return
-  const { selector, snippet, text } = req.body ?? {}
-  /* a comment that @mentions a resident agent is a new command to the team,
+app.post(
+  '/api/frames/:id/comments',
+  frameRoute<{ id: string }>(async (req, res) => {
+    if (!requireFrame(req, res, req.params.id)) return
+    const { selector, snippet, text } = req.body ?? {}
+    /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
-  if (mentionedRole(String(text ?? ''))) {
-    const gate = await allowance.consumeResidentTask(req.user!.id)
-    if (!gate.ok) {
-      return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+    if (mentionedRole(String(text ?? ''))) {
+      const gate = await allowance.consumeResidentTask(req.user!.id)
+      if (!gate.ok) {
+        return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+      }
     }
-  }
-  const comment = await actions.addElementComment(
-    req.params.id,
-    { selector: String(selector ?? ''), snippet: String(snippet ?? ''), text: String(text ?? '') },
-    req.user!.name,
-    req.user!.id,
-  )
-  if (!comment) return res.status(404).json({ error: 'frame not found or empty text' })
-  res.json(comment)
-})
+    const comment = await actions.addElementComment(
+      req.params.id,
+      { selector: String(selector ?? ''), snippet: String(snippet ?? ''), text: String(text ?? '') },
+      req.user!.name,
+      req.user!.id,
+    )
+    if (!comment) return res.status(404).json({ error: 'frame not found or empty text' })
+    res.json(comment)
+  }),
+)
 
-app.post('/api/comments/:id/replies', async (req, res) => {
-  const found = actions.findComment(req.params.id)
-  if (!found) return res.status(404).json({ error: 'comment not found' })
-  if (!requireCanvas(req, res, found.canvasId)) return
-  const text = String(req.body?.text ?? '')
-  if (!text.trim() || !(await actions.openThread(req.params.id))) {
-    return res.status(404).json({ error: 'thread resolved or empty text' })
-  }
-  /* same rule as a fresh comment: only an @mention costs a resident task */
-  let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
-  if (mentionedRole(text)) {
-    gate = await allowance.consumeResidentTask(req.user!.id)
-    if (!gate.ok) {
-      return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+app.post(
+  '/api/comments/:id/replies',
+  frameRoute<{ id: string }>(async (req, res) => {
+    const found = actions.findComment(req.params.id)
+    if (!found) return res.status(404).json({ error: 'comment not found' })
+    if (!requireCanvas(req, res, found.canvasId)) return
+    const text = String(req.body?.text ?? '')
+    if (!text.trim() || !(await actions.openThread(req.params.id))) {
+      return res.status(404).json({ error: 'thread resolved or empty text' })
     }
-  }
-  const reply = await actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
-  if (!reply) {
-    /* the thread closed while the meter was being written: give the task
+    /* same rule as a fresh comment: only an @mention costs a resident task */
+    let gate: Awaited<ReturnType<typeof allowance.consumeResidentTask>> | undefined
+    if (mentionedRole(text)) {
+      gate = await allowance.consumeResidentTask(req.user!.id)
+      if (!gate.ok) {
+        return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+      }
+    }
+    const reply = await actions.replyToComment(req.params.id, text, req.user!.name, req.user!.id)
+    if (!reply) {
+      /* the thread closed while the meter was being written: give the task
        back — a failed refund is logged, never turned into a 500 */
-    if (gate) {
-      await allowance.refundResidentTask(gate, req.user!.id).catch((err) => {
-        console.error(`[comments] could not refund a resident task for ${req.user!.id}:`, err)
-      })
+      if (gate) {
+        await allowance.refundResidentTask(gate, req.user!.id).catch((err) => {
+          console.error(`[comments] could not refund a resident task for ${req.user!.id}:`, err)
+        })
+      }
+      return res.status(409).json({ error: 'thread resolved meanwhile' })
     }
-    return res.status(409).json({ error: 'thread resolved meanwhile' })
-  }
-  res.json(reply)
-})
+    res.json(reply)
+  }),
+)
 
 app.post('/api/comments/:id/resolve', (req, res) => {
   const found = actions.findComment(req.params.id)
@@ -1668,47 +1692,53 @@ app.post('/api/canvases/:id/import', async (req, res) => {
   }
 })
 
-app.post('/api/canvases/:id/cards', async (req, res) => {
-  if (!requireCanvas(req, res, req.params.id)) return
-  const title = String(req.body?.title ?? '').trim()
-  if (!title) return res.status(400).json({ error: 'empty title' })
-  const gate = await allowance.consumeResidentTask(req.user!.id)
-  if (!gate.ok) {
-    return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
-  }
-  const card = await actions.addQueuedCard(
-    req.params.id,
-    title,
-    req.user!.name,
-    req.body?.agents,
-    req.body?.attachments,
-    req.user!.id,
-    req.body?.scope,
-  )
-  if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
-  res.json(card)
-})
-
-/* the canvas chat: a plain message is free; one that @mentions resident
-   agents queues a card for them and is metered like any other card */
-app.post('/api/canvases/:id/chat', async (req, res) => {
-  if (!requireCanvas(req, res, req.params.id)) return
-  /* the same cut addChatMessage applies, so a mention past the cap is
-     never metered for a card that then does not exist */
-  const text = String(req.body?.text ?? '')
-    .trim()
-    .slice(0, actions.MAX_CHAT_CHARS)
-  if (!text) return res.status(400).json({ error: 'empty text' })
-  if (mentionedRole(text)) {
+app.post(
+  '/api/canvases/:id/cards',
+  frameRoute<{ id: string }>(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id)) return
+    const title = String(req.body?.title ?? '').trim()
+    if (!title) return res.status(400).json({ error: 'empty title' })
     const gate = await allowance.consumeResidentTask(req.user!.id)
     if (!gate.ok) {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
-  }
-  const message = await actions.addChatMessage(req.params.id, text, req.user!.name, req.user!.id)
-  if (!message) return res.status(404).json({ error: 'canvas not found or empty text' })
-  res.json(message)
-})
+    const card = await actions.addQueuedCard(
+      req.params.id,
+      title,
+      req.user!.name,
+      req.body?.agents,
+      req.body?.attachments,
+      req.user!.id,
+      req.body?.scope,
+    )
+    if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
+    res.json(card)
+  }),
+)
+
+/* the canvas chat: a plain message is free; one that @mentions resident
+   agents queues a card for them and is metered like any other card */
+app.post(
+  '/api/canvases/:id/chat',
+  frameRoute<{ id: string }>(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id)) return
+    /* the same cut addChatMessage applies, so a mention past the cap is
+     never metered for a card that then does not exist */
+    const text = String(req.body?.text ?? '')
+      .trim()
+      .slice(0, actions.MAX_CHAT_CHARS)
+    if (!text) return res.status(400).json({ error: 'empty text' })
+    if (mentionedRole(text)) {
+      const gate = await allowance.consumeResidentTask(req.user!.id)
+      if (!gate.ok) {
+        return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+      }
+    }
+    const message = await actions.addChatMessage(req.params.id, text, req.user!.name, req.user!.id)
+    if (!message) return res.status(404).json({ error: 'canvas not found or empty text' })
+    res.json(message)
+  }),
+)
 
 app.post('/api/canvases/:canvasId/cards/:id/done', (req, res) => {
   if (!requireCanvas(req, res, req.params.canvasId)) return

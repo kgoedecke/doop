@@ -191,3 +191,115 @@ it('imports legacy SQL frames once, preserves references, and retries a partial 
     await server.stopped
   }
 }, 120_000)
+
+it('reserves distinct positions for simultaneous creates and unfinished payloads', async () => {
+  const server = await startServer(await port())
+  try {
+    const owner = await new Client(server).signUp('placement@frame-actors.test', 'Owner')
+    const canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Concurrent placement' }))
+    const frames = await Promise.all(
+      Array.from({ length: 6 }, (_, n) =>
+        json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: `Frame ${n}` })),
+      ),
+    )
+    const sorted = frames.sort((a, b) => a.x - b.x)
+    expect(sorted[0]?.x).toBe(120)
+    for (let n = 1; n < sorted.length; n++) expect(sorted[n]!.x).toBe(sorted[n - 1]!.x + sorted[n - 1]!.width + 80)
+    const rightmost = sorted.at(-1)!
+    const index = canvasIndex(canvas.id)
+    const bounds = Object.fromEntries(frames.map(({ id, x, width }) => [id, { x, width }]))
+    const candidate = { ...rightmost, id: `${canvas.id}.reserved`, width: 900 }
+    const reservation = await index.reserveFrame(candidate, true, bounds)
+    expect(reservation).toMatchObject({ x: rightmost.x + rightmost.width + 80, width: 900 })
+    const retry = await index.reserveFrame({ ...candidate, width: 200 }, true, bounds)
+    expect(retry).toEqual(reservation)
+    const next = await json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'After reservation' }))
+    expect(next.x).toBe(rightmost.x + rightmost.width + 80 + 900 + 80)
+    // A stale membership read must refresh, rather than place over a newly active frame.
+    expect(await index.reserveFrame({ ...candidate, id: `${canvas.id}.stale` }, true, bounds)).toBe('retry')
+    const explicit = await json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Explicit', x: -50 }))
+    expect(explicit.x).toBe(-50)
+  } finally {
+    server.stop()
+    await server.stopped
+  }
+}, 120_000)
+
+it('closes revoked sockets, rejects old tickets, and lets remaining users reconnect', async () => {
+  const server = await startServer(await port())
+  const sockets: WebSocket[] = []
+  const closed = (socket: WebSocket) => new Promise<number>((resolve) => socket.once('close', resolve))
+  try {
+    const owner = await new Client(server).signUp('revocation-owner@frame-actors.test', 'Owner')
+    const visitor = await new Client(server).signUp('revocation-visitor@frame-actors.test', 'Visitor')
+    const canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Revocation' }))
+    const frame = await json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Protected' }))
+    await json(owner.patch(`/api/canvases/${canvas.id}`, { linkAccess: 'edit' }))
+    const ticket = await json<{ websocketUrl: string }>(visitor.get(`/api/frames/${frame.id}/actor`))
+    const joined = await joinActor(ticket.websocketUrl, sockets)
+    const indexTicket = await json<{ websocketUrl: string }>(visitor.get(`/api/canvases/${canvas.id}/actor`))
+    const indexSocket = new WebSocket(indexTicket.websocketUrl)
+    sockets.push(indexSocket)
+    indexSocket.on('error', () => {})
+    let indexReady = false
+    indexSocket.on('message', (data) => {
+      if (JSON.parse(String(data)).type === 'index-snapshot') indexReady = true
+    })
+    await until(() => indexReady)
+    const frameClosed = closed(joined.socket),
+      indexClosed = closed(indexSocket)
+    await json(owner.patch(`/api/canvases/${canvas.id}`, { linkAccess: 'none' }))
+    expect(await frameClosed).toBe(4003)
+    expect(await indexClosed).toBe(4003)
+    expect((await visitor.get(`/api/frames/${frame.id}/actor`)).status).toBe(403)
+    expect((await visitor.patch(`/api/frames/${frame.id}`, { name: 'Denied' })).status).toBe(403)
+    for (const stale of [ticket, indexTicket]) {
+      const replay = new WebSocket(stale.websocketUrl)
+      sockets.push(replay)
+      replay.on('error', () => {})
+      expect(await closed(replay)).toBe(4003)
+    }
+    expect((await frameActor(frame.id).snapshot()).frame?.name).toBe('Protected')
+    const fresh = await json<{ websocketUrl: string }>(owner.get(`/api/frames/${frame.id}/actor`))
+    const remaining = await joinActor(fresh.websocketUrl, sockets)
+    await remaining.request({ type: 'write', write: { type: 'update', patch: { name: 'Owner edit' } } })
+    expect((await frameActor(frame.id).snapshot()).frame?.name).toBe('Owner edit')
+    await json(owner.post(`/api/canvases/${canvas.id}/members`, { email: 'revocation-visitor@frame-actors.test' }))
+    const memberTicket = await json<{ websocketUrl: string }>(visitor.get(`/api/frames/${frame.id}/actor`))
+    const member = await joinActor(memberTicket.websocketUrl, sockets)
+    const memberClosed = closed(member.socket)
+    const { id } = await json<{ id: string }>(visitor.get('/api/me'))
+    await json(owner.delete(`/api/canvases/${canvas.id}/members/${id}`))
+    expect(await memberClosed).toBe(4003)
+    expect((await visitor.get(`/api/frames/${frame.id}/actor`)).status).toBe(403)
+  } finally {
+    for (const socket of sockets) socket.terminate()
+    server.stop()
+    await server.stopped
+  }
+}, 120_000)
+
+it('returns a service error instead of hanging when actors are unavailable', async () => {
+  let server = await startServer(await port())
+  try {
+    const owner = await new Client(server).signUp('unavailable@frame-actors.test', 'Owner')
+    await json(owner.post('/api/canvases', { name: 'Unavailable' }))
+    const dataDir = server.dataDir
+    server.stop({ keepData: true })
+    await server.stopped
+    server = await startServer(
+      await port(),
+      { TERSE_ACTOR_URL: 'http://127.0.0.1:1/v1/projects/local/actors', TERSE_API_KEY: 'test-only' },
+      dataDir,
+    )
+    const restored = new Client(server)
+    restored.cookies = new Map(owner.cookies)
+    const response = await restored.req('/api/canvases', { signal: AbortSignal.timeout(3000) })
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ error: 'canvas service unavailable' })
+    expect((await fetch(`${server.base}/healthz`)).status).toBe(200)
+  } finally {
+    server.stop()
+    await server.stopped
+  }
+}, 120_000)

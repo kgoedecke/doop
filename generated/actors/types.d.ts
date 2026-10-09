@@ -11,6 +11,7 @@ interface $CanvasIndexContract {
         committed: IndexSnapshot | null
     }
     Methods: {
+        accessVersion(): Promise<number>
         activate(id: string): Promise<boolean>
         confirmDelete(id: string): Promise<void>
         destroy(): Promise<void>
@@ -21,6 +22,19 @@ interface $CanvasIndexContract {
         remove(id: string): Promise<boolean>
         /** Record intent before initializing the frame, so a later access can finish an interrupted create. */
         reserve(id: string): Promise<boolean>
+        /** Calculate and reserve placement together, including creates whose payload is still in flight. */
+        reserveFrame(
+            frame: Frame,
+            automatic: boolean,
+            observed: Record<
+                string,
+                {
+                    x: number
+                    width: number
+                }
+            >
+        ): Promise<Frame | "retry" | null>
+        revokeAccess(): Promise<void>
         snapshot(): Promise<IndexSnapshot>
     }
 }
@@ -32,8 +46,10 @@ interface $FrameActorContract {
         committed: FrameChange | FrameSnapshot | null
     }
     Methods: {
+        accessVersion(): Promise<number>
         destroy(): Promise<void>
         initialize(frame: Frame): Promise<boolean>
+        revokeAccess(): Promise<void>
         snapshot(): Promise<FrameSnapshot>
         /** Dashboard/activity responses omit HTML. */
         summary(): Promise<{
@@ -107,6 +123,11 @@ type FrameEdit =
           patch: FramePatch
       }
     | {
+          type: "replace"
+          find: string
+          replacement: string
+      }
+    | {
           type: "append"
           chunk: string
           start: boolean
@@ -115,10 +136,12 @@ type FrameEdit =
 type FrameMetadata = {
     actor: Actor
     readOnly: boolean
+    accessVersion?: number
 }
 type FrameMetadata$1 = {
     actor: Actor
     readOnly: boolean
+    accessVersion?: number
 }
 type FramePatch = Partial<Pick<Frame, "name" | "x" | "y" | "width" | "height" | "html">>
 type FrameSnapshot = {

@@ -107,6 +107,21 @@ describe('replying to a comment', () => {
     expect(await actions.replyToComment('missing', 'Hello', 'bob')).toBeUndefined()
   })
 
+  it('refuses a reply when the thread resolves during its frame lookup', async () => {
+    const parent = await root()
+    let release!: (frame: Frame) => void
+    vi.mocked(store.getFrame).mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve
+      }),
+    )
+    const reply = actions.replyToComment(parent.id, 'Late', 'bob')
+    actions.resolveComment(parent.id, 'alice')
+    release(FRAME)
+    expect(await reply).toBeUndefined()
+    expect(actions.commentThread(parent)).toEqual([parent])
+  })
+
   it('resolving the root closes every open reply so none stays queued for an agent', async () => {
     const parent = await root()
     const reply = (await actions.replyToComment(parent.id, `@${DEFAULT_ROLE_ID} bigger`, 'alice', 'alice'))!
