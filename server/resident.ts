@@ -175,7 +175,7 @@ function completeHtml(value: unknown): string | undefined {
 const REDESIGN_RE =
   /\b(redesign|re-?style|same style|match (?:the )?(?:style|design)|copy (?:the )?(?:style|design)|design of)\b/i
 
-function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.getCanvas>>['frames']): string {
+function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.getCanvasMetadata>>['frames']): string {
   const isRedesign = REDESIGN_RE.test(text)
   const redesignNote = isRedesign
     ? ' For the redesign itself, work audit-first and deliver TWO drafts:' +
@@ -216,7 +216,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   if (payer === undefined) return 'idle'
   /* Only work that predates per-user attribution falls back to the canvas
      owner — a real requester never bills a collaborator or the owner. */
-  const canvasOwner = store.getCanvas(canvasId)?.ownerId
+  const canvasOwner = store.getCanvasMetadata(canvasId)?.ownerId
   const model = await pickModel(payer || canvasOwner)
   if (!model) {
     stalled.add(payer)
@@ -291,7 +291,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       items.length + comments.length > 0 ? 'Reading feedback…' : 'Picking up a card…',
     )
 
-    const canvas = store.getCanvas(canvasId)
+    const canvas = await store.syncCanvas(canvasId)
     /* demo frames (the Doop welcome show, seeded examples) are product
        content, not user work — hidden so agents never mistake them for
        the canvas's established style */
@@ -324,7 +324,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        agent edits it in place instead of delivering something new elsewhere */
     function describeScope(scope: AgentTask['scope']): string {
       if (!scope) return ''
-      const f = store.getFrame(scope.frameId)
+      const f = canvas?.frames.find((frame) => frame.id === scope.frameId)
       if (!f) {
         /* the target is gone: say so rather than letting the request run
            canvas-wide against something the human never pointed at */
@@ -353,7 +353,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                   : ''
               const attached = (c.attachments ?? [])
                 .map((id) => {
-                  const f = store.getFrame(id)
+                  const f = canvas?.frames.find((frame) => frame.id === id)
                   return f ? `${f.id} ("${f.name}")` : null
                 })
                 .filter(Boolean)
@@ -374,7 +374,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         `New element comments addressed to you (each is pinned to a specific element):\n` +
           comments
             .map((c) => {
-              const fname = store.getFrame(c.frameId)?.name ?? 'unknown frame'
+              const fname = canvas?.frames.find((frame) => frame.id === c.frameId)?.name ?? 'unknown frame'
               /* a reply carries the conversation it answers, so "make it
                  bigger" reads against what was said before */
               const history = actions.commentThread(c)
@@ -1097,6 +1097,7 @@ async function execTool(
   actor: ReturnType<typeof actions.resolveActor>,
   runState: RunState,
 ): Promise<Anthropic.ToolResultBlockParam> {
+  await store.syncCanvas(canvasId)
   const input = block.input as { frame_id: string } & Record<string, string>
   const fail = (msg: string): Anthropic.ToolResultBlockParam => ({
     type: 'tool_result',
@@ -1123,7 +1124,7 @@ async function execTool(
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
           return fail(`create_frame HTML must be compact (at most ${MAX_REWRITE_CHUNK_CHARS} characters)`)
         }
-        const f = actions.createFrame(
+        const f = await actions.createFrame(
           canvasId,
           {
             name: String(raw.name || 'Frame'),
@@ -1141,13 +1142,13 @@ async function execTool(
         )
       }
       case 'inspect_frame': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         const inspection = await inspectFrame(f)
         return ok(JSON.stringify(inspection))
       }
       case 'get_frame_html': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         const raw = block.input as { query?: string; offset?: number; limit?: number }
@@ -1182,22 +1183,19 @@ async function execTool(
         )
       }
       case 'edit_frame_html': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
         if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
-        const count = f.html.split(input.find).length - 1
-        if (count === 0) return fail('"find" text not found — call get_frame_html and copy the exact text')
-        if (count > 1)
-          return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
-        actions.updateFrame(input.frame_id, { html: f.html.replace(input.find, input.replace) }, actor)
+        if (!(await actions.replaceFrameHtml(input.frame_id, input.find, input.replace, actor)))
+          return fail('frame not found on this canvas')
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
         return ok('applied')
       }
       case 'set_frame_html': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         const html = completeHtml(input.html)
         if (!html) {
@@ -1210,13 +1208,13 @@ async function execTool(
             `set_frame_html is limited to ${MAX_REWRITE_CHUNK_CHARS} characters. Use begin_frame_rewrite, append_frame_rewrite chunks, and commit_frame_rewrite.`,
           )
         }
-        actions.updateFrame(input.frame_id, { html }, actor)
+        await actions.updateFrame(input.frame_id, { html }, actor)
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
         return ok('applied — the new design is revealing to viewers now')
       }
       case 'begin_frame_rewrite': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         runState.rewriteDrafts.set(input.frame_id, '')
         return ok(
@@ -1224,7 +1222,7 @@ async function execTool(
         )
       }
       case 'append_frame_rewrite': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (!runState.rewriteDrafts.has(input.frame_id)) return fail('no rewrite draft; call begin_frame_rewrite first')
         const raw = block.input as { chunk?: unknown }
@@ -1240,14 +1238,14 @@ async function execTool(
         return ok(`appended ${raw.chunk.length} characters; draft is now ${draft.length} characters`)
       }
       case 'commit_frame_rewrite': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         const draft = runState.rewriteDrafts.get(input.frame_id)
         if (draft === undefined) return fail('no rewrite draft; call begin_frame_rewrite first')
         const html = completeHtml(draft)
         if (!html)
           return fail('rewrite draft is not a complete HTML document ending in </html>; append the missing content')
-        actions.updateFrame(input.frame_id, { html }, actor)
+        await actions.updateFrame(input.frame_id, { html }, actor)
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
@@ -1437,7 +1435,7 @@ async function execTool(
         }
 
         const existing = raw.as_reference
-          ? findImportedWebpageFrame(store.getCanvas(canvasId)?.frames ?? [], requestedUrl)
+          ? findImportedWebpageFrame((await store.syncCanvas(canvasId))?.frames ?? [], requestedUrl)
           : undefined
         if (existing) {
           runState.sourceFrames.add(existing.id)
@@ -1541,7 +1539,7 @@ async function execTool(
         const raw = block.input as { name?: string; markdown?: string; title?: string }
         if (typeof raw.name !== 'string' || !raw.name.trim()) return fail('name must be a non-empty slug')
         if (typeof raw.markdown !== 'string') return fail('markdown must be a string (empty string deletes the doc)')
-        const doc = actions.setGuideline(canvasId, raw.name, raw.markdown, actor, undefined, raw.title)
+        const doc = await actions.setGuideline(canvasId, raw.name, raw.markdown, actor, undefined, raw.title)
         if (doc === undefined) return fail('canvas not found')
         return ok(
           doc
@@ -1550,7 +1548,7 @@ async function execTool(
         )
       }
       case 'screenshot_frame': {
-        const f = store.getFrame(input.frame_id)
+        const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         /* a text-only model cannot see the render — skip the (paid, slow)
            screenshot entirely and point it at the textual surfaces, while

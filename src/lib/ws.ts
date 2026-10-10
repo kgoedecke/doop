@@ -1,3 +1,4 @@
+import { connectFrames, disconnectFrames, refreshFrames } from './canvas-actor'
 import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
 import { getIdentity } from './identity'
@@ -18,6 +19,7 @@ export function connect(canvasId: string) {
 }
 
 export function disconnect() {
+  disconnectFrames()
   currentCanvasId = null
   if (retryTimer) window.clearTimeout(retryTimer)
   socket?.close()
@@ -98,6 +100,9 @@ function handle(msg: ServerMessage) {
         else if (loadedBuild !== msg.serverBuild) s.setUpdateReady(true)
       }
       s.setCanvas(msg.canvas)
+      void connectFrames(msg.canvas.id)
+        .then(refreshFrames)
+        .catch((error) => console.error('[canvas]', error))
       s.setPresences(msg.presences)
       s.setActivity(msg.activity)
       s.setTasks(msg.tasks)
@@ -134,26 +139,8 @@ function handle(msg: ServerMessage) {
     case 'comment':
       s.upsertComment(msg.comment)
       break
-    case 'frame:drag':
-      s.patchFrameLocal(msg.frameId, { x: msg.x, y: msg.y, width: msg.width, height: msg.height })
-      break
-    case 'frame:created':
-      s.upsertFrame(msg.frame)
-      if (msg.actor.clientId !== me) s.flash(msg.frame.id, msg.actor.color)
-      break
-    case 'frame:updated':
-      s.upsertFrame(msg.frame)
-      /* during a live stream the marching border replaces per-chunk flashes */
-      if (msg.actor.clientId !== me && !s.streams[msg.frame.id]) s.flash(msg.frame.id, msg.actor.color)
-      break
     case 'frame:streaming':
       s.setStream(msg.frameId, msg.active ? { name: msg.actor.name, color: msg.actor.color } : null)
-      break
-    case 'frame:deleted':
-      s.removeFrame(msg.frameId)
-      break
-    case 'canvas:pages':
-      s.setPages(msg.pages)
       break
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)

@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 
 interface ToolInputSchema {
@@ -105,6 +105,7 @@ it('requires the original page list and rejects stale agent replacements', async
     updatedAt: 0,
   }
   store.canvases.set(canvas.id, canvas)
+  const syncCanvas = vi.spyOn(store, 'syncCanvas').mockResolvedValue(canvas)
   const server = buildMcpServer('Test Owner', 'test-owner-id')
   const client = new Client({ name: 'pages-test', version: '1.0.0' })
   const [a, b] = InMemoryTransport.createLinkedPair()
@@ -126,6 +127,7 @@ it('requires the original page list and rejects stale agent replacements', async
     expect(JSON.stringify(result)).toContain('Pages changed')
     expect(canvas.pages).toHaveLength(2)
   } finally {
+    syncCanvas.mockRestore()
     store.canvases.delete(canvas.id)
     await client.close()
     await server.close()

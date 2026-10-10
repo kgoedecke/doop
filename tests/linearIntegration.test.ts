@@ -28,8 +28,10 @@ beforeAll(async () => {
       }),
     )
   })
-  await new Promise<void>((resolve) => upstream.listen(4977, resolve))
-  server = await startServer(4976, { LINEAR_API_URL: 'http://localhost:4977' })
+  // The access suite also uses 4977; let the OS choose the mock upstream port.
+  await new Promise<void>((resolve) => upstream.listen(0, resolve))
+  const { port } = upstream.address() as { port: number }
+  server = await startServer(4976, { LINEAR_API_URL: `http://localhost:${port}` })
   owner = await new Client(server).signUp('linear-owner@test.dev', 'Owner')
   stranger = await new Client(server).signUp('linear-stranger@test.dev', 'Stranger')
 }, 60_000)

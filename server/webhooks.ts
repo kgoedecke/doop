@@ -442,7 +442,7 @@ function record(hook: WebhookRecord, ticket: number, result: WebhookDeliveryResu
  *  retry — access can go away during a DNS lookup or a back-off. */
 function stillDeliverable(hook: WebhookRecord, canvasId: string): boolean {
   if (hooks.get(hook.id) !== hook || !hook.enabled) return false
-  const canvas = store.getCanvas(canvasId)
+  const canvas = store.getCanvasMetadata(canvasId)
   return !!canvas && hasDurableCanvasAccess(hook.userId, canvas)
 }
 
@@ -468,7 +468,7 @@ async function send(
  *  subscribed to it and whose owner durably has access to the canvas. */
 export function onCanvasEvent(canvasId: string, event: CanvasEvent): void {
   if (!hooks.size) return
-  const canvas = store.getCanvas(canvasId)
+  const canvas = store.getCanvasMetadata(canvasId)
   if (!canvas) return
   const targets = [...hooks.values()].filter(
     (h) => h.enabled && h.events.includes(event.type) && hasDurableCanvasAccess(h.userId, canvas),

@@ -194,7 +194,7 @@ describe('delegation jobs', () => {
     expect(cards[0]?.status).toContain('two-column')
     expect(consumeResidentTask).toHaveBeenCalledTimes(1)
     expect(onFeedback).toHaveBeenCalledWith(row.canvasId)
-    expect(store.getCanvas(row.canvasId!)?.ownerId).toBe(userId)
+    expect(store.getCanvasMetadata(row.canvasId!)?.ownerId).toBe(userId)
     expect(sent.every((request) => request.authorization === 'Bearer oauth-secret')).toBe(true)
     await receiveSession(event())
     await tickLinear()

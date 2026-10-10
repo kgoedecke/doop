@@ -61,7 +61,7 @@ export function recipientsFor(canvas: Canvas, comment: ElementComment, actorKind
 export function onCanvasEvent(canvasId: string, event: CanvasEvent): void {
   if (event.type !== 'comment.created' && event.type !== 'comment.replied') return
   if (!mailerConfigured) return
-  const canvas = store.getCanvas(canvasId)
+  const canvas = store.getCanvasMetadata(canvasId)
   if (!canvas) return
   const item: PendingComment = { comment: event.comment, frameName: event.frame.name, actorKind: event.actorKind }
   for (const userId of recipientsFor(canvas, event.comment, event.actorKind)) queue(userId, canvasId, item)
@@ -90,7 +90,7 @@ async function flush(key: string) {
        of which mean: send nothing. Access is checked here, not only when
        the batch opened, so a comment never reaches someone who could no
        longer open the canvas to read it. */
-    const canvas = store.getCanvas(batch.canvasId)
+    const canvas = store.getCanvasMetadata(batch.canvasId)
     if (!canvas || !canAccessCanvas(batch.userId, canvas)) return
     const [person] = await mailableForComments([batch.userId])
     if (!person) return

@@ -67,7 +67,7 @@ liveActivitiesRouter.put('/:id', async (req, res) => {
   const parsed = registration.safeParse(req.body)
   if (!parsed.success || !/^[\w-]{1,100}$/.test(req.params.id))
     return res.status(400).json({ error: 'invalid activity registration' })
-  const canvas = store.getCanvas(parsed.data.canvasId)
+  const canvas = store.getCanvasMetadata(parsed.data.canvasId)
   if (!canvas || !hasDurableCanvasAccess(req.user!.id, canvas))
     return res.status(403).json({ error: 'canvas membership required' })
   if (!apnsConfigured())
@@ -153,7 +153,7 @@ export async function deliverLiveActivities(send = sendLiveActivityPush) {
     await db.delete(liveActivities).where(lt(liveActivities.expiresAt, Date.now()))
     const rows = await db.select().from(liveActivities)
     await forEachBounded(rows, DELIVERY_CONCURRENCY, deadline, async (row) => {
-      const canvas = store.getCanvas(row.canvasId)
+      const canvas = store.getCanvasMetadata(row.canvasId)
       const permitted = canvas && hasDurableCanvasAccess(row.userId, canvas)
       const state = permitted ? agentActivityState(canvas.name, getTasks(canvas.id)) : null
       const ended = !state || (state.phase !== 'working' && state.phase !== 'queued')

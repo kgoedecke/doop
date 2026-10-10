@@ -9,7 +9,7 @@ import * as schema from '../server/db/schema.ts'
 
 const rig = vi.hoisted(() => ({
   db: undefined as unknown as NodePgDatabase<typeof schema>,
-  getCanvas: vi.fn(),
+  getCanvasMetadata: vi.fn(),
   getTasks: vi.fn(),
   allowed: vi.fn(),
   allCanvases: vi.fn((): { id: string; name: string }[] => []),
@@ -19,7 +19,9 @@ vi.mock('../server/db/index.ts', () => ({
     return rig.db
   },
 }))
-vi.mock('../server/store.ts', () => ({ store: { getCanvas: rig.getCanvas, allCanvases: rig.allCanvases } }))
+vi.mock('../server/store.ts', () => ({
+  store: { getCanvasMetadata: rig.getCanvasMetadata, allCanvases: rig.allCanvases },
+}))
 vi.mock('../server/actions.ts', () => ({ getTasks: rig.getTasks }))
 vi.mock('../server/access.ts', () => ({ hasDurableCanvasAccess: rig.allowed }))
 vi.mock('../server/apns.ts', () => ({ apnsConfigured: () => true, sendLiveActivityPush: vi.fn() }))
@@ -38,7 +40,7 @@ beforeEach(async () => {
   await rig.db.delete(schema.liveActivityStarters)
   resetLiveActivityStarts()
   rig.allCanvases.mockReturnValue([])
-  rig.getCanvas.mockReturnValue({ id: 'c', name: 'Confidential design' })
+  rig.getCanvasMetadata.mockReturnValue({ id: 'c', name: 'Confidential design' })
   rig.getTasks.mockReturnValue([{ id: 't', agentName: 'Doop', status: 'Sketching', startedAt: 1000 }])
   rig.allowed.mockReturnValue(true)
   await rig.db.insert(schema.liveActivities).values({

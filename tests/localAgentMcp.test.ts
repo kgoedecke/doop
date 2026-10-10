@@ -12,7 +12,7 @@ vi.mock('../server/localAgentPreferences.ts', () => ({
   saveLocalAgentPreference: vi.fn(),
 }))
 vi.mock('../server/access.ts', () => ({ canAccessCanvas: (user: string) => user === 'alice' }))
-vi.mock('../server/store.ts', () => ({ store: { getCanvas: (id: string) => ({ id }), canvases: new Map() } }))
+vi.mock('../server/store.ts', () => ({ store: { getCanvasMetadata: (id: string) => ({ id }), canvases: new Map() } }))
 
 import { handleLocalAgentMcp } from '../server/localAgent.ts'
 import { localAgentRuns } from '../server/localAgentRuns.ts'

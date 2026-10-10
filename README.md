@@ -33,12 +33,12 @@ activity feed.
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
   `expectedPages` to protect collaborators), and target frames with `pageId`.
 - **True multiplayer** — live cursors, presence, per-frame editing indicators, undo/redo, comments
-  pinned to elements, and an activity feed, all over one WebSocket room.
+  pinned to elements, and an activity feed.
 - **Design memory** — pin exemplar frames, capture decisions, and let the distiller propose durable
   style rules that every agent follows.
 - **Private by default** — invite collaborators by email or flip on link sharing per canvas;
   agents inherit exactly their human's access.
-- **Self-host in one command** — `docker compose up`, or `bun run dev` with zero configuration
+- **Self-host** — configure a separate actor API, then `docker compose up`; develop locally with zero-config `bun run dev`
   (embedded Postgres, no external services required).
 
 ## Quickstart
@@ -50,25 +50,27 @@ bun run dev
 ```
 
 Doop builds and installs with [bun](https://bun.sh) (`bun.lock` is the only
-lockfile); the server itself runs on Node.
+lockfile); the server itself runs on Node 22.19+.
 
 - Web app: **http://localhost:4300**
 - API + WebSocket + MCP server: **http://localhost:4400** (the web port proxies `/api`, `/ws`, `/mcp` to it)
 
-Everything works with no configuration: data persists to an embedded Postgres (PGlite) in `data/pg`,
+Everything works with no configuration: canvas metadata persists to embedded Postgres (PGlite) in `data/pg`,
+with frame actors in `data/actors`,
 and every optional integration (SMTP, stock photos, object storage, analytics) degrades gracefully
 until its variable in [.env.example](.env.example) is set. The one you will most likely want is
 `ANTHROPIC_API_KEY`, which turns on the built-in [Doop Agent](#the-doop-agent) — agents you connect
 yourself over MCP need no key.
 
-Or self-host the production build with Docker:
+To self-host the production build, first configure `TERSE_ACTOR_URL` and `TERSE_API_KEY` in `.env`
+for a separately hosted actor API whose WebSocket endpoint is publicly reachable. Then start Docker:
 
 ```bash
 BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
 ```
 
-Production build without Docker: `bun run build && bun run start` (single server on :4400 serving
-everything). Set `DATABASE_URL` to use a real Postgres — same code path as PGlite.
+Production build without Docker: `bun run build && bun run start` (app server on :4400, using the
+same actor configuration from `.env`). Set `DATABASE_URL` to use a real Postgres — same code path as PGlite.
 
 Prefer not to run anything? **[doop.design](https://doop.design)** is the hosted version.
 
@@ -400,15 +402,29 @@ Any container host works; Railway/Fly are the least friction:
    persistent volume mounted at `/app/data`.
 3. Set `BETTER_AUTH_SECRET` (long random string) and `BETTER_AUTH_URL` (the public origin,
    e.g. `https://doop.example.com`). Extra allowed origins: `TRUSTED_ORIGINS` (comma-separated).
-4. Health check: `GET /healthz`. The server trusts one proxy hop (`trust proxy`), so
+4. Set `TERSE_ACTOR_URL` and `TERSE_API_KEY` for a separately hosted actor API. Its WebSocket
+   endpoint must be publicly reachable by browsers; use `wss://` when the app uses HTTPS.
+   Production startup requires `TERSE_ACTOR_URL` and does not start a local actor runtime.
+5. Health check: `GET /healthz`. The server trusts one proxy hop (`trust proxy`), so
    TLS termination at the platform edge works out of the box.
 
-Local sanity check of the exact production image:
+Local sanity check of the exact production image, with the actor settings in `.env`:
 
 ```bash
 docker build -t doop .
-docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
+docker run --env-file .env -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
 ```
+
+To use managed actors, create a project with `bunx terse-cli init`, then run `bun run deploy:actors`
+(or pass an existing `terse.config.json` path). Set `TERSE_ACTOR_URL` and `TERSE_API_KEY` on the Doop
+server. You can also use your own separately hosted actor API. Doop checks canvas access and issues
+short-lived actor tickets; browsers connect directly to the WebSocket URL returned by that API.
+The actor API key stays on the server. Doop does not relay actor WebSocket traffic or expose an
+actor runtime for you. Multiple app instances must share the same actor project. Back up actor
+storage alongside SQL and uploaded assets. Automatic local actors are limited to development and tests.
+
+Actor deployment uses the source list in `scripts/deploy-actors.mjs` and the package settings in
+`actors/`. Add new actor source dependencies to that list when introducing imports.
 
 ## Connect an AI agent
 
@@ -486,18 +502,15 @@ is redacted before upload (`data-doop-sync-ignore` excludes an element entirely)
 credential: it can only write frames to its one canvas, so revoking it in the Share dialog cuts the
 app off instantly. Endpoint: `POST /ingest/<key>` (CORS-open, no cookies).
 
-### How streaming looks (server-side smoothing)
+### How streaming looks
 
-Agent HTML lands in the store immediately, but viewers see it through a **typewriter reveal**: the server
-broadcasts the accumulated HTML at a steady rate (~500 chars/s, accelerating to clear backlogs in ~8s),
-so even an agent that sends few large chunks — or a one-shot `set_frame_html` / `create_frame` with
-full HTML — plays back as a smooth live stream. Mid-reveal HTML is _healed_ before broadcast: a trailing
-half-written tag is dropped, an unclosed `<script>` is cut (never run half-written JS), and an unclosed
-`<style>` is closed so content paints instead of blanking. Human edits from the inspector bypass the
-reveal (and a human html edit cancels any open reveal — the human takes over).
+Frame actors persist agent HTML and send it to subscribed browsers. Appended chunks render as they
+arrive; large agent updates get a browser-side **typewriter reveal**. Partial HTML is _healed_ before
+rendering: trailing incomplete tags and scripts are dropped, and unclosed styles are closed.
+Human edits bypass the reveal. The reveal changes only presentation; actor reads return saved HTML.
 
 While a stream/reveal is open the frame gets a pulsing dashed border and a "✦ <agent> is designing…"
-chip; "finished designing" logs when the reveal completes. A stale stream auto-closes after 30s.
+chip; "finished designing" logs when the agent sends `done=true`. A stale stream auto-closes after 30s.
 There is also a REST equivalent: `POST /api/frames/:id/append` with `{ html_chunk, start?, done?, actor? }`.
 
 ### How agents learn the workflow
@@ -607,7 +620,7 @@ free. `resolve_comment` also costs nothing.
 - **Infinite canvas** — wheel to pan, `⌘`/`ctrl` + wheel (or pinch) to zoom, drag the background to pan,
   zoom-to-fit; dot grid tracks the viewport.
 - **Frames** — drag to move, corner handle to resize, click to select. The right-hand inspector edits
-  name/position/size and the raw HTML with debounced live saves. `⌫` deletes the selected frame.
+  name/position/size and the raw HTML with live saves batched every 50ms. `⌫` deletes the selected frame.
 - **Multiplayer** — live cursors with name tags, presence avatars, per-frame "who's editing" indicators,
   colored flash when a remote actor changes a frame, drag positions streamed live, auto-reconnect.
 - **Activity feed** — every create/edit/rename/delete, by whom (user or agent), with timestamps.
@@ -619,13 +632,15 @@ free. `resolve_comment` also costs nothing.
 ```
 server/          Node (tsx) — one process on :4400
   index.ts       Express REST API + ws rooms + presence + static serving (prod)
-  store.ts       In-memory canvas/frame state (hot path), write-through to the DB
-  db/            Drizzle schema + PGlite/Postgres connection + write-through persistence
+  store.ts       Canvas metadata cache + frame access through actor RPC
+  db/            PGlite/Postgres application records + legacy frame imports
   actions.ts     Shared mutations: broadcast + activity log + agent presence
   mcp.ts         MCP server (@modelcontextprotocol/sdk), stateless streamable HTTP at /mcp
   seed.ts        Demo canvas on first run
 shared/types.ts  Store + ws protocol types shared by server and client
 src/             React + Vite + zustand client on :4300
+  actor.ts       CanvasIndex membership and FrameActor state, persisted in actor SQLite
+  lib/canvas-actor.ts  Browser subscriptions and edits over actor WebSockets
   components/ui/ The component system — every styled primitive lives here
   styles.css     Design tokens, the base reset, and keyframes. Nothing else.
 ```
@@ -648,15 +663,29 @@ Frame HTML renders in `<iframe sandbox="allow-scripts">` — scripts run, but no
 no reach into the app. Each iframe loads a small bootstrap once; new HTML is `postMessage`d in and
 **DOM-morphed in place** (`src/lib/frameRuntime.ts`), so updates and streaming ticks never white-flash
 the frame with a full document reload. Changed `<script>`s re-execute; unchanged styles/fonts are
-untouched. The realtime layer is plain JSON over a per-canvas WebSocket room;
-REST/MCP mutations are broadcast to the room by the shared actions layer, so human and agent edits go
-through identical plumbing.
+untouched. Each canvas has a small `CanvasIndex` actor holding pages, frame-to-page assignments, ordered
+frame IDs, and creation/deletion bookkeeping. Page deletion and frame placement are serialized there;
+an occupied page cannot be deleted, and a deleted page cannot receive frames.
+Browsers subscribe directly to this index and to one `FrameActor` per frame; reconnecting
+loads a fresh snapshot. Browser edits go directly to frame actors, while REST/MCP edits reach the same
+actors through the server. The `/ws` room carries chat, presence, and other collaboration events.
+PostgreSQL stores canvas metadata and collaboration records, including a mirror of the page list;
+actors own frames, pages, and their membership. Copies become visible in PostgreSQL after all copied
+frame actors are ready.
+
+On first canvas access, existing SQL frames are automatically copied into frame actors before the index
+is initialized. IDs and references stay unchanged. Imports can be retried after a crash and never overwrite
+initialized actors. Stop old app instances before deploying this version so they cannot keep writing to
+SQL after a canvas moves to actors. No separate frame backfill is needed; retain legacy SQL rows for now.
+Interrupted creates with saved payloads and pending deletions finish on the next canvas access.
+Deletion tombstones prevent stale SQL data or retried requests from bringing frames back.
 
 ## Contributing
 
 PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style.
-`bun run test` runs the integration suite (it boots the real server against a throwaway database);
-schema changes go through drizzle migrations (`npx drizzle-kit generate` after editing
+After actor changes, run `bun run actors:generate`, commit the generated client, and restart `bun run dev`.
+`bun run test` starts isolated local actors and real servers against throwaway databases.
+Schema changes go through drizzle migrations (`npx drizzle-kit generate` after editing
 `server/db/schema.ts`). Security issues: see [SECURITY.md](SECURITY.md) — please report privately.
 
 ## License

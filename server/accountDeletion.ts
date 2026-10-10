@@ -15,10 +15,10 @@ export async function purgeUserData(userId: string): Promise<{ deletedCanvases: 
   for (const canvas of store.allCanvases()) {
     const others = (canvas.memberIds ?? []).filter((id) => id !== userId)
     if (canvas.ownerId === userId && others.length === 0 && !canvas.workspaceId) {
-      store.deleteCanvas(canvas.id)
+      await store.deleteCanvas(canvas.id)
       deletedCanvases += 1
     } else if (canvas.memberIds?.includes(userId)) {
-      store.removeMember(canvas.id, userId)
+      await store.removeMember(canvas.id, userId)
     }
   }
   for (const workspaceId of workspaceIdsFor(userId)) await leaveWorkspace(workspaceId, userId)

@@ -37,6 +37,10 @@ function loadChatSeen(canvasId: string): number {
 
 interface State {
   canvas: Canvas | null
+  /** Membership order is available before individual frame snapshots arrive. */
+  frameIndex: string[] | null
+  /** View-only interpolation for incoming geometry; local edits stay immediate. */
+  frameMotion: Record<string, boolean>
   presences: Record<string, Presence>
   cursors: Record<string, { x: number; y: number }>
   activity: ActivityItem[]
@@ -117,6 +121,7 @@ interface State {
   setActivePage(id: string): void
   setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
   setCanvas(c: Canvas | null): void
+  setFrameIndex(frames: string[] | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
   setUpdateReady(v: boolean): void
@@ -144,7 +149,7 @@ interface State {
   /** the chat is on screen: nothing is unread any more */
   markChatSeen(): void
   upsertFrame(f: Frame): void
-  patchFrameLocal(frameId: string, patch: Partial<Frame>): void
+  patchFrameLocal(frameId: string, patch: Partial<Frame>, animate?: boolean): void
   removeFrame(frameId: string): void
   renameCanvasLocal(name: string): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
@@ -198,8 +203,19 @@ function readLayersOpen(): boolean {
   }
 }
 
+function orderFrames(frames: Frame[], index: string[] | null): Frame[] {
+  const positions = new Map(index?.map((entry, position) => [entry, position]))
+  return frames.sort(
+    (a, b) =>
+      (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
+      a.createdAt - b.createdAt,
+  )
+}
+
 export const useStore = create<State>((set, get) => ({
   canvas: null,
+  frameIndex: null,
+  frameMotion: {},
   activePageId: null,
   presences: {},
   cursors: {},
@@ -236,6 +252,8 @@ export const useStore = create<State>((set, get) => ({
   setCanvas: (canvas) =>
     set((s) => ({
       canvas,
+      frameMotion: {},
+      frameIndex: s.canvas?.id === canvas?.id ? s.frameIndex : null,
       activePageId: canvas
         ? canvas.id === s.canvas?.id && canvasPages(canvas).some((p) => p.id === s.activePageId)
           ? s.activePageId
@@ -280,6 +298,11 @@ export const useStore = create<State>((set, get) => ({
           : {}),
       }
     }),
+  setFrameIndex: (frameIndex) =>
+    set((state) => ({
+      frameIndex,
+      canvas: state.canvas ? { ...state.canvas, frames: orderFrames([...state.canvas.frames], frameIndex) } : null,
+    })),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
   setUpdateReady: (updateReady) => set({ updateReady }),
@@ -372,7 +395,7 @@ export const useStore = create<State>((set, get) => ({
       if (!s.canvas || f.canvasId !== s.canvas.id) return {}
       const frames = s.canvas.frames.some((x) => x.id === f.id)
         ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
-        : [...s.canvas.frames, f]
+        : orderFrames([...s.canvas.frames, f], s.frameIndex)
       const hidden = s.selectedIds.includes(f.id) && framePageId(s.canvas, f) !== s.activePageId
       return {
         canvas: { ...s.canvas, frames },
@@ -387,10 +410,11 @@ export const useStore = create<State>((set, get) => ({
           : {}),
       }
     }),
-  patchFrameLocal: (frameId, patch) =>
+  patchFrameLocal: (frameId, patch, animate = false) =>
     set((s) => {
       if (!s.canvas) return {}
       return {
+        frameMotion: { ...s.frameMotion, [frameId]: animate },
         canvas: {
           ...s.canvas,
           frames: s.canvas.frames.map((f) => (f.id === frameId ? { ...f, ...patch } : f)),
@@ -400,8 +424,11 @@ export const useStore = create<State>((set, get) => ({
   removeFrame: (frameId) =>
     set((s) => {
       if (!s.canvas) return {}
+      const frameMotion = { ...s.frameMotion }
+      delete frameMotion[frameId]
       const selectedIds = s.selectedIds.filter((id) => id !== frameId)
       return {
+        frameMotion,
         canvas: { ...s.canvas, frames: s.canvas.frames.filter((f) => f.id !== frameId) },
         selectedIds,
         /* losing the primary promotes the last surviving member, so a group

@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /* The queue mirrors into Postgres and broadcasts; this test only cares about
    the text a card carries. */
 vi.mock('../server/db/persist.ts', () => ({
+  loadLegacyFrameIds: async () => [],
+  legacyFrameCanvasId: async () => undefined,
   saveTask: () => {},
   saveFeedback: () => {},
   saveComment: () => {},
@@ -10,7 +12,6 @@ vi.mock('../server/db/persist.ts', () => ({
   saveDecision: () => {},
   saveProposal: () => {},
   saveCanvas: () => {},
-  saveFrame: () => {},
 }))
 
 const actions = await import('../server/actions.ts')
@@ -44,40 +45,40 @@ beforeEach(() => {
 })
 
 describe('addQueuedCard', () => {
-  it('keeps a prompt longer than 200 characters intact', () => {
+  it('keeps a prompt longer than 200 characters intact', async () => {
     expect(longPrompt.length).toBeGreaterThan(200)
-    const card = actions.addQueuedCard(canvasId, longPrompt, 'kevin')
+    const card = await actions.addQueuedCard(canvasId, longPrompt, 'kevin')
     expect(card?.status).toBe(longPrompt)
     expect(actions.getTasks(canvasId)[0]?.status).toBe(longPrompt)
   })
 
-  it('caps a pasted document at MAX_CARD_CHARS', () => {
-    const card = actions.addQueuedCard(canvasId, 'x'.repeat(actions.MAX_CARD_CHARS + 1), 'kevin')
+  it('caps a pasted document at MAX_CARD_CHARS', async () => {
+    const card = await actions.addQueuedCard(canvasId, 'x'.repeat(actions.MAX_CARD_CHARS + 1), 'kevin')
     expect(card?.status.length).toBe(actions.MAX_CARD_CHARS)
   })
 
-  it('treats the same long prompt queued twice as one card', () => {
-    const first = actions.addQueuedCard(canvasId, longPrompt, 'kevin')
-    const again = actions.addQueuedCard(canvasId, ` ${longPrompt} `, 'kevin')
+  it('treats the same long prompt queued twice as one card', async () => {
+    const first = await actions.addQueuedCard(canvasId, longPrompt, 'kevin')
+    const again = await actions.addQueuedCard(canvasId, ` ${longPrompt} `, 'kevin')
     expect(again?.id).toBe(first?.id)
     expect(actions.getTasks(canvasId)).toHaveLength(1)
   })
 
-  it('does not merge two prompts that only share their first 200 characters', () => {
-    const a = actions.addQueuedCard(canvasId, `${filler.repeat(3)}make it red`, 'kevin')
-    const b = actions.addQueuedCard(canvasId, `${filler.repeat(3)}make it blue`, 'kevin')
+  it('does not merge two prompts that only share their first 200 characters', async () => {
+    const a = await actions.addQueuedCard(canvasId, `${filler.repeat(3)}make it red`, 'kevin')
+    const b = await actions.addQueuedCard(canvasId, `${filler.repeat(3)}make it blue`, 'kevin')
     expect(b?.id).not.toBe(a?.id)
     expect(actions.getTasks(canvasId)).toHaveLength(2)
   })
 
-  it('carries the selected frame and element as the card scope', () => {
-    const frame = store.createFrame(canvasId, { name: 'Home' }, 'kevin')!
-    const card = actions.addQueuedCard(canvasId, 'make it bolder', 'kevin', undefined, undefined, undefined, {
+  it('carries the selected frame and element as the card scope', async () => {
+    const frame = (await store.createFrame(canvasId, { name: 'Home' }, 'kevin'))!
+    const card = await actions.addQueuedCard(canvasId, 'make it bolder', 'kevin', undefined, undefined, undefined, {
       frameId: frame.id,
       selector: 'aside:nth-of-type(1)',
     })
     expect(card?.scope).toEqual({ frameId: frame.id, selector: 'aside:nth-of-type(1)' })
-    const whole = actions.addQueuedCard(canvasId, 'make it bolder', 'kevin', undefined, undefined, undefined, {
+    const whole = await actions.addQueuedCard(canvasId, 'make it bolder', 'kevin', undefined, undefined, undefined, {
       frameId: frame.id,
       selector: '   ',
     })
@@ -85,15 +86,23 @@ describe('addQueuedCard', () => {
     expect(whole?.id).not.toBe(card?.id)
   })
 
-  it('drops a scope whose frame is not on this canvas', () => {
+  it('drops a scope whose frame is not on this canvas', async () => {
     const other = store.createCanvas('elsewhere', 'kevin').id
-    const foreign = store.createFrame(other, { name: 'Away' }, 'kevin')!
-    const card = actions.addQueuedCard(canvasId, 'tidy up', 'kevin', undefined, undefined, undefined, {
+    const foreign = (await store.createFrame(other, { name: 'Away' }, 'kevin'))!
+    const card = await actions.addQueuedCard(canvasId, 'tidy up', 'kevin', undefined, undefined, undefined, {
       frameId: foreign.id,
       selector: 'div',
     })
     expect(card?.scope).toBeUndefined()
-    const junk = actions.addQueuedCard(canvasId, 'tidy up again', 'kevin', undefined, undefined, undefined, 'nope')
+    const junk = await actions.addQueuedCard(
+      canvasId,
+      'tidy up again',
+      'kevin',
+      undefined,
+      undefined,
+      undefined,
+      'nope',
+    )
     expect(junk?.scope).toBeUndefined()
   })
 })

@@ -513,7 +513,7 @@ export async function pullCreatives(input: {
   ownerId: string
   actor: Actor
 }): Promise<PullResult> {
-  const canvas = store.getCanvas(input.canvasId)
+  const canvas = await store.syncCanvas(input.canvasId)
   if (!canvas) throw new Error('canvas not found')
   if (!input.connection.accounts.some((a) => a.id === input.accountId))
     throw new Error('that ad account is not part of the Meta connection')
@@ -538,7 +538,7 @@ export async function pullCreatives(input: {
     const src = await keepImage(ad.imageUrl, input.canvasId, input.ownerId)
     const height = frameHeight(ad)
     rowHeight = Math.max(rowHeight, height)
-    const frame = actions.createFrame(
+    const frame = await actions.createFrame(
       input.canvasId,
       {
         name: ad.name.slice(0, 80),
