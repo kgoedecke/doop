@@ -114,3 +114,16 @@ it('reconnects and catches up on frames created, edited, and deleted while offli
   expect(useStore.getState().canvas?.frames).toHaveLength(2)
   expect(socket('/frames/a/').readyState).toBe(3)
 })
+
+it('keeps the index page assignment when an older frame snapshot arrives', async () => {
+  const entry = { ...frame('a'), pageId: 'old' }
+  await connect([entry])
+  socket('/canvases/c/').receive({
+    ...indexSnapshot([entry], 1),
+    pages: [{ id: 'current', name: 'Current' }],
+    framePages: { a: 'current' },
+  })
+  expect(useStore.getState().canvas?.frames[0]?.pageId).toBe('current')
+  socket('/frames/a/').receive({ ...snapshot({ ...entry, html: '<p>Edited</p>' }), revision: 1 })
+  expect(useStore.getState().canvas?.frames[0]).toMatchObject({ pageId: 'current', html: '<p>Edited</p>' })
+})

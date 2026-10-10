@@ -83,6 +83,14 @@ export declare namespace actors {
                 Args: Parameters<Stub["initialize"]>
                 Result: Awaited<ReturnType<Stub["initialize"]>>
             }
+            ["initializePages"]: {
+                Args: Parameters<Stub["initializePages"]>
+                Result: Awaited<ReturnType<Stub["initializePages"]>>
+            }
+            ["moveFrame"]: {
+                Args: Parameters<Stub["moveFrame"]>
+                Result: Awaited<ReturnType<Stub["moveFrame"]>>
+            }
             ["pending"]: {
                 Args: Parameters<Stub["pending"]>
                 Result: Awaited<ReturnType<Stub["pending"]>>
@@ -102,6 +110,10 @@ export declare namespace actors {
             ["revokeAccess"]: {
                 Args: Parameters<Stub["revokeAccess"]>
                 Result: Awaited<ReturnType<Stub["revokeAccess"]>>
+            }
+            ["setPages"]: {
+                Args: Parameters<Stub["setPages"]>
+                Result: Awaited<ReturnType<Stub["setPages"]>>
             }
             ["snapshot"]: {
                 Args: Parameters<Stub["snapshot"]>
@@ -140,6 +152,14 @@ export declare namespace actors {
                 type Args = $MethodTypes["initialize"]["Args"]
                 type Result = $MethodTypes["initialize"]["Result"]
             }
+            namespace initializePages {
+                type Args = $MethodTypes["initializePages"]["Args"]
+                type Result = $MethodTypes["initializePages"]["Result"]
+            }
+            namespace moveFrame {
+                type Args = $MethodTypes["moveFrame"]["Args"]
+                type Result = $MethodTypes["moveFrame"]["Result"]
+            }
             namespace pending {
                 type Args = $MethodTypes["pending"]["Args"]
                 type Result = $MethodTypes["pending"]["Result"]
@@ -159,6 +179,10 @@ export declare namespace actors {
             namespace revokeAccess {
                 type Args = $MethodTypes["revokeAccess"]["Args"]
                 type Result = $MethodTypes["revokeAccess"]["Result"]
+            }
+            namespace setPages {
+                type Args = $MethodTypes["setPages"]["Args"]
+                type Result = $MethodTypes["setPages"]["Result"]
             }
             namespace snapshot {
                 type Args = $MethodTypes["snapshot"]["Args"]

@@ -1,7 +1,8 @@
 import { Actor, Compute, Emittable, Ephemeral, Persisted, type ActorDatabase, type ActorSocketOf } from 'durable-actors'
 import { repairEscapedHtml } from '../server/escapedHtml.js'
-import { MAX_FRAME_HTML_BYTES } from '../server/limits.js'
-import type { ActivityItem, Actor as Attribution, Frame } from '../shared/types.js'
+import { validateFrame } from '../shared/frame-validation.js'
+import { samePages } from '../shared/pages.js'
+import type { ActivityItem, Actor as Attribution, CanvasPageInfo, Frame } from '../shared/types.js'
 
 export type FrameInput = Pick<Frame, 'name'> &
   Partial<Pick<Frame, 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'demo'>>
@@ -57,14 +58,6 @@ function readFrame(db: ActorDatabase): Frame | null {
   const [row] = db.exec<FrameRow>(`SELECT ${COLUMNS} FROM frame`)
   return row ? decodeRow(row) : null
 }
-function validateFrame(frame: Frame) {
-  if (typeof frame.name !== 'string' || frame.name.length > 1024) throw new Error('Frame name is too long')
-  if (typeof frame.html !== 'string' || new TextEncoder().encode(frame.html).length > MAX_FRAME_HTML_BYTES)
-    throw new Error('Frame HTML is too large')
-  for (const key of ['x', 'y', 'width', 'height'] as const)
-    if (!Number.isFinite(frame[key]) || ((key === 'width' || key === 'height') && frame[key] <= 0))
-      throw new Error(`Invalid frame ${key}`)
-}
 
 export type IndexSnapshot = {
   type: 'index-snapshot'
@@ -72,8 +65,11 @@ export type IndexSnapshot = {
   frameIds: string[]
   initialized: boolean
   deleted: boolean
+  pages?: CanvasPageInfo[]
+  framePages?: Record<string, string>
 }
 export type IndexCommand = { type: 'snapshot' }
+export type PageUpdate = { pages: CanvasPageInfo[]; error?: 'conflict' | 'occupied' | 'deleted' }
 type IndexEntry = { id: string; status: 'creating' | 'active' | 'deleting' | 'deleted' }
 
 function indexTable(db: ActorDatabase): true {
@@ -88,6 +84,8 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
   @Persisted private deleted = false
   @Persisted private revision = 0
   @Persisted private accessRevision = 0
+  @Persisted private pages: CanvasPageInfo[] | null = null
+  @Persisted private framePages: Record<string, string> = {}
   @Persisted private reservedBounds: Record<string, { x: number; width: number; pageId?: string }> = {}
   @Ephemeral private ready = false
   @Persisted @Emittable committed: IndexSnapshot | null = null
@@ -123,6 +121,54 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
     return this.snapshot()
   }
 
+  /** Import SQL-owned pages once. Later reads never relocate a frame. */
+  async initializePages(pages: CanvasPageInfo[], framePages: Record<string, string> = {}): Promise<IndexSnapshot> {
+    if (this.pages === null && !this.deleted) {
+      if (!pages.length) throw new Error('A canvas must have a page')
+      if (!this.ready) this.ready = indexTable(this.db)
+      const entries = this.db.exec<IndexEntry>("SELECT id, status FROM entries WHERE status IN ('creating', 'active')")
+      for (const { id } of entries) {
+        const pageId = this.reservedBounds[id]?.pageId ?? framePages[id]
+        this.framePages[id] = pages.some((page) => page.id === pageId) ? pageId! : pages[0]!.id
+      }
+      this.pages = pages
+      this.revision++
+      this.committed = await this.snapshot()
+    }
+    return this.snapshot()
+  }
+
+  /** Page deletion and page moves share this actor's invocation queue. */
+  async setPages(pages: CanvasPageInfo[], expectedPages: CanvasPageInfo[]): Promise<PageUpdate> {
+    const current = this.pages ?? []
+    if (this.deleted) return { pages: current, error: 'deleted' }
+    if (!samePages(expectedPages, current)) return { pages: current, error: 'conflict' }
+    if (!pages.length || new Set(pages.map((page) => page.id)).size !== pages.length)
+      throw new Error('Provide at least one page with unique IDs')
+    const removed = new Set(current.filter((page) => !pages.some((next) => next.id === page.id)).map((page) => page.id))
+    if (removed.size) {
+      if (!this.ready) this.ready = indexTable(this.db)
+      const entries = this.db.exec<IndexEntry>(
+        "SELECT id, status FROM entries WHERE status IN ('creating', 'active', 'deleting')",
+      )
+      for (const entry of entries) {
+        if (removed.has(this.framePages[entry.id] ?? current[0]!.id)) return { pages: current, error: 'occupied' }
+      }
+    }
+    this.pages = pages
+    this.revision++
+    this.committed = await this.snapshot()
+    return { pages }
+  }
+
+  async moveFrame(id: string, pageId: string): Promise<boolean> {
+    if (!(await this.has(id)) || !this.pages?.some((page) => page.id === pageId)) return false
+    this.framePages[id] = pageId
+    this.revision++
+    this.committed = await this.snapshot()
+    return true
+  }
+
   async snapshot(): Promise<IndexSnapshot> {
     if (!this.ready) this.ready = indexTable(this.db)
     return {
@@ -130,6 +176,7 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
       revision: this.revision,
       initialized: this.initialized,
       deleted: this.deleted,
+      ...(this.pages ? { pages: this.pages, framePages: this.framePages } : {}),
       frameIds: this.db
         .exec<{ id: string }>("SELECT id FROM entries WHERE status = 'active' ORDER BY position")
         .map((row) => row.id),
@@ -163,9 +210,10 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
   ): Promise<Frame | 'retry' | null> {
     validateFrame(frame)
     if (!this.initialized || this.deleted) return null
+    if (!this.pages?.some((page) => page.id === frame.pageId)) return null
     if (!this.ready) this.ready = indexTable(this.db)
     const [existing] = this.db.exec<IndexEntry>('SELECT id, status FROM entries WHERE id = ?', frame.id)
-    if (existing?.status === 'active') return frame
+    if (existing?.status === 'active') return { ...frame, pageId: this.framePages[frame.id] ?? frame.pageId }
     if (existing && existing.status !== 'creating') return null
     const reserved = this.reservedBounds[frame.id]
     if (reserved) return { ...frame, ...reserved }
@@ -179,6 +227,7 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
     }
     if (automatic) frame = { ...frame, x: edges.length ? Math.max(...edges) + 80 : 120 }
     if (!(await this.reserve(frame.id))) return null
+    this.framePages[frame.id] = frame.pageId!
     this.reservedBounds = {
       ...this.reservedBounds,
       [frame.id]: { x: frame.x, width: frame.width, pageId: frame.pageId },
@@ -224,6 +273,7 @@ export class CanvasIndex extends Actor<FrameMetadata, IndexCommand, IndexSnapsho
     // Keep the tombstone so creation retries and legacy imports cannot resurrect the frame.
     this.db.exec("UPDATE entries SET status = 'deleted' WHERE id = ? AND status = 'deleting'", id)
     delete this.reservedBounds[id]
+    delete this.framePages[id]
   }
 
   async destroy(): Promise<void> {
@@ -276,7 +326,7 @@ export class FrameActor extends Actor<FrameMetadata, FrameCommand, FrameSnapshot
     }
     try {
       if (socket.metadata.readOnly) throw new Error('This connection is read only')
-      // Page changes use the app API, which validates SQL-owned canvas pages.
+      // Page changes use the app API and the canvas actor's invocation queue.
       if (command.write.type === 'update' && command.write.patch.pageId !== undefined)
         throw new Error('Page changes must use the frame API')
       if (!(await this.write(command.write, socket.metadata.actor, command.requestId)))

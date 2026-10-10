@@ -663,11 +663,15 @@ Frame HTML renders in `<iframe sandbox="allow-scripts">` — scripts run, but no
 no reach into the app. Each iframe loads a small bootstrap once; new HTML is `postMessage`d in and
 **DOM-morphed in place** (`src/lib/frameRuntime.ts`), so updates and streaming ticks never white-flash
 the frame with a full document reload. Changed `<script>`s re-execute; unchanged styles/fonts are
-untouched. Each canvas has a small `CanvasIndex` actor holding ordered frame IDs and creation/deletion
-bookkeeping. Browsers subscribe directly to this index and to one `FrameActor` per frame; reconnecting
+untouched. Each canvas has a small `CanvasIndex` actor holding pages, frame-to-page assignments, ordered
+frame IDs, and creation/deletion bookkeeping. Page deletion and frame placement are serialized there;
+an occupied page cannot be deleted, and a deleted page cannot receive frames.
+Browsers subscribe directly to this index and to one `FrameActor` per frame; reconnecting
 loads a fresh snapshot. Browser edits go directly to frame actors, while REST/MCP edits reach the same
 actors through the server. The `/ws` room carries chat, presence, and other collaboration events.
-PostgreSQL stores canvas metadata and collaboration records; actors own frames and their membership.
+PostgreSQL stores canvas metadata and collaboration records, including a mirror of the page list;
+actors own frames, pages, and their membership. Copies become visible in PostgreSQL after all copied
+frame actors are ready.
 
 On first canvas access, existing SQL frames are automatically copied into frame actors before the index
 is initialized. IDs and references stay unchanged. Imports can be retried after a crash and never overwrite

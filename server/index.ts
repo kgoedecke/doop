@@ -1472,7 +1472,7 @@ app.put(
   frameRoute(async (req, res) => {
     const canvas = requireCanvas(req, res, req.params.id)
     if (!canvas) return
-    const loaded = await store.syncCanvas(canvas.id, 'summary')
+    const loaded = await store.syncCanvas(canvas.id, 'index')
     if (!loaded) return res.status(404).json({ error: 'canvas not found' })
     const pages = req.body?.pages
     if (
@@ -1498,12 +1498,16 @@ app.put(
         error: 'Pages changed since you opened them. Please try again.',
         pages: canvasPages(store.getCanvasMetadata(canvas.id)!),
       })
-    const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
-    if (loaded.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId)))) {
+    const clean = pages.map((p) => ({ id: p.id, name: p.name.trim() }))
+    const result = await store.setPages(canvas.id, clean, req.body.expectedPages)
+    if (!result || result.error === 'deleted') return res.status(404).json({ error: 'canvas not found' })
+    if (result.error === 'conflict')
+      return res
+        .status(409)
+        .json({ error: 'Pages changed since you opened them. Please try again.', pages: result.pages })
+    if (result.error === 'occupied') {
       return res.status(400).json({ error: 'Move the frames to another page before deleting this page.' })
     }
-    const clean = pages.map((p) => ({ id: p.id, name: p.name.trim() }))
-    store.setPages(canvas.id, clean)
     const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
     broadcast(canvas.id, { type: 'canvas:pages', pages: clean, actor })
     res.json(clean)

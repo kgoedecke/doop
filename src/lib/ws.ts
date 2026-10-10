@@ -142,9 +142,6 @@ function handle(msg: ServerMessage) {
     case 'frame:streaming':
       s.setStream(msg.frameId, msg.active ? { name: msg.actor.name, color: msg.actor.color } : null)
       break
-    case 'canvas:pages':
-      s.setPages(msg.pages)
-      break
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
       break

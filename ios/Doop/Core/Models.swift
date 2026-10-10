@@ -34,6 +34,7 @@ public struct DesignFrame: Codable, Identifiable, Equatable {
     public var width: Double
     public var height: Double
     public var html: String
+    public var updatedAt: Double?
 }
 
 public struct CanvasTask: Codable, Identifiable, Hashable {
@@ -105,6 +106,25 @@ public struct WorkspaceList: Decodable {
     public var workspaces: [WorkspaceSummary]
 }
 
+public struct FrameDrag: Decodable {
+    public var frameId: String
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+    public var updatedAt: Double
+
+    public func applying(to frame: DesignFrame) -> DesignFrame? {
+        guard frame.id == frameId, frame.updatedAt == updatedAt else { return nil }
+        var preview = frame
+        preview.x = x
+        preview.y = y
+        preview.width = width
+        preview.height = height
+        return preview
+    }
+}
+
 /// Actor snapshots arrive directly; committed changes are wrapped by the runtime.
 public struct FrameActorEvent: Decodable {
     public var type: String
@@ -112,6 +132,7 @@ public struct FrameActorEvent: Decodable {
     public var frame: DesignFrame?
     public var frameIds: [String]?
     public var deleted: Bool?
+    public var drag: FrameDrag?
 
     private enum CodingKeys: String, CodingKey {
         case type, revision, frame, frameIds, deleted, changes, committed
@@ -123,6 +144,8 @@ public struct FrameActorEvent: Decodable {
         if type == "state_update" {
             let changes = try values.nestedContainer(keyedBy: CodingKeys.self, forKey: .changes)
             if let committed = try changes.decodeIfPresent(Self.self, forKey: .committed) { self = committed }
+        } else if type == "drag" {
+            drag = try FrameDrag(from: decoder)
         } else {
             revision = try values.decodeIfPresent(Int.self, forKey: .revision)
             frame = try values.decodeIfPresent(DesignFrame.self, forKey: .frame)

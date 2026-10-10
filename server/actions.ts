@@ -1227,9 +1227,15 @@ export async function appendFrameHtml(
 
 /* ------------------------------------------------------------------ */
 
-export function setCanvasPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[], actor: Actor) {
-  store.setPages(canvasId, pages)
-  broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+export async function setCanvasPages(
+  canvasId: string,
+  pages: import('../shared/types.ts').CanvasPageInfo[],
+  actor: Actor,
+  expectedPages: import('../shared/types.ts').CanvasPageInfo[],
+) {
+  const result = await store.setPages(canvasId, pages, expectedPages)
+  if (result && !result.error) broadcast(canvasId, { type: 'canvas:pages', pages: result.pages, actor })
+  return result
 }
 
 export async function createFrame(

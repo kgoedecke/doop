@@ -18,6 +18,9 @@ interface $CanvasIndexContract {
         has(id: string): Promise<boolean>
         /** Called only after legacy frame payloads have been copied. Retrying cannot reset membership. */
         initialize(frameIds?: string[]): Promise<IndexSnapshot>
+        /** Import SQL-owned pages once. Later reads never relocate a frame. */
+        initializePages(pages: CanvasPageInfo[], framePages?: Record<string, string>): Promise<IndexSnapshot>
+        moveFrame(id: string, pageId: string): Promise<boolean>
         pending(): Promise<IndexEntry[]>
         remove(id: string): Promise<boolean>
         /** Record intent before initializing the frame, so a later access can finish an interrupted create. */
@@ -36,6 +39,8 @@ interface $CanvasIndexContract {
             >
         ): Promise<Frame | "retry" | null>
         revokeAccess(): Promise<void>
+        /** Page deletion and page moves share this actor's invocation queue. */
+        setPages(pages: CanvasPageInfo[], expectedPages: CanvasPageInfo[]): Promise<PageUpdate>
         snapshot(): Promise<IndexSnapshot>
     }
 }
@@ -76,6 +81,10 @@ interface Actor {
     clientId?: string
     /** for agents: display name of the user whose OAuth token authorized it */
     owner?: string
+}
+interface CanvasPageInfo {
+    id: string
+    name: string
 }
 interface Frame {
     id: string
@@ -167,6 +176,12 @@ type IndexSnapshot = {
     frameIds: string[]
     initialized: boolean
     deleted: boolean
+    pages?: CanvasPageInfo[]
+    framePages?: Record<string, string>
+}
+type PageUpdate = {
+    pages: CanvasPageInfo[]
+    error?: "conflict" | "occupied" | "deleted"
 }
 type SyncError = {
     type: "error"

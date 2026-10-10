@@ -747,12 +747,12 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       if (!samePages(expectedPages, canvasPages(store.getCanvasMetadata(canvas_id)!)))
         return err('Pages changed. Read get_canvas again before saving.')
       if (new Set(pages.map((p) => p.id)).size !== pages.length) return err('Page IDs must be unique')
-      const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
-      if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId))))
-        return err('Move frames before deleting their page')
       const actor = actorFrom(agent_name)
-      actions.setCanvasPages(canvas_id, pages, actor)
-      return text({ ok: true, pages })
+      const result = await actions.setCanvasPages(canvas_id, pages, actor, expectedPages)
+      if (!result || result.error === 'deleted') return noCanvas(canvas_id)
+      if (result.error === 'conflict') return err('Pages changed. Read get_canvas again before saving.')
+      if (result.error === 'occupied') return err('Move frames before deleting their page')
+      return text({ ok: true, pages: result.pages })
     },
   )
 

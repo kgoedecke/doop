@@ -17,6 +17,8 @@ try {
     'server/escapedHtml.ts',
     'server/limits.ts',
     'shared/types.ts',
+    'shared/pages.ts',
+    'shared/frame-validation.ts',
     'shared/billing.ts',
   ]) {
     const target = path.join(staging, file)

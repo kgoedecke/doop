@@ -115,6 +115,15 @@ final class CanvasModel: ObservableObject {
                         @unknown default: continue
                         }
                         let event = try JSONDecoder().decode(FrameActorEvent.self, from: data)
+                        if let drag = event.drag {
+                            if frameIDs.contains(key),
+                               let index = canvas?.frames.firstIndex(where: { $0.id == key }),
+                               let frame = canvas?.frames[index],
+                               let preview = drag.applying(to: frame) {
+                                canvas?.frames[index] = preview
+                            }
+                            continue
+                        }
                         guard let next = event.revision, next >= revision else { continue }
                         revision = next
                         if key.isEmpty {

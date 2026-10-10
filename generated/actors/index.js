@@ -26,11 +26,14 @@ export const actors = {
                     { name: "destroy", result: "void" },
                     { name: "has", result: "value" },
                     { name: "initialize", result: "value" },
+                    { name: "initializePages", result: "value" },
+                    { name: "moveFrame", result: "value" },
                     { name: "pending", result: "value" },
                     { name: "remove", result: "value" },
                     { name: "reserve", result: "value" },
                     { name: "reserveFrame", result: "value" },
                     { name: "revokeAccess", result: "void" },
+                    { name: "setPages", result: "value" },
                     { name: "snapshot", result: "value" }
                 ],
                 transport

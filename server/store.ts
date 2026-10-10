@@ -1,10 +1,19 @@
 import { nanoid } from 'nanoid'
 import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
-import type { FrameInput, FramePatch } from '../src/actor.ts'
+import type { FrameInput, FramePatch, PageUpdate } from '../src/actor.ts'
 import { canvasPages } from '../shared/pages.ts'
+import { validateFrame } from '../shared/frame-validation.ts'
 import * as persist from './db/persist.ts'
 import { colorFor } from '../shared/types.ts'
-import type { Actor, Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
+import type {
+  Actor,
+  Canvas,
+  CanvasPageInfo,
+  CommunityCategory,
+  Frame,
+  GuidelineDoc,
+  MemoryReference,
+} from '../shared/types.ts'
 
 export const MAX_GUIDELINE_DOCS = 20
 
@@ -40,6 +49,15 @@ class Store {
       // cannot overwrite edits or reset an already initialized index.
       status = await index.initialize(ids)
     }
+    if (!status.deleted && !status.pages) {
+      const frames = await mapFrames(status.frameIds, async (frameId) => {
+        const { frame } = await frameActor(frameId).summary()
+        if (!frame && (await index.has(frameId))) throw new Error(`Frame unavailable: ${frameId}`)
+        return [frameId, frame?.pageId ?? ''] as const
+      })
+      status = await index.initializePages(canvasPages(this.canvases.get(id)!), Object.fromEntries(frames))
+    }
+    if (status.pages) this.canvases.get(id)!.pages = status.pages
     // Removal is durable before cleanup. A later request resumes cleanup after
     // an app crash; tombstones prevent retries from bringing a frame back.
     void this.recoverCanvasFrames(id, status.deleted)
@@ -94,11 +112,12 @@ class Store {
               if (!(await canvasIndex(id).has(frameId))) return undefined // concurrent deletion
               throw new Error(`Frame unavailable: ${frameId}`)
             }
-            return this.withPage({ html: '', ...frame }, canvas)
+            return { html: '', ...frame, pageId: snapshot.framePages?.[frameId] ?? frame.pageId }
           })
-    const present = frames.filter((frame): frame is Frame => !!frame)
+    const present = frames.filter((frame) => frame !== undefined)
     return {
       ...canvas,
+      pages: snapshot.pages ?? canvasPages(canvas),
       frames: present,
       updatedAt: present.reduce((latest, frame) => Math.max(latest, frame.updatedAt), canvas.updatedAt),
     }
@@ -108,23 +127,20 @@ class Store {
     for (const c of canvases) this.canvases.set(c.id, { ...c, pages: canvasPages(c), frames: [] })
   }
 
-  /** Older actors and orphaned frames rejoin the first page on their next read. */
-  private async withPage(frame: Frame, canvas: Canvas): Promise<Frame> {
-    const pages = canvasPages(canvas)
-    if (pages.some((page) => page.id === frame.pageId)) return frame
-    return (
-      (
-        await frameActor(frame.id).write(
-          { type: 'update', patch: { pageId: pages[0]!.id } },
-          { name: frame.updatedBy, kind: 'user', color: colorFor(frame.updatedBy) },
-        )
-      )?.frame ?? frame
-    )
-  }
-
   /** Metadata for server loops such as Live Activity push-to-start. */
   allCanvases(): Canvas[] {
     return [...this.canvases.values()]
+  }
+
+  /** Count membership with bounded index reads, without loading frame content. */
+  async getCanvasStats(): Promise<{ canvases: number; frames: number }> {
+    const counts = await mapFrames([...this.canvases.keys()], async (id) => {
+      if (!(await this.ensureMembership(id))) return undefined
+      const index = await canvasIndex(id).snapshot()
+      return index.deleted ? undefined : index.frameIds.length
+    })
+    const present = counts.filter((count): count is number => count !== undefined)
+    return { canvases: present.length, frames: present.reduce((total, count) => total + count, 0) }
   }
 
   /** The dashboard row for one canvas. `viewerId` decides only whether the
@@ -240,13 +256,24 @@ class Store {
       ...(guidelines?.length ? { guidelines } : {}),
       ...(references?.length ? { references } : {}),
     }
-    await persist.saveCanvasCopy({ ...canvas, frames: [] })
-    await canvasIndex(canvasId).initialize()
-    for (const frame of frames) {
-      await canvasIndex(canvasId).reserve(frame.id)
-      await frameActor(frame.id).initialize(frame)
-      await canvasIndex(canvasId).activate(frame.id)
+    const index = canvasIndex(canvasId)
+    try {
+      await index.initialize()
+      await index.initializePages(canvas.pages!)
+      for (const frame of frames) {
+        if (!(await index.reserveFrame(frame, false, {}))) throw new Error('Could not prepare copied frame')
+        await frameActor(frame.id).initialize(frame)
+        if (!(await index.activate(frame.id))) throw new Error('Could not finish copied frame')
+      }
+    } catch (error) {
+      await index
+        .destroy()
+        .then(() => this.cleanupFrames(canvasId))
+        .catch((cleanupError) => console.error('[copy cleanup]', cleanupError))
+      throw error
     }
+    // Publish only complete copies. A failed SQL response must not destroy ready actors.
+    await persist.saveCanvasCopy({ ...canvas, frames: [] })
     this.init([canvas])
     return canvas
   }
@@ -255,13 +282,20 @@ class Store {
     return this.canvases.get(id)
   }
 
-  setPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[]) {
-    const canvas = this.canvases.get(canvasId)
-    if (!canvas) return undefined
-    canvas.pages = pages
-    canvas.updatedAt = Date.now()
-    persist.saveCanvas(canvas)
-    return pages
+  async setPages(
+    canvasId: string,
+    pages: CanvasPageInfo[],
+    expectedPages: CanvasPageInfo[],
+  ): Promise<PageUpdate | undefined> {
+    const canvas = await this.loadCanvasMetadata(canvasId)
+    if (!canvas || !(await this.ensureMembership(canvasId))) return undefined
+    const result = await canvasIndex(canvasId).setPages(pages, expectedPages)
+    canvas.pages = result.pages
+    if (!result.error) {
+      canvas.updatedAt = Date.now()
+      persist.saveCanvas(canvas)
+    }
+    return result
   }
 
   /** Invalidate issued tickets as well as sockets, before an access change answers. */
@@ -527,11 +561,14 @@ class Store {
     return ref
   }
 
-  async getFrameMembership(frameId: string): Promise<{ id: string; canvasId: string } | undefined> {
+  async getFrameMembership(frameId: string): Promise<{ id: string; canvasId: string; pageId?: string } | undefined> {
     const canvasId = frameId.includes('.') ? frameId.split('.')[0] : await persist.legacyFrameCanvasId(frameId)
     if (!canvasId || !(await this.loadCanvasMetadata(canvasId)) || !(await this.ensureMembership(canvasId)))
       return undefined
-    return (await canvasIndex(canvasId).has(frameId)) ? { id: frameId, canvasId } : undefined
+    const snapshot = await canvasIndex(canvasId).snapshot()
+    return !snapshot.deleted && snapshot.frameIds.includes(frameId)
+      ? { id: frameId, canvasId, pageId: snapshot.framePages?.[frameId] }
+      : undefined
   }
 
   async getFrame(frameId: string): Promise<Frame | undefined> {
@@ -542,7 +579,7 @@ class Store {
       if (!(await canvasIndex(membership.canvasId).has(frameId))) return undefined
       throw new Error(`Frame unavailable: ${frameId}`)
     }
-    return this.withPage(frame, this.canvases.get(membership.canvasId)!)
+    return { ...frame, pageId: membership.pageId ?? frame.pageId }
   }
 
   async createFrame(canvasId: string, input: FrameInput, by: string, creationId?: string): Promise<Frame | undefined> {
@@ -580,14 +617,24 @@ class Store {
     } while (frame === 'retry')
     if (!frame) return undefined
     const actor = frameActor(id)
-    await actor.initialize(frame)
-    const saved = (await actor.snapshot()).frame
+    let saved: Frame | null
+    try {
+      await actor.initialize(frame)
+      saved = (await actor.snapshot()).frame
+    } catch (error) {
+      // Release the page reservation when this create fails, even if its payload committed.
+      await index
+        .remove(id)
+        .then(() => this.cleanupFrames(canvasId))
+        .catch((cleanupError) => console.error('[frame cleanup]', cleanupError))
+      throw error
+    }
     if (!saved) return undefined
     if (!(await canvasIndex(canvasId).activate(id))) {
       await actor.destroy()
       return undefined
     }
-    return saved
+    return { ...saved, pageId: frame.pageId }
   }
 
   async updateFrame(frameId: string, patch: FramePatch, by: string, actor?: Actor): Promise<Frame | undefined> {
@@ -598,17 +645,25 @@ class Store {
       !canvasPages(this.canvases.get(membership.canvasId)!).some((page) => page.id === patch.pageId)
     )
       return undefined
-    return (
-      await frameActor(frameId).write(
-        { type: 'update', patch },
-        actor ?? { name: by, kind: 'user', color: colorFor(by) },
-      )
-    )?.frame
+    const { pageId, ...content } = patch
+    if (pageId !== undefined) {
+      const current = (await frameActor(frameId).snapshot()).frame
+      if (!current) return undefined
+      validateFrame({ ...current, ...content })
+      if (!(await canvasIndex(membership.canvasId).moveFrame(frameId, pageId))) return undefined
+    }
+    const change = await frameActor(frameId).write(
+      { type: 'update', patch: content },
+      actor ?? { name: by, kind: 'user', color: colorFor(by) },
+    )
+    return change ? { ...change.frame, pageId: pageId ?? membership.pageId ?? change.frame.pageId } : undefined
   }
 
   async replaceFrameHtml(frameId: string, find: string, replacement: string, actor: Actor): Promise<Frame | undefined> {
-    if (!(await this.getFrameMembership(frameId))) return undefined
-    return (await frameActor(frameId).write({ type: 'replace', find, replacement }, actor))?.frame
+    const membership = await this.getFrameMembership(frameId)
+    if (!membership) return undefined
+    const change = await frameActor(frameId).write({ type: 'replace', find, replacement }, actor)
+    return change ? { ...change.frame, pageId: membership.pageId ?? change.frame.pageId } : undefined
   }
 
   async appendFrameHtml(
@@ -619,13 +674,13 @@ class Store {
     actor?: Actor,
     done = false,
   ): Promise<Frame | undefined> {
-    if (!(await this.getFrameMembership(frameId))) return undefined
-    return (
-      await frameActor(frameId).write(
-        { type: 'append', chunk, start, done },
-        actor ?? { name: by, kind: 'user', color: colorFor(by) },
-      )
-    )?.frame
+    const membership = await this.getFrameMembership(frameId)
+    if (!membership) return undefined
+    const change = await frameActor(frameId).write(
+      { type: 'append', chunk, start, done },
+      actor ?? { name: by, kind: 'user', color: colorFor(by) },
+    )
+    return change ? { ...change.frame, pageId: membership.pageId ?? change.frame.pageId } : undefined
   }
 
   async deleteFrame(frameId: string): Promise<Frame | undefined> {

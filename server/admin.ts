@@ -47,14 +47,8 @@ adminRouter.get(
   '/stats',
   frameRoute(async (req, res) => {
     const [users] = await db.select({ n: count() }).from(authSchema.user)
-    const canvases = (await Promise.all([...store.canvases.keys()].map((id) => store.syncCanvas(id)))).filter(
-      (c) => !!c,
-    )
-    res.json({
-      users: users?.n ?? 0,
-      canvases: canvases.length,
-      frames: canvases.reduce((n, c) => n + c.frames.length, 0),
-    })
+    const stats = await store.getCanvasStats()
+    res.json({ users: users?.n ?? 0, ...stats })
   }),
 )
 

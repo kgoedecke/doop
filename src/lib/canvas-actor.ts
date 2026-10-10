@@ -18,6 +18,7 @@ type Connection = {
 let connection: Connection | undefined
 const frames = new Map<string, Connection>()
 const members = new Set<string>()
+const framePages = new Map<string, string>()
 const savedFrames = new Map<string, Frame>()
 const pending = new Map<
   string,
@@ -85,7 +86,8 @@ export async function updateFrame(id: string, patch: Partial<Frame>): Promise<Fr
 }
 
 function paint(frame: Frame) {
-  if (members.has(frame.id)) useStore.getState().upsertFrame(frame)
+  if (members.has(frame.id))
+    useStore.getState().upsertFrame({ ...frame, pageId: framePages.get(frame.id) ?? frame.pageId })
 }
 
 function showFrame(event: FrameChange) {
@@ -146,7 +148,7 @@ function acknowledge(requestId: string | undefined, frame: Frame | undefined) {
   if (!request) return
   clearTimeout(request.timer)
   pending.delete(requestId)
-  request.resolve(frame)
+  request.resolve({ ...frame, pageId: framePages.get(frame.id) ?? frame.pageId })
 }
 
 function rejectPending(current: Connection, error: Error) {
@@ -185,6 +187,13 @@ function applyIndex(event: IndexSnapshot, current: Connection) {
     disconnectFrames()
     location.href = '/'
     return
+  }
+  if (event.pages) useStore.getState().setPages(event.pages, current.canvasId)
+  framePages.clear()
+  for (const [id, pageId] of Object.entries(event.framePages ?? {})) framePages.set(id, pageId)
+  for (const frame of useStore.getState().canvas?.frames ?? []) {
+    const pageId = framePages.get(frame.id)
+    if (pageId && pageId !== frame.pageId) useStore.getState().patchFrameLocal(frame.id, { pageId }, true)
   }
   const ids = new Set(event.frameIds)
   for (const id of members) if (!ids.has(id)) remove(id)
@@ -364,6 +373,7 @@ export function disconnectFrames() {
   connection = undefined
   frames.clear()
   members.clear()
+  framePages.clear()
   useStore.getState().setFrameIndex(null)
   savedFrames.clear()
   for (const timer of reveals.values()) clearTimeout(timer)
@@ -426,7 +436,7 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
   if (!canvasId) throw new Error('No canvas is open')
   await connectFrames(canvasId)
   if (connection?.canvasId !== canvasId) throw new Error('Canvas changed before the edit could be sent')
-  // Page membership is validated by the app; the actor still broadcasts the committed frame.
+  // Page membership is committed by the canvas index through the app API.
   if (write.type === 'update' && write.patch.pageId !== undefined) {
     const response = await fetch(`/api/frames/${encodeURIComponent(write.id)}`, {
       method: 'PATCH',
