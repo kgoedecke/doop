@@ -177,7 +177,7 @@ export async function verifySetup(env, fetcher = globalThis.fetch, runtimeId) {
     signal: globalThis.AbortSignal.timeout(15_000),
   })
   const result = await response.json().catch(() => ({}))
-  if (response.status === 404 && result.error?.code === 'session_view_not_found') return
+  if (response.status === 404 && ['resource_not_found', 'session_view_not_found'].includes(result.error?.code)) return
   const error = new Error(
     `SDK connection check failed (HTTP ${response.status}). Check the integration token, runtime identity and compatible Cantelop release.`,
   )

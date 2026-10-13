@@ -116,6 +116,15 @@ it('checks the deployed protocol without provisioning a Workspace or Session and
     return globalThis.Response.json({ error: { code: 'session_view_not_found' } }, { status: 404 })
   })
   await verifySetup(env, fetcher, 'rt_test')
+  await verifySetup(
+    env,
+    async () => globalThis.Response.json({ error: { code: 'resource_not_found' } }, { status: 404 }),
+    'rt_test',
+  )
+  for (const code of ['app_not_found', 'not_found'])
+    await expect(
+      verifySetup(env, async () => globalThis.Response.json({ error: { code } }, { status: 404 }), 'rt_test'),
+    ).rejects.toThrow('HTTP 404')
   await expect(
     verifySetup(env, async () => new globalThis.Response('sensitive error', { status: 401 }), 'rt_test'),
   ).rejects.toThrow('HTTP 401')
