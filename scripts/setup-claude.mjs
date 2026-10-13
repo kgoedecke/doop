@@ -58,9 +58,9 @@ No credentials are printed or copied from another developer.`)
       )
   }
   if (values.check) {
-    const { readFile } = await import('node:fs/promises')
-    const manifest = JSON.parse(await readFile(`${root}.cantelop/claude-client/cantelop-client.json`, 'utf8'))
-    await verifySetup(current.env, globalThis.fetch, manifest.apps[0]?.session_runtime_id)
+    process.loadEnvFile(`${root}.env`)
+    const { doopClaude } = await import('../.cantelop/claude-client/client.mjs')
+    await verifySetup(doopClaude, current.env.CLAUDE_REMOTE_ISSUER)
     console.log('Doop → Cantelop SDK connection verified. No Claude session was started.')
     return
   }
@@ -101,11 +101,9 @@ Deployment target: cantelop/cantelop.local.json`)
     return
   }
   await deploySetup(setup)
-  const { readFile } = await import('node:fs/promises')
-  const manifest = JSON.parse(await readFile(`${root}.cantelop/claude-client/cantelop-client.json`, 'utf8'))
-  await waitForSetup(setup.env, {
-    verify: (env) => verifySetup(env, globalThis.fetch, manifest.apps[0]?.session_runtime_id),
-  })
+  process.loadEnvFile(`${root}.env`)
+  const { doopClaude } = await import('../.cantelop/claude-client/client.mjs')
+  await waitForSetup(() => verifySetup(doopClaude, setup.env.CLAUDE_REMOTE_ISSUER))
   console.log('SDK connection verified. Restart Doop, then connect your Claude account in Settings → Claude Plan.')
   if (local) {
     console.log('Starting the MCP tunnel. Install cloudflared if needed; keep this terminal open while Claude works.')

@@ -102,7 +102,7 @@ remoteClaudeRouter.post('/disable', (req, res, next) => {
     await disableRemoteExecution(req.user!.id)
     await localAgentRuns.cancel(req.user!.id, 'remote')
     try {
-      const auth = (await remoteWorkspace(req.user!.id)).auth()
+      const auth = remoteWorkspace(req.user!.id).auth()
       if (await remoteCall((signal) => auth.logout({ signal }))) throw new Error('Sign-out not confirmed')
     } catch {
       throw new Error(
@@ -150,7 +150,7 @@ function authRoute<T>(action: string, schema: z.ZodType<T>, handle: (userId: str
 authRoute('start', modelRequest, async (userId, { model }) => {
   const preference = await getLocalAgentPreference(userId)
   if (preference.remoteAuthRequired) await localAgentRuns.cancel(userId, 'remote')
-  const auth = (await remoteWorkspace(userId)).auth()
+  const auth = remoteWorkspace(userId).auth()
   const result = await remoteCall((signal) => auth.login({ signal, force: !!preference.remoteAuthRequired }))
   if (!result.authenticated) {
     if (preference.remoteAuthRequired) await beginRemoteReauth(userId, result.attemptId)
@@ -161,12 +161,12 @@ authRoute('start', modelRequest, async (userId, { model }) => {
   return { authenticated: true, preference: await activateRemote(userId, model) }
 })
 authRoute('cancel', schemas.cancel, async (userId, { attemptId }) => {
-  const auth = (await remoteWorkspace(userId)).auth()
+  const auth = remoteWorkspace(userId).auth()
   await remoteCall((signal) => auth.cancelLogin({ attemptId, signal }))
   return { cancelled: true }
 })
 authRoute('code', schemas.code, async (userId, { attemptId, model, code }) => {
-  const auth = (await remoteWorkspace(userId)).auth()
+  const auth = remoteWorkspace(userId).auth()
   // The SDK rejects unsuccessful codes; a false status also cannot activate Doop.
   if (!(await remoteCall((signal) => auth.submitCode({ attemptId, code, signal }))))
     throw new RemoteAppError('login_failed', 409)

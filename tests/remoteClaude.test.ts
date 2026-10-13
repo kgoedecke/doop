@@ -67,12 +67,14 @@ it('retains the old issuer-derived Workspace namespace and isolates users', () =
   vi.stubEnv('CANTELOP_EDGE_URL', 'https://example.com/other')
   expect(() => remoteIdentity('alice')).toThrow('HTTPS origin')
 })
-it('requires the native SDK configuration and rejects an App different from the compiled backend', () => {
+it('requires the native SDK configuration and allows its default hosted Edge origin', () => {
   expect(remoteClaudeConfigured()).toBe(true)
   vi.stubEnv('CANTELOP_APP_SLUG', undefined)
   expect(remoteClaudeConfigured()).toBe(false)
-  vi.stubEnv('CANTELOP_APP_SLUG', 'another-app')
-  expect(() => remoteIdentity('alice')).toThrow('compiled backend belongs to a different App')
+  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude-runtime')
+  vi.stubEnv('CANTELOP_EDGE_URL', undefined)
+  expect(remoteClaudeConfigured()).toBe(true)
+  expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
 })
 it.each([true, false])('validates native auth status %s through real SDK requests', async (authenticated) => {
   const fetcher = vi.fn(async (request: Request) => {
@@ -104,7 +106,7 @@ it('does not leak upstream response bodies or interpret timeouts as sign-out', a
 it('denies foreign Sessions before issuing SDK calls', async () => {
   const fetcher = vi.fn()
   vi.stubGlobal('fetch', fetcher)
-  await expect(remoteSession('bob', sessionId())).rejects.toThrow('not found')
+  expect(() => remoteSession('bob', sessionId())).toThrow('not found')
   expect(fetcher).not.toHaveBeenCalled()
 })
 it('fails on stream reset without replaying a dispatched task', async () => {

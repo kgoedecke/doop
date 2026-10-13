@@ -1,40 +1,33 @@
 import { RemoteAppError, type SessionEventCursor } from '@cantelop/sdk'
 import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { ClaudeEvent } from '../shared/remoteClaude.ts'
+import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 import { doopClaude } from '../.cantelop/claude-client/client.mjs'
 import { claudeRuntimeOrigin } from './remoteClaudeOrigins.ts'
 
 export function remoteClaudeConfigured() {
-  return !!(
-    process.env.CANTELOP_APP_SLUG &&
-    process.env.CANTELOP_EDGE_URL &&
-    process.env.CANTELOP_INTEGRATION_TOKEN &&
-    process.env.CLAUDE_REMOTE_ISSUER
-  )
+  return !!(process.env.CANTELOP_APP_SLUG && process.env.CANTELOP_INTEGRATION_TOKEN && process.env.CLAUDE_REMOTE_ISSUER)
 }
 export function remoteIdentity(userId: string) {
   if (!remoteClaudeConfigured()) throw new Error('Hosted execution is not configured on this Doop server.')
-  claudeRuntimeOrigin(process.env.CANTELOP_EDGE_URL!)
-  if (process.env.CANTELOP_APP_SLUG !== doopClaude.name)
-    throw new Error('The compiled backend belongs to a different App. Rebuild it with CANTELOP_APP_SLUG set.')
+  claudeRuntimeOrigin()
   // Retain the pre-1.0 namespace, including the issuer, to preserve Workspaces.
   return createHash('sha256')
     .update(JSON.stringify([process.env.CLAUDE_REMOTE_ISSUER, userId]))
     .digest('hex')
     .slice(0, 48)
 }
-export async function remoteWorkspace(userId: string) {
+export function remoteWorkspace(userId: string) {
   const slug = `u-${remoteIdentity(userId)}`
   return doopClaude.workspace({ slug })
 }
-export async function remoteSession(userId: string, sessionId?: string) {
+export function remoteSession(userId: string, sessionId?: string) {
   const identity = remoteIdentity(userId)
   const id = sessionId ?? `${identity}:${randomUUID()}`
   const suffix = id.slice(identity.length + 1)
   if (!id.startsWith(`${identity}:`) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(suffix))
     throw new Error('Hosted Claude session not found.')
-  return (await remoteWorkspace(userId)).session({ id, keepAliveSeconds: 300 })
+  return remoteWorkspace(userId).session({ id, keepAliveSeconds: 300 })
 }
 export function isRemoteAuthError(error: unknown): error is RemoteAppError {
   return (
@@ -73,7 +66,7 @@ export async function remoteEvents(
   onEvent: (event: ClaudeEvent) => Promise<void> | void,
   onOpen?: () => Promise<void>,
 ) {
-  const session = await remoteSession(userId, sessionId)
+  const session = remoteSession(userId, sessionId)
   let cursor: SessionEventCursor | undefined
   let opened = false,
     failures = 0
@@ -132,6 +125,6 @@ export async function remoteEvents(
   }
 }
 export async function checkRemoteAuth(userId: string): Promise<boolean> {
-  const auth = (await remoteWorkspace(userId)).auth()
+  const auth = remoteWorkspace(userId).auth()
   return remoteCall((signal) => auth.status({ signal }))
 }

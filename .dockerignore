@@ -12,6 +12,5 @@ data
 **/coverage
 cantelop/cantelop.local.json
 cantelop/src/cantelop.local.ts
-cantelop/src/.cantelop-build-*.ts
 desktop/src-tauri/target
 desktop/src-tauri/gen

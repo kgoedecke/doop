@@ -16,7 +16,9 @@ function localRuntime(url: URL) {
   )
 }
 
-export function claudeRuntimeOrigin(value: string): URL {
+export function claudeRuntimeOrigin(
+  value = process.env.CANTELOP_EDGE_URL ?? `https://${process.env.CANTELOP_APP_SLUG}.cantelop.dev`,
+): URL {
   const url = new URL(value)
   if (!bareOrigin(url) || (url.protocol !== 'https:' && !localRuntime(url)))
     throw new Error('CANTELOP_EDGE_URL must be an HTTPS origin, or an HTTP loopback origin in development.')

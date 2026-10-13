@@ -2,7 +2,7 @@ import { claudeMcpOrigin } from './remoteClaudeOrigins.ts'
 import { getLocalAgentPreference, requireRemoteAuth } from './localAgentPreferences.ts'
 import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
 import { ClaudeSessionOutput, type ClaudeSessionConfig } from '@cantelop/sdk/harnesses/claude/protocol'
-import type { ClaudeEvent } from '../shared/remoteClaude.ts'
+import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import { remoteSession, remoteCall, remoteEvents } from './remoteClaudeClient.ts'
 
@@ -85,7 +85,7 @@ async function executeRemote(
     }
     if (Buffer.byteLength(JSON.stringify(settings)) > 48 * 1024)
       throw new Error('Hosted Claude configuration exceeds 48 KiB.')
-    const session = await remoteSession(userId)
+    const session = remoteSession(userId)
     sessionId = session.id
     const reply = await remoteCall(
       (signal) => session.request({ type: 'configure', config: settings }, { signal }),
@@ -152,8 +152,8 @@ async function executeRemote(
     controller.abort()
     if (sessionId && !finished) {
       const id = sessionId
-      await remoteCall(async (signal) =>
-        (await remoteSession(userId, id)).dispatch({ type: 'cancel', id: job.id }, { signal }),
+      await remoteCall((signal) =>
+        remoteSession(userId, id).dispatch({ type: 'cancel', id: job.id }, { signal }),
       ).catch(() => {})
     }
   }

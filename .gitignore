@@ -19,5 +19,4 @@ cantelop/.dev/
 cantelop/coverage/
 cantelop/cantelop.local.json
 cantelop/src/cantelop.local.ts
-cantelop/src/.cantelop-build-*.ts
 .cantelop/claude-client/

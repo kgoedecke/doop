@@ -1,3 +1,4 @@
+import { CantelopClient } from '@cantelop/sdk'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -60,10 +61,9 @@ it('preserves old Workspace identity and credentials without putting backend sec
   const second = await prepareSetup(root, { app: 'doop-alice' })
   expect(second.env.CLAUDE_REMOTE_ISSUER).toBe('existing-issuer')
   expect(second.env.CANTELOP_INTEGRATION_TOKEN).toBe('app-token')
-  expect(first.env.CANTELOP_EDGE_URL).toBe('https://doop-alice.cantelop.dev')
+  expect(first.env).not.toHaveProperty('CANTELOP_EDGE_URL')
   expect(parseEnv(await readFile(join(service, '.env.setup'), 'utf8'))).toEqual({})
   expect(parseEnv(await readFile(join(root, '.env.claude-hosted'), 'utf8'))).toEqual({
-    CANTELOP_EDGE_URL: 'https://doop-alice.cantelop.dev',
     CANTELOP_APP_SLUG: 'doop-alice',
     CLAUDE_REMOTE_ISSUER: 'existing-issuer',
     CANTELOP_INTEGRATION_TOKEN: 'app-token',
@@ -116,33 +116,42 @@ it('requires a platform-issued integration token and deploys without uploading b
     ['node', ['scripts/build-claude-client.mjs'], setup.root],
   ])
 })
-it('checks the deployed protocol without provisioning a Workspace or Session and keeps errors private', async () => {
-  const env = {
-    CANTELOP_EDGE_URL: 'https://claude.example',
-    CLAUDE_REMOTE_ISSUER: 'doop',
-    CANTELOP_INTEGRATION_TOKEN: 'token',
-  }
-  const fetcher = vi.fn(async (url, options) => {
-    expect(url).toBe('https://claude.example/commands')
-    expect(options.redirect).toBe('error')
-    expect(options.headers['X-Cantelop-Session-Runtime']).toBe('rt_test')
-    expect(JSON.parse(options.body).command).toEqual({ type: 'view' })
+it('checks the deployed projection through the SDK without provisioning and keeps errors private', async () => {
+  const app = new CantelopClient().app({
+    name: 'doop-claude-runtime',
+    edgeUrl: 'https://claude.example',
+    accessToken: 'token',
+    runtime: { receive() {} },
+  })
+  const fetcher = vi.fn(async (request) => {
+    expect(request.url).toBe('https://claude.example/commands')
+    expect(request.redirect).toBe('manual')
+    expect(request.headers.get('Authorization')).toBe('Bearer token')
+    const body = await request.json()
+    expect(body.command).toEqual({ type: 'view' })
+    expect(body.session.id).toContain(':setup-probe')
     return globalThis.Response.json({ error: { code: 'session_view_not_found' } }, { status: 404 })
   })
-  await verifySetup(env, fetcher, 'rt_test')
-  await verifySetup(
-    env,
-    async () => globalThis.Response.json({ error: { code: 'resource_not_found' } }, { status: 404 }),
-    'rt_test',
-  )
-  for (const code of ['app_not_found', 'not_found'])
-    await expect(
-      verifySetup(env, async () => globalThis.Response.json({ error: { code } }, { status: 404 }), 'rt_test'),
-    ).rejects.toThrow('HTTP 404')
-  await expect(
-    verifySetup(env, async () => new globalThis.Response('sensitive error', { status: 401 }), 'rt_test'),
-  ).rejects.toThrow('HTTP 401')
-  await expect(verifySetup(env, fetcher)).rejects.toThrow('build the SDK backend client')
+  vi.stubGlobal('fetch', fetcher)
+  try {
+    await verifySetup(app, 'doop')
+    for (const code of ['resource_not_found', 'session_view_not_found']) {
+      fetcher.mockImplementation(async () => globalThis.Response.json({ error: { code } }, { status: 404 }))
+      await verifySetup(app, 'doop')
+    }
+    for (const code of ['app_not_found', 'not_found']) {
+      fetcher.mockImplementation(async () => globalThis.Response.json({ error: { code } }, { status: 404 }))
+      await expect(verifySetup(app, 'doop')).rejects.toThrow('HTTP 404')
+    }
+    fetcher.mockImplementation(async () => new globalThis.Response('sensitive error', { status: 401 }))
+    await expect(verifySetup(app, 'doop')).rejects.toThrow('HTTP 401')
+    fetcher.mockImplementation(async () =>
+      globalThis.Response.json({ error: { code: 'unavailable' } }, { status: 503 }),
+    )
+    await expect(verifySetup(app, 'doop')).rejects.toMatchObject({ retryable: true })
+  } finally {
+    vi.unstubAllGlobals()
+  }
 })
 it('updates multiline dotenv assignments while retaining unrelated settings', () => {
   const source =
@@ -158,9 +167,9 @@ it('waits for transient release propagation and stops on credential failures', a
   const unavailable = Object.assign(new Error('not available'), { retryable: true })
   const verify = vi.fn().mockRejectedValueOnce(unavailable).mockResolvedValue(undefined)
   const pause = vi.fn()
-  await waitForSetup({}, { verify, pause, log: () => {} })
+  await waitForSetup(verify, { pause, log: () => {} })
   expect(verify).toHaveBeenCalledTimes(2)
   expect(pause).toHaveBeenCalledOnce()
   verify.mockRejectedValue(new Error('HTTP 401'))
-  await expect(waitForSetup({}, { verify, pause, log: () => {} })).rejects.toThrow('HTTP 401')
+  await expect(waitForSetup(verify, { pause, log: () => {} })).rejects.toThrow('HTTP 401')
 })

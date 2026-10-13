@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   impersonated: false,
 }))
 vi.mock('../server/remoteClaudeClient.ts', () => ({
-  remoteWorkspace: async () => ({
+  remoteWorkspace: () => ({
     auth: () => ({ login: mocks.login, logout: mocks.logout, submitCode: mocks.code, cancelLogin: mocks.cancelLogin }),
   }),
   remoteCall: (operation: (signal: AbortSignal) => Promise<unknown>) => operation(new AbortController().signal),

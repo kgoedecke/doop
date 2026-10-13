@@ -92,7 +92,7 @@ export async function prepareSetup(root, { app, mcpOrigin }) {
   // Preserve it when migrating so existing users keep the same Workspace.
   const issuer = current.env.CLAUDE_REMOTE_ISSUER || `urn:doop:${randomUUID()}`
   const doop = {
-    CANTELOP_EDGE_URL: origin,
+    ...(current.env.CANTELOP_EDGE_URL ? { CANTELOP_EDGE_URL: origin } : {}),
     CANTELOP_APP_SLUG: app,
     CLAUDE_REMOTE_ISSUER: issuer,
     ...(current.env.CANTELOP_INTEGRATION_TOKEN
@@ -153,49 +153,40 @@ export async function deploySetup(setup, execute = run) {
 }
 
 /** Authenticated read of a missing projection; never provisions a Workspace/Sandbox. */
-export async function verifySetup(env, fetcher = globalThis.fetch, runtimeId) {
-  const origin = httpsOrigin(env.CANTELOP_EDGE_URL)
-  if (!env.CANTELOP_INTEGRATION_TOKEN || !runtimeId)
-    throw new Error('Set CANTELOP_INTEGRATION_TOKEN and build the SDK backend client before checking the connection.')
+export async function verifySetup(app, issuer) {
+  const { RemoteAppError } = await import('@cantelop/sdk')
   const userId = createHash('sha256')
-    .update(JSON.stringify([env.CLAUDE_REMOTE_ISSUER, 'doop-setup-check']))
+    .update(JSON.stringify([issuer, 'doop-setup-check']))
     .digest('hex')
     .slice(0, 48)
-  const id = `msg_${randomUUID().replaceAll('-', '')}`
-  const response = await fetcher(`${origin}/commands`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.CANTELOP_INTEGRATION_TOKEN}`,
-      'Content-Type': 'application/json',
-      'X-Cantelop-Session-Runtime': runtimeId,
-    },
-    body: JSON.stringify({
-      protocolVersion: 2,
-      id,
-      workspace: { slug: `u-${userId}` },
-      session: { id: `${userId}:setup-probe` },
-      command: { type: 'view' },
-    }),
-    redirect: 'error',
-    signal: globalThis.AbortSignal.timeout(15_000),
-  })
-  const result = await response.json().catch(() => ({}))
-  if (response.status === 404 && ['resource_not_found', 'session_view_not_found'].includes(result.error?.code)) return
-  const error = new Error(
-    `SDK connection check failed (HTTP ${response.status}). Check the integration token, runtime identity and compatible Cantelop release.`,
-  )
-  error.retryable = [502, 503, 504].includes(response.status)
-  throw error
+  try {
+    await app
+      .workspace({ slug: `u-${userId}` })
+      .session({ id: `${userId}:setup-probe` })
+      .view({
+        signal: globalThis.AbortSignal.timeout(15_000),
+      })
+  } catch (error) {
+    if (
+      error instanceof RemoteAppError &&
+      error.status === 404 &&
+      ['resource_not_found', 'session_view_not_found'].includes(error.code)
+    )
+      return
+    const status = error instanceof RemoteAppError ? error.status : undefined
+    const failure = new Error(
+      `SDK connection check failed${status ? ` (HTTP ${status})` : ''}. Check the integration token, runtime identity and compatible Cantelop release.`,
+    )
+    failure.retryable = [502, 503, 504].includes(status)
+    throw failure
+  }
 }
 
 /** Allow a newly deployed route to become available without redeploying or starting a Session. */
-export async function waitForSetup(
-  env,
-  { verify = verifySetup, pause = delay, attempts = 12, log = console.log } = {},
-) {
+export async function waitForSetup(verify, { pause = delay, attempts = 12, log = console.log } = {}) {
   for (let attempt = 1; ; attempt++) {
     try {
-      await verify(env)
+      await verify()
       return
     } catch (error) {
       if (!error.retryable || attempt >= attempts) throw error

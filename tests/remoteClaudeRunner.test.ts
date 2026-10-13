@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
-import type { ClaudeEvent } from '../shared/remoteClaude.ts'
+import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   dispatch: vi.fn(),
@@ -21,7 +21,7 @@ import { runRemoteClaude } from '../server/remoteClaudeRunner.ts'
 import { localAgentRuns } from '../server/localAgentRuns.ts'
 beforeEach(() => {
   mocks.preference.mockResolvedValue({ remoteAuthRequired: false, remoteAuthGeneration: 3 })
-  mocks.session.mockResolvedValue({ id: 'remote-session', request: mocks.request, dispatch: mocks.dispatch })
+  mocks.session.mockReturnValue({ id: 'remote-session', request: mocks.request, dispatch: mocks.dispatch })
   mocks.request.mockResolvedValue({ type: 'session.state', configured: true, messages: [], truncated: false })
   mocks.dispatch.mockResolvedValue({ id: 'receipt' })
 })

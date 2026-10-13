@@ -11,10 +11,6 @@ const installed = await access(serviceCompiler).then(
   () => false,
 )
 const { buildBackendClient } = await import(installed ? serviceCompiler.href : '@cantelop/sdk/build')
-const source = await definitionFor(root)
-try {
-  await buildBackendClient({ definition: source.definition, outdir: `${root}../.cantelop/claude-client` })
-  console.log('Built Cantelop 1.0 backend client.')
-} finally {
-  await source.dispose()
-}
+const definition = await definitionFor(root)
+await buildBackendClient({ ...definition, outdir: `${root}../.cantelop/claude-client` })
+console.log('Built SDK Claude artifacts.')
