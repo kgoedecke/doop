@@ -5,7 +5,8 @@ SDK-maintained Claude harness, native authentication provider and Docker image.
 The service deploys independently of Doop. Its original App name is
 `doop-claude-runtime`; contributor overrides retain their existing App identity.
 
-Both Doop and this service pin the published **1.0.0-alpha.5** npm release.
+Both Doop and this service pin the same **1.0.0-alpha.5** archive in
+[`vendor/`](../vendor/README.md), including the SDK's backend declaration fix.
 Live development and deployment require Cantelop CLI **0.15.1** or newer and a
 platform supporting manifest schema 3, CLI build protocol 6, integration protocol 2
 and native auth declarations. See the [upstream SDK](https://github.com/stepandel/cantelop-sdk)
@@ -26,9 +27,10 @@ bun run lint
 
 `cantelop:build` uses the SDK compiler to generate matching protocol Edge, Session
 and backend artifacts under `.cantelop/artifacts`. `cantelop:client` generates the
-backend module under the repository root's `.cantelop/claude-client`
+backend module and `client.d.mts` declarations under the repository root's `.cantelop/claude-client`
 so its SDK imports resolve to Doop's SDK installation. Doop's dev, build and start scripts
-compile that backend automatically. The compiler removes native runtime and auth
+compile that backend automatically, as do type checking and tests. Doop imports
+the generated App types directly. The compiler removes native runtime and auth
 code from the backend and embeds the deployed runtime identity.
 
 Qualify the SDK-owned native image independently of the CLI:

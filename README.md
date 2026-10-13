@@ -610,7 +610,8 @@ please rebrand derived services.
 
 The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.5**,
 including its configurable Claude harness factory, native auth provider and maintained Docker image.
-Both dependency manifests pin the published npm release.
+Both dependency manifests pin the same [vendored SDK archive](vendor/README.md),
+including generated backend client declarations.
 It deploys independently of Doop. In **Settings → Claude Plan → Connect**,
 open the Claude sign-in link, then paste the returned code into Doop. The SDK owns
 link extraction, code submission, retry handling and native process cleanup.

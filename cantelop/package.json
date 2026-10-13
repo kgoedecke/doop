@@ -15,7 +15,7 @@
     "build:client": "node ../scripts/build-claude-client.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.0.0-alpha.5"
+    "@cantelop/sdk": "file:../vendor/cantelop-sdk-1.0.0-alpha.5.tgz"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",

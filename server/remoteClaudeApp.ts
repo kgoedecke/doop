@@ -1,12 +1,6 @@
-import type { App } from '@cantelop/sdk'
-import type {
-  ClaudeSessionCommand as Command,
-  ClaudeSessionEvent as Event,
-  ClaudeSessionReply as Reply,
-} from '@cantelop/sdk/harnesses/claude/protocol'
 import { claudeRuntimeOrigin } from './remoteClaudeOrigins.ts'
 
-export type ClaudeApp = App<Command, Event, Reply>
+export type ClaudeApp = typeof import('../.cantelop/claude-client/client.mjs').doopClaude
 let pending: Promise<ClaudeApp> | undefined
 export function loadClaudeApp(): Promise<ClaudeApp> {
   if (!pending) {
@@ -24,8 +18,7 @@ export function loadClaudeApp(): Promise<ClaudeApp> {
         throw new Error('The compiled backend belongs to a different App.')
       process.env.CANTELOP_APP_SLUG = app
       process.env.CANTELOP_EDGE_URL = origin
-      const moduleUrl = new URL('../.cantelop/claude-client/client.mjs', import.meta.url).href
-      const module = (await import(moduleUrl)) as { doopClaude: ClaudeApp }
+      const module = await import('../.cantelop/claude-client/client.mjs')
       return module.doopClaude
     })().catch(() => {
       pending = undefined

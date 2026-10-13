@@ -2,6 +2,7 @@
 FROM oven/bun:1 AS build
 WORKDIR /app
 COPY package.json bun.lock ./
+COPY vendor/cantelop-sdk-1.0.0-alpha.5.tgz ./vendor/
 RUN bun install --frozen-lockfile
 COPY . .
 
@@ -28,6 +29,7 @@ RUN bun run build
 FROM oven/bun:1 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
+COPY vendor/cantelop-sdk-1.0.0-alpha.5.tgz ./vendor/
 RUN bun install --frozen-lockfile --production
 
 # ---- runtime ----

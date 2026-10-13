@@ -1,14 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
-import { RemoteAppError, type App } from '@cantelop/sdk'
+import { RemoteAppError } from '@cantelop/sdk'
 import { buildBackendClient } from '../cantelop/node_modules/@cantelop/sdk/dist/build.js'
-import type {
-  ClaudeSessionCommand as Command,
-  ClaudeSessionEvent as Event,
-  ClaudeSessionReply as Reply,
-} from '@cantelop/sdk/harnesses/claude/protocol'
+import type { ClaudeApp } from '../server/remoteClaudeApp.ts'
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
@@ -19,11 +15,15 @@ it('loads the real compiled client with Doop’s SDK and sends the matching runt
   const outdir = await mkdtemp(join(root, '.cantelop', 'test-client-'))
   try {
     const artifact = await buildBackendClient({ definition: join(root, 'cantelop/src/cantelop.ts'), outdir })
+    const declarations = await readFile(artifact.declarationFile, 'utf8')
+    expect(declarations).toContain('doopClaude')
+    expect(declarations).toContain('@cantelop/sdk/harnesses/claude/protocol')
+    expect(declarations).not.toContain('createClaudeRuntime')
     vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude-runtime')
     vi.stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
     vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'test-app-token')
     const { doopClaude } = (await import(/* @vite-ignore */ pathToFileURL(artifact.mainModule).href)) as {
-      doopClaude: App<Command, Event, Reply>
+      doopClaude: ClaudeApp
     }
     const fetcher = vi.fn(async (request: Request) => {
       expect(request.url).toBe('https://claude.example/commands')
@@ -39,4 +39,4 @@ it('loads the real compiled client with Doop’s SDK and sends the matching runt
   } finally {
     await rm(outdir, { recursive: true, force: true })
   }
-})
+}, 30_000)

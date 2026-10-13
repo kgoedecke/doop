@@ -24,4 +24,8 @@ test('SDK compiles matching protocol Edge, native runtime and backend without sh
   assert.ok(!backend.includes('node:child_process'))
   assert.ok(!/from ["']@cantelop\/sdk\/harnesses\/claude["']/.test(backend))
   assert.ok(!backend.includes('StateStore'))
+  const declarations = await readFile(result.backend.declarationFile, 'utf8')
+  assert.match(declarations, /doopClaude/)
+  assert.match(declarations, /@cantelop\/sdk\/harnesses\/claude\/protocol/)
+  assert.ok(!declarations.includes('createClaudeRuntime'))
 })
