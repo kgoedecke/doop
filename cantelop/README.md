@@ -53,9 +53,7 @@ maintains a separate CLI download or login subprocess.
 
 - `src/cantelop.ts` defines the named App, native `claudeAuth`, SDK Dockerfile and runtime handlers. `cantelop.json` is the schema-3 definition pointer. The SDK generates Edge `/commands`; the service has no custom HTTP API.
 - `src/cantelop.ts` declares the SDK's `createClaudeRuntime` with workspace and permission settings. The SDK owns configuration, durable queues, cancellation, steering, status events and recovery, and uses `createClaudeHarness` internally for native execution.
-- `src/contracts.ts` only aliases the SDK's Claude Session protocol types. There is no local behaviour, state store or native runner. Existing snapshots under `/workspace/.cantelop` remain compatible. Interrupted work stays interrupted; only queued work resumes.
-- `src/contracts.ts` and `src/validation.ts` are SDK/Node-independent contracts shared with Doop's authorized backend.
-- Doop's `server/remoteClaudeClient.ts` selects Workspaces and Sessions through the compiled SDK App. Its internal `/v1/*` operation names are compatibility labels; network requests use protocol-2 `/commands` and SDK event streams.
+- `src/cantelop.ts` imports the public SDK protocol directly. There are no local contract shims, validators, behaviours, state stores or native runners. The SDK validates configuration and decodes output fragments; Doop only maps native results to canvas task results. Existing snapshots and conversation migration stay compatible.
 
 Only the authenticated Doop backend holds an App-scoped integration token. It
 chooses the Workspace slug from the existing issuer/user hash and checks Session
@@ -91,7 +89,7 @@ Setup writes ignored `src/cantelop.local.ts` with a literal App name and points
 Hosted Doop Docker builds accept the public `CLAUDE_REMOTE_APP` build argument so
 the compiled backend matches the independently deployed App. Credentials are
 supplied only at runtime. Generated backend artifacts are copied into Doop's
-runtime image with shared contracts/validation, without native Claude code.
+runtime image without native Claude code or runtime source files.
 
 After the compatible CLI/platform is available:
 

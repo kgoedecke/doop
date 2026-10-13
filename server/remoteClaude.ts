@@ -11,7 +11,13 @@ import {
   getLocalAgentPreference,
   saveLocalAgentPreference,
 } from './localAgentPreferences.ts'
-import { checkRemoteAuth, remoteClaudeConfigured, remoteWorkspace, remoteCall } from './remoteClaudeClient.ts'
+import {
+  checkRemoteAuth,
+  remoteClaudeConfigured,
+  remoteWorkspace,
+  remoteCall,
+  isRemoteAuthError,
+} from './remoteClaudeClient.ts'
 import { store } from './store.ts'
 import { canAccessCanvas } from './access.ts'
 import { onFeedback } from './resident.ts'
@@ -30,6 +36,8 @@ async function activateRemote(userId: string, model: (typeof CLAUDE_MODEL_IDS)[n
   for (const canvas of store.canvases.values()) if (canAccessCanvas(userId, canvas)) onFeedback(canvas.id)
   return preference
 }
+
+const modelRequest = z.object({ model: z.enum(CLAUDE_MODEL_IDS) }).strict()
 
 export const remoteClaudeRouter = Router()
 remoteClaudeRouter.use((req, res, next) => {
@@ -68,12 +76,7 @@ remoteClaudeRouter.post('/check', (req, res, next) => {
     .catch(next)
 })
 remoteClaudeRouter.post('/select', (req, res, next) => {
-  const parsed = z
-    .object({
-      model: z.enum(CLAUDE_MODEL_IDS),
-    })
-    .strict()
-    .safeParse(req.body)
+  const parsed = modelRequest.safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid Claude model.' })
     return
@@ -118,7 +121,6 @@ remoteClaudeRouter.post('/stop', (req, res, next) => {
 
 const attemptId = z.string().regex(/^lgn_[0-9a-f]{32}$/)
 const schemas = {
-  start: z.object({ model: z.enum(CLAUDE_MODEL_IDS) }).strict(),
   code: z
     .object({
       attemptId,
@@ -133,48 +135,43 @@ const schemas = {
     .strict(),
   cancel: z.object({ attemptId }).strict(),
 }
-for (const action of ['start', 'code', 'cancel'] as const) {
+function authRoute<T>(action: string, schema: z.ZodType<T>, handle: (userId: string, data: T) => Promise<unknown>) {
   remoteClaudeRouter.post(`/auth/${action}`, (req, res, next) => {
-    const parsed = schemas[action].safeParse(req.body)
+    const parsed = schema.safeParse(req.body)
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid Claude sign-in request.' })
       return
     }
-    void (async () => {
-      const userId = req.user!.id
-      if (action === 'start') {
-        const { model } = schemas.start.parse(req.body)
-        const preference = await getLocalAgentPreference(userId)
-        if (preference.remoteAuthRequired) await localAgentRuns.cancel(userId, 'remote')
-        const auth = (await remoteWorkspace(userId)).auth()
-        const result = await remoteCall((signal) => auth.login({ signal, force: !!preference.remoteAuthRequired }))
-        if (!result.authenticated) {
-          if (preference.remoteAuthRequired) await beginRemoteReauth(userId, result.attemptId)
-          res.json({ attemptId: result.attemptId, url: result.url, expiresAt: result.expiresAt })
-        } else if (!preference.remoteAuthRequired) {
-          res.json({ authenticated: true, preference: await activateRemote(userId, model) })
-        } else throw new Error('Hosted Claude returned an invalid sign-in response.')
-        return
-      }
-      if (action === 'cancel') {
-        const { attemptId } = schemas.cancel.parse(req.body)
-        const auth = (await remoteWorkspace(userId)).auth()
-        await remoteCall((signal) => auth.cancelLogin({ attemptId, signal }))
-        res.json({ cancelled: true })
-        return
-      }
-      const { attemptId, model, code } = schemas.code.parse(req.body)
-      const auth = (await remoteWorkspace(userId)).auth()
-      if (!(await remoteCall((signal) => auth.submitCode({ attemptId, code, signal })))) {
-        res.status(409).json({
-          error: 'Claude sign-in could not be confirmed. Start a new connection and try the sign-in code again.',
-        })
-        return
-      }
-      res.json({ authenticated: true, preference: await activateRemote(userId, model, attemptId) })
-    })().catch(next)
+    handle(req.user!.id, parsed.data)
+      .then((result) => res.json(result))
+      .catch(next)
   })
 }
+authRoute('start', modelRequest, async (userId, { model }) => {
+  const preference = await getLocalAgentPreference(userId)
+  if (preference.remoteAuthRequired) await localAgentRuns.cancel(userId, 'remote')
+  const auth = (await remoteWorkspace(userId)).auth()
+  const result = await remoteCall((signal) => auth.login({ signal, force: !!preference.remoteAuthRequired }))
+  if (!result.authenticated) {
+    if (preference.remoteAuthRequired) await beginRemoteReauth(userId, result.attemptId)
+    const { attemptId, url, expiresAt } = result
+    return { attemptId, url, expiresAt }
+  }
+  if (preference.remoteAuthRequired) throw new Error('Hosted Claude returned an invalid sign-in response.')
+  return { authenticated: true, preference: await activateRemote(userId, model) }
+})
+authRoute('cancel', schemas.cancel, async (userId, { attemptId }) => {
+  const auth = (await remoteWorkspace(userId)).auth()
+  await remoteCall((signal) => auth.cancelLogin({ attemptId, signal }))
+  return { cancelled: true }
+})
+authRoute('code', schemas.code, async (userId, { attemptId, model, code }) => {
+  const auth = (await remoteWorkspace(userId)).auth()
+  // The SDK rejects unsuccessful codes; a false status also cannot activate Doop.
+  if (!(await remoteCall((signal) => auth.submitCode({ attemptId, code, signal }))))
+    throw new RemoteAppError('login_failed', 409)
+  return { authenticated: true, preference: await activateRemote(userId, model, attemptId) }
+})
 remoteClaudeRouter.use(
   (
     error: unknown,
@@ -186,12 +183,7 @@ remoteClaudeRouter.use(
       res.end()
       return
     }
-    if (
-      error instanceof RemoteAppError &&
-      ['code_rejected', 'login_not_active', 'login_failed', 'login_timeout', 'auth_logout_unconfirmed'].includes(
-        error.code,
-      )
-    ) {
+    if (isRemoteAuthError(error)) {
       res.status(error.code === 'code_rejected' ? 400 : 409).json({
         code: error.code,
         error:

@@ -6,7 +6,11 @@ import { CantelopClient } from '@cantelop/sdk'
 import { remoteIdentity, checkRemoteAuth, remoteEvents, remoteSession } from '../server/remoteClaudeClient.ts'
 import { LocalAgentRuns, type LocalHarnessRequest } from '../server/localAgentRuns.ts'
 import { RemoteResult } from '../server/remoteClaudeRunner.ts'
-import type { Command, Event, Reply } from '../cantelop/src/contracts.ts'
+import type {
+  ClaudeSessionCommand as Command,
+  ClaudeSessionEvent as Event,
+  ClaudeSessionReply as Reply,
+} from '@cantelop/sdk/harnesses/claude/protocol'
 
 const streamId = '1'.repeat(32)
 const messageId = 'msg_' + '2'.repeat(32)
@@ -170,4 +174,28 @@ it.each([429, 503])('resumes SDK stream cursors after transient HTTP %s without 
   expect(opened).toHaveBeenCalledOnce()
   const request = fetcher.mock.calls[2]?.[0] as Request
   expect((await request.json()).command.after).toEqual({ streamId, sequence: 1 })
+})
+
+it('closes a pending SDK subscription when initial dispatch fails, without retrying it', async () => {
+  let aborted = false
+  vi.stubGlobal(
+    'fetch',
+    (request: Request) =>
+      new Promise<Response>((_resolve, reject) => {
+        const stop = () => {
+          aborted = true
+          reject(request.signal.reason)
+        }
+        request.signal.addEventListener('abort', stop, { once: true })
+        if (request.signal.aborted) stop()
+      }),
+  )
+  const dispatch = vi.fn(async () => {
+    throw new Error('Dispatch failed')
+  })
+  await expect(remoteEvents('alice', sessionId(), new AbortController().signal, () => {}, dispatch)).rejects.toThrow(
+    'Dispatch failed',
+  )
+  expect(dispatch).toHaveBeenCalledOnce()
+  expect(aborted).toBe(true)
 })

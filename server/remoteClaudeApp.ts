@@ -1,5 +1,9 @@
 import type { App } from '@cantelop/sdk'
-import type { Command, Event, Reply } from '../cantelop/src/contracts.ts'
+import type {
+  ClaudeSessionCommand as Command,
+  ClaudeSessionEvent as Event,
+  ClaudeSessionReply as Reply,
+} from '@cantelop/sdk/harnesses/claude/protocol'
 import { claudeRuntimeOrigin } from './remoteClaudeOrigins.ts'
 
 export type ClaudeApp = App<Command, Event, Reply>

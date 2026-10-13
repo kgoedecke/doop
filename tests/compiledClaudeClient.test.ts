@@ -4,7 +4,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { RemoteAppError, type App } from '@cantelop/sdk'
 import { buildBackendClient } from '../cantelop/node_modules/@cantelop/sdk/dist/build.js'
-import type { Command, Event, Reply } from '../cantelop/src/contracts.ts'
+import type {
+  ClaudeSessionCommand as Command,
+  ClaudeSessionEvent as Event,
+  ClaudeSessionReply as Reply,
+} from '@cantelop/sdk/harnesses/claude/protocol'
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()

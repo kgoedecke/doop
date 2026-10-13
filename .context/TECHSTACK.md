@@ -93,7 +93,8 @@
   and removes native provider code. Root dev/build/start compile it automatically.
   Build tooling selects the compiler matching the definition's SDK installation.
 - `server/remoteClaudeClient.ts` uses SDK Workspace/Session/auth references and SSE
-  iterators directly, with no legacy route adapter. SDK `workspace.auth().login()`
+  iterators directly, with no legacy route adapter. Subscription cleanup aborts
+  blocked reads before closing the iterator, including failed initial dispatch. SDK `workspace.auth().login()`
   owns existing-sign-in checks and confirmed logout before forced reconnect.
   Doop's backend holds `CANTELOP_INTEGRATION_TOKEN` and chooses each
   user's Workspace. `CLAUDE_REMOTE_ISSUER` remains in the old user hash to preserve
@@ -113,8 +114,9 @@
 - `cantelop/src/cantelop.ts` declares `createClaudeRuntime` with Doop's workspace
   and permission defaults. The SDK owns configuration, durable queues, targeted
   cancellation, steering, snapshots and recovery, and calls `createClaudeHarness`
-  internally. Doop's contracts only alias the SDK protocol; no local lifecycle or
-  state store remains. Existing snapshots and conversation migration stay compatible.
+  internally. Doop imports the public SDK protocol directly; the SDK validates
+  configuration and decodes native fragments. No local contracts, validators,
+  lifecycle or state store remain. Existing snapshots stay compatible.
 - `LocalAgentRuns` retains task-scoped MCP capabilities and revocation. Remote runs
   cannot be claimed by desktop polling. Authentication failures pause hosted work;
   transport, billing and rate-limit errors do not mark users signed out.
@@ -130,4 +132,4 @@
   private backend export. The protocol connection check reads an absent projection
   without provisioning resources. Doop Docker builds use public `CLAUDE_REMOTE_APP`
   to compile a backend matching the deployed App and copy only that client plus
-  shared contracts/validation into the server image.
+  into the server image; no Cantelop runtime source files are copied.

@@ -26,6 +26,11 @@ vi.mock('../server/remoteClaudeClient.ts', () => ({
   remoteCall: (operation: (signal: AbortSignal) => Promise<unknown>) => operation(new AbortController().signal),
   checkRemoteAuth: mocks.check,
   remoteClaudeConfigured: () => true,
+  isRemoteAuthError: (error: unknown) =>
+    error instanceof RemoteAppError &&
+    ['code_rejected', 'login_not_active', 'login_failed', 'login_timeout', 'auth_logout_unconfirmed'].includes(
+      error.code,
+    ),
 }))
 vi.mock('../server/auth.ts', () => ({ PUBLIC_ORIGIN: 'https://doop.example', isBanned: async () => mocks.banned }))
 vi.mock('../server/localAgentRuns.ts', () => ({ localAgentRuns: { cancel: mocks.cancel, runningRemote: () => false } }))

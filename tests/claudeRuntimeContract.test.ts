@@ -1,6 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { CantelopClient } from '@cantelop/sdk'
-import type { Command, Event, Reply } from '../cantelop/src/contracts.ts'
+import type {
+  ClaudeSessionCommand as Command,
+  ClaudeSessionEvent as Event,
+  ClaudeSessionReply as Reply,
+} from '@cantelop/sdk/harnesses/claude/protocol'
 import { checkRemoteAuth, remoteIdentity, remoteSession, remoteWorkspace } from '../server/remoteClaudeClient.ts'
 
 const mocks = vi.hoisted(() => ({ app: undefined as unknown }))

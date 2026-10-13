@@ -25,7 +25,8 @@ on port 4400 alongside a `postgres:16-alpine` container, and applies DB migratio
 format:check, build, test) but does not build or push a container image.
 
 For hosted Claude, the server image also contains the compiled SDK 1.0 backend
-under `.cantelop/claude-client` and runtime-independent Cantelop contracts/validation.
+under `.cantelop/claude-client`. Runtime protocol types and helpers come directly
+from the SDK; no Cantelop runtime source files are copied into the server image.
 Set the public `CLAUDE_REMOTE_APP` Docker build argument to the separately deployed
 Cantelop App name; supply its App-scoped integration token only at server runtime.
 Runtime source changes require a matching Cantelop deployment and Doop backend

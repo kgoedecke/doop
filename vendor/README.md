@@ -3,7 +3,8 @@
 `cantelop-sdk-1.0.0-alpha.3.tgz` is packed from the sibling
 `../Dakar/cantelop-sdk` source checkout with configurable `createClaudeHarness`, the SDK-owned durable
 `createClaudeRuntime`, its public Session protocol, compiler factory support and
-structured Workspace login, code submission and cancellation methods. It includes the SDK's compiled public package only.
+structured Workspace login, code submission and cancellation methods, plus
+backend-safe configuration validation and native output decoding. It includes the SDK's compiled public package only.
 Both Doop dependency manifests point at this tarball so frozen installs, CI and
 Docker builds consume the same tested API without copying the SDK implementation
 into Doop or requiring access to a sibling repository.

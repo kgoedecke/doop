@@ -2,7 +2,6 @@ import { RemoteAppError, type SessionEventCursor } from '@cantelop/sdk'
 import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ClaudeEvent } from '../shared/remoteClaude.ts'
-import { uuid } from '../cantelop/src/validation.ts'
 import { loadClaudeApp } from './remoteClaudeApp.ts'
 import { claudeRuntimeOrigin } from './remoteClaudeOrigins.ts'
 
@@ -22,22 +21,26 @@ export async function remoteWorkspace(userId: string) {
   const slug = `u-${remoteIdentity(userId)}`
   return (await loadClaudeApp()).workspace({ slug })
 }
-export async function remoteSession(userId: string, sessionId = `${remoteIdentity(userId)}:${randomUUID()}`) {
-  const prefix = `${remoteIdentity(userId)}:`
-  if (!sessionId.startsWith(prefix)) throw new Error('Hosted Claude session not found.')
-  uuid(sessionId.slice(prefix.length))
-  return (await remoteWorkspace(userId)).session({ id: sessionId, keepAliveSeconds: 300 })
+export async function remoteSession(userId: string, sessionId?: string) {
+  const identity = remoteIdentity(userId)
+  const id = sessionId ?? `${identity}:${randomUUID()}`
+  const suffix = id.slice(identity.length + 1)
+  if (!id.startsWith(`${identity}:`) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(suffix))
+    throw new Error('Hosted Claude session not found.')
+  return (await remoteWorkspace(userId)).session({ id, keepAliveSeconds: 300 })
 }
-function upstreamError(error: unknown): never {
-  if (error instanceof RemoteAppError && error.status === 504)
-    throw new Error('Hosted Claude did not respond in time. Try again; this does not mean you are signed out.')
-  if (
+export function isRemoteAuthError(error: unknown): error is RemoteAppError {
+  return (
     error instanceof RemoteAppError &&
     ['code_rejected', 'login_not_active', 'login_failed', 'login_timeout', 'auth_logout_unconfirmed'].includes(
       error.code,
     )
   )
-    throw error
+}
+function upstreamError(error: unknown): never {
+  if (error instanceof RemoteAppError && error.status === 504)
+    throw new Error('Hosted Claude did not respond in time. Try again; this does not mean you are signed out.')
+  if (isRemoteAuthError(error)) throw error
   // Never expose upstream bodies or configuration containing MCP credentials.
   throw new Error('Hosted Claude request failed. Check the connection in Settings.')
 }
@@ -62,21 +65,19 @@ export async function remoteEvents(
   signal: AbortSignal,
   onEvent: (event: ClaudeEvent) => Promise<void> | void,
   onOpen?: () => Promise<void>,
-  initialCursor?: SessionEventCursor,
 ) {
   const session = await remoteSession(userId, sessionId)
-  let cursor = initialCursor,
-    opened = false,
+  let cursor: SessionEventCursor | undefined
+  let opened = false,
     failures = 0
   while (!signal.aborted) {
     const connection = new AbortController()
     const connectionSignal = AbortSignal.any([signal, connection.signal])
     const timer = setTimeout(() => connection.abort(), 30_000)
-    let handlerError: unknown
+    const stream = session
+      .stream({ signal: connectionSignal, ...(cursor ? { after: cursor } : {}) })
+      [Symbol.asyncIterator]()
     try {
-      const stream = session
-        .stream({ signal: connectionSignal, ...(cursor ? { after: cursor } : {}) })
-        [Symbol.asyncIterator]()
       // Start establishing the subscription before dispatching. Request acceptance
       // is asynchronous; output is buffered even when the stream has no first event.
       const first = stream.next()
@@ -91,27 +92,21 @@ export async function remoteEvents(
       }
       let next = await first
       clearTimeout(timer)
-      try {
-        while (!next.done && !signal.aborted) {
-          const event = next.value
-          try {
-            await onEvent({ ...event.data, message_id: event.messageId } as ClaudeEvent)
-          } catch (error) {
-            handlerError = error
-            throw error
-          }
-          cursor = event.cursor
-          failures = 0
-          if (signal.aborted) break
-          next = await stream.next()
+      while (!next.done && !signal.aborted) {
+        const event = next.value
+        try {
+          await onEvent(event.data)
+        } catch (error) {
+          throw new ClaudeStreamReset(String(error))
         }
-      } finally {
-        await stream.return?.()
+        cursor = event.cursor
+        failures = 0
+        if (signal.aborted) break
+        next = await stream.next()
       }
     } catch (error) {
       if (signal.aborted) return
-      if (error instanceof ClaudeStreamReset || handlerError)
-        throw new ClaudeStreamReset(error instanceof ClaudeStreamReset ? error.message : String(handlerError))
+      if (error instanceof ClaudeStreamReset) throw error
       if (
         error instanceof RemoteAppError &&
         (['event_stream_reset', 'event_cursor_expired', 'invalid_event_stream'].includes(error.code) ||
@@ -124,6 +119,7 @@ export async function remoteEvents(
     } finally {
       clearTimeout(timer)
       connection.abort()
+      await stream.return?.().catch(() => {})
     }
     await delay(1000, undefined, { signal }).catch(() => {})
   }

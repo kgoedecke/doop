@@ -53,8 +53,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY shared ./shared
-# Shared contracts/validation and compiled SDK backend only; no native runner.
-COPY cantelop/src/contracts.ts cantelop/src/validation.ts ./cantelop/src/
+# The compiled SDK backend carries runtime identity; no native runtime source is needed.
 COPY --from=build /app/.cantelop/claude-client ./.cantelop/claude-client
 
 EXPOSE 4400

@@ -1,58 +1,26 @@
 import { claudeMcpOrigin } from './remoteClaudeOrigins.ts'
 import { getLocalAgentPreference, requireRemoteAuth } from './localAgentPreferences.ts'
 import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
-import { config } from '../cantelop/src/validation.ts'
+import { ClaudeSessionOutput, type ClaudeSessionConfig } from '@cantelop/sdk/harnesses/claude/protocol'
 import type { ClaudeEvent } from '../shared/remoteClaude.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import { remoteSession, remoteCall, remoteEvents } from './remoteClaudeClient.ts'
 
-/** Reassembles only this message's native output, within the native runner's 4 MiB limit. */
+/** Translate the SDK's decoded native result into Doop's task result. */
 export class RemoteResult {
   result?: LocalAgentResult
-  private fragments = new Map<string, { parts: string[]; total: number; size: number }>()
-  private size = 0
-  constructor(private messageId: string) {}
-  accept(event: ClaudeEvent) {
-    if (!('id' in event) || event.id !== this.messageId) return
-    if (event.type === 'claude') this.native(event.event)
-    if (event.type === 'claude.fragment') {
-      if (
-        !Number.isSafeInteger(event.total) ||
-        event.total < 1 ||
-        event.total > 1024 ||
-        !Number.isSafeInteger(event.index) ||
-        event.index < 0 ||
-        event.index >= event.total
-      )
-        throw new Error('Invalid Claude output fragments.')
-      const fragment = this.fragments.get(event.eventId) ?? { parts: [], total: event.total, size: 0 }
-      if (fragment.total !== event.total) throw new Error('Inconsistent Claude output fragments.')
-      if (fragment.parts[event.index] !== undefined) {
-        if (fragment.parts[event.index] !== event.json) throw new Error('Conflicting Claude output fragments.')
-        return
-      }
-      fragment.parts[event.index] = event.json
-      fragment.size += event.json.length
-      this.size += event.json.length
-      if (this.size > 4 * 1024 * 1024 || this.fragments.size > 32)
-        throw new Error('Claude output exceeded the fragment limit.')
-      this.fragments.set(event.eventId, fragment)
-      if (fragment.parts.filter((part) => part !== undefined).length === fragment.total) {
-        this.native(JSON.parse(fragment.parts.join('')) as Record<string, unknown>)
-        this.fragments.delete(event.eventId)
-        this.size -= fragment.size
-      }
-    }
+  private readonly output: ClaudeSessionOutput
+  constructor(messageId: string) {
+    this.output = new ClaudeSessionOutput(messageId)
   }
-  private native(value: unknown) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return
-    const event = value as Record<string, unknown>
-    if (event.type === 'result')
+  accept(event: ClaudeEvent) {
+    const native = this.output.accept(event)
+    if (native?.type === 'result')
       this.result = {
-        success: event.is_error === false && event.subtype === 'success',
+        success: native.is_error === false && native.subtype === 'success',
         text:
-          typeof event.result === 'string'
-            ? event.result.slice(0, 100_000)
+          typeof native.result === 'string'
+            ? native.result.slice(0, 100_000)
             : 'Claude did not complete this task. Check your account and usage limits.',
       }
   }
@@ -101,7 +69,7 @@ async function executeRemote(
     )
     if (Buffer.byteLength(job.system) > 32 * 1024)
       throw new Error('The agent system prompt exceeds the hosted 32 KiB limit.')
-    const settings = config({
+    const settings: ClaudeSessionConfig = {
       model: job.model,
       systemPrompt: job.system,
       maxTurns: job.maxTurns,
@@ -114,7 +82,7 @@ async function executeRemote(
           headers: { Authorization: `Bearer ${job.token}` },
         },
       },
-    })
+    }
     if (Buffer.byteLength(JSON.stringify(settings)) > 48 * 1024)
       throw new Error('Hosted Claude configuration exceeds 48 KiB.')
     const session = await remoteSession(userId)

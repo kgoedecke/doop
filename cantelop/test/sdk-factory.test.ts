@@ -6,7 +6,11 @@ import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { createClaudeHarness, createClaudeRuntime } from '@cantelop/sdk/harnesses/claude'
 import type { SessionActivityFunction, SessionActivationContext, SessionContext } from '@cantelop/sdk/session'
-import type { Command, Event, Reply } from '../src/contracts.js'
+import type {
+  ClaudeSessionCommand as Command,
+  ClaudeSessionEvent as Event,
+  ClaudeSessionReply as Reply,
+} from '@cantelop/sdk/harnesses/claude/protocol'
 
 test('Doop uses the real SDK factory for restrictions, fragments and native resume across turns', async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), 'doop-factory-'))
