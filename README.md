@@ -608,10 +608,10 @@ please rebrand derived services.
 
 ## Claude Plan: hosted execution with your own Claude account
 
-The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.5**,
+The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.7**,
 including its configurable Claude harness factory, native auth provider and maintained Docker image.
-Both dependency manifests pin the same [vendored SDK archive](vendor/README.md),
-including generated backend client declarations.
+Both dependency manifests pin the published npm release, including portable
+generated backend declarations and the App-name build override.
 It deploys independently of Doop. In **Settings → Claude Plan → Connect**,
 open the Claude sign-in link, then paste the returned code into Doop. The SDK owns
 link extraction, code submission, retry handling and native process cleanup.
@@ -700,7 +700,7 @@ copy `CLAUDE_REMOTE_APP` to `CANTELOP_APP_SLUG` and `CLAUDE_REMOTE_URL` to
 these aliases automatically. Keep `CLAUDE_REMOTE_ISSUER` unchanged.
 
 - `CANTELOP_APP_SLUG`: existing Cantelop App name; also a Docker build argument for hosted Doop.
-- `CANTELOP_EDGE_URL`: App Edge HTTPS origin, or HTTP loopback in development.
+- `CANTELOP_EDGE_URL`: optional override; defaults to `https://<CANTELOP_APP_SLUG>.cantelop.dev`. Use an HTTP loopback origin for local development.
 - `CANTELOP_INTEGRATION_TOKEN`: platform-issued App-scoped token, only in Doop's backend environment.
 - `CLAUDE_REMOTE_ISSUER`: stable identity namespace used with the Doop user ID to derive the Workspace. Preserve it from earlier configurations.
 - `BETTER_AUTH_URL`: Doop's public sign-in/callback origin.

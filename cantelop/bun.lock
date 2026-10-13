@@ -5,7 +5,7 @@
     "": {
       "name": "cantelop-claude-api",
       "dependencies": {
-        "@cantelop/sdk": "file:../vendor/cantelop-sdk-1.0.0-alpha.5.tgz",
+        "@cantelop/sdk": "1.0.0-alpha.7",
       },
       "devDependencies": {
         "@types/node": "^22.20.3",
@@ -15,7 +15,7 @@
     },
   },
   "packages": {
-    "@cantelop/sdk": ["@cantelop/sdk@../vendor/cantelop-sdk-1.0.0-alpha.5.tgz", { "dependencies": { "@libsql/client": "^0.17.0", "drizzle-kit": "0.31.10", "drizzle-orm": "0.45.2", "esbuild": "^0.25.0", "typescript": "^5.9.3" } }, "sha512-kpeJDSDZmC5C/lMDAo8NdALsZSTo6Oq6RK143byYu8+P+zNm8+AWAaeIitjL4tw5fUQ/RRctJALsC7LakY1c/A=="],
+    "@cantelop/sdk": ["@cantelop/sdk@1.0.0-alpha.7", "", { "dependencies": { "@libsql/client": "^0.17.0", "drizzle-kit": "0.31.10", "drizzle-orm": "0.45.2", "esbuild": "^0.25.0", "typescript": "^5.9.3" } }, "sha512-sS5tHvFMrMFTWkKW9jHZhhegMWyEK9KxnnhwRktd3zYTRRDPitAH1s3SngjSQA9yLfclWX2LmvyOlhxBHLXt+Q=="],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 

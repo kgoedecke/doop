@@ -1,12 +1,12 @@
 # Hosted Claude runtime
 
-Doop's hosted Claude service uses `@cantelop/sdk@1.0.0-alpha.5`, including the
+Doop's hosted Claude service uses `@cantelop/sdk@1.0.0-alpha.7`, including the
 SDK-maintained Claude harness, native authentication provider and Docker image.
 The service deploys independently of Doop. Its original App name is
 `doop-claude-runtime`; contributor overrides retain their existing App identity.
 
-Both Doop and this service pin the same **1.0.0-alpha.5** archive in
-[`vendor/`](../vendor/README.md), including the SDK's backend declaration fix.
+Both Doop and this service pin the published **1.0.0-alpha.7** npm release,
+including portable backend declarations and the App-name build override.
 Live development and deployment require Cantelop CLI **0.15.1** or newer and a
 platform supporting manifest schema 3, CLI build protocol 6, integration protocol 2
 and native auth declarations. See the [upstream SDK](https://github.com/stepandel/cantelop-sdk)
@@ -84,7 +84,8 @@ credentials or put this token in the native Sandbox environment. Existing legacy
 signing-key entries may remain in a contributor's private environment but are unused.
 
 Setup writes ignored `src/cantelop.local.ts` with a literal App name and points
-`cantelop.local.json` at it. Both runtime and backend builds select that definition.
+`cantelop.local.json` at it. Both runtime and backend builds select that definition. The SDK's `appName` build option
+applies deployment overrides without temporary source copies.
 Hosted Doop Docker builds accept the public `CANTELOP_APP_SLUG` build argument so
 the compiled backend matches the independently deployed App. Credentials are
 supplied only at runtime. Generated backend artifacts are copied into Doop's
