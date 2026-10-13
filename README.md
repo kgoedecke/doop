@@ -687,10 +687,10 @@ own native Claude login. Keep the runtime and Doop running. Docker must reach
 Doop's backend through `host.docker.internal`; container localhost points to the
 container. Use your backend port if it differs from 4400.
 
-HTTP is accepted only in development with a loopback Cantelop origin; HTTP MCP
-callbacks require `host.docker.internal`. Production requires HTTPS. App-token
-and run-token checks remain enabled. Local Doop with remote Cantelop needs a public
-HTTPS MCP origin, such as the tunnel provided by `cantelop:tunnel`.
+The SDK validates its own endpoint. HTTP MCP callbacks to `host.docker.internal`
+are allowed in development independently of that endpoint; production callbacks
+require HTTPS. App-token and run-token checks remain enabled. Remote runtimes need
+a callback they can reach, such as the public HTTPS tunnel provided by `cantelop:tunnel`.
 
 ### Manual configuration
 

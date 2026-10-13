@@ -119,6 +119,9 @@
   internally. Doop imports the public SDK protocol directly; the SDK validates
   configuration and decodes native fragments. No local contracts, validators,
   lifecycle or state store remain. Existing snapshots stay compatible.
+- MCP callback validation is independent of the SDK endpoint: HTTPS origins are
+  accepted, and HTTP `host.docker.internal` origins are allowed in development.
+  Remote runtimes still require a reachable callback.
 - `LocalAgentRuns` retains task-scoped MCP capabilities and revocation. Remote runs
   cannot be claimed by desktop polling. Authentication failures pause hosted work;
   transport, billing and rate-limit errors do not mark users signed out.
