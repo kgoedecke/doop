@@ -1,17 +1,14 @@
 # Hosted Claude runtime
 
-Doop's hosted Claude service uses `@cantelop/sdk@1.0.0-alpha.3`, including the
+Doop's hosted Claude service uses `@cantelop/sdk@1.0.0-alpha.5`, including the
 SDK-maintained Claude harness, native authentication provider and Docker image.
 The service deploys independently of Doop. Its original App name is
 `doop-claude-runtime`; contributor overrides retain their existing App identity.
 
-This checkout uses a locally packed **alpha.3** SDK containing the configurable
-factory changes in `../Dakar/cantelop-sdk`. The tarball is included under `vendor/`
-so clean installs, CI and Docker builds are reproducible before npm publication.
-It has not been published to npm; alpha.2 remains the released baseline. Live development/deployment requires a compatible
-Cantelop CLI/platform supporting manifest schema 3, CLI build protocol 6,
-integration protocol 2 and structured native auth commands. The installed CLI
-0.13.0 does not accept schema 3. See the [upstream SDK](https://github.com/stepandel/cantelop-sdk)
+Both Doop and this service pin the published **1.0.0-alpha.5** npm release.
+Live development and deployment require Cantelop CLI **0.15.1** or newer and a
+platform supporting manifest schema 3, CLI build protocol 6, integration protocol 2
+and native auth declarations. See the [upstream SDK](https://github.com/stepandel/cantelop-sdk)
 and its [integration requirements](https://github.com/stepandel/cantelop-sdk/blob/main/docs/integration-foundation.md).
 
 ## Verification

@@ -608,11 +608,10 @@ please rebrand derived services.
 
 ## Claude Plan: hosted execution with your own Claude account
 
-The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.3**,
+The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.5**,
 including its configurable Claude harness factory, native auth provider and maintained Docker image.
-The alpha.3 changes are prepared in the sibling SDK source repository and consumed
-through a local packed artifact under `vendor/`; npm publication remains separate.
-It deploys independently of Doop. In **Settings → Claude Plan → Connect**, follow
+Both dependency manifests pin the published npm release.
+It deploys independently of Doop. In **Settings → Claude Plan → Connect**,
 open the Claude sign-in link, then paste the returned code into Doop. The SDK owns
 link extraction, code submission, retry handling and native process cleanup.
 Doop relays the short-lived code to the SDK; native credentials stay in the
