@@ -61,10 +61,13 @@ export async function readSetup(root) {
   const source = await optionalFile(join(root, '.env'))
   const local = await optionalFile(join(service, 'cantelop.local.json'))
   const env = parseEnv(source)
+  // Migrate saved Doop aliases; the runtime uses the SDK's native variables directly.
+  if (!env.CANTELOP_APP_SLUG && env.CLAUDE_REMOTE_APP) env.CANTELOP_APP_SLUG = env.CLAUDE_REMOTE_APP
+  if (!env.CANTELOP_EDGE_URL && env.CLAUDE_REMOTE_URL) env.CANTELOP_EDGE_URL = env.CLAUDE_REMOTE_URL
   const app =
-    env.CLAUDE_REMOTE_APP ||
+    env.CANTELOP_APP_SLUG ||
     (local && JSON.parse(local).app) ||
-    /^https:\/\/([a-z0-9-]+)\.cantelop\.dev\/?$/.exec(env.CLAUDE_REMOTE_URL ?? '')?.[1]
+    /^https:\/\/([a-z0-9-]+)\.cantelop\.dev\/?$/.exec(env.CANTELOP_EDGE_URL ?? '')?.[1]
   return { root, service, source, env, app }
 }
 
@@ -79,9 +82,9 @@ export async function prepareSetup(root, { app, mcpOrigin }) {
       `This checkout is already paired with ${current.app}. Use a separate checkout for another deployment.`,
     )
   const origin = `https://${app}.cantelop.dev`
-  if (current.env.CLAUDE_REMOTE_URL && httpsOrigin(current.env.CLAUDE_REMOTE_URL) !== origin)
+  if (current.env.CANTELOP_EDGE_URL && httpsOrigin(current.env.CANTELOP_EDGE_URL) !== origin)
     throw new Error(
-      'The existing CLAUDE_REMOTE_URL belongs to another deployment. Keep its configuration or use a separate checkout.',
+      'The existing CANTELOP_EDGE_URL belongs to another deployment. Keep its configuration or use a separate checkout.',
     )
   mcpOrigin ??= current.env.CLAUDE_REMOTE_MCP_ORIGIN
   if (mcpOrigin) mcpOrigin = httpsOrigin(mcpOrigin)
@@ -89,8 +92,8 @@ export async function prepareSetup(root, { app, mcpOrigin }) {
   // Preserve it when migrating so existing users keep the same Workspace.
   const issuer = current.env.CLAUDE_REMOTE_ISSUER || `urn:doop:${randomUUID()}`
   const doop = {
-    CLAUDE_REMOTE_URL: origin,
-    CLAUDE_REMOTE_APP: app,
+    CANTELOP_EDGE_URL: origin,
+    CANTELOP_APP_SLUG: app,
     CLAUDE_REMOTE_ISSUER: issuer,
     ...(current.env.CANTELOP_INTEGRATION_TOKEN
       ? { CANTELOP_INTEGRATION_TOKEN: current.env.CANTELOP_INTEGRATION_TOKEN }
@@ -151,7 +154,7 @@ export async function deploySetup(setup, execute = run) {
 
 /** Authenticated read of a missing projection; never provisions a Workspace/Sandbox. */
 export async function verifySetup(env, fetcher = globalThis.fetch, runtimeId) {
-  const origin = httpsOrigin(env.CLAUDE_REMOTE_URL)
+  const origin = httpsOrigin(env.CANTELOP_EDGE_URL)
   if (!env.CANTELOP_INTEGRATION_TOKEN || !runtimeId)
     throw new Error('Set CANTELOP_INTEGRATION_TOKEN and build the SDK backend client before checking the connection.')
   const userId = createHash('sha256')

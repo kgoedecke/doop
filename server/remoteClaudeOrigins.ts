@@ -19,16 +19,16 @@ function localRuntime(url: URL) {
 export function claudeRuntimeOrigin(value: string): URL {
   const url = new URL(value)
   if (!bareOrigin(url) || (url.protocol !== 'https:' && !localRuntime(url)))
-    throw new Error('CLAUDE_REMOTE_URL must be an HTTPS origin, or an HTTP loopback origin in development.')
+    throw new Error('CANTELOP_EDGE_URL must be an HTTPS origin, or an HTTP loopback origin in development.')
   return url
 }
 
 export function claudeMcpOrigin(value: string): URL {
   const url = new URL(value)
   let local = false
-  if (development() && process.env.CLAUDE_REMOTE_URL) {
+  if (development() && process.env.CANTELOP_EDGE_URL) {
     try {
-      local = localRuntime(new URL(process.env.CLAUDE_REMOTE_URL))
+      local = localRuntime(new URL(process.env.CANTELOP_EDGE_URL))
     } catch {
       // Invalid runtime configuration must not enable HTTP callbacks.
     }

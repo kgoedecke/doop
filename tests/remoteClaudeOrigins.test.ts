@@ -7,7 +7,7 @@ it.each([undefined, 'development'])('allows the local container setup with NODE_
   vi.stubEnv('NODE_ENV', environment)
   for (const host of ['localhost', '127.0.0.1', '[::1]']) {
     const runtime = `http://${host}:8787`
-    vi.stubEnv('CLAUDE_REMOTE_URL', runtime)
+    vi.stubEnv('CANTELOP_EDGE_URL', runtime)
     expect(claudeRuntimeOrigin(runtime).origin).toBe(runtime)
     expect(claudeMcpOrigin('http://host.docker.internal:4400').origin).toBe('http://host.docker.internal:4400')
   }
@@ -15,7 +15,7 @@ it.each([undefined, 'development'])('allows the local container setup with NODE_
 
 it.each(['production', 'staging', 'test'])('rejects HTTP outside development: %s', (environment) => {
   vi.stubEnv('NODE_ENV', environment)
-  vi.stubEnv('CLAUDE_REMOTE_URL', 'http://localhost:8787')
+  vi.stubEnv('CANTELOP_EDGE_URL', 'http://localhost:8787')
   expect(() => claudeRuntimeOrigin('http://localhost:8787')).toThrow('HTTPS origin')
   expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow('HTTPS origin')
   expect(claudeRuntimeOrigin('https://claude.example').origin).toBe('https://claude.example')
@@ -49,7 +49,7 @@ it.each([
   'ftp://host.docker.internal:4400',
 ])('rejects invalid container MCP origin %s', (value) => {
   vi.stubEnv('NODE_ENV', 'development')
-  vi.stubEnv('CLAUDE_REMOTE_URL', 'http://localhost:8787')
+  vi.stubEnv('CANTELOP_EDGE_URL', 'http://localhost:8787')
   expect(() => claudeMcpOrigin(value)).toThrow()
 })
 
@@ -57,7 +57,7 @@ it.each([undefined, 'https://claude.example', 'http://example.com', 'invalid', '
   'requires HTTPS MCP for nonlocal runtime %s',
   (runtime) => {
     vi.stubEnv('NODE_ENV', 'development')
-    vi.stubEnv('CLAUDE_REMOTE_URL', runtime)
+    vi.stubEnv('CANTELOP_EDGE_URL', runtime)
     expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow()
     expect(claudeMcpOrigin('https://tools.example').origin).toBe('https://tools.example')
   },

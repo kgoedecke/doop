@@ -44,9 +44,9 @@ No credentials are printed or copied from another developer.`)
     throw new Error('Use --check by itself to verify the saved configuration.')
   const current = await readSetup(root)
   for (const name of [
-    'CLAUDE_REMOTE_URL',
+    'CANTELOP_EDGE_URL',
     'CANTELOP_INTEGRATION_TOKEN',
-    'CLAUDE_REMOTE_APP',
+    'CANTELOP_APP_SLUG',
     'CLAUDE_REMOTE_ISSUER',
     'CLAUDE_REMOTE_MCP_ORIGIN',
   ]) {

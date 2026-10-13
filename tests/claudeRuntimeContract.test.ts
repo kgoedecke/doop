@@ -8,14 +8,19 @@ import type {
 import { checkRemoteAuth, remoteIdentity, remoteSession, remoteWorkspace } from '../server/remoteClaudeClient.ts'
 
 const mocks = vi.hoisted(() => ({ app: undefined as unknown }))
-vi.mock('../server/remoteClaudeApp.ts', () => ({ loadClaudeApp: async () => mocks.app }))
+vi.mock('../.cantelop/claude-client/client.mjs', () => ({
+  get doopClaude() {
+    return mocks.app
+  },
+}))
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
 
 it('uses real SDK protocol 2 with backend credentials and preserves user Workspaces across auth/tasks/logout', async () => {
-  vi.stubEnv('CLAUDE_REMOTE_URL', 'https://claude.example')
+  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude-runtime')
+  vi.stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
   vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
   vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'app-scoped-token')
   const commands: {

@@ -85,7 +85,7 @@ signing-key entries may remain in a contributor's private environment but are un
 
 Setup writes ignored `src/cantelop.local.ts` with a literal App name and points
 `cantelop.local.json` at it. Both runtime and backend builds select that definition.
-Hosted Doop Docker builds accept the public `CLAUDE_REMOTE_APP` build argument so
+Hosted Doop Docker builds accept the public `CANTELOP_APP_SLUG` build argument so
 the compiled backend matches the independently deployed App. Credentials are
 supplied only at runtime. Generated backend artifacts are copied into Doop's
 runtime image without native Claude code or runtime source files.

@@ -34,7 +34,7 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
   'creates a task-scoped MCP session using %s',
   async (mcpOrigin) => {
     vi.stubEnv('NODE_ENV', 'development')
-    vi.stubEnv('CLAUDE_REMOTE_URL', mcpOrigin.startsWith('http:') ? 'http://127.0.0.1:8787' : 'https://claude.example')
+    vi.stubEnv('CANTELOP_EDGE_URL', mcpOrigin.startsWith('http:') ? 'http://127.0.0.1:8787' : 'https://claude.example')
     vi.stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
     vi.stubEnv('CLAUDE_REMOTE_MCP_ORIGIN', mcpOrigin)
     const prompt = 'Task '.repeat(20000)

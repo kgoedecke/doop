@@ -650,7 +650,7 @@ Doop after its address changes. `bun run cantelop:tunnel` restarts just that tun
 
 Import **`.env.claude-hosted`** into the Doop host's backend environment. Keep it
 private: it contains the App integration token. Hosted Doop Docker builds also
-need the public **`CLAUDE_REMOTE_APP` build argument** matching the Cantelop App
+need the public **`CANTELOP_APP_SLUG` build argument** matching the Cantelop App
 name. Doop builds a compiled SDK backend with that App's runtime identity and
 copies it into its runtime image. Dev/build/start compile the backend automatically;
 `bun run cantelop:client` rebuilds it explicitly. Runtime changes require matching
@@ -674,7 +674,8 @@ native auth commands in container mode. Once available, start `bun run cantelop:
 and use its matching App token in Doop's backend environment:
 
 ```dotenv
-CLAUDE_REMOTE_URL=http://127.0.0.1:8787
+CANTELOP_APP_SLUG=YOUR_EXISTING_APP
+CANTELOP_EDGE_URL=http://127.0.0.1:8787
 CLAUDE_REMOTE_MCP_ORIGIN=http://host.docker.internal:4400
 CLAUDE_REMOTE_ISSUER=YOUR_EXISTING_NAMESPACE
 CANTELOP_INTEGRATION_TOKEN=LOCAL_APP_INTEGRATION_TOKEN
@@ -693,8 +694,13 @@ HTTPS MCP origin, such as the tunnel provided by `cantelop:tunnel`.
 
 ### Manual configuration
 
-- `CLAUDE_REMOTE_APP`: existing Cantelop App name; also a Docker build argument for hosted Doop.
-- `CLAUDE_REMOTE_URL`: App Edge HTTPS origin, or HTTP loopback in development.
+Use the SDK's native connection variables below. For an existing deployment,
+copy `CLAUDE_REMOTE_APP` to `CANTELOP_APP_SLUG` and `CLAUDE_REMOTE_URL` to
+`CANTELOP_EDGE_URL`, then rebuild and restart Doop. Contributor setup migrates
+these aliases automatically. Keep `CLAUDE_REMOTE_ISSUER` unchanged.
+
+- `CANTELOP_APP_SLUG`: existing Cantelop App name; also a Docker build argument for hosted Doop.
+- `CANTELOP_EDGE_URL`: App Edge HTTPS origin, or HTTP loopback in development.
 - `CANTELOP_INTEGRATION_TOKEN`: platform-issued App-scoped token, only in Doop's backend environment.
 - `CLAUDE_REMOTE_ISSUER`: stable identity namespace used with the Doop user ID to derive the Workspace. Preserve it from earlier configurations.
 - `BETTER_AUTH_URL`: Doop's public sign-in/callback origin.

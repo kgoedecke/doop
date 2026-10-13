@@ -15,7 +15,7 @@ COPY . .
 # VITE_POSTHOG_HOST is deliberately left unset: the client then defaults to
 # the same-origin /relay proxy, which is what defeats ad blockers. Setting
 # it to a posthog.com host would bypass the relay and resurrect blocking.
-ARG CLAUDE_REMOTE_APP
+ARG CANTELOP_APP_SLUG
 ARG VITE_POSTHOG_KEY
 ARG VITE_POSTHOG_HOST
 # comma-separated email domains whose sessions skip replay (operator accounts)

@@ -2,15 +2,22 @@ import { RemoteAppError, type SessionEventCursor } from '@cantelop/sdk'
 import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ClaudeEvent } from '../shared/remoteClaude.ts'
-import { loadClaudeApp } from './remoteClaudeApp.ts'
+import { doopClaude } from '../.cantelop/claude-client/client.mjs'
 import { claudeRuntimeOrigin } from './remoteClaudeOrigins.ts'
 
 export function remoteClaudeConfigured() {
-  return !!(process.env.CLAUDE_REMOTE_URL && process.env.CANTELOP_INTEGRATION_TOKEN && process.env.CLAUDE_REMOTE_ISSUER)
+  return !!(
+    process.env.CANTELOP_APP_SLUG &&
+    process.env.CANTELOP_EDGE_URL &&
+    process.env.CANTELOP_INTEGRATION_TOKEN &&
+    process.env.CLAUDE_REMOTE_ISSUER
+  )
 }
 export function remoteIdentity(userId: string) {
   if (!remoteClaudeConfigured()) throw new Error('Hosted execution is not configured on this Doop server.')
-  claudeRuntimeOrigin(process.env.CLAUDE_REMOTE_URL!)
+  claudeRuntimeOrigin(process.env.CANTELOP_EDGE_URL!)
+  if (process.env.CANTELOP_APP_SLUG !== doopClaude.name)
+    throw new Error('The compiled backend belongs to a different App. Rebuild it with CANTELOP_APP_SLUG set.')
   // Retain the pre-1.0 namespace, including the issuer, to preserve Workspaces.
   return createHash('sha256')
     .update(JSON.stringify([process.env.CLAUDE_REMOTE_ISSUER, userId]))
@@ -19,7 +26,7 @@ export function remoteIdentity(userId: string) {
 }
 export async function remoteWorkspace(userId: string) {
   const slug = `u-${remoteIdentity(userId)}`
-  return (await loadClaudeApp()).workspace({ slug })
+  return doopClaude.workspace({ slug })
 }
 export async function remoteSession(userId: string, sessionId?: string) {
   const identity = remoteIdentity(userId)

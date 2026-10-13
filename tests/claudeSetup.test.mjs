@@ -60,11 +60,11 @@ it('preserves old Workspace identity and credentials without putting backend sec
   const second = await prepareSetup(root, { app: 'doop-alice' })
   expect(second.env.CLAUDE_REMOTE_ISSUER).toBe('existing-issuer')
   expect(second.env.CANTELOP_INTEGRATION_TOKEN).toBe('app-token')
-  expect(first.env.CLAUDE_REMOTE_URL).toBe('https://doop-alice.cantelop.dev')
+  expect(first.env.CANTELOP_EDGE_URL).toBe('https://doop-alice.cantelop.dev')
   expect(parseEnv(await readFile(join(service, '.env.setup'), 'utf8'))).toEqual({})
   expect(parseEnv(await readFile(join(root, '.env.claude-hosted'), 'utf8'))).toEqual({
-    CLAUDE_REMOTE_URL: 'https://doop-alice.cantelop.dev',
-    CLAUDE_REMOTE_APP: 'doop-alice',
+    CANTELOP_EDGE_URL: 'https://doop-alice.cantelop.dev',
+    CANTELOP_APP_SLUG: 'doop-alice',
     CLAUDE_REMOTE_ISSUER: 'existing-issuer',
     CANTELOP_INTEGRATION_TOKEN: 'app-token',
     CLAUDE_REMOTE_MCP_ORIGIN: 'https://doop.example',
@@ -88,6 +88,20 @@ it('rejects target switches and malformed origins before modifying saved identit
   ).rejects.toThrow('HTTPS origin')
   expect(await readFile(join(root, '.env'), 'utf8')).toBe(saved)
 })
+it('migrates saved connection aliases to native SDK variables without changing the Workspace namespace', async () => {
+  const { root } = await fixture(
+    'CLAUDE_REMOTE_APP=doop-alice\nCLAUDE_REMOTE_URL=https://doop-alice.cantelop.dev\nCLAUDE_REMOTE_ISSUER=existing-issuer\nCANTELOP_INTEGRATION_TOKEN=app-token\n',
+  )
+  expect((await readSetup(root)).app).toBe('doop-alice')
+  const setup = await prepareSetup(root, { app: 'doop-alice' })
+  expect(setup.env).toMatchObject({
+    CANTELOP_APP_SLUG: 'doop-alice',
+    CANTELOP_EDGE_URL: 'https://doop-alice.cantelop.dev',
+    CLAUDE_REMOTE_ISSUER: 'existing-issuer',
+    CANTELOP_INTEGRATION_TOKEN: 'app-token',
+  })
+  expect(parseEnv(await readFile(join(root, '.env'), 'utf8'))).toMatchObject(setup.env)
+})
 it('requires a platform-issued integration token and deploys without uploading backend environment', async () => {
   const { root } = await fixture()
   const setup = await prepareSetup(root, { app: 'doop-alice' })
@@ -104,7 +118,7 @@ it('requires a platform-issued integration token and deploys without uploading b
 })
 it('checks the deployed protocol without provisioning a Workspace or Session and keeps errors private', async () => {
   const env = {
-    CLAUDE_REMOTE_URL: 'https://claude.example',
+    CANTELOP_EDGE_URL: 'https://claude.example',
     CLAUDE_REMOTE_ISSUER: 'doop',
     CANTELOP_INTEGRATION_TOKEN: 'token',
   }

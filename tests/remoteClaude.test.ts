@@ -1,9 +1,19 @@
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: vi.fn(), requireRemoteAuth: vi.fn() }))
 const sdkMocks = vi.hoisted(() => ({ app: undefined as unknown }))
-vi.mock('../server/remoteClaudeApp.ts', () => ({ loadClaudeApp: async () => sdkMocks.app }))
+vi.mock('../.cantelop/claude-client/client.mjs', () => ({
+  get doopClaude() {
+    return sdkMocks.app
+  },
+}))
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { CantelopClient } from '@cantelop/sdk'
-import { remoteIdentity, checkRemoteAuth, remoteEvents, remoteSession } from '../server/remoteClaudeClient.ts'
+import {
+  remoteClaudeConfigured,
+  remoteIdentity,
+  checkRemoteAuth,
+  remoteEvents,
+  remoteSession,
+} from '../server/remoteClaudeClient.ts'
 import { LocalAgentRuns, type LocalHarnessRequest } from '../server/localAgentRuns.ts'
 import { RemoteResult } from '../server/remoteClaudeRunner.ts'
 import type {
@@ -15,7 +25,8 @@ import type {
 const streamId = '1'.repeat(32)
 const messageId = 'msg_' + '2'.repeat(32)
 function configured() {
-  vi.stubEnv('CLAUDE_REMOTE_URL', 'https://claude.example')
+  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude-runtime')
+  vi.stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
   vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
   vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'integration-token')
   sdkMocks.app = new CantelopClient().app<Command, Event, Reply>({
@@ -53,8 +64,15 @@ function sse(frames: Event[], start = 1) {
 it('retains the old issuer-derived Workspace namespace and isolates users', () => {
   expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
   expect(remoteIdentity('alice')).not.toBe(remoteIdentity('bob'))
-  vi.stubEnv('CLAUDE_REMOTE_URL', 'https://example.com/other')
+  vi.stubEnv('CANTELOP_EDGE_URL', 'https://example.com/other')
   expect(() => remoteIdentity('alice')).toThrow('HTTPS origin')
+})
+it('requires the native SDK configuration and rejects an App different from the compiled backend', () => {
+  expect(remoteClaudeConfigured()).toBe(true)
+  vi.stubEnv('CANTELOP_APP_SLUG', undefined)
+  expect(remoteClaudeConfigured()).toBe(false)
+  vi.stubEnv('CANTELOP_APP_SLUG', 'another-app')
+  expect(() => remoteIdentity('alice')).toThrow('compiled backend belongs to a different App')
 })
 it.each([true, false])('validates native auth status %s through real SDK requests', async (authenticated) => {
   const fetcher = vi.fn(async (request: Request) => {

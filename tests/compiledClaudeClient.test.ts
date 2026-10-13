@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { RemoteAppError } from '@cantelop/sdk'
 import { buildBackendClient } from '../cantelop/node_modules/@cantelop/sdk/dist/build.js'
-import type { ClaudeApp } from '../server/remoteClaudeApp.ts'
+type ClaudeApp = typeof import('../.cantelop/claude-client/client.mjs').doopClaude
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
