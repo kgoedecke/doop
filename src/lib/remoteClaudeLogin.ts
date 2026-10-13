@@ -42,7 +42,10 @@ export class RemoteClaudeLogin {
     this.view('Starting Claude sign-in…')
     try {
       const result = await api.remoteClaudeAuth(this.userId, 'start', { model: this.model })
-      this.controller.signal.throwIfAborted()
+      if (this.controller.signal.aborted) {
+        if (result.attemptId) await api.remoteClaudeAuth(this.userId, 'cancel', { attemptId: result.attemptId })
+        return
+      }
       if ('authenticated' in result && result.authenticated === true) {
         if (!result.preference) throw new Error('Doop did not confirm the Claude Plan selection.')
         this.connected(result.preference)
@@ -90,12 +93,12 @@ export class RemoteClaudeLogin {
   }
   async cancel() {
     const attemptId = this.attemptId
-    this.dispose()
-    if (attemptId) await api.remoteClaudeAuth(this.userId, 'cancel', { attemptId })
-  }
-  dispose() {
     this.controller.abort()
     this.attemptId = undefined
     this.url = undefined
+    if (attemptId) await api.remoteClaudeAuth(this.userId, 'cancel', { attemptId })
+  }
+  dispose() {
+    void this.cancel().catch(() => {})
   }
 }

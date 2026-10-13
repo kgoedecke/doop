@@ -29,12 +29,13 @@ async function main() {
     console.log(`Usage: bun run cantelop:setup [--app NAME] [--mcp-origin https://doop.example | --local]
 
 Run cantelop login first. Requires Node 22+, Bun, Cantelop CLI, and Docker.
-Generates a private identity, deploys your app, and verifies its JWT handshake.
+Preserves the Workspace namespace, deploys your App, and verifies SDK protocol 2.
+Requires a compatible schema-3/build-protocol-6 Cantelop CLI/platform and an App integration token.
 --local          Start the existing MCP tunnel after deployment; keep this terminal open.
 --prepare-only   Write configuration without installing, deploying, or starting a tunnel.
 --check          Verify the saved handshake without deploying or creating a workspace.
 
-Reruns reuse the saved identity. Hosted environment export: .env.claude-hosted (private).
+Reruns reuse the saved Workspace namespace. Hosted environment export: .env.claude-hosted (private).
 No credentials are printed or copied from another developer.`)
     return
   }
@@ -44,9 +45,9 @@ No credentials are printed or copied from another developer.`)
   const current = await readSetup(root)
   for (const name of [
     'CLAUDE_REMOTE_URL',
-    'CLAUDE_REMOTE_SIGNING_KEY',
+    'CANTELOP_INTEGRATION_TOKEN',
+    'CLAUDE_REMOTE_APP',
     'CLAUDE_REMOTE_ISSUER',
-    'CLAUDE_REMOTE_AUDIENCE',
     'CLAUDE_REMOTE_MCP_ORIGIN',
   ]) {
     const shellValue = process.env[name]?.replace(/\\n/g, '\n')
@@ -57,14 +58,10 @@ No credentials are printed or copied from another developer.`)
       )
   }
   if (values.check) {
-    if (
-      !current.env.CLAUDE_REMOTE_SIGNING_KEY ||
-      !current.env.CLAUDE_REMOTE_ISSUER ||
-      !current.env.CLAUDE_REMOTE_AUDIENCE
-    )
-      throw new Error('No complete saved identity. Run setup first.')
-    await verifySetup(current.env)
-    console.log('Doop → Cantelop handshake verified. No Claude session was started.')
+    const { readFile } = await import('node:fs/promises')
+    const manifest = JSON.parse(await readFile(`${root}.cantelop/claude-client/cantelop-client.json`, 'utf8'))
+    await verifySetup(current.env, globalThis.fetch, manifest.apps[0]?.session_runtime_id)
+    console.log('Doop → Cantelop SDK connection verified. No Claude session was started.')
     return
   }
   let app = values.app || current.app
@@ -95,7 +92,7 @@ No credentials are printed or copied from another developer.`)
   }
   if (mcpOrigin) mcpOrigin = httpsOrigin(mcpOrigin)
   const setup = await prepareSetup(root, { app, mcpOrigin })
-  console.log(`Saved configuration for ${app}. Private key stays in Doop; Cantelop receives only the public key.
+  console.log(`Saved configuration for ${app}. App integration credentials stay in Doop; Claude authentication stays in each Workspace.
 Hosted Doop configuration: .env.claude-hosted (private; import into your hosting provider).
 Deployment target: cantelop/cantelop.local.json`)
   if (values['prepare-only']) {
@@ -104,8 +101,12 @@ Deployment target: cantelop/cantelop.local.json`)
     return
   }
   await deploySetup(setup)
-  await waitForSetup(setup.env)
-  console.log('Handshake verified. Restart Doop, then connect your Claude account in Settings → Claude Plan.')
+  const { readFile } = await import('node:fs/promises')
+  const manifest = JSON.parse(await readFile(`${root}.cantelop/claude-client/cantelop-client.json`, 'utf8'))
+  await waitForSetup(setup.env, {
+    verify: (env) => verifySetup(env, globalThis.fetch, manifest.apps[0]?.session_runtime_id),
+  })
+  console.log('SDK connection verified. Restart Doop, then connect your Claude account in Settings → Claude Plan.')
   if (local) {
     console.log('Starting the MCP tunnel. Install cloudflared if needed; keep this terminal open while Claude works.')
     await run(process.execPath, ['--env-file-if-exists=.env', 'scripts/dev-mcp-tunnel.mjs'], root)

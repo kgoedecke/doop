@@ -9,12 +9,13 @@
   },
   "scripts": {
     "dev": "cantelop dev --container",
-    "build": "cantelop build",
-    "check": "tsc -p tsconfig.api.json && tsc -p tsconfig.session.json",
-    "test": "node --import tsx --test test/*.test.ts"
+    "build": "node ../scripts/build-claude-runtime.mjs",
+    "check": "tsc -p tsconfig.session.json",
+    "test": "node --import tsx --test test/*.test.ts",
+    "build:client": "node ../scripts/build-claude-client.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "0.12.0"
+    "@cantelop/sdk": "file:../vendor/cantelop-sdk-1.0.0-alpha.3.tgz"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",

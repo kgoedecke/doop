@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFile, rename, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseEnv } from 'node:util'
@@ -61,14 +61,15 @@ export async function readSetup(root) {
   const source = await optionalFile(join(root, '.env'))
   const local = await optionalFile(join(service, 'cantelop.local.json'))
   const env = parseEnv(source)
-  const app = local
-    ? JSON.parse(local).app
-    : /^https:\/\/([a-z0-9-]+)\.cantelop\.dev\/?$/.exec(env.CLAUDE_REMOTE_URL ?? '')?.[1]
+  const app =
+    env.CLAUDE_REMOTE_APP ||
+    (local && JSON.parse(local).app) ||
+    /^https:\/\/([a-z0-9-]+)\.cantelop\.dev\/?$/.exec(env.CLAUDE_REMOTE_URL ?? '')?.[1]
   return { root, service, source, env, app }
 }
 
 export async function prepareSetup(root, { app, mcpOrigin }) {
-  if (!/^[a-z][a-z0-9-]{1,61}[a-z0-9]$/.test(app ?? ''))
+  if (!/^(?!.*--)[a-z][a-z0-9-]{1,61}[a-z0-9]$/.test(app ?? ''))
     throw new Error(
       'App name must be 3–63 lowercase letters, digits, or hyphens, starting with a letter and ending with a letter or digit.',
     )
@@ -82,39 +83,30 @@ export async function prepareSetup(root, { app, mcpOrigin }) {
     throw new Error(
       'The existing CLAUDE_REMOTE_URL belongs to another deployment. Keep its configuration or use a separate checkout.',
     )
+  mcpOrigin ??= current.env.CLAUDE_REMOTE_MCP_ORIGIN
   if (mcpOrigin) mcpOrigin = httpsOrigin(mcpOrigin)
-  const names = ['CLAUDE_REMOTE_SIGNING_KEY', 'CLAUDE_REMOTE_ISSUER', 'CLAUDE_REMOTE_AUDIENCE']
-  const present = names.filter((name) => current.env[name])
-  if (present.length && present.length !== names.length)
-    throw new Error(
-      'Existing Claude identity is incomplete. Restore its signing key, issuer, and audience before setup; they will not be replaced.',
-    )
-  const key = present.length
-    ? createPrivateKey(current.env.CLAUDE_REMOTE_SIGNING_KEY.replace(/\\n/g, '\n'))
-    : generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey
-  if (key.asymmetricKeyType !== 'ec' || key.asymmetricKeyDetails?.namedCurve !== 'prime256v1')
-    throw new Error('Existing signing key must be an ES256/P-256 key.')
+  // This issuer is a durable namespace, not a JWT issuer in SDK 1.0.
+  // Preserve it when migrating so existing users keep the same Workspace.
   const issuer = current.env.CLAUDE_REMOTE_ISSUER || `urn:doop:${randomUUID()}`
-  const audience = current.env.CLAUDE_REMOTE_AUDIENCE || app
   const doop = {
     CLAUDE_REMOTE_URL: origin,
-    CLAUDE_REMOTE_SIGNING_KEY: key.export({ format: 'pem', type: 'pkcs8' }).toString().replace(/\n/g, '\\n'),
+    CLAUDE_REMOTE_APP: app,
     CLAUDE_REMOTE_ISSUER: issuer,
-    CLAUDE_REMOTE_AUDIENCE: audience,
+    ...(current.env.CANTELOP_INTEGRATION_TOKEN
+      ? { CANTELOP_INTEGRATION_TOKEN: current.env.CANTELOP_INTEGRATION_TOKEN }
+      : {}),
     ...(mcpOrigin ? { CLAUDE_REMOTE_MCP_ORIGIN: mcpOrigin } : {}),
   }
-  const publicEnv = {
-    AUTH_PUBLIC_JWK: JSON.stringify(createPublicKey(key).export({ format: 'jwk' })),
-    AUTH_ISSUER: issuer,
-    AUTH_AUDIENCE: audience,
-  }
   const manifest = JSON.parse(await readFile(join(current.service, 'cantelop.json'), 'utf8'))
-  manifest.app = app
+  manifest.definition = 'src/cantelop.local.ts'
+  const definition = await readFile(join(current.service, 'src/cantelop.ts'), 'utf8')
+  const localDefinition = definition.replace("name: 'doop-claude-runtime'", `name: '${app}'`)
   const envText = updateEnv(current.source, doop)
-  const publicText = updateEnv('', publicEnv)
+  const publicText = '# SDK 1.0 uses native Workspace auth. No application keys belong in the Sandbox.\n'
   // Persist identity first: a failed deployment or interrupted setup must reuse it next time.
   await privateWrite(join(root, '.env'), envText)
   await privateWrite(join(current.service, '.env.setup'), publicText)
+  await privateWrite(join(current.service, 'src/cantelop.local.ts'), localDefinition)
   await privateWrite(join(current.service, 'cantelop.local.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   await privateWrite(join(root, '.env.claude-hosted'), updateEnv('', doop))
   return { ...current, app, env: { ...current.env, ...doop } }
@@ -124,6 +116,7 @@ export function run(command, args, cwd) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env }
     delete env.CLAUDE_REMOTE_SIGNING_KEY
+    delete env.CANTELOP_INTEGRATION_TOKEN
     const child = spawn(command, args, { cwd, stdio: 'inherit', env })
     const stop = () => child.kill('SIGTERM')
     process.once('SIGINT', stop)
@@ -145,41 +138,51 @@ export function run(command, args, cwd) {
 }
 
 export async function deploySetup(setup, execute = run) {
+  if (!setup.env.CANTELOP_INTEGRATION_TOKEN)
+    throw new Error(
+      'SDK 1.0 requires an App-scoped CANTELOP_INTEGRATION_TOKEN in Doop’s .env. Obtain it from the compatible Cantelop platform; never use a CLI login token.',
+    )
   await execute('bun', ['install', '--frozen-lockfile'], setup.service)
-  // Only the generated public configuration is eligible for upload, never Doop's .env.
-  await execute(
-    'cantelop',
-    ['deploy', '--create-app', '--env-file', '.env.setup', '-config', 'cantelop.local.json'],
-    setup.service,
-  )
+  // Requires the coordinated schema-3/build-protocol-6 CLI/platform release.
+  // No backend token or signing key is uploaded as Sandbox environment.
+  await execute('cantelop', ['deploy', '--create-app', '-config', 'cantelop.local.json'], setup.service)
+  await execute('node', ['scripts/build-claude-client.mjs'], setup.root)
 }
 
-export async function verifySetup(env, fetcher = globalThis.fetch) {
+/** Authenticated read of a missing projection; never provisions a Workspace/Sandbox. */
+export async function verifySetup(env, fetcher = globalThis.fetch, runtimeId) {
   const origin = httpsOrigin(env.CLAUDE_REMOTE_URL)
-  const key = createPrivateKey(env.CLAUDE_REMOTE_SIGNING_KEY.replace(/\\n/g, '\n'))
-  const sub = 'doop-setup-check'
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url')
-  const body = `${encode({ alg: 'ES256', typ: 'JWT' })}.${encode({ sub, iss: env.CLAUDE_REMOTE_ISSUER, aud: env.CLAUDE_REMOTE_AUDIENCE, exp: Math.floor(Date.now() / 1000) + 60 })}`
-  const token = `${body}.${sign('sha256', Buffer.from(body), { key, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`
-  const response = await fetcher(`${origin}/v1/identity`, {
-    headers: { Authorization: `Bearer ${token}` },
+  if (!env.CANTELOP_INTEGRATION_TOKEN || !runtimeId)
+    throw new Error('Set CANTELOP_INTEGRATION_TOKEN and build the SDK backend client before checking the connection.')
+  const userId = createHash('sha256')
+    .update(JSON.stringify([env.CLAUDE_REMOTE_ISSUER, 'doop-setup-check']))
+    .digest('hex')
+    .slice(0, 48)
+  const id = `msg_${randomUUID().replaceAll('-', '')}`
+  const response = await fetcher(`${origin}/commands`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.CANTELOP_INTEGRATION_TOKEN}`,
+      'Content-Type': 'application/json',
+      'X-Cantelop-Session-Runtime': runtimeId,
+    },
+    body: JSON.stringify({
+      protocolVersion: 2,
+      id,
+      workspace: { slug: `u-${userId}` },
+      session: { id: `${userId}:setup-probe` },
+      command: { type: 'view' },
+    }),
     redirect: 'error',
     signal: globalThis.AbortSignal.timeout(15_000),
   })
-  if (!response.ok) {
-    const error = new Error(
-      `Handshake check failed (HTTP ${response.status}). Check the active Cantelop release and rerun with --check.`,
-    )
-    error.retryable = [404, 502, 503, 504].includes(response.status)
-    throw error
-  }
-  const identity = await response.json()
-  const expected = createHash('sha256')
-    .update(JSON.stringify([env.CLAUDE_REMOTE_ISSUER, sub]))
-    .digest('hex')
-    .slice(0, 48)
-  if (identity.userId !== expected || identity.workspaceSlug !== `u-${expected}`)
-    throw new Error('Handshake returned a different identity. Check the configured issuer and active release.')
+  const result = await response.json().catch(() => ({}))
+  if (response.status === 404 && result.error?.code === 'session_view_not_found') return
+  const error = new Error(
+    `SDK connection check failed (HTTP ${response.status}). Check the integration token, runtime identity and compatible Cantelop release.`,
+  )
+  error.retryable = [502, 503, 504].includes(response.status)
+  throw error
 }
 
 /** Allow a newly deployed route to become available without redeploying or starting a Session. */
@@ -193,7 +196,7 @@ export async function waitForSetup(
       return
     } catch (error) {
       if (!error.retryable || attempt >= attempts) throw error
-      log(`Waiting for the deployed handshake endpoint (${attempt}/${attempts})…`)
+      log(`Waiting for the deployed SDK endpoint (${attempt}/${attempts})…`)
       await pause(5000)
     }
   }

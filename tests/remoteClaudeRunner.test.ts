@@ -1,15 +1,29 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { ClaudeEvent } from '../shared/remoteClaude.ts'
-const mocks = vi.hoisted(() => ({ post: vi.fn(), events: vi.fn(), preference: vi.fn(), requireAuth: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  request: vi.fn(),
+  dispatch: vi.fn(),
+  session: vi.fn(),
+  events: vi.fn(),
+  preference: vi.fn(),
+  requireAuth: vi.fn(),
+}))
 vi.mock('../server/localAgentPreferences.ts', () => ({
   getLocalAgentPreference: mocks.preference,
   requireRemoteAuth: mocks.requireAuth,
 }))
-vi.mock('../server/remoteClaudeClient.ts', () => ({ remotePost: mocks.post, remoteEvents: mocks.events }))
+vi.mock('../server/remoteClaudeClient.ts', () => ({
+  remoteSession: mocks.session,
+  remoteCall: (operation: (signal: AbortSignal) => Promise<unknown>) => operation(new AbortController().signal),
+  remoteEvents: mocks.events,
+}))
 import { runRemoteClaude } from '../server/remoteClaudeRunner.ts'
 import { localAgentRuns } from '../server/localAgentRuns.ts'
 beforeEach(() => {
   mocks.preference.mockResolvedValue({ remoteAuthRequired: false, remoteAuthGeneration: 3 })
+  mocks.session.mockResolvedValue({ id: 'remote-session', request: mocks.request, dispatch: mocks.dispatch })
+  mocks.request.mockResolvedValue({ type: 'session.state', configured: true, messages: [], truncated: false })
+  mocks.dispatch.mockResolvedValue({ id: 'receipt' })
 })
 afterEach(async () => {
   await localAgentRuns.cancel('alice')
@@ -27,26 +41,23 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
     const execute = vi.fn()
     let messageId = ''
     let token = ''
-    mocks.post.mockImplementation(async (user: string, path: string, body: Record<string, unknown>) => {
-      expect(user).toBe('alice')
-      if (path === '/v1/sessions') {
-        expect(body).toMatchObject({
-          model: 'claude-sonnet-5',
-          systemPrompt: 'Rules',
-          maxTurns: 24,
-          tools: [],
-          allowedTools: ['mcp__doop__edit', 'mcp__doop__get_run_context'],
-        })
-        const mcp = (body.mcps as { doop: { url: string; headers: { Authorization: string } } }).doop
-        expect(mcp.url.startsWith(`${mcpOrigin}/local-agent/mcp/`)).toBe(true)
-        messageId = mcp.url.split('/').at(-1)!
-        token = mcp.headers.Authorization.slice(7)
-        expect(localAgentRuns.poll('alice', 'desktop')).toBeNull()
-        const result = await localAgentRuns.execute(messageId, token, 'get_run_context', {})
-        expect(result.content).toBe(prompt)
-      }
-      if (path === '/v1/messages') expect(body).toMatchObject({ sessionId: 'remote-session', messageId, mode: 'queue' })
-      return { sessionId: 'remote-session', receiptId: 'receipt' }
+    mocks.request.mockImplementation(async (command: { type: string; config: Record<string, unknown> }) => {
+      const body = command.config
+      expect(body).toMatchObject({
+        model: 'claude-sonnet-5',
+        systemPrompt: 'Rules',
+        maxTurns: 24,
+        tools: [],
+        allowedTools: ['mcp__doop__edit', 'mcp__doop__get_run_context'],
+      })
+      const mcp = (body.mcps as { doop: { url: string; headers: { Authorization: string } } }).doop
+      expect(mcp.url.startsWith(`${mcpOrigin}/local-agent/mcp/`)).toBe(true)
+      messageId = mcp.url.split('/').at(-1)!
+      token = mcp.headers.Authorization.slice(7)
+      expect(localAgentRuns.poll('alice', 'desktop')).toBeNull()
+      const result = await localAgentRuns.execute(messageId, token, 'get_run_context', {})
+      expect(result.content).toBe(prompt)
+      return { type: 'session.state', configured: true, messages: [], truncated: false }
     })
     mocks.events.mockImplementation(
       async (
@@ -77,12 +88,15 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
     ).toEqual({ success: true, text: 'Done' })
     expect(localAgentRuns.authorized(messageId, token)).toBeUndefined()
     expect(execute).not.toHaveBeenCalled()
-    expect(mocks.post.mock.calls.map((call) => call[1])).toEqual(['/v1/sessions', '/v1/messages'])
+    expect(mocks.session).toHaveBeenCalledWith('alice')
+    expect(mocks.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'queue', id: messageId }),
+      expect.objectContaining({ id: `msg_${messageId.replaceAll('-', '')}` }),
+    )
   },
 )
 it('cancels the remote message and revokes access after a stream failure', async () => {
   vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
-  mocks.post.mockResolvedValue({ sessionId: 'session', receiptId: 'receipt' })
   mocks.events.mockRejectedValue(new Error('History lost'))
   const result = await runRemoteClaude('alice', 'default', {
     canvasId: 'canvas',
@@ -94,10 +108,9 @@ it('cancels the remote message and revokes access after a stream failure', async
   })
   expect(result).toEqual({ success: false, text: 'History lost' })
   expect(mocks.requireAuth).not.toHaveBeenCalled()
-  expect(mocks.post).toHaveBeenLastCalledWith(
-    'alice',
-    '/v1/cancel',
-    expect.objectContaining({ sessionId: 'session', messageId: expect.any(String) }),
+  expect(mocks.dispatch).toHaveBeenLastCalledWith(
+    { type: 'cancel', id: expect.any(String) },
+    { signal: expect.any(AbortSignal) },
   )
   expect(localAgentRuns.runningRemote('alice')).toBe(false)
 })
@@ -115,15 +128,15 @@ it('rejects localhost before creating a hosted session and explains the tunnel s
   })
   expect(result.success).toBe(false)
   expect(result.text).toContain('CLAUDE_REMOTE_MCP_ORIGIN')
-  expect(mocks.post).not.toHaveBeenCalled()
+  expect(mocks.session).not.toHaveBeenCalled()
 })
 
 it('persists an explicit auth failure for this user and stops dispatching while blocked', async () => {
   vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
   let id = ''
-  mocks.post.mockImplementation(async (_user, path, body) => {
-    if (path === '/v1/messages') id = body.messageId
-    return { sessionId: 'session', receiptId: 'receipt' }
+  mocks.dispatch.mockImplementation(async (command) => {
+    if (command.type === 'queue') id = command.id
+    return { id: 'receipt' }
   })
   mocks.events.mockImplementation(async (_user, _session, _signal, event, open) => {
     await open()
@@ -135,8 +148,8 @@ it('persists an explicit auth failure for this user and stops dispatching while 
   const request = { canvasId: 'canvas', prompt: 'Task', system: 'Rules', maxTurns: 2, tools: [], execute: vi.fn() }
   expect(await runRemoteClaude('alice', 'default', request)).toMatchObject({ success: false, authRequired: true })
   expect(mocks.requireAuth).toHaveBeenCalledWith('alice', 3)
-  mocks.post.mockClear()
+  mocks.session.mockClear()
   mocks.preference.mockResolvedValue({ remoteAuthRequired: true })
   expect(await runRemoteClaude('alice', 'default', request)).toMatchObject({ authRequired: true })
-  expect(mocks.post).not.toHaveBeenCalled()
+  expect(mocks.session).not.toHaveBeenCalled()
 })

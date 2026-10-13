@@ -24,6 +24,14 @@ on port 4400 alongside a `postgres:16-alpine` container, and applies DB migratio
 (`server/db/index.ts`). CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
 format:check, build, test) but does not build or push a container image.
 
+For hosted Claude, the server image also contains the compiled SDK 1.0 backend
+under `.cantelop/claude-client` and runtime-independent Cantelop contracts/validation.
+Set the public `CLAUDE_REMOTE_APP` Docker build argument to the separately deployed
+Cantelop App name; supply its App-scoped integration token only at server runtime.
+Runtime source changes require a matching Cantelop deployment and Doop backend
+rebuild. The SDK alpha needs the coordinated schema-3/build-protocol-6/protocol-2
+CLI/platform release before live deployment. See `cantelop/README.md`.
+
 ## Desktop app (Tauri: macOS DMG + Windows NSIS installer)
 
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup

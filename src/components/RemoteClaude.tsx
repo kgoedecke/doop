@@ -7,8 +7,8 @@ import { RemoteClaudeLogin, type LoginView } from '../lib/remoteClaudeLogin'
 import { CLAUDE_MODELS, normalizeClaudeModel, type LocalAgentPreference } from '../../shared/localAgent'
 import type { RemoteClaudeStatus } from '../../shared/remoteClaude'
 import { AgentIcon } from './AgentIcon'
-import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { Button } from './ui/button'
 import { CheckIcon } from './ui/icons'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { planRow, planMark, planPill, actionsRow } from './ui/model-plan'
@@ -73,8 +73,8 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
   const active = !!preference?.enabled && preference.transport === 'remote'
   const needsReconnect = active && !!status?.authRequired
   const model = normalizeClaudeModel(preference?.model)
-  const selectedBlurb = CLAUDE_MODELS.find((option) => option.id === model)?.blurb
   const signInUrl = view?.url
+  const selectedBlurb = CLAUDE_MODELS.find((option) => option.id === model)?.blurb
   useEffect(() => {
     let disposed = false
     const refresh = () => {

@@ -1,9 +1,10 @@
 import { claudeMcpOrigin } from './remoteClaudeOrigins.ts'
 import { getLocalAgentPreference, requireRemoteAuth } from './localAgentPreferences.ts'
 import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
+import { config } from '../cantelop/src/validation.ts'
 import type { ClaudeEvent } from '../shared/remoteClaude.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
-import { remotePost, remoteEvents } from './remoteClaudeClient.ts'
+import { remoteSession, remoteCall, remoteEvents } from './remoteClaudeClient.ts'
 
 /** Reassembles only this message's native output, within the native runner's 4 MiB limit. */
 export class RemoteResult {
@@ -100,26 +101,29 @@ async function executeRemote(
     )
     if (Buffer.byteLength(job.system) > 32 * 1024)
       throw new Error('The agent system prompt exceeds the hosted 32 KiB limit.')
-    const created = await remotePost(
-      userId,
-      '/v1/sessions',
-      {
-        model: job.model,
-        systemPrompt: job.system,
-        maxTurns: job.maxTurns,
-        tools: [],
-        allowedTools: request.tools.map((tool) => `mcp__doop__${tool.name}`),
-        mcps: {
-          doop: {
-            type: 'http',
-            url: `${origin.origin}/local-agent/mcp/${job.id}`,
-            headers: { Authorization: `Bearer ${job.token}` },
-          },
+    const settings = config({
+      model: job.model,
+      systemPrompt: job.system,
+      maxTurns: job.maxTurns,
+      tools: [],
+      allowedTools: request.tools.map((tool) => `mcp__doop__${tool.name}`),
+      mcps: {
+        doop: {
+          type: 'http',
+          url: `${origin.origin}/local-agent/mcp/${job.id}`,
+          headers: { Authorization: `Bearer ${job.token}` },
         },
       },
+    })
+    if (Buffer.byteLength(JSON.stringify(settings)) > 48 * 1024)
+      throw new Error('Hosted Claude configuration exceeds 48 KiB.')
+    const session = await remoteSession(userId)
+    sessionId = session.id
+    const reply = await remoteCall(
+      (signal) => session.request({ type: 'configure', config: settings }, { signal }),
       signal,
     )
-    sessionId = created.sessionId
+    if (reply.type === 'error') throw new Error('Hosted Claude configuration failed.')
     const output = new RemoteResult(job.id)
     let outcome: LocalAgentResult | undefined
     await remoteEvents(
@@ -155,15 +159,16 @@ async function executeRemote(
         }
       },
       async () => {
-        await remotePost(
-          userId,
-          '/v1/messages',
-          {
-            sessionId,
-            messageId: job.id,
-            mode: 'queue',
-            text: 'Call get_run_context to read the complete task, then carry it out using the Doop tools.',
-          },
+        await remoteCall(
+          (signal) =>
+            session.dispatch(
+              {
+                type: 'queue',
+                id: job.id,
+                text: 'Call get_run_context to read the complete task, then carry it out using the Doop tools.',
+              },
+              { id: `msg_${job.id.replaceAll('-', '')}`, signal },
+            ),
           signal,
         )
       },
@@ -178,7 +183,10 @@ async function executeRemote(
     localAgentRuns.revokeRemote(job.id)
     controller.abort()
     if (sessionId && !finished) {
-      await remotePost(userId, '/v1/cancel', { sessionId, messageId: job.id }).catch(() => {})
+      const id = sessionId
+      await remoteCall(async (signal) =>
+        (await remoteSession(userId, id)).dispatch({ type: 'cancel', id: job.id }, { signal }),
+      ).catch(() => {})
     }
   }
 }

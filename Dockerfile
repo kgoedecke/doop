@@ -2,6 +2,7 @@
 FROM oven/bun:1 AS build
 WORKDIR /app
 COPY package.json bun.lock ./
+COPY vendor/cantelop-sdk-1.0.0-alpha.3.tgz ./vendor/
 RUN bun install --frozen-lockfile
 COPY . .
 
@@ -14,6 +15,7 @@ COPY . .
 # VITE_POSTHOG_HOST is deliberately left unset: the client then defaults to
 # the same-origin /relay proxy, which is what defeats ad blockers. Setting
 # it to a posthog.com host would bypass the relay and resurrect blocking.
+ARG CLAUDE_REMOTE_APP
 ARG VITE_POSTHOG_KEY
 ARG VITE_POSTHOG_HOST
 # comma-separated email domains whose sessions skip replay (operator accounts)
@@ -27,6 +29,7 @@ RUN bun run build
 FROM oven/bun:1 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
+COPY vendor/cantelop-sdk-1.0.0-alpha.3.tgz ./vendor/
 RUN bun install --frozen-lockfile --production
 
 # ---- runtime ----
@@ -50,6 +53,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY shared ./shared
+# Shared contracts/validation and compiled SDK backend only; no native runner.
+COPY cantelop/src/contracts.ts cantelop/src/validation.ts ./cantelop/src/
+COPY --from=build /app/.cantelop/claude-client ./.cantelop/claude-client
 
 EXPOSE 4400
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

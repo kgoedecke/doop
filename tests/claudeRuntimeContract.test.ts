@@ -1,107 +1,79 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { generateKeyPairSync } from 'node:crypto'
-import api from '../cantelop/src/api.ts'
+import { CantelopClient } from '@cantelop/sdk'
 import type { Command, Event, Reply } from '../cantelop/src/contracts.ts'
-import { checkRemoteAuth, remoteIdentity, remotePost } from '../server/remoteClaudeClient.ts'
-import { consumeClaudeEvents } from '../shared/remoteClaude.ts'
+import { checkRemoteAuth, remoteIdentity, remoteSession, remoteWorkspace } from '../server/remoteClaudeClient.ts'
 
+const mocks = vi.hoisted(() => ({ app: undefined as unknown }))
+vi.mock('../server/remoteClaudeApp.ts', () => ({ loadClaudeApp: async () => mocks.app }))
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
 
-function connect() {
-  const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+it('uses real SDK protocol 2 with backend credentials and preserves user Workspaces across auth/tasks/logout', async () => {
   vi.stubEnv('CLAUDE_REMOTE_URL', 'https://claude.example')
   vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
-  vi.stubEnv('CLAUDE_REMOTE_AUDIENCE', 'cantelop-claude-api')
-  vi.stubEnv('CLAUDE_REMOTE_SIGNING_KEY', pair.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString())
-  const opened: { id: string; workspaceSlug: string }[] = []
-  const stopped: string[] = []
-  const commands: Command[] = []
-  const app = {
-    workspaces: { open: async ({ slug }: { slug: string }) => ({ id: 'workspace', slug }) },
-    sessions: {
-      open: (options: { id: string; workspaceSlug: string }) => {
-        opened.push(options)
-        return {
-          ...options,
-          stop: async () => {
-            stopped.push(options.id)
-          },
-          request: async (command: Command): Promise<Reply> => {
-            commands.push(command)
-            return command.type === 'snapshot'
-              ? { type: 'session.state', messages: [], configured: true, truncated: false }
-              : { type: 'auth.status', authenticated: command.type !== 'auth.logout' }
-          },
-          dispatch: async (command: Command) => {
-            commands.push(command)
-            return { id: 'receipt' }
-          },
-        }
+  vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'app-scoped-token')
+  const commands: {
+    workspace: { slug: string }
+    session: { id: string }
+    command: { type: string; message?: Command; auth?: { type: string } }
+    id: string
+  }[] = []
+  mocks.app = new CantelopClient().app<Command, Event, Reply>({
+    name: 'doop-claude-runtime',
+    runtime: { receive() {} },
+    auth: {
+      status: () => true,
+      logout() {},
+      terminal() {
+        throw new Error('native-only')
       },
     },
-  } as unknown as Parameters<typeof api.create>[0]['app']
-  const router = api.create({
-    app,
-    env: {
-      AUTH_PUBLIC_JWK: JSON.stringify(pair.publicKey.export({ format: 'jwk' })),
-      AUTH_ISSUER: 'doop',
-      AUTH_AUDIENCE: 'cantelop-claude-api',
-    },
+    edgeUrl: 'https://claude.example',
+    accessToken: 'app-scoped-token',
   })
-  vi.stubGlobal('fetch', (url: string, options: RequestInit) => router.handle(new Request(url, options)))
-  return { opened, commands, stopped }
-}
-
-it('accepts Doop JWTs and retains the same workspace across auth, tasks, snapshots, and logout', async () => {
-  const { opened, commands, stopped } = connect()
+  vi.stubGlobal('fetch', async (request: Request) => {
+    expect(request.url).toBe('https://claude.example/commands')
+    expect(request.headers.get('Authorization')).toBe('Bearer app-scoped-token')
+    const envelope = await request.json()
+    expect(envelope.protocolVersion).toBe(2)
+    expect(envelope.id).toMatch(/^msg_[0-9a-f]{32}$/)
+    commands.push(envelope)
+    if (envelope.command.type === 'auth')
+      return Response.json({
+        protocolVersion: 2,
+        id: envelope.id,
+        reply: { type: 'status', authenticated: envelope.command.auth.type !== 'logout' },
+      })
+    if (envelope.command.type === 'request')
+      return Response.json({
+        protocolVersion: 2,
+        id: envelope.id,
+        reply: { type: 'session.state', configured: true, messages: [], truncated: false },
+      })
+    return Response.json({
+      protocolVersion: 2,
+      id: envelope.id,
+      status: 'accepted',
+      accepted_at: new Date().toISOString(),
+    })
+  })
   expect(await checkRemoteAuth('alice')).toBe(true)
-  const created = await remotePost('alice', '/v1/sessions', { tools: [], allowedTools: [], mcps: {} })
-  const message = await remotePost('alice', '/v1/messages', { sessionId: created.sessionId, text: 'Design a card' })
-  expect(message).toMatchObject({ receiptId: 'receipt', sessionId: created.sessionId })
-  expect(await remotePost('alice', '/v1/snapshot', { sessionId: created.sessionId })).toMatchObject({
-    type: 'session.state',
-    configured: true,
-  })
-  await expect(
-    remotePost('bob', '/v1/cancel', { sessionId: created.sessionId, messageId: message.messageId }),
-  ).rejects.toThrow('(404)')
-  expect(await remotePost('alice', '/v1/auth/logout', {})).toMatchObject({ authenticated: false })
-  expect(opened.every((session) => session.workspaceSlug === `u-${remoteIdentity('alice')}`)).toBe(true)
-  expect(opened[0]?.id).toBe(`${remoteIdentity('alice')}:auth`)
-  expect(stopped).toEqual([`${remoteIdentity('alice')}:auth`, `${remoteIdentity('alice')}:auth`])
-  expect(commands.map((command) => command.type)).toEqual([
-    'auth.check',
-    'configure',
-    'queue',
-    'snapshot',
-    'auth.logout',
-  ])
-})
-
-it('consumes runtime output inside Cantelop transport envelopes and advances the replay cursor', async () => {
-  const events: Event[] = [
-    { type: 'message.status', id: 'message', status: 'running' },
-    { type: 'claude', id: 'message', event: { type: 'result', is_error: false, subtype: 'success', result: 'Done' } },
-    { type: 'message.status', id: 'message', status: 'completed' },
-  ]
-  const received: unknown[] = []
-  const cursors: string[] = []
-  await consumeClaudeEvents(
-    new Response(
-      events
-        .map((data, index) => `id: stream:${index}\ndata: ${JSON.stringify({ data, message_id: 'receipt' })}\n\n`)
-        .join(''),
-    ),
-    (event) => {
-      received.push(event)
-    },
-    (cursor) => {
-      cursors.push(cursor)
-    },
+  const session = await remoteSession('alice')
+  await session.request({ type: 'configure', config: { tools: [], allowedTools: [], mcps: {} } })
+  const id = crypto.randomUUID()
+  const message = await session.dispatch(
+    { type: 'queue', id, text: 'Design a card' },
+    { id: `msg_${id.replaceAll('-', '')}` },
   )
-  expect(received).toEqual(events.map((event) => ({ ...event, message_id: 'receipt' })))
-  expect(cursors).toEqual(['stream:0', 'stream:1', 'stream:2'])
+  expect(message.id).toBe(`msg_${id.replaceAll('-', '')}`)
+  expect(await session.request({ type: 'snapshot' })).toMatchObject({ type: 'session.state', configured: true })
+  await expect(remoteSession('bob', session.id)).rejects.toThrow()
+  expect(await (await remoteWorkspace('alice')).auth().logout()).toBe(false)
+  expect(commands.every((command) => command.workspace.slug === `u-${remoteIdentity('alice')}`)).toBe(true)
+  expect(commands[0]?.session.id).toBe('cantelop-native-auth')
+  expect(commands.map((command) => command.command.type)).toEqual(['auth', 'request', 'dispatch', 'request', 'auth'])
+  expect(commands[1]?.command.message).toMatchObject({ type: 'configure' })
+  expect(commands[2]?.command.message).toMatchObject({ type: 'queue', id })
 })

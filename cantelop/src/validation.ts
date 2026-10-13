@@ -1,14 +1,6 @@
 import type { SessionConfig } from './contracts.js'
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message)
-  }
-}
 export function fail(message: string): never {
-  throw new ApiError(400, message)
+  throw new Error(message)
 }
 export function fields(value: unknown, keys: string[]): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((k) => !keys.includes(k)))
@@ -93,35 +85,4 @@ export function uuid(value: unknown): string {
   if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value))
     fail('Invalid UUID')
   return value
-}
-export async function readBody(request: Request): Promise<unknown> {
-  const reader = request.body?.getReader()
-  if (!reader) return {}
-  const chunks: Uint8Array[] = []
-  let size = 0
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      size += value.length
-      if (size > 48 * 1024) {
-        await reader.cancel()
-        throw new ApiError(413, 'Request too large')
-      }
-      chunks.push(value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  const bytes = new Uint8Array(size)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.length
-  }
-  try {
-    return JSON.parse(new TextDecoder().decode(bytes) || '{}')
-  } catch {
-    fail('Invalid JSON')
-  }
 }

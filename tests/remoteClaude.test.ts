@@ -1,175 +1,103 @@
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: vi.fn(), requireRemoteAuth: vi.fn() }))
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { generateKeyPairSync, verify } from 'node:crypto'
-import {
-  remoteBearer,
-  remoteIdentity,
-  checkRemoteAuth,
-  remoteEvents,
-  remotePost,
-  RemoteClaudeLoginError,
-} from '../server/remoteClaudeClient.ts'
-import { consumeClaudeEvents } from '../shared/remoteClaude.ts'
+const sdkMocks = vi.hoisted(() => ({ app: undefined as unknown }))
+vi.mock('../server/remoteClaudeApp.ts', () => ({ loadClaudeApp: async () => sdkMocks.app }))
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { CantelopClient } from '@cantelop/sdk'
+import { remoteIdentity, checkRemoteAuth, remoteEvents, remoteSession } from '../server/remoteClaudeClient.ts'
 import { LocalAgentRuns, type LocalHarnessRequest } from '../server/localAgentRuns.ts'
 import { RemoteResult } from '../server/remoteClaudeRunner.ts'
+import type { Command, Event, Reply } from '../cantelop/src/contracts.ts'
 
-const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+const streamId = '1'.repeat(32)
+const messageId = 'msg_' + '2'.repeat(32)
 function configured() {
   vi.stubEnv('CLAUDE_REMOTE_URL', 'https://claude.example')
   vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
-  vi.stubEnv('CLAUDE_REMOTE_AUDIENCE', 'claude-api')
-  vi.stubEnv('CLAUDE_REMOTE_SIGNING_KEY', pair.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString())
+  vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'integration-token')
+  sdkMocks.app = new CantelopClient().app<Command, Event, Reply>({
+    name: 'doop-claude-runtime',
+    runtime: { receive() {} },
+    auth: {
+      status: () => true,
+      logout() {},
+      terminal() {
+        throw new Error('native-only')
+      },
+    },
+    edgeUrl: 'https://claude.example',
+    accessToken: 'integration-token',
+  })
 }
+beforeEach(configured)
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
-function sse(frames: unknown[]) {
+const sessionId = () => `${remoteIdentity('alice')}:00000000-0000-4000-8000-000000000000`
+function sse(frames: Event[], start = 1) {
   return new Response(
-    frames.map((event, index) => `id: stream:${index + 1}\ndata: ${JSON.stringify(event)}\n\n`).join(''),
+    frames
+      .map((data, index) => {
+        const sequence = start + index
+        return `id: ${streamId}:${sequence}\ndata: ${JSON.stringify({ stream_id: streamId, sequence, session_id: sessionId(), message_id: messageId, created_at: new Date().toISOString(), data })}\n\n`
+      })
+      .join(''),
     { headers: { 'Content-Type': 'text/event-stream' } },
   )
 }
-
-describe('hosted application identity and stream', () => {
-  it('signs short-lived per-user ES256 JWTs and separates workspaces', () => {
-    configured()
-    const [header, payload, signature] = remoteBearer('alice').split('.') as [string, string, string]
-    expect(
-      verify(
-        'sha256',
-        Buffer.from(`${header}.${payload}`),
-        { key: pair.publicKey, dsaEncoding: 'ieee-p1363' },
-        Buffer.from(signature, 'base64url'),
-      ),
-    ).toBe(true)
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString())
-    expect(claims).toMatchObject({ sub: 'alice', iss: 'doop', aud: 'claude-api' })
-    expect(claims.exp - Math.floor(Date.now() / 1000)).toBeLessThanOrEqual(300)
-    expect(remoteIdentity('alice')).not.toBe(remoteIdentity('bob'))
-    vi.stubEnv('CLAUDE_REMOTE_URL', 'https://example.com/other')
-    expect(() => remoteBearer('alice')).toThrow('HTTPS origin')
+it('retains the old issuer-derived Workspace namespace and isolates users', () => {
+  expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
+  expect(remoteIdentity('alice')).not.toBe(remoteIdentity('bob'))
+  vi.stubEnv('CLAUDE_REMOTE_URL', 'https://example.com/other')
+  expect(() => remoteIdentity('alice')).toThrow('HTTPS origin')
+})
+it.each([true, false])('validates native auth status %s through real SDK requests', async (authenticated) => {
+  const fetcher = vi.fn(async (request: Request) => {
+    const body = await request.json()
+    expect(body.command.auth).toEqual({ type: 'status' })
+    expect(request.headers.get('Authorization')).toBe('Bearer integration-token')
+    return Response.json({ protocolVersion: 2, id: body.id, reply: { type: 'status', authenticated } })
   })
-  it('uses the local HTTP runtime with signed application authentication', async () => {
-    configured()
-    vi.stubEnv('NODE_ENV', 'development')
-    vi.stubEnv('CLAUDE_REMOTE_URL', 'http://127.0.0.1:8787')
-    const fetcher = vi.fn(async () =>
-      Response.json({
-        sessionId: `${remoteIdentity('alice')}:auth`,
-        type: 'auth.status',
-        authenticated: false,
-      }),
-    )
-    vi.stubGlobal('fetch', fetcher)
-    expect(await checkRemoteAuth('alice')).toBe(false)
-    expect(fetcher).toHaveBeenCalledWith(
-      'http://127.0.0.1:8787/v1/auth',
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer /) }),
-      }),
-    )
-  })
-  it.each([true, false])('reads auth status %s directly without opening an event stream', async (authenticated) => {
-    configured()
-    const fetcher = vi.fn(async (_url: string | URL | Request) =>
-      Response.json({
-        sessionId: `${remoteIdentity('alice')}:auth`,
-        type: 'auth.status',
-        authenticated,
-      }),
-    )
-    vi.stubGlobal('fetch', fetcher)
-    expect(await checkRemoteAuth('alice')).toBe(authenticated)
-    expect(fetcher).toHaveBeenCalledOnce()
-    expect(fetcher.mock.calls[0]?.[0]).toBe('https://claude.example/v1/auth')
-  })
-  it.each([
-    { type: 'auth.status', authenticated: 'false' },
-    { type: 'auth.status' },
-    { type: 'error', authenticated: false },
-    { type: 'auth.status', authenticated: true, sessionId: 'bob:auth' },
-    { receiptId: 'old-api-receipt' },
-  ])('rejects malformed, foreign, or legacy auth replies instead of reporting sign-out', async (reply) => {
-    configured()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ sessionId: `${remoteIdentity('alice')}:auth`, ...reply })),
-    )
-    await expect(checkRemoteAuth('alice')).rejects.toThrow('invalid authentication status')
-  })
-  it('allows overhead beyond the API request wait and reports timeouts without leaking bodies', async () => {
-    configured()
-    const timeout = vi.spyOn(AbortSignal, 'timeout')
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('sensitive upstream detail', { status: 504 })),
-    )
-    await expect(checkRemoteAuth('alice')).rejects.toThrow('does not mean you are signed out')
-    expect(timeout).toHaveBeenCalledWith(45_000)
-  })
-  it('fails on reset without replaying a dispatched task', async () => {
-    configured()
-    const open = vi.fn(async () => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => sse([{ type: 'event_cursor_expired' }])),
-    )
-    await expect(remoteEvents('alice', 'session', new AbortController().signal, () => {}, open)).rejects.toThrow(
-      'lost its event history',
-    )
-    expect(open).toHaveBeenCalledOnce()
-  })
-  it('bounds request bodies before sending and hides upstream secrets in errors', async () => {
-    configured()
-    const fetcher = vi.fn(async () => new Response('Bearer secret', { status: 400 }))
-    vi.stubGlobal('fetch', fetcher)
-    await expect(remotePost('alice', '/v1/sessions', { systemPrompt: 'x'.repeat(50_000) })).rejects.toThrow('48 KiB')
-    expect(fetcher).not.toHaveBeenCalled()
-    await expect(remotePost('alice', '/v1/sessions', {})).rejects.toThrow('request failed (400)')
-  })
-  it('passes through only known login error codes and hides upstream details', async () => {
-    configured()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ code: 'code_rejected', secret: 'hidden' }, { status: 422 })),
-    )
-    await expect(remotePost('alice', '/v1/auth/login/code', { attemptId: 'a', code: 'x' })).rejects.toMatchObject({
-      code: 'code_rejected',
-      status: 422,
+  vi.stubGlobal('fetch', fetcher)
+  expect(await checkRemoteAuth('alice')).toBe(authenticated)
+  expect(fetcher).toHaveBeenCalledOnce()
+})
+it.each([{ type: 'status', authenticated: 'false' }, { type: 'status' }, { type: 'error', authenticated: false }])(
+  'does not treat malformed native auth replies as sign-out',
+  async (reply) => {
+    vi.stubGlobal('fetch', async (request: Request) => {
+      const body = await request.json()
+      return Response.json({ protocolVersion: 2, id: body.id, reply })
     })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ code: 'unexpected', secret: 'hidden' }, { status: 400 })),
-    )
-    await expect(remotePost('alice', '/v1/auth/login/code', {})).rejects.toThrow('request failed (400)')
-    expect(new RemoteClaudeLoginError('code_rejected', 422).message).not.toContain('hidden')
-  })
-  it('decodes split UTF-8 SSE frames and advances cursors after processing', async () => {
-    const bytes = new TextEncoder().encode(
-      'id: a:1\r\ndata: {"type":"claude","id":"run","event":{"text":"😀"}}\r\n\r\n',
-    )
-    const response = new Response(
-      new ReadableStream({
-        start(controller) {
-          for (const byte of bytes) controller.enqueue(new Uint8Array([byte]))
-          controller.close()
-        },
+    await expect(checkRemoteAuth('alice')).rejects.toThrow('request failed')
+  },
+)
+it('does not leak upstream response bodies or interpret timeouts as sign-out', async () => {
+  vi.stubGlobal('fetch', async () =>
+    Response.json({ error: { code: 'request_wait_timeout' }, secret: 'hidden' }, { status: 504 }),
+  )
+  await expect(checkRemoteAuth('alice')).rejects.toThrow('does not mean you are signed out')
+})
+it('denies foreign Sessions before issuing SDK calls', async () => {
+  const fetcher = vi.fn()
+  vi.stubGlobal('fetch', fetcher)
+  await expect(remoteSession('bob', sessionId())).rejects.toThrow('not found')
+  expect(fetcher).not.toHaveBeenCalled()
+})
+it('fails on stream reset without replaying a dispatched task', async () => {
+  const opened = vi.fn(async () => {})
+  vi.stubGlobal(
+    'fetch',
+    async () =>
+      new Response('event: error\ndata: {"code":"event_cursor_expired"}\n\n', {
+        headers: { 'Content-Type': 'text/event-stream' },
       }),
-    )
-    const events: unknown[] = []
-    await consumeClaudeEvents(
-      response,
-      (event) => {
-        events.push(event)
-      },
-      (cursor) => {
-        events.push(cursor)
-      },
-    )
-    expect(events).toEqual([{ type: 'claude', id: 'run', event: { text: '😀' } }, 'a:1'])
-  })
+  )
+  await expect(remoteEvents('alice', sessionId(), new AbortController().signal, () => {}, opened)).rejects.toThrow(
+    'lost its event history',
+  )
+  expect(opened).toHaveBeenCalledOnce()
 })
 
 const harness: LocalHarnessRequest = {
@@ -220,26 +148,26 @@ it('reassembles bounded results and rejects bad fragments without mixing message
   ).toThrow('Invalid')
 })
 
-it.each([429, 503])('retries transient stream HTTP %s without redispatching', async (status) => {
-  configured()
+it.each([429, 503])('resumes SDK stream cursors after transient HTTP %s without redispatch', async (status) => {
   const controller = new AbortController()
   const opened = vi.fn(async () => {})
   const fetcher = vi
     .fn()
-    .mockResolvedValueOnce(sse([{ type: 'auth.status', authenticated: false }]))
+    .mockResolvedValueOnce(sse([{ type: 'session.ready', sessionId: sessionId() }]))
     .mockResolvedValueOnce(new Response(null, { status }))
-    .mockResolvedValueOnce(sse([{ type: 'auth.status', authenticated: true }]))
+    .mockResolvedValueOnce(sse([{ type: 'message.status', id: 'run', status: 'completed' }], 2))
   vi.stubGlobal('fetch', fetcher)
   await remoteEvents(
     'alice',
-    'session',
+    sessionId(),
     controller.signal,
     (event) => {
-      if (event.type === 'auth.status' && event.authenticated) controller.abort()
+      if (event.type === 'message.status') controller.abort()
     },
     opened,
   )
   expect(fetcher).toHaveBeenCalledTimes(3)
   expect(opened).toHaveBeenCalledOnce()
-  expect(fetcher.mock.calls[2]?.[1]?.headers).toMatchObject({ 'Last-Event-ID': 'stream:1' })
+  const request = fetcher.mock.calls[2]?.[0] as Request
+  expect((await request.json()).command.after).toEqual({ streamId, sequence: 1 })
 })

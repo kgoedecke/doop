@@ -258,6 +258,7 @@ export const api = {
       authenticated?: boolean
       attemptId?: string
       url?: string
+      expiresAt?: string
       cancelled?: boolean
       preference?: LocalAgentPreference
     }>(`/api/remote-claude/auth/${action}`, {

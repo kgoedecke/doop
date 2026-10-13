@@ -1,3 +1,4 @@
+import { RemoteAppError } from '@cantelop/sdk'
 import { Router } from 'express'
 import { z } from 'zod'
 import { CLAUDE_MODEL_IDS } from '../shared/localAgent.ts'
@@ -10,13 +11,7 @@ import {
   getLocalAgentPreference,
   saveLocalAgentPreference,
 } from './localAgentPreferences.ts'
-import {
-  checkRemoteAuth,
-  RemoteClaudeLoginError,
-  remoteClaudeConfigured,
-  remoteIdentity,
-  remotePost,
-} from './remoteClaudeClient.ts'
+import { checkRemoteAuth, remoteClaudeConfigured, remoteWorkspace, remoteCall } from './remoteClaudeClient.ts'
 import { store } from './store.ts'
 import { canAccessCanvas } from './access.ts'
 import { onFeedback } from './resident.ts'
@@ -104,13 +99,8 @@ remoteClaudeRouter.post('/disable', (req, res, next) => {
     await disableRemoteExecution(req.user!.id)
     await localAgentRuns.cancel(req.user!.id, 'remote')
     try {
-      const result = await remotePost(req.user!.id, '/v1/auth/logout', {})
-      if (
-        result.sessionId !== `${remoteIdentity(req.user!.id)}:auth` ||
-        result.type !== 'auth.status' ||
-        result.authenticated !== false
-      )
-        throw new Error('Sign-out not confirmed')
+      const auth = (await remoteWorkspace(req.user!.id)).auth()
+      if (await remoteCall((signal) => auth.logout({ signal }))) throw new Error('Sign-out not confirmed')
     } catch {
       throw new Error(
         'Claude Plan is disconnected, but Claude sign-out could not be confirmed. Retry disconnecting to finish signing out.',
@@ -126,13 +116,22 @@ remoteClaudeRouter.post('/stop', (req, res, next) => {
     .catch(next)
 })
 
-const attempt = z.string().uuid()
+const attemptId = z.string().regex(/^lgn_[0-9a-f]{32}$/)
 const schemas = {
   start: z.object({ model: z.enum(CLAUDE_MODEL_IDS) }).strict(),
   code: z
-    .object({ attemptId: attempt, code: z.string().regex(/^[\x21-\x7e]{1,2048}$/), model: z.enum(CLAUDE_MODEL_IDS) })
+    .object({
+      attemptId,
+      code: z
+        .string()
+        .min(1)
+        .max(2048)
+        // eslint-disable-next-line no-control-regex -- Codes must not inject CLI control input.
+        .regex(/^[^\x00-\x1f\x7f]+$/),
+      model: z.enum(CLAUDE_MODEL_IDS),
+    })
     .strict(),
-  cancel: z.object({ attemptId: attempt }).strict(),
+  cancel: z.object({ attemptId }).strict(),
 }
 for (const action of ['start', 'code', 'cancel'] as const) {
   remoteClaudeRouter.post(`/auth/${action}`, (req, res, next) => {
@@ -142,40 +141,37 @@ for (const action of ['start', 'code', 'cancel'] as const) {
       return
     }
     void (async () => {
+      const userId = req.user!.id
       if (action === 'start') {
-        const startRequest = schemas.start.parse(req.body)
-        const preference = await getLocalAgentPreference(req.user!.id)
-        const result = await remotePost(
-          req.user!.id,
-          '/v1/auth/login',
-          preference.remoteAuthRequired ? { force: true } : {},
-        )
-        if (result.sessionId !== `${remoteIdentity(req.user!.id)}:auth`)
-          throw new Error('Hosted Claude returned an invalid sign-in session.')
-        if (result.type === 'auth.login' && result.attemptId && result.url) {
-          if (preference.remoteAuthRequired) await beginRemoteReauth(req.user!.id, result.attemptId)
-          res.json({ attemptId: result.attemptId, url: result.url })
-        } else if (result.type === 'auth.status' && result.authenticated === true && !preference.remoteAuthRequired)
-          res.json({ authenticated: true, preference: await activateRemote(req.user!.id, startRequest.model) })
-        else throw new Error('Hosted Claude returned an invalid sign-in response.')
+        const { model } = schemas.start.parse(req.body)
+        const preference = await getLocalAgentPreference(userId)
+        if (preference.remoteAuthRequired) await localAgentRuns.cancel(userId, 'remote')
+        const auth = (await remoteWorkspace(userId)).auth()
+        const result = await remoteCall((signal) => auth.login({ signal, force: !!preference.remoteAuthRequired }))
+        if (!result.authenticated) {
+          if (preference.remoteAuthRequired) await beginRemoteReauth(userId, result.attemptId)
+          res.json({ attemptId: result.attemptId, url: result.url, expiresAt: result.expiresAt })
+        } else if (!preference.remoteAuthRequired) {
+          res.json({ authenticated: true, preference: await activateRemote(userId, model) })
+        } else throw new Error('Hosted Claude returned an invalid sign-in response.')
         return
       }
-      const codeRequest = action === 'code' ? schemas.code.parse(req.body) : undefined
-      const result = await remotePost(
-        req.user!.id,
-        action === 'code' ? '/v1/auth/login/code' : '/v1/auth/cancel',
-        codeRequest ? { attemptId: codeRequest.attemptId, code: codeRequest.code } : parsed.data,
-      )
-      if (result.sessionId !== `${remoteIdentity(req.user!.id)}:auth`)
-        throw new Error('Hosted Claude returned an invalid sign-in session.')
-      if (action === 'code') {
-        if (result.type !== 'auth.status' || result.authenticated !== true)
-          throw new Error('Claude sign-in could not be confirmed.')
-        res.json({
-          authenticated: true,
-          preference: await activateRemote(req.user!.id, codeRequest!.model, codeRequest!.attemptId),
+      if (action === 'cancel') {
+        const { attemptId } = schemas.cancel.parse(req.body)
+        const auth = (await remoteWorkspace(userId)).auth()
+        await remoteCall((signal) => auth.cancelLogin({ attemptId, signal }))
+        res.json({ cancelled: true })
+        return
+      }
+      const { attemptId, model, code } = schemas.code.parse(req.body)
+      const auth = (await remoteWorkspace(userId)).auth()
+      if (!(await remoteCall((signal) => auth.submitCode({ attemptId, code, signal })))) {
+        res.status(409).json({
+          error: 'Claude sign-in could not be confirmed. Start a new connection and try the sign-in code again.',
         })
-      } else res.json({ cancelled: result.type === 'auth.cancelled' })
+        return
+      }
+      res.json({ authenticated: true, preference: await activateRemote(userId, model, attemptId) })
     })().catch(next)
   })
 }
@@ -190,9 +186,23 @@ remoteClaudeRouter.use(
       res.end()
       return
     }
-    res.status(error instanceof RemoteClaudeLoginError ? error.status : 502).json({
+    if (
+      error instanceof RemoteAppError &&
+      ['code_rejected', 'login_not_active', 'login_failed', 'login_timeout', 'auth_logout_unconfirmed'].includes(
+        error.code,
+      )
+    ) {
+      res.status(error.code === 'code_rejected' ? 400 : 409).json({
+        code: error.code,
+        error:
+          error.code === 'code_rejected'
+            ? 'Claude did not accept that code. Paste it again.'
+            : 'Claude sign-in could not be confirmed. Start a new connection.',
+      })
+      return
+    }
+    res.status(502).json({
       error: error instanceof Error ? error.message : 'Hosted Claude is unavailable. Try again.',
-      ...(error instanceof RemoteClaudeLoginError ? { code: error.code } : {}),
     })
   },
 )

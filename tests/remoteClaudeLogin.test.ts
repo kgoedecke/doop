@@ -65,3 +65,23 @@ it('cancels the active attempt without exposing terminal output', async () => {
   await login.cancel()
   expect(post).toHaveBeenLastCalledWith('alice', 'cancel', { attemptId })
 })
+
+it('cancels a late-created login if the component was disposed while starting', async () => {
+  let resolve!: (value: unknown) => void
+  post
+    .mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done
+      }),
+    )
+    .mockResolvedValueOnce({ cancelled: true })
+  const connected = vi.fn()
+  const login = new RemoteClaudeLogin('alice', 'default', () => {}, connected)
+  const starting = login.start()
+  login.dispose()
+  const attemptId = 'lgn_' + '1'.repeat(32)
+  resolve({ attemptId, url: 'https://claude.ai/login' })
+  await starting
+  expect(post).toHaveBeenLastCalledWith('alice', 'cancel', { attemptId })
+  expect(connected).not.toHaveBeenCalled()
+})

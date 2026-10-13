@@ -1,15 +1,18 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import express from 'express'
+import { RemoteAppError } from '@cantelop/sdk'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 const mocks = vi.hoisted(() => ({
-  post: vi.fn(),
+  login: vi.fn(),
+  logout: vi.fn(),
+  code: vi.fn(),
+  cancelLogin: vi.fn(),
   disable: vi.fn(),
   preference: vi.fn(),
   clearAuth: vi.fn(),
   beginAuth: vi.fn(),
   check: vi.fn(),
-  identity: vi.fn(),
   save: vi.fn(),
   cancel: vi.fn(),
   wake: vi.fn(),
@@ -17,17 +20,11 @@ const mocks = vi.hoisted(() => ({
   impersonated: false,
 }))
 vi.mock('../server/remoteClaudeClient.ts', () => ({
-  remotePost: mocks.post,
+  remoteWorkspace: async () => ({
+    auth: () => ({ login: mocks.login, logout: mocks.logout, submitCode: mocks.code, cancelLogin: mocks.cancelLogin }),
+  }),
+  remoteCall: (operation: (signal: AbortSignal) => Promise<unknown>) => operation(new AbortController().signal),
   checkRemoteAuth: mocks.check,
-  RemoteClaudeLoginError: class extends Error {
-    constructor(
-      readonly code: string,
-      readonly status: number,
-    ) {
-      super(code)
-    }
-  },
-  remoteIdentity: mocks.identity,
   remoteClaudeConfigured: () => true,
 }))
 vi.mock('../server/auth.ts', () => ({ PUBLIC_ORIGIN: 'https://doop.example', isBanned: async () => mocks.banned }))
@@ -63,18 +60,18 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()))
 })
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
   mocks.banned = false
   mocks.impersonated = false
-  mocks.post.mockResolvedValue({
-    sessionId: 'alice:auth',
-    type: 'auth.login',
-    attemptId: crypto.randomUUID(),
-    url: 'https://claude.ai/login',
+  mocks.login.mockResolvedValue({
+    authenticated: false,
+    attemptId: 'lgn_' + '1'.repeat(32),
+    url: 'https://claude.ai/oauth',
+    expiresAt: new Date(Date.now() + 60000),
   })
-  mocks.identity.mockReturnValue('alice')
   mocks.check.mockResolvedValue(true)
+  mocks.code.mockResolvedValue(true)
 })
 const post = (path: string, body: unknown, headers = {}) =>
   fetch(origin + path, {
@@ -83,7 +80,7 @@ const post = (path: string, body: unknown, headers = {}) =>
     body: JSON.stringify(body),
   })
 const model = 'claude-sonnet-5'
-it('accepts only the two-call Claude sign-in shape', async () => {
+it('accepts only the structured sign-in shape and rejects incomplete code requests', async () => {
   for (const body of [
     { claudeToken: 'secret' },
     { attemptId: crypto.randomUUID(), publicKey: { d: 'private' } },
@@ -91,9 +88,9 @@ it('accepts only the two-call Claude sign-in shape', async () => {
   ])
     expect((await post('/auth/start', body)).status).toBe(400)
   expect((await post('/auth/code', { code: 'plaintext' })).status).toBe(400)
-  expect(mocks.post).not.toHaveBeenCalled()
+  expect(mocks.login).not.toHaveBeenCalled()
   expect((await post('/auth/start', { model })).status).toBe(200)
-  expect(mocks.post).toHaveBeenCalledExactlyOnceWith('alice', '/v1/auth/login', {})
+  expect(mocks.login).toHaveBeenCalledExactlyOnceWith({ signal: expect.any(AbortSignal), force: false })
 })
 it('requires fresh native authentication before enabling the requester', async () => {
   mocks.check.mockResolvedValueOnce(false)
@@ -114,7 +111,7 @@ it('selects an already signed-in plan in the login response', async () => {
     .mockResolvedValueOnce({ enabled: false, model: 'default' })
     .mockResolvedValueOnce({ enabled: false, model: 'default' })
     .mockResolvedValueOnce({ enabled: true, transport: 'remote', model })
-  mocks.post.mockResolvedValueOnce({ sessionId: 'alice:auth', type: 'auth.status', authenticated: true })
+  mocks.login.mockResolvedValueOnce({ authenticated: true })
   const response = await post('/auth/start', { model })
   expect(response.status).toBe(200)
   expect(await response.json()).toMatchObject({
@@ -132,16 +129,16 @@ it('blocks cross-origin writes, bans, and impersonation before using hosted iden
   mocks.banned = false
   mocks.impersonated = true
   expect((await post('/auth/code', {}, { Origin: 'https://evil.example' })).status).toBe(403)
-  expect(mocks.post).not.toHaveBeenCalled()
+  expect(mocks.login).not.toHaveBeenCalled()
 })
 
 it('rejects an old tab after the browser changes Doop accounts', async () => {
   expect((await post('/auth/start', { model }, { 'X-Doop-User': 'bob' })).status).toBe(409)
-  expect(mocks.post).not.toHaveBeenCalled()
+  expect(mocks.login).not.toHaveBeenCalled()
 })
 
-it('clears blocked auth only after the upstream confirms the matching code', async () => {
-  const attemptId = crypto.randomUUID()
+it('clears blocked auth only after the upstream confirms the matching login attempt', async () => {
+  const attemptId = 'lgn_' + '1'.repeat(32)
   mocks.preference.mockResolvedValue({
     transport: 'remote',
     enabled: true,
@@ -150,61 +147,78 @@ it('clears blocked auth only after the upstream confirms the matching code', asy
   })
   expect((await post('/select', { model: 'claude-sonnet-5' })).status).toBe(409)
   expect(mocks.clearAuth).not.toHaveBeenCalled()
-  mocks.post.mockResolvedValueOnce({ sessionId: 'alice:auth', type: 'auth.status', authenticated: true })
-  expect((await post('/auth/code', { attemptId, code: 'abc123', model })).status).toBe(200)
-  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth/login/code', { attemptId, code: 'abc123' })
+  mocks.login.mockResolvedValueOnce({ authenticated: true })
+  expect((await post('/auth/code', { attemptId, model, code: 'sign-in-code' })).status).toBe(200)
+  expect(mocks.code).toHaveBeenCalledWith({ attemptId, code: 'sign-in-code', signal: expect.any(AbortSignal) })
   expect(mocks.clearAuth).toHaveBeenCalledWith('alice', 0, attemptId)
   expect(mocks.save).toHaveBeenCalledWith('alice', { enabled: true, transport: 'remote', model })
 })
 it('does not reactivate a plan when its reconnect attempt changed', async () => {
-  const attemptId = crypto.randomUUID()
+  const attemptId = 'lgn_' + '1'.repeat(32)
   mocks.preference.mockResolvedValue({
     transport: 'remote',
     enabled: false,
     remoteAuthRequired: true,
-    remoteAuthAttempt: crypto.randomUUID(),
+    remoteAuthAttempt: 'lgn_' + '2'.repeat(32),
   })
-  mocks.post.mockResolvedValueOnce({ sessionId: 'alice:auth', type: 'auth.status', authenticated: true })
-  const response = await post('/auth/code', { attemptId, code: 'abc123', model })
+  mocks.login.mockResolvedValueOnce({ authenticated: true })
+  const response = await post('/auth/code', { attemptId, model, code: 'sign-in-code' })
   expect(response.status).toBe(502)
   expect(mocks.clearAuth).not.toHaveBeenCalled()
   expect(mocks.save).not.toHaveBeenCalled()
 })
 
 it('forces a native re-login for a paused account and records its attempt', async () => {
-  const attemptId = crypto.randomUUID()
+  const attemptId = 'lgn_' + '1'.repeat(32)
   mocks.preference.mockResolvedValue({ remoteAuthRequired: true })
-  mocks.post.mockResolvedValueOnce({
-    sessionId: 'alice:auth',
-    type: 'auth.login',
+  mocks.login.mockResolvedValueOnce({
+    authenticated: false,
     attemptId,
-    url: 'https://claude.ai/login',
+    url: 'https://claude.ai/oauth',
+    expiresAt: new Date(Date.now() + 60000),
   })
   expect((await post('/auth/start', { model })).status).toBe(200)
   expect(mocks.beginAuth).toHaveBeenCalledWith('alice', attemptId)
-  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth/login', { force: true })
+  expect(mocks.login).toHaveBeenCalledWith({ signal: expect.any(AbortSignal), force: true })
 })
 
 it('disables and stops hosted tasks before confirming native sign-out', async () => {
-  mocks.post.mockResolvedValueOnce({ sessionId: 'alice:auth', type: 'auth.status', authenticated: false })
+  mocks.logout.mockResolvedValueOnce(false)
   expect((await post('/disable', {})).status).toBe(200)
   expect(mocks.disable).toHaveBeenCalledWith('alice')
   expect(mocks.cancel).toHaveBeenCalledWith('alice', 'remote')
-  expect(mocks.post).toHaveBeenCalledWith('alice', '/v1/auth/logout', {})
+  expect(mocks.logout).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) })
   expect(mocks.disable.mock.invocationCallOrder[0]).toBeLessThan(mocks.cancel.mock.invocationCallOrder[0]!)
-  expect(mocks.cancel.mock.invocationCallOrder[0]).toBeLessThan(mocks.post.mock.invocationCallOrder[0]!)
+  expect(mocks.cancel.mock.invocationCallOrder[0]).toBeLessThan(mocks.logout.mock.invocationCallOrder[0]!)
 })
 it('does not claim successful logout when the API fails or still reports signed in', async () => {
-  for (const result of [
-    { sessionId: 'alice:auth' },
-    { sessionId: 'alice:auth', type: 'auth.status', authenticated: true },
-  ]) {
-    mocks.post.mockResolvedValueOnce(result)
-    const response = await post('/disable', {})
-    expect(response.status).toBe(502)
-    expect((await response.json()).error).toContain('sign-out could not be confirmed')
-  }
-  mocks.post.mockRejectedValueOnce(new Error('timeout'))
+  mocks.logout.mockResolvedValueOnce(true)
+  const response = await post('/disable', {})
+  expect(response.status).toBe(502)
+  expect((await response.json()).error).toContain('sign-out could not be confirmed')
+  mocks.logout.mockRejectedValueOnce(new Error('timeout'))
   expect((await post('/disable', {})).status).toBe(502)
-  expect(mocks.disable).toHaveBeenCalledTimes(3)
+  expect(mocks.disable).toHaveBeenCalledTimes(2)
+})
+
+it('cancels the native login attempt using the SDK auth method', async () => {
+  const attemptId = 'lgn_' + '1'.repeat(32)
+  const response = await post('/auth/cancel', { attemptId })
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ cancelled: true })
+  expect(mocks.cancelLogin).toHaveBeenCalledExactlyOnceWith({ attemptId, signal: expect.any(AbortSignal) })
+  expect(mocks.save).not.toHaveBeenCalled()
+})
+
+it('returns a stable rejected-code error so the existing form can retry', async () => {
+  const attemptId = 'lgn_' + '1'.repeat(32)
+  mocks.code.mockRejectedValueOnce(new RemoteAppError('code_rejected', 400))
+  const response = await post('/auth/code', { attemptId, model, code: 'wrong-code' })
+  expect(response.status).toBe(400)
+  expect(await response.json()).toEqual({
+    code: 'code_rejected',
+    error: 'Claude did not accept that code. Paste it again.',
+  })
+  expect(mocks.save).not.toHaveBeenCalled()
+  expect((await post('/auth/code', { attemptId, model, code: 'right-code' })).status).toBe(200)
 })

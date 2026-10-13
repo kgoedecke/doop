@@ -6,9 +6,9 @@
   "type": "module",
   "packageManager": "bun@1.3.10",
   "scripts": {
-    "dev": "concurrently -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
-    "build": "vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
+    "dev": "node --env-file-if-exists=.env scripts/build-claude-client.mjs && concurrently -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
+    "build": "node scripts/build-claude-client.mjs && vite build",
+    "start": "node --env-file-if-exists=.env scripts/build-claude-client.mjs && NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests",
     "lint": "eslint . --max-warnings 0",
@@ -23,7 +23,8 @@
     "cantelop:build": "bun run --cwd cantelop build",
     "cantelop:dev": "bun run --cwd cantelop dev",
     "cantelop:setup": "node scripts/setup-claude.mjs",
-    "cantelop:tunnel": "node --env-file-if-exists=.env scripts/dev-mcp-tunnel.mjs"
+    "cantelop:tunnel": "node --env-file-if-exists=.env scripts/dev-mcp-tunnel.mjs",
+    "cantelop:client": "node --env-file-if-exists=.env scripts/build-claude-client.mjs"
   },
   "lint-staged": {
     "*.{ts,tsx,js}": [
@@ -37,6 +38,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@aws-sdk/client-s3": "^3.1110.0",
+    "@cantelop/sdk": "file:vendor/cantelop-sdk-1.0.0-alpha.3.tgz",
     "@electric-sql/pglite": "^0.5.4",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@radix-ui/react-alert-dialog": "^1.1.23",

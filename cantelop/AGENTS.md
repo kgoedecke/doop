@@ -1,9 +1,9 @@
 # Hosted Claude runtime
 
 - This service belongs to Doop but deploys independently through Cantelop. Keep the existing app identity and workspace/session naming stable.
-- Use `@cantelop/sdk/api` for Edge routes and `@cantelop/sdk/session` for Session behaviours and managed activities. Cantelop owns Workspaces, Sandbox lifecycle, and event transport.
-- Verify SDK changes against https://github.com/stepandel/cantelop-sdk and the npm registry. Keep the pinned version and Bun lockfile in sync.
+- Use SDK 1.0 `CantelopClient` App definitions, `@cantelop/sdk/session` for behaviours/activities, and `@cantelop/sdk/harnesses/claude` for native execution/auth/image. Declare `createClaudeRuntime` from the SDK; it owns the durable lifecycle and uses `createClaudeHarness` internally. Do not implement local behaviours, state stores, native runners or protected execution subclasses. The SDK generates protocol Edge routes. Cantelop owns Workspaces, Sandbox lifecycle, and event transport.
+- Verify SDK changes against https://github.com/stepandel/cantelop-sdk and the npm registry. Keep both SDK dependency pins and Bun lockfiles in sync. Until alpha.3 is published, both installs use the qualified local artifact in `vendor/`.
 - Keep Claude Code unmodified and use native authentication. Never collect or export Claude credentials, or put application signing keys in the runtime environment.
-- `src/contracts.ts` and `src/terminal-crypto.ts` are shared with Doop. Keep these modules independent of Node and the SDK.
-- From the repository root run `bun run cantelop:install`, `bun run cantelop:check`, `bun run cantelop:test`, and `bun run cantelop:build`. The build requires the Cantelop CLI and Docker. Also run the root typecheck, lint, and hosted Claude integration tests when changing shared modules.
+- `src/contracts.ts` and `src/validation.ts` are shared with Doop. Keep these modules independent of Node and the SDK.
+- From the repository root run `bun run cantelop:install`, `bun run cantelop:check`, `bun run cantelop:test`, and `bun run cantelop:build`. The artifact build uses the SDK compiler. Qualify the SDK Claude image with Docker; live dev/deploy requires a schema-3/build-protocol-6 CLI/platform. Also run the root typecheck, lint, and hosted Claude integration tests when changing shared modules.
 - Do not import `.cantelop`, `.dev`, local credentials, or deployment state from another checkout.
