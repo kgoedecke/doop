@@ -65,7 +65,7 @@ it('retains the old issuer-derived Workspace namespace and isolates users', () =
   expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
   expect(remoteIdentity('alice')).not.toBe(remoteIdentity('bob'))
   vi.stubEnv('CANTELOP_EDGE_URL', 'https://example.com/other')
-  expect(() => remoteIdentity('alice')).toThrow('HTTPS origin')
+  expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
 })
 it('requires the native SDK configuration and allows its default hosted Edge origin', () => {
   expect(remoteClaudeConfigured()).toBe(true)

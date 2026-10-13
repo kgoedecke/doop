@@ -3,14 +3,12 @@ import { createHash, randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 import { doopClaude } from '../.cantelop/claude-client/client.mjs'
-import { claudeRuntimeOrigin } from './remoteClaudeOrigins.ts'
 
 export function remoteClaudeConfigured() {
   return !!(process.env.CANTELOP_APP_SLUG && process.env.CANTELOP_INTEGRATION_TOKEN && process.env.CLAUDE_REMOTE_ISSUER)
 }
 export function remoteIdentity(userId: string) {
   if (!remoteClaudeConfigured()) throw new Error('Hosted execution is not configured on this Doop server.')
-  claudeRuntimeOrigin()
   // Retain the pre-1.0 namespace, including the issuer, to preserve Workspaces.
   return createHash('sha256')
     .update(JSON.stringify([process.env.CLAUDE_REMOTE_ISSUER, userId]))

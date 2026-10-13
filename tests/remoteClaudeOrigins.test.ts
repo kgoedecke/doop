@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { claudeMcpOrigin, claudeRuntimeOrigin } from '../server/remoteClaudeOrigins.ts'
+import { claudeMcpOrigin } from '../server/remoteClaudeOrigins.ts'
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -8,7 +8,6 @@ it.each([undefined, 'development'])('allows the local container setup with NODE_
   for (const host of ['localhost', '127.0.0.1', '[::1]']) {
     const runtime = `http://${host}:8787`
     vi.stubEnv('CANTELOP_EDGE_URL', runtime)
-    expect(claudeRuntimeOrigin(runtime).origin).toBe(runtime)
     expect(claudeMcpOrigin('http://host.docker.internal:4400').origin).toBe('http://host.docker.internal:4400')
   }
 })
@@ -16,9 +15,7 @@ it.each([undefined, 'development'])('allows the local container setup with NODE_
 it.each(['production', 'staging', 'test'])('rejects HTTP outside development: %s', (environment) => {
   vi.stubEnv('NODE_ENV', environment)
   vi.stubEnv('CANTELOP_EDGE_URL', 'http://localhost:8787')
-  expect(() => claudeRuntimeOrigin('http://localhost:8787')).toThrow('HTTPS origin')
   expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow('HTTPS origin')
-  expect(claudeRuntimeOrigin('https://claude.example').origin).toBe('https://claude.example')
   expect(claudeMcpOrigin('https://tools.example').origin).toBe('https://tools.example')
 })
 
@@ -32,9 +29,10 @@ it.each([
   'http://localhost:8787/path',
   'http://localhost:8787?token=x',
   'http://localhost:8787#fragment',
-])('rejects unsafe runtime origin %s', (value) => {
+])('requires HTTPS MCP when the local runtime setting is unsafe: %s', (value) => {
   vi.stubEnv('NODE_ENV', 'development')
-  expect(() => claudeRuntimeOrigin(value)).toThrow()
+  vi.stubEnv('CANTELOP_EDGE_URL', value)
+  expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow('HTTPS origin')
 })
 
 it.each([
