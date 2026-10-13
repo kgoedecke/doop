@@ -1,5 +1,5 @@
 import { RemoteAppError, type SessionEventCursor } from '@cantelop/sdk'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 import { doopClaude } from '../.cantelop/claude-client/client.mjs'
@@ -19,14 +19,7 @@ export function remoteWorkspace(userId: string) {
   const slug = `u-${remoteIdentity(userId)}`
   return doopClaude.workspace({ slug })
 }
-export function remoteSession(userId: string, sessionId?: string) {
-  const identity = remoteIdentity(userId)
-  const id = sessionId ?? `${identity}:${randomUUID()}`
-  const suffix = id.slice(identity.length + 1)
-  if (!id.startsWith(`${identity}:`) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(suffix))
-    throw new Error('Hosted Claude session not found.')
-  return remoteWorkspace(userId).session({ id, keepAliveSeconds: 300 })
-}
+export type ClaudeSession = ReturnType<ReturnType<typeof remoteWorkspace>['session']>
 export function isRemoteAuthError(error: unknown): error is RemoteAppError {
   return (
     error instanceof RemoteAppError &&
@@ -58,13 +51,11 @@ export async function remoteCall<T>(operation: (signal: AbortSignal) => Promise<
 export class ClaudeStreamReset extends Error {}
 /** Reconnect only the subscription. Never redispatch work on stream failures. */
 export async function remoteEvents(
-  userId: string,
-  sessionId: string,
+  session: ClaudeSession,
   signal: AbortSignal,
   onEvent: (event: ClaudeEvent) => Promise<void> | void,
   onOpen?: () => Promise<void>,
 ) {
-  const session = remoteSession(userId, sessionId)
   let cursor: SessionEventCursor | undefined
   let opened = false,
     failures = 0

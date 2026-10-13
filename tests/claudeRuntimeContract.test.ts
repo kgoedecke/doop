@@ -5,7 +5,7 @@ import type {
   ClaudeSessionEvent as Event,
   ClaudeSessionReply as Reply,
 } from '@cantelop/sdk/harnesses/claude/protocol'
-import { checkRemoteAuth, remoteIdentity, remoteSession, remoteWorkspace } from '../server/remoteClaudeClient.ts'
+import { checkRemoteAuth, remoteIdentity, remoteWorkspace } from '../server/remoteClaudeClient.ts'
 
 const mocks = vi.hoisted(() => ({ app: undefined as unknown }))
 vi.mock('../.cantelop/claude-client/client.mjs', () => ({
@@ -69,7 +69,7 @@ it('uses real SDK protocol 2 with backend credentials and preserves user Workspa
     })
   })
   expect(await checkRemoteAuth('alice')).toBe(true)
-  const session = remoteSession('alice')
+  const session = remoteWorkspace('alice').session({ keepAliveSeconds: 300 })
   await session.request({ type: 'configure', config: { tools: [], allowedTools: [], mcps: {} } })
   const id = crypto.randomUUID()
   const message = await session.dispatch(
@@ -78,7 +78,9 @@ it('uses real SDK protocol 2 with backend credentials and preserves user Workspa
   )
   expect(message.id).toBe(`msg_${id.replaceAll('-', '')}`)
   expect(await session.request({ type: 'snapshot' })).toMatchObject({ type: 'session.state', configured: true })
-  expect(() => remoteSession('bob', session.id)).toThrow()
+  expect(session.id).toMatch(/^ses_[0-9a-f]{32}$/)
+  expect(remoteWorkspace('bob').selector).not.toEqual(session.workspace)
+  expect(commands.slice(1, 4).every((command) => command.session.id === session.id)).toBe(true)
   expect(await remoteWorkspace('alice').auth().logout()).toBe(false)
   expect(commands.every((command) => command.workspace.slug === `u-${remoteIdentity('alice')}`)).toBe(true)
   expect(commands[0]?.session.id).toBe('cantelop-native-auth')

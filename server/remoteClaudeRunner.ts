@@ -4,7 +4,7 @@ import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/loc
 import { ClaudeSessionOutput, type ClaudeSessionConfig } from '@cantelop/sdk/harnesses/claude/protocol'
 import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
-import { remoteSession, remoteCall, remoteEvents } from './remoteClaudeClient.ts'
+import { remoteWorkspace, remoteCall, remoteEvents, type ClaudeSession } from './remoteClaudeClient.ts'
 
 /** Translate the SDK's decoded native result into Doop's task result. */
 export class RemoteResult {
@@ -60,7 +60,7 @@ async function executeRemote(
 ): Promise<LocalAgentResult> {
   const controller = new AbortController()
   const signal = AbortSignal.any([controller.signal, cancellation, AbortSignal.timeout(30 * 60_000)])
-  let sessionId: string | undefined
+  let activeSession: ClaudeSession | undefined
   let finished = false
   try {
     signal.throwIfAborted()
@@ -85,8 +85,8 @@ async function executeRemote(
     }
     if (Buffer.byteLength(JSON.stringify(settings)) > 48 * 1024)
       throw new Error('Hosted Claude configuration exceeds 48 KiB.')
-    const session = remoteSession(userId)
-    sessionId = session.id
+    const session = remoteWorkspace(userId).session({ keepAliveSeconds: 300 })
+    activeSession = session
     const reply = await remoteCall(
       (signal) => session.request({ type: 'configure', config: settings }, { signal }),
       signal,
@@ -95,8 +95,7 @@ async function executeRemote(
     const output = new RemoteResult(job.id)
     let outcome: LocalAgentResult | undefined
     await remoteEvents(
-      userId,
-      sessionId,
+      session,
       signal,
       async (event) => {
         if (event.type === 'auth.required' && event.id === job.id) {
@@ -150,11 +149,9 @@ async function executeRemote(
   } finally {
     localAgentRuns.revokeRemote(job.id)
     controller.abort()
-    if (sessionId && !finished) {
-      const id = sessionId
-      await remoteCall((signal) =>
-        remoteSession(userId, id).dispatch({ type: 'cancel', id: job.id }, { signal }),
-      ).catch(() => {})
+    if (activeSession && !finished) {
+      const session = activeSession
+      await remoteCall((signal) => session.dispatch({ type: 'cancel', id: job.id }, { signal })).catch(() => {})
     }
   }
 }

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   dispatch: vi.fn(),
   session: vi.fn(),
+  workspace: vi.fn(),
   events: vi.fn(),
   preference: vi.fn(),
   requireAuth: vi.fn(),
@@ -13,7 +14,7 @@ vi.mock('../server/localAgentPreferences.ts', () => ({
   requireRemoteAuth: mocks.requireAuth,
 }))
 vi.mock('../server/remoteClaudeClient.ts', () => ({
-  remoteSession: mocks.session,
+  remoteWorkspace: mocks.workspace,
   remoteCall: (operation: (signal: AbortSignal) => Promise<unknown>) => operation(new AbortController().signal),
   remoteEvents: mocks.events,
 }))
@@ -21,6 +22,7 @@ import { runRemoteClaude } from '../server/remoteClaudeRunner.ts'
 import { localAgentRuns } from '../server/localAgentRuns.ts'
 beforeEach(() => {
   mocks.preference.mockResolvedValue({ remoteAuthRequired: false, remoteAuthGeneration: 3 })
+  mocks.workspace.mockReturnValue({ session: mocks.session })
   mocks.session.mockReturnValue({ id: 'remote-session', request: mocks.request, dispatch: mocks.dispatch })
   mocks.request.mockResolvedValue({ type: 'session.state', configured: true, messages: [], truncated: false })
   mocks.dispatch.mockResolvedValue({ id: 'receipt' })
@@ -61,8 +63,7 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
     })
     mocks.events.mockImplementation(
       async (
-        _user: string,
-        _session: string,
+        _session: unknown,
         _signal: AbortSignal,
         event: (event: ClaudeEvent) => void,
         open: () => Promise<void>,
@@ -88,7 +89,9 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
     ).toEqual({ success: true, text: 'Done' })
     expect(localAgentRuns.authorized(messageId, token)).toBeUndefined()
     expect(execute).not.toHaveBeenCalled()
-    expect(mocks.session).toHaveBeenCalledWith('alice')
+    expect(mocks.workspace).toHaveBeenCalledWith('alice')
+    expect(mocks.session).toHaveBeenCalledExactlyOnceWith({ keepAliveSeconds: 300 })
+    expect(mocks.events.mock.calls[0]?.[0]).toBe(mocks.session.mock.results[0]?.value)
     expect(mocks.dispatch).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'queue', id: messageId }),
       expect.objectContaining({ id: `msg_${messageId.replaceAll('-', '')}` }),
@@ -112,6 +115,8 @@ it('cancels the remote message and revokes access after a stream failure', async
     { type: 'cancel', id: expect.any(String) },
     { signal: expect.any(AbortSignal) },
   )
+  expect(mocks.session).toHaveBeenCalledOnce()
+  expect(mocks.events.mock.calls[0]?.[0]).toBe(mocks.session.mock.results[0]?.value)
   expect(localAgentRuns.runningRemote('alice')).toBe(false)
 })
 
@@ -138,7 +143,7 @@ it('persists an explicit auth failure for this user and stops dispatching while 
     if (command.type === 'queue') id = command.id
     return { id: 'receipt' }
   })
-  mocks.events.mockImplementation(async (_user, _session, _signal, event, open) => {
+  mocks.events.mockImplementation(async (_session, _signal, event, open) => {
     await open()
     await event({ type: 'auth.required', id: 'unrelated' })
     expect(mocks.requireAuth).not.toHaveBeenCalled()

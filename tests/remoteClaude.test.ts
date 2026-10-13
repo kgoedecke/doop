@@ -12,7 +12,7 @@ import {
   remoteIdentity,
   checkRemoteAuth,
   remoteEvents,
-  remoteSession,
+  remoteWorkspace,
 } from '../server/remoteClaudeClient.ts'
 import { LocalAgentRuns, type LocalHarnessRequest } from '../server/localAgentRuns.ts'
 import { RemoteResult } from '../server/remoteClaudeRunner.ts'
@@ -49,7 +49,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
-const sessionId = () => `${remoteIdentity('alice')}:00000000-0000-4000-8000-000000000000`
+const sessionId = () => 'ses_test'
+const session = () => remoteWorkspace('alice').session({ id: sessionId(), keepAliveSeconds: 300 })
 function sse(frames: Event[], start = 1) {
   return new Response(
     frames
@@ -103,10 +104,15 @@ it('does not leak upstream response bodies or interpret timeouts as sign-out', a
   )
   await expect(checkRemoteAuth('alice')).rejects.toThrow('does not mean you are signed out')
 })
-it('denies foreign Sessions before issuing SDK calls', async () => {
+it('creates lazy SDK sessions scoped to each user Workspace', () => {
   const fetcher = vi.fn()
   vi.stubGlobal('fetch', fetcher)
-  expect(() => remoteSession('bob', sessionId())).toThrow('not found')
+  const alice = remoteWorkspace('alice').session({ keepAliveSeconds: 300 })
+  const bob = remoteWorkspace('bob').session({ keepAliveSeconds: 300 })
+  expect(alice.workspace).toEqual({ slug: `u-${remoteIdentity('alice')}` })
+  expect(bob.workspace).toEqual({ slug: `u-${remoteIdentity('bob')}` })
+  expect(alice.workspace).not.toEqual(bob.workspace)
+  expect(alice.id).not.toBe(bob.id)
   expect(fetcher).not.toHaveBeenCalled()
 })
 it('fails on stream reset without replaying a dispatched task', async () => {
@@ -118,7 +124,7 @@ it('fails on stream reset without replaying a dispatched task', async () => {
         headers: { 'Content-Type': 'text/event-stream' },
       }),
   )
-  await expect(remoteEvents('alice', sessionId(), new AbortController().signal, () => {}, opened)).rejects.toThrow(
+  await expect(remoteEvents(session(), new AbortController().signal, () => {}, opened)).rejects.toThrow(
     'lost its event history',
   )
   expect(opened).toHaveBeenCalledOnce()
@@ -182,8 +188,7 @@ it.each([429, 503])('resumes SDK stream cursors after transient HTTP %s without 
     .mockResolvedValueOnce(sse([{ type: 'message.status', id: 'run', status: 'completed' }], 2))
   vi.stubGlobal('fetch', fetcher)
   await remoteEvents(
-    'alice',
-    sessionId(),
+    session(),
     controller.signal,
     (event) => {
       if (event.type === 'message.status') controller.abort()
@@ -213,7 +218,7 @@ it('closes a pending SDK subscription when initial dispatch fails, without retry
   const dispatch = vi.fn(async () => {
     throw new Error('Dispatch failed')
   })
-  await expect(remoteEvents('alice', sessionId(), new AbortController().signal, () => {}, dispatch)).rejects.toThrow(
+  await expect(remoteEvents(session(), new AbortController().signal, () => {}, dispatch)).rejects.toThrow(
     'Dispatch failed',
   )
   expect(dispatch).toHaveBeenCalledOnce()
