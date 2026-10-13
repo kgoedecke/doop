@@ -7,31 +7,15 @@ function bareOrigin(url: URL) {
   return !url.username && !url.password && !url.search && !url.hash && url.pathname === '/'
 }
 
-function localRuntime(url: URL) {
-  return (
-    development() &&
-    bareOrigin(url) &&
-    url.protocol === 'http:' &&
-    ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
-  )
-}
-
 export function claudeMcpOrigin(value: string): URL {
   const url = new URL(value)
-  let local = false
-  if (development() && process.env.CANTELOP_EDGE_URL) {
-    try {
-      local = localRuntime(new URL(process.env.CANTELOP_EDGE_URL))
-    } catch {
-      // Invalid runtime configuration must not enable HTTP callbacks.
-    }
-  }
   if (
     !bareOrigin(url) ||
-    (url.protocol !== 'https:' && !(local && url.protocol === 'http:' && url.hostname === 'host.docker.internal'))
+    (url.protocol !== 'https:' &&
+      !(development() && url.protocol === 'http:' && url.hostname === 'host.docker.internal'))
   )
     throw new Error(
-      'CLAUDE_REMOTE_MCP_ORIGIN must be an HTTPS origin for remote Cantelop (use a tunnel for local Doop), or http://host.docker.internal:4400 with a local HTTP Cantelop runtime in development.',
+      'CLAUDE_REMOTE_MCP_ORIGIN must be an HTTPS origin, or an HTTP host.docker.internal origin in development.',
     )
   return url
 }

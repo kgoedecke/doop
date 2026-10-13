@@ -5,34 +5,13 @@ afterEach(() => vi.unstubAllEnvs())
 
 it.each([undefined, 'development'])('allows the local container setup with NODE_ENV=%s', (environment) => {
   vi.stubEnv('NODE_ENV', environment)
-  for (const host of ['localhost', '127.0.0.1', '[::1]']) {
-    const runtime = `http://${host}:8787`
-    vi.stubEnv('CANTELOP_EDGE_URL', runtime)
-    expect(claudeMcpOrigin('http://host.docker.internal:4400').origin).toBe('http://host.docker.internal:4400')
-  }
+  expect(claudeMcpOrigin('http://host.docker.internal:4400').origin).toBe('http://host.docker.internal:4400')
 })
 
 it.each(['production', 'staging', 'test'])('rejects HTTP outside development: %s', (environment) => {
   vi.stubEnv('NODE_ENV', environment)
-  vi.stubEnv('CANTELOP_EDGE_URL', 'http://localhost:8787')
   expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow('HTTPS origin')
   expect(claudeMcpOrigin('https://tools.example').origin).toBe('https://tools.example')
-})
-
-it.each([
-  'http://example.com:8787',
-  'http://localhost.example:8787',
-  'http://host.docker.internal:8787',
-  'http://192.168.1.2:8787',
-  'ftp://localhost:8787',
-  'http://user:pass@localhost:8787',
-  'http://localhost:8787/path',
-  'http://localhost:8787?token=x',
-  'http://localhost:8787#fragment',
-])('requires HTTPS MCP when the local runtime setting is unsafe: %s', (value) => {
-  vi.stubEnv('NODE_ENV', 'development')
-  vi.stubEnv('CANTELOP_EDGE_URL', value)
-  expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow('HTTPS origin')
 })
 
 it.each([
@@ -45,18 +24,21 @@ it.each([
   'http://host.docker.internal:4400?q=x',
   'http://host.docker.internal:4400#fragment',
   'ftp://host.docker.internal:4400',
+  'https://user:pass@tools.example',
+  'https://tools.example/path',
+  'https://tools.example?q=x',
+  'https://tools.example#fragment',
 ])('rejects invalid container MCP origin %s', (value) => {
   vi.stubEnv('NODE_ENV', 'development')
-  vi.stubEnv('CANTELOP_EDGE_URL', 'http://localhost:8787')
   expect(() => claudeMcpOrigin(value)).toThrow()
 })
 
 it.each([undefined, 'https://claude.example', 'http://example.com', 'invalid', 'http://localhost/path'])(
-  'requires HTTPS MCP for nonlocal runtime %s',
+  'validates MCP callbacks independently of SDK endpoint configuration: %s',
   (runtime) => {
     vi.stubEnv('NODE_ENV', 'development')
     vi.stubEnv('CANTELOP_EDGE_URL', runtime)
-    expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow()
+    expect(claudeMcpOrigin('http://host.docker.internal:4400').origin).toBe('http://host.docker.internal:4400')
     expect(claudeMcpOrigin('https://tools.example').origin).toBe('https://tools.example')
   },
 )
