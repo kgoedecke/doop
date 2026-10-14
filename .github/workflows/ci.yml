@@ -33,7 +33,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install Cantelop CLI
+        run: |
+          curl -fsSL https://github.com/stepandel/homebrew-tap/releases/download/cantelop-v0.15.1/install.sh -o /tmp/install-cantelop.sh
+          CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: bun run cantelop:install
+      - run: bun run cantelop:build
       - run: bun run cantelop:check
       - run: bun run cantelop:test
       - run: bun run typecheck
@@ -56,7 +62,6 @@ jobs:
         with:
           node-version: 22
       - run: bun install --cwd cantelop --frozen-lockfile
-      - run: bun run cantelop:build
       - name: Build SDK Claude image
         working-directory: cantelop
         run: docker build --platform linux/amd64 -f node_modules/@cantelop/sdk/dist/harnesses/claude/Dockerfile -t doop-claude-sdk .

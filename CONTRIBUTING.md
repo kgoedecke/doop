@@ -34,14 +34,13 @@ CI runs typecheck, lint, format check, and build on every push and PR.
 
 ## Hosted Claude runtime
 
-The Cantelop service lives in `cantelop/` and uses a separate Bun
-lockfile. Run `bun run cantelop:install` before root type checking or tests, which
-include client/service contract checks. Run `bun run cantelop:check` and
-`bun run cantelop:test` for its Node test suite. `bun run cantelop:build` also verifies
-the deployable API and sandbox image and requires Cantelop CLI and Docker.
-See [the service README](cantelop/README.md) for deployment details.
+The Cantelop service lives in `cantelop/` and uses a separate Bun lockfile.
+Run `bun run cantelop:install` and `bun run cantelop:build` before root type checking,
+tests, development or Docker builds. The build uses the Cantelop CLI and Docker to
+qualify the service and generate Doop's backend client. Ordinary Doop commands
+reuse that client; rebuild after changing the service definition or SDK.
+Run `bun run cantelop:check` and `bun run cantelop:test` for the service checks.
+See [the service README](cantelop/README.md) for configuration and deployment.
 
-For live testing on your own Cantelop account, run `cantelop login` and
-`bun run cantelop:setup`. It provisions matching configuration without another
-developer's environment variables. `--prepare-only` generates files without
-deploying. Setup tests use generated temporary keys and fake deployment commands.
+For live testing, configure your own backend environment, run `cantelop login`
+and `bun run cantelop:deploy`. Preserve the existing App name and Workspace namespace.

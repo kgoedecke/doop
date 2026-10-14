@@ -58,6 +58,7 @@ yourself over MCP need no key.
 Or self-host the production build with Docker:
 
 ```bash
+bun run cantelop:install && bun run cantelop:build
 BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
 ```
 
@@ -364,6 +365,7 @@ Any container host works; Railway/Fly are the least friction:
 Local sanity check of the exact production image:
 
 ```bash
+bun run cantelop:install && bun run cantelop:build
 docker build -t doop .
 docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
 ```
@@ -618,48 +620,40 @@ link extraction, code submission, retry handling and native process cleanup.
 Doop relays the short-lived code to the SDK; native credentials stay in the
 Workspace. There is no interactive terminal UI.
 
-The alpha requires a coordinated Cantelop CLI/platform rollout: manifest schema
-3, CLI build protocol 6, integration protocol 2 and structured native auth commands.
-CLI 0.13.0 cannot run this manifest. Local artifact compilation and tests work
-without that rollout; live sign-in, tasks and deployment require compatible
-platform support. See the [upstream integration documentation](https://github.com/stepandel/cantelop-sdk/blob/main/docs/integration-foundation.md).
+Use Cantelop CLI 0.15.1 or newer with a platform supporting manifest schema 3,
+CLI build protocol 6, integration protocol 2 and native authentication.
 
 ### Set up your own hosted Claude service
 
-Use Node 22+, Bun 1.3.10, Docker with linux/amd64 support and the compatible CLI.
-Obtain an **App-scoped integration token** from Cantelop and save it as
-`CANTELOP_INTEGRATION_TOKEN` in Doop's private `.env`. This is a backend credential;
-never use a CLI administrative login token or put it in the native Sandbox.
+Use Node 22+, Bun 1.3.10 and Docker with linux/amd64 support. Configure Doop's
+private `.env` using the variables below. Obtain an App-scoped integration token
+from Cantelop; keep it in the backend environment.
+
+`cantelop/src/cantelop.ts` is the single App definition. Keep its name equal to
+`CANTELOP_APP_SLUG`; for an existing deployment, retain its current name.
 
 ```sh
 bun run cantelop:install
 bun run cantelop:check
 bun run cantelop:test
 bun run cantelop:build
-# Once the compatible CLI/platform is available:
 cantelop login
-bun run cantelop:setup --app YOUR_EXISTING_APP --mcp-origin https://doop.example
+bun run cantelop:deploy
 ```
 
-Setup preserves the Workspace namespace, writes an ignored literal App definition
-at `cantelop/src/cantelop.local.ts`, points `cantelop/cantelop.local.json` at it,
-deploys with the compatible CLI and verifies SDK connectivity without starting
-Claude. For local Doop with remote Cantelop, use `--local` and install
-`cloudflared`; setup starts the existing MCP tunnel. Keep it running and restart
-Doop after its address changes. `bun run cantelop:tunnel` restarts just that tunnel.
+`cantelop:build` runs `cantelop build`, which generates and qualifies the service
+and backend client. The command copies the generated client from
+`cantelop/.cantelop/client` to `.cantelop/client` so it resolves Doop's SDK installation.
+Run it once before dev, type checking, tests or a Doop Docker build, and again
+after changing the App definition or SDK. Doop's ordinary commands reuse this
+client. Runtime changes require a matching Cantelop deployment and Doop rebuild.
 
-Import **`.env.claude-hosted`** into the Doop host's backend environment. Keep it
-private: it contains the App integration token. Hosted Doop Docker builds also
-need the public **`CANTELOP_APP_SLUG` build argument** matching the Cantelop App
-name. Doop builds a compiled SDK backend with that App's runtime identity and
-copies it into its runtime image. Dev/build/start compile the backend automatically;
-`bun run cantelop:client` rebuilds it explicitly. Runtime changes require matching
-Cantelop deployment and Doop backend rebuilds.
+The Doop Docker image packages only `.cantelop/client`; build it from a checkout
+where `bun run cantelop:build` has succeeded. Supply the integration token and
+other backend variables at runtime. Artifact generation needs no backend credentials.
 
-`--prepare-only` writes configuration without installation, deployment or a tunnel.
-`--check` verifies the saved SDK connection after compiling the backend. Setup
-fails clearly when the integration token is absent. Generated `.env.setup` has no
-identity keys or backend credentials; native auth is owned by the SDK.
+For local Doop with remote Cantelop, install `cloudflared` and run
+`bun run cantelop:tunnel`. Keep it running and restart Doop after its address changes.
 
 When migrating, keep the existing App name, **`CLAUDE_REMOTE_ISSUER`** and Doop user
 IDs. The issuer remains part of the durable Workspace hash, so changing it creates
@@ -669,8 +663,7 @@ just to create the new integration token.
 
 ### Fully local Claude development (no tunnel)
 
-A compatible CLI must supply the same App integration protocol and native auth
-native auth commands in container mode. Once available, start `bun run cantelop:dev`
+Start `bun run cantelop:dev`
 and use its matching App token in Doop's backend environment:
 
 ```dotenv
@@ -696,10 +689,9 @@ a callback they can reach, such as the public HTTPS tunnel provided by `cantelop
 
 Use the SDK's native connection variables below. For an existing deployment,
 copy `CLAUDE_REMOTE_APP` to `CANTELOP_APP_SLUG` and `CLAUDE_REMOTE_URL` to
-`CANTELOP_EDGE_URL`, then rebuild and restart Doop. Contributor setup migrates
-these aliases automatically. Keep `CLAUDE_REMOTE_ISSUER` unchanged.
+`CANTELOP_EDGE_URL`, then rebuild and restart Doop. Keep `CLAUDE_REMOTE_ISSUER` unchanged.
 
-- `CANTELOP_APP_SLUG`: existing Cantelop App name; also a Docker build argument for hosted Doop.
+- `CANTELOP_APP_SLUG`: existing Cantelop App name, matching `cantelop/src/cantelop.ts`.
 - `CANTELOP_EDGE_URL`: optional override; defaults to `https://<CANTELOP_APP_SLUG>.cantelop.dev`. Use an HTTP loopback origin for local development.
 - `CANTELOP_INTEGRATION_TOKEN`: platform-issued App-scoped token, only in Doop's backend environment.
 - `CLAUDE_REMOTE_ISSUER`: stable identity namespace used with the Doop user ID to derive the Workspace. Preserve it from earlier configurations.

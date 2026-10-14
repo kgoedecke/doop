@@ -17,6 +17,4 @@ desktop/src-tauri/gen
 cantelop/.cantelop/
 cantelop/.dev/
 cantelop/coverage/
-cantelop/cantelop.local.json
-cantelop/src/cantelop.local.ts
-.cantelop/claude-client/
+.cantelop/

@@ -25,13 +25,13 @@ bun run typecheck
 bun run lint
 ```
 
-`cantelop:build` uses the SDK compiler to generate matching protocol Edge, Session
-and backend artifacts under `.cantelop/artifacts`. `cantelop:client` generates the
-backend module and `client.d.mts` declarations under the repository root's `.cantelop/claude-client`
-so its SDK imports resolve to Doop's SDK installation. Doop's dev, build and start scripts
-compile that backend automatically, as do type checking and tests. Doop imports
-the generated App types directly. The compiler removes native runtime and auth
-code from the backend and embeds the deployed runtime identity.
+`cantelop:build` runs the Cantelop CLI to generate matching Edge, Session runtime
+and backend artifacts and qualify the runtime image. The CLI writes the backend
+to `cantelop/.cantelop/client`; the build command copies it to the repository root's
+`.cantelop/client` so its imports resolve Doop's SDK installation. Doop imports
+the generated types directly. Run this build before starting Doop, type checking,
+testing or building its Docker image. Ordinary Doop commands reuse the artifacts.
+The SDK strips native code from the backend and embeds the runtime identity.
 
 Qualify the SDK-owned native image independently of the CLI:
 
@@ -83,29 +83,24 @@ platform-issued `CANTELOP_INTEGRATION_TOKEN`. Never use administrative CLI login
 credentials or put this token in the native Sandbox environment. Existing legacy
 signing-key entries may remain in a contributor's private environment but are unused.
 
-Setup writes ignored `src/cantelop.local.ts` with a literal App name and points
-`cantelop.local.json` at it. Both runtime and backend builds select that definition. The SDK's `appName` build option
-applies deployment overrides without temporary source copies.
-Hosted Doop Docker builds accept the public `CANTELOP_APP_SLUG` build argument so
-the compiled backend matches the independently deployed App. Credentials are
-supplied only at runtime. Generated backend artifacts are copied into Doop's
-runtime image without native Claude code or runtime source files.
-
-After the compatible CLI/platform is available:
+`src/cantelop.ts` is the single App definition. Keep its name equal to Doop's
+`CANTELOP_APP_SLUG`. Configure the backend environment using the root `.env.example`.
+Build and deploy with the CLI:
 
 ```sh
+bun run cantelop:build
 cantelop login
-bun run cantelop:setup --app YOUR_EXISTING_APP --mcp-origin https://doop.example
+bun run cantelop:deploy
 ```
 
-The setup check reads an absent Session projection through the authenticated SDK
-protocol; it does not provision a Workspace or start Claude. `cantelop:dev` uses
-container mode with a compatible CLI. Rebuild both artifacts and restart Doop
-after changing runtime source or App configuration.
+`cantelop:dev` uses container mode. Rebuild the generated client and restart Doop
+after changing runtime source, App configuration or the SDK. Build Doop's Docker
+image after `cantelop:build`; it packages the compiled client and requires no
+Cantelop CLI or Docker daemon inside the image.
 
 Tests use fake Claude executables and controlled SDK protocol responses. They
 verify cancellation, migration, recovery, tenant selection, reconnect gating,
-link/code login, setup and compiler separation without model calls or user
+link/code login and compiler separation without model calls or user
 credentials. A production sign-in, task, cancellation and reconnect still need
 verification against the compatible deployed platform using the user's own account.
 

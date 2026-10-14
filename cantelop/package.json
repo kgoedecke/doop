@@ -9,10 +9,10 @@
   },
   "scripts": {
     "dev": "cantelop dev --container",
-    "build": "node ../scripts/build-claude-runtime.mjs",
+    "build": "cantelop build && mkdir -p ../.cantelop && cp -R .cantelop/client ../.cantelop/",
     "check": "tsc -p tsconfig.session.json",
     "test": "node --import tsx --test test/*.test.ts",
-    "build:client": "node ../scripts/build-claude-client.mjs"
+    "deploy": "cantelop deploy"
   },
   "dependencies": {
     "@cantelop/sdk": "1.0.0-alpha.9"

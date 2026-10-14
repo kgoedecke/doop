@@ -6,11 +6,13 @@ data
 .env.local
 **/node_modules
 **/.cantelop
+!.cantelop/
+.cantelop/*
+!.cantelop/client/
+!.cantelop/client/**
 **/.dev
 **/.env
 **/.env.*
 **/coverage
-cantelop/cantelop.local.json
-cantelop/src/cantelop.local.ts
 desktop/src-tauri/target
 desktop/src-tauri/gen

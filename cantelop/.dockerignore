@@ -5,5 +5,3 @@ node_modules
 .dev
 .cantelop
 coverage
-
-cantelop.local.json

@@ -8,7 +8,7 @@ import type {
 import { checkRemoteAuth, remoteIdentity, remoteWorkspace } from '../server/remoteClaudeClient.ts'
 
 const mocks = vi.hoisted(() => ({ app: undefined as unknown }))
-vi.mock('../.cantelop/claude-client/client.mjs', () => ({
+vi.mock('../.cantelop/client/client.mjs', () => ({
   get doopClaude() {
     return mocks.app
   },

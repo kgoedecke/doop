@@ -1,6 +1,6 @@
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: vi.fn(), requireRemoteAuth: vi.fn() }))
 const sdkMocks = vi.hoisted(() => ({ app: undefined as unknown }))
-vi.mock('../.cantelop/claude-client/client.mjs', () => ({
+vi.mock('../.cantelop/client/client.mjs', () => ({
   get doopClaude() {
     return sdkMocks.app
   },

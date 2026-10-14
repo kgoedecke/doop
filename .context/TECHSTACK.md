@@ -92,10 +92,11 @@ and native tool defaults live in the App definition. No `configure` request is u
   `claudeAuth` and the SDK-owned Claude Dockerfile. Schema-3 `cantelop.json` points
   to the definition; the SDK generates protocol-2 Edge `/commands` routes.
 - `server/remoteClaudeClient.ts` imports the typed compiled backend from the repository-root
-  `.cantelop/claude-client`. The SDK compiler emits portable declarations, embeds
-  the matching runtime identity and removes native provider code. Root dev/build/start
-  and typecheck compile it automatically.
-  Build tooling selects the compiler matching the definition's SDK installation.
+  `.cantelop/client`. The SDK compiler emits portable declarations, embeds
+  the matching runtime identity and removes native provider code. `cantelop:build`
+  runs the CLI and copies its generated client to Doop's artifact directory so
+  it uses Doop's SDK installation. Ordinary dev/build/start/typecheck/test commands
+  reuse this client; rebuild after changing the App definition or SDK.
 - `server/remoteClaudeClient.ts` uses SDK Workspace/Session/auth references and SSE
   iterators directly, with no legacy route adapter. Subscription cleanup aborts
   blocked reads before closing the iterator, including failed initial dispatch. SDK `workspace.auth().login()`
@@ -128,17 +129,13 @@ and native tool defaults live in the App definition. No `configure` request is u
 - `LocalAgentRuns` retains task-scoped MCP capabilities and revocation. Remote runs
   cannot be claimed by desktop polling. Authentication failures pause hosted work;
   transport, billing and rate-limit errors do not mark users signed out.
-- `cantelop:build` compiles Edge/runtime/backend artifacts without the CLI. Service
-  tests use Node's test runner and fake Claude executables; root Vitest tests cover
-  the real SDK protocol, compiled backend, authorization, link/code login and setup.
-  CI separately builds and smoke-tests the SDK-owned native image.
-- Live dev/deployment requires the coordinated schema-3/build-protocol-6/protocol-2
-  Cantelop CLI/platform with native auth declarations and structured auth commands.
-  Use CLI 0.15.1 or newer. No live subscription sign-in or model call is part of automated tests.
-- `cantelop:setup` preserves the Workspace namespace and creates ignored literal
-  `src/cantelop.local.ts`/`cantelop.local.json` overrides. `.env.claude-hosted` is a
-  private backend export. The protocol connection check reads an absent projection
-  without provisioning resources. The SDK `appName` build option handles overrides
-  without temporary source copies. Doop Docker builds use public `CANTELOP_APP_SLUG`
-  to compile a backend matching the deployed App and copy only that client plus
-  into the server image; no Cantelop runtime source files are copied.
+- `cantelop:build` runs `cantelop build` to compile and qualify the service with
+  Docker. Service tests use Node's test runner and fake Claude executables;
+  root Vitest tests cover SDK protocol, compiled backend and authentication.
+  CI builds the client before root checks and smoke-tests the SDK-owned image.
+- Live dev/deployment requires CLI 0.15.1 or newer and a platform supporting
+  schema 3, build protocol 6, integration protocol 2 and native authentication.
+- `cantelop/src/cantelop.ts` is the single App definition. Backend environment
+  configuration preserves the App name and `CLAUDE_REMOTE_ISSUER` namespace.
+  Doop Docker builds package the generated `.cantelop/client`; run
+  `cantelop:build` first. Tokens are supplied only at runtime.
