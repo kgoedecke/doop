@@ -119,6 +119,11 @@ export function hasRole(workspaceId: string, userId: string | undefined, atLeast
   return !!role && RANK[role] >= RANK[atLeast]
 }
 
+/** Every member of a workspace — the people a workspace canvas is shared with. */
+export function workspaceMemberIds(workspaceId: string): string[] {
+  return [...(members.get(workspaceId)?.keys() ?? [])]
+}
+
 export function workspaceIdsFor(userId: string): string[] {
   const ids: string[] = []
   for (const [id, map] of members) if (map.has(userId)) ids.push(id)

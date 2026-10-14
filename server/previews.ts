@@ -28,7 +28,7 @@ const IMG_CACHE_MAX = 200
    anonymous hotlink abuse — authenticated users bypass it (verified by the
    caller, and only checked when the budget is actually exhausted). */
 const renderHits = new Map<string, number[]>()
-const RENDERS_PER_MIN = 12
+const RENDERS_PER_MIN = Number(process.env.PREVIEW_RENDERS_PER_MIN || 12)
 
 export interface ImageRequest {
   ext: 'png' | 'jpg'

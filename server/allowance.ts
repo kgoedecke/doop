@@ -1,4 +1,5 @@
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
+import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { eq, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { residentUsage } from './db/schema.ts'
@@ -34,7 +35,7 @@ export interface Allowance {
   /** the user connected a model account the Doop Agent can run on */
   byoModel: boolean
   /** which kind, for the UI copy */
-  byoKind?: AccountKind | 'claude-local' | 'claude-remote'
+  byoKind?: AccountKind | 'claude-local' | 'claude-remote' | 'gemini-cloud'
   /** the ChatGPT account's email, so the UI can name what is connected */
   byoEmail?: string
   /** the agent is running on this user's own account right now — connecting
@@ -63,6 +64,7 @@ async function usedCount(userId: string): Promise<number> {
 }
 
 export async function getAllowance(userId: string): Promise<Allowance> {
+  const geminiCloud = !!geminiCloudWorkerFor(userId)
   const [connected, used, model, local] = await Promise.all([
     hasOwnAgent(userId),
     usedCount(userId),
@@ -73,14 +75,16 @@ export async function getAllowance(userId: string): Promise<Allowance> {
     used,
     limit: RESIDENT_TASK_LIMIT,
     connected,
-    byoModel: local.enabled || model.connected,
-    ...(local.enabled
-      ? { byoKind: local.transport === 'remote' ? ('claude-remote' as const) : ('claude-local' as const) }
-      : model.kind
-        ? { byoKind: model.kind }
-        : {}),
-    ...(!local.enabled && model.email ? { byoEmail: model.email } : {}),
-    onOwnAccount: local.enabled || model.connected,
+    byoModel: geminiCloud || local.enabled || model.connected,
+    ...(geminiCloud
+      ? { byoKind: 'gemini-cloud' as const }
+      : local.enabled
+        ? { byoKind: local.transport === 'remote' ? ('claude-remote' as const) : ('claude-local' as const) }
+        : model.kind
+          ? { byoKind: model.kind }
+          : {}),
+    ...(!geminiCloud && !local.enabled && model.email ? { byoEmail: model.email } : {}),
+    onOwnAccount: geminiCloud || local.enabled || model.connected,
   }
 }
 

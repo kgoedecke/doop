@@ -3,6 +3,7 @@ import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
 import type { VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
+import { CheckIcon } from './icons'
 import { menuItemVariants } from './menu'
 
 /* A menu hanging off a button. Radix handles what the hand-rolled version
@@ -38,6 +39,10 @@ function DropdownMenuContent({
   )
 }
 
+/* what every row in the menu shares, whichever primitive renders it */
+const itemClass =
+  'cursor-pointer gap-[11px] rounded-[9px] px-2.5 py-[9px] text-[13.5px] outline-none data-[highlighted]:bg-paper-deep data-[disabled]:pointer-events-none data-[disabled]:text-ink-faint'
+
 function DropdownMenuItem({
   className,
   tone,
@@ -48,12 +53,34 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       className={cn(
         menuItemVariants({ tone }),
-        'cursor-pointer gap-[11px] rounded-[9px] px-2.5 py-[9px] text-[13.5px] outline-none data-[highlighted]:bg-paper-deep data-[disabled]:pointer-events-none data-[disabled]:text-ink-faint',
+        itemClass,
         tone === 'danger' && 'data-[highlighted]:bg-accent-ink/10',
         className,
       )}
       {...props}
     />
+  )
+}
+
+const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
+
+/** One of a set where exactly one is on; the chosen row wears a check. */
+function DropdownMenuRadioItem({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+  return (
+    <DropdownMenuPrimitive.RadioItem
+      data-slot="dropdown-menu-radio-item"
+      className={cn(menuItemVariants(), itemClass, className)}
+      {...props}
+    >
+      {children}
+      <DropdownMenuPrimitive.ItemIndicator className="ml-auto flex text-ink">
+        <CheckIcon width={14} height={14} aria-hidden />
+      </DropdownMenuPrimitive.ItemIndicator>
+    </DropdownMenuPrimitive.RadioItem>
   )
 }
 
@@ -72,6 +99,17 @@ function DropdownMenuLabel({ className, ...props }: React.ComponentProps<typeof 
   return <DropdownMenuPrimitive.Label data-slot="dropdown-menu-label" className={cn(className)} {...props} />
 }
 
+/** Uppercase caption over a group of rows further down the menu. */
+function DropdownMenuCaption({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Label>) {
+  return (
+    <DropdownMenuPrimitive.Label
+      data-slot="dropdown-menu-caption"
+      className={cn('px-2.5 pb-1 pt-[7px] text-[10px] font-bold uppercase tracking-[0.12em] text-ink-faint', className)}
+      {...props}
+    />
+  )
+}
+
 export {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -79,4 +117,7 @@ export {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
+  DropdownMenuCaption,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 }

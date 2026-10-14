@@ -75,7 +75,7 @@ function PanelTab({ className, ...props }: React.ComponentProps<typeof TabsPrimi
     <TabsPrimitive.Trigger
       data-slot="panel-tab"
       className={cn(
-        'rounded-sm px-2 py-[3px] font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-ink-faint transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=active]:bg-paper-deep data-[state=active]:text-ink',
+        'rounded-sm px-[7px] py-[3px] font-mono text-[11px] font-medium uppercase tracking-[0.07em] text-ink-faint transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=active]:bg-paper-deep data-[state=active]:text-ink',
         className,
       )}
       {...props}

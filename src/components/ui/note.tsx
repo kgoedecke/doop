@@ -10,7 +10,7 @@ const noteVariants = cva('leading-[1.45]', {
     tone: {
       muted: 'text-ink-faint',
       error: 'text-accent-ink',
-      success: 'text-[#2f7a3f]',
+      success: 'text-success-ink',
     },
     size: {
       xs: 'text-[11.5px]',

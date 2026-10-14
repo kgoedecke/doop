@@ -39,7 +39,7 @@ let root: Root
 const reachedWindow = vi.fn()
 
 function pressDelete() {
-  const tree = container.querySelector<HTMLElement>('[tabindex="0"]')
+  const tree = container.querySelector<HTMLElement>('[role="tree"]')
   if (!tree) throw new Error('layers tree not rendered')
   act(() => {
     tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }))
@@ -53,7 +53,9 @@ describe('LayersPanel ⌫', () => {
     reachedWindow.mockClear()
     window.addEventListener('keydown', reachedWindow)
     const canvas: Canvas = { id: 'c1', name: 'Canvas', frames: [frame] } as Canvas
-    useStore.setState({ canvas, selectedId: 'f1', selectedIds: ['f1'], selectedElement: null })
+    /* setCanvas also picks the active page; the panel lists that page's frames */
+    useStore.getState().setCanvas(canvas)
+    useStore.setState({ selectedId: 'f1', selectedIds: ['f1'], selectedElement: null })
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)

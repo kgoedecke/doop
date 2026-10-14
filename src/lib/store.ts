@@ -1,8 +1,10 @@
 import { create } from 'zustand'
+import { canvasPages, framePageId } from '../../shared/pages'
 import type {
   ActivityItem,
   AgentTask,
   Canvas,
+  ChatMessage,
   DesignDecision,
   ElementComment,
   Frame,
@@ -21,6 +23,18 @@ export interface Viewport {
   zoom: number
 }
 
+export type PanelTab = 'tasks' | 'chat' | 'activity' | 'memory'
+
+const chatSeenKey = (canvasId: string) => `doop:chatSeen:${canvasId}`
+
+function loadChatSeen(canvasId: string): number {
+  try {
+    return Number(localStorage.getItem(chatSeenKey(canvasId)) ?? 0) || 0
+  } catch {
+    return 0
+  }
+}
+
 interface State {
   canvas: Canvas | null
   presences: Record<string, Presence>
@@ -32,13 +46,18 @@ interface State {
   feedback: TaskFeedback[]
   /** element-anchored comments (newest first) */
   comments: ElementComment[]
+  /** the canvas chat (newest first) */
+  chat: ChatMessage[]
+  /** when this browser last had the chat open on this canvas — everything
+   *  newer from someone else counts as unread on the rail */
+  chatSeenAt: number
   /** design decisions captured into Memory (newest first) */
   decisions: DesignDecision[]
   /** distiller rule proposals (newest first) */
   proposals: MemoryProposal[]
   /** which tab the side panel shows — in the store so a Memory-suggestion
    *  toast anywhere in the app can jump straight to the Memory tab */
-  panelTab: 'tasks' | 'activity' | 'memory'
+  panelTab: PanelTab
   /** every selected frame, in selection order — marquee and ⇧-click build
    *  this up; a plain click collapses it to one */
   selectedIds: string[]
@@ -77,6 +96,10 @@ interface State {
   flashes: Record<string, { color: string; at: number }>
   /** frameId -> actor currently streaming a design into it */
   streams: Record<string, { name: string; color: string }>
+  /** a transient toast — in the store so long actions fired from surfaces
+   *  that close at once (a context menu) can still report back. A `busy`
+   *  notice (an export in flight) stays up until the next notice replaces it. */
+  notice: { text: string; at: number; busy?: boolean } | null
   /** the free-tier wall is showing — in the store so any surface that hits
    *  the resident-task limit (board, prompt bar, element comment) can raise it */
   limitWall: boolean
@@ -90,6 +113,9 @@ interface State {
    *  follow); any camera move of our own lets go */
   following: string | null
 
+  activePageId: string | null
+  setActivePage(id: string): void
+  setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
@@ -113,6 +139,10 @@ interface State {
   upsertFeedback(fb: TaskFeedback): void
   setComments(comments: ElementComment[]): void
   upsertComment(c: ElementComment): void
+  setChat(messages: ChatMessage[]): void
+  pushChat(message: ChatMessage): void
+  /** the chat is on screen: nothing is unread any more */
+  markChatSeen(): void
   upsertFrame(f: Frame): void
   patchFrameLocal(frameId: string, patch: Partial<Frame>): void
   removeFrame(frameId: string): void
@@ -125,7 +155,10 @@ interface State {
   pushDecision(decision: DesignDecision): void
   setProposals(proposals: MemoryProposal[]): void
   upsertProposal(proposal: MemoryProposal): void
-  setPanelTab(tab: 'tasks' | 'activity' | 'memory'): void
+  setPanelTab(tab: PanelTab): void
+  /** show `text` as a toast for a few seconds — or, with `busy`, with a
+   *  spinner until the next notice replaces it */
+  pushNotice(text: string, options?: { busy?: boolean }): void
   setLimitWall(v: boolean): void
   allowanceChanged(): void
   requestFlyTo(frameId: string): void
@@ -154,6 +187,8 @@ interface State {
 }
 
 const LAYERS_OPEN_KEY = 'doop:layers-open'
+/* longer than the slowest real export (Canva: render + verify, ~3 min) */
+const BUSY_NOTICE_MAX_MS = 5 * 60_000
 
 function readLayersOpen(): boolean {
   try {
@@ -165,12 +200,15 @@ function readLayersOpen(): boolean {
 
 export const useStore = create<State>((set, get) => ({
   canvas: null,
+  activePageId: null,
   presences: {},
   cursors: {},
   activity: [],
   tasks: [],
   feedback: [],
   comments: [],
+  chat: [],
+  chatSeenAt: 0,
   decisions: [],
   proposals: [],
   panelTab: 'tasks',
@@ -191,10 +229,57 @@ export const useStore = create<State>((set, get) => ({
   connected: false,
   canvasNotFound: false,
   updateReady: false,
+  notice: null,
   flashes: {},
   streams: {},
 
-  setCanvas: (canvas) => set({ canvas }),
+  setCanvas: (canvas) =>
+    set((s) => ({
+      canvas,
+      activePageId: canvas
+        ? canvas.id === s.canvas?.id && canvasPages(canvas).some((p) => p.id === s.activePageId)
+          ? s.activePageId
+          : canvasPages(canvas)[0]!.id
+        : null,
+    })),
+  setActivePage: (id) =>
+    set((s) => {
+      if (!s.canvas || !canvasPages(s.canvas).some((p) => p.id === id) || s.activePageId === id) return {}
+      return {
+        activePageId: id,
+        selectedId: null,
+        selectedIds: [],
+        selectedElement: null,
+        elementPanelOpen: false,
+        inspectorOpen: false,
+        ctxMenu: null,
+        following: null,
+        snapGuides: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }
+    }),
+  setPages: (pages, canvasId) =>
+    set((s) => {
+      if (!s.canvas || (canvasId !== undefined && s.canvas.id !== canvasId)) return {}
+      const firstId = canvasPages(s.canvas)[0]!.id
+      const canvas = { ...s.canvas, pages, frames: s.canvas.frames.map((f) => ({ ...f, pageId: f.pageId ?? firstId })) }
+      const activePageId = pages.some((p) => p.id === s.activePageId) ? s.activePageId : pages[0]!.id
+      return {
+        canvas,
+        activePageId,
+        ...(activePageId !== s.activePageId
+          ? {
+              selectedId: null,
+              selectedIds: [],
+              selectedElement: null,
+              inspectorOpen: false,
+              elementPanelOpen: false,
+              ctxMenu: null,
+              following: null,
+            }
+          : {}),
+      }
+    }),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
   setUpdateReady: (updateReady) => set({ updateReady }),
@@ -220,7 +305,11 @@ export const useStore = create<State>((set, get) => ({
       if (!p) return {}
       return { presences: { ...s.presences, [clientId]: { ...p, viewport } } }
     }),
-  setFollowing: (following) => set({ following }),
+  setFollowing: (following) => {
+    const pageId = following ? get().presences[following]?.viewport?.pageId : undefined
+    if (pageId) get().setActivePage(pageId)
+    set({ following })
+  },
   setViewportFollowing: (viewport) => set({ viewport }),
   setCursor: (clientId, x, y) => set((s) => ({ cursors: { ...s.cursors, [clientId]: { x, y } } })),
   setEditing: (clientId, frameId) =>
@@ -248,6 +337,22 @@ export const useStore = create<State>((set, get) => ({
     }),
   setFeedback: (feedback) => set({ feedback }),
   setComments: (comments) => set({ comments }),
+  setChat: (chat) => set((s) => ({ chat, chatSeenAt: s.canvas ? loadChatSeen(s.canvas.id) : 0 })),
+  pushChat: (message) =>
+    set((s) => (s.chat.some((m) => m.id === message.id) ? {} : { chat: [message, ...s.chat].slice(0, 300) })),
+  markChatSeen: () =>
+    set((s) => {
+      const latest = s.chat[0]?.at ?? 0
+      if (latest <= s.chatSeenAt) return {}
+      if (s.canvas) {
+        try {
+          localStorage.setItem(chatSeenKey(s.canvas.id), String(latest))
+        } catch {
+          /* private mode: the badge just comes back next visit */
+        }
+      }
+      return { chatSeenAt: latest }
+    }),
   upsertComment: (c) =>
     set((s) => {
       const comments = s.comments.some((x) => x.id === c.id)
@@ -264,11 +369,23 @@ export const useStore = create<State>((set, get) => ({
     }),
   upsertFrame: (f) =>
     set((s) => {
-      if (!s.canvas) return {}
+      if (!s.canvas || f.canvasId !== s.canvas.id) return {}
       const frames = s.canvas.frames.some((x) => x.id === f.id)
         ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
         : [...s.canvas.frames, f]
-      return { canvas: { ...s.canvas, frames } }
+      const hidden = s.selectedIds.includes(f.id) && framePageId(s.canvas, f) !== s.activePageId
+      return {
+        canvas: { ...s.canvas, frames },
+        ...(hidden
+          ? {
+              selectedIds: s.selectedIds.filter((id) => id !== f.id),
+              selectedId: null,
+              selectedElement: null,
+              inspectorOpen: false,
+              elementPanelOpen: false,
+            }
+          : {}),
+      }
     }),
   patchFrameLocal: (frameId, patch) =>
     set((s) => {
@@ -332,20 +449,47 @@ export const useStore = create<State>((set, get) => ({
       return { proposals }
     }),
   setPanelTab: (panelTab) => set({ panelTab }),
+  pushNotice: (text, options) => {
+    const busy = options?.busy === true
+    const at = Date.now()
+    set({ notice: { text, at, busy } })
+    if (busy) {
+      /* a backstop for a request that never settles (a stalled Canva
+         export) — normally the outcome replaces a busy notice long before */
+      setTimeout(() => {
+        if (get().notice?.at === at) set({ notice: null })
+      }, BUSY_NOTICE_MAX_MS)
+      return
+    }
+    setTimeout(() => {
+      const cur = get().notice
+      /* only clear our own notice — a newer one restarts the clock */
+      if (cur && !cur.busy && Date.now() - cur.at >= 4900) set({ notice: null })
+    }, 5000)
+  },
   setLimitWall: (limitWall) => set({ limitWall }),
   allowanceChanged: () => set((s) => ({ allowanceVersion: s.allowanceVersion + 1 })),
-  requestFlyTo: (frameId) => set({ flyTo: { frameId, at: Date.now() } }),
+  requestFlyTo: (frameId) => {
+    const s = get()
+    const frame = s.canvas?.frames.find((f) => f.id === frameId)
+    if (frame && s.canvas) s.setActivePage(framePageId(s.canvas, frame))
+    set({ flyTo: { frameId, at: Date.now() } })
+  },
   requestFlyToPoint: (x, y) => set({ flyTo: { point: { x, y }, at: Date.now() } }),
   /* selecting a different frame (or deselecting) closes the Inspector — the
      panel must not follow surface clicks, paste, or undo onto another frame.
      Re-selecting the same frame keeps an open panel open. */
-  select: (selectedId) =>
+  select: (selectedId) => {
+    const state = get()
+    const frame = state.canvas?.frames.find((f) => f.id === selectedId)
+    if (frame && state.canvas) state.setActivePage(framePageId(state.canvas, frame))
     set((s) => {
       const selectedIds = selectedId ? [selectedId] : []
       return s.selectedId === selectedId
         ? { selectedId, selectedIds }
         : { selectedId, selectedIds, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
-    }),
+    })
+  },
   toggleSelect: (id) =>
     set((s) => {
       const selectedIds = s.selectedIds.includes(id) ? s.selectedIds.filter((x) => x !== id) : [...s.selectedIds, id]
@@ -354,13 +498,17 @@ export const useStore = create<State>((set, get) => ({
         ? { selectedIds }
         : { selectedIds, selectedId, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
     }),
-  selectMany: (ids) =>
+  selectMany: (ids) => {
+    const state = get()
+    const frame = state.canvas?.frames.find((f) => f.id === ids[ids.length - 1])
+    if (frame && state.canvas) state.setActivePage(framePageId(state.canvas, frame))
     set((s) => {
       const selectedId = ids[ids.length - 1] ?? null
       return selectedId === s.selectedId
         ? { selectedIds: ids }
         : { selectedIds: ids, selectedId, inspectorOpen: false, selectedElement: null, elementPanelOpen: false }
-    }),
+    })
+  },
   setPanMode: (panMode) => set({ panMode }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),

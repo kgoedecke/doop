@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/kgoedecke/doop/compare/desktop-v0.4.0...desktop-v0.5.0) (2026-10-13)
+
+
+### Features
+
+* **connect:** pick the agent first in Connect AI, nudge to connect a plan from the prompt bar ([#226](https://github.com/kgoedecke/doop/issues/226)) ([aa1442b](https://github.com/kgoedecke/doop/commit/aa1442bc9aa3e836fbe6025e6ad3ad85461e9c70))
+* **desktop:** add a drag-to-Applications background to the macOS DMG ([#225](https://github.com/kgoedecke/doop/issues/225)) ([8f5ada5](https://github.com/kgoedecke/doop/commit/8f5ada56e7cbfe81efae646bede81e8e8e50bbcb))
+
 ## [0.4.0](https://github.com/kgoedecke/doop/compare/desktop-v0.3.0...desktop-v0.4.0) (2026-09-19)
 
 

@@ -350,7 +350,7 @@ export function Home() {
                   {a.lastAt > 0 && now - a.lastAt < LIVE_WINDOW ? (
                     <Dot
                       size="sm"
-                      className="ml-auto bg-[#3f9c52] shadow-[0_0_0_3px_rgba(63,156,82,0.15)]"
+                      className="ml-auto bg-success shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_15%,transparent)]"
                       title="working right now"
                     />
                   ) : (

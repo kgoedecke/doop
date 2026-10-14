@@ -1,3 +1,4 @@
+import { canvasPages, samePages } from '../shared/pages.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { Request, Response } from 'express'
@@ -6,6 +7,7 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
 import { canAccessCanvas } from './access.ts'
+import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
 import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned, PUBLIC_ORIGIN } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
@@ -21,6 +23,7 @@ import * as backgrounds from './backgrounds.ts'
 import { viewWebsite } from './website.ts'
 import { createImportedWebpageFrame } from './webpageImport.ts'
 import { normalizeImportUrl } from './importer.ts'
+import { extensions, type McpToolHelpers } from './extensions.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import * as allowance from './allowance.ts'
@@ -37,10 +40,15 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - Small edits: edit_frame_html (exact find/replace — the change morphs into the rendered frame in place). Full redesigns: set_frame_html or a new stream. Rename/move/resize: update_frame.
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
 - Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
-- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
+${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
 - Comments: call get_comments to read element-pinned comments and replies on a canvas, optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.`
+
+function extensionGuideLines(): string {
+  const lines = extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
+  return lines.length ? lines.join('\n') + '\n' : ''
+}
 
 function text(data: unknown) {
   return { content: [{ type: 'text' as const, text: typeof data === 'string' ? data : JSON.stringify(data, null, 2) }] }
@@ -129,23 +137,25 @@ function withFeedback<T extends { content: { type: 'text' | 'image'; [k: string]
   return result
 }
 
-/* upload rate limit per connecting user, mirroring the page-import route */
+/* Per-connecting-user rate limits, each overridable by environment variable
+   for self-hosted instances that want a looser cap (see .env.example). The
+   defaults are the conservative values that suit the hosted service. */
 const uploadHits = new Map<string, number[]>()
-const UPLOADS_PER_MIN = 15
+const UPLOADS_PER_MIN = Number(process.env.MCP_UPLOADS_PER_MIN || 15)
 
 /* photo search burns the shared Pexels quota (200 req/hour on the free tier) */
 const searchHits = new Map<string, number[]>()
-const SEARCHES_PER_MIN = 12
+const SEARCHES_PER_MIN = Number(process.env.MCP_SEARCHES_PER_MIN || 12)
 
 /* generation spends the payer's subscription quota or money — keep a burst
    of retries from draining it */
 const generateHits = new Map<string, number[]>()
-const GENERATIONS_PER_MIN = 6
+const GENERATIONS_PER_MIN = Number(process.env.MCP_GENERATIONS_PER_MIN || 6)
 
 /* importing writes a potentially large HTML frame, so keep it at the same
    conservative per-user rate as the browser UI's import endpoint */
 const importHits = new Map<string, number[]>()
-const IMPORTS_PER_MIN = 5
+const IMPORTS_PER_MIN = Number(process.env.MCP_IMPORTS_PER_MIN || 5)
 
 const agentName = z
   .string()
@@ -154,6 +164,7 @@ const agentName = z
   )
 
 function frameSummary(f: {
+  pageId?: string
   id: string
   name: string
   x: number
@@ -167,6 +178,7 @@ function frameSummary(f: {
 }) {
   return {
     id: f.id,
+    pageId: f.pageId,
     name: f.name,
     ...(f.demo ? { demo: true } : {}),
     x: f.x,
@@ -354,6 +366,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         text({
           id: c.id,
           name: c.name,
+          pages: c.pages,
           /* demo frames (the Doop welcome show, seeded examples) are product
              content, not user work — hidden so agents never mistake them for
              the canvas's established style */
@@ -712,12 +725,45 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   )
 
   server.registerTool(
+    'set_canvas_pages',
+    {
+      description:
+        'Create, rename, reorder or delete canvas pages. Send the complete ordered page list with stable IDs (read get_canvas first). A page containing frames cannot be deleted: move its frames with update_frame first.',
+      inputSchema: {
+        canvas_id: z.string(),
+        expectedPages: z
+          .array(z.object({ id: z.string(), name: z.string() }))
+          .describe('Exact ordered pages returned by get_canvas; protects collaborators from overwritten changes'),
+        pages: z
+          .array(z.object({ id: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100) }))
+          .min(1)
+          .max(100),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, pages, expectedPages, agent_name }) => {
+      const canvas = canvasFor(canvas_id)
+      if (!canvas) return noCanvas(canvas_id)
+      if (!samePages(expectedPages, canvasPages(canvas)))
+        return err('Pages changed. Read get_canvas again before saving.')
+      if (new Set(pages.map((p) => p.id)).size !== pages.length) return err('Page IDs must be unique')
+      const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
+      if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId))))
+        return err('Move frames before deleting their page')
+      const actor = actorFrom(agent_name)
+      actions.setCanvasPages(canvas_id, pages, actor)
+      return text({ ok: true, pages })
+    },
+  )
+
+  server.registerTool(
     'create_frame',
     {
       description:
         'Create a new frame on a canvas with an HTML design. A frame is a rectangular artboard that renders a full HTML document (inline <style> and <script> allowed, no external network access needed). If x/y are omitted the frame is auto-placed to the right of existing frames. Everyone viewing the canvas sees it appear live.',
       inputSchema: {
         canvas_id: z.string(),
+        pageId: z.string().optional().describe('Target page ID from get_canvas; defaults to the first page'),
         name: z.string().describe('Frame title, e.g. "Landing hero" or "Pricing card"'),
         html: z
           .string()
@@ -731,9 +777,9 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, name, html, x, y, width, height, agent_name }) => {
+    async ({ canvas_id, pageId, name, html, x, y, width, height, agent_name }) => {
       if (!canvasFor(canvas_id)) return noCanvas(canvas_id)
-      const frame = actions.createFrame(canvas_id, { name, html, x, y, width, height }, actorFrom(agent_name))
+      const frame = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!frame) return noCanvas(canvas_id)
       const result = withEscapeNote(
         frame.html.length > 0
@@ -1280,6 +1326,31 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
     },
   )
 
+  /* extension tools get the same
+     per-session helpers the built-in tools close over */
+  const extensionHelpers: McpToolHelpers = {
+    ownerId,
+    agentName,
+    actorFrom,
+    canvasFor,
+    noCanvas,
+    err,
+    text,
+    textWithNudge,
+    withFeedback,
+    withStatusNudge,
+    frameSummary,
+    takeImportSlot: (key) => {
+      const now = Date.now()
+      const hits = (importHits.get(key) ?? []).filter((t) => now - t < 60_000)
+      if (hits.length >= IMPORTS_PER_MIN) return false
+      hits.push(now)
+      importHits.set(key, hits)
+      return true
+    },
+  }
+  for (const extension of extensions) extension.registerMcpTools?.(server, extensionHelpers)
+
   server.registerTool(
     'get_frame_screenshot',
     {
@@ -1392,9 +1463,10 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
   server.registerTool(
     'update_frame',
     {
-      description: 'Update frame metadata: rename it or move/resize it on the canvas.',
+      description: 'Update frame metadata: rename it, move/resize it, or move it to another page using pageId.',
       inputSchema: {
         frame_id: z.string(),
+        pageId: z.string().optional(),
         name: z.string().optional(),
         x: z.number().optional(),
         y: z.number().optional(),
@@ -1440,9 +1512,30 @@ export async function handleMcpRequest(req: Request, res: Response) {
     })
     return
   }
-  /* OAuth gate: the 401 + WWW-Authenticate header is what triggers the
-     browser approval flow in MCP clients (RFC 9728 discovery). */
-  const session = await auth.api.getMcpSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
+  /* Two ways in, one identity. An agent key (`Authorization: Bearer dpk_…`,
+     minted in Settings) is the headless path — Mastra, n8n, CI — where the
+     OAuth browser dance has nobody to dance it. It resolves to its owner on
+     every request, so revocation and bans bite immediately; a recognised but
+     invalid key gets a 401 WITHOUT the WWW-Authenticate pointer, because
+     sending a headless client into OAuth discovery helps nobody. Everything
+     else falls through to the OAuth gate below. */
+  const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1]
+  let session: { userId?: string | null } | null
+  if (bearer && isAgentKeySecret(bearer)) {
+    session = await verifyAgentKey(bearer)
+    if (!session) {
+      res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32001, message: 'Unauthorized: unknown or revoked agent key' },
+        id: null,
+      })
+      return
+    }
+  } else {
+    /* OAuth gate: the 401 + WWW-Authenticate header is what triggers the
+       browser approval flow in MCP clients (RFC 9728 discovery). */
+    session = await auth.api.getMcpSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
+  }
   if (!session) {
     const origin = `${req.protocol}://${req.get('host')}`
     res

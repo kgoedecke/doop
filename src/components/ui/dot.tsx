@@ -14,7 +14,7 @@ const dotVariants = cva('inline-block shrink-0', {
       current: 'bg-current',
       idle: 'bg-ink-faint',
       running: 'bg-brand animate-[status-pulse_1.6s_ease-in-out_infinite]',
-      done: 'bg-[#2e9e5b]',
+      done: 'bg-success',
       failed: 'bg-accent-ink',
       muted: 'bg-line',
     },

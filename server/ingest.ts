@@ -145,7 +145,7 @@ export function wrapSnapshotHtml(html: string, marker: string, baseUrl: string |
 
 /* ------------------------------------------------------------------ */
 
-const INGESTS_PER_MIN = 30
+const INGESTS_PER_MIN = Number(process.env.SYNC_INGESTS_PER_MIN || 30)
 /** floor between rewrites of the SAME page — a busy app must not churn the
  *  canvas (and its websocket room) with a frame write per user interaction */
 const PAGE_MIN_INTERVAL_MS = Number(process.env.SYNC_PAGE_INTERVAL_MS ?? 30_000)

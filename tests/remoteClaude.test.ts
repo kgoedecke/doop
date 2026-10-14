@@ -160,6 +160,25 @@ it('desktop polling cannot claim or finish a hosted run; cancellation revokes it
   expect(runs.authorized(captured!.id, captured!.token)).toBeUndefined()
   expect((await result).success).toBe(false)
 })
+it('revokes a hosted run when its canvas task is canceled', async () => {
+  const runs = new LocalAgentRuns()
+  let canceled = false
+  let captured: { id: string; token: string } | undefined
+  const result = runs.start('alice', 'default', { ...harness, isCanceled: () => canceled }, async (job, abort) => {
+    captured = job
+    await new Promise<void>((resolve) => abort.addEventListener('abort', () => resolve(), { once: true }))
+    return { success: false, text: 'stopped' }
+  })
+  await Promise.resolve()
+  expect(runs.authorized(captured!.id, captured!.token)).toBeDefined()
+  canceled = true
+  expect(runs.authorized(captured!.id, captured!.token)).toBeUndefined()
+  expect(runs.poll('alice', 'desktop')).toBeNull()
+  await runs.expire()
+  expect(await result).toEqual({ success: false, text: 'Task stopped.' })
+  expect(runs.runningRemote('alice')).toBe(false)
+})
+
 it.each([429, 503])('resumes SDK stream cursors after transient HTTP %s without redispatch', async (status) => {
   const controller = new AbortController()
   const opened = vi.fn(async () => {})

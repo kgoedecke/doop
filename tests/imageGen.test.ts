@@ -12,11 +12,18 @@ vi.mock('../server/modelAccounts.ts', () => ({
   withFreshToken: vi.fn((account: unknown) => Promise.resolve(account)),
 }))
 
+/* the image-model preference lives in the DB; tests pick per-case */
+vi.mock('../server/imagePrefs.ts', () => ({
+  getImagePref: vi.fn(() => Promise.resolve(undefined)),
+}))
+
 import { getAccount } from '../server/modelAccounts.ts'
+import { getImagePref } from '../server/imagePrefs.ts'
 import { _internal, generateImage, generatorFor } from '../server/imageGen.ts'
 import sharp from 'sharp'
 
 const mockedGetAccount = vi.mocked(getAccount)
+const mockedGetImagePref = vi.mocked(getImagePref)
 
 async function tinyPng(): Promise<string> {
   const buf = await sharp({ create: { width: 8, height: 6, channels: 4, background: '#e5533c' } })
@@ -44,12 +51,16 @@ async function imageStream(): Promise<Response> {
 afterEach(() => {
   vi.restoreAllMocks()
   mockedGetAccount.mockReset()
+  mockedGetImagePref.mockReset()
+  mockedGetImagePref.mockResolvedValue(undefined)
   delete process.env.OPENAI_API_KEY
+  delete process.env.GEMINI_API_KEY
+  delete process.env.ARK_API_KEY
 })
 
 describe('the hosted image_generation request', () => {
   it('forces the hosted tool with the size for the aspect', () => {
-    const body = _internal.requestBody('gpt-5.6-terra', { prompt: 'a red circle', aspect: 'landscape' })
+    const body = _internal.requestBody('gpt-5.6-terra', 'gpt-image-2', { prompt: 'a red circle', aspect: 'landscape' })
     expect(body.tool_choice).toEqual({ type: 'image_generation' })
     expect(body.tools).toHaveLength(1)
     expect(body.tools[0]).toMatchObject({ type: 'image_generation', size: '1536x1024', output_format: 'png' })
@@ -63,7 +74,7 @@ describe('the hosted image_generation request', () => {
   })
 
   it('defaults to a square, medium-quality image', () => {
-    const body = _internal.requestBody('gpt-5.6-terra', { prompt: 'x' })
+    const body = _internal.requestBody('gpt-5.6-terra', 'gpt-image-2', { prompt: 'x' })
     expect(body.tools[0]).toMatchObject({ size: '1024x1024', quality: 'medium' })
   })
 })
@@ -127,6 +138,81 @@ describe('who pays', () => {
     await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(
       /connect a ChatGPT subscription or OpenAI API key/,
     )
+  })
+})
+
+describe('the image-model registry', () => {
+  async function geminiResponse(): Promise<Response> {
+    return new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { data: await tinyPng() } }] } }] }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+
+  it('draws Nano Banana on a connected Gemini key with the aspect ratio', async () => {
+    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'gemini-key', apiKey: 'AIzaTestKey123', connectedAt: 1 })
+    mockedGetImagePref.mockResolvedValue('gemini-3.1-flash-image')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(await geminiResponse())
+
+    const image = await generateImage('u1', { prompt: 'a red circle', aspect: 'landscape' })
+
+    expect(image.billedTo).toBe('Gemini')
+    expect(image.mime).toBe('image/webp')
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(String(url)).toContain('generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image')
+    const headers = init!.headers as Record<string, string>
+    expect(headers['x-goog-api-key']).toBe('AIzaTestKey123')
+    const body = JSON.parse(String(init!.body)) as {
+      generationConfig: { imageConfig: { aspectRatio: string }; responseModalities: string[] }
+    }
+    expect(body.generationConfig.imageConfig.aspectRatio).toBe('3:2')
+    expect(body.generationConfig.responseModalities).toContain('IMAGE')
+  })
+
+  it('draws Seedream on the server ARK key with an explicit size', async () => {
+    mockedGetAccount.mockResolvedValue(null)
+    mockedGetImagePref.mockResolvedValue('seedream-5-0-pro')
+    process.env.ARK_API_KEY = 'ark-server'
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ b64_json: await tinyPng() }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+
+    const image = await generateImage('u1', { prompt: 'a hero backdrop', aspect: 'portrait' })
+
+    expect(image.billedTo).toBe('server')
+    const [url, init] = fetchSpy.mock.calls[0]!
+    expect(String(url)).toContain('bytepluses.com/api/v3/images/generations')
+    const body = JSON.parse(String(init!.body)) as Record<string, unknown>
+    expect(body.model).toBe('seedream-5-0-pro')
+    expect(body.size).toBe('1536x2304')
+    expect(body.response_format).toBe('b64_json')
+    expect(body.watermark).toBe(false)
+  })
+
+  it('refuses an explicit pick whose provider has no credentials, naming the fix', async () => {
+    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'openai-key', apiKey: 'sk-user', connectedAt: 1 })
+    mockedGetImagePref.mockResolvedValue('gemini-3.1-flash-image')
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(/connect a Gemini API key/)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the first server-enabled model when nothing is connected and no pick was made', async () => {
+    mockedGetAccount.mockResolvedValue(null)
+    process.env.GEMINI_API_KEY = 'gm-server'
+    const generator = await generatorFor('u1')
+    expect(generator.ok && generator.label).toBe('server')
+  })
+
+  it('never runs a connected user on the server keys for another provider', async () => {
+    mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'openrouter-key', apiKey: 'sk-or-x', connectedAt: 1 })
+    process.env.OPENAI_API_KEY = 'sk-server'
+    process.env.GEMINI_API_KEY = 'gm-server'
+    const generator = await generatorFor('u1')
+    expect(generator.ok).toBe(false)
   })
 })
 

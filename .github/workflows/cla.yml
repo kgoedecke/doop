@@ -26,3 +26,7 @@ jobs:
           path-to-document: 'https://github.com/kgoedecke/doop/blob/main/CLA.md'
           branch: 'cla-signatures'
           allowlist: kgoedecke,bot*,*[bot],Claude*
+          # Default is true, which locks every merged PR. release-please then cannot comment on or
+          # relabel its own merged release PR, so every later run aborts with "untagged, merged
+          # release PRs outstanding" and no new release PR is ever opened.
+          lock-pullrequest-aftermerge: false

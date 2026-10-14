@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { api } from '../lib/api'
+import { downloadFrameExport } from '../lib/frameExport'
 import { deleteFrameTracked, recordUpdate } from '../lib/history'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelDisclosure, PanelHeader } from './ui/panel'
@@ -131,11 +132,19 @@ export function Inspector({
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3.5 py-2.5">
         <span className="mr-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Export</span>
-        <Button asChild className={exportBtn} title="Download as PNG (2×)">
-          <a href={`/i/${frame.id}.png?scale=2&download`}>PNG</a>
+        <Button
+          className={exportBtn}
+          title="Download as PNG (2×)"
+          onClick={() => void downloadFrameExport(frame, 'png')}
+        >
+          PNG
         </Button>
-        <Button asChild className={exportBtn} title="Download as JPG (2×)">
-          <a href={`/i/${frame.id}.jpg?scale=2&download`}>JPG</a>
+        <Button
+          className={exportBtn}
+          title="Download as JPG (2×)"
+          onClick={() => void downloadFrameExport(frame, 'jpg')}
+        >
+          JPG
         </Button>
         <Button
           className={exportBtn}

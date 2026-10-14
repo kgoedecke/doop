@@ -1,7 +1,11 @@
 import type { RemoteClaudeStatus } from '../../shared/remoteClaude'
+import { useStore } from './store'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
+import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
 import type {
   ActivityItem,
+  ChatMessage,
   Canvas,
   CanvasMeta,
   CardScope,
@@ -37,6 +41,16 @@ export interface SyncKeyInfo {
   lastUsedAt: number | null
   /** synced frames currently on the canvas */
   frames: number
+}
+
+/** An account-scoped bearer credential for /mcp (headless agents). The
+ *  secret exists only on the create response — the list shows `start`. */
+export interface AgentKeyInfo {
+  id: string
+  name: string
+  start: string
+  createdAt: number
+  lastUsedAt: number | null
 }
 
 /** The flow map of a canvas's synced app(s): link hotspots between frames
@@ -118,13 +132,13 @@ export interface Allowance {
   connected: boolean
   /** connected a model account the Doop Agent itself can run on */
   byoModel: boolean
-  byoKind?: ModelAccountKind | 'claude-local' | 'claude-remote'
+  byoKind?: ModelAccountKind | 'claude-local' | 'claude-remote' | 'gemini-cloud'
   byoEmail?: string
   /** free tasks are spent and their own account is carrying the agent */
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key'
+export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -139,6 +153,8 @@ export interface AgentModelOption {
   id: string
   name: string
   blurb: string
+  /** false = the model cannot see screenshots; runs skip visual review */
+  vision?: boolean
 }
 
 export interface ModelAccountStatus {
@@ -151,8 +167,15 @@ export interface ModelAccountStatus {
   connectedAt?: number
   /** false when the server has switched the ChatGPT flow off */
   chatgptEnabled?: boolean
-  /** the tiers a user may pick between */
-  models?: AgentModelOption[]
+  /** the curated menu each provider's picker offers */
+  menus?: Record<ModelAccountKind, AgentModelOption[]>
+}
+
+/** One image-model registry entry's availability for this user. */
+export interface ImageModelStatus {
+  id: string
+  available: boolean
+  selected: boolean
 }
 
 export interface WebsiteImportResult {
@@ -171,6 +194,7 @@ export interface AutomationInput {
 /** The Integrations page: per-provider connection state. A provider the
  *  server has no app credentials for reports `enabled: false`. */
 export interface IntegrationsStatus {
+  [integration: string]: unknown
   meta: {
     enabled: boolean
     connected: boolean
@@ -229,7 +253,7 @@ export function errorMessage(err: unknown, fallback: string): string {
   return fallback
 }
 
-async function req<T>(url: string, init?: RequestInit): Promise<T> {
+export async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
@@ -266,6 +290,17 @@ export const api = {
       headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
       body: JSON.stringify(body),
     }),
+  listWebhooks: () => req<WebhookInfo[]>('/api/webhooks'),
+  createWebhook: (input: { url: string; events: WebhookEventType[] }) =>
+    req<WebhookInfo & { secret: string }>('/api/webhooks', { method: 'POST', body: JSON.stringify(input) }),
+  updateWebhook: (id: string, patch: { url?: string; events?: WebhookEventType[]; enabled?: boolean }) =>
+    req<WebhookInfo>(`/api/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteWebhook: (id: string) => req<{ ok: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
+  rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
+  testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
+  notificationSettings: () => req<NotificationSettings>('/api/notifications'),
+  setNotificationPrefs: (prefs: NotificationPrefs) =>
+    req<NotificationSettings>('/api/notifications', { method: 'PUT', body: JSON.stringify(prefs) }),
   localAgent: () => req<LocalAgentPreference>('/api/local-agent'),
   setLocalAgent: (preference: LocalAgentPreference) =>
     req<LocalAgentPreference>('/api/local-agent', { method: 'PUT', body: JSON.stringify(preference) }),
@@ -318,6 +353,11 @@ export const api = {
   deleteSyncKey: (canvasId: string, keyId: string) =>
     req(`/api/canvases/${canvasId}/sync-keys/${keyId}`, { method: 'DELETE' }),
   syncFlow: (canvasId: string) => req<SyncFlow>(`/api/canvases/${canvasId}/sync-flow`),
+  /* agent keys: bearer credentials for headless MCP clients */
+  listAgentKeys: () => req<AgentKeyInfo[]>('/api/agent-keys'),
+  createAgentKey: (name: string) =>
+    req<AgentKeyInfo & { secret: string }>('/api/agent-keys', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteAgentKey: (keyId: string) => req(`/api/agent-keys/${keyId}`, { method: 'DELETE' }),
   /* GitHub repos connected as import sources */
   listGithubConnections: (canvasId: string) => req<GithubConnectionInfo[]>(`/api/canvases/${canvasId}/github`),
   connectGithub: (canvasId: string, input: { repo: string; token?: string; pass?: string; branch?: string }) =>
@@ -373,10 +413,24 @@ export const api = {
     }
     return res.json() as Promise<{ url: string; mime: string; size: number }>
   },
+  setPages: (
+    canvasId: string,
+    pages: import('../../shared/types').CanvasPageInfo[],
+    expectedPages: import('../../shared/types').CanvasPageInfo[],
+  ) =>
+    req<import('../../shared/types').CanvasPageInfo[]>(`/api/canvases/${canvasId}/pages`, {
+      method: 'PUT',
+      body: JSON.stringify({ pages, expectedPages }),
+    }),
   createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) =>
     req<Frame>(`/api/canvases/${canvasId}/frames`, {
       method: 'POST',
-      body: JSON.stringify({ ...input, actor: actor() }),
+      body: JSON.stringify({
+        pageId:
+          useStore.getState().canvas?.id === canvasId ? (useStore.getState().activePageId ?? undefined) : undefined,
+        ...input,
+        actor: actor(),
+      }),
     }),
   updateFrame: (frameId: string, patch: Partial<Frame>) =>
     req<Frame>('/api/frames/' + frameId, { method: 'PATCH', body: JSON.stringify({ ...patch, actor: actor() }) }),
@@ -409,9 +463,16 @@ export const api = {
     req<ModelAccountStatus>('/api/model-account/openai-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   connectAnthropicKey: (apiKey: string) =>
     req<ModelAccountStatus>('/api/model-account/anthropic-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectOpenRouterKey: (apiKey: string) =>
+    req<ModelAccountStatus>('/api/model-account/openrouter-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectGeminiKey: (apiKey: string) =>
+    req<ModelAccountStatus>('/api/model-account/gemini-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),
+  imageModels: () => req<{ models: ImageModelStatus[] }>('/api/image-model'),
+  setImageModel: (model: string) =>
+    req<{ models: ImageModelStatus[] }>('/api/image-model', { method: 'PUT', body: JSON.stringify({ model }) }),
   addCard: (canvasId: string, title: string, agents: string[], attachments?: string[], scope?: CardScope) =>
     req(`/api/canvases/${canvasId}/cards`, {
       method: 'POST',
@@ -421,6 +482,8 @@ export const api = {
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),
   retryCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
+  sendChat: (canvasId: string, text: string) =>
+    req<ChatMessage>(`/api/canvases/${canvasId}/chat`, { method: 'POST', body: JSON.stringify({ text }) }),
   addComment: (frameId: string, input: { selector: string; snippet: string; text: string }) =>
     req(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
   replyComment: (commentId: string, text: string) =>

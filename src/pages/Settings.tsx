@@ -4,9 +4,24 @@ import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { openCanvasTab } from '../lib/desktop'
 import { ModelAccountPanel } from '../components/ModelAccount'
+import { ImageModelCard } from '../components/ImageModelCard'
 import { useAllowance } from '../components/TeamAllowance'
+import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import { AccountSettings } from '../components/AccountSettings'
-import { AccountMenu, ConnectCard, IconBack, IconChevron, IconSpark, IconUser } from '../components/DashShell'
+import { AppearanceSettings } from '../components/AppearanceSettings'
+import { AgentKeys } from '../components/AgentKeys'
+import { Webhooks } from '../components/Webhooks'
+import {
+  AccountMenu,
+  ConnectCard,
+  IconBack,
+  IconChevron,
+  IconKey,
+  IconSpark,
+  IconTheme,
+  IconUser,
+  IconWebhooks,
+} from '../components/DashShell'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { Wordmark } from '../components/ui/wordmark'
@@ -24,7 +39,32 @@ import {
   DashTitle,
 } from '../components/ui/dash'
 
-type Pane = 'agent' | 'account'
+type Pane = 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
+
+/* the heading over each pane, and the line under it */
+const panes: Record<Pane, { title: string; blurb: string }> = {
+  agent: { title: 'Doop Agent', blurb: 'Which model account the agent runs on, for every canvas you work on.' },
+  keys: { title: 'Agent keys', blurb: 'Bearer credentials that let headless agents design as you.' },
+  webhooks: {
+    title: 'Webhooks',
+    blurb: 'HTTP calls to your systems when something happens on a canvas you can open.',
+  },
+  account: { title: 'Your account', blurb: 'Who you are on every canvas — and how you get back into this one.' },
+  appearance: {
+    title: 'Appearance',
+    blurb: 'How Doop looks in this browser: light, dark, or whatever your system is.',
+  },
+}
+
+function isPane(value: string | null): value is Pane {
+  return value !== null && value in panes
+}
+
+/** ?pane= deep-links a section — the connect modal sends people to ?pane=keys. */
+function initialPane(): Pane {
+  const pane = new URLSearchParams(location.search).get('pane')
+  return isPane(pane) ? pane : 'agent'
+}
 
 /**
  * Account settings. Today it holds one thing — which model account the Doop
@@ -38,7 +78,7 @@ type Pane = 'agent' | 'account'
 export function Settings() {
   /* the sub-nav switches panes rather than scrolling to an anchor — on a page
      this short an anchor jump looks like nothing happened */
-  const [pane, setPane] = useState<Pane>('agent')
+  const [pane, setPane] = useState<Pane>(initialPane)
   const { allowance, refresh } = useAllowance()
   const left = allowance ? Math.max(0, allowance.limit - allowance.used) : null
   /* arriving from a canvas (the free-tier wall) should not cost you your
@@ -56,9 +96,11 @@ export function Settings() {
     ? allowance.byoModel
       ? allowance.byoKind === 'claude-remote'
         ? 'Claude Plan selected — runs on your Claude account.'
-        : allowance.byoKind === 'claude-local'
-          ? 'Claude CLI selected — runs on your connected desktop.'
-          : `Running on your ${allowance.byoKind === 'anthropic-key' ? 'Claude API key' : allowance.byoKind === 'openai-key' ? 'OpenAI key' : 'ChatGPT subscription'}.`
+        : allowance.byoKind === 'gemini-cloud'
+          ? 'Gemini cloud pilot selected — connection managed by your operator.'
+          : allowance.byoKind === 'claude-local'
+            ? 'Claude CLI selected — runs on your connected desktop.'
+            : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
       : allowance.limit <= 0
         ? 'No free tasks on this server — connect an account to use the Doop Agent.'
         : left === 0
@@ -84,8 +126,17 @@ export function Settings() {
           <DashNavItem icon={<IconSpark />} active={pane === 'agent'} onClick={() => setPane('agent')}>
             Doop Agent
           </DashNavItem>
+          <DashNavItem icon={<IconKey />} active={pane === 'keys'} onClick={() => setPane('keys')}>
+            Agent keys
+          </DashNavItem>
+          <DashNavItem icon={<IconWebhooks />} active={pane === 'webhooks'} onClick={() => setPane('webhooks')}>
+            Webhooks
+          </DashNavItem>
           <DashNavItem icon={<IconUser />} active={pane === 'account'} onClick={() => setPane('account')}>
             Your account
+          </DashNavItem>
+          <DashNavItem icon={<IconTheme />} active={pane === 'appearance'} onClick={() => setPane('appearance')}>
+            Appearance
           </DashNavItem>
         </nav>
 
@@ -118,12 +169,8 @@ export function Settings() {
         <DashContent>
           <div className="flex items-start gap-4 md:items-end">
             <div>
-              <DashTitle>{pane === 'agent' ? 'Doop Agent' : 'Your account'}</DashTitle>
-              <DashSubtitle>
-                {pane === 'agent'
-                  ? 'Which model account the agent runs on, for every canvas you work on.'
-                  : 'Who you are on every canvas — and how you get back into this one.'}
-              </DashSubtitle>
+              <DashTitle>{panes[pane].title}</DashTitle>
+              <DashSubtitle>{panes[pane].blurb}</DashSubtitle>
             </div>
           </div>
 
@@ -132,8 +179,17 @@ export function Settings() {
               <TabsTrigger value="agent">
                 <IconSpark /> Doop Agent
               </TabsTrigger>
+              <TabsTrigger value="keys">
+                <IconKey /> Agent keys
+              </TabsTrigger>
+              <TabsTrigger value="webhooks">
+                <IconWebhooks /> Webhooks
+              </TabsTrigger>
               <TabsTrigger value="account">
-                <IconUser /> Your account
+                <IconUser /> Account
+              </TabsTrigger>
+              <TabsTrigger value="appearance">
+                <IconTheme /> Appearance
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -163,9 +219,16 @@ export function Settings() {
                 </CardHeader>
                 <ModelAccountPanel onChange={refresh} />
               </Card>
+              <ImageModelCard />
             </>
-          ) : (
+          ) : pane === 'keys' ? (
+            <AgentKeys />
+          ) : pane === 'webhooks' ? (
+            <Webhooks />
+          ) : pane === 'account' ? (
             <AccountSettings />
+          ) : (
+            <AppearanceSettings />
           )}
         </DashContent>
       </DashMain>

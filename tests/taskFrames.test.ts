@@ -97,3 +97,33 @@ describe('a claimed card next to a status task', () => {
     expect(tasks.find((t) => !t.queuedBy)?.frameIds).toEqual([frame.id])
   })
 })
+
+describe('status runs', () => {
+  it('keeps the run start once the task log has trimmed its first status', async () => {
+    const { agentActivityState } = await import('../shared/agentActivity.ts')
+    vi.useFakeTimers({ now: 1_000_000 })
+    try {
+      actions.setAgentStatus(canvasId, agent, 'Step 0')
+      for (let i = 1; i <= 120; i++) {
+        vi.advanceTimersByTime(1000)
+        actions.setAgentStatus(canvasId, agent, `Step ${i}`)
+      }
+      const tasks = actions.getTasks(canvasId)
+      expect(tasks.some((t) => t.status === 'Step 0')).toBe(false)
+      expect(agentActivityState('Canvas', tasks)).toMatchObject({
+        status: 'Step 120',
+        steps: ['Step 118', 'Step 119'],
+        startedAt: 1000,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('starts a new run after the agent cleared its status', () => {
+    actions.setAgentStatus(canvasId, agent, 'Before')
+    actions.setAgentStatus(canvasId, agent, '')
+    actions.setAgentStatus(canvasId, agent, 'After')
+    expect(actions.getTasks(canvasId)[0]?.runStartedAt).toBeUndefined()
+  })
+})

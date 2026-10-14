@@ -3,6 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- Paints the saved theme before the bundle loads, so a reload never
+         flashes light. src/lib/theme.ts owns the key and takes over after. -->
+    <script>
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('doop-theme')
+          var dark = saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.classList.toggle('dark', dark)
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {}
+      })()
+    </script>
     <title>Doop — designed by Agents &amp; Humans</title>
     <meta
       name="description"

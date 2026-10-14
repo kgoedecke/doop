@@ -1,0 +1,45 @@
+# Vendored from DioxusLabs/blitz at 0f60502ea724ef703b34220b3847bb3483f70b5f with one
+# fix (src/filters.rs, src/render.rs): CSS filter lengths are scaled by the paint
+# scale, so blur radii and drop-shadow offsets stay in CSS pixels at every zoom.
+# Everything else is the upstream crate; drop this directory once the fix lands
+# upstream and remove the [patch] entry in ../../rust/Cargo.toml.
+[package]
+name = "blitz-paint"
+description = "Paint a Blitz Document using anyrender"
+documentation = "https://docs.rs/blitz-paint"
+version = "0.3.0-beta.2"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/DioxusLabs/blitz"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[features]
+default = ["svg"]
+tracing = ["dep:tracing"]
+svg = ["dep:anyrender_svg", "dep:usvg", "blitz-dom/svg"]
+custom-widget = ["blitz-dom/custom-widget"]
+font-embolden = []
+apple-font-embolden = []
+# Paint overlay scrollbar thumbs on scroll containers, and enable their
+# drag/hover interaction in blitz-dom (off by default while the feature
+# matures).
+scrollbars = ["blitz-dom/scrollbars"]
+
+[dependencies]
+anyrender = { version = "0.14.0" }
+anyrender_svg = { version = "0.15.0", optional = true }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "0f60502ea724ef703b34220b3847bb3483f70b5f", default-features = false }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "0f60502ea724ef703b34220b3847bb3483f70b5f", default-features = false }
+style = { version = "0.22.0", package = "stylo" }
+euclid = "0.22"
+taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "49152ca29664f9687c714c7732d88ff07d62110a", default-features = false }
+parley = { git = "https://github.com/linebender/parley", rev = "718dcb721941fd8e72128833122d31f5a4e80504", default-features = false, features = ["std", "bytemuck"] }
+skrifa = { version = "0.44", default-features = false }
+color = "0.3"
+peniko = "0.6.0"
+kurbo = "0.13.1"
+usvg = { version = "0.48.1", optional = true }
+bytemuck = "1"
+smallvec = "1"
+tracing = { version = "0.1.40", optional = true }

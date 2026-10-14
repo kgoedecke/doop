@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { canvasPages, pageFrames } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
 import type { Canvas, CommunityCategory, Frame, GuidelineDoc, MemoryReference } from '../shared/types.ts'
 
@@ -13,8 +14,18 @@ class Store {
 
   init(canvases: Canvas[]) {
     for (const c of canvases) {
+      c.pages = canvasPages(c)
       this.canvases.set(c.id, c)
-      for (const f of c.frames) this.frameIndex.set(f.id, c.id)
+      for (const f of c.frames) {
+        /* A frame whose page is gone (the server died between a frame move
+           and the page's deletion: moves persist on a debounce, pages at
+           once) rejoins the first page instead of vanishing from every page. */
+        if (!f.pageId || !c.pages.some((page) => page.id === f.pageId)) {
+          f.pageId = c.pages[0]!.id
+          persist.saveFrame(f, true)
+        }
+        this.frameIndex.set(f.id, c.id)
+      }
     }
   }
 
@@ -60,6 +71,12 @@ class Store {
    *  A deliberately separate method rather than a flag on listCanvases: a
    *  boolean parameter is the kind of thing that eventually gets passed
    *  `true` from a route that shouldn't. */
+  /** Every canvas, unfiltered and unsummarised, for server-side loops that
+   *  apply their own access check per user (Live Activity push-to-start). */
+  allCanvases(): Canvas[] {
+    return [...this.canvases.values()]
+  }
+
   listAllCanvases(limit = 200) {
     const all = [...this.canvases.values()].sort((a, b) => b.updatedAt - a.updatedAt)
     return {
@@ -77,6 +94,7 @@ class Store {
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
     this.canvases.set(canvas.id, canvas)
+    canvas.pages = canvasPages(canvas)
     persist.saveCanvas(canvas)
     return canvas
   }
@@ -122,6 +140,7 @@ class Store {
       createdAt: now,
       updatedAt: now,
       frames,
+      pages: canvasPages(source).map((page) => ({ ...page })),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
       ...(references?.length ? { references } : {}),
@@ -130,6 +149,22 @@ class Store {
     this.canvases.set(canvas.id, canvas)
     for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
     return canvas
+  }
+
+  setPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[]) {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return undefined
+    const firstId = canvasPages(canvas)[0]!.id
+    for (const frame of canvas.frames) {
+      if (!frame.pageId) {
+        frame.pageId = firstId
+        persist.saveFrame(frame, true)
+      }
+    }
+    canvas.pages = pages
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return pages
   }
 
   getCanvas(id: string) {
@@ -381,23 +416,36 @@ class Store {
 
   createFrame(
     canvasId: string,
-    input: { name: string; x?: number; y?: number; width?: number; height?: number; html?: string; demo?: boolean },
+    input: {
+      name: string
+      pageId?: string
+      x?: number
+      y?: number
+      width?: number
+      height?: number
+      html?: string
+      demo?: boolean
+    },
     by: string,
   ): Frame | undefined {
     const c = this.canvases.get(canvasId)
     if (!c) return undefined
+    const pageId = input.pageId ?? canvasPages(c)[0]!.id
+    if (!canvasPages(c).some((page) => page.id === pageId)) return undefined
+    const frames = pageFrames(c, pageId)
     const now = Date.now()
     // auto-place: to the right of the right-most frame
     let x = input.x
     let y = input.y
     if (x === undefined || y === undefined) {
-      const rightmost = c.frames.reduce((mx, f) => Math.max(mx, f.x + f.width), 0)
-      x ??= c.frames.length ? rightmost + 80 : 120
+      const rightmost = frames.reduce((mx, f) => Math.max(mx, f.x + f.width), 0)
+      x ??= frames.length ? rightmost + 80 : 120
       y ??= 120
     }
     const frame: Frame = {
       id: nanoid(10),
       canvasId,
+      pageId,
       name: input.name,
       x,
       y,
@@ -419,11 +467,16 @@ class Store {
 
   updateFrame(
     frameId: string,
-    patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
+    patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
     by: string,
   ): Frame | undefined {
     const frame = this.getFrame(frameId)
     if (!frame) return undefined
+    if (
+      patch.pageId !== undefined &&
+      !canvasPages(this.canvases.get(frame.canvasId)!).some((p) => p.id === patch.pageId)
+    )
+      return undefined
     Object.assign(frame, patch)
     frame.updatedAt = Date.now()
     frame.updatedBy = by

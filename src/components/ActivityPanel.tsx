@@ -13,6 +13,9 @@ import { PanelCollapseRightIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
+import { ChatPanel } from './ChatPanel'
+import { taskFrameId } from '../lib/taskFrame'
+import { useChatUnread } from '../lib/chatUnread'
 
 const emptyNote = 'px-4 py-6 text-center text-[13px] text-ink-faint'
 
@@ -21,23 +24,6 @@ const emptyNote = 'px-4 py-6 text-center text-[13px] text-ink-faint'
 function reportLimit(err: unknown) {
   if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
   else console.error(err)
-}
-
-/** The frame a task is "at": the last frame it touched that still exists,
- *  or — for a task still running before any edit landed — wherever the agent
- *  is currently focused or streaming. Undefined when there is nowhere to go. */
-function taskFrameId(task: AgentTask, s: ReturnType<typeof useStore.getState>): string | undefined {
-  const frames = s.canvas?.frames ?? []
-  const exists = (id: string | null | undefined) => (id && frames.some((f) => f.id === id) ? id : undefined)
-  for (let i = (task.frameIds?.length ?? 0) - 1; i >= 0; i--) {
-    const id = exists(task.frameIds?.[i])
-    if (id) return id
-  }
-  if (task.endedAt || task.failedAt) return undefined
-  const live = Object.values(s.presences).find((p) => p.kind === 'agent' && p.name === task.agentName)
-  const focused = exists(live?.activeFrameId)
-  if (focused) return focused
-  return exists(Object.entries(s.streams).find(([, actor]) => actor.name === task.agentName)?.[0])
 }
 
 function duration(t: AgentTask): string {
@@ -60,6 +46,7 @@ export function ActivityPanel({
   const tab = useStore((s) => s.panelTab)
   const setTab = useStore((s) => s.setPanelTab)
   const [, tick] = useState(0)
+  const unread = useChatUnread()
 
   /* refresh relative timestamps and running durations */
   useEffect(() => {
@@ -73,6 +60,19 @@ export function ActivityPanel({
         <PanelHeader>
           <PanelTabs>
             <PanelTab value="tasks">Agents</PanelTab>
+            <PanelTab
+              value="chat"
+              className="relative"
+              title={unread ? `Chat · ${unread} new` : 'Talk to the room — @mention an agent to hand it a task'}
+            >
+              Chat
+              {/* new messages while another tab is open: a count on the tab itself */}
+              {unread > 0 && (
+                <span className="absolute -top-1 -right-1.5 grid h-[14px] min-w-[14px] place-items-center rounded-lg bg-accent-ink px-[3px] font-mono text-[8px] font-medium normal-case tracking-normal text-white">
+                  {unread > 99 ? '99+' : unread}
+                </span>
+              )}
+            </PanelTab>
             <PanelTab value="activity">Activity</PanelTab>
             <PanelTab
               value="memory"
@@ -95,6 +95,9 @@ export function ActivityPanel({
         </PanelHeader>
         <PanelTabPanel value="tasks">
           <TaskList />
+        </PanelTabPanel>
+        <PanelTabPanel value="chat">
+          <ChatPanel active={tab === 'chat'} />
         </PanelTabPanel>
         <PanelTabPanel value="activity">
           <ActivityList />

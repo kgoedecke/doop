@@ -10,7 +10,32 @@ import {
   primaryKey,
   jsonb,
 } from 'drizzle-orm/pg-core'
+import type { CanvasPageInfo } from '../../shared/types.ts'
 import type { Schedule, Step } from '../../shared/automations.ts'
+
+/** ActivityKit tokens are delivery secrets: never return them through read APIs. */
+export const liveActivities = pgTable('live_activities', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  canvasId: text('canvas_id').notNull(),
+  token: text('token').notNull().unique(),
+  environment: text('environment').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  lastPayload: text('last_payload'),
+  lastTimestamp: bigint('last_timestamp', { mode: 'number' }).notNull().default(0),
+})
+
+/** Push-to-start tokens (iOS 17.2+): one per device and server origin, so the
+ *  server can start a Live Activity for an agent task on any canvas the user
+ *  belongs to, app open or not. Delivery secrets like the update tokens above. */
+export const liveActivityStarters = pgTable('live_activity_starters', {
+  token: text('token').primaryKey(),
+  userId: text('user_id').notNull(),
+  environment: text('environment').notNull(),
+  /** the server origin string the app uses, echoed into the activity's attributes */
+  origin: text('origin').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+})
 
 /**
  * One Postgres-dialect schema for every environment: PGlite (embedded, file
@@ -21,6 +46,7 @@ import type { Schedule, Step } from '../../shared/automations.ts'
  */
 
 export const canvases = pgTable('canvases', {
+  pages: jsonb('pages').$type<CanvasPageInfo[]>(),
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerId: text('owner_id'),
@@ -124,6 +150,7 @@ export const canvasMembers = pgTable(
 export const frames = pgTable(
   'frames',
   {
+    pageId: text('page_id'),
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
     name: text('name').notNull(),
@@ -193,6 +220,30 @@ export const syncEdges = pgTable(
     lastAt: bigint('last_at', { mode: 'number' }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.keyId, t.fromPage, t.toPage] })],
+)
+
+/** Agent keys: account-scoped bearer credentials for the /mcp endpoint — the
+ *  headless counterpart to the MCP OAuth flow, for agents with no browser to
+ *  approve in (Mastra, n8n, CI). A key acts as its owner: every MCP call it
+ *  authenticates goes through the same canvas-access gate as an OAuth
+ *  session. Unlike sync keys the secret is hashed at rest — it grants the
+ *  account's full agent surface, not a single write-only drop box — and is
+ *  shown once, at mint time. `start` keeps the first characters so the list
+ *  UI can say which key is which. Revocation = row deletion, checked on
+ *  every request. */
+export const agentKeys = pgTable(
+  'agent_keys',
+  {
+    id: text('id').primaryKey(),
+    /** sha256 hex of the full secret; the secret itself is never stored */
+    secretHash: text('secret_hash').notNull(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    start: text('start').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+  },
+  (t) => [index('agent_keys_user_idx').on(t.userId), uniqueIndex('agent_keys_hash_idx').on(t.secretHash)],
 )
 
 /** A GitHub repo connected to a canvas as an import source. Two credential
@@ -302,6 +353,27 @@ export const comments = pgTable(
     parentId: text('parent_id'),
   },
   (t) => [index('comments_canvas_idx').on(t.canvasId)],
+)
+
+/** The canvas chat. Rows are immutable: a message that queued a card points
+ *  at it through task_id, an agent's answer points back through reply_to_id. */
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    fromName: text('from_name').notNull(),
+    fromKind: text('from_kind').notNull(),
+    fromUserId: text('from_user_id'),
+    color: text('color').notNull(),
+    text: text('text').notNull(),
+    at: bigint('at', { mode: 'number' }).notNull(),
+    /** comma-joined agent-role ids the text @mentions, in order */
+    mentions: text('mentions'),
+    taskId: text('task_id'),
+    replyToId: text('reply_to_id'),
+  },
+  (t) => [index('chat_messages_canvas_idx').on(t.canvasId)],
 )
 
 /** Uploaded image assets: metadata only — bytes live in object storage (or
@@ -572,3 +644,90 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
   enabled: boolean('enabled').notNull().default(false),
   model: text('model').notNull().default('default'),
 })
+
+/** Per-user notification switches. No row means everything is on: comment
+ *  email is opt-out, so the person who shared a review link hears about the
+ *  feedback without first finding a setting. */
+export const notificationPrefs = pgTable('notification_prefs', {
+  userId: text('user_id').primaryKey(),
+  commentEmails: boolean('comment_emails').notNull().default(true),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** Outbound webhooks: per-user endpoints told about events on the canvases
+ *  that user durably has access to (owner, invited, workspace). The secret
+ *  signs every delivery (HMAC), so it is stored as-is, like an integration
+ *  token. Delivery health lives on the row so the settings page can show it. */
+export const webhooks = pgTable(
+  'webhooks',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    url: text('url').notNull(),
+    secret: text('secret').notNull(),
+    /** subscribed event names (shared/webhooks.ts WEBHOOK_EVENTS) */
+    events: jsonb('events').$type<string[]>().notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    lastStatus: integer('last_status'),
+    lastAt: bigint('last_at', { mode: 'number' }),
+    lastError: text('last_error'),
+    /** consecutive failed deliveries; the hook pauses itself past a ceiling */
+    failures: integer('failures').notNull().default(0),
+  },
+  (t) => [index('webhooks_user_idx').on(t.userId)],
+)
+
+/** Which image model generate_image draws with, per user. Separate from
+ *  model_accounts because a server-tier user (no account row) still picks
+ *  among the server-enabled image models. */
+export const imagePrefs = pgTable('image_prefs', {
+  userId: text('user_id').primaryKey(),
+  model: text('model').notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** One app-actor installation per Linear workspace, billed to its installer. */
+export const linearInstallations = pgTable('linear_installations', {
+  organizationId: text('organization_id').primaryKey(),
+  userId: text('user_id').notNull().unique(),
+  appUserId: text('app_user_id').notNull(),
+  name: text('name').notNull(),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+})
+
+export const linearOAuthStates = pgTable('linear_oauth_states', {
+  hash: text('hash').primaryKey(),
+  userId: text('user_id').notNull(),
+  verifier: text('verifier').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+})
+
+/** A durable inbox and result outbox. Session IDs deduplicate Linear retries. */
+export const linearSessions = pgTable(
+  'linear_sessions',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id').notNull(),
+    userId: text('user_id').notNull(),
+    issueId: text('issue_id'),
+    title: text('title').notNull(),
+    prompt: text('prompt').notNull(),
+    status: text('status').notNull().default('pending'),
+    canvasId: text('canvas_id'),
+    taskId: text('task_id'),
+    error: text('error'),
+    ackId: text('ack_id').notNull(),
+    resultId: text('result_id').notNull(),
+    nextAttemptAt: bigint('next_attempt_at', { mode: 'number' }).notNull().default(0),
+    linked: boolean('linked').notNull().default(false),
+    acknowledged: boolean('acknowledged').notNull().default(false),
+    reported: boolean('reported').notNull().default(false),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('linear_sessions_status_idx').on(t.status)],
+)

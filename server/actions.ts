@@ -3,14 +3,24 @@ import { store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
-import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
+import {
+  DEFAULT_ROLE_ID,
+  mentionedRole,
+  mentionedRoles,
+  normalizePipeline,
+  roleByAgentName,
+  roleName,
+  stripMentions,
+} from '../shared/agents.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
+import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
   ActorKind,
   ActivityItem,
   AgentTask,
   CardScope,
+  ChatMessage,
   DesignDecision,
   ElementComment,
   Frame,
@@ -53,6 +63,7 @@ export function hydrateLogs(data: {
   tasks: Map<string, AgentTask[]>
   feedback: Map<string, TaskFeedback[]>
   comments: Map<string, ElementComment[]>
+  chat?: Map<string, ChatMessage[]>
   activity: Map<string, ActivityItem[]>
   decisions: Map<string, DesignDecision[]>
   proposals: Map<string, MemoryProposal[]>
@@ -60,6 +71,8 @@ export function hydrateLogs(data: {
   for (const [canvasId, list] of data.tasks) taskLog.set(canvasId, list)
   for (const [canvasId, list] of data.feedback) feedbackLog.set(canvasId, list)
   for (const [canvasId, list] of data.comments) commentLog.set(canvasId, list)
+  chatLog.clear()
+  for (const [canvasId, list] of data.chat ?? []) chatLog.set(canvasId, list)
   for (const [canvasId, list] of data.activity) activityLog.set(canvasId, list)
   for (const [canvasId, list] of data.decisions) decisionLog.set(canvasId, list)
   for (const [canvasId, list] of data.proposals) proposalLog.set(canvasId, list)
@@ -261,6 +274,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
      narrates work ON a card, it doesn't end it */
   const open = list.find((t) => sameAgent(t, actor) && !t.endedAt && !t.queuedBy)
   if (open?.status === clean) return // same status re-posted: nothing new
+  const runStartedAt = open ? (open.runStartedAt ?? open.startedAt) : undefined
   if (open) {
     open.endedAt = Date.now()
     persist.saveTask(canvasId, open)
@@ -274,6 +288,7 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
       color: actor.color,
       status: clean,
       startedAt: Date.now(),
+      ...(runStartedAt ? { runStartedAt } : {}),
     }
     list.unshift(task)
     if (list.length > 100) list.length = 100
@@ -291,6 +306,97 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
 /* ------------------------------------------------------------------ */
 
 const feedbackLog = new Map<string, TaskFeedback[]>() // canvasId -> entries (newest first)
+
+/* ---- canvas chat ---- */
+
+const chatLog = new Map<string, ChatMessage[]>() // canvasId -> messages (newest first)
+
+export const MAX_CHAT_CHARS = 4_000
+/** an agent's closing summary is a paragraph, not the whole transcript */
+const MAX_CHAT_REPLY_CHARS = 1_500
+
+export function getChat(canvasId: string): ChatMessage[] {
+  return chatLog.get(canvasId) ?? []
+}
+
+function pushChat(message: ChatMessage) {
+  const list = chatLog.get(message.canvasId) ?? []
+  list.unshift(message)
+  const dropped = list.splice(persist.CHAT_LOG_CAP).map((m) => m.id)
+  chatLog.set(message.canvasId, list)
+  persist.saveChat(message)
+  persist.deleteChat(dropped)
+  broadcast(message.canvasId, { type: 'chat', message })
+}
+
+/** A human says something in the canvas chat. @mentioning resident agents
+ *  turns the message into a board card for them, in mention order — the
+ *  message keeps the card's id so the chat can show where the work stands. */
+export function addChatMessage(
+  canvasId: string,
+  text: string,
+  from: string,
+  fromUserId?: string,
+): ChatMessage | undefined {
+  const clean = text.trim().slice(0, MAX_CHAT_CHARS)
+  if (!clean || !store.getCanvas(canvasId)) return undefined
+  const roles = mentionedRoles(clean)
+  const card =
+    roles.length > 0
+      ? addQueuedCard(
+          canvasId,
+          stripMentions(clean) || clean,
+          from,
+          roles.map((r) => r.id),
+          undefined,
+          fromUserId,
+        )
+      : undefined
+  const list = chatLog.get(canvasId) ?? []
+  const message: ChatMessage = {
+    id: nanoid(8),
+    canvasId,
+    from,
+    fromKind: 'user',
+    ...(fromUserId ? { fromUserId } : {}),
+    color: colorFor(from),
+    text: clean,
+    /* strictly increasing per canvas so the thread order survives a restart */
+    at: Math.max(Date.now(), (list[0]?.at ?? 0) + 1),
+    ...(roles.length > 0 ? { mentions: roles.map((r) => r.id) } : {}),
+    ...(card ? { taskId: card.id } : {}),
+  }
+  pushChat(message)
+  return message
+}
+
+/** An agent answers the chat message that queued one of its cards. Nothing
+ *  is posted for cards that came from the board — those have no thread. */
+export function chatReplyForCard(
+  canvasId: string,
+  cardId: string,
+  actor: Actor,
+  text: string,
+): ChatMessage | undefined {
+  const asked = (chatLog.get(canvasId) ?? []).find((m) => m.taskId === cardId && m.fromKind === 'user')
+  if (!asked) return undefined
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return undefined
+  const list = chatLog.get(canvasId) ?? []
+  const message: ChatMessage = {
+    id: nanoid(8),
+    canvasId,
+    from: actor.name,
+    fromKind: 'agent',
+    color: actor.color,
+    text: clean.length > MAX_CHAT_REPLY_CHARS ? clean.slice(0, MAX_CHAT_REPLY_CHARS - 1) + '…' : clean,
+    at: Math.max(Date.now(), (list[0]?.at ?? 0) + 1),
+    taskId: cardId,
+    replyToId: asked.id,
+  }
+  pushChat(message)
+  return message
+}
 
 export function getFeedback(canvasId: string): TaskFeedback[] {
   return feedbackLog.get(canvasId) ?? []
@@ -543,6 +649,12 @@ function postComment(
        an API key). Dynamic import: resident depends on this module. */
     import('./resident.ts').then((r) => r.onFeedback(frame.canvasId)).catch(() => {})
   }
+  emitCanvasEvent(frame.canvasId, {
+    type: anchor.parentId ? 'comment.replied' : 'comment.created',
+    comment,
+    frame,
+    actorKind: kind,
+  })
   return comment
 }
 
@@ -633,6 +745,7 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
         })
       }
     }
+    emitCanvasEvent(canvasId, { type: 'comment.resolved', comment: c, frame: store.getFrame(c.frameId), by })
     return c
   }
   return undefined
@@ -798,6 +911,14 @@ export function addQueuedCard(
   return card
 }
 
+/** Publish a board card already committed by a durable integration job. */
+export function publishQueuedCard(canvasId: string, card: AgentTask): void {
+  const list = taskLog.get(canvasId) ?? []
+  if (list.some((task) => task.id === card.id)) return
+  taskLog.set(canvasId, trimTaskLog([card, ...list]))
+  broadcast(canvasId, { type: 'task', task: card })
+}
+
 const TASK_LOG_CAP = 100
 
 /** Keep the task log at its cap without losing open work: the oldest FINISHED
@@ -952,17 +1073,21 @@ export function completeCard(canvasId: string, cardId: string): AgentTask | unde
   card.endedAt = Date.now()
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
+  emitCanvasEvent(canvasId, { type: 'task.completed', task: card })
   return card
 }
 
-/** An unsuccessful card stays paused until a human explicitly retries it. */
+/** An unsuccessful card stays paused until a human explicitly retries it.
+ *  Failing it again before that retry changes nothing — the first reason
+ *  stands, and the failure is announced once. */
 export function failCard(canvasId: string, cardId: string, reason: string): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
-  if (!card || card.endedAt) return card
+  if (!card || card.endedAt || card.failedAt) return card
   card.failedAt = Date.now()
   card.failureReason = reason
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
+  emitCanvasEvent(canvasId, { type: 'task.failed', task: card, reason })
   return card
 }
 
@@ -1144,9 +1269,23 @@ export function appendFrameHtml(
 
 /* ------------------------------------------------------------------ */
 
+export function setCanvasPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[], actor: Actor) {
+  store.setPages(canvasId, pages)
+  broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+}
+
 export function createFrame(
   canvasId: string,
-  input: { name: string; x?: number; y?: number; width?: number; height?: number; html?: string; demo?: boolean },
+  input: {
+    name: string
+    pageId?: string
+    x?: number
+    y?: number
+    width?: number
+    height?: number
+    html?: string
+    demo?: boolean
+  },
   actor: Actor,
 ): Frame | undefined {
   if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
@@ -1162,12 +1301,13 @@ export function createFrame(
   }
   logActivity(canvasId, actor, `created frame “${frame.name}”`, frame.id)
   touch(canvasId, actor, frame.id)
+  emitCanvasEvent(canvasId, { type: 'frame.created', frame, actor })
   return frame
 }
 
 export function updateFrame(
   frameId: string,
-  patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
+  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
   actor: Actor,
 ): Frame | undefined {
   const before = store.getFrame(frameId)
@@ -1175,7 +1315,8 @@ export function updateFrame(
   if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
   const prevName = before.name
   const prevHtml = before.html
-  const frame = store.updateFrame(frameId, patch, actor.name)!
+  const frame = store.updateFrame(frameId, patch, actor.name)
+  if (!frame) return undefined
 
   const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
   if (htmlChanged && actor.kind === 'agent') {
@@ -1241,6 +1382,7 @@ export function deleteCanvas(canvasId: string): boolean {
   taskLog.delete(canvasId)
   feedbackLog.delete(canvasId)
   commentLog.delete(canvasId)
+  chatLog.delete(canvasId)
   activityLog.delete(canvasId)
   decisionLog.delete(canvasId)
   proposalLog.delete(canvasId)

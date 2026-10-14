@@ -9,8 +9,23 @@ vi.mock('../server/modelAccounts.ts', () => ({
 vi.mock('../server/localAgentRuns.ts', () => ({ localAgentRuns: { online: mocks.online, start: vi.fn() } }))
 import { pickModel } from '../server/agentModel.ts'
 
-afterEach(() => vi.clearAllMocks())
+afterEach(() => {
+  vi.clearAllMocks()
+  vi.unstubAllEnvs()
+})
 describe('local provider routing', () => {
+  it('routes an explicitly configured pilot user through the cloud harness without touching paid API accounts', async () => {
+    vi.stubEnv(
+      'DOOP_GEMINI_CLOUD_WORKERS',
+      JSON.stringify({ alice: { url: 'https://worker.example', token: 'x'.repeat(32) } }),
+    )
+    const model = await pickModel('alice')
+    expect(model).toMatchObject({ provider: 'gemini-cloud', userId: 'alice' })
+    expect(model?.runHarness).toBeTypeOf('function')
+    expect(mocks.preference).not.toHaveBeenCalled()
+    expect(mocks.account).not.toHaveBeenCalled()
+    await expect(model!.run({ system: [], messages: [], tools: [], maxTokens: 1 })).rejects.toThrow('canvas tasks only')
+  })
   it('never falls back to the connected server account when Claude is offline', async () => {
     mocks.preference.mockResolvedValue({ enabled: true, model: 'sonnet' })
     mocks.online.mockReturnValue(false)

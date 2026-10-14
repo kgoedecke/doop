@@ -9,6 +9,8 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
   Activity,
+  Bell,
+  ChatBubble,
   Building,
   CreditCard,
   Lock,
@@ -16,8 +18,11 @@ import {
   Attachment,
   Brain,
   Compass,
+  Computer,
   Group,
+  HalfMoon,
   HelpCircle,
+  Key,
   LogOut,
   Menu,
   NavArrowLeft,
@@ -30,6 +35,7 @@ import {
   Check,
   Compress,
   Copy,
+  Puzzle,
   DesignNib,
   FrameAltEmpty,
   Github,
@@ -48,6 +54,7 @@ import {
   SidebarExpand,
   SparkSolid,
   Square,
+  SunLight,
   Text,
   Trash,
   Xmark,
@@ -77,6 +84,8 @@ export const GithubIcon = icon(Github)
 export const SyncIcon = icon(RefreshDouble)
 export const ImportIcon = icon(Import)
 export const PulseIcon = icon(Activity)
+export const BellIcon = icon(Bell)
+export const ChatIcon = icon(ChatBubble)
 export const SparkIcon = icon(SparkSolid)
 export const SearchIcon = icon(Search)
 export const PlusIcon = icon(Plus)
@@ -104,6 +113,7 @@ export const ClockIcon = icon(Clock)
 export const GearIcon = icon(Settings)
 export const ShieldIcon = icon(Shield)
 export const HelpIcon = icon(HelpCircle)
+export const KeyIcon = icon(Key)
 export const LogOutIcon = icon(LogOut)
 export const AttachmentIcon = icon(Attachment)
 export const BrainIcon = icon(Brain)
@@ -111,3 +121,8 @@ export const BrainIcon = icon(Brain)
 export const BuildingIcon = icon(Building)
 export const CreditCardIcon = icon(CreditCard)
 export const LockIcon = icon(Lock)
+export const PuzzleIcon = icon(Puzzle)
+/* the theme switch: sun for light, half moon for dark */
+export const DesktopIcon = icon(Computer)
+export const SunIcon = icon(SunLight)
+export const MoonIcon = icon(HalfMoon)

@@ -96,7 +96,10 @@ export function WorkspaceRail({
                 </span>
                 <span className="truncate">{a.name}</span>
                 {a.lastAt > 0 && now - a.lastAt < LIVE_WINDOW ? (
-                  <Dot size="sm" className="ml-auto bg-[#3f9c52] shadow-[0_0_0_3px_rgba(63,156,82,0.15)]" />
+                  <Dot
+                    size="sm"
+                    className="ml-auto bg-success shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_15%,transparent)]"
+                  />
                 ) : (
                   <span className="ml-auto flex-none font-mono text-[10.5px] text-ink-faint">
                     {a.lastAt > 0 ? timeAgo(a.lastAt) : ''}
@@ -130,7 +133,7 @@ export function ClockTile({ size = 24, className }: { size?: number; className?:
         height={icon}
         viewBox="0 0 24 24"
         fill="none"
-        stroke="#fdfdfc"
+        stroke="var(--paper)"
         strokeWidth="1.9"
         strokeLinecap="round"
       >
@@ -189,7 +192,7 @@ export function StepChain({
               key={id}
               role={roleById(id)}
               size={size}
-              className={cn(j > 0 && 'ring-[1.5px] ring-white')}
+              className={cn(j > 0 && 'ring-[1.5px] ring-surface')}
               style={j > 0 ? { marginLeft: -Math.round(size * 0.3) } : undefined}
             />
           ))}
@@ -317,7 +320,7 @@ export function RunDot({ status, className }: { status: 'running' | 'ok' | 'fail
     <span
       className={cn(
         'inline-block size-[7px] flex-none rounded-full',
-        status === 'ok' && 'bg-[#3f9c52]',
+        status === 'ok' && 'bg-success',
         status === 'failed' && 'bg-accent-ink',
         status === 'running' && 'animate-pulse bg-[#8B5CF6]',
         className,

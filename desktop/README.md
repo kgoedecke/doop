@@ -151,6 +151,17 @@ code-signing guide). Until then, same rule as the DMG: testers only.
 4. Tag a release. Tauri signs and notarizes during the build; the resulting
    DMG opens with no warnings and can be linked from doop.design.
 
+## DMG background
+
+The macOS disk image opens on a 660x400 Finder window with the app on the left, the
+`Applications` link on the right, and `src-tauri/dmg/background.png` behind them telling
+people to drag one onto the other. The icon slots are fixed by `bundle.macOS.dmg` in
+`src-tauri/tauri.conf.json`; the picture is rendered from `src-tauri/dmg/background.html`
+(the brand fonts and palette, an arrow between the two slots, the instruction underneath).
+To change it, edit the HTML and re-render with the Chrome command in the file's header
+comment, which also tags the PNG as 144 dpi so Finder draws the 2x image at 1x size on
+Retina and non-Retina displays alike.
+
 ## Icon
 
 `app-icon.png` (1024px, the layered-D mark from `src/App.tsx` `<Logo/>`) is

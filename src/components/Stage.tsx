@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useStore } from '../lib/store'
+import { usePageCanvas, currentPageCanvas } from '../lib/pages'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { FrameView } from './FrameView'
@@ -24,7 +25,15 @@ const sendCursor = throttle((x: number, y: number) => sendWs({ type: 'cursor', x
 /* the camera is shared so others can follow it — same cadence as the cursor */
 const sendViewport = throttle(
   (vp: { x: number; y: number; zoom: number }, el: HTMLElement) =>
-    sendWs({ type: 'viewport', viewport: { ...vp, width: el.clientWidth, height: el.clientHeight } }),
+    sendWs({
+      type: 'viewport',
+      viewport: {
+        ...vp,
+        pageId: useStore.getState().activePageId ?? undefined,
+        width: el.clientWidth,
+        height: el.clientHeight,
+      },
+    }),
   50,
 )
 
@@ -34,7 +43,8 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   const gridRef = useRef<HTMLDivElement>(null)
   const zoomLabelRef = useRef<HTMLSpanElement>(null)
   const setViewport = useStore((s) => s.setViewport)
-  const canvas = useStore((s) => s.canvas)
+  const canvas = usePageCanvas()
+  const activePageId = useStore((s) => s.activePageId)
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
   const [panning, setPanning] = useState(false)
@@ -45,6 +55,8 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   /* iframe oversampling factor — bumped only once the zoom settles */
   const [raster, setRaster] = useState(1)
   const fitted = useRef(false)
+  const deepLinkHandled = useRef(false)
+  const focusedPage = useRef<string | null>(null)
 
   /* Viewport → DOM without React: no component subscribes to the viewport, so
      pan/zoom never renders anything. A store subscription writes the world
@@ -118,6 +130,10 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
       const leader = s.presences[s.following]
       const cursor = s.cursors[s.following]
       const stage = { width: el.clientWidth, height: el.clientHeight }
+      if (leader?.viewport?.pageId && leader.viewport.pageId !== s.activePageId) {
+        s.setActivePage(leader.viewport.pageId)
+        useStore.setState({ following: s.following })
+      }
       if (leader?.viewport) target = cameraToFollow(leader.viewport, stage)
       else if (cursor) target = cameraOnCursor(cursor, stage, s.viewport.zoom)
       else return
@@ -190,7 +206,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
         zoom: from.zoom,
       }
     }
-    const f = useStore.getState().canvas?.frames.find((x) => x.id === req.frameId)
+    const f = currentPageCanvas()?.frames.find((x) => x.id === req.frameId)
     if (!f) return undefined
     const pad = 80
     const zoom = Math.min(
@@ -209,6 +225,8 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     (f: { id: string; x: number; y: number; width: number; height: number }) => {
       const el = ref.current
       if (!el) return
+      select(f.id)
+      focusedPage.current = useStore.getState().activePageId
       const pad = 80
       const zoom = Math.min(
         MAX_ZOOM,
@@ -219,7 +237,6 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
         y: (el.clientHeight - f.height * zoom) / 2 - f.y * zoom,
         zoom,
       })
-      select(f.id)
       /* a shared frame link asks for this exact frame — show its details too */
       useStore.getState().setInspectorOpen(true)
     },
@@ -228,7 +245,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
 
   const fit = useCallback(() => {
     const el = ref.current
-    const c = useStore.getState().canvas
+    const c = currentPageCanvas()
     if (!el || !c) return
     const boxes = c.frames.map((f) => ({ x: f.x, y: f.y - 30, w: f.width, h: f.height + 30 }))
     if (!boxes.length) {
@@ -253,15 +270,23 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     })
   }, [setViewport])
 
+  useEffect(() => {
+    fitted.current = focusedPage.current === activePageId
+    focusedPage.current = null
+  }, [activePageId])
+
   /* zoom-to-fit once the canvas arrives — unless the URL deep-links a frame */
   useEffect(() => {
     if (!canvas || fitted.current) return
     fitted.current = true
-    const focusId = new URLSearchParams(location.search).get('frame')
-    const target = focusId ? canvas.frames.find((f) => f.id === focusId) : null
-    if (target) focusFrame(target)
-    else fit()
-  }, [canvas, fit, focusFrame])
+    if (useStore.getState().following) return
+    const focusId = deepLinkHandled.current ? null : new URLSearchParams(location.search).get('frame')
+    const target = focusId ? useStore.getState().canvas?.frames.find((f) => f.id === focusId) : null
+    if (target) {
+      deepLinkHandled.current = true
+      focusFrame(target)
+    } else fit()
+  }, [canvas, activePageId, fit, focusFrame])
 
   /* wheel: pan / pinch-zoom — needs a non-passive listener. Trackpads fire
      wheel events faster than the display refreshes, so deltas accumulate and
@@ -517,7 +542,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
         height: Math.abs(cur.y - origin.y),
       }
       setMarquee(rect)
-      const frames = useStore.getState().canvas?.frames ?? []
+      const frames = currentPageCanvas()?.frames ?? []
       const hits = frames
         .filter(
           (f) =>

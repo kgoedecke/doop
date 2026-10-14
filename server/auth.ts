@@ -9,6 +9,7 @@ import { store } from './store.ts'
 import * as demo from './demo.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { acceptInvites } from './workspaces.ts'
+import { purgeUserData } from './accountDeletion.ts'
 
 /**
  * better-auth on our own database: email/password + cookie sessions now;
@@ -352,6 +353,17 @@ function buildAuth() {
           subject: 'Verify your doop email',
           text: `Hi ${user.name || 'there'},\n\nConfirm this email address to activate your doop account:\n\n${url}\n\nIf you didn't sign up for doop, ignore this email.`,
         })
+      },
+    },
+    /* self-service account deletion (POST /api/auth/delete-user with the
+       password; the iOS app needs it for App Store rule 5.1.1(v)). The user's
+       own data goes first so nothing is left pointing at a vanished account. */
+    user: {
+      deleteUser: {
+        enabled: true,
+        beforeDelete: async (user) => {
+          await purgeUserData(user.id)
+        },
       },
     },
     /* onboarding: every new user gets a canvas, and the demo agent performs

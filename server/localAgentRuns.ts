@@ -8,6 +8,8 @@ export interface LocalHarnessRequest {
   system: string
   tools: Anthropic.Tool[]
   maxTurns: number
+  /** Stops this canvas run without canceling other work for the account. */
+  isCanceled?: () => boolean
   execute: (block: Anthropic.ToolUseBlockParam) => Promise<Anthropic.ToolResultBlockParam>
 }
 
@@ -38,7 +40,9 @@ export class LocalAgentRuns {
     const device = this.devices.get(userId)
     if (device && device.id !== deviceId && this.online(userId, now)) return null
     this.devices.set(userId, { id: deviceId, at: now })
-    const run = [...this.runs.values()].find((r) => r.userId === userId && !r.closing && !r.remote)
+    const run = [...this.runs.values()].find(
+      (r) => r.userId === userId && !r.closing && !r.remote && !r.request.isCanceled?.(),
+    )
     if (!run || (run.deviceId && run.deviceId !== deviceId)) return null
     run.deviceId = deviceId
     run.lastSeen = now
@@ -96,7 +100,12 @@ export class LocalAgentRuns {
 
   authorized(id: string, token: string): Run | undefined {
     const run = this.runs.get(id)
-    return run && !run.closing && !run.remote?.signal.aborted && (run.deviceId || run.remote) && token === run.job.token
+    return run &&
+      !run.closing &&
+      !run.request.isCanceled?.() &&
+      !run.remote?.signal.aborted &&
+      (run.deviceId || run.remote) &&
+      token === run.job.token
       ? run
       : undefined
   }
@@ -105,7 +114,7 @@ export class LocalAgentRuns {
     const run = this.authorized(id, token)
     if (!run || !run.request.tools.some((tool) => tool.name === name)) throw new Error('Run or tool unavailable')
     const result = run.tail.then(() => {
-      if (run.closing) throw new Error('Run ended')
+      if (run.closing || run.request.isCanceled?.()) throw new Error('Run ended')
       return run.request.execute({ type: 'tool_use', id: randomUUID(), name, input })
     })
     run.tail = result.catch(() => {})
@@ -142,15 +151,18 @@ export class LocalAgentRuns {
         .filter(
           (r) =>
             !r.closing &&
-            ((!r.remote && (r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now))) ||
+            (r.request.isCanceled?.() ||
+              (!r.remote && (r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now))) ||
               now - r.startedAt > 30 * 60_000),
         )
         .map((r) =>
           this.close(r, {
             success: false,
-            text: r.remote
-              ? 'Hosted Claude timed out. Review any completed edits before retrying.'
-              : 'Desktop disconnected or local run timed out. Retry the task.',
+            text: r.request.isCanceled?.()
+              ? 'Task stopped.'
+              : r.remote
+                ? 'Hosted Claude timed out. Review any completed edits before retrying.'
+                : 'Desktop disconnected or local run timed out. Retry the task.',
           }),
         ),
     )
