@@ -8,12 +8,14 @@ export default tseslint.config(
     ignores: [
       'dist/',
       'node_modules/',
+      '.claude/worktrees/**',
       'desktop/src-tauri/target/',
       '.cantelop/**',
       'cantelop/.cantelop/**',
       'cantelop/.dev/**',
     ],
   },
+  { languageOptions: { parserOptions: { tsconfigRootDir: import.meta.dirname } } },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -5,7 +5,7 @@ vi.mock('../src/lib/api', () => ({
   ApiError: class extends Error {
     body: Record<string, unknown>
     constructor(_status: number, text: string) {
-      super(text)
+      super(`${_status} ${text}`)
       this.body = JSON.parse(text)
     }
   },
@@ -105,4 +105,33 @@ it('applies a sign-in the server confirmed even if the login was cancelled meanw
   resolve({ authenticated: true, preference })
   await sending
   expect(connected).toHaveBeenCalledWith(preference)
+})
+
+it('shows a readable failure and stops preparing when sign-in cannot start', async () => {
+  const update = vi.fn()
+  post.mockRejectedValueOnce(new ApiError(502, JSON.stringify({ error: 'Hosted Claude is unavailable.' })))
+  const login = new RemoteClaudeLogin('alice', 'default', update, vi.fn())
+  await login.start()
+  expect(update).toHaveBeenLastCalledWith({
+    status: 'Hosted Claude is unavailable.',
+    url: undefined,
+    ready: false,
+    active: false,
+  })
+})
+
+it('clears an unusable sign-in link when code confirmation fails', async () => {
+  const update = vi.fn()
+  post
+    .mockResolvedValueOnce({ attemptId: 'attempt', url: 'https://claude.ai/login' })
+    .mockRejectedValueOnce(new ApiError(502, JSON.stringify({ error: 'Hosted Claude is unavailable.' })))
+  const login = new RemoteClaudeLogin('alice', 'default', update, vi.fn())
+  await login.start()
+  await login.send('code')
+  expect(update).toHaveBeenLastCalledWith({
+    status: 'Hosted Claude is unavailable.',
+    url: undefined,
+    ready: false,
+    active: false,
+  })
 })

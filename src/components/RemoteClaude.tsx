@@ -251,19 +251,30 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
             <p role="status" aria-live="polite" className="text-sm text-ink-soft">
               {view.status}
             </p>
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold">1. Sign in to Claude</h4>
-              {signInUrl && view.active ? (
-                <Button asChild>
-                  <a href={signInUrl} target="_blank" rel="noopener noreferrer">
-                    Open Claude sign-in <span aria-hidden>↗</span>
-                  </a>
-                </Button>
-              ) : view.active ? (
-                <Button disabled>Preparing sign-in…</Button>
-              ) : null}
-              <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
-            </div>
+            {view.active ? (
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold">1. Sign in to Claude</h4>
+                {signInUrl && view.active ? (
+                  <Button asChild>
+                    <a href={signInUrl} target="_blank" rel="noopener noreferrer">
+                      Open Claude sign-in <span aria-hidden>↗</span>
+                    </a>
+                  </Button>
+                ) : view.active ? (
+                  <Button disabled>Preparing sign-in…</Button>
+                ) : null}
+                <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
+              </div>
+            ) : (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  void act(connect)
+                }}
+              >
+                Retry sign-in
+              </Button>
+            )}
             {view.ready && view.active && (
               <form
                 onSubmit={(event) => {

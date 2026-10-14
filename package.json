@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "NODE_ENV=production tsx --env-file-if-exists=.env server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run tests",
+    "test": "vitest run --dir tests",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

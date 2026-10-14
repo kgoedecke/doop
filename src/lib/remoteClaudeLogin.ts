@@ -34,9 +34,9 @@ export class RemoteClaudeLogin {
     private update: (view: LoginView) => void,
     private connected: (preference: LocalAgentPreference) => void,
   ) {}
-  private view(status: string) {
+  private view(status: string, active = true) {
     if (!this.controller.signal.aborted)
-      this.update({ status, url: this.url, ready: !!this.attemptId && !this.sending, active: true })
+      this.update({ status, url: this.url, ready: !!this.attemptId && !this.sending, active })
   }
   async start() {
     this.view('Starting Claude sign-in…')
@@ -59,7 +59,14 @@ export class RemoteClaudeLogin {
       this.url = url
       this.view('Sign in to Claude Code, then paste the code it gives you.')
     } catch (error) {
-      this.view(error instanceof Error ? error.message : 'Could not start Claude sign-in.')
+      this.view(
+        error instanceof ApiError && typeof error.body.error === 'string'
+          ? error.body.error
+          : error instanceof Error
+            ? error.message
+            : 'Could not start Claude sign-in.',
+        false,
+      )
     }
   }
   async send(code: string) {
@@ -81,12 +88,14 @@ export class RemoteClaudeLogin {
         this.view('Claude did not accept that code. Paste it again.')
       } else {
         this.attemptId = undefined
+        this.url = undefined
         this.view(
           error instanceof ApiError && typeof error.body.error === 'string'
             ? error.body.error
             : error instanceof Error
               ? error.message
               : 'Could not confirm Claude sign-in.',
+          false,
         )
       }
     } finally {

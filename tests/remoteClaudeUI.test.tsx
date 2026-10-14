@@ -73,6 +73,7 @@ let root: Root
 let container: HTMLDivElement
 beforeEach(() => {
   vi.clearAllMocks()
+  loginMocks.url = 'https://claude.com/oauth/authorize?test=1'
   mocks.status.mockResolvedValue({ configured: true, running: false })
   useLocalAgent.setState({ preference: { enabled: true, transport: 'local', model: 'claude-sonnet-5' } })
   container = document.createElement('div')
@@ -224,4 +225,24 @@ it('keeps the logout failure and retry when preference refresh also fails', asyn
   expect(container.textContent).toContain('Logout unavailable')
   expect(container.textContent).not.toContain('Preference unavailable')
   expect(container.textContent).toContain('Retry sign-out')
+})
+
+it('offers a fresh sign-in after login fails instead of staying on preparing', async () => {
+  await act(async () => root.render(<RemoteClaudeRow />))
+  await act(async () => connect().click())
+  await act(async () =>
+    loginMocks.update?.({
+      status: 'Hosted Claude is unavailable.',
+      ready: false,
+      active: false,
+    }),
+  )
+  expect(container.textContent).toContain('Hosted Claude is unavailable.')
+  expect(container.textContent).not.toContain('Preparing sign-in')
+  expect(container.querySelector('a')).toBeNull()
+  expect(container.querySelector('#hosted-sign-in-code')).toBeNull()
+  const retry = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Retry sign-in')!
+  expect(retry.disabled).toBe(false)
+  await act(async () => retry.click())
+  expect(container.querySelector('a')?.textContent).toContain('Open Claude sign-in')
 })
