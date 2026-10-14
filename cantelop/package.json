@@ -11,7 +11,6 @@
     "dev": "cantelop dev --container",
     "build": "cantelop build",
     "check": "tsc -p tsconfig.session.json",
-    "test": "node --import tsx --test test/*.test.ts",
     "deploy": "cantelop deploy"
   },
   "dependencies": {

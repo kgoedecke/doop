@@ -671,117 +671,62 @@ please rebrand derived services.
 
 ## Claude Plan: hosted execution with your own Claude account
 
-The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.9**,
-including its configurable Claude harness factory, native auth provider and maintained Docker image.
-Both dependency manifests pin the published npm release, including portable
-generated backend declarations and the App-name build override.
-It deploys independently of Doop. In **Settings → Claude Plan → Connect**,
-open the Claude sign-in link, then paste the returned code into Doop. The SDK owns
-link extraction, code submission, retry handling and native process cleanup.
-Doop relays the short-lived code to the SDK; native credentials stay in the
-Workspace. There is no interactive terminal UI.
-
-Use Cantelop CLI 0.15.1 or newer with a platform supporting manifest schema 3,
-CLI build protocol 6, integration protocol 2 and native authentication.
+In **Settings → Claude Plan → Connect**, open the Claude sign-in link and paste
+the returned code into Doop. Native credentials stay in your Cantelop Workspace.
+Tasks use your Claude account; repository imports still require an API-key provider.
+Disconnect stops hosted tasks before signing out, and failed sign-out remains retryable.
 
 ### Set up your own hosted Claude service
 
-Use Node 22+, Bun 1.3.10 and Docker with linux/amd64 support. Configure Doop's
-private `.env` using the variables below. Obtain an App-scoped integration token
-from Cantelop; keep it in the backend environment.
+Use Node 22+, Bun 1.3.10, Docker with linux/amd64 support and Cantelop CLI 0.15.1
+or newer. Both packages share a Bun workspace and pin SDK 1.0.0-alpha.9.
+`cantelop/src/cantelop.ts` defines the App; retain the existing App name and
+`CLAUDE_REMOTE_ISSUER` when upgrading so users keep their Workspaces and credentials.
 
-`cantelop/src/cantelop.ts` is the single App definition. Keep its name equal to
-`CANTELOP_APP_SLUG`; for an existing deployment, retain its current name.
+Configure Doop's private backend environment:
+
+- `CANTELOP_APP_SLUG`: App name, matching `cantelop/src/cantelop.ts`.
+- `CANTELOP_INTEGRATION_TOKEN`: platform-issued App token. Keep it in the backend;
+  never use a CLI administrative token or put it in the Sandbox.
+- `CLAUDE_REMOTE_ISSUER`: stable namespace combined with each Doop user ID to select a Workspace.
+- `CANTELOP_EDGE_URL`: optional endpoint override; the SDK derives the hosted URL from the App name.
+- `BETTER_AUTH_URL`: Doop's public sign-in origin.
+- `CLAUDE_REMOTE_MCP_ORIGIN`: reachable MCP callback origin, defaulting to `BETTER_AUTH_URL`.
+  Hosted runtimes require HTTPS.
 
 ```sh
 bun install --frozen-lockfile
 bun run cantelop:check
-bun run cantelop:test
 bun run cantelop:build
 cantelop login
 bun run cantelop:deploy
 ```
 
-`cantelop:build` runs `cantelop build`, which generates and qualifies the service
-and backend client. Doop imports the CLI-generated client directly from
-`cantelop/.cantelop/client`. Both packages share one Bun workspace SDK installation.
-Run it once before dev, type checking, tests or a Doop Docker build, and again
-after changing the App definition or SDK. Doop's ordinary commands reuse this
-client. Runtime changes require a matching Cantelop deployment and Doop rebuild.
+`cantelop:build` runs the CLI and generates `cantelop/.cantelop/client`, which Doop
+imports directly. Build before dev, type checking, tests or Docker packaging.
+Ordinary Doop commands reuse these artifacts. Changes to the App or SDK require
+both a matching Cantelop deployment and a rebuilt Doop client. The Doop Docker
+image packages the generated client; supply backend credentials only at runtime.
 
-The Doop Docker image packages only `cantelop/.cantelop/client`; build it from a checkout
-where `bun run cantelop:build` has succeeded. Supply the integration token and
-other backend variables at runtime. Artifact generation needs no backend credentials.
+### Local development
 
-For local Doop with remote Cantelop, install `cloudflared` and run
+For local Doop with hosted Cantelop, install `cloudflared` and run
 `bun run cantelop:tunnel`. Keep it running and restart Doop after its address changes.
 
-When migrating, keep the existing App name, **`CLAUDE_REMOTE_ISSUER`** and Doop user
-IDs. The issuer remains part of the durable Workspace hash, so changing it creates
-different Workspaces. Existing native credentials and conversations stay in place.
-Legacy signing keys and audiences are no longer used. Never replace the issuer
-just to create the new integration token.
-
-### Fully local Claude development (no tunnel)
-
-Start `bun run cantelop:dev`
-and use its matching App token in Doop's backend environment:
+For a fully local runtime, start `bun run cantelop:dev`, use its matching App token,
+and configure:
 
 ```dotenv
-CANTELOP_APP_SLUG=YOUR_EXISTING_APP
 CANTELOP_EDGE_URL=http://127.0.0.1:8787
 CLAUDE_REMOTE_MCP_ORIGIN=http://host.docker.internal:4400
-CLAUDE_REMOTE_ISSUER=YOUR_EXISTING_NAMESPACE
-CANTELOP_INTEGRATION_TOKEN=LOCAL_APP_INTEGRATION_TOKEN
 ```
 
-Start Doop with `bun run dev`, then connect in **http://localhost:4300/settings**.
-The same link-and-code login form starts the CLI's native login. Its local Workspace has its
-own native Claude login. Keep the runtime and Doop running. Docker must reach
-Doop's backend through `host.docker.internal`; container localhost points to the
-container. Use your backend port if it differs from 4400.
+Start Doop with `bun run dev` and connect at **http://localhost:4300/settings**.
+Container callbacks to `host.docker.internal` are allowed in development; adjust
+the backend port if needed. Production MCP callbacks require HTTPS.
 
-The SDK validates its own endpoint. HTTP MCP callbacks to `host.docker.internal`
-are allowed in development independently of that endpoint; production callbacks
-require HTTPS. App-token and run-token checks remain enabled. Remote runtimes need
-a callback they can reach, such as the public HTTPS tunnel provided by `cantelop:tunnel`.
-
-### Manual configuration
-
-Use the SDK's native connection variables below. For an existing deployment,
-copy `CLAUDE_REMOTE_APP` to `CANTELOP_APP_SLUG` and `CLAUDE_REMOTE_URL` to
-`CANTELOP_EDGE_URL`, then rebuild and restart Doop. Keep `CLAUDE_REMOTE_ISSUER` unchanged.
-
-- `CANTELOP_APP_SLUG`: existing Cantelop App name, matching `cantelop/src/cantelop.ts`.
-- `CANTELOP_EDGE_URL`: optional override; defaults to `https://<CANTELOP_APP_SLUG>.cantelop.dev`. Use an HTTP loopback origin for local development.
-- `CANTELOP_INTEGRATION_TOKEN`: platform-issued App-scoped token, only in Doop's backend environment.
-- `CLAUDE_REMOTE_ISSUER`: stable identity namespace used with the Doop user ID to derive the Workspace. Preserve it from earlier configurations.
-- `BETTER_AUTH_URL`: Doop's public sign-in/callback origin.
-- `CLAUDE_REMOTE_MCP_ORIGIN`: origin for run-scoped MCP; defaults to `BETTER_AUTH_URL`. Remote Cantelop needs HTTPS. Fully local Docker Desktop uses `http://host.docker.internal:4400`.
-
-Doop authorizes browser requests and selects Workspaces on the backend. Each user
-retains a separate native Claude login. SDK requests use the generated `/commands`
-Edge API through typed Workspace/Session methods; task output uses SDK SSE with
-explicit cursor resumption. `workspace.auth().login({ force })` owns the native
-sign-in and forced reconnect flow; Doop retains user authorization and preferences. Expired/reset
-history fails the task without replaying edits or falling back to another account.
-
-Doop declares `createClaudeRuntime` from the SDK with its workspace and permission settings.
-The SDK owns the durable queue, per-message cancellation, steering, recovery and
-status protocol, and calls `createClaudeHarness` internally for native execution.
-Doop has no local Claude lifecycle or native runner implementation.
-Interrupted work is not replayed after Sandbox loss; only queued work resumes.
-Native authentication failures pause hosted work until a matching reconnect is
-confirmed. Billing, rate-limit and transport failures retain ordinary error handling.
-
-Each canvas run uses an immutable configuration with the selected model, system
-prompt, turn limit and exact run-scoped Doop MCP allowlist. Built-in shell and file
-tools remain unavailable. Large task context is fetched through `get_run_context`.
-System prompts remain limited to 32 KiB and encoded configuration to 48 KiB.
-MCP tokens are revoked when a run ends or is cancelled/times out. Closing the
-browser does not cancel a running task; restarting Doop interrupts its in-memory
-run context. There is no exactly-once edit guarantee.
-
-**Disconnect** disables and stops hosted tasks before native Workspace logout.
-Unconfirmed sign-out remains retryable. These settings do not change Anthropic
-billing or usage limits. Repository imports still require an API-key provider.
+Hosted tasks receive only their run-scoped MCP permissions; native shell and file
+tools are disabled. MCP tokens are revoked when a task ends or is canceled.
+Closing the browser does not stop a task, but restarting Doop interrupts its
+in-memory run context. Lost event history fails the task without replaying edits.
+See [the service architecture](cantelop/README.md) for code ownership.

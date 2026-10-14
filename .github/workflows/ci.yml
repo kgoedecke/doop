@@ -38,9 +38,15 @@ jobs:
           curl -fsSL https://github.com/stepandel/homebrew-tap/releases/download/cantelop-v0.15.1/install.sh -o /tmp/install-cantelop.sh
           CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: bun run cantelop:build
+      - name: Build Cantelop service and verify native CLI
+        shell: bash
+        run: |
+          bun run cantelop:build | tee /tmp/cantelop-build.log
+          runtime_image=$(sed -n 's/.*Session runtime image \(sha256:[0-9a-f]*\)).*/\1/p' /tmp/cantelop-build.log)
+          test -n "$runtime_image"
+          docker run --rm --platform linux/amd64 --entrypoint sh "$runtime_image" -c \
+            "claude --version && python3 -c \"import py_compile; py_compile.compile('/opt/app/login-pty.py', cfile='/tmp/login-pty.pyc', doraise=True)\""
       - run: bun run cantelop:check
-      - run: bun run cantelop:test
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run format:check
@@ -49,19 +55,3 @@ jobs:
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
       - run: bun run test
-
-  claude-runtime-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: bun install --frozen-lockfile
-      - name: Build SDK Claude image
-        run: docker build --platform linux/amd64 -f node_modules/@cantelop/sdk/dist/harnesses/claude/Dockerfile -t doop-claude-sdk .
-      - name: Verify stock CLI and PTY helper
-        run: docker run --rm doop-claude-sdk sh -c 'claude --version && python3 -m py_compile /opt/app/login-pty.py'

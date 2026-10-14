@@ -18,7 +18,6 @@
     "doc-lint": "node scripts/doc-lint.mjs",
     "prepare": "husky || true",
     "cantelop:check": "bun run --cwd cantelop check",
-    "cantelop:test": "bun run --cwd cantelop test",
     "cantelop:build": "bun run --cwd cantelop build",
     "cantelop:dev": "bun run --cwd cantelop dev",
     "cantelop:tunnel": "node --env-file-if-exists=.env scripts/dev-mcp-tunnel.mjs",

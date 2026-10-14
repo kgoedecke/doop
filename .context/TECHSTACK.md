@@ -90,62 +90,15 @@
 
 ## 12. Hosted Claude execution
 
-Task-specific settings travel in the SDK queue dispatch; stable execution policy
-and native tool defaults live in the App definition. No `configure` request is used.
-
-- Root and `cantelop/` pin `@cantelop/sdk` **1.0.0-alpha.9** in one Bun workspace with a shared root lockfile.
-  `cantelop/src/cantelop.ts` declares the App, SDK-owned durable Claude runtime,
-  `claudeAuth` and the SDK-owned Claude Dockerfile. Schema-3 `cantelop.json` points
-  to the definition; the SDK generates protocol-2 Edge `/commands` routes.
-- `server/remoteClaudeClient.ts` imports the typed compiled backend from the repository-root
-  `cantelop/.cantelop/client`. The SDK compiler emits portable declarations, embeds
-  the matching runtime identity and removes native provider code. `cantelop:build`
-  runs the CLI; Doop imports its generated client directly using the shared SDK
-  installation. Ordinary dev/build/start/typecheck/test commands
-  reuse this client; rebuild after changing the App definition or SDK.
-- `server/remoteClaudeClient.ts` uses SDK Workspace/Session/auth references and SSE
-  iterators directly, with no legacy route adapter. Subscription cleanup aborts
-  blocked reads before closing the iterator, including failed initial dispatch. SDK `workspace.auth().login()`
-  owns existing-sign-in checks and confirmed logout before forced reconnect.
-  Doop's backend selects `CANTELOP_APP_SLUG`, holds `CANTELOP_INTEGRATION_TOKEN`
-  and chooses each user's Workspace. The SDK derives the hosted Edge URL;
-  `CANTELOP_EDGE_URL` is an optional override. `CLAUDE_REMOTE_ISSUER` remains in the old user hash to preserve
-  existing Workspaces; per-user ES256 JWTs and audiences are retired.
-- `server/remoteClaude.ts` authorizes status, selection, login and logout requests.
-  Native sign-in preserves the Anthropic link and code form. SDK `auth.login()`
-  returns a link/attempt ID; `submitCode()` validates the code through the CLI,
-  and `cancelLogin()` stops that attempt. Raw native output stays in the SDK.
-  Native credentials remain in the Workspace; Doop relays only the sign-in code.
-  Forced reconnect cancels hosted work and confirms logout before fresh login.
-  Reconnect attempts remain generation-fenced.
-- `src/components/RemoteClaude.tsx` renders the Claude Plan controls and code form.
-  `RemoteClaudeLogin` handles UI state and retries, and cancels late-created attempts
-  when the sign-in component is disposed. A stable SDK `code_rejected` response
-  keeps the form ready for another code. There is no terminal component
-  or xterm dependency; the SDK owns the native login lifecycle.
-- `cantelop/src/cantelop.ts` declares `createClaudeRuntime` with Doop's workspace
-  and permission defaults. The SDK owns configuration, durable queues, targeted
-  cancellation, steering, snapshots and recovery, and calls `createClaudeHarness`
-  internally. Doop imports the public SDK protocol directly; the SDK validates
-  configuration and decodes native fragments. No local contracts, validators,
-  lifecycle or state store remain. Existing snapshots stay compatible.
-- MCP callback validation is independent of the SDK endpoint: HTTPS origins are
-  accepted, and HTTP `host.docker.internal` origins are allowed in development.
-  Remote runtimes still require a reachable callback.
-- `LocalAgentRuns` retains task-scoped MCP capabilities and revocation. Remote runs
-  cannot be claimed by desktop polling. Authentication failures pause hosted work;
-  transport, billing and rate-limit errors do not mark users signed out.
-- `cantelop:build` runs `cantelop build` to compile and qualify the service with
-  Docker. The service test checks App compilation and backend separation;
-  root Vitest tests cover Doop's compiled client, authorization, task-scoped MCP
-  access, cancellation and login. SDK harness internals are tested upstream.
-  CI builds the client before root checks and smoke-tests the SDK-owned image.
-- Live dev/deployment requires CLI 0.15.1 or newer and a platform supporting
-  schema 3, build protocol 6, integration protocol 2 and native authentication.
-- `cantelop/src/cantelop.ts` is the single App definition. Backend environment
-  configuration preserves the App name and `CLAUDE_REMOTE_ISSUER` namespace.
-  Doop Docker builds package the generated `cantelop/.cantelop/client`; run
-  `cantelop:build` first. Tokens are supplied only at runtime.
+- `cantelop/src/cantelop.ts` defines the SDK-owned Claude runtime and native auth.
+  The service and Doop share a Bun workspace and `@cantelop/sdk@1.0.0-alpha.9`.
+- `server/remoteClaudeClient.ts` imports the CLI-generated backend and handles
+  Workspace selection and stream reconnection. Routes authorize browser requests;
+  the runner supplies task-scoped MCP access and settings in a single dispatch.
+- `RemoteClaude.tsx` and `remoteClaudeLogin.ts` provide the link/code login UI.
+- See [setup and deployment](../README.md#set-up-your-own-hosted-claude-service)
+  and [service architecture](../cantelop/README.md). Preserve the App name and
+  `CLAUDE_REMOTE_ISSUER` namespace across changes.
 
 ## OSS integration scope
 
