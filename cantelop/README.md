@@ -1,12 +1,12 @@
 # Hosted Claude runtime
 
-Doop's hosted Claude service uses `@cantelop/sdk@1.0.0-alpha.7`, including the
+Doop's hosted Claude service uses `@cantelop/sdk@1.0.0-alpha.9`, including the
 SDK-maintained Claude harness, native authentication provider and Docker image.
 The service deploys independently of Doop. Its original App name is
 `doop-claude-runtime`; contributor overrides retain their existing App identity.
 
-Both Doop and this service pin the published **1.0.0-alpha.7** npm release,
-including portable backend declarations and the App-name build override.
+Both Doop and this service pin the published **1.0.0-alpha.9** npm release,
+including portable backend declarations, the App-name build override and per-task Claude settings.
 Live development and deployment require Cantelop CLI **0.15.1** or newer and a
 platform supporting manifest schema 3, CLI build protocol 6, integration protocol 2
 and native auth declarations. See the [upstream SDK](https://github.com/stepandel/cantelop-sdk)
@@ -108,3 +108,7 @@ verify cancellation, migration, recovery, tenant selection, reconnect gating,
 link/code login, setup and compiler separation without model calls or user
 credentials. A production sign-in, task, cancellation and reconnect still need
 verification against the compatible deployed platform using the user's own account.
+
+Claude execution policy and native tool defaults are declared in `src/cantelop.ts`.
+Doop dispatches each task with `settings` for its model, system prompt, turn limit,
+MCP permissions and run-scoped credentials. There is no separate configuration request.

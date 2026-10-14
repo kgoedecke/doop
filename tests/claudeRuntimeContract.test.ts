@@ -70,21 +70,36 @@ it('uses real SDK protocol 2 with backend credentials and preserves user Workspa
   })
   expect(await checkRemoteAuth('alice')).toBe(true)
   const session = remoteWorkspace('alice').session({ keepAliveSeconds: 300 })
-  await session.request({ type: 'configure', config: { tools: [], allowedTools: [], mcps: {} } })
   const id = crypto.randomUUID()
   const message = await session.dispatch(
-    { type: 'queue', id, text: 'Design a card' },
+    {
+      type: 'queue',
+      id,
+      text: 'Design a card',
+      settings: {
+        model: 'claude-sonnet-5',
+        allowedTools: ['mcp__doop__edit'],
+        mcps: { doop: { type: 'http', url: 'https://tools.example/mcp', headers: { Authorization: 'run-token' } } },
+      },
+    },
     { id: `msg_${id.replaceAll('-', '')}` },
   )
   expect(message.id).toBe(`msg_${id.replaceAll('-', '')}`)
   expect(await session.request({ type: 'snapshot' })).toMatchObject({ type: 'session.state', configured: true })
   expect(session.id).toMatch(/^ses_[0-9a-f]{32}$/)
   expect(remoteWorkspace('bob').selector).not.toEqual(session.workspace)
-  expect(commands.slice(1, 4).every((command) => command.session.id === session.id)).toBe(true)
+  expect(commands.slice(1, 3).every((command) => command.session.id === session.id)).toBe(true)
   expect(await remoteWorkspace('alice').auth().logout()).toBe(false)
   expect(commands.every((command) => command.workspace.slug === `u-${remoteIdentity('alice')}`)).toBe(true)
   expect(commands[0]?.session.id).toBe('cantelop-native-auth')
-  expect(commands.map((command) => command.command.type)).toEqual(['auth', 'request', 'dispatch', 'request', 'auth'])
-  expect(commands[1]?.command.message).toMatchObject({ type: 'configure' })
-  expect(commands[2]?.command.message).toMatchObject({ type: 'queue', id })
+  expect(commands.map((command) => command.command.type)).toEqual(['auth', 'dispatch', 'request', 'auth'])
+  expect(commands[1]?.command.message).toMatchObject({
+    type: 'queue',
+    id,
+    settings: {
+      model: 'claude-sonnet-5',
+      allowedTools: ['mcp__doop__edit'],
+      mcps: { doop: { headers: { Authorization: 'run-token' } } },
+    },
+  })
 })

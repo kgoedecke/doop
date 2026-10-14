@@ -608,7 +608,7 @@ please rebrand derived services.
 
 ## Claude Plan: hosted execution with your own Claude account
 
-The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.7**,
+The [hosted service](cantelop/README.md) uses **Cantelop SDK 1.0.0-alpha.9**,
 including its configurable Claude harness factory, native auth provider and maintained Docker image.
 Both dependency manifests pin the published npm release, including portable
 generated backend declarations and the App-name build override.

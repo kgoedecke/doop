@@ -1,7 +1,7 @@
 import { claudeMcpOrigin } from './remoteClaudeOrigins.ts'
 import { getLocalAgentPreference, requireRemoteAuth } from './localAgentPreferences.ts'
 import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
-import { ClaudeSessionOutput, type ClaudeSessionConfig } from '@cantelop/sdk/harnesses/claude/protocol'
+import { ClaudeSessionOutput, type ClaudeSessionSettings } from '@cantelop/sdk/harnesses/claude/protocol'
 import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import { remoteWorkspace, remoteCall, remoteEvents, type ClaudeSession } from './remoteClaudeClient.ts'
@@ -69,11 +69,10 @@ async function executeRemote(
     )
     if (Buffer.byteLength(job.system) > 32 * 1024)
       throw new Error('The agent system prompt exceeds the hosted 32 KiB limit.')
-    const settings: ClaudeSessionConfig = {
+    const settings: ClaudeSessionSettings = {
       model: job.model,
       systemPrompt: job.system,
       maxTurns: job.maxTurns,
-      tools: [],
       allowedTools: request.tools.map((tool) => `mcp__doop__${tool.name}`),
       mcps: {
         doop: {
@@ -87,11 +86,6 @@ async function executeRemote(
       throw new Error('Hosted Claude configuration exceeds 48 KiB.')
     const session = remoteWorkspace(userId).session({ keepAliveSeconds: 300 })
     activeSession = session
-    const reply = await remoteCall(
-      (signal) => session.request({ type: 'configure', config: settings }, { signal }),
-      signal,
-    )
-    if (reply.type === 'error') throw new Error('Hosted Claude configuration failed.')
     const output = new RemoteResult(job.id)
     let outcome: LocalAgentResult | undefined
     await remoteEvents(
@@ -132,6 +126,7 @@ async function executeRemote(
               {
                 type: 'queue',
                 id: job.id,
+                settings,
                 text: 'Call get_run_context to read the complete task, then carry it out using the Doop tools.',
               },
               { id: `msg_${job.id.replaceAll('-', '')}`, signal },

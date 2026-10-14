@@ -43,15 +43,15 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
     const execute = vi.fn()
     let messageId = ''
     let token = ''
-    mocks.request.mockImplementation(async (command: { type: string; config: Record<string, unknown> }) => {
-      const body = command.config
+    mocks.dispatch.mockImplementation(async (command: { type: string; settings: Record<string, unknown> }) => {
+      const body = command.settings
       expect(body).toMatchObject({
         model: 'claude-sonnet-5',
         systemPrompt: 'Rules',
         maxTurns: 24,
-        tools: [],
         allowedTools: ['mcp__doop__edit', 'mcp__doop__get_run_context'],
       })
+      expect(body).not.toHaveProperty('tools')
       const mcp = (body.mcps as { doop: { url: string; headers: { Authorization: string } } }).doop
       expect(mcp.url.startsWith(`${mcpOrigin}/local-agent/mcp/`)).toBe(true)
       messageId = mcp.url.split('/').at(-1)!
@@ -59,7 +59,7 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
       expect(localAgentRuns.poll('alice', 'desktop')).toBeNull()
       const result = await localAgentRuns.execute(messageId, token, 'get_run_context', {})
       expect(result.content).toBe(prompt)
-      return { type: 'session.state', configured: true, messages: [], truncated: false }
+      return { id: 'receipt' }
     })
     mocks.events.mockImplementation(
       async (
@@ -89,6 +89,8 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
     ).toEqual({ success: true, text: 'Done' })
     expect(localAgentRuns.authorized(messageId, token)).toBeUndefined()
     expect(execute).not.toHaveBeenCalled()
+    expect(mocks.request).not.toHaveBeenCalled()
+    expect(mocks.dispatch).toHaveBeenCalledOnce()
     expect(mocks.workspace).toHaveBeenCalledWith('alice')
     expect(mocks.session).toHaveBeenCalledExactlyOnceWith({ keepAliveSeconds: 300 })
     expect(mocks.events.mock.calls[0]?.[0]).toBe(mocks.session.mock.results[0]?.value)

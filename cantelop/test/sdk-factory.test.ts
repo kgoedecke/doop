@@ -31,7 +31,7 @@ console.log(JSON.stringify({type:'result',is_error:false,subtype:'success',resul
   )
   let factories = 0
   const behaviour = createClaudeRuntime(
-    { workspace, permissionMode: 'dontAsk', settingSources: [] },
+    { workspace, permissionMode: 'dontAsk', settingSources: [], tools: [] },
     (context, options) => {
       factories++
       return createClaudeHarness(context, options)
@@ -100,18 +100,16 @@ console.log(JSON.stringify({type:'result',is_error:false,subtype:'success',resul
     } as SessionContext<Command, Event, Reply>)
   }
   await behaviour.onActivate(resources)
-  await receive({
-    type: 'configure',
-    config: {
-      model: 'default',
-      tools: [],
-      allowedTools: ['mcp__doop__edit'],
-      mcps: { doop: { type: 'http', url: 'https://tools.example/mcp', headers: { Authorization: 'run-token' } } },
-      systemPrompt: 'Canvas rules 😀',
-      maxTurns: 24,
+  const settings = {
+    model: 'default',
+    allowedTools: ['mcp__doop__edit'],
+    mcps: {
+      doop: { type: 'http' as const, url: 'https://tools.example/mcp', headers: { Authorization: 'run-token' } },
     },
-  })
-  await receive({ type: 'queue', id: 'first', text: 'large' })
+    systemPrompt: 'Canvas rules 😀',
+    maxTurns: 24,
+  }
+  await receive({ type: 'queue', id: 'first', text: 'large', settings })
   await task
   const init = events.find(
     (event) => event.type === 'claude' && (event.event as Record<string, unknown>).type === 'system',
@@ -134,15 +132,25 @@ console.log(JSON.stringify({type:'result',is_error:false,subtype:'success',resul
   const fragments = events.filter((event) => event.type === 'claude.fragment' && event.id === 'first')
   assert.ok(fragments.length > 1)
   assert.equal(JSON.parse(fragments.map((fragment) => fragment.json).join('')).result, '😀'.repeat(40000))
-  await receive({ type: 'queue', id: 'second', text: 'again' })
+  const secondSettings = {
+    ...settings,
+    mcps: {
+      doop: { ...settings.mcps.doop, headers: { Authorization: 'second-run-token' } },
+    },
+  }
+  await receive({ type: 'queue', id: 'second', text: 'again', settings: secondSettings })
   await task
-  assert.equal(factories, 1)
+  assert.equal(factories, 2)
   const second = events.find(
     (event) =>
       event.type === 'claude' && event.id === 'second' && (event.event as Record<string, unknown>).type === 'system',
   )!
   assert.equal(second.type, 'claude')
-  assert.ok((second.event as { args: string[] }).args.includes('--resume'))
+  const secondArgs = (second.event as { args: string[] }).args
+  assert.ok(secondArgs.includes('--resume'))
+  assert.deepEqual(JSON.parse(secondArgs[secondArgs.indexOf('--mcp-config') + 1]!), {
+    mcpServers: secondSettings.mcps,
+  })
   assert.ok(
     events.some((event) => event.type === 'message.status' && event.id === 'second' && event.status === 'completed'),
   )

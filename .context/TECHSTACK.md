@@ -84,7 +84,10 @@
 
 ## 12. Hosted Claude execution
 
-- Root and `cantelop/` pin `@cantelop/sdk` **1.0.0-alpha.7** with separate Bun lockfiles.
+Task-specific settings travel in the SDK queue dispatch; stable execution policy
+and native tool defaults live in the App definition. No `configure` request is used.
+
+- Root and `cantelop/` pin `@cantelop/sdk` **1.0.0-alpha.9** with separate Bun lockfiles.
   `cantelop/src/cantelop.ts` declares the App, SDK-owned durable Claude runtime,
   `claudeAuth` and the SDK-owned Claude Dockerfile. Schema-3 `cantelop.json` points
   to the definition; the SDK generates protocol-2 Edge `/commands` routes.

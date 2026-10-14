@@ -8,7 +8,7 @@ import type {
 
 export const doopClaude = new CantelopClient().app<Command, Event, Reply>({
   name: 'doop-claude-runtime',
-  runtime: createClaudeRuntime({ workspace: '/workspace', permissionMode: 'dontAsk', settingSources: [] }),
+  runtime: createClaudeRuntime({ workspace: '/workspace', permissionMode: 'dontAsk', settingSources: [], tools: [] }),
   auth: claudeAuth,
   dockerfile: claudeDockerfile,
 })
