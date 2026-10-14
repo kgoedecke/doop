@@ -284,6 +284,18 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     }
   }
 
+  const disconnectLocal = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await selectServer()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const remove = async () => {
     setBusy(true)
     try {
@@ -657,6 +669,27 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         placeholder: 'AIza…',
       })}
 
+      {/* an existing desktop CLI connection still routes tasks, so it stays visible until disconnected */}
+      {local?.enabled && local.transport !== 'remote' && (
+        <section className={planRow(true)} aria-label="Claude CLI">
+          <span aria-hidden className={planMark(true)}>
+            <AgentIcon name="claude" size={20} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink">
+              Claude CLI <span className={planPill(true)}>Active · Desktop</span>
+            </h3>
+            <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft">
+              Tasks run through Claude Code on your connected desktop.
+            </p>
+            <div className={actionsRow}>
+              <Button variant="danger" className={rowBtn} onClick={disconnectLocal} disabled={busy}>
+                Disconnect
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
       <RemoteClaudeRow replaces={replaces} />
       {keySection({
         kind: 'anthropic-key',

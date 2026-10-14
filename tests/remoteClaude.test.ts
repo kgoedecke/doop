@@ -49,7 +49,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 const sessionId = () => 'ses_test'
-const session = () => remoteWorkspace('alice').session({ id: sessionId(), keepAliveSeconds: 300 })
+const session = async () => (await remoteWorkspace('alice')).session({ id: sessionId(), keepAliveSeconds: 300 })
 function sse(frames: Event[], start = 1) {
   return new Response(
     frames
@@ -103,11 +103,11 @@ it('does not leak upstream response bodies or interpret timeouts as sign-out', a
   )
   await expect(checkRemoteAuth('alice')).rejects.toThrow('does not mean you are signed out')
 })
-it('creates lazy SDK sessions scoped to each user Workspace', () => {
+it('creates lazy SDK sessions scoped to each user Workspace', async () => {
   const fetcher = vi.fn()
   vi.stubGlobal('fetch', fetcher)
-  const alice = remoteWorkspace('alice').session({ keepAliveSeconds: 300 })
-  const bob = remoteWorkspace('bob').session({ keepAliveSeconds: 300 })
+  const alice = (await remoteWorkspace('alice')).session({ keepAliveSeconds: 300 })
+  const bob = (await remoteWorkspace('bob')).session({ keepAliveSeconds: 300 })
   expect(alice.workspace).toEqual({ slug: `u-${remoteIdentity('alice')}` })
   expect(bob.workspace).toEqual({ slug: `u-${remoteIdentity('bob')}` })
   expect(alice.workspace).not.toEqual(bob.workspace)
@@ -123,7 +123,7 @@ it('fails on stream reset without replaying a dispatched task', async () => {
         headers: { 'Content-Type': 'text/event-stream' },
       }),
   )
-  await expect(remoteEvents(session(), new AbortController().signal, () => {}, opened)).rejects.toThrow(
+  await expect(remoteEvents(await session(), new AbortController().signal, () => {}, opened)).rejects.toThrow(
     'lost its event history',
   )
   expect(opened).toHaveBeenCalledOnce()
@@ -189,7 +189,7 @@ it.each([429, 503])('resumes SDK stream cursors after transient HTTP %s without 
     .mockResolvedValueOnce(sse([{ type: 'message.status', id: 'run', status: 'completed' }], 2))
   vi.stubGlobal('fetch', fetcher)
   await remoteEvents(
-    session(),
+    await session(),
     controller.signal,
     (event) => {
       if (event.type === 'message.status') controller.abort()
@@ -219,7 +219,7 @@ it('closes a pending SDK subscription when initial dispatch fails, without retry
   const dispatch = vi.fn(async () => {
     throw new Error('Dispatch failed')
   })
-  await expect(remoteEvents(session(), new AbortController().signal, () => {}, dispatch)).rejects.toThrow(
+  await expect(remoteEvents(await session(), new AbortController().signal, () => {}, dispatch)).rejects.toThrow(
     'Dispatch failed',
   )
   expect(dispatch).toHaveBeenCalledOnce()

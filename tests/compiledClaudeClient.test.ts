@@ -40,7 +40,7 @@ it('uses the compiled client with backend credentials, shared SDK errors and iso
   vi.stubGlobal('fetch', fetcher)
   expect(await checkRemoteAuth('alice')).toBe(true)
   expect(await checkRemoteAuth('bob')).toBe(true)
-  expect(await remoteWorkspace('alice').auth().logout()).toBe(false)
+  expect(await (await remoteWorkspace('alice')).auth().logout()).toBe(false)
   expect(workspaces).toEqual([
     `u-${remoteIdentity('alice')}`,
     `u-${remoteIdentity('bob')}`,

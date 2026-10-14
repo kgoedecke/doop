@@ -44,6 +44,8 @@ export class RemoteClaudeLogin {
       const result = await api.remoteClaudeAuth(this.userId, 'start', { model: this.model })
       if (this.controller.signal.aborted) {
         if (result.attemptId) await api.remoteClaudeAuth(this.userId, 'cancel', { attemptId: result.attemptId })
+        // The server already activated a signed-in Workspace; reflect it even after cancel.
+        else if (result.authenticated === true && result.preference) this.connected(result.preference)
         return
       }
       if ('authenticated' in result && result.authenticated === true) {
@@ -70,7 +72,7 @@ export class RemoteClaudeLogin {
         code,
         model: this.model,
       })
-      this.controller.signal.throwIfAborted()
+      // No abort check: once the code is accepted the server has activated, even if cancelled meanwhile.
       if (result.authenticated !== true || !result.preference) throw new Error('Claude sign-in could not be confirmed.')
       this.connected(result.preference)
     } catch (error) {

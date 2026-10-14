@@ -2,7 +2,7 @@ import { RemoteAppError } from '@cantelop/sdk'
 import { Router } from 'express'
 import { z } from 'zod'
 import { CLAUDE_MODEL_IDS } from '../shared/localAgent.ts'
-import { isBanned, PUBLIC_ORIGIN } from './auth.ts'
+import { isBanned, TRUSTED_ORIGINS } from './auth.ts'
 import { localAgentRuns } from './localAgentRuns.ts'
 import {
   beginRemoteReauth,
@@ -33,7 +33,9 @@ async function activateRemote(userId: string, model: (typeof CLAUDE_MODEL_IDS)[n
   if (previous.transport !== 'remote') await localAgentRuns.cancel(userId)
   await saveLocalAgentPreference(userId, { enabled: true, model, transport: 'remote' })
   const preference: LocalAgentPreference = await getLocalAgentPreference(userId)
-  for (const canvas of store.canvases.values()) if (canAccessCanvas(userId, canvas)) onFeedback(canvas.id)
+  // Only a newly usable plan has waiting work to resume; a model switch does not.
+  const resumes = !(previous.enabled && previous.transport === 'remote') || previous.remoteAuthRequired
+  if (resumes) for (const canvas of store.canvases.values()) if (canAccessCanvas(userId, canvas)) onFeedback(canvas.id)
   return preference
 }
 
@@ -50,7 +52,7 @@ remoteClaudeRouter.use((req, res, next) => {
     res.status(403).json({ error: 'Hosted account access is unavailable while viewing as another user.' })
     return
   }
-  if (req.headers.origin && req.headers.origin !== PUBLIC_ORIGIN) {
+  if (req.headers.origin && !TRUSTED_ORIGINS.includes(req.headers.origin)) {
     res.status(403).json({ error: 'Cross-origin account access denied.' })
     return
   }
@@ -101,14 +103,21 @@ remoteClaudeRouter.post('/disable', (req, res, next) => {
   void (async () => {
     await disableRemoteExecution(req.user!.id)
     await localAgentRuns.cancel(req.user!.id, 'remote')
+    let signedIn: boolean
     try {
-      const auth = remoteWorkspace(req.user!.id).auth()
-      if (await remoteCall((signal) => auth.logout({ signal }))) throw new Error('Sign-out not confirmed')
-    } catch {
+      const auth = (await remoteWorkspace(req.user!.id)).auth()
+      signedIn = await remoteCall((signal) => auth.logout({ signal }))
+    } catch (error) {
+      console.warn('[remote-claude] sign-out failed', error)
+      throw new Error(
+        `Claude Plan is disconnected, but Claude sign-out failed: ${error instanceof Error ? error.message : 'unknown error.'} Retry disconnecting to finish signing out.`,
+        { cause: error },
+      )
+    }
+    if (signedIn)
       throw new Error(
         'Claude Plan is disconnected, but Claude sign-out could not be confirmed. Retry disconnecting to finish signing out.',
       )
-    }
     res.json(await getLocalAgentPreference(req.user!.id))
   })().catch(next)
 })
@@ -150,7 +159,7 @@ function authRoute<T>(action: string, schema: z.ZodType<T>, handle: (userId: str
 authRoute('start', modelRequest, async (userId, { model }) => {
   const preference = await getLocalAgentPreference(userId)
   if (preference.remoteAuthRequired) await localAgentRuns.cancel(userId, 'remote')
-  const auth = remoteWorkspace(userId).auth()
+  const auth = (await remoteWorkspace(userId)).auth()
   const result = await remoteCall((signal) => auth.login({ signal, force: !!preference.remoteAuthRequired }))
   if (!result.authenticated) {
     if (preference.remoteAuthRequired) await beginRemoteReauth(userId, result.attemptId)
@@ -161,12 +170,12 @@ authRoute('start', modelRequest, async (userId, { model }) => {
   return { authenticated: true, preference: await activateRemote(userId, model) }
 })
 authRoute('cancel', schemas.cancel, async (userId, { attemptId }) => {
-  const auth = remoteWorkspace(userId).auth()
+  const auth = (await remoteWorkspace(userId)).auth()
   await remoteCall((signal) => auth.cancelLogin({ attemptId, signal }))
   return { cancelled: true }
 })
 authRoute('code', schemas.code, async (userId, { attemptId, model, code }) => {
-  const auth = remoteWorkspace(userId).auth()
+  const auth = (await remoteWorkspace(userId)).auth()
   // The SDK rejects unsuccessful codes; a false status also cannot activate Doop.
   if (!(await remoteCall((signal) => auth.submitCode({ attemptId, code, signal }))))
     throw new RemoteAppError('login_failed', 409)

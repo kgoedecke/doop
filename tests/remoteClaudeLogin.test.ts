@@ -85,3 +85,24 @@ it('cancels a late-created login if the component was disposed while starting', 
   expect(post).toHaveBeenLastCalledWith('alice', 'cancel', { attemptId })
   expect(connected).not.toHaveBeenCalled()
 })
+
+it('applies a sign-in the server confirmed even if the login was cancelled meanwhile', async () => {
+  const attemptId = 'lgn_' + '1'.repeat(32)
+  let resolve!: (value: unknown) => void
+  post
+    .mockResolvedValueOnce({ attemptId, url: 'https://claude.ai/login' })
+    .mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done
+      }),
+    )
+    .mockResolvedValueOnce({ cancelled: true })
+  const connected = vi.fn()
+  const login = new RemoteClaudeLogin('alice', 'claude-sonnet-5', () => {}, connected)
+  await login.start()
+  const sending = login.send('code')
+  await login.cancel()
+  resolve({ authenticated: true, preference })
+  await sending
+  expect(connected).toHaveBeenCalledWith(preference)
+})

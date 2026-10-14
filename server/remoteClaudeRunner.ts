@@ -59,7 +59,8 @@ async function executeRemote(
   generation: number,
 ): Promise<LocalAgentResult> {
   const controller = new AbortController()
-  const signal = AbortSignal.any([controller.signal, cancellation, AbortSignal.timeout(30 * 60_000)])
+  // LocalAgentRuns' sweep enforces the run time limit by aborting `cancellation`.
+  const signal = AbortSignal.any([controller.signal, cancellation])
   let activeSession: ClaudeSession | undefined
   let finished = false
   try {
@@ -84,7 +85,7 @@ async function executeRemote(
     }
     if (Buffer.byteLength(JSON.stringify(settings)) > 48 * 1024)
       throw new Error('Hosted Claude configuration exceeds 48 KiB.')
-    const session = remoteWorkspace(userId).session({ keepAliveSeconds: 300 })
+    const session = (await remoteWorkspace(userId)).session({ keepAliveSeconds: 300 })
     activeSession = session
     const output = new RemoteResult(job.id)
     let outcome: LocalAgentResult | undefined

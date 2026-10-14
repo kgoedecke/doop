@@ -32,7 +32,10 @@ vi.mock('../server/remoteClaudeClient.ts', () => ({
       error.code,
     ),
 }))
-vi.mock('../server/auth.ts', () => ({ PUBLIC_ORIGIN: 'https://doop.example', isBanned: async () => mocks.banned }))
+vi.mock('../server/auth.ts', () => ({
+  TRUSTED_ORIGINS: ['https://doop.example', 'https://alt.doop.example'],
+  isBanned: async () => mocks.banned,
+}))
 vi.mock('../server/localAgentRuns.ts', () => ({ localAgentRuns: { cancel: mocks.cancel, runningRemote: () => false } }))
 vi.mock('../server/localAgentPreferences.ts', () => ({
   getLocalAgentPreference: mocks.preference,
@@ -109,6 +112,7 @@ it('switches models on an active hosted plan without starting Claude again', asy
   mocks.preference.mockResolvedValue({ enabled: true, transport: 'remote', model: 'claude-opus-5' })
   expect((await post('/select', { model })).status).toBe(200)
   expect(mocks.check).not.toHaveBeenCalled()
+  expect(mocks.wake).not.toHaveBeenCalled()
   expect(mocks.save).toHaveBeenCalledWith('alice', { enabled: true, transport: 'remote', model })
 })
 it('selects an already signed-in plan in the login response', async () => {
@@ -135,6 +139,10 @@ it('blocks cross-origin writes, bans, and impersonation before using hosted iden
   mocks.impersonated = true
   expect((await post('/auth/code', {}, { Origin: 'https://evil.example' })).status).toBe(403)
   expect(mocks.login).not.toHaveBeenCalled()
+})
+
+it('accepts sessions from any trusted origin', async () => {
+  expect((await post('/auth/start', { model }, { Origin: 'https://alt.doop.example' })).status).toBe(200)
 })
 
 it('rejects an old tab after the browser changes Doop accounts', async () => {

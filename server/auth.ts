@@ -18,6 +18,8 @@ import { purgeUserData } from './accountDeletion.ts'
 
 /** The canonical public origin: OAuth authorize/token/login URLs live here. */
 export const PUBLIC_ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
+/** the public origin plus any extras from env — the origins production sessions are trusted from */
+export const TRUSTED_ORIGINS = [PUBLIC_ORIGIN, ...(process.env.TRUSTED_ORIGINS || '').split(',').filter(Boolean)]
 
 /**
  * Who gets the admin role, by email. Ids can't do this job: on a fresh
@@ -292,7 +294,7 @@ function buildAuth() {
     /* prod: the public origin, plus any extras from env. dev: trust whichever
        origin the request came from (localhost, 127.0.0.1, LAN IP — all fine). */
     trustedOrigins: prod
-      ? [PUBLIC_ORIGIN, ...(process.env.TRUSTED_ORIGINS || '').split(',').filter(Boolean)]
+      ? TRUSTED_ORIGINS
       : (request) => {
           const origin = request?.headers.get('origin')
           return origin ? [origin] : []
