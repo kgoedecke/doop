@@ -17,17 +17,9 @@ it.each(['pre-chat', 'main', 'hosted-claude'])(
     const client = new PGlite()
     try {
       await mkdir(path.join(baseline, 'meta'))
-      const legacy =
-        history === 'hosted-claude'
-          ? (JSON.parse(
-              await readFile(path.join(migrationsFolder, '../migration-history/claude/_journal.json'), 'utf8'),
-            ) as typeof journal)
-          : undefined
-      const entries =
-        legacy?.entries ??
-        journal.entries.filter((entry) =>
-          history === 'pre-chat' ? entry.tag < '0018' : entry.tag !== '0028_remote_claude',
-        )
+      const entries = journal.entries.filter((entry) =>
+        history === 'main' ? entry.tag !== '0028_remote_claude' : entry.tag < '0018',
+      )
       await writeFile(path.join(baseline, 'meta/_journal.json'), JSON.stringify({ ...journal, entries }))
       for (const entry of entries) {
         await copyFile(path.join(migrationsFolder, `${entry.tag}.sql`), path.join(baseline, `${entry.tag}.sql`))
@@ -37,10 +29,23 @@ it.each(['pre-chat', 'main', 'hosted-claude'])(
       await client.exec(
         "INSERT INTO local_agent_preferences (user_id, enabled, model) VALUES ('existing-user', true, 'default')",
       )
-      if (history === 'hosted-claude')
-        await client.exec(
-          "UPDATE local_agent_preferences SET transport = 'remote', remote_auth_attempt = 'keep-attempt', remote_auth_required = true, remote_auth_generation = 17",
-        )
+      if (history === 'hosted-claude') {
+        // Earlier branch databases had these columns and a migration timestamp
+        // newer than main's chat migration. Reproduce that historical state
+        // without retaining obsolete migrations in the production directory.
+        await client.exec(`
+          ALTER TABLE local_agent_preferences
+            ADD COLUMN transport text NOT NULL DEFAULT 'local',
+            ADD COLUMN remote_auth_attempt text,
+            ADD COLUMN remote_auth_required boolean NOT NULL DEFAULT false,
+            ADD COLUMN remote_auth_generation integer NOT NULL DEFAULT 0;
+          INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+            VALUES ('legacy-claude-branch', 1790025364364);
+          UPDATE local_agent_preferences SET transport = 'remote',
+            remote_auth_attempt = 'keep-attempt', remote_auth_required = true,
+            remote_auth_generation = 17;
+        `)
+      }
       await migrate(db, { migrationsFolder })
       await migrate(db, { migrationsFolder })
       const existing = await client.query('SELECT user_id, enabled FROM local_agent_preferences')
