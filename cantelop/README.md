@@ -96,10 +96,10 @@ after changing runtime source, App configuration or the SDK. Build Doop's Docker
 image after `cantelop:build`; it packages the compiled client and requires no
 Cantelop CLI or Docker daemon inside the image.
 
-Tests use fake Claude executables and controlled SDK protocol responses. They
-verify cancellation, migration, recovery, tenant selection, reconnect gating,
-link/code login and compiler separation without model calls or user
-credentials. A production sign-in, task, cancellation and reconnect still need
+Tests cover Doop's App compilation and backend integration with controlled SDK
+responses: user isolation, task-scoped MCP access, cancellation, reconnect gating
+and link/code login. Native harness behavior and fragment decoding belong to the
+SDK test suite. These tests make no model calls and use no user credentials. A production sign-in, task, cancellation and reconnect still need
 verification against the compatible deployed platform using the user's own account.
 
 Claude execution policy and native tool defaults are declared in `src/cantelop.ts`.

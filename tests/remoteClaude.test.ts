@@ -15,7 +15,6 @@ import {
   remoteWorkspace,
 } from '../server/remoteClaudeClient.ts'
 import { LocalAgentRuns, type LocalHarnessRequest } from '../server/localAgentRuns.ts'
-import { RemoteResult } from '../server/remoteClaudeRunner.ts'
 import type {
   ClaudeSessionCommand as Command,
   ClaudeSessionEvent as Event,
@@ -161,23 +160,6 @@ it('desktop polling cannot claim or finish a hosted run; cancellation revokes it
   expect(runs.authorized(captured!.id, captured!.token)).toBeUndefined()
   expect((await result).success).toBe(false)
 })
-it('reassembles bounded results and rejects bad fragments without mixing messages', () => {
-  const result = new RemoteResult('run')
-  result.accept({
-    type: 'claude',
-    id: 'other',
-    event: { type: 'result', is_error: false, subtype: 'success', result: 'Wrong' },
-  })
-  expect(result.result).toBeUndefined()
-  const json = JSON.stringify({ type: 'result', is_error: false, subtype: 'success', result: 'Done 😀' })
-  result.accept({ type: 'claude.fragment', id: 'run', eventId: 'e', total: 2, index: 1, json: json.slice(20) })
-  result.accept({ type: 'claude.fragment', id: 'run', eventId: 'e', total: 2, index: 0, json: json.slice(0, 20) })
-  expect(result.result).toEqual({ success: true, text: 'Done 😀' })
-  expect(() =>
-    result.accept({ type: 'claude.fragment', id: 'run', eventId: 'bad', total: 100000, index: 0, json: '' }),
-  ).toThrow('Invalid')
-})
-
 it.each([429, 503])('resumes SDK stream cursors after transient HTTP %s without redispatch', async (status) => {
   const controller = new AbortController()
   const opened = vi.fn(async () => {})

@@ -130,8 +130,9 @@ and native tool defaults live in the App definition. No `configure` request is u
   cannot be claimed by desktop polling. Authentication failures pause hosted work;
   transport, billing and rate-limit errors do not mark users signed out.
 - `cantelop:build` runs `cantelop build` to compile and qualify the service with
-  Docker. Service tests use Node's test runner and fake Claude executables;
-  root Vitest tests cover SDK protocol, compiled backend and authentication.
+  Docker. The service test checks App compilation and backend separation;
+  root Vitest tests cover Doop's compiled client, authorization, task-scoped MCP
+  access, cancellation and login. SDK harness internals are tested upstream.
   CI builds the client before root checks and smoke-tests the SDK-owned image.
 - Live dev/deployment requires CLI 0.15.1 or newer and a platform supporting
   schema 3, build protocol 6, integration protocol 2 and native authentication.
