@@ -6,10 +6,10 @@ data
 .env.local
 **/node_modules
 **/.cantelop
-!.cantelop/
-.cantelop/*
-!.cantelop/client/
-!.cantelop/client/**
+!cantelop/.cantelop/
+cantelop/.cantelop/*
+!cantelop/.cantelop/client/
+!cantelop/.cantelop/client/**
 **/.dev
 **/.env
 **/.env.*

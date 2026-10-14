@@ -17,7 +17,6 @@
     "format:check": "prettier --check .",
     "doc-lint": "node scripts/doc-lint.mjs",
     "prepare": "husky || true",
-    "cantelop:install": "bun install --cwd cantelop --frozen-lockfile",
     "cantelop:check": "bun run --cwd cantelop check",
     "cantelop:test": "bun run --cwd cantelop test",
     "cantelop:build": "bun run --cwd cantelop build",
@@ -100,5 +99,8 @@
     "typescript-eslint": "^8.67.0",
     "vite": "^5.3.3",
     "vitest": "^4.1.11"
-  }
+  },
+  "workspaces": [
+    "cantelop"
+  ]
 }

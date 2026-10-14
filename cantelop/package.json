@@ -9,18 +9,13 @@
   },
   "scripts": {
     "dev": "cantelop dev --container",
-    "build": "cantelop build && mkdir -p ../.cantelop && cp -R .cantelop/client ../.cantelop/",
+    "build": "cantelop build",
     "check": "tsc -p tsconfig.session.json",
     "test": "node --import tsx --test test/*.test.ts",
     "deploy": "cantelop deploy"
   },
   "dependencies": {
     "@cantelop/sdk": "1.0.0-alpha.9"
-  },
-  "devDependencies": {
-    "@types/node": "^22.20.3",
-    "tsx": "^4.23.13",
-    "typescript": "^5.9.3"
   },
   "packageManager": "bun@1.3.10"
 }

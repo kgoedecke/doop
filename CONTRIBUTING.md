@@ -34,8 +34,9 @@ CI runs typecheck, lint, format check, and build on every push and PR.
 
 ## Hosted Claude runtime
 
-The Cantelop service lives in `cantelop/` and uses a separate Bun lockfile.
-Run `bun run cantelop:install` and `bun run cantelop:build` before root type checking,
+The Cantelop service lives in `cantelop/`, a Bun workspace sharing the root
+lockfile and SDK installation.
+Run `bun install --frozen-lockfile` and `bun run cantelop:build` before root type checking,
 tests, development or Docker builds. The build uses the Cantelop CLI and Docker to
 qualify the service and generate Doop's backend client. Ordinary Doop commands
 reuse that client; rebuild after changing the service definition or SDK.

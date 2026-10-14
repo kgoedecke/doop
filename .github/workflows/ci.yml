@@ -38,7 +38,6 @@ jobs:
           curl -fsSL https://github.com/stepandel/homebrew-tap/releases/download/cantelop-v0.15.1/install.sh -o /tmp/install-cantelop.sh
           CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: bun run cantelop:install
       - run: bun run cantelop:build
       - run: bun run cantelop:check
       - run: bun run cantelop:test
@@ -61,9 +60,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: bun install --cwd cantelop --frozen-lockfile
+      - run: bun install --frozen-lockfile
       - name: Build SDK Claude image
-        working-directory: cantelop
         run: docker build --platform linux/amd64 -f node_modules/@cantelop/sdk/dist/harnesses/claude/Dockerfile -t doop-claude-sdk .
       - name: Verify stock CLI and PTY helper
         run: docker run --rm doop-claude-sdk sh -c 'claude --version && python3 -m py_compile /opt/app/login-pty.py'

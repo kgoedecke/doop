@@ -17,7 +17,7 @@ and its [integration requirements](https://github.com/stepandel/cantelop-sdk/blo
 Use Node 22+, Bun 1.3.10 and Docker with linux/amd64 support:
 
 ```sh
-bun run cantelop:install
+bun install --frozen-lockfile
 bun run cantelop:check
 bun run cantelop:test
 bun run cantelop:build
@@ -27,16 +27,14 @@ bun run lint
 
 `cantelop:build` runs the Cantelop CLI to generate matching Edge, Session runtime
 and backend artifacts and qualify the runtime image. The CLI writes the backend
-to `cantelop/.cantelop/client`; the build command copies it to the repository root's
-`.cantelop/client` so its imports resolve Doop's SDK installation. Doop imports
-the generated types directly. Run this build before starting Doop, type checking,
+to `cantelop/.cantelop/client`. Doop imports it directly, using the shared Bun
+workspace SDK installation, including the generated types. Run this build before starting Doop, type checking,
 testing or building its Docker image. Ordinary Doop commands reuse the artifacts.
 The SDK strips native code from the backend and embeds the runtime identity.
 
 Qualify the SDK-owned native image independently of the CLI:
 
 ```sh
-cd cantelop
 docker build --platform linux/amd64 \
   -f node_modules/@cantelop/sdk/dist/harnesses/claude/Dockerfile \
   -t doop-claude-sdk .

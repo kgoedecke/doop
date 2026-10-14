@@ -87,15 +87,15 @@
 Task-specific settings travel in the SDK queue dispatch; stable execution policy
 and native tool defaults live in the App definition. No `configure` request is used.
 
-- Root and `cantelop/` pin `@cantelop/sdk` **1.0.0-alpha.9** with separate Bun lockfiles.
+- Root and `cantelop/` pin `@cantelop/sdk` **1.0.0-alpha.9** in one Bun workspace with a shared root lockfile.
   `cantelop/src/cantelop.ts` declares the App, SDK-owned durable Claude runtime,
   `claudeAuth` and the SDK-owned Claude Dockerfile. Schema-3 `cantelop.json` points
   to the definition; the SDK generates protocol-2 Edge `/commands` routes.
 - `server/remoteClaudeClient.ts` imports the typed compiled backend from the repository-root
-  `.cantelop/client`. The SDK compiler emits portable declarations, embeds
+  `cantelop/.cantelop/client`. The SDK compiler emits portable declarations, embeds
   the matching runtime identity and removes native provider code. `cantelop:build`
-  runs the CLI and copies its generated client to Doop's artifact directory so
-  it uses Doop's SDK installation. Ordinary dev/build/start/typecheck/test commands
+  runs the CLI; Doop imports its generated client directly using the shared SDK
+  installation. Ordinary dev/build/start/typecheck/test commands
   reuse this client; rebuild after changing the App definition or SDK.
 - `server/remoteClaudeClient.ts` uses SDK Workspace/Session/auth references and SSE
   iterators directly, with no legacy route adapter. Subscription cleanup aborts
@@ -137,5 +137,5 @@ and native tool defaults live in the App definition. No `configure` request is u
   schema 3, build protocol 6, integration protocol 2 and native authentication.
 - `cantelop/src/cantelop.ts` is the single App definition. Backend environment
   configuration preserves the App name and `CLAUDE_REMOTE_ISSUER` namespace.
-  Doop Docker builds package the generated `.cantelop/client`; run
+  Doop Docker builds package the generated `cantelop/.cantelop/client`; run
   `cantelop:build` first. Tokens are supplied only at runtime.

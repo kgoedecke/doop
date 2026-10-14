@@ -3,14 +3,14 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { RemoteAppError } from '@cantelop/sdk'
-type ClaudeApp = typeof import('../.cantelop/client/client.mjs').doopClaude
+type ClaudeApp = typeof import('../cantelop/.cantelop/client/client.mjs').doopClaude
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
 it('loads the real compiled client with Doop’s SDK and sends the matching runtime identity', async () => {
   const root = fileURLToPath(new URL('../', import.meta.url))
-  const outdir = join(root, '.cantelop/client')
+  const outdir = join(root, 'cantelop/.cantelop/client')
   const manifest = JSON.parse(await readFile(join(outdir, 'cantelop-client.json'), 'utf8'))
   const declarations = await readFile(join(outdir, 'client.d.mts'), 'utf8')
   expect(declarations).toContain('doopClaude')

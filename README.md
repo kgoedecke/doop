@@ -58,7 +58,7 @@ yourself over MCP need no key.
 Or self-host the production build with Docker:
 
 ```bash
-bun run cantelop:install && bun run cantelop:build
+bun install --frozen-lockfile && bun run cantelop:build
 BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
 ```
 
@@ -365,7 +365,7 @@ Any container host works; Railway/Fly are the least friction:
 Local sanity check of the exact production image:
 
 ```bash
-bun run cantelop:install && bun run cantelop:build
+bun install --frozen-lockfile && bun run cantelop:build
 docker build -t doop .
 docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
 ```
@@ -633,7 +633,7 @@ from Cantelop; keep it in the backend environment.
 `CANTELOP_APP_SLUG`; for an existing deployment, retain its current name.
 
 ```sh
-bun run cantelop:install
+bun install --frozen-lockfile
 bun run cantelop:check
 bun run cantelop:test
 bun run cantelop:build
@@ -642,13 +642,13 @@ bun run cantelop:deploy
 ```
 
 `cantelop:build` runs `cantelop build`, which generates and qualifies the service
-and backend client. The command copies the generated client from
-`cantelop/.cantelop/client` to `.cantelop/client` so it resolves Doop's SDK installation.
+and backend client. Doop imports the CLI-generated client directly from
+`cantelop/.cantelop/client`. Both packages share one Bun workspace SDK installation.
 Run it once before dev, type checking, tests or a Doop Docker build, and again
 after changing the App definition or SDK. Doop's ordinary commands reuse this
 client. Runtime changes require a matching Cantelop deployment and Doop rebuild.
 
-The Doop Docker image packages only `.cantelop/client`; build it from a checkout
+The Doop Docker image packages only `cantelop/.cantelop/client`; build it from a checkout
 where `bun run cantelop:build` has succeeded. Supply the integration token and
 other backend variables at runtime. Artifact generation needs no backend credentials.
 

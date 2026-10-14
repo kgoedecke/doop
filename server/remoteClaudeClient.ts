@@ -2,7 +2,7 @@ import { RemoteAppError, type SessionEventCursor } from '@cantelop/sdk'
 import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
-import { doopClaude } from '../.cantelop/client/client.mjs'
+import { doopClaude } from '../cantelop/.cantelop/client/client.mjs'
 
 export function remoteClaudeConfigured() {
   return !!(process.env.CANTELOP_APP_SLUG && process.env.CANTELOP_INTEGRATION_TOKEN && process.env.CLAUDE_REMOTE_ISSUER)
