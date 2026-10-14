@@ -34,7 +34,8 @@ const COALESCE_MS = 1500
 
 let undoStack: Entry[] = []
 let redoStack: Entry[] = []
-let busy = false
+let historyQueue: Promise<void> = Promise.resolve()
+let historyVersion = 0
 /* saves still in flight from a drag: undo/redo wait for them so the inverse
    write never lands before (and gets overwritten by) the original */
 let inflight: Promise<unknown> = Promise.resolve()
@@ -44,6 +45,7 @@ export function trackSave(p: Promise<unknown>) {
 }
 
 export function clearHistory() {
+  historyVersion++
   undoStack = []
   redoStack = []
 }
@@ -248,16 +250,16 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
   return e
 }
 
-async function step(direction: 'undo' | 'redo') {
-  if (busy) return
-  busy = true
+async function applyStep(direction: 'undo' | 'redo', version: number) {
   let entry: Entry | undefined
   try {
     await inflight
+    if (version !== historyVersion) return
     const from = direction === 'undo' ? undoStack : redoStack
     entry = from.pop()
     if (!entry) return
     const applied = await apply(entry, direction)
+    if (version !== historyVersion) return
     if (applied) {
       const to = direction === 'undo' ? redoStack : undoStack
       to.push(applied)
@@ -273,9 +275,14 @@ async function step(direction: 'undo' | 'redo') {
     }
     /* the frame is gone or the canvas moved on — drop the entry */
     console.error(`${direction} failed`, err)
-  } finally {
-    busy = false
   }
+}
+
+function step(direction: 'undo' | 'redo') {
+  // Actor updates can paint before the API confirms a save; keep quick keyboard steps in order.
+  const version = historyVersion
+  historyQueue = historyQueue.then(() => applyStep(direction, version))
+  return historyQueue
 }
 
 export function undo() {

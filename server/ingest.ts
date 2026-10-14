@@ -284,7 +284,7 @@ export async function handleIngest(req: express.Request, res: express.Response) 
   if (!/^dk_[\w-]{20,}$/.test(secret)) return res.status(404).json({ error: 'unknown sync key' })
   const [key] = await db.select().from(syncKeys).where(eq(syncKeys.secret, secret))
   if (!key) return res.status(404).json({ error: 'unknown sync key' })
-  const canvas = store.getCanvas(key.canvasId)
+  const canvas = await store.syncCanvas(key.canvasId)
   if (!canvas) return res.status(410).json({ error: 'the canvas this key points at no longer exists' })
 
   const page = cleanPage(req.body?.page)
@@ -360,7 +360,7 @@ export async function handleIngest(req: express.Request, res: express.Response) 
     }
     pageLastWrite.set(marker, Date.now())
     /* geometry the user may have arranged stays; content and height track the app */
-    actions.updateFrame(existing.id, { html: wrapped, name: title.slice(0, 80), height }, actor)
+    await actions.updateFrame(existing.id, { html: wrapped, name: title.slice(0, 80), height }, actor)
     await saveLinks(key.id, page, links)
     return res.json({ ok: true, frameId: existing.id, updated: true })
   }
@@ -378,7 +378,11 @@ export async function handleIngest(req: express.Request, res: express.Response) 
     y = 120
   }
   pageLastWrite.set(marker, Date.now())
-  const frame = actions.createFrame(canvas.id, { name: title.slice(0, 80), x, y, width, height, html: wrapped }, actor)
+  const frame = await actions.createFrame(
+    canvas.id,
+    { name: title.slice(0, 80), x, y, width, height, html: wrapped },
+    actor,
+  )
   if (!frame) return res.status(410).json({ error: 'canvas vanished mid-sync' })
   await saveLinks(key.id, page, links)
   res.json({ ok: true, frameId: frame.id, created: true })

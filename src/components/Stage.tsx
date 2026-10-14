@@ -45,6 +45,7 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
   const activePageId = useStore((s) => s.activePageId)
+  const frameIndex = useStore((s) => s.frameIndex)
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
   const [panning, setPanning] = useState(false)
@@ -247,7 +248,12 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     const el = ref.current
     const c = currentPageCanvas()
     if (!el || !c) return
-    const boxes = c.frames.map((f) => ({ x: f.x, y: f.y - 30, w: f.width, h: f.height + 30 }))
+    const boxes = c.frames.map((f) => ({
+      x: f.x,
+      y: f.y - 30,
+      w: f.width,
+      h: f.height + 30,
+    }))
     if (!boxes.length) {
       setViewport({ x: 80, y: 80, zoom: 1 })
       return
@@ -277,16 +283,19 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
 
   /* zoom-to-fit once the canvas arrives — unless the URL deep-links a frame */
   useEffect(() => {
-    if (!canvas || fitted.current) return
+    if (!canvas || !frameIndex || fitted.current) return
+    const fullCanvas = useStore.getState().canvas
+    const focusId = deepLinkHandled.current ? null : new URLSearchParams(location.search).get('frame')
+    const target = focusId ? fullCanvas?.frames.find((f) => f.id === focusId) : null
+    const loaded = new Set(fullCanvas?.frames.map((frame) => frame.id))
+    if (!target && frameIndex.some((id) => !loaded.has(id))) return
     fitted.current = true
     if (useStore.getState().following) return
-    const focusId = deepLinkHandled.current ? null : new URLSearchParams(location.search).get('frame')
-    const target = focusId ? useStore.getState().canvas?.frames.find((f) => f.id === focusId) : null
     if (target) {
       deepLinkHandled.current = true
       focusFrame(target)
     } else fit()
-  }, [canvas, activePageId, fit, focusFrame])
+  }, [canvas, activePageId, frameIndex, fit, focusFrame])
 
   /* wheel: pan / pinch-zoom — needs a non-passive listener. Trackpads fire
      wheel events faster than the display refreshes, so deltas accumulate and

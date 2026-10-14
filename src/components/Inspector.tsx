@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { api } from '../lib/api'
+import { batchedEdit } from '../lib/batchedEdit'
 import { downloadFrameExport } from '../lib/frameExport'
 import { deleteFrameTracked, recordUpdate } from '../lib/history'
 import { cn } from '@/lib/utils'
@@ -37,9 +38,10 @@ export function Inspector({
   const [copiedUrl, setCopiedUrl] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const saveTimer = useRef<number | null>(null)
+  const [save] = useState(batchedEdit)
   const copyTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
+  useEffect(() => () => save.flush(), [save, frame.id])
 
   /* switching frames resets the draft; otherwise pull in remote html
      updates unless the user is typing */
@@ -66,14 +68,16 @@ export function Inspector({
   function onHtmlChange(value: string) {
     setDraft(value)
     setSaveState('dirty')
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(async () => {
+    save.schedule(() => {
       const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
       if (before !== undefined) recordUpdate(frame.id, { html: before }, { html: value })
-      await api.updateFrame(frame.id, { html: value }).catch(console.error)
-      setSaveState('saved')
-      window.setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 1500)
-    }, 700)
+      useStore.getState().patchFrameLocal(frame.id, { html: value })
+      api.updateFrame(frame.id, { html: value }).then(() => {
+        if (frameId.current !== frame.id || textareaRef.current?.value !== value) return
+        setSaveState('saved')
+        window.setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 1500)
+      }, console.error)
+    })
   }
 
   async function copyHtml() {
@@ -187,6 +191,7 @@ export function Inspector({
             spellCheck={false}
             placeholder="<!doctype html>…"
             onChange={(e) => onHtmlChange(e.target.value)}
+            onBlur={() => save.flush()}
           />
           <button
             type="button"

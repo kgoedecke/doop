@@ -25,7 +25,7 @@ vi.mock('../server/db/index.ts', () => {
 })
 vi.mock('../server/access.ts', () => ({ hasDurableCanvasAccess: mocks.access }))
 vi.mock('../server/store.ts', () => ({
-  store: { getCanvas: (id: string) => (id === 'c1' ? CANVAS : undefined) },
+  store: { getCanvasMetadata: (id: string) => (id === 'c1' ? CANVAS : undefined) },
 }))
 
 const CANVAS: Canvas = { id: 'c1', name: 'Landing', ownerId: 'alice', createdAt: 0, updatedAt: 0, frames: [] }

@@ -6,6 +6,8 @@ CHANGELOG.md
 desktop/src-tauri/tauri.conf.json
 desktop/CHANGELOG.md
 
+# Reproduced byte-for-byte by the actor generator.
+generated/
 # Real frames captured verbatim as Blitz bridge test fixtures
 ios/BlitzKit/rust/tests/*.html
 

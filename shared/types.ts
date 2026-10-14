@@ -463,7 +463,6 @@ export type ClientMessage =
   | { type: 'cursor'; x: number; y: number }
   | { type: 'viewport'; viewport: PeerViewport }
   | { type: 'editing'; frameId: string | null }
-  | { type: 'frame:drag'; frameId: string; x: number; y: number; width: number; height: number }
 
 export type ServerMessage =
   | {
@@ -491,10 +490,6 @@ export type ServerMessage =
   | { type: 'feedback'; feedback: TaskFeedback }
   | { type: 'comment'; comment: ElementComment }
   | { type: 'chat'; message: ChatMessage }
-  | { type: 'frame:drag'; clientId: string; frameId: string; x: number; y: number; width: number; height: number }
-  | { type: 'frame:created'; frame: Frame; actor: Actor }
-  | { type: 'frame:updated'; frame: Frame; actor: Actor }
-  | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
   | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { inspectElement, onFrameReady, styleElement, type ElementInfo, type StylePatch } from '../lib/frameBridge'
 import { ancestorsOf, buildLayerTree, elementHtml, findLayer, layerName } from '../lib/layers'
 import { replaceLayerHtml } from '../lib/layerEdits'
+import { batchedEdit } from '../lib/batchedEdit'
 import {
   borderSummary,
   compactBox,
@@ -45,7 +46,6 @@ const TAB_KEY = 'doop:element-panel-tab'
 /* the runtime answers in a frame or two; the wait lets a streaming agent's
    chunks settle before every re-read */
 const INSPECT_DELAY_MS = 120
-const HTML_SAVE_DELAY_MS = 700
 
 type Tab = 'design' | 'html'
 
@@ -369,17 +369,9 @@ function HtmlTab({ frame, selector }: { frame: Frame; selector: string }) {
   const source = useMemo(() => elementHtml(frame.html, selector) ?? '', [frame.html, selector])
   const [draft, setDraft] = useState(source)
   const [typing, setTyping] = useState(false)
-  /* the save waiting for the typing to pause; flushed when the editor goes
-     away so a quick switch to another row neither loses nor delays the edit */
-  const pendingSave = useRef<{ timer: number; run: () => void } | null>(null)
-  useEffect(
-    () => () => {
-      if (!pendingSave.current) return
-      window.clearTimeout(pendingSave.current.timer)
-      pendingSave.current.run()
-    },
-    [],
-  )
+  const [save] = useState(batchedEdit)
+  /* Flush the last keystroke before switching elements or closing the editor. */
+  useEffect(() => () => save.flush(), [save, frame.id, selector])
   /* remote html changes replace the draft unless the person is typing */
   const [seen, setSeen] = useState(source)
   if (seen !== source) {
@@ -389,13 +381,10 @@ function HtmlTab({ frame, selector }: { frame: Frame; selector: string }) {
 
   function onChange(value: string) {
     setDraft(value)
-    if (pendingSave.current) window.clearTimeout(pendingSave.current.timer)
-    const run = () => {
-      pendingSave.current = null
+    save.schedule(() => {
       const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id) ?? frame
       replaceLayerHtml(live, selector, value)
-    }
-    pendingSave.current = { timer: window.setTimeout(run, HTML_SAVE_DELAY_MS), run }
+    })
   }
 
   return (
@@ -405,7 +394,10 @@ function HtmlTab({ frame, selector }: { frame: Frame; selector: string }) {
       value={draft}
       spellCheck={false}
       onFocus={() => setTyping(true)}
-      onBlur={() => setTyping(false)}
+      onBlur={() => {
+        save.flush()
+        setTyping(false)
+      }}
       onChange={(e) => onChange(e.target.value)}
     />
   )

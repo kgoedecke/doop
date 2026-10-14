@@ -8,11 +8,9 @@ import * as storage from './storage.ts'
  * Uploaded image assets: bytes in object storage (server/storage.ts), one
  * metadata row per asset in the assets table (including the canvas it was
  * uploaded for). Frame HTML is the ground truth for which assets are still
- * in use, tracked as a projection in asset_refs: every durable frame write
- * re-extracts that frame's /a/<id> references (db/persist.ts), and boot
- * rebuilds the whole table from hydrated frames — so a failed fire-and-
- * forget write self-heals. Nothing is ever deleted; if cleanup is wanted
- * some day, asset_refs is the ledger to build it on.
+ * in use. Boot leaves asset_refs intact so it does not activate every frame
+ * actor. The projection is not kept current during direct actor edits, so
+ * future cleanup must consult actor state. Nothing is currently deleted.
  */
 
 export const MAX_ASSET_BYTES = 5 * 1024 * 1024
@@ -82,13 +80,6 @@ export function endTicketUpload(token: string, success: boolean): void {
     const t = tickets.get(token)
     if (t) t.inFlight = false
   }
-}
-
-/** Asset ids referenced by a piece of frame HTML (/a/<id>.<ext> URLs). */
-export function extractAssetIds(html: string): Set<string> {
-  const ids = new Set<string>()
-  for (const [, id] of html.matchAll(/\/a\/([A-Za-z0-9_-]+)\.[a-z0-9]+/g)) if (id) ids.add(id)
-  return ids
 }
 
 export interface AssetMeta {
@@ -169,21 +160,4 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
     return Buffer.concat(chunks)
   }
   throw new Error('too many redirects')
-}
-
-/** Rebuild the asset_refs projection from a full set of frames — called at
- *  boot with the frames hydrate just loaded (no extra I/O), which both
- *  backfills pre-existing content and heals any drift from failed
- *  write-through. Incremental upkeep afterwards lives in db/persist.ts. */
-export async function reconcileAssetRefs(frames: { id: string; html: string }[]): Promise<number> {
-  const rows: { assetId: string; frameId: string }[] = []
-  for (const f of frames) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })
-  await db.delete(t.assetRefs)
-  for (let i = 0; i < rows.length; i += 1000) {
-    await db
-      .insert(t.assetRefs)
-      .values(rows.slice(i, i + 1000))
-      .onConflictDoNothing()
-  }
-  return rows.length
 }

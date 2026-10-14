@@ -104,7 +104,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      The parent flips edit mode on. Instead of designMode (which makes the
      whole document a caret trap), we hit-test: hovering a text-bearing
      element outlines it, clicking makes JUST that element editable with the
-     caret placed at the click point. Edits debounce-serialize back to the
+     caret placed at the click point. Edits batch-serialize back to the
      parent, which saves them through the normal frame-update path. */
   var editing = false
   var activeEl = null
@@ -215,6 +215,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (editing && activeEl) postActive()
   }
 
+  function queueEdited() {
+    if (editTimer !== null) return
+    editTimer = setTimeout(function () {
+      editTimer = null
+      postEdited()
+    }, 50)
+  }
+
   function setEdit(on) {
     if (on === editing) return
     editing = on
@@ -253,8 +261,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   document.addEventListener('input', function () {
     if (!editing) return
-    if (editTimer) clearTimeout(editTimer)
-    editTimer = setTimeout(postEdited, 400)
+    queueEdited()
   })
 
   /* Escape pressed with focus inside the frame: the parent never sees the
@@ -422,7 +429,6 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
   }
 
-  var styleTimer = null
   function applyStyle(selector, styles) {
     var el = null
     try { el = selector ? document.querySelector(selector) : null } catch (e) { /* bad selector */ }
@@ -433,9 +439,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       else el.style.setProperty(k, String(styles[k]))
     }
     if (!el.getAttribute('style')) el.removeAttribute('style')
-    /* a slider fires many of these a second — one save once it settles */
-    if (styleTimer) clearTimeout(styleTimer)
-    styleTimer = setTimeout(postEdited, 250)
+    /* Sliders stream while moving, using the same bounded batch as typing. */
+    queueEdited()
     return true
   }
 

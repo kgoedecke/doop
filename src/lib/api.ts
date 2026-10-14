@@ -1,3 +1,4 @@
+import { updateFrame, writeFrame } from './canvas-actor'
 import { useStore } from './store'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
@@ -395,19 +396,19 @@ export const api = {
       body: JSON.stringify({ pages, expectedPages }),
     }),
   createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) =>
-    req<Frame>(`/api/canvases/${canvasId}/frames`, {
-      method: 'POST',
-      body: JSON.stringify({
-        pageId:
-          useStore.getState().canvas?.id === canvasId ? (useStore.getState().activePageId ?? undefined) : undefined,
-        ...input,
-        actor: actor(),
-      }),
-    }),
-  updateFrame: (frameId: string, patch: Partial<Frame>) =>
-    req<Frame>('/api/frames/' + frameId, { method: 'PATCH', body: JSON.stringify({ ...patch, actor: actor() }) }),
-  deleteFrame: (frameId: string) =>
-    req('/api/frames/' + frameId, { method: 'DELETE', body: JSON.stringify({ actor: actor() }) }),
+    writeFrame(
+      {
+        type: 'create',
+        input: {
+          pageId:
+            useStore.getState().canvas?.id === canvasId ? (useStore.getState().activePageId ?? undefined) : undefined,
+          ...input,
+        },
+      },
+      canvasId,
+    ),
+  updateFrame,
+  deleteFrame: (frameId: string) => writeFrame({ type: 'delete', id: frameId }),
   sendTaskFeedback: (taskId: string, text: string) =>
     req(`/api/tasks/${taskId}/feedback`, { method: 'POST', body: JSON.stringify({ text, from: getIdentity().name }) }),
   importPage: (canvasId: string, url: string) =>

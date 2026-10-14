@@ -26,8 +26,8 @@ export interface Server {
 export async function startServer(port: number, env: Record<string, string> = {}, reuseDir?: string): Promise<Server> {
   const dataDir = reuseDir ?? mkdtempSync(path.join(tmpdir(), 'doop-test-'))
   const proc: ChildProcess = spawn(
-    path.join(ROOT, 'node_modules', '.bin', 'tsx'),
-    [path.join(ROOT, 'server', 'index.ts')],
+    process.execPath,
+    ['--import', path.join(ROOT, 'node_modules/tsx/dist/loader.mjs'), path.join(ROOT, 'server', 'index.ts')],
     {
       cwd: dataDir, // PGlite persists to <cwd>/data — isolated per run
       env: { ...process.env, PORT: String(port), NODE_ENV: undefined as unknown as string, ...env },

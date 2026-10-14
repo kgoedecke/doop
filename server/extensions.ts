@@ -54,7 +54,7 @@ export interface McpToolHelpers {
   ownerId?: string
   agentName: z.ZodType<string>
   actorFrom(agentName?: string): Actor
-  canvasFor(canvasId: string): Canvas | undefined
+  canvasFor(canvasId: string): Promise<Canvas | undefined>
   noCanvas(id: string): McpToolResult
   err(message: string): McpToolResult
   text(data: unknown): McpToolResult

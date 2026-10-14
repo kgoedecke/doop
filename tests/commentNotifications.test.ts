@@ -74,8 +74,8 @@ beforeEach(() => {
     decisions: new Map(),
     proposals: new Map(),
   })
-  vi.spyOn(store, 'getFrame').mockImplementation((id) => (id === FRAME.id ? FRAME : undefined))
-  vi.spyOn(store, 'getCanvas').mockImplementation((id) => (id === CANVAS.id ? CANVAS : undefined))
+  vi.spyOn(store, 'getFrame').mockImplementation(async (id) => (id === FRAME.id ? FRAME : undefined))
+  vi.spyOn(store, 'getCanvasMetadata').mockImplementation((id) => (id === CANVAS.id ? CANVAS : undefined))
   unsubscribe = events.onCanvasEvent(notify.onCanvasEvent)
 })
 
@@ -86,8 +86,8 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
-function comment(text: string, from = 'alice', userId = from) {
-  return actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text }, from, userId)!
+async function comment(text: string, from = 'alice', userId = from) {
+  return (await actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text }, from, userId))!
 }
 
 async function deliver() {
@@ -98,27 +98,27 @@ const sentTo = () => mocks.sendMail.mock.calls.map(([m]) => m.to).sort()
 
 describe('who is told', () => {
   it('emails the invited and workspace members, never the author', async () => {
-    comment('Too small', 'alice')
+    await comment('Too small', 'alice')
     await deliver()
     expect(sentTo()).toEqual(['bob@example.com', 'carol@example.com'])
   })
 
   it('tells a share-link visitor about replies to their thread, and not the replier', async () => {
-    const root = comment('Can this be bigger?', 'dave')
+    const root = await comment('Can this be bigger?', 'dave')
     mocks.sendMail.mockClear()
     await deliver()
     mocks.sendMail.mockClear()
-    actions.replyToComment(root.id, 'Sure', 'alice', 'alice')
+    await actions.replyToComment(root.id, 'Sure', 'alice', 'alice')
     await deliver()
     expect(sentTo()).toEqual(['bob@example.com', 'carol@example.com', 'dave@example.com'])
   })
 
   it("sends an agent's reply to the account that ran it", async () => {
-    const root = comment('Make it pop', 'dave')
+    const root = await comment('Make it pop', 'dave')
     await deliver()
     mocks.sendMail.mockClear()
     /* MCP attributes an agent reply to the connecting user — alice here */
-    actions.replyToComment(root.id, 'Done — bumped the heading', 'Doop', 'alice', 'agent')
+    await actions.replyToComment(root.id, 'Done — bumped the heading', 'Doop', 'alice', 'agent')
     await deliver()
     expect(sentTo()).toContain('alice@example.com')
     expect(sentTo()).toContain('dave@example.com')
@@ -127,27 +127,27 @@ describe('who is told', () => {
   it('sends nothing when the recipient opted out, was banned, or is gone', async () => {
     mocks.workspaceMembers.mockReturnValue([]) // bob is the only recipient left
     mocks.mailable.mockResolvedValueOnce([])
-    comment('Hello', 'alice')
+    await comment('Hello', 'alice')
     await deliver()
     expect(mocks.sendMail).not.toHaveBeenCalled()
   })
 
   it('sends nothing to someone who lost access inside the window', async () => {
-    const root = comment('Can this be bigger?', 'dave') // a share-link visitor
+    const root = await comment('Can this be bigger?', 'dave') // a share-link visitor
     await deliver()
     mocks.sendMail.mockClear()
-    actions.replyToComment(root.id, 'Sure', 'alice', 'alice')
+    await actions.replyToComment(root.id, 'Sure', 'alice', 'alice')
     /* before the batch sends: bob is removed, carol's workspace membership
        ends, and the share link dave came in through is turned off */
-    vi.spyOn(store, 'getCanvas').mockReturnValue({ ...CANVAS, memberIds: [], linkAccess: 'none' })
+    vi.spyOn(store, 'getCanvasMetadata').mockReturnValue({ ...CANVAS, memberIds: [], linkAccess: 'none' })
     mocks.workspaceMembers.mockReturnValue([])
     await deliver()
     expect(mocks.sendMail).not.toHaveBeenCalled()
   })
 
   it('sends nothing when the canvas was deleted inside the window', async () => {
-    comment('Hello', 'alice')
-    vi.spyOn(store, 'getCanvas').mockReturnValue(undefined)
+    await comment('Hello', 'alice')
+    vi.spyOn(store, 'getCanvasMetadata').mockReturnValue(undefined)
     await deliver()
     expect(mocks.sendMail).not.toHaveBeenCalled()
   })
@@ -155,9 +155,9 @@ describe('who is told', () => {
 
 describe('coalescing', () => {
   it('bundles a burst from one person into one email per recipient', async () => {
-    comment('One', 'alice')
-    comment('Two', 'alice')
-    comment('Three', 'alice')
+    await comment('One', 'alice')
+    await comment('Two', 'alice')
+    await comment('Three', 'alice')
     expect(notify.pendingBatches()).toBe(2)
     await deliver()
     expect(mocks.sendMail).toHaveBeenCalledTimes(2)
@@ -169,15 +169,15 @@ describe('coalescing', () => {
   })
 
   it('counts several authors as "new comments"', async () => {
-    comment('One', 'alice')
-    comment('Two', 'dave')
+    await comment('One', 'alice')
+    await comment('Two', 'dave')
     await deliver()
     const toBob = mocks.sendMail.mock.calls.map(([m]) => m).find((m) => m.to === 'bob@example.com')!
     expect(toBob.subject).toBe('2 new comments on “Landing”')
   })
 
   it('waits the full window before sending', async () => {
-    comment('One', 'alice')
+    await comment('One', 'alice')
     await vi.advanceTimersByTimeAsync(notify.COALESCE_MS - 1000)
     expect(mocks.sendMail).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1000)
@@ -188,8 +188,8 @@ describe('coalescing', () => {
 describe('the email itself', () => {
   const person = { id: 'bob', name: 'Bob', email: 'bob@example.com' }
 
-  it('names the author and frame, quotes the text, and deep-links the thread', () => {
-    const root = comment('Too small', 'alice')
+  it('names the author and frame, quotes the text, and deep-links the thread', async () => {
+    const root = await comment('Too small', 'alice')
     const mail = notify.digest(person, CANVAS, [{ comment: root, frameName: FRAME.name, actorKind: 'user' }])
     expect(mail.to).toBe('bob@example.com')
     expect(mail.subject).toBe('alice commented on “Landing”')
@@ -200,9 +200,9 @@ describe('the email itself', () => {
     expect(mail.text).toContain('/settings?pane=account')
   })
 
-  it('links a reply to its root, since only roots have pins', () => {
-    const root = comment('Too small', 'dave')
-    const reply = actions.replyToComment(root.id, 'Agreed', 'alice', 'alice')!
+  it('links a reply to its root, since only roots have pins', async () => {
+    const root = await comment('Too small', 'dave')
+    const reply = (await actions.replyToComment(root.id, 'Agreed', 'alice', 'alice'))!
     const mail = notify.digest(person, CANVAS, [{ comment: reply, frameName: FRAME.name, actorKind: 'user' }])
     expect(mail.subject).toBe('alice replied on “Landing”')
     expect(mail.text).toContain('alice replied in “Hero”:')
@@ -210,8 +210,8 @@ describe('the email itself', () => {
     expect(mail.text).not.toContain(`&comment=${reply.id}`)
   })
 
-  it('trims very long comments', () => {
-    const root = comment('x'.repeat(2000), 'alice')
+  it('trims very long comments', async () => {
+    const root = await comment('x'.repeat(2000), 'alice')
     const mail = notify.digest(person, CANVAS, [{ comment: root, frameName: FRAME.name, actorKind: 'user' }])
     expect(mail.text).toContain('x'.repeat(597) + '…')
     expect(mail.text).not.toContain('x'.repeat(598))
@@ -219,10 +219,10 @@ describe('the email itself', () => {
 })
 
 describe('recipientsFor', () => {
-  it('is empty when nobody but the author is attached to the canvas', () => {
+  it('is empty when nobody but the author is attached to the canvas', async () => {
     mocks.workspaceMembers.mockReturnValue([])
     const lonely: Canvas = { ...CANVAS, memberIds: [], workspaceId: undefined }
-    const root = comment('Note to self', 'alice')
+    const root = await comment('Note to self', 'alice')
     expect(notify.recipientsFor(lonely, root, 'user')).toEqual([])
   })
 })

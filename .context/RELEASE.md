@@ -21,7 +21,9 @@ Both packages are 0.x, so breaking changes bump the minor, not the major. With t
 No container release pipeline for the server app. Self-hosting is
 `docker compose up` (`docker-compose.yml` + `Dockerfile`) - builds the app image locally, runs it
 on port 4400 alongside a `postgres:16-alpine` container, and applies DB migrations at boot
-(`server/db/index.ts`). CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
+(`server/db/index.ts`). Set `TERSE_ACTOR_URL` and `TERSE_API_KEY` for a separate actor API whose
+WebSocket endpoint browsers can reach. The app image does not start or bundle the native actor runtime.
+CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
 format:check, build, test) but does not build or push a container image.
 
 ## Desktop app (Tauri: macOS DMG + Windows NSIS installer)

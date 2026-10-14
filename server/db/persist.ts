@@ -1,10 +1,7 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
-import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import type {
@@ -15,8 +12,8 @@ import type {
   ChatMessage,
   DesignDecision,
   ElementComment,
-  Frame,
   GuidelineDoc,
+  Frame,
   MemoryProposal,
   MemoryReference,
   RepoCardKind,
@@ -25,13 +22,20 @@ import type {
 } from '../../shared/types.ts'
 
 /**
- * Write-through persistence: the in-memory maps stay the source of truth and
- * the hot path; every committed mutation is mirrored here asynchronously.
- * Nothing on the live path (presence, cursors, reveal ticks) awaits the DB.
+ * Canvas metadata and collaboration state are mirrored from in-memory maps
+ * to SQL asynchronously. Frames are persisted by their actors.
  */
 
+const pendingWrites = new Set<Promise<unknown>>()
 function swallow(p: Promise<unknown>) {
-  p.catch((err) => console.error('[db] write failed', err))
+  const write = p.catch((err) => console.error('[db] write failed', err))
+  pendingWrites.add(write)
+  void write.finally(() => pendingWrites.delete(write))
+}
+
+/** Finish metadata and collaboration writes before a normal shutdown. */
+export async function flush(): Promise<void> {
+  while (pendingWrites.size) await Promise.all(pendingWrites)
 }
 
 /** every mutable canvas column, so insert and upsert can't drift apart */
@@ -59,31 +63,10 @@ export function saveCanvas(c: Canvas) {
   )
 }
 
-/** Persist a newly duplicated canvas as one unit. Unlike ordinary live edits,
- * duplication must not report success until every copied row is durable. */
+/** Persist a duplicated canvas's metadata, guidelines and references together. */
 export async function saveCanvasCopy(c: Canvas): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.insert(t.canvases).values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })
-
-    if (c.frames.length) {
-      await tx.insert(t.frames).values(
-        c.frames.map((frame) => ({
-          id: frame.id,
-          canvasId: frame.canvasId,
-          pageId: frame.pageId ?? null,
-          name: frame.name,
-          x: frame.x,
-          y: frame.y,
-          width: frame.width,
-          height: frame.height,
-          html: frame.html,
-          createdAt: frame.createdAt,
-          updatedAt: frame.updatedAt,
-          updatedBy: frame.updatedBy,
-          demo: frame.demo ?? null,
-        })),
-      )
-    }
 
     if (c.guidelines?.length) {
       await tx.insert(t.guidelines).values(
@@ -115,11 +98,6 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
         })),
       )
     }
-
-    const refs = c.frames.flatMap((frame) =>
-      [...extractAssetIds(frame.html)].map((assetId) => ({ assetId, frameId: frame.id })),
-    )
-    if (refs.length) await tx.insert(t.assetRefs).values(refs)
   })
 }
 
@@ -271,76 +249,7 @@ export function saveProposal(canvasId: string, p: MemoryProposal) {
   )
 }
 
-/* Streaming appends update a frame's html on every chunk — debounce per frame
-   so the DB sees one row write per burst, not one per keystroke of the reveal. */
-const frameTimers = new Map<string, NodeJS.Timeout>()
-const FRAME_DEBOUNCE_MS = 400
-
-export function saveFrame(f: Frame, immediate = false) {
-  const existing = frameTimers.get(f.id)
-  if (existing) clearTimeout(existing)
-  if (immediate) {
-    frameTimers.delete(f.id)
-    swallow(writeFrame(f))
-    return
-  }
-  frameTimers.set(
-    f.id,
-    setTimeout(() => {
-      frameTimers.delete(f.id)
-      swallow(writeFrame(f)) // f is mutated in place by the store, so the ref holds the latest state
-    }, FRAME_DEBOUNCE_MS),
-  )
-}
-
-async function writeFrame(f: Frame) {
-  const row = {
-    id: f.id,
-    canvasId: f.canvasId,
-    pageId: f.pageId ?? null,
-    name: f.name,
-    x: f.x,
-    y: f.y,
-    width: f.width,
-    height: f.height,
-    html: f.html,
-    createdAt: f.createdAt,
-    updatedAt: f.updatedAt,
-    updatedBy: f.updatedBy,
-    demo: f.demo ?? null,
-  }
-  const { id, createdAt, ...set } = row
-  await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
-  await syncAssetRefs(f.id, f.html)
-}
-
-/* asset_refs is a projection of frame HTML: recompute this frame's full ref
-   set on every durable write (never increment/decrement — nothing to drift).
-   Boot reconciles the whole table, so a lost write here self-heals. */
-async function syncAssetRefs(frameId: string, html: string) {
-  const ids = [...extractAssetIds(html)]
-  await db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId))
-  if (ids.length) {
-    await db
-      .insert(t.assetRefs)
-      .values(ids.map((assetId) => ({ assetId, frameId })))
-      .onConflictDoNothing()
-  }
-}
-
 export function deleteCanvas(canvasId: string) {
-  /* refs must go before the frames rows the subquery reads */
-  swallow(
-    db
-      .delete(t.assetRefs)
-      .where(
-        inArray(
-          t.assetRefs.frameId,
-          db.select({ id: t.frames.id }).from(t.frames).where(eq(t.frames.canvasId, canvasId)),
-        ),
-      )
-      .then(() => db.delete(t.frames).where(eq(t.frames.canvasId, canvasId))),
-  )
   swallow(db.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId)))
   swallow(db.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId)))
   swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
@@ -353,16 +262,6 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.memoryProposals).where(eq(t.memoryProposals.canvasId, canvasId)))
   swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
   swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
-}
-
-export function deleteFrame(frameId: string) {
-  const timer = frameTimers.get(frameId)
-  if (timer) {
-    clearTimeout(timer)
-    frameTimers.delete(frameId)
-  }
-  swallow(db.delete(t.frames).where(eq(t.frames.id, frameId)))
-  swallow(db.delete(t.assetRefs).where(eq(t.assetRefs.frameId, frameId)))
 }
 
 /** The frame/element a prompt card was scoped to, or nothing when the row
@@ -554,19 +453,6 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
   )
 }
 
-/** Flush pending debounced frame writes (called on shutdown). */
-export async function flush(getFrame: (id: string) => Frame | undefined): Promise<void> {
-  const ids = [...frameTimers.keys()]
-  for (const [, timer] of frameTimers) clearTimeout(timer)
-  frameTimers.clear()
-  await Promise.allSettled(
-    ids.map((id) => {
-      const f = getFrame(id)
-      return f ? writeFrame(f) : Promise.resolve()
-    }),
-  )
-}
-
 /* ------------------------------------------------------------------ */
 /* Boot hydration                                                     */
 /* ------------------------------------------------------------------ */
@@ -586,10 +472,71 @@ const LOG_CAP = 100
 /** the chat keeps more history than the other logs — it is the conversation */
 export const CHAT_LOG_CAP = 300
 
+/** Read-only bridge for existing installs; actors become authoritative on first access. */
+export async function loadLegacyFrameIds(canvasId: string): Promise<string[]> {
+  const rows = await db
+    .select({ id: t.frames.id })
+    .from(t.frames)
+    .where(eq(t.frames.canvasId, canvasId))
+    .orderBy(t.frames.createdAt, t.frames.id)
+  return rows.map((row) => row.id)
+}
+
+export async function loadLegacyFrame(id: string): Promise<Frame | undefined> {
+  const [row] = await db.select().from(t.frames).where(eq(t.frames.id, id))
+  if (!row) return undefined
+  const { demo, pageId, ...frame } = row
+  return { ...frame, ...(demo === null ? {} : { demo }), ...(pageId === null ? {} : { pageId }) }
+}
+
+export async function legacyFrameCanvasId(id: string): Promise<string | undefined> {
+  const [row] = await db.select({ canvasId: t.frames.canvasId }).from(t.frames).where(eq(t.frames.id, id))
+  return row?.canvasId
+}
+
+/** Discover canvas metadata without rehydrating frames or AI queues. */
+export async function loadCanvas(id: string): Promise<Canvas | undefined> {
+  const [c] = await db.select().from(t.canvases).where(eq(t.canvases.id, id))
+  if (!c) return undefined
+  const [members, guidelines, references] = await Promise.all([
+    db.select().from(t.canvasMembers).where(eq(t.canvasMembers.canvasId, id)),
+    db.select().from(t.guidelines).where(eq(t.guidelines.canvasId, id)).orderBy(t.guidelines.name),
+    db
+      .select()
+      .from(t.memoryReferences)
+      .where(eq(t.memoryReferences.canvasId, id))
+      .orderBy(desc(t.memoryReferences.pinnedAt)),
+  ])
+  return {
+    id,
+    name: c.name,
+    ownerId: c.ownerId ?? undefined,
+    linkAccess: c.linkAccess === 'edit' ? 'edit' : undefined,
+    publishedAt: c.publishedAt ?? undefined,
+    description: c.description ?? undefined,
+    category: isCommunityCategory(c.category) ? c.category : undefined,
+    copyCount: c.copyCount,
+    workspaceId: c.workspaceId ?? undefined,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    frames: [],
+    memberIds: members.map((member) => member.userId),
+    guidelines: guidelines.map((g) => ({
+      name: g.name,
+      markdown: g.markdown,
+      title: g.title ?? undefined,
+      updatedAt: g.updatedAt,
+      updatedBy: g.updatedBy,
+      x: g.x ?? undefined,
+      y: g.y ?? undefined,
+    })),
+    references: references.map(({ canvasId: _canvasId, ...reference }) => reference),
+  }
+}
+
 export async function hydrate(): Promise<Hydrated> {
   const [
     canvasRows,
-    frameRows,
     taskRows,
     feedbackRows,
     commentRows,
@@ -602,7 +549,6 @@ export async function hydrate(): Promise<Hydrated> {
     memberRows,
   ] = await Promise.all([
     db.select().from(t.canvases),
-    db.select().from(t.frames),
     db.select().from(t.tasks).orderBy(desc(t.tasks.startedAt)),
     db.select().from(t.feedback).orderBy(desc(t.feedback.at)),
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
@@ -635,9 +581,6 @@ export async function hydrate(): Promise<Hydrated> {
     const c = byId.get(m.canvasId)
     if (c) (c.memberIds ??= []).push(m.userId)
   }
-  for (const f of frameRows)
-    byId.get(f.canvasId)?.frames.push({ ...f, pageId: f.pageId ?? undefined, demo: f.demo ?? undefined })
-  for (const c of canvases) c.frames.sort((a, b) => a.createdAt - b.createdAt)
   for (const r of referenceRows) {
     const c = byId.get(r.canvasId)
     if (!c) continue
@@ -849,26 +792,4 @@ export async function hydrate(): Promise<Hydrated> {
   }
 
   return { canvases, tasks, feedback, comments, chat, activity, decisions, proposals }
-}
-
-/** One-time import of the pre-DB data/store.json so existing canvases survive. */
-export async function importLegacyJson(): Promise<Canvas[] | null> {
-  const file = path.join(process.cwd(), 'data', 'store.json')
-  let parsed: Canvas[]
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch {
-    return null
-  }
-  if (!Array.isArray(parsed) || parsed.length === 0) return null
-  for (const c of parsed) {
-    await db
-      .insert(t.canvases)
-      .values({ id: c.id, name: c.name, createdAt: c.createdAt, updatedAt: c.updatedAt })
-      .onConflictDoNothing()
-    for (const f of c.frames) await writeFrame(f)
-  }
-  fs.renameSync(file, `${file}.imported`)
-  console.log(`[db] imported ${parsed.length} canvas(es) from legacy store.json`)
-  return parsed
 }

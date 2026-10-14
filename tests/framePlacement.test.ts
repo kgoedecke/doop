@@ -55,25 +55,6 @@ describe('frameCenterPosition', () => {
 
     expect(pos).toEqual({ x: 250 - 320, y: 200 - 240 })
   })
-
-  it('is independent of how many frames already exist on the canvas', () => {
-    // the bug this replaces was keyed off canvas.frames (right of the
-    // right-most one), which drifts further off-screen the more frames
-    // exist. The fix only depends on the current view, so the same
-    // viewport always yields the same placement.
-    const withNoFrames = frameCenterPosition(
-      { x: 0, y: 0, zoom: 1 },
-      { width: 1000, height: 800 },
-      { width: 640, height: 480 },
-    )
-    const withManyFrames = frameCenterPosition(
-      { x: 0, y: 0, zoom: 1 },
-      { width: 1000, height: 800 },
-      { width: 640, height: 480 },
-    )
-
-    expect(withManyFrames).toEqual(withNoFrames)
-  })
 })
 
 describe('createCenteredFrame', () => {

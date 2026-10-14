@@ -130,7 +130,7 @@ function scheduleNext(row: Pick<AutomationRow, 'enabled' | 'schedule' | 'steps'>
 function checkCanvases(ownerId: string, steps: Step[]): string | undefined {
   for (const s of steps) {
     if (!s.canvasId) continue
-    const c = store.getCanvas(s.canvasId)
+    const c = store.getCanvasMetadata(s.canvasId)
     if (!c || !hasDurableCanvasAccess(ownerId, c)) return 'one of the canvases is not yours'
   }
   return undefined
@@ -283,7 +283,7 @@ async function runAgent(
 ): Promise<string> {
   const gate = await allowance.consumeResidentTask(row.ownerId)
   if (!gate.ok) throw new StepError('no model account connected — the Doop Agent has nothing to run on')
-  const card = actions.addQueuedCard(step.canvasId, step.prompt, actorName, step.roles, undefined, row.ownerId)
+  const card = await actions.addQueuedCard(step.canvasId, step.prompt, actorName, step.roles, undefined, row.ownerId)
   if (!card) {
     await allowance.refundResidentTask(gate, row.ownerId)
     throw new StepError('canvas not found')

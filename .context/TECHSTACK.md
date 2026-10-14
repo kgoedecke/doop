@@ -3,8 +3,9 @@
 ## 1. Language and Runtime
 
 - TypeScript 5.5.3 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
-- Node.js - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step, both in dev
-  (`tsx watch`) and prod (`NODE_ENV=production tsx server/index.ts`).
+- Node.js - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step.
+  `bun run dev` starts local actors unless an external actor API is configured.
+  `bun run start` requires `TERSE_ACTOR_URL` for a separately hosted actor API with a public WebSocket endpoint.
 - Bun 1.3.10 - pinned via `packageManager` in `package.json`; used as the package manager and
   script runner, not as the server runtime.
 - Rust (stable) - `desktop/src-tauri`, the Tauri desktop shell.
@@ -18,12 +19,18 @@
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
-- `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
-  activity feed) over one room per canvas.
+- `ws` 8.18.0 - WebSocket server for cursors, presence, and collaboration over one room per canvas;
+  frame edits use separate actor subscriptions.
 
 ## 3. Data and Persistence
 
-- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - primary database.
+- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - existing application records.
+  Legacy frame rows are imported automatically on first canvas access, preserving IDs and references.
+- `durable-actors` - `CanvasIndex` owns pages, frame-to-page assignments, ordered frame IDs, and lifecycle bookkeeping;
+  `FrameActor` owns frame content and geometry. Each uses 1 CPU and 256 MiB. Browser and iOS subscriptions go directly
+  to both actor types, with fresh snapshots on reconnect.
+  Local actors start automatically in development/tests;
+  production requires a separate actor API, with client WebSockets connecting directly to it.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).
@@ -40,14 +47,13 @@
 
 ## 6. Build and Dependency Management
 
-- Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
---frozen-lockfile` in CI.
+- Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install --frozen-lockfile` in CI.
 - Vite 5.3.3 - frontend build tool (`vite build`).
 
 ## 7. Testing Stack
 
-- Vitest 4.1.11 - unit/integration tests across `server/` and `src/`; run via `bun run test`
-  (`vitest run`). Tests live in `tests/`.
+- Vitest 4.1.11 - unit/integration tests across `server/` and `src/`; `bun run test` starts isolated
+  actors and runs Vitest against throwaway PGlite databases. Tests live in `tests/`.
 
 ## 8. CI/CD and Delivery
 
@@ -69,7 +75,8 @@
   `DOOP_GEMINI_CLOUD_WORKERS` enables operator-managed routing and BYO metering; unset by default.
 
 - Docker - `Dockerfile` + `docker-compose.yml`; `docker compose up` runs the app container
-  (port 4400) and a `postgres:16-alpine` db container for self-hosting.
+  (port 4400) and a `postgres:16-alpine` db container for self-hosting. Actors run separately,
+  configured through `TERSE_ACTOR_URL` and `TERSE_API_KEY`.
 
 ## 10. Frontend Stack
 

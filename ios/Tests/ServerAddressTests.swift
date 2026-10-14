@@ -11,6 +11,7 @@ struct ServerAddressChecks {
         checks.testSelfHostedPortIsPreserved()
         try checks.testExportDestinations()
         try checks.testServerResponseContracts()
+        try checks.testFrameActorEvents()
         try checks.testAgentActivityStates()
         print("All core checks passed.")
     }
@@ -78,6 +79,31 @@ struct ServerAddressChecks {
         checkEqual(update.frame?.x, 1.5)
         let deletion = try JSONDecoder().decode(CanvasEvent.self, from: Data(#"{"type":"frame:deleted","frameId":"f"}"#.utf8))
         checkEqual(deletion.frameId, "f")
+    }
+
+    func testFrameActorEvents() throws {
+        func event(_ json: String) throws -> FrameActorEvent {
+            try JSONDecoder().decode(FrameActorEvent.self, from: Data(json.utf8))
+        }
+        let index = try event(#"{"type":"index-snapshot","revision":1,"frameIds":["f"],"deleted":false}"#)
+        checkEqual(index.frameIds, ["f"])
+        let update = try event(#"{"type":"state_update","changes":{"committed":{"type":"frame-change","revision":2,"frame":{"id":"f","canvasId":"c","name":"Frame","x":10,"y":20,"width":390,"height":844,"html":"<p>Saved</p>","updatedAt":100}}}}"#)
+        checkEqual(update.type, "frame-change")
+        checkEqual(update.revision, 2)
+        checkEqual(update.frame?.html, "<p>Saved</p>")
+        let drag = try event(#"{"type":"drag","frameId":"f","x":50,"y":60,"width":400,"height":800,"updatedAt":100}"#)
+        checkNil(drag.revision, "Drag previews have no saved revision")
+        var saved = update.frame!
+        let preview = drag.drag!.applying(to: saved)!
+        checkEqual([preview.x, preview.y, preview.width, preview.height], [50, 60, 400, 800])
+        checkEqual(preview.html, saved.html)
+        checkEqual(preview.updatedAt, saved.updatedAt)
+        saved.updatedAt = 101
+        checkNil(drag.drag!.applying(to: saved), "A newer save invalidates the drag preview")
+        let deletion = try event(#"{"type":"state_update","changes":{"committed":{"type":"frame-snapshot","revision":3,"frame":null,"deleted":true}}}"#)
+        checkEqual(deletion.deleted, true)
+        checkNil(deletion.frame, "Deleted frames have no content")
+        checkNil(try event(#"{"type":"state_update","changes":{"committed":null}}"#).revision, "Ignore empty runtime state")
     }
 
     func testAgentActivityStates() throws {

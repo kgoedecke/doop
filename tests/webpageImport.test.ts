@@ -34,7 +34,7 @@ describe('agent webpage import', () => {
       updatedBy: actor.name,
     }
     const importPage: typeof import('../server/importer.ts').importPage = vi.fn(async () => imported)
-    const createFrame: typeof import('../server/actions.ts').createFrame = vi.fn(() => frame)
+    const createFrame: typeof import('../server/actions.ts').createFrame = vi.fn(async () => frame)
 
     const result = await createImportedWebpageFrame(
       { canvasId: 'canvas-1', url: 'example.com', actor, includePreview: true },

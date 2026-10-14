@@ -6,17 +6,20 @@
   "type": "module",
   "packageManager": "bun@1.3.10",
   "scripts": {
-    "dev": "concurrently -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
+    "dev": "node scripts/run-with-actors.mjs dev",
     "build": "vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
+    "start": "NODE_ENV=production node --env-file-if-exists=.env --import tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "node scripts/run-with-actors.mjs test",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "doc-lint": "node scripts/doc-lint.mjs",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "deploy:actors": "node scripts/deploy-actors.mjs",
+    "actors:generate": "node scripts/generate-actors.mjs",
+    "actors:check": "node scripts/generate-actors.mjs --check"
   },
   "lint-staged": {
     "*.{ts,tsx,js}": [
@@ -46,6 +49,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
+    "durable-actors": "0.7.16",
     "express": "^4.19.2",
     "iconoir-react": "^7.12.1",
     "nanoid": "^5.0.7",
@@ -58,10 +62,11 @@
     "sharp": "0.34.3",
     "stripe": "21.0.1",
     "tailwind-merge": "^3.6.0",
+    "terse-sdk": "0.9.15",
     "tsx": "^4.23.9",
     "undici": "^8.10.2",
     "ws": "^8.18.0",
-    "zod": "^3.23.8",
+    "zod": "4.3.6",
     "zustand": "^4.5.4"
   },
   "devDependencies": {
@@ -88,10 +93,14 @@
     "prettier": "^3.9.6",
     "shadcn": "^4.19.0",
     "tailwindcss": "^4.3.3",
+    "terse-cli": "0.9.15",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.67.0",
     "vite": "^5.3.3",
     "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

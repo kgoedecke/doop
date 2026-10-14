@@ -500,7 +500,7 @@ export async function runRepoCards(
       try {
         actions.setAgentStatus(canvasId, actor, `Reading ${repo}’s design system — theme, tokens, type`)
         const md = await extractDesignSystem(conn, paths, model)
-        actions.setGuideline(canvasId, designSystemSlug(repo), md, actor, undefined, `${repo} design system`)
+        await actions.setGuideline(canvasId, designSystemSlug(repo), md, actor, undefined, `${repo} design system`)
         actions.advanceCard(canvasId, card.id, actor)
       } catch (err) {
         console.error(`[github-recon] design system extraction for ${repo} failed`, err)
@@ -545,7 +545,7 @@ export async function runRepoCards(
 }
 
 /** Land one frame for a screen at the connection's next grid slot. */
-function placeRepoFrame(
+async function placeRepoFrame(
   canvasId: string,
   conn: GithubConnection,
   screen: RepoScreenRef,
@@ -553,11 +553,15 @@ function placeRepoFrame(
   width: number,
   height: number,
   actor: Actor,
-): Frame {
-  const canvas = store.getCanvas(canvasId)
+): Promise<Frame> {
+  const canvas = await store.syncCanvas(canvasId)
   if (!canvas) throw new Error('canvas not found')
   const at = nextRepoFramePosition(canvas.frames, conn.id, width)
-  const frame = actions.createFrame(canvasId, { name: screen.title.slice(0, 80), ...at, width, height, html }, actor)
+  const frame = await actions.createFrame(
+    canvasId,
+    { name: screen.title.slice(0, 80), ...at, width, height, html },
+    actor,
+  )
   if (!frame) throw new Error('canvas not found')
   return frame
 }
@@ -574,7 +578,7 @@ async function sketchScreen(
 ): Promise<void> {
   if (screen.source === 'static') {
     const html = wrapRepoHtml(await fetchRepoFile(conn, screen.sourcePath), conn, screen)
-    placeRepoFrame(canvasId, conn, screen, html, PAGE_W, STATIC_H, actor)
+    await placeRepoFrame(canvasId, conn, screen, html, PAGE_W, STATIC_H, actor)
     return
   }
 
@@ -646,7 +650,15 @@ async function sketchScreen(
   }
   const { html, height } = extractHtml((result?.content ?? []) as { type: string; text?: string }[])
   const withAssets = await resolveRepoAssets(conn, html, pathSet)
-  let frame = placeRepoFrame(canvasId, conn, screen, wrapGeneratedHtml(withAssets, conn, screen), width, height, actor)
+  let frame = await placeRepoFrame(
+    canvasId,
+    conn,
+    screen,
+    wrapGeneratedHtml(withAssets, conn, screen),
+    width,
+    height,
+    actor,
+  )
 
   /* Doop's own doctrine: never ship without looking. Render the draft,
      show the model its own output, and let it fix what is visibly
@@ -684,11 +696,11 @@ async function sketchScreen(
       const redo = extractHtml(fixed.content as { type: string; text?: string }[])
       const redoAssets = await resolveRepoAssets(conn, redo.html, pathSet)
       frame =
-        actions.updateFrame(
+        (await actions.updateFrame(
           frame.id,
           { html: wrapGeneratedHtml(redoAssets, conn, screen), height: redo.height },
           actor,
-        ) ?? frame
+        )) ?? frame
     } catch (err) {
       console.error(`[github-recon] review round for ${screen.route} failed — keeping the draft`, err)
       break

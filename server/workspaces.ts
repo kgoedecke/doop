@@ -227,7 +227,7 @@ export async function deleteWorkspace(id: string): Promise<void> {
   const ws = records.get(id)
   if (!ws) return
   if (billing.billingEnabled()) await billing.cancelSubscription(ws)
-  store.detachWorkspace(id)
+  await store.detachWorkspace(id)
   records.delete(id)
   members.delete(id)
   await db.transaction(async (tx) => {
@@ -360,6 +360,11 @@ export async function removeMember(workspaceId: string, userId: string): Promise
     .delete(t.workspaceMembers)
     .where(and(eq(t.workspaceMembers.workspaceId, workspaceId), eq(t.workspaceMembers.userId, userId)))
   map.delete(userId)
+  await Promise.all(
+    [...store.canvases.values()]
+      .filter((canvas) => canvas.workspaceId === workspaceId)
+      .map((canvas) => store.revokeCanvasAccess(canvas.id)),
+  )
   reconcileSeats(ws)
   return true
 }

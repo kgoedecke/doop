@@ -8,6 +8,7 @@ const rig = vi.hoisted(() => ({
 vi.mock('../server/db/persist.ts', () => {
   const noop = () => undefined
   return {
+    loadLegacyFrameIds: async () => [],
     deleteCanvas: noop,
     deleteFrame: noop,
     deleteGuideline: noop,
@@ -37,8 +38,8 @@ vi.mock('../server/workspaces.ts', () => ({
 import { store } from '../server/store.ts'
 import { purgeUserData } from '../server/accountDeletion.ts'
 
-beforeEach(() => {
-  for (const canvas of store.allCanvases()) store.deleteCanvas(canvas.id)
+beforeEach(async () => {
+  for (const canvas of store.allCanvases()) await store.deleteCanvas(canvas.id)
   rig.workspaces.clear()
   rig.dbDeletes = 0
 })
@@ -55,10 +56,10 @@ it('deletes only the canvases nobody else can reach, and leaves the rest', async
   const result = await purgeUserData('alice')
 
   expect(result.deletedCanvases).toBe(1)
-  expect(store.getCanvas(mine.id)).toBeUndefined()
-  expect(store.getCanvas(shared.id)).toBeDefined()
-  expect(store.getCanvas(inWorkspace.id)).toBeDefined()
-  expect(store.getCanvas(theirs.id)?.memberIds ?? []).not.toContain('alice')
+  expect(store.getCanvasMetadata(mine.id)).toBeUndefined()
+  expect(store.getCanvasMetadata(shared.id)).toBeDefined()
+  expect(store.getCanvasMetadata(inWorkspace.id)).toBeDefined()
+  expect(store.getCanvasMetadata(theirs.id)?.memberIds ?? []).not.toContain('alice')
   expect(rig.workspaces.get('ws1')?.has('alice')).toBe(false)
   expect(rig.workspaces.get('ws1')?.has('bob')).toBe(true)
   expect(rig.dbDeletes).toBe(2) // live activity update tokens and push-to-start tokens

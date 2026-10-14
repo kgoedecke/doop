@@ -12,8 +12,9 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   account/server settings, frame list and properties, HTML editing, frame and
   element comments, agent tasks, sharing, and HTML export.
 - **Swift networking**: `DoopClient` talks to the existing REST API using session
-  cookies. `CanvasModel` owns the canvas state and its authenticated WebSocket room,
-  including reconnection, frame updates, agent tasks, comments and presence.
+  cookies. `CanvasModel` subscribes directly to canvas and frame actors for frame
+  updates, with fresh snapshots on reconnect. Its authenticated WebSocket room
+  handles agent tasks, comments and presence.
 - **Native canvas** (`Doop/Blitz/BlitzCanvasView.swift`): a UIKit view with one
   Core Animation layer per frame. Pan, pinch zoom, tap to select, double tap to zoom
   to a frame, drag a frame by its title. Labels, selection outlines and collaborator
