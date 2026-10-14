@@ -31,9 +31,8 @@ Run `bun install --frozen-lockfile` and `bun run cantelop:build` before building
 Doop image; it packages the CLI-generated backend client. Keep the App name in
 `cantelop/src/cantelop.ts` equal to backend `CANTELOP_APP_SLUG`; supply the
 App-scoped integration token only at server runtime.
-Runtime source changes require a matching Cantelop deployment and Doop backend
-rebuild. The SDK alpha needs the coordinated schema-3/build-protocol-6/protocol-2
-CLI/platform release before live deployment. See `cantelop/README.md`.
+Runtime source or SDK changes require a matching Cantelop deployment and Doop
+backend rebuild. See `cantelop/README.md`.
 
 ## Desktop app (Tauri: macOS DMG + Windows NSIS installer)
 

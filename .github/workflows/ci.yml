@@ -35,7 +35,7 @@ jobs:
           node-version: 22
       - name: Install Cantelop CLI
         run: |
-          curl -fsSL https://github.com/stepandel/homebrew-tap/releases/download/cantelop-v0.15.1/install.sh -o /tmp/install-cantelop.sh
+          curl -fsSL https://github.com/stepandel/homebrew-tap/releases/download/cantelop-v0.15.2/install.sh -o /tmp/install-cantelop.sh
           CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build Cantelop service and verify native CLI
