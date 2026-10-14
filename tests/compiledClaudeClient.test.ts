@@ -26,7 +26,7 @@ it('uses the compiled client with backend credentials, shared SDK errors and iso
     doopClaude: ClaudeApp
   }
   const fetcher = vi.fn(async (request: Request) => {
-    expect(request.url).toBe('https://claude.example/commands')
+    expect(request.url).toBe('https://claude.example/commands/auth')
     expect(request.headers.get('X-Cantelop-Session-Runtime')).toBe(manifest.apps[0].session_runtime_id)
     expect(request.headers.get('Authorization')).toBe('Bearer test-app-token')
     const command = await request.json()

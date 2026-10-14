@@ -679,7 +679,7 @@ Disconnect stops hosted tasks before signing out, and failed sign-out remains re
 ### Set up your own hosted Claude service
 
 Use Node 22+, Bun 1.3.10, Docker with linux/amd64 support and Cantelop CLI 0.15.1
-or newer. Both packages share a Bun workspace and pin SDK 1.0.0-alpha.11.
+or newer. Both packages share a Bun workspace and pin SDK 1.0.0-alpha.12.
 `cantelop/src/cantelop.ts` defines the App; retain the existing App name and
 `CLAUDE_REMOTE_ISSUER` when upgrading so users keep their Workspaces and credentials.
 
