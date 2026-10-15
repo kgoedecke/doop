@@ -155,6 +155,18 @@ it('shows the native sign-in link and code field', async () => {
   await act(async () => complete.click())
   expect(loginMocks.send).toHaveBeenCalledWith('test-code')
   expect(container.querySelector('[role="status"]')?.textContent).toBe('Verifying sign-in…')
+  expect(container.querySelector('a')).toBeNull()
+  expect(container.querySelector('#hosted-sign-in-code')).toBeNull()
+  await act(async () =>
+    loginMocks.update?.({
+      url: loginMocks.url,
+      status: 'Claude did not accept that code. Paste it again.',
+      ready: true,
+      active: true,
+    }),
+  )
+  expect(container.querySelector('a')?.textContent).toContain('Open Claude sign-in')
+  expect(container.querySelector('#hosted-sign-in-code')).not.toBeNull()
 })
 it('uses the confirmed login selection without another API request', async () => {
   await act(async () => root.render(<RemoteClaudeRow />))

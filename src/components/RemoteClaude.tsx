@@ -74,6 +74,8 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
   const needsReconnect = active && !!status?.authRequired
   const model = normalizeClaudeModel(preference?.model)
   const signInUrl = view?.url
+  // The link has served its purpose once a code is being verified; a rejected code makes the view ready again.
+  const verifyingCode = !!signInUrl && !view?.ready
   const selectedBlurb = CLAUDE_MODELS.find((option) => option.id === model)?.blurb
   useEffect(() => {
     let disposed = false
@@ -252,19 +254,21 @@ function RemoteClaudeConnection({ userId, replaces }: { userId: string; replaces
               {view.status}
             </p>
             {view.active ? (
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold">1. Sign in to Claude</h4>
-                {signInUrl && view.active ? (
-                  <Button asChild>
-                    <a href={signInUrl} target="_blank" rel="noopener noreferrer">
-                      Open Claude sign-in <span aria-hidden>↗</span>
-                    </a>
-                  </Button>
-                ) : view.active ? (
-                  <Button disabled>Preparing sign-in…</Button>
-                ) : null}
-                <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
-              </div>
+              !verifyingCode && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold">1. Sign in to Claude</h4>
+                  {signInUrl && view.active ? (
+                    <Button asChild>
+                      <a href={signInUrl} target="_blank" rel="noopener noreferrer">
+                        Open Claude sign-in <span aria-hidden>↗</span>
+                      </a>
+                    </Button>
+                  ) : view.active ? (
+                    <Button disabled>Preparing sign-in…</Button>
+                  ) : null}
+                  <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
+                </div>
+              )
             ) : (
               <Button
                 disabled={busy}
