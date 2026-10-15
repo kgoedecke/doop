@@ -14,7 +14,7 @@
     "deploy": "cantelop deploy"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.0.0"
+    "@cantelop/sdk": "1.0.1"
   },
   "packageManager": "bun@1.3.10"
 }
