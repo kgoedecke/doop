@@ -24,12 +24,12 @@ import type {
 const streamId = '1'.repeat(32)
 const messageId = 'msg_' + '2'.repeat(32)
 function configured() {
-  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude-runtime')
+  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
   vi.stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
   vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
   vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'integration-token')
   sdkMocks.app = new CantelopClient().app<Command, Event, Reply>({
-    name: 'doop-claude-runtime',
+    name: 'doop-claude',
     runtime: { receive() {} },
     auth: {
       status: () => true,
@@ -71,7 +71,7 @@ it('requires the native SDK configuration and allows its default hosted Edge ori
   expect(remoteClaudeConfigured()).toBe(true)
   vi.stubEnv('CANTELOP_APP_SLUG', undefined)
   expect(remoteClaudeConfigured()).toBe(false)
-  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude-runtime')
+  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
   vi.stubEnv('CANTELOP_EDGE_URL', undefined)
   expect(remoteClaudeConfigured()).toBe(true)
   expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')

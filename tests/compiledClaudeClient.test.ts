@@ -16,7 +16,7 @@ it('uses the compiled client with backend credentials, shared SDK errors and iso
   expect(declarations).toContain('doopClaude')
   expect(declarations).toContain('@cantelop/sdk/harnesses/claude/protocol')
   expect(declarations).not.toContain('createClaudeRuntime')
-  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude-runtime')
+  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
   vi.stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
   vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'test-app-token')
   vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
