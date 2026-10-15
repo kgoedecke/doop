@@ -135,6 +135,18 @@ it('shows one sign-in action and keeps native output collapsed until needed', as
   await act(async () => complete.click())
   expect(loginMocks.send).toHaveBeenCalledWith('test-code')
   expect(container.querySelector('[role="status"]')?.textContent).toBe('Verifying sign-in…')
+  expect(container.querySelector('a')).toBeNull()
+  expect(container.querySelector('#hosted-sign-in-code')).toBeNull()
+  await act(async () =>
+    loginMocks.update?.({
+      text: `${loginMocks.text}\nInvalid code. Paste code here if prompted >`,
+      status: 'Sign in to Claude in a new tab, then return here.',
+      ready: true,
+      active: true,
+    }),
+  )
+  expect(container.querySelector('a')?.textContent).toContain('Open Claude sign-in')
+  expect(container.querySelector('#hosted-sign-in-code')).not.toBeNull()
 })
 it('waits for a code prompt before showing the code field', async () => {
   mocks.check.mockResolvedValue({ authenticated: false })

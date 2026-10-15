@@ -23,12 +23,16 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Terminal output length when the sign-in code was sent; the sign-in steps stay
+  // hidden until Claude asks for a code again (e.g. the pasted one was rejected).
+  const [codeSentAt, setCodeSentAt] = useState<number | null>(null)
   const login = useRef<RemoteClaudeLogin>()
   const active = !!preference?.enabled && preference.transport === 'remote'
   const needsReconnect = active && !!status?.authRequired
   const model = normalizeClaudeModel(preference?.model)
   const signInUrl = view ? anthropicLinks(view.text).at(-1) : undefined
-  const codeRequested = !!view && /(?:paste|enter)[^\n]{0,50}\bcode\b/i.test(view.text)
+  const codeRequested = !!view && /(?:paste|enter)[^\n]{0,50}\bcode\b/i.test(view.text.slice(codeSentAt ?? 0))
+  const verifying = codeSentAt !== null && !codeRequested
   useEffect(() => {
     let disposed = false
     const refresh = () => {
@@ -80,6 +84,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
       return
     }
     login.current?.dispose()
+    setCodeSentAt(null)
     const connection = new RemoteClaudeLogin(userId, setView, (attemptId) => act(() => select(model, attemptId)))
     login.current = connection
     await connection.start(status?.authRequired ?? false)
@@ -175,19 +180,21 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
             <p role="status" aria-live="polite" className="text-sm text-ink-soft">
               {view.status}
             </p>
-            <div className="space-y-2">
-              <h4 className="text-sm font-semibold">1. Sign in to Claude</h4>
-              {signInUrl && view.active ? (
-                <Button asChild>
-                  <a href={signInUrl} target="_blank" rel="noopener noreferrer">
-                    Open Claude sign-in <span aria-hidden>↗</span>
-                  </a>
-                </Button>
-              ) : view.active ? (
-                <Button disabled>Preparing sign-in…</Button>
-              ) : null}
-              <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
-            </div>
+            {!verifying && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold">1. Sign in to Claude</h4>
+                {signInUrl && view.active ? (
+                  <Button asChild>
+                    <a href={signInUrl} target="_blank" rel="noopener noreferrer">
+                      Open Claude sign-in <span aria-hidden>↗</span>
+                    </a>
+                  </Button>
+                ) : view.active ? (
+                  <Button disabled>Preparing sign-in…</Button>
+                ) : null}
+                <p className="text-xs text-ink-soft">Opens in a new tab. Sign in, then return here.</p>
+              </div>
+            )}
             {codeRequested && view.active && (
               <form
                 onSubmit={(event) => {
@@ -195,6 +202,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
                   if (!input.trim() || !view.ready) return
                   const value = input.trim()
                   setInput('')
+                  setCodeSentAt(view.text.length)
                   void login.current?.send(value)
                 }}
                 className="space-y-2"
@@ -269,6 +277,7 @@ function RemoteClaudeConnection({ userId }: { userId: string }) {
                   login.current = undefined
                   setView(null)
                   setInput('')
+                  setCodeSentAt(null)
                 })
               }}
             >
