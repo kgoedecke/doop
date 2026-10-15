@@ -7,7 +7,7 @@
       "dependencies": {
         "@anthropic-ai/sdk": "^0.115.0",
         "@aws-sdk/client-s3": "^3.1110.0",
-        "@cantelop/sdk": "1.0.0-alpha.12",
+        "@cantelop/sdk": "1.0.0",
         "@electric-sql/pglite": "^0.5.4",
         "@modelcontextprotocol/sdk": "^1.12.0",
         "@radix-ui/react-alert-dialog": "^1.1.23",
@@ -77,7 +77,7 @@
       "name": "cantelop-claude-api",
       "version": "0.1.0",
       "dependencies": {
-        "@cantelop/sdk": "1.0.0-alpha.12",
+        "@cantelop/sdk": "1.0.0",
       },
     },
   },
@@ -200,7 +200,7 @@
 
     "@better-fetch/fetch": ["@better-fetch/fetch@1.3.1", "", {}, "sha512-ABkD1WhyfPZprKRQI3bhATjeiFuNWC9PXhfGWqL+sg/gKrM977oFrYkdb4msM3hgUGonr7KlOsOFT5TU2rht9g=="],
 
-    "@cantelop/sdk": ["@cantelop/sdk@1.0.0-alpha.12", "", { "dependencies": { "@libsql/client": "^0.17.0", "drizzle-kit": "0.31.10", "drizzle-orm": "0.45.2", "esbuild": "^0.25.0", "typescript": "^5.9.3" } }, "sha512-vd1fZfOxIbmVXeMAHIyQljv61n6OTbvmuoLzz8iC6xlOp2GIEUJnEZV6GHWvECEMJCz4UY7zVpphUQpzSVSAAw=="],
+    "@cantelop/sdk": ["@cantelop/sdk@1.0.0", "", { "dependencies": { "@libsql/client": "^0.17.0", "drizzle-kit": "0.31.10", "drizzle-orm": "0.45.2", "esbuild": "^0.25.0", "typescript": "^5.9.3" } }, "sha512-1/4JdGptIr2eTY/mVfKC3Jm2Fjy8HKGMqK5YX6d55gwLwcy/UXGCf99jCVzC3e+6pSODdGUIjTAP6qkkqaInuQ=="],
 
     "@commitlint/cli": ["@commitlint/cli@21.2.2", "", { "dependencies": { "@commitlint/config-conventional": "^21.2.2", "@commitlint/format": "^21.2.2", "@commitlint/lint": "^21.2.2", "@commitlint/load": "^21.2.2", "@commitlint/read": "^21.2.1", "@commitlint/types": "^21.2.0", "tinyexec": "^1.0.0", "yargs": "^18.0.0" }, "bin": { "commitlint": "cli.js" } }, "sha512-a+6hQxIxnpdvSvS2apvttPNbEliYsVC3PqFYDiiB2kjbwIsQsj1urvQ4Tkf70pKYozPalKAuRQmm/GHwndduqA=="],
 
