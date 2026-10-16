@@ -1,10 +1,16 @@
 dist/
 node_modules/
+.claude/worktrees/
+.cantelop/
 package-lock.json
 bun.lock
 CHANGELOG.md
 desktop/src-tauri/tauri.conf.json
 desktop/CHANGELOG.md
+cantelop/.cantelop/
+cantelop/.dev/
+cantelop/coverage/
+
 
 # Real frames captured verbatim as Blitz bridge test fixtures
 ios/BlitzKit/rust/tests/*.html

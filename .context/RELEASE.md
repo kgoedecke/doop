@@ -24,6 +24,16 @@ on port 4400 alongside a `postgres:16-alpine` container, and applies DB migratio
 (`server/db/index.ts`). CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
 format:check, build, test) but does not build or push a container image.
 
+For hosted Claude, the server image also contains the compiled SDK 1.0 backend
+under `cantelop/.cantelop/client`. Runtime protocol types and helpers come directly
+from the SDK; no Cantelop runtime source files are copied into the server image.
+Run `bun install --frozen-lockfile` and `bun run cantelop:build` before building the
+Doop image; it packages the CLI-generated backend client. Keep the App name in
+`cantelop/src/cantelop.ts` equal to backend `CANTELOP_APP_SLUG`; supply the
+App-scoped integration token only at server runtime.
+Runtime source or SDK changes require a matching Cantelop deployment and Doop
+backend rebuild. See `cantelop/README.md`.
+
 ## Desktop app (Tauri: macOS DMG + Windows NSIS installer)
 
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup

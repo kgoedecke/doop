@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { runRemoteClaude } from './remoteClaudeRunner.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
@@ -29,7 +30,7 @@ import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCo
  */
 
 export type ServerProvider = 'anthropic' | 'azure'
-export type Provider = ServerProvider | AccountKind | 'claude-local' | 'gemini-cloud'
+export type Provider = ServerProvider | AccountKind | 'claude-local' | 'claude-remote' | 'gemini-cloud'
 
 export interface AgentTurnRequest {
   /** ordered system blocks; `cache` marks an Anthropic cache breakpoint */
@@ -300,6 +301,16 @@ export async function pickModel(payerId?: string): Promise<AgentModel | null> {
       }
     }
     const local = await getLocalAgentPreference(payerId)
+    if (local.enabled && local.transport === 'remote') {
+      if (local.remoteAuthRequired) return null
+      return {
+        provider: 'claude-remote',
+        label: `Hosted Claude (${local.model})`,
+        userId: payerId,
+        runHarness: (req) => runRemoteClaude(payerId, local.model, req),
+        run: () => Promise.reject(new Error('Repository imports require an API-key provider. Select it in Settings.')),
+      }
+    }
     if (local.enabled) {
       if (!localAgentRuns.online(payerId)) return null
       return {

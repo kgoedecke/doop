@@ -49,8 +49,7 @@ bun install
 bun run dev
 ```
 
-Doop builds and installs with [bun](https://bun.sh) (`bun.lock` is the only
-lockfile); the server itself runs on Node.
+Doop builds and installs with [bun](https://bun.sh) (each package uses a `bun.lock` lockfile); the server itself runs on Node.
 
 - Web app: **http://localhost:4300**
 - API + WebSocket + MCP server: **http://localhost:4400** (the web port proxies `/api`, `/ws`, `/mcp` to it)
@@ -64,6 +63,7 @@ yourself over MCP need no key.
 Or self-host the production build with Docker:
 
 ```bash
+bun install --frozen-lockfile && bun run cantelop:build
 BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
 ```
 
@@ -421,6 +421,7 @@ Any container host works; Railway/Fly are the least friction:
 Local sanity check of the exact production image:
 
 ```bash
+bun install --frozen-lockfile && bun run cantelop:build
 docker build -t doop .
 docker run -p 4400:4400 -e BETTER_AUTH_URL=http://localhost:4400 -e BETTER_AUTH_SECRET=dev-only doop
 ```
@@ -682,3 +683,65 @@ changes under the same license.
 
 The **doop name and logo are trademarks** and are not covered by the code license —
 please rebrand derived services.
+
+## Claude Plan: hosted execution with your own Claude account
+
+In **Settings → Claude Plan → Connect**, open the Claude sign-in link and paste
+the returned code into Doop. Native credentials stay in your Cantelop Workspace.
+Tasks use your Claude account; repository imports still require an API-key provider.
+Disconnect stops hosted tasks before signing out, and failed sign-out remains retryable.
+
+### Set up your own hosted Claude service
+
+Use Node 22+, Bun 1.3.10, Docker with linux/amd64 support and Cantelop CLI 0.15.2
+or newer. Both packages share a Bun workspace and pin SDK 1.0.1.
+`cantelop/src/cantelop.ts` defines the App; retain the existing App name and
+`CLAUDE_REMOTE_ISSUER` when upgrading so users keep their Workspaces and credentials.
+
+Configure Doop's private backend environment:
+
+- `CANTELOP_APP_SLUG`: App name, matching `cantelop/src/cantelop.ts`.
+- `CANTELOP_INTEGRATION_TOKEN`: platform-issued App token. Keep it in the backend;
+  never use a CLI administrative token or put it in the Sandbox.
+- `CLAUDE_REMOTE_ISSUER`: stable namespace combined with each Doop user ID to select a Workspace.
+- `CANTELOP_EDGE_URL`: optional endpoint override; the SDK derives the hosted URL from the App name.
+- `BETTER_AUTH_URL`: Doop's public sign-in origin.
+- `CLAUDE_REMOTE_MCP_ORIGIN`: reachable MCP callback origin, defaulting to `BETTER_AUTH_URL`.
+  Hosted runtimes require HTTPS.
+
+```sh
+bun install --frozen-lockfile
+bun run cantelop:check
+bun run cantelop:build
+cantelop login
+bun run cantelop:deploy
+```
+
+`cantelop:build` runs the CLI and generates `cantelop/.cantelop/client`, which Doop
+imports directly. Build before dev, type checking, tests or Docker packaging.
+Ordinary Doop commands reuse these artifacts. Changes to the App or SDK require
+both a matching Cantelop deployment and a rebuilt Doop client. The Doop Docker
+image packages the generated client; supply backend credentials only at runtime.
+
+### Local development
+
+For local Doop with hosted Cantelop, install `cloudflared` and run
+`bun run cantelop:tunnel`. Keep it running and restart Doop after its address changes.
+
+For a fully local runtime, start `bun run cantelop:dev`, use its matching App token,
+and configure:
+
+```dotenv
+CANTELOP_EDGE_URL=http://127.0.0.1:8787
+CLAUDE_REMOTE_MCP_ORIGIN=http://host.docker.internal:4400
+```
+
+Start Doop with `bun run dev` and connect at **http://localhost:4300/settings**.
+Container callbacks to `host.docker.internal` are allowed in development; adjust
+the backend port if needed. Production MCP callbacks require HTTPS.
+
+Hosted tasks receive only their run-scoped MCP permissions; native shell and file
+tools are disabled. MCP tokens are revoked when a task ends or is canceled.
+Closing the browser does not stop a task, but restarting Doop interrupts its
+in-memory run context. Lost event history fails the task without replaying edits.
+See [the service architecture](cantelop/README.md) for code ownership.

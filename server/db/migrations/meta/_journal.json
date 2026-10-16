@@ -197,6 +197,13 @@
       "when": 1791579850954,
       "tag": "0028_slack_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791942090751,
+      "tag": "0029_remote_claude",
+      "breakpoints": true
     }
   ]
 }

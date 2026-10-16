@@ -8,15 +8,20 @@
   "scripts": {
     "dev": "concurrently -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
     "build": "vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
+    "start": "NODE_ENV=production tsx --env-file-if-exists=.env server/index.ts",
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --dir tests",
     "lint": "oxlint --type-aware --deny-warnings . && eslint . --max-warnings 0",
     "lint:fix": "oxlint --type-aware --deny-warnings --fix . && eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "doc-lint": "node scripts/doc-lint.mjs",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "cantelop:check": "bun run --cwd cantelop check",
+    "cantelop:build": "bun run --cwd cantelop build",
+    "cantelop:dev": "bun run --cwd cantelop dev",
+    "cantelop:tunnel": "node --env-file-if-exists=.env scripts/dev-mcp-tunnel.mjs",
+    "cantelop:deploy": "bun run --cwd cantelop deploy"
   },
   "lint-staged": {
     "*.{ts,tsx,js}": [
@@ -31,6 +36,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@aws-sdk/client-s3": "^3.1110.0",
+    "@cantelop/sdk": "1.0.1",
     "@electric-sql/pglite": "^0.5.4",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@radix-ui/react-alert-dialog": "^1.1.23",
@@ -96,5 +102,8 @@
     "typescript-eslint": "^8.67.0",
     "vite": "^8.3.4",
     "vitest": "^5.0.3"
-  }
+  },
+  "workspaces": [
+    "cantelop"
+  ]
 }

@@ -141,6 +141,12 @@ const schema = {
     default: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
   }),
 
+  /* ------------------------------------------------ hosted Claude */
+  CANTELOP_APP_SLUG: str({ default: undefined }),
+  CANTELOP_INTEGRATION_TOKEN: str({ default: undefined }),
+  CLAUDE_REMOTE_ISSUER: str({ default: undefined }),
+  CLAUDE_REMOTE_MCP_ORIGIN: str({ default: undefined }),
+
   /* ------------------------------------------------ image generation */
   OPENAI_API_KEY: str({ default: undefined }),
   GEMINI_API_KEY: str({ default: undefined }),

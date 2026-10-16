@@ -36,7 +36,7 @@ export interface Allowance {
   /** the user connected a model account the Doop Agent can run on */
   byoModel: boolean
   /** which kind, for the UI copy */
-  byoKind?: AccountKind | 'claude-local' | 'gemini-cloud'
+  byoKind?: AccountKind | 'claude-local' | 'claude-remote' | 'gemini-cloud'
   /** the ChatGPT account's email, so the UI can name what is connected */
   byoEmail?: string
   /** the agent is running on this user's own account right now — connecting
@@ -80,11 +80,11 @@ export async function getAllowance(userId: string): Promise<Allowance> {
     ...(geminiCloud
       ? { byoKind: 'gemini-cloud' as const }
       : local.enabled
-        ? { byoKind: 'claude-local' as const }
+        ? { byoKind: local.transport === 'remote' ? ('claude-remote' as const) : ('claude-local' as const) }
         : model.kind
           ? { byoKind: model.kind }
           : {}),
-    ...(!geminiCloud && model.email ? { byoEmail: model.email } : {}),
+    ...(!geminiCloud && !local.enabled && model.email ? { byoEmail: model.email } : {}),
     onOwnAccount: geminiCloud || local.enabled || model.connected,
   }
 }

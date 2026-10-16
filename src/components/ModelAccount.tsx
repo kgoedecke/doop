@@ -1,9 +1,8 @@
+import { RemoteClaudeRow } from './RemoteClaude'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
 import { AgentIcon } from './AgentIcon'
-import { LocalClaudeRow } from './LocalClaude'
 import { authClient } from '../lib/auth'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
-import { isDesktopShell } from '../lib/shell'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
@@ -92,7 +91,6 @@ const maInput = 'rounded-[10px] border-ink px-3 py-[10px] font-mono focus:ring-0
 const rowBtn = 'max-md:justify-center'
 
 export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
-  const desktop = isDesktopShell()
   const { account, refresh, set } = useModelAccount()
   const { data: session } = authClient.useSession()
   const local = useLocalAgent((s) => s.preference)
@@ -281,6 +279,18 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     } catch (e) {
       fail(e)
       refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const disconnectLocal = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      await selectServer()
+    } catch (e) {
+      fail(e)
     } finally {
       setBusy(false)
     }
@@ -659,7 +669,28 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         placeholder: 'AIza…',
       })}
 
-      {desktop && <LocalClaudeRow />}
+      {/* an existing desktop CLI connection still routes tasks, so it stays visible until disconnected */}
+      {local?.enabled && local.transport !== 'remote' && (
+        <section className={planRow(true)} aria-label="Claude CLI">
+          <span aria-hidden className={planMark(true)}>
+            <AgentIcon name="claude" size={20} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink">
+              Claude CLI <span className={planPill(true)}>Active · Desktop</span>
+            </h3>
+            <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft">
+              Tasks run through Claude Code on your connected desktop.
+            </p>
+            <div className={actionsRow}>
+              <Button variant="danger" className={rowBtn} onClick={disconnectLocal} disabled={busy}>
+                Disconnect
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
+      <RemoteClaudeRow replaces={replaces} />
       {keySection({
         kind: 'anthropic-key',
         title: 'Claude API key',
@@ -668,8 +699,6 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         placeholder: 'sk-ant-…',
       })}
 
-      {/* the browser cannot run the local CLI, so the plan closes the list as a pointer to the desktop app */}
-      {!desktop && <LocalClaudeRow />}
       {error && <p className="mt-[10px] text-[12.5px] text-accent-ink">{error}</p>}
     </div>
   )
