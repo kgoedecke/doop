@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/pglite'
 import { migrate } from 'drizzle-orm/pglite/migrator'
 import { expect, it } from 'vitest'
 
-it.each(['pre-chat', 'main', 'hosted-claude'])(
+it.each(['pre-chat', 'main', 'hosted-claude', 'current-hosted-claude'])(
   'upgrades %s without losing preferences or applying deferred Figma changes',
   async (history) => {
     const migrationsFolder = path.resolve('server/db/migrations')
@@ -18,7 +18,9 @@ it.each(['pre-chat', 'main', 'hosted-claude'])(
     try {
       await mkdir(path.join(baseline, 'meta'))
       const entries = journal.entries.filter((entry) =>
-        history === 'main' ? entry.tag !== '0028_remote_claude' : entry.tag < '0018',
+        history === 'main'
+          ? entry.tag !== '0029_remote_claude'
+          : entry.tag < (history === 'current-hosted-claude' ? '0028' : '0018'),
       )
       await writeFile(path.join(baseline, 'meta/_journal.json'), JSON.stringify({ ...journal, entries }))
       for (const entry of entries) {
@@ -29,7 +31,7 @@ it.each(['pre-chat', 'main', 'hosted-claude'])(
       await client.exec(
         "INSERT INTO local_agent_preferences (user_id, enabled, model) VALUES ('existing-user', true, 'default')",
       )
-      if (history === 'hosted-claude') {
+      if (history === 'hosted-claude' || history === 'current-hosted-claude') {
         // Earlier branch databases had these columns and a migration timestamp
         // newer than main's chat migration. Reproduce that historical state
         // without retaining obsolete migrations in the production directory.
@@ -40,21 +42,30 @@ it.each(['pre-chat', 'main', 'hosted-claude'])(
             ADD COLUMN remote_auth_required boolean NOT NULL DEFAULT false,
             ADD COLUMN remote_auth_generation integer NOT NULL DEFAULT 0;
           INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
-            VALUES ('legacy-claude-branch', 1790025364364);
+            VALUES ('legacy-claude-branch', ${history === 'current-hosted-claude' ? 1791942090750 : 1790025364364});
           UPDATE local_agent_preferences SET transport = 'remote',
             remote_auth_attempt = 'keep-attempt', remote_auth_required = true,
             remote_auth_generation = 17;
         `)
       }
+      if (history === 'main') {
+        await client.exec(`INSERT INTO slack_installations (team_id, user_id, bot_user_id, name, bot_token, connected_at)
+          VALUES ('existing-team', 'existing-user', 'bot', 'Team', 'keep-token', 1)`)
+      }
       await migrate(db, { migrationsFolder })
       await migrate(db, { migrationsFolder })
+      if (history === 'main') {
+        expect((await client.query('SELECT bot_token FROM slack_installations')).rows).toEqual([
+          { bot_token: 'keep-token' },
+        ])
+      }
       const existing = await client.query('SELECT user_id, enabled FROM local_agent_preferences')
       expect(existing.rows).toEqual([{ user_id: 'existing-user', enabled: true }])
       const preferences = await client.query(
         'SELECT transport, remote_auth_attempt, remote_auth_required, remote_auth_generation FROM local_agent_preferences',
       )
       expect(preferences.rows).toEqual([
-        history === 'hosted-claude'
+        history === 'hosted-claude' || history === 'current-hosted-claude'
           ? {
               transport: 'remote',
               remote_auth_attempt: 'keep-attempt',
@@ -74,6 +85,9 @@ it.each(['pre-chat', 'main', 'hosted-claude'])(
           'linear_installations',
           'linear_oauth_states',
           'linear_sessions',
+          'slack_installations',
+          'slack_oauth_states',
+          'slack_sessions',
         ]),
       )
       const deferred = await client.query(

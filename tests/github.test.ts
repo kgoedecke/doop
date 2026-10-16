@@ -158,11 +158,10 @@ describe('nested monorepo roots', () => {
 import { afterAll, beforeAll } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
-const PORT = 4986
 let server: Server
 
 beforeAll(async () => {
-  server = await startServer(PORT)
+  server = await startServer()
 }, 70_000)
 
 afterAll(() => server?.stop())

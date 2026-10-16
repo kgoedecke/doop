@@ -1,15 +1,11 @@
+import { env } from './env.ts'
 import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
 import { CLAUDE_MODEL_IDS, normalizeClaudeModel } from '../shared/localAgent.ts'
-import {
-  DEFAULT_GEMINI_MODEL,
-  DEFAULT_OPENROUTER_MODEL,
-  GEMINI_MODELS,
-  OPENROUTER_MODELS,
-} from '../shared/modelMenu.ts'
+import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import { isKnownModel, modelFor } from './openaiAgent.ts'
 
 /**
@@ -42,15 +38,15 @@ import { isKnownModel, modelFor } from './openaiAgent.ts'
  * boring, fully supported alternative and shares everything downstream.
  */
 
-const ISSUER = process.env.CHATGPT_OAUTH_ISSUER || 'https://auth.openai.com'
+const ISSUER = env.CHATGPT_OAUTH_ISSUER
 /* the Codex CLI's public client; overridable if OpenAI ever issues our own */
-const CLIENT_ID = process.env.CHATGPT_OAUTH_CLIENT_ID || 'app_EMoamEEZ73f0CkXaXp7hrann'
+const CLIENT_ID = env.CHATGPT_OAUTH_CLIENT_ID
 /* fixed by the client registration above — the browser will fail to load it,
    which is fine: the authorization code is in the URL by then */
-const REDIRECT_URI = process.env.CHATGPT_OAUTH_REDIRECT_URI || 'http://localhost:1455/auth/callback'
+const REDIRECT_URI = env.CHATGPT_OAUTH_REDIRECT_URI
 /* auth.openai.com sits behind a bot filter that challenges a default Node
    fetch — an ordinary product User-Agent passes where no header at all does */
-const AUTH_USER_AGENT = process.env.CHATGPT_AUTH_USER_AGENT || 'doop/0.1 (+https://doop.design)'
+const AUTH_USER_AGENT = env.CHATGPT_AUTH_USER_AGENT
 
 export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
 
@@ -89,7 +85,7 @@ export interface AccountStatus {
 }
 
 export function chatgptConnectEnabled(): boolean {
-  return process.env.CHATGPT_CONNECT_DISABLED !== '1'
+  return !env.CHATGPT_CONNECT_DISABLED
 }
 
 /* ---------------------------------------------------------------- */
@@ -137,8 +133,8 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
   }
 }
 
-const DEFAULT_OPENROUTER = process.env.DOOP_AGENT_OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL
-const DEFAULT_GEMINI = process.env.DOOP_AGENT_GEMINI_MODEL || DEFAULT_GEMINI_MODEL
+const DEFAULT_OPENROUTER = env.DOOP_AGENT_OPENROUTER_MODEL
+const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
 
 /* per-kind model policy: how a stored (possibly unset or stale) model id
    resolves to the one that will run, and which ids the picker may set */
@@ -468,7 +464,7 @@ async function exchangeAndSave(
  * when Doop and the browser share a machine.
  */
 
-export const DEVICE_VERIFICATION_URL = process.env.CHATGPT_DEVICE_URL || `${ISSUER}/codex/device`
+export const DEVICE_VERIFICATION_URL = env.CHATGPT_DEVICE_URL ?? `${ISSUER}/codex/device`
 /* the device endpoints sit under /api/accounts, and the code they hand back was
    minted against this redirect — not the loopback one the browser flow uses */
 const DEVICE_API = '/api/accounts'
@@ -622,7 +618,7 @@ export function cancelDeviceAuth(userId: string) {
 /* Loopback catcher: same-machine flows need no copying             */
 /* ---------------------------------------------------------------- */
 
-const CALLBACK_PORT = Number(process.env.CHATGPT_OAUTH_CALLBACK_PORT || 1455)
+const CALLBACK_PORT = env.CHATGPT_OAUTH_CALLBACK_PORT
 const CATCHER_TTL_MS = PENDING_TTL_MS
 
 let catcher: http.Server | null = null

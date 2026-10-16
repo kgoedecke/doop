@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { runRemoteClaude } from './remoteClaudeRunner.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
@@ -64,12 +65,12 @@ export class ModelConfigurationError extends ModelAuthError {}
 /* the server tier: pays for everyone's free tasks                  */
 /* ---------------------------------------------------------------- */
 
-const ANTHROPIC_MODEL = process.env.DOOP_AGENT_MODEL || 'claude-opus-5'
+const ANTHROPIC_MODEL = env.DOOP_AGENT_MODEL
 
 let anthropic: Anthropic | null = null
 
 function anthropicTier(): AgentModel | null {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!env.ANTHROPIC_API_KEY) {
     warnOnce(
       '[doop-agent] ANTHROPIC_API_KEY not set — the free Doop Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See README → "The Doop Agent".',
     )
@@ -126,9 +127,9 @@ export async function runAnthropicTurn(
 }
 
 function azureTier(): AgentModel | null {
-  const endpoint = process.env.AZURE_OPENAI_ENDPOINT
-  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT
-  const apiKey = process.env.AZURE_OPENAI_API_KEY
+  const endpoint = env.AZURE_OPENAI_ENDPOINT
+  const deployment = env.AZURE_OPENAI_DEPLOYMENT
+  const apiKey = env.AZURE_OPENAI_API_KEY
   if (!endpoint || !deployment || !apiKey) {
     warnOnce(
       '[doop-agent] DOOP_AGENT_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY — the free Doop Agent tier is off until all three are set.',
@@ -167,13 +168,9 @@ const serverTiers: Record<ServerProvider, () => AgentModel | null> = {
   azure: azureTier,
 }
 
+/* an unknown DOOP_AGENT_PROVIDER fails at boot (server/env.ts) */
 function serverProvider(): ServerProvider {
-  const chosen = process.env.DOOP_AGENT_PROVIDER || 'anthropic'
-  if (chosen in serverTiers) return chosen as ServerProvider
-  warnOnce(
-    `[doop-agent] DOOP_AGENT_PROVIDER="${chosen}" is not a server provider (anthropic | azure) — using anthropic.`,
-  )
-  return 'anthropic'
+  return env.DOOP_AGENT_PROVIDER
 }
 
 /** What the boot banner reports: which provider the free tier would run on,

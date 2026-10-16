@@ -10,6 +10,7 @@ import { navigate } from '../App'
 import { authClient } from './auth'
 import {
   type DesktopSignInProvider,
+  type ProviderRedirects,
   desktopSignInURL,
   forgetPendingSignIn,
   isPendingSignIn,
@@ -167,13 +168,16 @@ export function supportsBrowserSignIn(): boolean {
  *  fresh challenge as the pending sign-in and send the system browser to
  *  the page that starts the provider round trip. False if the browser
  *  could not be opened — the caller shows its start-failure message. */
-export async function beginBrowserSignIn(provider: DesktopSignInProvider, to: string): Promise<boolean> {
+export async function beginBrowserSignIn(
+  provider: DesktopSignInProvider,
+  redirects: ProviderRedirects,
+): Promise<boolean> {
   const open = shellWindow.__TAURI__?.opener?.openUrl
   if (typeof open !== 'function') return false
   const challenge = newChallenge()
   if (!rememberPendingSignIn(challenge)) return false
   try {
-    await open(desktopSignInURL(location.origin, { provider, challenge, to }))
+    await open(desktopSignInURL(location.origin, { provider, challenge, ...redirects }))
     return true
   } catch (err) {
     console.error(err)

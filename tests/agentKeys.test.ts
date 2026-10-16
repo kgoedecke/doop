@@ -7,13 +7,11 @@ import { Client, startServer, type Server } from './harness.ts'
  * that mints and revokes them, and the /mcp gate that accepts them.
  */
 
-const PORT = 5004
-
 let server: Server
 let BASE: string
 
 beforeAll(async () => {
-  server = await startServer(PORT)
+  server = await startServer()
   BASE = server.base
 }, 70_000)
 

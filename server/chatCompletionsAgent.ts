@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
@@ -33,15 +34,12 @@ import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAge
  * on a modality the model lacks.
  */
 
-export const OPENROUTER_URL = process.env.OPENROUTER_CHAT_URL || 'https://openrouter.ai/api/v1/chat/completions'
-export const GEMINI_OPENAI_URL =
-  process.env.GEMINI_OPENAI_CHAT_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+export const OPENROUTER_URL = env.OPENROUTER_CHAT_URL
+export const GEMINI_OPENAI_URL = env.GEMINI_OPENAI_CHAT_URL
 
 export const IMAGE_OMITTED_NOTE = '[image omitted — the selected model cannot view images]'
 
-/* same source as server/auth.ts's PUBLIC_ORIGIN, read directly so this module
-   (and its unit tests) never import the auth stack */
-const APP_ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
+const APP_ORIGIN = env.BETTER_AUTH_URL
 
 export interface ChatCompletionsConfig {
   /** one of the fixed URL constants above — never user input */

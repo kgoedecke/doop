@@ -36,6 +36,27 @@ public struct DesignFrame: Codable, Identifiable, Equatable {
     public var html: String
 }
 
+/// What a prompt is about: the frame the person had selected when they asked, and
+/// the element inside it when one was picked. The agent edits that in place.
+/// Mirrors `CardScope` in `shared/types.ts`.
+public struct CardScope: Codable, Equatable {
+    public var frameId: String
+    /// Element selector inside the frame; absent means the whole frame.
+    public var selector: String?
+
+    public init(frameId: String, selector: String? = nil) {
+        self.frameId = frameId
+        self.selector = selector
+    }
+
+    /// The `scope` field of a `POST /api/canvases/:id/cards` body.
+    public var body: [String: Any] {
+        var body: [String: Any] = ["frameId": frameId]
+        if let selector { body["selector"] = selector }
+        return body
+    }
+}
+
 public struct CanvasTask: Codable, Identifiable, Hashable {
     public var id: String
     public var agentName: String

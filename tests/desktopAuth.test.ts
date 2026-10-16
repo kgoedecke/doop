@@ -44,18 +44,37 @@ describe('desktop sign-in deep links', () => {
 })
 
 describe('desktop sign-in start page', () => {
-  it('round-trips provider, challenge and target through the browser URL', () => {
-    const request = { provider: 'microsoft' as const, challenge: CHALLENGE, to: '/c/abc' }
+  it('round-trips provider, challenge and both landings through the browser URL', () => {
+    const request = {
+      provider: 'microsoft' as const,
+      challenge: CHALLENGE,
+      callbackURL: '/c/abc',
+      newUserCallbackURL: '/api/welcome',
+    }
     const url = new URL(desktopSignInURL('https://doop.design', request))
     expect(url.origin + url.pathname).toBe('https://doop.design/desktop/signin')
     expect(parseDesktopSignInQuery(url.search)).toEqual(request)
   })
 
-  it('rejects unknown providers and bad challenges, sanitises the target', () => {
+  it('sends a new account where a returning one goes when no landing of its own is given', () => {
+    const parsed = parseDesktopSignInQuery(`?provider=google&challenge=${CHALLENGE}&to=/c/abc`)
+    expect(parsed).toEqual({
+      provider: 'google',
+      challenge: CHALLENGE,
+      callbackURL: '/c/abc',
+      newUserCallbackURL: '/c/abc',
+    })
+  })
+
+  it('rejects unknown providers and bad challenges, sanitises both landings', () => {
     expect(parseDesktopSignInQuery(`?provider=github&challenge=${CHALLENGE}&to=/`)).toBeNull()
     expect(parseDesktopSignInQuery('?provider=google&to=/')).toBeNull()
     expect(parseDesktopSignInQuery('?provider=google&challenge=short&to=/')).toBeNull()
-    expect(parseDesktopSignInQuery(`?provider=google&challenge=${CHALLENGE}&to=//evil.com`)?.to).toBe('/')
+    const foreign = parseDesktopSignInQuery(
+      `?provider=google&challenge=${CHALLENGE}&to=//evil.com&newUserTo=//evil.com`,
+    )
+    expect(foreign?.callbackURL).toBe('/')
+    expect(foreign?.newUserCallbackURL).toBe('/')
   })
 
   it('mints distinct well-formed challenges', () => {

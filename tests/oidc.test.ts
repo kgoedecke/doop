@@ -15,20 +15,15 @@ import { Client, startServer, type Server } from './harness.ts'
 
 const ROOT = process.cwd()
 
-/* 4970-4972: test files run in parallel, each claiming its own port range
-   (see admin.test.ts's PORT comment) - this file's is clear of every other
-   test file's (checked: 4977, 4979, 4980, 4985, 4993-4996 for admin.test.ts's
-   PORT/+1/+2/+3, and 4973 for oidcAccountLinking.test.ts). */
-const PORT_UNCONFIGURED = 4970
-const PORT_CONFIGURED = 4971
+/* the one hardcoded port left: this process refuses to boot and never binds it */
 const PORT_BOOT_REFUSAL = 4972
 
 let unconfigured: Server
 let configured: Server
 
 beforeAll(async () => {
-  unconfigured = await startServer(PORT_UNCONFIGURED)
-  configured = await startServer(PORT_CONFIGURED, {
+  unconfigured = await startServer()
+  configured = await startServer({
     OIDC_ISSUER: 'https://idp.invalid',
     OIDC_CLIENT_ID: 'test-client',
     OIDC_CLIENT_SECRET: 'test-secret',
@@ -48,6 +43,8 @@ describe('GET /api/oidc-config', () => {
       enabled: false,
       google: false,
       microsoft: false,
+      apple: false,
+      appleNative: false,
     })
   })
 
@@ -55,7 +52,14 @@ describe('GET /api/oidc-config', () => {
     const client = new Client(configured)
     const res = await client.get('/api/oidc-config')
     const body = await res.text()
-    expect(JSON.parse(body)).toEqual({ enabled: true, displayName: 'Zitadel', google: false, microsoft: false })
+    expect(JSON.parse(body)).toEqual({
+      enabled: true,
+      displayName: 'Zitadel',
+      google: false,
+      microsoft: false,
+      apple: false,
+      appleNative: false,
+    })
     expect(body).not.toContain('test-secret')
   })
 })

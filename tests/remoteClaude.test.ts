@@ -1,3 +1,4 @@
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: vi.fn(), requireRemoteAuth: vi.fn() }))
 const sdkMocks = vi.hoisted(() => ({ app: undefined as unknown }))
 vi.mock('../cantelop/.cantelop/client/client.mjs', () => ({
@@ -24,10 +25,10 @@ import type {
 const streamId = '1'.repeat(32)
 const messageId = 'msg_' + '2'.repeat(32)
 function configured() {
-  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
-  vi.stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
-  vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
-  vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'integration-token')
+  stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
+  stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
+  stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
+  stubEnv('CANTELOP_INTEGRATION_TOKEN', 'integration-token')
   sdkMocks.app = new CantelopClient().app<Command, Event, Reply>({
     name: 'doop-claude',
     runtime: { receive() {} },
@@ -44,7 +45,7 @@ function configured() {
 }
 beforeEach(configured)
 afterEach(() => {
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -64,15 +65,15 @@ function sse(frames: Event[], start = 1) {
 it('retains the old issuer-derived Workspace namespace and isolates users', () => {
   expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
   expect(remoteIdentity('alice')).not.toBe(remoteIdentity('bob'))
-  vi.stubEnv('CANTELOP_EDGE_URL', 'https://example.com/other')
+  stubEnv('CANTELOP_EDGE_URL', 'https://example.com/other')
   expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
 })
 it('requires the native SDK configuration and allows its default hosted Edge origin', () => {
   expect(remoteClaudeConfigured()).toBe(true)
-  vi.stubEnv('CANTELOP_APP_SLUG', undefined)
+  stubEnv('CANTELOP_APP_SLUG', undefined)
   expect(remoteClaudeConfigured()).toBe(false)
-  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
-  vi.stubEnv('CANTELOP_EDGE_URL', undefined)
+  stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
+  stubEnv('CANTELOP_EDGE_URL', undefined)
   expect(remoteClaudeConfigured()).toBe(true)
   expect(remoteIdentity('alice')).toBe('eadef8c2ff8c6942fb7075e7d8317304e56a1815d3172722')
 })

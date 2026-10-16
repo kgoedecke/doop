@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import type { Canvas, ElementComment, Frame } from '../shared/types.ts'
 
 /* The registry writes through to the database and reads it once at boot; a
@@ -68,7 +69,7 @@ beforeEach(async () => {
   mocks.fetch.mockResolvedValue(ok())
   mocks.dbError = null
   vi.stubGlobal('fetch', mocks.fetch)
-  delete process.env.WEBHOOK_ALLOW_PRIVATE_URLS
+  unstubAllEnvs()
   await webhooks.hydrateWebhooks() // empties the registry
 })
 
@@ -129,7 +130,7 @@ describe('address screening', () => {
   })
 
   it('lets the operator allow private targets', async () => {
-    process.env.WEBHOOK_ALLOW_PRIVATE_URLS = 'true'
+    stubEnv('WEBHOOK_ALLOW_PRIVATE_URLS', 'true')
     expect(webhooks.urlProblem('http://n8n:5678/webhook/doop')).toBeNull()
     expect(await webhooks.targetProblem('http://localhost:5678/hook')).toBeNull()
     expect(mocks.lookup).not.toHaveBeenCalled()

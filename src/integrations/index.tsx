@@ -1,6 +1,7 @@
 import type { ComponentType, ReactNode } from 'react'
 import type { IntegrationsStatus } from '../lib/api'
 import { linearIntegration } from './linear'
+import { slackIntegration } from './slack'
 
 /**
  * Client extensions, the mirror of `server/extensions.ts`: each integration
@@ -62,4 +63,4 @@ export type ClientIntegration =
       }
     })
 
-export const clientIntegrations: ClientIntegration[] = [linearIntegration]
+export const clientIntegrations: ClientIntegration[] = [linearIntegration, slackIntegration]

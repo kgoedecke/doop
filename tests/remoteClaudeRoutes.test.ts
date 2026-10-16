@@ -32,8 +32,10 @@ vi.mock('../server/remoteClaudeClient.ts', () => ({
       error.code,
     ),
 }))
+vi.mock('../server/env.ts', () => ({
+  env: { BETTER_AUTH_URL: 'https://doop.example', TRUSTED_ORIGINS: ['https://alt.doop.example'] },
+}))
 vi.mock('../server/auth.ts', () => ({
-  TRUSTED_ORIGINS: ['https://doop.example', 'https://alt.doop.example'],
   isBanned: async () => mocks.banned,
 }))
 vi.mock('../server/localAgentRuns.ts', () => ({ localAgentRuns: { cancel: mocks.cancel, runningRemote: () => false } }))

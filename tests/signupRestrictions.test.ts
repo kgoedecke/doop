@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
-const PORT = 4997
-
 let server: Server
 let client: Client
 
@@ -15,7 +13,7 @@ function signUp(email: string, name: string) {
 }
 
 beforeAll(async () => {
-  server = await startServer(PORT, { SIGNUP_EMAIL_DOMAINS: 'jointhetroops.com, partner.test' })
+  server = await startServer({ SIGNUP_EMAIL_DOMAINS: 'jointhetroops.com, partner.test' })
   client = new Client(server)
 }, 70_000)
 

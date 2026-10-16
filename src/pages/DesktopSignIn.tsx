@@ -18,16 +18,23 @@ export function DesktopSignIn({ signedIn }: { signedIn: boolean }) {
 
   useEffect(() => {
     if (!request) return
-    const callbackURL = desktopHandoffURL(request.challenge, request.to)
+    const callbackURL = desktopHandoffURL(request.challenge, request.callbackURL)
     if (signedIn) {
       location.replace(callbackURL)
       return
     }
+    /* the handoff carries the in-app landing through to the deep link, so
+       a new account's first-canvas landing survives the hop too */
+    const redirects = {
+      callbackURL,
+      newUserCallbackURL: desktopHandoffURL(request.challenge, request.newUserCallbackURL),
+      errorCallbackURL: '/auth',
+    }
     const failed = 'Could not start sign-in — go back to the doop app and try again.'
     const start =
       request.provider === 'oidc'
-        ? authClient.signIn.oauth2({ providerId: 'oidc', callbackURL, errorCallbackURL: '/auth' })
-        : authClient.signIn.social({ provider: request.provider, callbackURL, errorCallbackURL: '/auth' })
+        ? authClient.signIn.oauth2({ providerId: 'oidc', ...redirects })
+        : authClient.signIn.social({ provider: request.provider, ...redirects })
     start
       .then((res) => {
         if (res.error) setStartError(res.error.message ?? failed)

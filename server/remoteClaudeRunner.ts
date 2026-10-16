@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { claudeMcpOrigin } from './remoteClaudeOrigins.ts'
 import { getLocalAgentPreference, requireRemoteAuth } from './localAgentPreferences.ts'
 import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
@@ -65,9 +66,7 @@ async function executeRemote(
   let finished = false
   try {
     signal.throwIfAborted()
-    const origin = claudeMcpOrigin(
-      process.env.CLAUDE_REMOTE_MCP_ORIGIN ?? process.env.BETTER_AUTH_URL ?? 'http://localhost:4300',
-    )
+    const origin = claudeMcpOrigin(env.CLAUDE_REMOTE_MCP_ORIGIN ?? env.BETTER_AUTH_URL)
     if (Buffer.byteLength(job.system) > 32 * 1024)
       throw new Error('The agent system prompt exceeds the hosted 32 KiB limit.')
     const settings: ClaudeSessionSettings = {

@@ -2,12 +2,11 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
-const PORT = 4987
 let server: Server
 let owner: Client
 let outsider: Client
 beforeAll(async () => {
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  server = await startServer()
   owner = new Client(server)
   await owner.signUp('pages-owner@test.dev', 'Page Owner')
   outsider = new Client(server)
@@ -31,7 +30,7 @@ it('creates, reorders and copies pages while preserving frame membership and acc
   expect((await save([first, second], outsider)).status).toBe(403)
   expect((await save([])).status).toBe(400)
   expect((await save([first, first])).status).toBe(400)
-  const socket = new WebSocket(`ws://localhost:${PORT}/ws`, { headers: { Cookie: owner.header() } })
+  const socket = new WebSocket(`ws://localhost:${server.port}/ws`, { headers: { Cookie: owner.header() } })
   await new Promise<void>((resolve, reject) => {
     socket.on('error', reject)
     socket.on('open', () =>
@@ -84,7 +83,7 @@ it('creates, reorders and copies pages while preserving frame membership and acc
   await new Promise((resolve) => setTimeout(resolve, 600))
   server.stop({ keepData: true })
   await server.stopped
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` }, server.dataDir)
+  server = await startServer({}, server.dataDir)
   const persisted = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
   expect(persisted.pages).toEqual([second])
   expect(persisted.frames.every((f: { pageId: string }) => f.pageId === second.id)).toBe(true)

@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import fs from 'node:fs'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
@@ -9,7 +10,7 @@ import { guardPublicPageRequests } from './publicUrl.ts'
  */
 
 const CHROME_PATHS = [
-  process.env.CHROME_PATH,
+  env.CHROME_PATH,
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
@@ -57,7 +58,7 @@ export async function getBrowser(): Promise<Browser> {
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
       '--hide-scrollbars',
       /* containers: no user namespaces for the sandbox, tiny /dev/shm */
-      ...(process.env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
+      ...(env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
     ],
   })
   return browserPromise
@@ -94,7 +95,7 @@ async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
   const loaded = await openIsolatedPage()
   const { page } = loaded
   try {
-    const assetOrigin = new URL(process.env.BETTER_AUTH_URL || 'http://localhost:4300').origin
+    const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
     await guardPublicPageRequests(page, {
       allowUrl: (url) => url.origin === assetOrigin && url.pathname.startsWith('/a/'),
     })

@@ -220,14 +220,12 @@ describe('meta', () => {
 /* ------------------------------------------------------------------ */
 /* REST                                                                */
 
-const PORT = 4994
-
 let server: Server
 let owner: Client
 let other: Client
 
 beforeAll(async () => {
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  server = await startServer()
   owner = new Client(server)
   await owner.signUp('owner@test.dev', 'Olive Owner')
   other = new Client(server)

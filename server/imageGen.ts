@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { getAccount, withFreshToken } from './modelAccounts.ts'
@@ -44,9 +45,9 @@ import {
  */
 
 /* the registry entry used when a user never picked one */
-const DEFAULT_IMAGE_MODEL = process.env.DOOP_IMAGE_MODEL || 'gpt-image-2'
+const DEFAULT_IMAGE_MODEL = env.DOOP_IMAGE_MODEL
 /* the text model that fronts OpenAI's hosted tool; unset = the account's own tier */
-const ROUTER_MODEL = process.env.DOOP_IMAGE_ROUTER_MODEL || ''
+const ROUTER_MODEL = env.DOOP_IMAGE_ROUTER_MODEL
 const FETCH_TIMEOUT_MS = 5 * 60 * 1000
 const PREVIEW_PX = 512
 
@@ -92,7 +93,7 @@ export type Generator =
   | { ok: false; reason: string }
 
 export function serverImageGenEnabled(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY || process.env.GEMINI_API_KEY || process.env.ARK_API_KEY)
+  return Boolean(env.OPENAI_API_KEY || env.GEMINI_API_KEY || env.ARK_API_KEY)
 }
 
 /* ---------------------------------------------------------------- */
@@ -195,7 +196,7 @@ function apiKeyGenerator(apiKey: string, label: string, routerModel: string, ima
 /* Gemini (Nano Banana): generateContent with image output          */
 /* ---------------------------------------------------------------- */
 
-const GEMINI_MODELS_URL = process.env.GEMINI_MODELS_URL || 'https://generativelanguage.googleapis.com/v1beta/models'
+const GEMINI_MODELS_URL = env.GEMINI_MODELS_URL
 
 const GEMINI_ASPECTS: Record<ImageAspect, string> = {
   square: '1:1',
@@ -254,7 +255,7 @@ function geminiGenerator(apiKey: string, label: string, model: string): Generato
 /* Seedream (BytePlus ModelArk): OpenAI-flavoured images endpoint   */
 /* ---------------------------------------------------------------- */
 
-const ARK_IMAGES_URL = process.env.ARK_IMAGES_URL || 'https://ark.ap-southeast.bytepluses.com/api/v3/images/generations'
+const ARK_IMAGES_URL = env.ARK_IMAGES_URL
 
 /* Seedream takes explicit pixel sizes; these mirror the 1:1 / 3:2 / 2:3
    aspects at a resolution comfortably inside its supported range */
@@ -320,12 +321,12 @@ function available(option: ImageModelOption, account: ModelAccount | null): bool
   switch (option.provider) {
     case 'openai':
       if (account) return account.kind === 'chatgpt' || (account.kind === 'openai-key' && Boolean(account.apiKey))
-      return Boolean(process.env.OPENAI_API_KEY)
+      return Boolean(env.OPENAI_API_KEY)
     case 'gemini':
       if (account) return account.kind === 'gemini-key' && Boolean(account.apiKey)
-      return Boolean(process.env.GEMINI_API_KEY)
+      return Boolean(env.GEMINI_API_KEY)
     case 'ark':
-      return Boolean(process.env.ARK_API_KEY)
+      return Boolean(env.ARK_API_KEY)
   }
 }
 
@@ -373,7 +374,7 @@ function providerGenerator(option: ImageModelOption, account: ModelAccount | nul
       if (account?.kind === 'openai-key' && account.apiKey) {
         return apiKeyGenerator(account.apiKey, 'OpenAI', ROUTER_MODEL || modelFor(account), option.id)
       }
-      const serverKey = account ? undefined : process.env.OPENAI_API_KEY
+      const serverKey = account ? undefined : env.OPENAI_API_KEY
       if (serverKey) return apiKeyGenerator(serverKey, 'server', ROUTER_MODEL || DEFAULT_OPENAI_MODEL, option.id)
       return {
         ok: false,
@@ -382,7 +383,7 @@ function providerGenerator(option: ImageModelOption, account: ModelAccount | nul
     }
     case 'gemini': {
       if (account?.kind === 'gemini-key' && account.apiKey) return geminiGenerator(account.apiKey, 'Gemini', option.id)
-      const serverKey = account ? undefined : process.env.GEMINI_API_KEY
+      const serverKey = account ? undefined : env.GEMINI_API_KEY
       if (serverKey) return geminiGenerator(serverKey, 'server', option.id)
       return {
         ok: false,
@@ -390,7 +391,7 @@ function providerGenerator(option: ImageModelOption, account: ModelAccount | nul
       }
     }
     case 'ark': {
-      const serverKey = process.env.ARK_API_KEY
+      const serverKey = env.ARK_API_KEY
       if (serverKey) return arkGenerator(serverKey, 'server', option.id)
       return {
         ok: false,

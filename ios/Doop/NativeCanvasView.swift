@@ -8,6 +8,8 @@ struct NativeCanvasView: View {
     @State private var sheet: Panel?
     @State private var prompt = ""
     @State private var sending = false
+    /// The scope key the person dismissed with the chip's ×; a new selection brings the chip back.
+    @State private var dismissedScope: String?
     @State private var exportURL: URL?
     private let summary: CanvasSummary
     private enum Panel: String, Identifiable { case frames, inspector, tasks, comments, export; var id: String { rawValue } }
@@ -22,16 +24,16 @@ struct NativeCanvasView: View {
         VStack(spacing: 0) {
             HStack(spacing: 7) {
                 Circle().fill(model.connected ? .green : .orange).frame(width: 6, height: 6)
-                Text(model.connected ? "Live" : "Connecting…")
+                Text(model.connected ? "Live" : model.connecting ? "Connecting…" : "Disconnected")
                 Spacer()
                 if !model.presences.isEmpty { Label("\(model.presences.count) here", systemImage: "person.2") }
                 Text("\(model.canvas?.frames.count ?? 0) \(model.canvas?.frames.count == 1 ? "frame" : "frames")")
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.vertical, 10)
-            if let error = model.error {
+            if let error = model.error ?? model.connectionError {
                 HStack {
                     Text(error).font(.caption)
                     Spacer()
-                    Button { model.error = nil } label: { Image(systemName: "xmark") }.accessibilityLabel("Dismiss message")
+                    Button { if model.error != nil { model.error = nil } else { model.connectionError = nil } } label: { Image(systemName: "xmark") }.accessibilityLabel("Dismiss message")
                 }.padding(12).background(Color.orange.opacity(0.12))
             }
             ZStack(alignment: .bottom) {
@@ -53,8 +55,12 @@ struct NativeCanvasView: View {
                     }
                     VStack(spacing: 10) {
                         HStack(spacing: 10) {
-                            Image(systemName: "sparkles").foregroundStyle(.tint)
-                            TextField("Ask your agent to design…", text: $prompt, axis: .vertical).lineLimit(1...4)
+                            if let scope = promptScope {
+                                PromptScopeChip(scope: scope) { dismissedScope = scope.key }
+                            } else {
+                                Image(systemName: "sparkles").foregroundStyle(.tint)
+                            }
+                            TextField(promptPlaceholder, text: $prompt, axis: .vertical).lineLimit(1...4)
                                 .textFieldStyle(.plain)
                                 .accessibilityIdentifier("canvas.prompt")
                             Button(action: sendPrompt) {
@@ -105,19 +111,31 @@ struct NativeCanvasView: View {
                 }
             }
         }
-        .onAppear { model.start() }
+        .onAppear { if scenePhase == .active { model.start() } }
         .onDisappear { model.stop() }
         .onChange(of: scenePhase) { phase in if phase == .active { model.start() } else if phase == .background { model.stop() } }
         .onChange(of: model.deleted) { deleted in if deleted { dismiss() } }
     }
     }
 
+    /// The selection scopes the prompt, as on the web, until the chip is dismissed.
+    private var promptScope: PromptScope? {
+        guard let scope = model.promptScope, scope.key != dismissedScope else { return nil }
+        return scope
+    }
+
+    private var promptPlaceholder: String {
+        guard let scope = promptScope else { return "Ask your agent to design…" }
+        return scope.isElement ? "Ask your agent to change this element…" : "Ask your agent to change this frame…"
+    }
+
     private func sendPrompt() {
         let value = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         sending = true
+        let scope = promptScope?.scope
         Task {
-            do { try await model.queue(value); prompt = ""; sheet = .tasks }
+            do { try await model.queue(value, scope: scope); prompt = ""; sheet = .tasks }
             catch { model.error = error.localizedDescription }
             sending = false
         }
@@ -148,6 +166,29 @@ struct NativeCanvasView: View {
             exportURL = destination
             sheet = .export
         } catch { model.error = error.localizedDescription }
+    }
+}
+
+/// The prompt bar's scope: the selected frame's name, or the picked element's
+/// `tag#id.class`, with an × that asks without it.
+private struct PromptScopeChip: View {
+    let scope: PromptScope
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: scope.isElement ? "scope" : "rectangle").font(.caption)
+            Text(scope.label).font(.caption.monospaced().bold()).lineLimit(1).truncationMode(.tail)
+            Button(action: dismiss) { Image(systemName: "xmark").font(.caption2.bold()) }
+                .accessibilityLabel(scope.isElement ? "Remove element scope" : "Remove frame scope")
+        }
+        .foregroundStyle(.tint)
+        .padding(.leading, 8).padding(.trailing, 6).padding(.vertical, 5)
+        .background(Color.accentColor.opacity(0.12), in: Capsule())
+        .frame(maxWidth: 150, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(scope.isElement ? "Scoped to \(scope.label) in \(scope.frameName)" : "Scoped to the frame \(scope.label)")
     }
 }
 

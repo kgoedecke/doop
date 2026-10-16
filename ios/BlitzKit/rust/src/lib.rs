@@ -226,12 +226,15 @@ pub extern "C" fn doopblitz_doc_loading(doc: *const Doc) -> bool {
 ///
 /// Taffy rounds every box to whole CSS pixels after layout, so at a paint scale
 /// above 1 a box on a half-pixel edge (a 1.5px outline, an 8px handle centred on
-/// it) gets a different number of device pixels on each side. Browsers keep
-/// sub-pixel layout and snap at paint time instead; this pass does the same
-/// arithmetic as `taffy::round_layout`, but on the `1 / scale` grid.
+/// it) gets a different number of device pixels on each side. Below 1 the CSS
+/// grid is finer than the device grid, so a one-device-pixel border (Stylo snaps
+/// hairlines up to one) came out one or two CSS pixels wide depending on where
+/// the box sat: a faint line here, a heavy one there. Browsers keep sub-pixel
+/// layout and snap at paint time instead; this pass does the same arithmetic as
+/// `taffy::round_layout`, but on the `1 / scale` grid, at every scale.
 fn round_layout_to_device(doc: &mut BaseDocument, scale: f32) {
     use taffy::{NodeId as TaffyId, RoundTree, TraversePartialTree};
-    if scale <= 1.0 || !scale.is_finite() {
+    if scale <= 0.0 || !scale.is_finite() {
         return;
     }
     fn walk(doc: &mut BaseDocument, node: TaffyId, scale: f32, cumulative_x: f32, cumulative_y: f32) {

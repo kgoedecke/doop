@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
@@ -62,13 +63,13 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => upstream.listen(0, resolve))
   const address = upstream.address()
   if (!address || typeof address === 'string') throw new Error('Missing test port')
-  vi.stubEnv('LINEAR_API_URL', `http://localhost:${address.port}`)
+  stubEnv('LINEAR_API_URL', `http://localhost:${address.port}`)
   await connect('alice', keys.alice)
   await connect('bob', keys.bob)
 }, 30_000)
 
 afterAll(async () => {
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   await new Promise<void>((resolve) => upstream.close(() => resolve()))
 })
 

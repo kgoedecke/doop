@@ -2,7 +2,9 @@
 
 ## 1. Language and Runtime
 
-- TypeScript 5.5.3 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
+- TypeScript 5.9 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
+  `bun run typecheck` uses `tsgo` (`@typescript/native-preview`, the TypeScript 7 Go compiler) for
+  speed; the JS `typescript` package serves editors and the ESLint parser.
 - Node.js - runtime; `tsx` 4.23.9 runs server TypeScript directly with no build step, both in dev
   (`tsx watch`) and prod (`NODE_ENV=production tsx server/index.ts`).
 - Bun 1.3.10 - pinned via `packageManager` in `package.json`; used as the package manager and
@@ -33,8 +35,9 @@
 
 ## 5. Security and Secrets
 
-- better-auth 1.6.26 - authentication: email/password, generic OIDC/SSO, and Google / Microsoft
-  sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` client pairs). Configuration and secrets
+- better-auth 1.6.26 - authentication: email/password, generic OIDC/SSO, and Google / Microsoft /
+  Apple sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` / `APPLE_*` client pairs; the iOS app
+  signs in with Apple natively against `APPLE_APP_BUNDLE_IDENTIFIER`). Configuration and secrets
   (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, provider client IDs/secrets) come from the
   environment (`.env`, documented in `.env.example`); never committed.
 
@@ -42,18 +45,19 @@
 
 - Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
 --frozen-lockfile` in CI.
-- Vite 5.3.3 - frontend build tool (`vite build`).
+- Vite 8 (Rolldown-based) - frontend build tool (`vite build`), with `@vitejs/plugin-react` 6.
 
 ## 7. Testing Stack
 
-- Vitest 4.1.11 - unit/integration tests across `server/` and `src/`; run via `bun run test`
+- Vitest 5 - unit/integration tests across `server/` and `src/`; run via `bun run test`
   (`vitest run`). Tests live in `tests/`.
 
 ## 8. CI/CD and Delivery
 
 - GitHub Actions:
-  - `.github/workflows/ci.yml` - gates `typecheck`, `lint`, `format:check`, `build`, `test` on
-    push to `main` and on PRs; a separate job lints the PR title with commitlint (PRs land on
+  - `.github/workflows/ci.yml` - gates `typecheck`, `lint` + `format:check` + `doc-lint`, `build`
+    and `test` (four vitest shards) as parallel jobs on push to `main` and on PRs, cancelling
+    superseded PR runs; a separate job lints the PR title with commitlint (PRs land on
     `main` as a squash, so the PR title becomes the commit subject).
   - `.github/workflows/cla.yml` - CLA check (this is an AGPL-3.0 project with CLA-based
     contribution).
@@ -73,15 +77,15 @@
 
 ## 10. Frontend Stack
 
-- React 18.3.1 + Vite 5.3.3 - SPA, entry at `index.html`.
+- React 18.3.1 + Vite 8 - SPA, entry at `index.html`.
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
 
 ## 11. Developer Experience Tooling
 
-- ESLint 10.8.1 + typescript-eslint 8.67.0 + eslint-plugin-react-hooks 7.1.1 - lint, config in
-  `eslint.config.js`.
+- oxlint 1.x + oxlint-tsgolint (type-aware rules) - lint, config in `.oxlintrc.json`; ESLint 10 with
+  the typescript-eslint parser runs only the `process.env` ban in `eslint.config.js`.
 - Prettier 3.9.6 - formatting (no semicolons, single quotes, printWidth 120), config in
   `.prettierrc.json`.
 - Husky 9.1.7 + lint-staged 17.3.0 - pre-commit hook runs `lint-staged` (`.husky/pre-commit`).

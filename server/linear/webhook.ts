@@ -1,3 +1,4 @@
+import { env } from '../env.ts'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import express from 'express'
 import { z } from 'zod'
@@ -15,7 +16,7 @@ export function validSignature(raw: Buffer, signature: string, secret: string): 
 export function linearWebhookRouter() {
   const router = express.Router()
   router.post('/', express.raw({ type: '*/*', limit: '256kb' }), async (req, res, next) => {
-    const secret = process.env.LINEAR_WEBHOOK_SECRET
+    const secret = env.LINEAR_WEBHOOK_SECRET
     if (!secret) return res.status(503).json({ error: 'Linear webhooks are not configured.' })
     if (!Buffer.isBuffer(req.body) || !validSignature(req.body, req.get('linear-signature') ?? '', secret)) {
       return res.status(401).json({ error: 'Invalid Linear signature.' })
@@ -42,7 +43,7 @@ export function linearWebhookRouter() {
       if (
         envelope.data.type === 'OAuthApp' &&
         envelope.data.action === 'revoked' &&
-        envelope.data.oauthClientId === process.env.LINEAR_CLIENT_ID &&
+        envelope.data.oauthClientId === env.LINEAR_CLIENT_ID &&
         envelope.data.organizationId
       ) {
         const [installation] = await db

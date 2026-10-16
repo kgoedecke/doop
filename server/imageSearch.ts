@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 /**
  * Image sourcing for design agents: stock photo search (Pexels) and icon /
  * brand-logo search (Iconify). Both power the search_images / search_icons
@@ -16,7 +17,7 @@ const ICONIFY_ENDPOINT = 'https://api.iconify.design'
 const FETCH_TIMEOUT_MS = 15_000
 
 export function photoSearchEnabled(): boolean {
-  return Boolean(process.env.PEXELS_API_KEY)
+  return Boolean(env.PEXELS_API_KEY)
 }
 
 export interface PhotoResult {
@@ -46,7 +47,7 @@ export async function searchPhotos(
   query: string,
   opts: { orientation?: PhotoOrientation; count?: number } = {},
 ): Promise<PhotoResult[]> {
-  const key = process.env.PEXELS_API_KEY
+  const key = env.PEXELS_API_KEY
   if (!key) throw new Error('photo search is not configured (PEXELS_API_KEY is not set)')
   const count = Math.max(1, Math.min(opts.count ?? 5, 8))
   const params = new URLSearchParams({ query, per_page: String(count) })
@@ -119,7 +120,7 @@ export const ICON_USAGE_NOTE =
   'Hotlink svg_url in <img src> or CSS. Monochrome icons render black by default — append ?color=%23<hex> (URL-encoded #) to recolor, and &height=<px> to size. For company/brand logos use search_logos instead.'
 
 export function logoSearchEnabled(): boolean {
-  return Boolean(process.env.BRANDFETCH_CLIENT_ID)
+  return Boolean(env.BRANDFETCH_CLIENT_ID)
 }
 
 export interface LogoResult {
@@ -141,7 +142,7 @@ interface BrandfetchHit {
  *  (the successor to the retired Clearbit logo API — free client ID, URLs
  *  designed for hotlinking). Empty when BRANDFETCH_CLIENT_ID is unset. */
 export async function searchLogos(query: string, count = 5): Promise<LogoResult[]> {
-  const clientId = process.env.BRANDFETCH_CLIENT_ID
+  const clientId = env.BRANDFETCH_CLIENT_ID
   if (!clientId) return []
   const res = await fetch(`https://api.brandfetch.io/v2/search/${encodeURIComponent(query)}?c=${clientId}`, {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

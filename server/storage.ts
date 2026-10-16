@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { S3Client } from '@aws-sdk/client-s3'
@@ -11,7 +12,7 @@ import type { S3Client } from '@aws-sdk/client-s3'
  * PGlite. Either way the assets table is the source of truth for what exists.
  */
 
-const BUCKET = process.env.BUCKET
+const BUCKET = env.BUCKET
 const DISK_DIR = path.join(process.cwd(), 'data', 'assets')
 
 export const storageMode: 'bucket' | 'disk' = BUCKET ? 'bucket' : 'disk'
@@ -32,11 +33,11 @@ async function client(): Promise<S3Client> {
     /* loaded on demand so dev without a bucket never pays for the SDK */
     const { S3Client } = await import('@aws-sdk/client-s3')
     s3 = new S3Client({
-      region: process.env.REGION || 'auto',
-      endpoint: process.env.ENDPOINT,
+      region: env.REGION,
+      endpoint: env.ENDPOINT,
       credentials:
-        process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY
-          ? { accessKeyId: process.env.ACCESS_KEY_ID, secretAccessKey: process.env.SECRET_ACCESS_KEY }
+        env.ACCESS_KEY_ID && env.SECRET_ACCESS_KEY
+          ? { accessKeyId: env.ACCESS_KEY_ID, secretAccessKey: env.SECRET_ACCESS_KEY }
           : undefined,
     })
   }

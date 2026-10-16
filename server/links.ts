@@ -1,8 +1,9 @@
+import { env } from './env.ts'
 import type { ElementComment } from '../shared/types.ts'
 
 /** The instance's public origin, for links that leave the browser: email,
  *  webhooks. BETTER_AUTH_URL is already the one URL every deploy must set. */
-export const ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
+export const ORIGIN = env.BETTER_AUTH_URL
 
 export const canvasLink = (canvasId: string) => `${ORIGIN}/c/${canvasId}`
 

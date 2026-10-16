@@ -731,3 +731,57 @@ export const linearSessions = pgTable(
   },
   (t) => [index('linear_sessions_status_idx').on(t.status)],
 )
+
+/** One bot installation per Slack workspace, billed to its Doop installer. */
+export const slackInstallations = pgTable('slack_installations', {
+  teamId: text('team_id').primaryKey(),
+  userId: text('user_id').notNull().unique(),
+  botUserId: text('bot_user_id').notNull(),
+  name: text('name').notNull(),
+  botToken: text('bot_token').notNull(),
+  connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+})
+
+export const slackOAuthStates = pgTable('slack_oauth_states', {
+  hash: text('hash').primaryKey(),
+  userId: text('user_id').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+})
+
+/** A durable inbox and result outbox, one row per Slack mention or slash
+ *  command. Slack's event_id / trigger_id is the row id, so a redelivery
+ *  never starts a second run. */
+export const slackSessions = pgTable(
+  'slack_sessions',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id').notNull(),
+    userId: text('user_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    /** the thread Doop answers in; a slash command has none until Doop posts */
+    threadTs: text('thread_ts'),
+    requesterId: text('requester_id').notNull(),
+    /** slash commands only: Slack's response_url fallback when the bot is not in the channel */
+    responseUrl: text('response_url'),
+    title: text('title').notNull(),
+    prompt: text('prompt').notNull(),
+    status: text('status').notNull().default('pending'),
+    canvasId: text('canvas_id'),
+    taskId: text('task_id'),
+    /** a follow-up mention in a thread Doop already designed for: reuse that canvas */
+    followUp: boolean('follow_up').notNull().default(false),
+    error: text('error'),
+    /** ts of the "Doop is on it" message, updated in place with the canvas link */
+    ackTs: text('ack_ts'),
+    nextAttemptAt: bigint('next_attempt_at', { mode: 'number' }).notNull().default(0),
+    acknowledged: boolean('acknowledged').notNull().default(false),
+    linked: boolean('linked').notNull().default(false),
+    reported: boolean('reported').notNull().default(false),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('slack_sessions_status_idx').on(t.status),
+    index('slack_sessions_thread_idx').on(t.teamId, t.channelId, t.threadTs),
+  ],
+)

@@ -2,7 +2,8 @@ import { RemoteAppError } from '@cantelop/sdk'
 import { Router } from 'express'
 import { z } from 'zod'
 import { CLAUDE_MODEL_IDS } from '../shared/localAgent.ts'
-import { isBanned, TRUSTED_ORIGINS } from './auth.ts'
+import { isBanned } from './auth.ts'
+import { env } from './env.ts'
 import { localAgentRuns } from './localAgentRuns.ts'
 import {
   beginRemoteReauth,
@@ -52,7 +53,7 @@ remoteClaudeRouter.use((req, res, next) => {
     res.status(403).json({ error: 'Hosted account access is unavailable while viewing as another user.' })
     return
   }
-  if (req.headers.origin && !TRUSTED_ORIGINS.includes(req.headers.origin)) {
+  if (req.headers.origin && ![env.BETTER_AUTH_URL, ...env.TRUSTED_ORIGINS].includes(req.headers.origin)) {
     res.status(403).json({ error: 'Cross-origin account access denied.' })
     return
   }
@@ -137,7 +138,7 @@ const schemas = {
         .string()
         .min(1)
         .max(2048)
-        // eslint-disable-next-line no-control-regex -- Codes must not inject CLI control input.
+        // oxlint-disable-next-line no-control-regex -- Codes must not inject CLI control input.
         .regex(/^[^\x00-\x1f\x7f]+$/),
       model: z.enum(CLAUDE_MODEL_IDS),
     })

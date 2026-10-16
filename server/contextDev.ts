@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { parsePublicHttpUrl } from './publicUrl.ts'
 import { WebsiteCaptureUnavailableError } from './websiteAccess.ts'
 import { MAX_FRAME_HTML_BYTES } from './limits.ts'
@@ -37,7 +38,7 @@ interface ContextHtmlBody {
 }
 
 export function contextDevConfigured(): boolean {
-  return !!process.env.CONTEXT_DEV_API_KEY?.trim()
+  return !!env.CONTEXT_DEV_API_KEY?.trim()
 }
 
 function shortMessage(value: unknown): string {
@@ -51,7 +52,7 @@ export async function scrapeContextWebsiteHtml(
   rawUrl: string,
   request: typeof fetch = fetch,
 ): Promise<ContextWebsiteHtml> {
-  const apiKey = process.env.CONTEXT_DEV_API_KEY?.trim()
+  const apiKey = env.CONTEXT_DEV_API_KEY?.trim()
   if (!apiKey) throw new Error('CONTEXT_DEV_API_KEY is not configured')
 
   const requestedUrl = parsePublicHttpUrl(rawUrl)
@@ -151,7 +152,7 @@ export async function scrapeContextSitemap(
   maxLinks: number,
   request: typeof fetch = fetch,
 ): Promise<string[]> {
-  const apiKey = process.env.CONTEXT_DEV_API_KEY?.trim()
+  const apiKey = env.CONTEXT_DEV_API_KEY?.trim()
   if (!apiKey) throw new Error('CONTEXT_DEV_API_KEY is not configured')
 
   const requestedUrl = parsePublicHttpUrl(rawUrl)

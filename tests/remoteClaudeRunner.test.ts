@@ -1,3 +1,4 @@
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { ClaudeSessionEvent as ClaudeEvent } from '@cantelop/sdk/harnesses/claude/protocol'
 const mocks = vi.hoisted(() => ({
@@ -29,16 +30,16 @@ beforeEach(() => {
 })
 afterEach(async () => {
   await localAgentRuns.cancel('alice')
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   vi.clearAllMocks()
 })
 it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
   'creates a task-scoped MCP session using %s',
   async (mcpOrigin) => {
-    vi.stubEnv('NODE_ENV', 'development')
-    vi.stubEnv('CANTELOP_EDGE_URL', mcpOrigin.startsWith('http:') ? 'http://127.0.0.1:8787' : 'https://claude.example')
-    vi.stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
-    vi.stubEnv('CLAUDE_REMOTE_MCP_ORIGIN', mcpOrigin)
+    stubEnv('NODE_ENV', 'development')
+    stubEnv('CANTELOP_EDGE_URL', mcpOrigin.startsWith('http:') ? 'http://127.0.0.1:8787' : 'https://claude.example')
+    stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
+    stubEnv('CLAUDE_REMOTE_MCP_ORIGIN', mcpOrigin)
     const prompt = 'Task '.repeat(20000)
     const execute = vi.fn()
     let messageId = ''
@@ -101,7 +102,7 @@ it.each(['https://tools.example', 'http://host.docker.internal:4400'])(
   },
 )
 it('cancels the remote message and revokes access after a stream failure', async () => {
-  vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  stubEnv('BETTER_AUTH_URL', 'https://doop.example')
   mocks.events.mockRejectedValue(new Error('History lost'))
   const result = await runRemoteClaude('alice', 'default', {
     canvasId: 'canvas',
@@ -123,8 +124,8 @@ it('cancels the remote message and revokes access after a stream failure', async
 })
 
 it('rejects localhost before creating a hosted session and explains the tunnel setting', async () => {
-  vi.stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
-  vi.stubEnv('CLAUDE_REMOTE_MCP_ORIGIN', undefined)
+  stubEnv('BETTER_AUTH_URL', 'http://localhost:4300')
+  stubEnv('CLAUDE_REMOTE_MCP_ORIGIN', undefined)
   const result = await runRemoteClaude('alice', 'default', {
     canvasId: 'canvas',
     prompt: 'Task',
@@ -139,7 +140,7 @@ it('rejects localhost before creating a hosted session and explains the tunnel s
 })
 
 it('persists an explicit auth failure for this user and stops dispatching while blocked', async () => {
-  vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  stubEnv('BETTER_AUTH_URL', 'https://doop.example')
   let id = ''
   mocks.dispatch.mockImplementation(async (command) => {
     if (command.type === 'queue') id = command.id

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
  * generate_image rides the Responses API's hosted image tool on whichever
@@ -53,9 +54,7 @@ afterEach(() => {
   mockedGetAccount.mockReset()
   mockedGetImagePref.mockReset()
   mockedGetImagePref.mockResolvedValue(undefined)
-  delete process.env.OPENAI_API_KEY
-  delete process.env.GEMINI_API_KEY
-  delete process.env.ARK_API_KEY
+  unstubAllEnvs()
 })
 
 describe('the hosted image_generation request', () => {
@@ -120,13 +119,13 @@ describe('who pays', () => {
   it('falls back to the server key only when the user connected nothing', async () => {
     mockedGetAccount.mockResolvedValue(null)
     expect((await generatorFor('u1')).ok).toBe(false)
-    process.env.OPENAI_API_KEY = 'sk-server'
+    stubEnv('OPENAI_API_KEY', 'sk-server')
     const generator = await generatorFor('u1')
     expect(generator.ok && generator.label).toBe('server')
   })
 
   it('never bills the server when the account lookup itself fails', async () => {
-    process.env.OPENAI_API_KEY = 'sk-server'
+    stubEnv('OPENAI_API_KEY', 'sk-server')
     mockedGetAccount.mockRejectedValue(new Error('db down'))
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     await expect(generateImage('u1', { prompt: 'x' })).rejects.toThrow(/could not read your connected model account/)
@@ -172,7 +171,7 @@ describe('the image-model registry', () => {
   it('draws Seedream on the server ARK key with an explicit size', async () => {
     mockedGetAccount.mockResolvedValue(null)
     mockedGetImagePref.mockResolvedValue('seedream-5-0-pro')
-    process.env.ARK_API_KEY = 'ark-server'
+    stubEnv('ARK_API_KEY', 'ark-server')
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ data: [{ b64_json: await tinyPng() }] }), {
         status: 200,
@@ -202,15 +201,15 @@ describe('the image-model registry', () => {
 
   it('falls back to the first server-enabled model when nothing is connected and no pick was made', async () => {
     mockedGetAccount.mockResolvedValue(null)
-    process.env.GEMINI_API_KEY = 'gm-server'
+    stubEnv('GEMINI_API_KEY', 'gm-server')
     const generator = await generatorFor('u1')
     expect(generator.ok && generator.label).toBe('server')
   })
 
   it('never runs a connected user on the server keys for another provider', async () => {
     mockedGetAccount.mockResolvedValue({ userId: 'u1', kind: 'openrouter-key', apiKey: 'sk-or-x', connectedAt: 1 })
-    process.env.OPENAI_API_KEY = 'sk-server'
-    process.env.GEMINI_API_KEY = 'gm-server'
+    stubEnv('OPENAI_API_KEY', 'sk-server')
+    stubEnv('GEMINI_API_KEY', 'gm-server')
     const generator = await generatorFor('u1')
     expect(generator.ok).toBe(false)
   })
@@ -240,10 +239,10 @@ describe('failure modes', () => {
 
 it('does not bill the server for image generation when a Claude API key is selected', async () => {
   mockedGetAccount.mockResolvedValue({ userId: 'alice', kind: 'anthropic-key', apiKey: 'sk-ant-test', connectedAt: 1 })
-  vi.stubEnv('OPENAI_API_KEY', 'sk-server-test')
+  stubEnv('OPENAI_API_KEY', 'sk-server-test')
   try {
     expect(await generatorFor('alice')).toMatchObject({ ok: false })
   } finally {
-    vi.unstubAllEnvs()
+    unstubAllEnvs()
   }
 })

@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import express from 'express'
 import { and, eq, inArray } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
@@ -58,7 +59,7 @@ const records = new Map<string, WorkspaceRecord>()
 /** workspaceId -> userId -> membership */
 const members = new Map<string, Map<string, Membership>>()
 
-const ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
+const ORIGIN = env.BETTER_AUTH_URL
 
 function swallow(p: Promise<unknown>) {
   p.catch((err) => console.error('[workspaces] write failed', err))
@@ -399,7 +400,7 @@ async function listInvites(workspaceId: string): Promise<WorkspaceInvite[]> {
  *  same line ADMIN_EMAILS draws) and local development takes the address
  *  at face value. */
 export function unknownEmailInvitesAllowed(): boolean {
-  return mailerConfigured || process.env.NODE_ENV !== 'production'
+  return mailerConfigured || !env.isProduction
 }
 
 /** Turn an invite into a membership: the member row and the invite's

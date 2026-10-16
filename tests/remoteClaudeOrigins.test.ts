@@ -1,15 +1,20 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
+import { afterEach, expect, it } from 'vitest'
 import { claudeMcpOrigin } from '../server/remoteClaudeOrigins.ts'
 
-afterEach(() => vi.unstubAllEnvs())
+afterEach(() => unstubAllEnvs())
 
 it.each([undefined, 'development'])('allows the local container setup with NODE_ENV=%s', (environment) => {
-  vi.stubEnv('NODE_ENV', environment)
+  stubEnv('BETTER_AUTH_SECRET', 'test-secret')
+  stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  stubEnv('NODE_ENV', environment)
   expect(claudeMcpOrigin('http://host.docker.internal:4400').origin).toBe('http://host.docker.internal:4400')
 })
 
-it.each(['production', 'staging', 'test'])('rejects HTTP outside development: %s', (environment) => {
-  vi.stubEnv('NODE_ENV', environment)
+it.each(['production', 'test'])('rejects HTTP outside development: %s', (environment) => {
+  stubEnv('BETTER_AUTH_SECRET', 'test-secret')
+  stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  stubEnv('NODE_ENV', environment)
   expect(() => claudeMcpOrigin('http://host.docker.internal:4400')).toThrow('HTTPS origin')
   expect(claudeMcpOrigin('https://tools.example').origin).toBe('https://tools.example')
 })
@@ -29,15 +34,15 @@ it.each([
   'https://tools.example?q=x',
   'https://tools.example#fragment',
 ])('rejects invalid container MCP origin %s', (value) => {
-  vi.stubEnv('NODE_ENV', 'development')
+  stubEnv('NODE_ENV', 'development')
   expect(() => claudeMcpOrigin(value)).toThrow()
 })
 
 it.each([undefined, 'https://claude.example', 'http://example.com', 'invalid', 'http://localhost/path'])(
   'validates MCP callbacks independently of SDK endpoint configuration: %s',
   (runtime) => {
-    vi.stubEnv('NODE_ENV', 'development')
-    vi.stubEnv('CANTELOP_EDGE_URL', runtime)
+    stubEnv('NODE_ENV', 'development')
+    stubEnv('CANTELOP_EDGE_URL', runtime)
     expect(claudeMcpOrigin('http://host.docker.internal:4400').origin).toBe('http://host.docker.internal:4400')
     expect(claudeMcpOrigin('https://tools.example').origin).toBe('https://tools.example')
   },

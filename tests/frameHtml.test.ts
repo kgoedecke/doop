@@ -7,12 +7,10 @@ import { Client, startServer, type Server } from './harness.ts'
  * visible source text — these tests pin the repair down to what is stored.
  */
 
-const PORT = 4979
-
 let server: Server
 
 beforeAll(async () => {
-  server = await startServer(PORT)
+  server = await startServer()
 }, 70_000)
 
 afterAll(() => server?.stop())

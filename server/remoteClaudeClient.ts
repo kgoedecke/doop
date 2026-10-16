@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { RemoteAppError, type App, type SessionEventCursor } from '@cantelop/sdk'
 import { createHash } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -12,13 +13,13 @@ type ClaudeApp = App<ClaudeSessionCommand, ClaudeEvent, ClaudeSessionReply>
 const CLIENT_MODULE = '../cantelop/.cantelop/client/client.mjs'
 
 export function remoteClaudeConfigured() {
-  return !!(process.env.CANTELOP_APP_SLUG && process.env.CANTELOP_INTEGRATION_TOKEN && process.env.CLAUDE_REMOTE_ISSUER)
+  return !!(env.CANTELOP_APP_SLUG && env.CANTELOP_INTEGRATION_TOKEN && env.CLAUDE_REMOTE_ISSUER)
 }
 export function remoteIdentity(userId: string) {
   if (!remoteClaudeConfigured()) throw new Error('Hosted execution is not configured on this Doop server.')
   // Retain the pre-1.0 namespace, including the issuer, to preserve Workspaces.
   return createHash('sha256')
-    .update(JSON.stringify([process.env.CLAUDE_REMOTE_ISSUER, userId]))
+    .update(JSON.stringify([env.CLAUDE_REMOTE_ISSUER, userId]))
     .digest('hex')
     .slice(0, 48)
 }

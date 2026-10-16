@@ -11,7 +11,13 @@ struct ServerAddressChecks {
         checks.testSelfHostedPortIsPreserved()
         try checks.testExportDestinations()
         try checks.testServerResponseContracts()
+        checks.testCardScopeBody()
         try checks.testAgentActivityStates()
+        FrameSnappingChecks.run()
+        try PendingFrameMoveChecks.run()
+        try ProviderSignInChecks.run()
+        AppleSignInChecks.run()
+        try CanvasSocketChecks.run()
         print("All core checks passed.")
     }
     func testNormalizesOriginAndStartsAtAuthentication() {
@@ -78,6 +84,17 @@ struct ServerAddressChecks {
         checkEqual(update.frame?.x, 1.5)
         let deletion = try JSONDecoder().decode(CanvasEvent.self, from: Data(#"{"type":"frame:deleted","frameId":"f"}"#.utf8))
         checkEqual(deletion.frameId, "f")
+    }
+
+    /// The prompt's scope posts the shape `shared/types.ts` calls CardScope: a frame id, plus
+    /// the element selector only when one was picked.
+    func testCardScopeBody() {
+        let frame = CardScope(frameId: "f1").body
+        checkEqual(frame["frameId"] as? String, "f1")
+        checkNil(frame["selector"], "A frame scope carries no selector")
+        let element = CardScope(frameId: "f1", selector: "body > main > h1:nth-of-type(1)").body
+        checkEqual(element["selector"] as? String, "body > main > h1:nth-of-type(1)")
+        checkTrue(JSONSerialization.isValidJSONObject(["title": "Make it bolder", "scope": element]))
     }
 
     func testAgentActivityStates() throws {

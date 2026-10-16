@@ -3,14 +3,12 @@ import { Client, startServer, type Server } from './harness.ts'
 import { activeAgentTasks, agentActivityState } from '../shared/agentActivity.ts'
 import type { AgentTask } from '../shared/types.ts'
 
-const PORT = 5018
 let server: Server
 let owner: Client
 let stranger: Client
 let canvasId: string
 beforeAll(async () => {
-  server = await startServer(PORT, {
-    BETTER_AUTH_URL: `http://localhost:${PORT}`,
+  server = await startServer({
     DOOP_APNS_TEAM_ID: 'test',
     DOOP_APNS_KEY_ID: 'test',
     DOOP_APNS_PRIVATE_KEY: 'not-a-real-key',

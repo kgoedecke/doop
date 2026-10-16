@@ -1,8 +1,10 @@
-import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
-import reactHooks from 'eslint-plugin-react-hooks'
-import prettier from 'eslint-config-prettier'
 
+/* oxlint (`.oxlintrc.json`) carries the rule set, including the type-aware
+   rules via tsgolint. ESLint stays for what oxlint cannot cover: the
+   `no-restricted-syntax` selector below, and `no-undef` for the plain
+   JavaScript that no type check sees (oxlint's is still a nursery rule).
+   No type information is loaded, so this run is cheap. */
 export default tseslint.config(
   {
     ignores: [
@@ -15,39 +17,9 @@ export default tseslint.config(
       'cantelop/.dev/**',
     ],
   },
-  { languageOptions: { parserOptions: { tsconfigRootDir: import.meta.dirname } } },
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.{ts,tsx}'],
-    plugins: { 'react-hooks': reactHooks },
-    rules: {
-      ...reactHooks.configs.recommended.rules,
-      'react-hooks/set-state-in-effect': 'error',
-      'react-hooks/exhaustive-deps': 'error',
-    },
-  },
-  {
-    /* type-aware rules for the TypeScript sources: a dropped promise is a
-       real bug (lost errors, work that never awaits), not a style nit */
-    files: ['src/**/*.{ts,tsx}', 'server/**/*.ts', 'shared/**/*.ts', 'tests/**/*.ts'],
-    languageOptions: { parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname } },
-    rules: {
-      '@typescript-eslint/no-floating-promises': 'error',
-    },
-  },
-  {
-    rules: {
-      /* the server talks to itself over broad JSON shapes; the odd any at a
-         seam must be an explicit, commented eslint-disable, not a habit */
-      '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-unused-vars': [
-        'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
-      ],
-      /* declare global { namespace Express } is how express req typing works */
-      '@typescript-eslint/no-namespace': ['error', { allowDeclarations: true }],
-    },
+    files: ['**/*.{js,mjs,cjs}'],
+    rules: { 'no-undef': 'error' },
   },
   {
     /* repo maintenance scripts and the iOS dev helpers: plain ESM run directly
@@ -75,11 +47,22 @@ export default tseslint.config(
           .map((g) => [g, 'readonly']),
       ),
     },
+  },
+  {
+    /* every environment variable is declared once in server/env.ts, typed and
+       validated at boot; the rest of the server reads `env.X` from there. The
+       Gemini cloud worker is its own process with its own three variables. */
+    files: ['server/**/*.ts'],
+    ignores: ['server/env.ts', 'server/geminiCloudWorker.ts', 'server/geminiCloudWorkerMain.ts'],
+    languageOptions: { parser: tseslint.parser },
     rules: {
-      '@typescript-eslint/no-unused-expressions': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', { caughtErrors: 'none' }],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "MemberExpression[object.name='process'][property.name='env']",
+          message: 'Read environment variables through `env` from server/env.ts, which validates them at boot.',
+        },
+      ],
     },
   },
-  /* must be last: silence stylistic rules that would fight prettier */
-  prettier,
 )

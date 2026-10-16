@@ -9,6 +9,10 @@ export type GeminiCloudWorker = z.infer<typeof workerSchema>
 
 /** Operator-only pilot routing. Never accept worker destinations from browser requests. */
 export function geminiCloudWorkerFor(userId: string): GeminiCloudWorker | undefined {
+  /* read raw rather than through server/env.ts: this module ships inside the
+     worker image (workers/gemini/Dockerfile), which has none of the server's
+     environment and must not validate it */
+  // eslint-disable-next-line no-restricted-syntax
   const raw = process.env.DOOP_GEMINI_CLOUD_WORKERS
   if (!raw) return undefined
   try {

@@ -35,6 +35,8 @@ jobs:
         run: cargo test --release --manifest-path ios/BlitzKit/rust/Cargo.toml
       - name: Check core contracts
         run: swift run --package-path ios DoopCoreChecks
+      - name: Check canvas connections
+        run: bash ios/ConnectionTests/run.sh
       - name: Build iPhone and iPad app
         run: >-
           xcodebuild -project ios/Doop.xcodeproj -scheme Doop

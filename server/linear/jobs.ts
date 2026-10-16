@@ -1,3 +1,4 @@
+import { env } from '../env.ts'
 import { randomUUID } from 'node:crypto'
 import { and, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
@@ -48,7 +49,7 @@ export const sessionEvent = z.object({
 /** Called only after verifying the signature and freshness of the raw payload. */
 export async function receiveSession(event: z.infer<typeof sessionEvent>) {
   if (
-    event.oauthClientId !== process.env.LINEAR_CLIENT_ID ||
+    event.oauthClientId !== env.LINEAR_CLIENT_ID ||
     event.appUserId !== event.agentSession.appUserId ||
     event.organizationId !== event.agentSession.organizationId
   )

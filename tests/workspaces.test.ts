@@ -7,12 +7,10 @@ import { Client, startServer, type Server } from './harness.ts'
  * per-canvas rules keep working around it. Real server, real database.
  */
 
-const PORT = 5001
-
 let server: Server
 
 beforeAll(async () => {
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  server = await startServer()
 }, 70_000)
 
 afterAll(() => server?.stop())
@@ -216,7 +214,7 @@ describe('workspaces (self-hosted, billing off)', () => {
   it('survives a restart', async () => {
     server.stop({ keepData: true })
     await server.stopped
-    server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` }, server.dataDir)
+    server = await startServer({}, server.dataDir)
     const detail = await (await owner.get(`/api/workspaces/${workspaceId}`)).json()
     expect(detail.name).toBe('Acme Design')
     expect(detail.memberCount).toBe(2)

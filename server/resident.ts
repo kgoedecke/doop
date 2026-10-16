@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
@@ -10,7 +11,6 @@ import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
 import * as backgrounds from './backgrounds.ts'
-import { PUBLIC_ORIGIN } from './auth.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
@@ -1314,7 +1314,7 @@ async function execTool(
         /* counted once an image actually exists: a refusal or a transient
            failure spent nothing and must not lock the tool for the run */
         runState.imagesGenerated++
-        const url = `${PUBLIC_ORIGIN}/a/${asset.id}.${asset.ext}`
+        const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
         return ok([
           { type: 'image', source: { type: 'base64', media_type: image.preview.mime, data: image.preview.data } },
           {
@@ -1340,7 +1340,7 @@ async function execTool(
             slot: pick(backgrounds.BACKGROUND_SLOTS, raw.slot),
             count: Number(raw.count) || undefined,
           },
-          PUBLIC_ORIGIN,
+          env.BETTER_AUTH_URL,
         )
         const { results } = listing
         if (results.length === 0)

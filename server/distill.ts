@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
@@ -14,14 +15,14 @@ import * as actions from './actions.ts'
  * disabled otherwise, like the resident agents.
  */
 
-const MODEL = process.env.DOOP_DISTILL_MODEL || 'claude-haiku-4-5-20251001'
+const MODEL = env.DOOP_DISTILL_MODEL
 /** most recent unconsumed decisions the judge sees per run */
 const MAX_WINDOW = 15
 
 let client: Anthropic | null = null
 
 function getClient(): Anthropic | null {
-  if (!process.env.ANTHROPIC_API_KEY) return null
+  if (!env.ANTHROPIC_API_KEY) return null
   if (!client) client = new Anthropic()
   return client
 }

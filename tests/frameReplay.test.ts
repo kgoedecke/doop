@@ -32,7 +32,9 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
     browser = await getBrowser()
     page = await browser.newPage()
     await page.goto(`${server.resolvedUrls!.local[0]}tests/fixtures/frameReplay.html`)
-    await page.waitForFunction(() => window.testReady && window.messages.some((m) => m.type === 'doop:frame-ready'))
+    await page.waitForFunction(() => window.testReady && window.messages.some((m) => m.type === 'doop:frame-ready'), {
+      timeout: 60_000,
+    })
   }, 60_000)
   afterAll(async () => {
     await page?.close()

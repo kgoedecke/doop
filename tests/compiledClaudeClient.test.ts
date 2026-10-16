@@ -1,3 +1,4 @@
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import { afterEach, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -5,7 +6,7 @@ import { join } from 'node:path'
 import { RemoteAppError } from '@cantelop/sdk'
 type ClaudeApp = typeof import('../cantelop/.cantelop/client/client.mjs').doopClaude
 afterEach(() => {
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   vi.unstubAllGlobals()
 })
 it('uses the compiled client with backend credentials, shared SDK errors and isolated user Workspaces', async () => {
@@ -16,10 +17,10 @@ it('uses the compiled client with backend credentials, shared SDK errors and iso
   expect(declarations).toContain('doopClaude')
   expect(declarations).toContain('@cantelop/sdk/harnesses/claude/protocol')
   expect(declarations).not.toContain('createClaudeRuntime')
-  vi.stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
-  vi.stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
-  vi.stubEnv('CANTELOP_INTEGRATION_TOKEN', 'test-app-token')
-  vi.stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
+  stubEnv('CANTELOP_APP_SLUG', 'doop-claude')
+  stubEnv('CANTELOP_EDGE_URL', 'https://claude.example')
+  stubEnv('CANTELOP_INTEGRATION_TOKEN', 'test-app-token')
+  stubEnv('CLAUDE_REMOTE_ISSUER', 'doop')
   const { checkRemoteAuth, remoteIdentity, remoteWorkspace } = await import('../server/remoteClaudeClient.ts')
   const workspaces: string[] = []
   const { doopClaude } = (await import(/* @vite-ignore */ pathToFileURL(join(outdir, 'client.mjs')).href)) as {

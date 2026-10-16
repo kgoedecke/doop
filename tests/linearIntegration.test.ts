@@ -1,4 +1,5 @@
 import { createServer, type Server as HttpServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js'
@@ -28,8 +29,9 @@ beforeAll(async () => {
       }),
     )
   })
-  await new Promise<void>((resolve) => upstream.listen(4977, resolve))
-  server = await startServer(4976, { LINEAR_API_URL: 'http://localhost:4977' })
+  await new Promise<void>((resolve) => upstream.listen(0, resolve))
+  const upstreamPort = (upstream.address() as AddressInfo).port
+  server = await startServer({ LINEAR_API_URL: `http://localhost:${upstreamPort}` })
   owner = await new Client(server).signUp('linear-owner@test.dev', 'Owner')
   stranger = await new Client(server).signUp('linear-stranger@test.dev', 'Stranger')
 }, 60_000)

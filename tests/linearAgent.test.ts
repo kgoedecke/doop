@@ -1,5 +1,6 @@
 import { randomUUID, createHmac } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import { eq } from 'drizzle-orm'
 import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
 import express from 'express'
@@ -86,10 +87,10 @@ beforeAll(async () => {
 }, 30_000)
 
 beforeEach(async () => {
-  vi.stubEnv('LINEAR_CLIENT_ID', 'linear-client')
-  vi.stubEnv('LINEAR_CLIENT_SECRET', 'linear-secret')
-  vi.stubEnv('LINEAR_WEBHOOK_SECRET', 'webhook-secret')
-  vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  stubEnv('LINEAR_CLIENT_ID', 'linear-client')
+  stubEnv('LINEAR_CLIENT_SECRET', 'linear-secret')
+  stubEnv('LINEAR_WEBHOOK_SECRET', 'webhook-secret')
+  stubEnv('BETTER_AUTH_URL', 'https://doop.example')
   await db.delete(linearSessions)
   await db.delete(linearInstallations)
   await db.delete(linearOAuthStates)
@@ -123,7 +124,11 @@ beforeEach(async () => {
           expires_in: 86_400,
         })
       const { query, variables } = JSON.parse(String(options?.body))
-      sent.push({ query, variables, authorization: (options?.headers as Record<string, string>).Authorization ?? '' })
+      sent.push({
+        query,
+        variables,
+        authorization: (options?.headers as Record<string, string> | undefined)?.Authorization ?? '',
+      })
       if (query.includes('DoopAgentIdentity'))
         return Response.json({
           data: {
@@ -140,7 +145,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   vi.unstubAllGlobals()
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   await new Promise<void>((resolve) => webhookServer.close(() => resolve()))
 })
 

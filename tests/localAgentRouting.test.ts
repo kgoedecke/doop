@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 const mocks = vi.hoisted(() => ({ preference: vi.fn(), account: vi.fn(), online: vi.fn() }))
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: mocks.preference }))
 vi.mock('../server/modelAccounts.ts', () => ({
@@ -11,11 +12,11 @@ import { pickModel } from '../server/agentModel.ts'
 
 afterEach(() => {
   vi.clearAllMocks()
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
 })
 describe('local provider routing', () => {
   it('routes an explicitly configured pilot user through the cloud harness without touching paid API accounts', async () => {
-    vi.stubEnv(
+    stubEnv(
       'DOOP_GEMINI_CLOUD_WORKERS',
       JSON.stringify({ alice: { url: 'https://worker.example', token: 'x'.repeat(32) } }),
     )

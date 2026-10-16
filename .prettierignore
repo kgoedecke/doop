@@ -1,5 +1,7 @@
 dist/
 node_modules/
+.claude/worktrees/
+.cantelop/
 package-lock.json
 bun.lock
 CHANGELOG.md

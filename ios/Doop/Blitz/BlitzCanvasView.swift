@@ -20,6 +20,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private let chrome = CALayer()
     private let selectionOutline = CAShapeLayer()
     private let elementOutline = CAShapeLayer()
+    private let snapGuideLayer = CAShapeLayer()
+    private var snapGuides: [SnapGuide] = []
     private var frames: [String: FrameLayer] = [:]
     private var labels: [String: CATextLayer] = [:]
     private var cursors: [String: CursorLayer] = [:]
@@ -27,8 +29,10 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private var offset = CGPoint(x: 40, y: 80)
     private var fitted = false
     private var fitCommand = 0
-    private var drag: (id: String, origin: CGPoint)?
+    private var drag: (id: String, origin: CGPoint, proposedOrigin: CGPoint)?
     private var pinchAnchor = CGPoint.zero
+    /// Fingers in the pinch at the last update; the centroid jumps when one lifts.
+    private var pinchTouches = 0
     private var relayout: DispatchWorkItem?
     private var pendingWakes = Set<Int>()
     private var animationLink: CADisplayLink?
@@ -63,6 +67,10 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         selectionOutline.strokeColor = UIColor.tintColor.cgColor
         elementOutline.strokeColor = UIColor(red: 0.90, green: 0.33, blue: 0.24, alpha: 1).cgColor
         elementOutline.fillColor = UIColor(red: 0.90, green: 0.33, blue: 0.24, alpha: 0.08).cgColor
+        snapGuideLayer.fillColor = nil
+        snapGuideLayer.strokeColor = UIColor.tintColor.cgColor
+        snapGuideLayer.lineWidth = 1
+        chrome.addSublayer(snapGuideLayer)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
         pan.maximumNumberOfTouches = 1
@@ -90,6 +98,9 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func tearDown() {
+        drag = nil
+        snapGuides = []
+        snapGuideLayer.path = nil
         animationLink?.invalidate()
         animationLink = nil
         BlitzDocument.onWake = nil
@@ -134,7 +145,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         var added = false
         for frame in current {
             if let existing = frames[frame.id] {
-                existing.update(frame)
+                existing.update(frame, preservingOrigin: drag?.id == frame.id)
             } else {
                 let layer = FrameLayer(frame: frame, baseURL: model.client.server.origin)
                 layer.onDocumentRegistered = { [weak self] docID in
@@ -155,6 +166,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                 added = true
             }
         }
+        snapDraggedFrame()
         if added { rerenderVisible() }
         // A collaborator can move or resize an animating frame into view: restart the loop.
         let viewport = toWorldRect(bounds)
@@ -366,7 +378,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         return CGRect(x: origin.x, y: origin.y, width: rect.width / zoom, height: rect.height / zoom)
     }
 
-    // MARK: - Chrome (labels, selection, cursors) in screen space
+    // MARK: - Chrome (labels, selection, guides, cursors) in screen space
 
     private func drawChrome() {
         CATransaction.begin()
@@ -400,6 +412,14 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             selectionOutline.isHidden = true
             elementOutline.isHidden = true
         }
+        let guidePath = UIBezierPath()
+        for guide in snapGuides {
+            let start = guide.axis == .vertical ? CGPoint(x: guide.at, y: guide.from) : CGPoint(x: guide.from, y: guide.at)
+            let end = guide.axis == .vertical ? CGPoint(x: guide.at, y: guide.to) : CGPoint(x: guide.to, y: guide.at)
+            guidePath.move(to: toScreen(start))
+            guidePath.addLine(to: toScreen(end))
+        }
+        snapGuideLayer.path = snapGuides.isEmpty ? nil : guidePath.cgPath
         for person in model.presences {
             guard let cursor = cursors[person.clientId], let point = person.cursor else { continue }
             let world = CGPoint(x: point.x, y: point.y)
@@ -409,6 +429,17 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     // MARK: - Gestures
+
+    private func snapDraggedFrame() {
+        guard let drag, let frame = frames[drag.id] else { snapGuides = []; return }
+        // Use the unsnapped finger position on every update so an existing snap
+        // never accumulates into the next movement. Model order breaks ties.
+        let others = (model.canvas?.frames ?? []).compactMap { $0.id == drag.id ? nil : frames[$0.id]?.rect }
+        let raw = CGRect(origin: drag.proposedOrigin, size: frame.rect.size)
+        let snapped = FrameSnapping.move(raw, among: others, zoom: zoom)
+        frame.move(to: snapped.rect.origin)
+        snapGuides = snapped.guides
+    }
 
     private func frame(at screenPoint: CGPoint) -> FrameLayer? {
         let point = toWorld(screenPoint)
@@ -465,14 +496,17 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             #endif
             let start = gesture.location(in: self)
             if let id = label(at: CGPoint(x: start.x - translation.x, y: start.y - translation.y)), let frame = frames[id] {
-                drag = (id, frame.rect.origin)
+                drag = (id, frame.rect.origin, frame.rect.origin)
                 model.select(id)
             } else {
                 drag = nil
             }
+            snapGuides = []
         case .changed:
-            if let drag, let frame = frames[drag.id] {
-                frame.move(to: CGPoint(x: drag.origin.x + translation.x / zoom, y: drag.origin.y + translation.y / zoom))
+            if let drag {
+                self.drag?.proposedOrigin = CGPoint(x: drag.origin.x + translation.x / zoom,
+                                                   y: drag.origin.y + translation.y / zoom)
+                snapDraggedFrame()
                 drawChrome()
             } else {
                 offset.x += translation.x
@@ -480,23 +514,24 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                 gesture.setTranslation(.zero, in: self)
                 applyTransform()
             }
-        case .ended, .cancelled:
+        case .ended, .cancelled, .failed:
             gestureActive = false
             #if DEBUG
             monitor.end()
             #endif
             if let drag, let frame = frames[drag.id] {
                 let target = frame.rect.origin
-                self.drag = nil
                 if gesture.state == .ended, hypot(translation.x, translation.y) > 3 {
                     Task { await model.moveFrame(drag.id, x: target.x, y: target.y) }
                 } else {
                     frame.move(to: drag.origin)
-                    drawChrome()
                 }
             } else {
                 scheduleRelayout()
             }
+            self.drag = nil
+            snapGuides = []
+            drawChrome()
         default: break
         }
     }
@@ -510,7 +545,15 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             monitor.begin("pinch")
             #endif
             pinchAnchor = toWorld(center)
+            pinchTouches = gesture.numberOfTouches
         case .changed:
+            // The centroid moves to the remaining finger when one lifts (or to the
+            // midpoint when one lands): anchor the world point now under it so the
+            // view holds still instead of jumping to the new centre.
+            if gesture.numberOfTouches != pinchTouches {
+                pinchTouches = gesture.numberOfTouches
+                pinchAnchor = toWorld(center)
+            }
             zoom = max(Self.minZoom, min(Self.maxZoom, zoom * gesture.scale))
             gesture.scale = 1
             offset = CGPoint(x: center.x - pinchAnchor.x * zoom, y: center.y - pinchAnchor.y * zoom)
@@ -665,8 +708,9 @@ private final class FrameLayer {
     }
 
     /// Apply a model change: geometry is immediate, HTML re-parses in the engine.
-    func update(_ frame: DesignFrame) {
-        let newRect = CGRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height)
+    func update(_ frame: DesignFrame, preservingOrigin: Bool = false) {
+        let newRect = CGRect(x: preservingOrigin ? rect.minX : frame.x,
+                             y: preservingOrigin ? rect.minY : frame.y, width: frame.width, height: frame.height)
         name = frame.name
         if newRect != rect {
             let resized = newRect.size != rect.size

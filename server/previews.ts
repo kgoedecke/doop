@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import type { Frame } from '../shared/types.ts'
 import * as thumbs from './thumbs.ts'
 
@@ -28,7 +29,7 @@ const IMG_CACHE_MAX = 200
    anonymous hotlink abuse — authenticated users bypass it (verified by the
    caller, and only checked when the budget is actually exhausted). */
 const renderHits = new Map<string, number[]>()
-const RENDERS_PER_MIN = Number(process.env.PREVIEW_RENDERS_PER_MIN || 12)
+const RENDERS_PER_MIN = env.PREVIEW_RENDERS_PER_MIN
 
 export interface ImageRequest {
   ext: 'png' | 'jpg'
@@ -48,7 +49,7 @@ export type ImageResult = { status: 'ok'; buf: Buffer } | { status: 'rate-limite
 /** May reject when the render itself fails — the caller owns the 500. */
 export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageResult> {
   const preview = req.preview && req.ext === 'jpg'
-  const key = `${frame.id}:${req.ext}:${req.scale}:${req.ext === 'jpg' ? req.quality : ''}:${preview ? 'p' : ''}`
+  const key = imageKey(frame.id, req.ext, req.scale, req.ext === 'jpg' ? req.quality : '', preview)
   const cached = imgCache.get(key)
   let pending =
     cached && cached.updatedAt === frame.updatedAt && Date.now() - cached.at < IMG_CACHE_MS ? cached.buf : null
@@ -76,6 +77,19 @@ export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageRe
   }
 
   return { status: 'ok', buf: await pending }
+}
+
+function imageKey(id: string, ext: 'png' | 'jpg', scale: 1 | 2, quality: number | '', preview: boolean): string {
+  return `${id}:${ext}:${scale}:${quality}:${preview ? 'p' : ''}`
+}
+
+/** Seeds the cache with a render another path already paid for. The MCP
+ *  screenshot tool renders through `renderFrame` directly, and the ChatGPT
+ *  preview card loads `/i/<id>.png` right after it from a cookie-less sandbox
+ *  iframe — anonymous, so metered. Priming turns that load into a free
+ *  cached serve instead of a second render against the per-IP budget. */
+export function primeImage(frame: Frame, scale: 1 | 2, png: Buffer): void {
+  remember(imageKey(frame.id, 'png', scale, '', false), Promise.resolve(png), frame.updatedAt)
 }
 
 function remember(key: string, pending: Promise<Buffer>, updatedAt: number) {

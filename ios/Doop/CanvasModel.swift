@@ -1,16 +1,27 @@
 import CoreGraphics
+import Combine
 import Foundation
+import os
 
 @MainActor
 final class CanvasModel: ObservableObject {
     let id: String
     let client: DoopClient
-    @Published var canvas: CanvasDocument? { didSet { pruneSelection() } }
+    @Published var canvas: CanvasDocument? {
+        didSet {
+            // Full frame events and reconnect snapshots can still contain the
+            // pre-drop position. Overlay pending moves at every model entry.
+            if var document = canvas, pendingMoves.apply(to: &document.frames) { canvas = document }
+            pruneSelection()
+        }
+    }
     @Published var tasks: [CanvasTask] = []
     @Published var comments: [CanvasComment] = []
     @Published var presences: [CanvasPresence] = []
     @Published var selectedID: String?
     @Published var connected = false
+    @Published var connecting = false
+    @Published var connectionError: String?
     @Published var error: String?
     @Published var deleted = false
     /// When on, taps inside the selected frame pick elements instead of frames.
@@ -18,21 +29,38 @@ final class CanvasModel: ObservableObject {
     @Published var selectedElement: SelectedElement?
     @Published var viewportCommand = 0
     private var connection: Task<Void, Never>?
+    private var connectionID: UUID?
     private var socket: URLSessionWebSocketTask?
     private let clientID = "ios-" + UUID().uuidString
+    private var pendingMoves = PendingFrameMoves()
+    private let connectionLog = Logger(subsystem: "design.doop.ios", category: "canvas.connection")
 
     init(id: String, client: DoopClient) { self.id = id; self.client = client }
     var selected: DesignFrame? { canvas?.frames.first { $0.id == selectedID } }
 
     func start() {
         guard connection == nil else { return }
+        let generation = UUID()
+        connectionID = generation
+        connecting = true
+        connectionError = nil
         #if DEBUG
         startFakeCollaborators()
         #endif
         connection = Task {
-            do { canvas = try await client.get("/api/canvases/\(id)") }
-            catch { self.error = error.localizedDescription }
-            while !Task.isCancelled {
+            defer {
+                if connectionID == generation {
+                    socket?.cancel(with: .goingAway, reason: nil)
+                    socket = nil
+                    connection = nil
+                    connectionID = nil
+                    connecting = false
+                }
+            }
+            // `init` already contains the full canvas. Open the socket directly
+            // instead of downloading every frame twice on each foreground visit.
+            while connectionID == generation && !Task.isCancelled {
+                var attempt: URLSessionWebSocketTask?
                 do {
                     var request = try client.request("/ws")
                     var url = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
@@ -41,13 +69,18 @@ final class CanvasModel: ObservableObject {
                     let cookies = HTTPCookieStorage.shared.cookies(for: client.server.home) ?? []
                     request.setValue(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], forHTTPHeaderField: "Cookie")
                     request.url = url.url
-                    let ws = client.session.webSocketTask(with: request)
+                    let ws = CanvasSocket.task(session: client.session, request: request)
+                    attempt = ws
                     socket = ws
                     ws.resume()
                     let join: [String: Any] = ["type": "join", "canvasId": id, "clientId": clientID, "name": "iOS", "kind": "user"]
-                    try await send(join)
-                    while !Task.isCancelled {
+                    let joinData = try JSONSerialization.data(withJSONObject: join)
+                    try await ws.send(.string(String(decoding: joinData, as: UTF8.self)))
+                    while connectionID == generation && !Task.isCancelled {
                         let message = try await ws.receive()
+                        // A suspended receive may finish after stop/start has
+                        // installed a new socket. It no longer owns this model.
+                        guard connectionID == generation, !Task.isCancelled else { return }
                         let data: Data
                         switch message {
                         case .data(let value): data = value
@@ -57,15 +90,23 @@ final class CanvasModel: ObservableObject {
                         apply(try JSONDecoder().decode(CanvasEvent.self, from: data))
                     }
                 } catch {
+                    let code = attempt?.closeCode.rawValue ?? 0
+                    attempt?.cancel(with: .goingAway, reason: nil)
+                    guard connectionID == generation, !Task.isCancelled else { return }
+                    socket = nil
                     connected = false
-                    if Task.isCancelled { break }
-                    let code = socket?.closeCode.rawValue
-                    if code == 4401 || code == 4403 {
+                    let failure = CanvasSocket.failure(for: error, closeCode: code)
+                    connecting = failure.shouldRetry
+                    let nsError = error as NSError
+                    // Keep payloads, URLs and cookies out of diagnostics.
+                    connectionLog.error("Canvas socket failed: \(nsError.domain, privacy: .public) code \(nsError.code) close \(code)")
+                    connectionError = failure.message
+                    if failure == .sessionExpired || failure == .accessDenied {
                         await AgentLiveActivities.shared.endCanvas(id: id, client: client)
-                        self.error = code == 4401 ? "Your session expired. Return to the library and sign in again." : "You no longer have access to this canvas."
-                        break
+                        return
                     }
-                    self.error = "Connection interrupted. Reconnecting…"
+                    if failure == .notFound { deleted = true }
+                    guard failure.shouldRetry else { return }
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
             }
@@ -73,11 +114,15 @@ final class CanvasModel: ObservableObject {
     }
 
     func stop() {
+        // Revoke ownership before cancellation wakes the old task's catch.
+        connectionID = nil
         connection?.cancel()
         connection = nil
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         connected = false
+        connecting = false
+        connectionError = nil
     }
 
     private func send(_ payload: [String: Any]) async throws {
@@ -100,7 +145,8 @@ final class CanvasModel: ObservableObject {
             comments = event.comments ?? []
             presences = event.presences ?? []
             connected = true
-            error = nil
+            connecting = false
+            connectionError = nil
         case "frame:created", "frame:updated":
             if let frame = event.frame, canvas != nil { upsert(frame, into: &canvas!.frames) }
         case "frame:deleted":
@@ -155,12 +201,40 @@ final class CanvasModel: ObservableObject {
     func moveFrame(_ frameID: String, x: Double, y: Double) async {
         guard x.isFinite, y.isFinite, abs(x) < 1_000_000, abs(y) < 1_000_000,
               canvas?.frames.contains(where: { $0.id == frameID }) == true else { return }
-        do { try await patchFrame(frameID, patch: ["x": x, "y": y]) }
-        catch { self.error = error.localizedDescription; canvas = try? await client.get("/api/canvases/\(id)") }
+        let token = pendingMoves.begin(frameID: frameID, x: x, y: y)
+        // Keep the dropped preview in place while the save is in flight, even
+        // when cursor/presence events cause the canvas layers to sync.
+        if let index = canvas?.frames.firstIndex(where: { $0.id == frameID }) {
+            canvas?.frames[index].x = x
+            canvas?.frames[index].y = y
+        }
+        do {
+            let data = try await client.data("/api/frames/\(frameID)", method: "PATCH", body: ["x": x, "y": y])
+            let frame = try JSONDecoder().decode(DesignFrame.self, from: data)
+            guard pendingMoves.finish(frameID: frameID, token: token) else { return }
+            // A deletion received during the save must not resurrect the frame.
+            if canvas?.frames.contains(where: { $0.id == frameID }) == true { upsert(frame, into: &canvas!.frames) }
+        } catch {
+            guard pendingMoves.finish(frameID: frameID, token: token) else { return }
+            self.error = error.localizedDescription
+            canvas = try? await client.get("/api/canvases/\(id)")
+        }
     }
 
-    func queue(_ prompt: String) async throws {
-        _ = try await client.data("/api/canvases/\(id)/cards", method: "POST", body: ["title": prompt])
+    /// The selection as the next prompt's scope: the picked element when it still
+    /// matches the frame's HTML, else the selected frame, else nothing.
+    var promptScope: PromptScope? {
+        guard let frame = selected else { return nil }
+        if let element = selectedElement, element.frameID == frame.id, element.htmlHash == frame.html.hashValue {
+            return PromptScope(scope: CardScope(frameId: frame.id, selector: element.selector), label: element.label, frameName: frame.name)
+        }
+        return PromptScope(scope: CardScope(frameId: frame.id), label: frame.name, frameName: frame.name)
+    }
+
+    func queue(_ prompt: String, scope: CardScope? = nil) async throws {
+        var body: [String: Any] = ["title": prompt]
+        if let scope { body["scope"] = scope.body }
+        _ = try await client.data("/api/canvases/\(id)/cards", method: "POST", body: body)
     }
 
     /// A comment pinned to an element when one is selected, else to the frame body.
@@ -186,6 +260,18 @@ final class CanvasModel: ObservableObject {
         canvas?.frames.removeAll { $0.id == frameID }
         select(nil)
     }
+}
+
+/// The selection a prompt is scoped to, as the prompt bar's chip shows it.
+struct PromptScope: Equatable {
+    var scope: CardScope
+    /// What the chip reads: an element's `tag#id.class`, a frame's name.
+    var label: String
+    var frameName: String
+    var isElement: Bool { scope.selector != nil }
+    /// "frame:selector" for an element, the frame id alone for a frame — the key a
+    /// dismissal is remembered by, so a new selection brings the chip back.
+    var key: String { scope.selector.map { "\(scope.frameId):\($0)" } ?? scope.frameId }
 }
 
 /// An element picked inside a frame by the Blitz hit test.

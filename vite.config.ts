@@ -15,6 +15,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   test: {
     setupFiles: ['tests/setup.ts'],
+    globalSetup: ['tests/globalSetup.ts'],
+    /* seven files drive a real Chromium; closing one under a full parallel
+       run can outlast the 10s default */
+    hookTimeout: 30_000,
   },
   resolve: {
     alias: {

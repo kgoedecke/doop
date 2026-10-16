@@ -1,3 +1,4 @@
+import { env } from '../env.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,7 +25,7 @@ export let db: Db
 const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 
 export async function initDb(): Promise<void> {
-  const url = process.env.DATABASE_URL
+  const url = env.DATABASE_URL
   if (url) {
     const { drizzle } = await import('drizzle-orm/node-postgres')
     db = drizzle(url, { schema })

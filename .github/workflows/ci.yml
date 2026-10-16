@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# A new push to the same PR supersedes the run in flight; main is never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # PRs land on main as a squash, so the PR *title* becomes the commit subject —
   # that, not the branch's commits, is what has to satisfy commitlint. The local
@@ -22,13 +27,14 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: printf '%s\n' "$PR_TITLE" | bunx --bun commitlint
 
-  checks:
+  # The checks run as parallel jobs so wall-clock is the slowest one, not the
+  # sum. Install is ~5s per job (setup-bun restores ~/.bun/install/cache keyed
+  # on bun.lock), so the duplication is cheap.
+  cantelop:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      # setup-bun restores ~/.bun/install/cache keyed on bun.lock, so this is
-      # already the cached path — no separate cache step
       - run: bun install --frozen-lockfile
       - uses: actions/setup-node@v4
         with:
@@ -47,11 +53,76 @@ jobs:
           docker run --rm --platform linux/amd64 --entrypoint sh "$runtime_image" -c \
             "claude --version && python3 -c \"import py_compile; py_compile.compile('/opt/app/login-pty.py', cfile='/tmp/login-pty.pyc', doraise=True)\""
       - run: bun run cantelop:check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  typecheck:
+    needs: cantelop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
       - run: bun run typecheck
+
+  lint:
+    needs: cantelop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
       - run: bun run lint
       - run: bun run format:check
       - run: bun run doc-lint
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
       - run: bun run build
+
+  # The suite boots a real server per integration file, which is CPU-bound on
+  # the 2-vCPU runner; sharding across runners is what brings the step down.
+  test:
+    needs: cantelop
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
-      - run: bun run test
+      - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # One status that stands for every shard, so a required check or a merge
+  # queue names "tests" rather than each "test (N)"; renumbering the matrix
+  # never silently drops a protection.
+  tests:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test.result }}" = success

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "doop",
+  "version": "0.1.0",
+  "description": "Doop is a multiplayer design canvas for ChatGPT. Describe a landing page, app screen, slide or social post; ChatGPT designs it on a live canvas, previews it in the chat, and keeps editing as you give feedback.",
+  "author": {
+    "name": "M5L Software, Inc.",
+    "email": "hello@doop.design",
+    "url": "https://doop.design"
+  },
+  "homepage": "https://doop.design/claude-design-for-chatgpt",
+  "repository": "https://github.com/kgoedecke/doop",
+  "license": "AGPL-3.0",
+  "keywords": ["design", "canvas", "mockup", "landing page", "ui", "multiplayer"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Doop",
+        "shortDescription": "Design canvas for ChatGPT",
+        "longDescription": "Doop gives ChatGPT a real design canvas. Describe what you want — a landing page, an app screen, a pitch slide, a social post, an email — and ChatGPT creates it as a frame on a shareable multiplayer canvas. Each frame is a real HTML artboard: you see a rendered preview right in the conversation, open the canvas to edit it yourself, and keep iterating in the chat.\n\nWhat ChatGPT can do on your canvas:\n• Create frames and stream designs in section by section\n• Review its own work with screenshots and fix layout issues\n• Edit a frame in place from your feedback\n• Search stock photos, 200,000+ icons and company logos\n• Generate images and upload your own assets\n• Import an existing webpage or a Photoshop file to redesign it\n• Read and reply to comments your teammates leave on the canvas\n• Follow your canvas's style guides and pinned references\n\nEverything happens on a live canvas at doop.design that you can share with teammates. Export frames as PNG, JPG or PSD, or send them to Canva. Doop is open source (AGPL-3.0) and can be self-hosted.",
+        "developerName": "M5L Software, Inc.",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://doop.design",
+        "supportURL": "https://github.com/kgoedecke/doop/issues",
+        "privacyPolicyURL": "https://doop.design/privacy",
+        "termsOfServiceURL": "https://doop.design/terms",
+        "defaultPrompt": [
+          "Design a landing page hero for a coffee subscription on my Doop canvas. Dark, editorial.",
+          "Create a mobile onboarding screen for a budgeting app in Doop and show me the preview.",
+          "Import acme.com into Doop and redesign its pricing section in a cleaner style."
+        ],
+        "brandColor": "#E5533C",
+        "brandColorDark": "#E5533C",
+        "logo": "./assets/logo.png",
+        "composerIcon": "./assets/logo.png"
+      },
+      "review": {
+        "demo_recording_url": "https://www.loom.com/share/e4269d063a96443bbdee452fb58c73c3",
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Create a new design on a fresh canvas and show the preview card.",
+              "prompt": "Create a new Doop canvas and design a landing page hero for a coffee subscription. Dark, editorial, one bold display face.",
+              "tools_triggered": "get_guide, create_canvas, create_frame, append_frame_html, get_frame_screenshot",
+              "expected_behavior": "ChatGPT reads the Doop guide, creates a canvas and a frame, streams the HTML in, reviews it with a screenshot, and the conversation shows a preview card with an Open in Doop button that opens the canvas."
+            },
+            {
+              "description": "Edit an existing frame from feedback.",
+              "prompt": "On my Doop canvas, make the call-to-action button on the hero frame bigger and red.",
+              "tools_triggered": "list_canvases, get_canvas, get_frame, edit_frame_html, get_frame_screenshot",
+              "expected_behavior": "ChatGPT finds the frame, applies a targeted find-and-replace edit, reviews it with a screenshot, and the updated frame preview appears in the chat."
+            },
+            {
+              "description": "Use real imagery instead of placeholders.",
+              "prompt": "Add a hero photo of a pour-over coffee to the landing page frame on my Doop canvas.",
+              "tools_triggered": "get_canvas, search_images, edit_frame_html, get_frame_screenshot",
+              "expected_behavior": "ChatGPT searches stock photos, picks one, inserts it into the frame, and reviews the result."
+            },
+            {
+              "description": "Import a public webpage as a reference and redesign it.",
+              "prompt": "Import https://example.com into my Doop canvas and redesign it as a modern SaaS landing page in a separate frame.",
+              "tools_triggered": "get_canvas, import_webpage, create_frame, append_frame_html, get_frame_screenshot",
+              "expected_behavior": "The source page lands as an editable frame that is left untouched; the redesign is created as a new frame and previewed."
+            },
+            {
+              "description": "List and describe what is on a canvas without changing it.",
+              "prompt": "What frames are on my Doop canvas right now?",
+              "tools_triggered": "list_canvases, get_canvas",
+              "expected_behavior": "ChatGPT lists the canvas's frames with names and sizes and shows the canvas preview card; nothing is modified."
+            }
+          ],
+          "negative": [
+            {
+              "description": "General knowledge question unrelated to design should not call Doop.",
+              "prompt": "What is the capital of Australia?"
+            },
+            {
+              "description": "Writing help with no canvas intent should not call Doop.",
+              "prompt": "Rewrite this paragraph to sound more formal: we had a great quarter and sold a lot."
+            },
+            {
+              "description": "A request to delete everything should be confirmed, not executed blindly.",
+              "prompt": "Delete all the frames on every one of my Doop canvases."
+            }
+          ]
+        }
+      },
+      "publication": {
+        "release_notes": "First release of Doop for ChatGPT: a multiplayer design canvas with inline frame previews, stock photo, icon and logo search, image generation, webpage and PSD import, and shared comments."
+      }
+    }
+  }
+}

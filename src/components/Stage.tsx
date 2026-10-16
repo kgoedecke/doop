@@ -166,32 +166,6 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
     }
   }, [])
 
-  /* a fly-to request (prompt bar): glide the camera to the frame instead of
-     snapping, so the new design streams in on-screen with a bit of drama.
-     The request object stays in the store; only a NEW request re-runs this. */
-  const flyTo = useStore((s) => s.flyTo)
-  useEffect(() => {
-    if (!flyTo) return
-    const el = ref.current
-    if (!el) return
-    const from = useStore.getState().viewport
-    const target = flyTargetFor(flyTo, el, from)
-    if (!target) return
-    const start = performance.now()
-    const DURATION = 700
-    const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
-    let raf = requestAnimationFrame(function step(now: number) {
-      const k = ease(Math.min(1, (now - start) / DURATION))
-      setViewport({
-        x: from.x + (target.x - from.x) * k,
-        y: from.y + (target.y - from.y) * k,
-        zoom: from.zoom + (target.zoom - from.zoom) * k,
-      })
-      if (now - start < DURATION) raf = requestAnimationFrame(step)
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [flyTo]) // eslint-disable-line react-hooks/exhaustive-deps
-
   /** where a fly-to lands: a frame fitted with padding, or a bare world
    *  point centred at the zoom we already have (a peer's cursor) */
   function flyTargetFor(
@@ -219,6 +193,32 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
       zoom,
     }
   }
+
+  /* a fly-to request (prompt bar): glide the camera to the frame instead of
+     snapping, so the new design streams in on-screen with a bit of drama.
+     The request object stays in the store; only a NEW request re-runs this. */
+  const flyTo = useStore((s) => s.flyTo)
+  useEffect(() => {
+    if (!flyTo) return
+    const el = ref.current
+    if (!el) return
+    const from = useStore.getState().viewport
+    const target = flyTargetFor(flyTo, el, from)
+    if (!target) return
+    const start = performance.now()
+    const DURATION = 700
+    const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+    let raf = requestAnimationFrame(function step(now: number) {
+      const k = ease(Math.min(1, (now - start) / DURATION))
+      setViewport({
+        x: from.x + (target.x - from.x) * k,
+        y: from.y + (target.y - from.y) * k,
+        zoom: from.zoom + (target.zoom - from.zoom) * k,
+      })
+      if (now - start < DURATION) raf = requestAnimationFrame(step)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [flyTo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* center one frame in the viewport and select it (shared frame links) */
   const focusFrame = useCallback(

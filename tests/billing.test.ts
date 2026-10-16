@@ -10,14 +10,12 @@ import { isWorkspaceActive, workspaceStatusFrom, TEAM_SEAT_PRICE, seatPerMonth, 
  * test-signature helper, so nothing touches the network.
  */
 
-const PORT = 4998
 const WEBHOOK_SECRET = 'whsec_test_doop'
 
 let server: Server
 
 beforeAll(async () => {
-  server = await startServer(PORT, {
-    BETTER_AUTH_URL: `http://localhost:${PORT}`,
+  server = await startServer({
     STRIPE_SECRET_KEY: 'sk_test_doop_fake',
     STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
     STRIPE_PRICE_TEAM_MONTHLY: 'price_month',
@@ -250,9 +248,7 @@ describe('workspaces behind Stripe', () => {
     server.stop({ keepData: true })
     await server.stopped
     server = await startServer(
-      PORT,
       {
-        BETTER_AUTH_URL: `http://localhost:${PORT}`,
         STRIPE_SECRET_KEY: 'sk_test_doop_fake',
         STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
         STRIPE_PRICE_TEAM_MONTHLY: 'price_month',

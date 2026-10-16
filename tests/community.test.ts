@@ -1,14 +1,12 @@
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
-const PORT = 4960
-
 let server: Server
 let author: Client
 let visitor: Client
 
 beforeAll(async () => {
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  server = await startServer()
   author = new Client(server)
   await author.signUp('author@test.dev', 'Ada Author')
   visitor = new Client(server)
@@ -128,7 +126,7 @@ it('keeps a listing across a restart', async () => {
   const dataDir = server.dataDir
   server.stop({ keepData: true })
   await server.stopped
-  server = await startServer(PORT + 1, { BETTER_AUTH_URL: `http://localhost:${PORT + 1}` }, dataDir)
+  server = await startServer({}, dataDir)
 
   const back = new Client(server)
   await back.post('/api/auth/sign-in/email', { email: 'visitor@test.dev', password: 'password12345' })

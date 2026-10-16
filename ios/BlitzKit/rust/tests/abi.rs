@@ -295,6 +295,64 @@ fn borders_on_half_pixels_stay_symmetric_at_high_scale() {
     }
 }
 
+/// Dark run lengths down one bitmap column, with the number of partially
+/// covered (grey) rows met along the way.
+fn vertical_dark_runs(pixels: &[u8], width: usize, height: usize, x: usize) -> (Vec<usize>, usize) {
+    let red = |y: usize| pixels[(y * width + x) * 4];
+    let mut runs = Vec::new();
+    let mut soft = 0;
+    let mut y = 0;
+    while y < height {
+        if red(y) < 128 {
+            let start = y;
+            while y < height && red(y) < 128 {
+                y += 1;
+            }
+            runs.push(y - start);
+        } else {
+            if red(y) < 225 {
+                soft += 1;
+            }
+            y += 1;
+        }
+    }
+    (runs, soft)
+}
+
+/// Stylo snaps a 1px border to one device pixel at every scale. The layout has
+/// to be snapped on the same grid, or at scales below 1 (a fitted board on a
+/// phone) a border came out one or two CSS pixels wide depending on where its
+/// box sat: the frame's top edge and a button's top edge looked different.
+#[test]
+fn hairline_borders_match_at_every_scale() {
+    let html = CString::new(
+        "<!doctype html><html><body style='margin:0;background:#fff'>\
+        <div style='position:absolute;left:0;top:0;width:300px;height:30px;border-top:1px solid #000'></div>\
+        <div style='position:absolute;left:20px;top:37px;width:200px;height:40px;border:1px solid #000;background:#fff'></div>\
+        <div style='position:absolute;left:20px;top:93.5px;width:200px;height:40px;border:1px solid #000;background:#fff'></div>\
+        </body></html>",
+    )
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    for scale in [0.61f32, 0.84, 1.0, 1.37, 2.3] {
+        unsafe {
+            let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 300, 160, scale);
+            let (mut w, mut h, mut len) = (0u32, 0u32, 0usize);
+            let px = doopblitz_doc_render(doc, &mut w, &mut h, &mut len);
+            let pixels = std::slice::from_raw_parts(px, len);
+            let x = (100.0 * scale).round() as usize;
+            let (runs, soft) = vertical_dark_runs(pixels, w as usize, h as usize, x);
+            eprintln!("scale {scale}: border runs {runs:?}, soft rows {soft}");
+            assert_eq!(runs.len(), 5, "scale {scale}: expected five borders down the column, got {runs:?}");
+            let expected = (1.0f32).max((scale).floor()) as usize;
+            assert!(runs.iter().all(|&r| r == expected), "scale {scale}: borders are not all {expected} device px: {runs:?}");
+            assert_eq!(soft, 0, "scale {scale}: {soft} rows are only partly covered, borders sit off the pixel grid");
+            doopblitz_buffer_free(px, len);
+            doopblitz_doc_free(doc);
+        }
+    }
+}
+
 /// An element id with CSS-special characters must come back as a selector that
 /// matches that element, as `CSS.escape()` would build it.
 #[test]

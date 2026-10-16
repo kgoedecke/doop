@@ -377,6 +377,21 @@ ID token includes the `email` and `verified_primary_email` optional claims; with
 Microsoft sign-in still works but only links to an existing account that is already
 verified. Everything else (allowlist, admin promotion) follows the SSO rules above.
 
+### Sign in with Apple
+
+Two independent halves, documented in [.env.example](.env.example). For the web button,
+register a Services ID with Sign in with Apple enabled and
+`<BETTER_AUTH_URL>/api/auth/callback/apple` as a return URL, then set `APPLE_CLIENT_ID` (the
+Services ID) and `APPLE_CLIENT_SECRET` (the client-secret JWT signed with your Sign in with
+Apple key, which Apple caps at six months) together. For the iOS app, set
+`APPLE_APP_BUNDLE_IDENTIFIER` to the app's bundle id: the app shows the native Sign in with
+Apple button and posts the identity token Apple issues for that bundle id to
+`/api/auth/sign-in/social`, which the server verifies against Apple's keys. Apple only sends
+the person's name on their first sign-in, so the app forwards it then; a later sign-in from a
+fresh install leaves the name as stored. Linking and admin promotion follow the SSO rules
+above. Apple's "Hide My Email" addresses are on `privaterelay.appleid.com`, which
+`SIGNUP_EMAIL_DOMAINS` rejects unless listed.
+
 ## Agent auth (MCP OAuth)
 
 The `/mcp` endpoint requires OAuth. Adding the server in Claude Code / Codex triggers

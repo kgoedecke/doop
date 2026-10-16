@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
 import { setName } from '../lib/identity'
 import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
-import type { DesktopSignInProvider } from '../lib/desktopAuth'
+import type { DesktopSignInProvider, ProviderRedirects } from '../lib/desktopAuth'
 import { safeRelativeTarget } from '../lib/safeTarget'
+import { FIRST_CANVAS_PATH } from '../../shared/firstCanvas'
 import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
 import { AuthScreen } from '../components/ui/screen'
@@ -35,25 +36,31 @@ async function accountExists(email: string): Promise<boolean> {
   }
 }
 
-function resumeOAuthFlow(): boolean {
+function interruptedTarget(): string | null {
   const params = new URLSearchParams(location.search)
   const target = safeRelativeTarget(params.get('redirect_to') || params.get('redirect_uri'))
-  if (target) {
-    location.href = target
-    return true
-  }
-  if (params.has('client_id') && params.has('response_type')) {
-    location.href = `/api/auth/mcp/authorize${location.search}`
-    return true
-  }
-  return false
+  if (target) return target
+  if (params.has('client_id') && params.has('response_type')) return `/api/auth/mcp/authorize${location.search}`
+  return null
+}
+
+/* Where the verification link lands a signup that had to confirm its email
+   first (SMTP on): the interrupted flow if there was one, else the first
+   canvas — the same landing an instantly signed-in signup gets below. */
+function verifiedLanding(): string {
+  return interruptedTarget() ?? FIRST_CANVAS_PATH
+}
+
+function resumeOAuthFlow(): boolean {
+  const target = interruptedTarget()
+  if (target) location.href = target
+  return target !== null
 }
 
 type AuthMode = 'signin' | 'signup' | 'forgot' | 'reset'
 
 /** The redirect knobs shared by better-auth's social and oauth2 sign-ins. */
-interface ProviderStart {
-  callbackURL: string
+interface ProviderStart extends ProviderRedirects {
   errorCallbackURL: string
 }
 
@@ -65,6 +72,18 @@ function MicrosoftMark() {
       <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
       <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
       <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+    </svg>
+  )
+}
+
+/** Apple's mark, in the text colour as its sign-in guidelines ask (inline for the same reason). */
+function AppleMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" className="shrink-0">
+      <path
+        fill="currentColor"
+        d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+      />
     </svg>
   )
 }
@@ -132,17 +151,18 @@ function ssoErrorFromUrl(): string | null {
   return SSO_ERROR_MESSAGES[code] ?? 'Sign-in failed — try again or use email/password.'
 }
 
-/* Where the SSO redirect should land, mirroring resumeOAuthFlow() below —
-   but handed to the server as callbackURL rather than navigated to
-   directly. The browser leaves for the IdP and returns already carrying a
-   session, so this component's own resumeOAuthFlow() never gets to run for
-   this path; the equivalent logic has to travel with the request instead. */
-function ssoCallbackURL(): string {
-  const params = new URLSearchParams(location.search)
-  const target = safeRelativeTarget(params.get('redirect_to') || params.get('redirect_uri'))
-  if (target) return target
-  if (params.has('client_id') && params.has('response_type')) return `/api/auth/mcp/authorize${location.search}`
-  return location.pathname + location.search
+/* Where a provider sign-in should land, mirroring what the email form does
+   after submit — but handed to the server as redirect URLs rather than
+   navigated to directly. The browser leaves for the IdP and returns already
+   carrying a session, so this component's own resumeOAuthFlow() never gets
+   to run for this path; the equivalent logic has to travel with the
+   request instead. An interrupted flow wins for everyone; otherwise a
+   returning user comes back to this page and a new account lands on its
+   first canvas, the same place the email signup goes. */
+function ssoRedirects(): ProviderRedirects {
+  const target = interruptedTarget()
+  if (target) return { callbackURL: target, newUserCallbackURL: target }
+  return { callbackURL: location.pathname + location.search, newUserCallbackURL: FIRST_CANVAS_PATH }
 }
 
 /** Matches server/auth.ts loginProvidersConfig's response shape. */
@@ -151,16 +171,23 @@ interface OidcClientConfig {
   displayName?: string
   google: boolean
   microsoft: boolean
+  /** the browser "Sign in with Apple" (the iOS app's native one is appleNative, not shown here) */
+  apple: boolean
 }
 
 /* The client bundle is static and shared across self-hosted deploys — it
    can't know at build time whether the operator configured SSO, so it asks
    the server. See server/auth.ts loginProvidersConfig. */
 function useOidcConfig(): OidcClientConfig {
-  const [config, setConfig] = useState<OidcClientConfig>({ enabled: false, google: false, microsoft: false })
+  const [config, setConfig] = useState<OidcClientConfig>({
+    enabled: false,
+    google: false,
+    microsoft: false,
+    apple: false,
+  })
   useEffect(() => {
     fetch('/api/oidc-config')
-      .then((res) => (res.ok ? res.json() : { enabled: false, google: false, microsoft: false }))
+      .then((res) => (res.ok ? res.json() : { enabled: false, google: false, microsoft: false, apple: false }))
       .then(setConfig)
       .catch(() => {}) // SSO button just doesn't appear — email/password still works
   }, [])
@@ -223,7 +250,7 @@ export function AuthPage() {
            signs in through the system browser and gets the session handed
            back over a doop:// link (src/lib/desktopAuth.ts). The browser
            starts the provider round trip itself, from a doop page. */
-        if (!(await beginBrowserSignIn(provider, ssoCallbackURL()))) {
+        if (!(await beginBrowserSignIn(provider, ssoRedirects()))) {
           setError(startFailed)
           return
         }
@@ -231,7 +258,7 @@ export function AuthPage() {
         setNotice(browserSignInNotice)
         return
       }
-      const res = await start({ callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' })
+      const res = await start({ ...ssoRedirects(), errorCallbackURL: '/auth' })
       if (res.error) setError(res.error.message ?? startFailed)
     } finally {
       setBusy(false)
@@ -242,14 +269,14 @@ export function AuthPage() {
     return providerSignIn('oidc', (opts) => authClient.signIn.oauth2({ providerId: 'oidc', ...opts }))
   }
 
-  function socialSignIn(provider: 'google' | 'microsoft') {
+  function socialSignIn(provider: 'google' | 'microsoft' | 'apple') {
     return providerSignIn(provider, (opts) => authClient.signIn.social({ provider, ...opts }))
   }
 
   async function resendVerification() {
     setBusy(true)
     try {
-      await authClient.sendVerificationEmail({ email, callbackURL: '/' })
+      await authClient.sendVerificationEmail({ email, callbackURL: verifiedLanding() })
       setError(null)
       setUnverified(false)
       setNotice('Verification email sent — check your inbox.')
@@ -285,7 +312,12 @@ export function AuthPage() {
       }
       const res =
         mode === 'signup'
-          ? await authClient.signUp.email({ name: name.trim() || email.split('@')[0] || email, email, password })
+          ? await authClient.signUp.email({
+              name: name.trim() || email.split('@')[0] || email,
+              email,
+              password,
+              callbackURL: verifiedLanding(),
+            })
           : await authClient.signIn.email({ email, password })
       if (res.error) {
         if (mode === 'signin' && res.error.code === 'EMAIL_NOT_VERIFIED') {
@@ -311,17 +343,9 @@ export function AuthPage() {
         }
         posthog.capture(mode === 'signup' ? 'account_signed_up' : 'account_signed_in')
         setName(res.data.user.name) // keep cursor/feed identity in sync with the account
-        if (!resumeOAuthFlow() && mode === 'signup') {
-          /* land new users on their auto-created first canvas, where the
-             demo agent is waiting to perform */
-          try {
-            const canvases: { id: string; ownerId?: string }[] = await (await fetch('/api/canvases')).json()
-            const own = canvases.find((c) => c.ownerId)
-            if (own) location.href = `/c/${own.id}`
-          } catch {
-            /* fall through to the session-gated re-render */
-          }
-        }
+        /* land new users on their auto-created first canvas, where the
+           demo agent is waiting to perform */
+        if (!resumeOAuthFlow() && mode === 'signup') location.href = FIRST_CANVAS_PATH
       }
     } finally {
       setBusy(false)
@@ -353,7 +377,7 @@ export function AuthPage() {
             </>
           )}
         </p>
-        {(oidc.enabled || oidc.google || oidc.microsoft) && (mode === 'signin' || mode === 'signup') && (
+        {(oidc.enabled || oidc.google || oidc.microsoft || oidc.apple) && (mode === 'signin' || mode === 'signup') && (
           <>
             {oidc.google && (
               <Button
@@ -381,6 +405,20 @@ export function AuthPage() {
               >
                 <MicrosoftMark />
                 {mode === 'signup' ? 'Sign up' : 'Sign in'} with Microsoft
+              </Button>
+            )}
+            {oidc.apple && (
+              <Button
+                variant="default"
+                size="lg"
+                block
+                className="border-line"
+                type="button"
+                onClick={() => socialSignIn('apple')}
+                disabled={busy}
+              >
+                <AppleMark />
+                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Apple
               </Button>
             )}
             {oidc.enabled && (

@@ -66,6 +66,17 @@ class Store {
       .map((c) => this.toMeta(c, userId))
   }
 
+  /** The canvas signup made for this user (server/auth.ts): the oldest one
+   *  they own. Undefined once they have deleted it, or for an account that
+   *  predates the signup hook. */
+  firstCanvasOf(userId: string): Canvas | undefined {
+    let first: Canvas | undefined
+    for (const c of this.canvases.values()) {
+      if (c.ownerId === userId && (!first || c.createdAt < first.createdAt)) first = c
+    }
+    return first
+  }
+
   /** Every canvas on the instance, for the admin index only. Access is the
    *  caller's problem — the only caller is server/admin.ts, behind isAdmin.
    *  A deliberately separate method rather than a flag on listCanvases: a
