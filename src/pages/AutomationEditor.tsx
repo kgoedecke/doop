@@ -148,7 +148,11 @@ function usePan() {
         if (!atTop && !atBottom) return
       }
       e.preventDefault()
-      offset.current = { x: offset.current.x - e.deltaX, y: offset.current.y - e.deltaY }
+      if (e.shiftKey && e.deltaX === 0) {
+        offset.current = { x: offset.current.x - e.deltaY, y: offset.current.y }
+      } else {
+        offset.current = { x: offset.current.x - e.deltaX, y: offset.current.y - e.deltaY }
+      }
       apply()
     }
     el.addEventListener('click', onClick, true)

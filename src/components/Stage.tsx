@@ -333,6 +333,8 @@ export function Stage({ onAddFrame }: { onAddFrame: () => void }) {
         pivotX = e.clientX - rect.left
         pivotY = e.clientY - rect.top
         zoomDelta += Math.max(-40, Math.min(40, e.deltaY))
+      } else if (e.shiftKey && e.deltaX === 0) {
+        panX += e.deltaY
       } else {
         panX += e.deltaX
         panY += e.deltaY
