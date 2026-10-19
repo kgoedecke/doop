@@ -1,4 +1,6 @@
 import { env } from './env.ts'
+import { remoteClaudeRouter } from './remoteClaude.ts'
+
 import { canvasPages, samePages } from '../shared/pages.ts'
 import { FIRST_CANVAS_PATH } from '../shared/firstCanvas.ts'
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
@@ -655,6 +657,8 @@ function requireFrame(req: express.Request, res: express.Response, frameId: stri
 }
 
 app.use('/api/local-agent', localAgentRouter)
+app.use('/api/remote-claude', remoteClaudeRouter)
+
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/admin', adminRouter)

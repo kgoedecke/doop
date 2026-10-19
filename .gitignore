@@ -12,4 +12,10 @@ desktop/src-tauri/gen
 # files are ignored.
 .claude/settings.local.json
 .claude/.current-tool
+
+# Local Cantelop artifacts and deployment credentials
+cantelop/.cantelop/
+cantelop/.dev/
+cantelop/coverage/
+.cantelop/
 chatgpt-plugin/dist/

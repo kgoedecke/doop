@@ -1,3 +1,4 @@
+import type { RemoteClaudeStatus } from '../../shared/remoteClaude'
 import { useStore } from './store'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
@@ -131,7 +132,7 @@ export interface Allowance {
   connected: boolean
   /** connected a model account the Doop Agent itself can run on */
   byoModel: boolean
-  byoKind?: ModelAccountKind | 'claude-local' | 'gemini-cloud'
+  byoKind?: ModelAccountKind | 'claude-local' | 'claude-remote' | 'gemini-cloud'
   byoEmail?: string
   /** free tasks are spent and their own account is carrying the agent */
   onOwnAccount: boolean
@@ -262,6 +263,33 @@ export async function req<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  remoteClaude: (userId: string) =>
+    req<RemoteClaudeStatus>('/api/remote-claude', { headers: { 'X-Doop-User': userId } }),
+  checkRemoteClaude: (userId: string) =>
+    req<{ authenticated: boolean }>('/api/remote-claude/check', { method: 'POST', headers: { 'X-Doop-User': userId } }),
+  selectRemoteClaude: (userId: string, model: string) =>
+    req<LocalAgentPreference>('/api/remote-claude/select', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
+      body: JSON.stringify({ model }),
+    }),
+  disableRemoteClaude: (userId: string) =>
+    req<LocalAgentPreference>('/api/remote-claude/disable', { method: 'POST', headers: { 'X-Doop-User': userId } }),
+  stopRemoteClaude: (userId: string) =>
+    req<{ ok: boolean }>('/api/remote-claude/stop', { method: 'POST', headers: { 'X-Doop-User': userId } }),
+  remoteClaudeAuth: (userId: string, action: 'start' | 'code' | 'cancel', body: unknown) =>
+    req<{
+      authenticated?: boolean
+      attemptId?: string
+      url?: string
+      expiresAt?: string
+      cancelled?: boolean
+      preference?: LocalAgentPreference
+    }>(`/api/remote-claude/auth/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Doop-User': userId },
+      body: JSON.stringify(body),
+    }),
   listWebhooks: () => req<WebhookInfo[]>('/api/webhooks'),
   createWebhook: (input: { url: string; events: WebhookEventType[] }) =>
     req<WebhookInfo & { secret: string }>('/api/webhooks', { method: 'POST', body: JSON.stringify(input) }),

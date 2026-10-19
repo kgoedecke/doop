@@ -94,11 +94,13 @@ export function Settings() {
 
   const meter = allowance
     ? allowance.byoModel
-      ? allowance.byoKind === 'gemini-cloud'
-        ? 'Gemini cloud pilot selected — connection managed by your operator.'
-        : allowance.byoKind === 'claude-local'
-          ? 'Claude CLI selected — runs on your connected desktop.'
-          : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
+      ? allowance.byoKind === 'claude-remote'
+        ? 'Claude Plan selected — runs on your Claude account.'
+        : allowance.byoKind === 'gemini-cloud'
+          ? 'Gemini cloud pilot selected — connection managed by your operator.'
+          : allowance.byoKind === 'claude-local'
+            ? 'Claude CLI selected — runs on your connected desktop.'
+            : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
       : allowance.limit <= 0
         ? 'No free tasks on this server — connect an account to use the Doop Agent.'
         : left === 0
@@ -198,8 +200,8 @@ export function Settings() {
                 <CardHeader>
                   <CardTitle>Doop Agent</CardTitle>
                   <CardDescription>
-                    Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your
-                    desktop. Your provider’s usage limits and charges apply.
+                    Choose which account the Doop Agent runs on across your canvases. Your provider’s usage limits and
+                    charges apply.
                   </CardDescription>
                   {meter && (
                     <div className="mt-[11px] flex flex-col items-start gap-[7px] text-[11.5px] text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">

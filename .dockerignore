@@ -4,3 +4,15 @@ data
 .git
 .env
 .env.local
+**/node_modules
+**/.cantelop
+!cantelop/.cantelop/
+cantelop/.cantelop/*
+!cantelop/.cantelop/client/
+!cantelop/.cantelop/client/**
+**/.dev
+**/.env
+**/.env.*
+**/coverage
+desktop/src-tauri/target
+desktop/src-tauri/gen

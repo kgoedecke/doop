@@ -10,7 +10,15 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["dist/", "node_modules/", "desktop/src-tauri/target/"],
+  "ignorePatterns": [
+    "dist/",
+    "node_modules/",
+    "desktop/src-tauri/target/",
+    ".claude/worktrees/**",
+    ".cantelop/**",
+    "cantelop/.cantelop/**",
+    "cantelop/.dev/**"
+  ],
   "rules": {
     "constructor-super": "error",
     "for-direction": "error",

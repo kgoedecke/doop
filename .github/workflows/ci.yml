@@ -30,20 +30,60 @@ jobs:
   # The checks run as parallel jobs so wall-clock is the slowest one, not the
   # sum. Install is ~5s per job (setup-bun restores ~/.bun/install/cache keyed
   # on bun.lock), so the duplication is cheap.
-  typecheck:
+  cantelop:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Cantelop CLI
+        run: |
+          curl -fsSL https://github.com/stepandel/homebrew-tap/releases/download/cantelop-v0.15.2/install.sh -o /tmp/install-cantelop.sh
+          CANTELOP_NO_MODIFY_PATH=1 sh /tmp/install-cantelop.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Build Cantelop service and verify native CLI
+        shell: bash
+        run: |
+          bun run cantelop:build | tee /tmp/cantelop-build.log
+          runtime_image=$(sed -n 's/.*Session runtime image \(sha256:[0-9a-f]*\)).*/\1/p' /tmp/cantelop-build.log)
+          test -n "$runtime_image"
+          docker run --rm --platform linux/amd64 --entrypoint sh "$runtime_image" -c \
+            "claude --version && python3 -c \"import py_compile; py_compile.compile('/opt/app/login-pty.py', cfile='/tmp/login-pty.pyc', doraise=True)\""
+      - run: bun run cantelop:check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  typecheck:
+    needs: cantelop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
       - run: bun run typecheck
 
   lint:
+    needs: cantelop
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
       - run: bun run lint
       - run: bun run format:check
       - run: bun run doc-lint
@@ -59,6 +99,7 @@ jobs:
   # The suite boots a real server per integration file, which is CPU-bound on
   # the 2-vCPU runner; sharding across runners is what brings the step down.
   test:
+    needs: cantelop
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -68,6 +109,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: cantelop-client
+          path: cantelop/.cantelop/client/
       # `bun run test`, not `bun test`: the suite is vitest, and `bun test`
       # would run Bun's own runner against the same files
       - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}

@@ -19,7 +19,6 @@ import {
   Brain,
   Compass,
   Computer,
-  Download,
   Group,
   HalfMoon,
   HelpCircle,
@@ -122,9 +121,8 @@ export const BrainIcon = icon(Brain)
 export const BuildingIcon = icon(Building)
 export const CreditCardIcon = icon(CreditCard)
 export const LockIcon = icon(Lock)
-export const DesktopIcon = icon(Computer)
-export const DownloadIcon = icon(Download)
 export const PuzzleIcon = icon(Puzzle)
 /* the theme switch: sun for light, half moon for dark */
+export const DesktopIcon = icon(Computer)
 export const SunIcon = icon(SunLight)
 export const MoonIcon = icon(HalfMoon)

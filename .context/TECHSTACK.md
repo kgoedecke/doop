@@ -92,6 +92,18 @@
 - commitlint 21.2.2 (`@commitlint/config-conventional`) - conventional commit / PR title linting,
   config in `commitlint.config.js`.
 
+## 12. Hosted Claude execution
+
+- `cantelop/src/cantelop.ts` defines the SDK-owned Claude runtime and native auth.
+  The service and Doop share a Bun workspace and `@cantelop/sdk@1.0.1`.
+- `server/remoteClaudeClient.ts` imports the CLI-generated backend and handles
+  Workspace selection and stream reconnection. Routes authorize browser requests;
+  the runner supplies task-scoped MCP access and settings in a single dispatch.
+- `RemoteClaude.tsx` and `remoteClaudeLogin.ts` provide the link/code login UI.
+- See [setup and deployment](../README.md#set-up-your-own-hosted-claude-service)
+  and [service architecture](../cantelop/README.md). Preserve the App name and
+  `CLAUDE_REMOTE_ISSUER` namespace across changes.
+
 ## OSS integration scope
 
 The integration registries currently register Linear only. Canvas imports offer websites, live-app
