@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, errorMessage, type AgentKeyInfo } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { timeAgo } from '../lib/time'
+import { ConfirmDialog } from './ui/alert-dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Note } from './ui/note'
@@ -36,6 +37,9 @@ export function AgentKeys() {
   const [error, setError] = useState('')
   /* the one moment the full secret exists client-side */
   const [minted, setMinted] = useState<{ id: string; secret: string } | null>(null)
+  /* the key awaiting "are you sure" — an in-app dialog, since window.confirm
+     is a silent "cancel" in the desktop shell's webview */
+  const [confirmRevoke, setConfirmRevoke] = useState<AgentKeyInfo | null>(null)
 
   /* `keys === null` is "still loading", and minting stays disabled until it
      resolves: a list request in flight would otherwise land after the key it
@@ -66,7 +70,6 @@ export function AgentKeys() {
   }
 
   async function revoke(key: AgentKeyInfo) {
-    if (!window.confirm(`Revoke "${key.name}"? Agents using it lose access immediately.`)) return
     try {
       await api.deleteAgentKey(key.id)
       posthog.capture('agent_key_revoked')
@@ -127,7 +130,7 @@ export function AgentKeys() {
           key={key.id}
           label={key.name}
           action={
-            <Button size="sm" variant="ghost" aria-label={`Revoke ${key.name}`} onClick={() => void revoke(key)}>
+            <Button size="sm" variant="ghost" aria-label={`Revoke ${key.name}`} onClick={() => setConfirmRevoke(key)}>
               <TrashIcon /> Revoke
             </Button>
           }
@@ -144,6 +147,19 @@ export function AgentKeys() {
           <Note>Interactive clients (Claude Code, Codex) don’t need one — they sign in with OAuth.</Note>
         </CardRow>
       )}
+      <ConfirmDialog
+        open={!!confirmRevoke}
+        onOpenChange={(open) => !open && setConfirmRevoke(null)}
+        title={`Revoke “${confirmRevoke?.name ?? ''}”?`}
+        description="Agents using it lose access immediately."
+        confirmLabel="Revoke key"
+        destructive
+        onConfirm={() => {
+          const target = confirmRevoke
+          setConfirmRevoke(null)
+          if (target) void revoke(target)
+        }}
+      />
     </SettingsCard>
   )
 }

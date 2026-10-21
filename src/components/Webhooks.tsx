@@ -3,6 +3,7 @@ import { api, errorMessage } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { timeAgo } from '../lib/time'
 import { WEBHOOK_EVENTS, WEBHOOK_EVENT_LABELS, type WebhookEventType, type WebhookInfo } from '../../shared/webhooks'
+import { ConfirmDialog } from './ui/alert-dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Note } from './ui/note'
@@ -69,6 +70,9 @@ export function Webhooks() {
   /* the one moment a secret exists client-side */
   const [secret, setSecret] = useState<{ id: string; secret: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  /* the action awaiting "are you sure" — an in-app dialog, since
+     window.confirm is a silent "cancel" in the desktop shell's webview */
+  const [confirming, setConfirming] = useState<{ kind: 'rotate' | 'remove'; hook: WebhookInfo } | null>(null)
   const [rowNote, setRowNote] = useState<Record<string, { text: string; tone?: 'error' | 'success' }>>({})
 
   useEffect(() => {
@@ -138,12 +142,6 @@ export function Webhooks() {
     act(
       hook,
       async () => {
-        if (
-          !window.confirm(
-            `Rotate the secret for ${hostOf(hook.url)}? Deliveries signed with the old one stop verifying.`,
-          )
-        )
-          return
         const { secret: fresh } = await api.rotateWebhookSecret(hook.id)
         posthog.capture('webhook_secret_rotated')
         setSecret({ id: hook.id, secret: fresh })
@@ -155,7 +153,6 @@ export function Webhooks() {
     act(
       hook,
       async () => {
-        if (!window.confirm(`Remove the webhook for ${hostOf(hook.url)}?`)) return
         await api.deleteWebhook(hook.id)
         posthog.capture('webhook_deleted')
         setHooks((current) => current?.filter((h) => h.id !== hook.id) ?? null)
@@ -229,7 +226,12 @@ export function Webhooks() {
                 <Button size="sm" variant="ghost" disabled={busy === hook.id} onClick={() => void test(hook)}>
                   Send test
                 </Button>
-                <Button size="sm" variant="ghost" disabled={busy === hook.id} onClick={() => void rotate(hook)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy === hook.id}
+                  onClick={() => setConfirming({ kind: 'rotate', hook })}
+                >
                   Rotate secret
                 </Button>
                 <Button size="sm" variant="ghost" disabled={busy === hook.id} onClick={() => void toggle(hook)}>
@@ -240,7 +242,7 @@ export function Webhooks() {
                   variant="ghost"
                   disabled={busy === hook.id}
                   aria-label={`Remove webhook for ${hostOf(hook.url)}`}
-                  onClick={() => void remove(hook)}
+                  onClick={() => setConfirming({ kind: 'remove', hook })}
                 >
                   <TrashIcon /> Remove
                 </Button>
@@ -262,6 +264,25 @@ export function Webhooks() {
           <Note>Add one above — a quick way to try it is an n8n Webhook node or a request bin.</Note>
         </CardRow>
       )}
+      <ConfirmDialog
+        open={!!confirming}
+        onOpenChange={(open) => !open && setConfirming(null)}
+        title={
+          confirming?.kind === 'rotate'
+            ? `Rotate the secret for ${confirming ? hostOf(confirming.hook.url) : ''}?`
+            : `Remove the webhook for ${confirming ? hostOf(confirming.hook.url) : ''}?`
+        }
+        description={
+          confirming?.kind === 'rotate' ? 'Deliveries signed with the old secret stop verifying.' : undefined
+        }
+        confirmLabel={confirming?.kind === 'rotate' ? 'Rotate secret' : 'Remove webhook'}
+        destructive
+        onConfirm={() => {
+          const target = confirming
+          setConfirming(null)
+          if (target) void (target.kind === 'rotate' ? rotate(target.hook) : remove(target.hook))
+        }}
+      />
     </SettingsCard>
   )
 }

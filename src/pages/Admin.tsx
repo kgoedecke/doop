@@ -6,6 +6,7 @@ import { AppRail, railLayout } from '../components/AppRail'
 import { ChevronRightIcon, GridIcon, UsersIcon } from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
+import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Badge } from '../components/ui/badge'
 import { SearchField } from '../components/ui/search-field'
 import { MetaLine, Tile, TileBody, TileCover } from '../components/ui/tile'
@@ -35,6 +36,9 @@ export function Admin() {
   const [users, setUsers] = useState<AdminUser[] | null>(null)
   const [stats, setStats] = useState<{ users: number; canvases: number; frames: number } | null>(null)
   const [tab, setTab] = useState<'canvases' | 'users'>('canvases')
+  /* the ban/unban awaiting "are you sure" — an in-app dialog, since
+     window.confirm is a silent "cancel" in the desktop shell's webview */
+  const [confirmBan, setConfirmBan] = useState<{ user: AdminUser; banned: boolean } | null>(null)
   const [q, setQ] = useState('')
   const [denied, setDenied] = useState(false)
 
@@ -61,12 +65,6 @@ export function Admin() {
   }
 
   async function setBanned(u: AdminUser, banned: boolean) {
-    const ok = window.confirm(
-      banned
-        ? `Ban ${u.name} (${u.email})? They are signed out everywhere and cannot sign in or use MCP until unbanned.`
-        : `Unban ${u.name} (${u.email})?`,
-    )
-    if (!ok) return
     try {
       if (banned) await adminApi.ban(u.id)
       else await adminApi.unban(u.id)
@@ -269,7 +267,11 @@ export function Admin() {
                           View as
                         </Button>
                       )}
-                      <Button variant={u.banned ? 'ghost' : 'danger'} size="sm" onClick={() => setBanned(u, !u.banned)}>
+                      <Button
+                        variant={u.banned ? 'ghost' : 'danger'}
+                        size="sm"
+                        onClick={() => setConfirmBan({ user: u, banned: !u.banned })}
+                      >
                         {u.banned ? 'Unban' : 'Ban'}
                       </Button>
                     </div>
@@ -280,6 +282,23 @@ export function Admin() {
           )}
         </DashContent>
       </DashMain>
+      <ConfirmDialog
+        open={!!confirmBan}
+        onOpenChange={(open) => !open && setConfirmBan(null)}
+        title={`${confirmBan?.banned ? 'Ban' : 'Unban'} ${confirmBan?.user.name ?? ''} (${confirmBan?.user.email ?? ''})?`}
+        description={
+          confirmBan?.banned
+            ? 'They are signed out everywhere and cannot sign in or use MCP until unbanned.'
+            : undefined
+        }
+        confirmLabel={confirmBan?.banned ? 'Ban' : 'Unban'}
+        destructive={confirmBan?.banned}
+        onConfirm={() => {
+          const target = confirmBan
+          setConfirmBan(null)
+          if (target) void setBanned(target.user, target.banned)
+        }}
+      />
     </DashLayout>
   )
 }
