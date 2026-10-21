@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/kgoedecke/doop/compare/desktop-v0.5.0...desktop-v0.6.0) (2026-10-21)
+
+
+### Features
+
+* **claude:** add direct connector setup and desktop extension ([#280](https://github.com/kgoedecke/doop/issues/280)) ([d058f12](https://github.com/kgoedecke/doop/commit/d058f123b831949725f87654148401b0d1cc1301))
+* **desktop:** add automatic Codex MCP setup ([#289](https://github.com/kgoedecke/doop/issues/289)) ([3b5b090](https://github.com/kgoedecke/doop/commit/3b5b0906a932d1381c713ca9b7fb020553151ea5))
+
 ## [0.5.0](https://github.com/kgoedecke/doop/compare/desktop-v0.4.0...desktop-v0.5.0) (2026-10-13)
 
 
