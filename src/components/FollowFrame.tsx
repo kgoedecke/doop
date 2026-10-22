@@ -3,7 +3,10 @@ import { AgentIcon } from './AgentIcon'
 
 /** Figma-style "you are following X": a border in the leader's colour around
  *  the stage and a pill naming them. Any pan or zoom of our own lets go, so
- *  the pill's × is for people who want to stop without moving. */
+ *  the pill's × is for people who want to stop without moving. The pill hangs
+ *  below the top bar (--chrome-top, set by the page), where the presence
+ *  avatars would otherwise cover it; the 7px plus the 3px border lines it up
+ *  with the tool rail. */
 export function FollowFrame() {
   const leader = useStore((s) => (s.following ? s.presences[s.following] : undefined))
   const stop = useStore((s) => s.setFollowing)
@@ -14,7 +17,7 @@ export function FollowFrame() {
       style={{ borderColor: leader.color }}
     >
       <div
-        className="pointer-events-auto absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full py-1.5 pr-2 pl-3.5 text-[12.5px] font-bold text-white shadow-pop"
+        className="pointer-events-auto absolute left-1/2 top-[calc(var(--chrome-top,0px)+7px)] flex -translate-x-1/2 items-center gap-2 rounded-full py-1.5 pr-2 pl-3.5 text-[12.5px] font-medium text-white shadow-pop"
         style={{ background: leader.color }}
       >
         <span>

@@ -33,7 +33,7 @@ export const Cursors = memo(function Cursors() {
               />
             </svg>
             <span
-              className="absolute left-3.5 top-4 whitespace-nowrap rounded-[999px_999px_999px_4px] px-2 py-[3px] text-[11px] font-bold text-white"
+              className="absolute left-3.5 top-4 whitespace-nowrap rounded-[999px_999px_999px_4px] px-2 py-[3px] text-[11px] font-medium text-white"
               style={{ background: p.color }}
             >
               {p.kind === 'agent' && (
