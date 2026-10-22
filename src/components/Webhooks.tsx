@@ -23,8 +23,8 @@ function hostOf(url: string): string {
 /** The one-line health of a hook, phrased for a person. */
 function health(hook: WebhookInfo): { text: string; tone?: 'error' | 'success' } {
   if (!hook.enabled && hook.lastError?.startsWith('paused')) return { text: hook.lastError, tone: 'error' }
-  if (!hook.enabled) return { text: 'off — nothing is sent' }
-  if (!hook.lastAt) return { text: 'no deliveries yet — send a test' }
+  if (!hook.enabled) return { text: 'Off. No events are sent.' }
+  if (!hook.lastAt) return { text: 'No deliveries yet. Send a test.' }
   if (hook.failures) {
     return {
       text: `${hook.failures} failed in a row · last ${timeAgo(hook.lastAt)}: ${hook.lastError ?? 'failed'}`,
@@ -135,7 +135,7 @@ export function Webhooks() {
     act(
       hook,
       async () => replace(await api.updateWebhook(hook.id, { enabled: !hook.enabled })),
-      'That could not be saved',
+      'The webhook setting could not be saved',
     )
 
   const rotate = (hook: WebhookInfo) =>
@@ -158,7 +158,7 @@ export function Webhooks() {
         setHooks((current) => current?.filter((h) => h.id !== hook.id) ?? null)
         if (secret?.id === hook.id) setSecret(null)
       },
-      'That webhook could not be removed',
+      'The webhook could not be removed',
     )
 
   return (
@@ -166,11 +166,11 @@ export function Webhooks() {
       <CardHeader>
         <CardTitle>Webhooks</CardTitle>
         <CardDescription>
-          doop POSTs a signed JSON event to each URL below when something happens on a canvas you own, were invited to,
-          or that lives in one of your workspaces — route it to Slack, n8n, an issue tracker, anything with an HTTP
-          endpoint. Each delivery carries an <code className="font-mono text-label">X-Doop-Signature</code> header
-          (HMAC-SHA256 with the webhook’s secret) so the receiver can trust it. Failed deliveries are retried three
-          times; a hook that keeps failing pauses itself.
+          doop sends a signed JSON event by POST to each URL below when an event occurs on a canvas you own, were
+          invited to, or that belongs to one of your workspaces. Send events to Slack, n8n, an issue tracker, or any
+          HTTP endpoint. Each delivery includes an <code className="font-mono text-label">X-Doop-Signature</code> header
+          (HMAC-SHA256 with the webhook’s secret) so the receiver can verify it. Failed deliveries are retried three
+          times. Webhooks that keep failing are paused automatically.
         </CardDescription>
       </CardHeader>
 
@@ -205,11 +205,13 @@ export function Webhooks() {
       {secret && (
         <CardRow label="Signing secret">
           <div className="min-w-0 flex-1">
-            <Note tone="success">Copy it now — it is shown once. Verify deliveries with it on your side.</Note>
+            <Note tone="success">
+              Copy the signing secret now. It’s shown only once. Use it to verify deliveries on your side.
+            </Note>
             <CodeBlock className="mt-2" text={secret.secret} />
             <Note>
-              signature = “sha256=” + HMAC-SHA256(secret, X-Doop-Timestamp + “.” + raw body). The docs have a ready-made
-              check.
+              signature = “sha256=” + HMAC-SHA256(secret, X-Doop-Timestamp + “.” + raw body). The docs include a
+              verification check.
             </Note>
           </div>
         </CardRow>
@@ -261,7 +263,7 @@ export function Webhooks() {
       })}
       {hooks && hooks.length === 0 && !secret && (
         <CardRow label="No webhooks yet">
-          <Note>Add one above — a quick way to try it is an n8n Webhook node or a request bin.</Note>
+          <Note>Add a webhook above. To try it, use an n8n Webhook node or a request bin.</Note>
         </CardRow>
       )}
       <ConfirmDialog

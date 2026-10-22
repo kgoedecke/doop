@@ -176,7 +176,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           (flow) => {
             if (!cancelled && 'userCode' in flow && flow.status === 'error') {
               setDevice(null)
-              setError(flow.error || 'That sign-in did not complete')
+              setError(flow.error || 'Sign-in did not complete')
             }
           },
           () => {},
@@ -191,7 +191,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   const fail = (e: unknown) => {
     const body = (e as { body?: { error?: string } })?.body
-    setError(body?.error || (e instanceof Error ? e.message : 'That did not work — try again'))
+    setError(body?.error || (e instanceof Error ? e.message : 'The connection could not be updated. Try again.'))
   }
 
   const start = async () => {
@@ -407,7 +407,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               </span>
             </div>
             <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">
-              Route OpenAI models through your ChatGPT subscription
+              Use OpenAI models with your ChatGPT subscription
             </p>
             {onChatgpt && account.email && (
               <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-body text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
@@ -445,8 +445,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               <div className={planFlow}>
                 <ol className={maSteps}>
                   <li>
-                    One-time setup: turn on <b>device code authorization</b> in ChatGPT → Settings → Security. (On a
-                    workspace account an admin has to allow it.)
+                    Turn on <b>device code authorization</b> in ChatGPT → Settings → Security once. For a workspace
+                    account, an admin must allow it.
                   </li>
                   <li>
                     Open{' '}
@@ -503,7 +503,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 <ol className={maSteps}>
                   <li>Approve the connection in the tab that just opened.</li>
                   <li>
-                    You will land on a <code>localhost:1455</code> page that <b>fails to load</b> — that is expected.
+                    You’ll reach a <code>localhost:1455</code> page that <b>fails to load</b>. This is expected.
                   </li>
                   <li>Copy that page's full address and paste it below.</li>
                 </ol>
@@ -540,7 +540,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {keySection({
         kind: 'openai-key',
         title: 'OpenAI API key',
-        lede: 'Pay per token on your own OpenAI account — no ChatGPT subscription involved',
+        lede: 'Pay per token on your own OpenAI account. This does not use a ChatGPT subscription.',
         mark: <OpenAiMark />,
         placeholder: 'sk-…',
       })}
@@ -548,7 +548,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {keySection({
         kind: 'openrouter-key',
         title: 'OpenRouter API key',
-        lede: 'One key for Kimi, Qwen, GLM, DeepSeek, MiniMax, Gemini and more — pay per token on your OpenRouter account',
+        lede: 'Use one key for Kimi, Qwen, GLM, DeepSeek, MiniMax, Gemini and more. Pay per token on your OpenRouter account.',
         mark: <OpenRouterMark />,
         placeholder: 'sk-or-…',
       })}
@@ -556,7 +556,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {keySection({
         kind: 'gemini-key',
         title: 'Gemini API key',
-        lede: 'Google’s Gemini models, plus Nano Banana image generation — pay per token on your Google AI account',
+        lede: 'Use Google’s Gemini models and Nano Banana image generation. Pay per token on your Google AI account.',
         mark: <GeminiMark />,
         placeholder: 'AIza…',
       })}

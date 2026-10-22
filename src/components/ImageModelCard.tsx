@@ -10,9 +10,9 @@ import { CheckIcon } from './ui/icons'
 
 /** Why an entry is disabled, phrased as the fix. */
 const UNAVAILABLE_HINTS = {
-  openai: 'Needs a ChatGPT subscription or OpenAI API key connected above (or a server key).',
-  gemini: 'Needs a Gemini API key connected above (or a server key).',
-  ark: 'Not configured on this server (its operator sets ARK_API_KEY).',
+  openai: 'Connect a ChatGPT subscription or OpenAI API key above, or use a server key.',
+  gemini: 'Connect a Gemini API key above, or use a server key.',
+  ark: 'Not configured on this server. The server operator sets ARK_API_KEY.',
 } as const
 
 /**
@@ -47,7 +47,7 @@ export function ImageModelCard() {
       posthog.capture('image_model_changed', { model: id })
     } catch (e) {
       const body = (e as { body?: { error?: string } })?.body
-      setError(body?.error || (e instanceof Error ? e.message : 'That did not work — try again'))
+      setError(body?.error || (e instanceof Error ? e.message : 'The image model could not be saved. Try again.'))
       refresh()
     } finally {
       setBusy(false)
@@ -59,8 +59,8 @@ export function ImageModelCard() {
       <CardHeader>
         <CardTitle>Image model</CardTitle>
         <CardDescription>
-          Which model the agent draws generated images with. It runs on the matching account above, or on this server’s
-          key when you connected nothing.
+          Choose the model the agent uses to generate images. It uses the matching account above, or this server’s key
+          if you haven’t connected an account.
         </CardDescription>
       </CardHeader>
       <div className="px-4 pb-5 pt-4 sm:px-[22px]">

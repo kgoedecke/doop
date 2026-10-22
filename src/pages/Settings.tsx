@@ -33,15 +33,15 @@ type Pane = 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
 /* the heading over each pane, and the line under it */
 const panes: Record<Pane, { title: string; blurb: string }> = {
   agent: { title: 'Doop Agent', blurb: 'Manage the provider connections the agent uses on your canvases.' },
-  keys: { title: 'Agent keys', blurb: 'Bearer credentials that let headless agents design as you.' },
+  keys: { title: 'Agent keys', blurb: 'Let headless agents design as you with bearer credentials.' },
   webhooks: {
     title: 'Webhooks',
-    blurb: 'HTTP calls to your systems when something happens on a canvas you can open.',
+    blurb: 'Send HTTP calls to your systems when events occur on a canvas you can open.',
   },
-  account: { title: 'Your account', blurb: 'Who you are on every canvas — and how you get back into this one.' },
+  account: { title: 'Your account', blurb: 'Manage your identity across canvases and how you sign in.' },
   appearance: {
     title: 'Appearance',
-    blurb: 'How Doop looks in this browser: light, dark, or whatever your system is.',
+    blurb: 'Choose a light or dark theme for Doop in this browser, or follow your system setting.',
   },
 }
 
@@ -83,7 +83,7 @@ export function Settings() {
           ? 'Claude CLI selected — runs on your connected desktop.'
           : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
       : allowance.limit <= 0
-        ? 'No free tasks on this server — connect an account to use the Doop Agent.'
+        ? 'This server has no free tasks. Connect an account to use the Doop Agent.'
         : left === 0
           ? 'Your free tasks are used up.'
           : `${left} of ${allowance.limit} free task${allowance.limit === 1 ? '' : 's'} left.`
