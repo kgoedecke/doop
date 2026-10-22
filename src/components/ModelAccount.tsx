@@ -5,7 +5,7 @@ import { LocalClaudeRow } from './LocalClaude'
 import { authClient } from '../lib/auth'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
 import { isDesktopShell } from '../lib/shell'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import type { DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
@@ -38,8 +38,21 @@ export function useModelAccount(): {
   set: (next: ModelAccountStatus) => void
 } {
   const [account, setAccount] = useState<ModelAccountStatus | null>(null)
+  /* bumped by every refresh and every saved change, so a slow refresh can't
+     put back the model a newer save or refresh replaced */
+  const version = useRef(0)
   const refresh = useCallback(() => {
-    api.modelAccount().then(setAccount, () => {})
+    const started = ++version.current
+    api.modelAccount().then(
+      (next) => {
+        if (started === version.current) setAccount(next)
+      },
+      () => {},
+    )
+  }, [])
+  const set = useCallback((next: ModelAccountStatus) => {
+    version.current++
+    setAccount(next)
   }, [])
   useEffect(() => {
     refresh()
@@ -50,7 +63,7 @@ export function useModelAccount(): {
       window.removeEventListener('focus', refresh)
     }
   }, [refresh])
-  return { account, refresh, set: setAccount }
+  return { account, refresh, set }
 }
 
 /**
