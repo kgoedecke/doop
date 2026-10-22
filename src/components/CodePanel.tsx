@@ -1,33 +1,50 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
+import { CheckIcon, ClipboardIcon } from './ui/icons'
 
 /** Source view for the element toolbar: the selected element's markup with a copy button. */
 export function CodePanel({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current !== null) clearTimeout(copyTimer.current)
+    },
+    [],
+  )
 
   function copy() {
     navigator.clipboard.writeText(code).then(
-      () => setCopied(true),
+      () => {
+        if (copyTimer.current !== null) clearTimeout(copyTimer.current)
+        setCopied(true)
+        copyTimer.current = setTimeout(() => setCopied(false), 1500)
+      },
       () => setCopied(false),
     )
   }
 
   return (
-    <div className="relative mt-1.5 w-[440px] max-w-[80vw] rounded-[10px] bg-ink px-3 py-2.5 shadow-pop animate-[chip-in_0.18s_ease]">
-      <Button
-        variant="inverse"
-        size="sm"
-        className="absolute right-2 top-[7px] rounded-md bg-paper/[0.12] px-[9px] py-[3px] text-[11px] hover:bg-paper/[0.22]"
-        onClick={copy}
-      >
-        {copied ? 'Copied!' : 'Copy'}
-      </Button>
+    <div className="mt-1.5 flex w-[440px] max-w-[80vw] items-center gap-2 rounded-pill bg-ink p-1 pl-3 shadow-pop animate-[chip-in_0.18s_ease]">
       <pre
         data-stage-scroll
-        className="max-h-[260px] overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-paper [font-family:ui-monospace,monospace] [word-break:break-word]"
+        className="max-h-[260px] min-w-0 flex-1 overflow-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-paper [font-family:ui-monospace,monospace] [word-break:break-word]"
       >
         {code}
       </pre>
+      <Button
+        variant="inverse"
+        size="icon-sm"
+        className="rounded-pill"
+        aria-label={copied ? 'Code copied' : 'Copy code'}
+        onClick={copy}
+      >
+        {copied ? <CheckIcon className="text-success-on-ink" /> : <ClipboardIcon />}
+      </Button>
+      <span role="status" className="sr-only">
+        {copied ? 'Code copied to clipboard' : ''}
+      </span>
     </div>
   )
 }

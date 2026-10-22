@@ -40,7 +40,7 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
 import { FrameContextMenu } from './FrameContextMenu'
-import { Panel, PanelBody, PanelClose, PanelHeader } from './ui/panel'
+import { Panel, PanelBody, PanelClose, PanelHeader, type PanelResize } from './ui/panel'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Tooltip } from './ui/tooltip'
@@ -163,12 +163,14 @@ export function LayersPanel({
   onAddFrame,
   surface = 'floating',
   onClose,
+  resize,
 }: {
   onAddFrame: () => void
   /* 'inline' when the panel is filling a mobile Sheet rather than floating */
   surface?: 'floating' | 'inline'
   /** inline only: the sheet's close, in the collapse control's place */
   onClose?: () => void
+  resize?: PanelResize
 }) {
   /* a row's pointerleave never fires if the panel goes away under it */
   useEffect(() => () => useStore.getState().setHoveredLayer(null), [])
@@ -349,7 +351,11 @@ export function LayersPanel({
   }
 
   return (
-    <Panel surface={surface} className={cn(surface === 'floating' && 'top-2.5 bottom-3.5 left-3.5 w-[264px]')}>
+    <Panel
+      surface={surface}
+      resize={resize}
+      className={cn(surface === 'floating' && 'top-2.5 bottom-3.5 left-3.5 w-[264px]')}
+    >
       {/* the panel's name with its icon, the collapse control at the far end */}
       <PanelHeader className="h-10 pl-3.5">
         <span className="flex items-center gap-2">
@@ -484,7 +490,7 @@ export function LayersRailToggle() {
         <Button
           variant="bare"
           size="icon-sm"
-          className="size-7 rounded-[7px] text-ink hover:bg-paper-deep"
+          className="size-7 rounded-[7px] text-ink-soft hover:bg-paper-deep hover:text-ink"
           aria-label={`Layers — ${count} frames`}
           onClick={() => setLayersOpen(true)}
         >

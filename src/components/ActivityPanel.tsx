@@ -8,6 +8,7 @@ import { AgentIcon } from './AgentIcon'
 import { MemoryPanel } from './MemoryPanel'
 import {
   Panel,
+  type PanelResize,
   PanelBody,
   PanelClose,
   PanelHeader,
@@ -54,6 +55,7 @@ export function ActivityPanel({
   surface = 'floating',
   className,
   style,
+  resize,
 }: {
   canvasId: string
   onClose: () => void
@@ -62,6 +64,7 @@ export function ActivityPanel({
   className?: string
   /** carries `right` while floating — the panel always hugs the right edge */
   style?: CSSProperties
+  resize?: PanelResize
 }) {
   const tab = useStore((s) => s.panelTab)
   const setTab = useStore((s) => s.setPanelTab)
@@ -78,6 +81,7 @@ export function ActivityPanel({
   return (
     <Panel
       surface={surface}
+      resize={resize}
       className={cn(
         surface === 'floating' && 'top-2.5 bottom-3.5 w-[280px] transition-[right] duration-150',
         className,

@@ -13,7 +13,7 @@ const badgeVariants = cva(
   {
     variants: {
       tone: {
-        default: 'border-transparent bg-transparent text-ink-faint shadow-[inset_0_0_0_0.75px_var(--line)]',
+        default: 'border-line bg-transparent text-ink-faint',
         admin: 'border-accent-ink/40 bg-accent-ink/[0.08] text-accent-ink',
         banned: 'border-warning-ink/35 bg-warning/[0.12] text-warning-ink',
         accent: 'border-accent-ink/40 bg-transparent text-accent-ink',

@@ -142,7 +142,9 @@ export function BarPill({ className, ...props }: React.ComponentProps<'div'>) {
 
 /** A quiet text-and-icon action inside a BarPill. */
 export const barPillBtn =
-  'h-[30px] gap-[7px] rounded-[8px] px-2.5 text-[12px] font-normal text-ink hover:bg-paper-deep hover:text-ink [&_svg]:text-ink-soft'
+  'h-[30px] gap-[7px] rounded-[8px] px-2.5 text-[12px] font-medium text-ink hover:bg-paper-deep hover:text-ink [&_svg]:text-ink-soft'
+/** White content inside a filled pill; the outer BarPill owns its fill and edge. */
+export const barPillAccentBtn = cn(barPillBtn, 'text-white hover:bg-white/10 hover:text-white [&_svg]:text-current')
 /** An icon-only action inside a BarPill. */
 export const barPillIconBtn =
   'size-[30px] rounded-[8px] p-0 text-ink-soft hover:bg-paper-deep hover:text-ink disabled:opacity-40'

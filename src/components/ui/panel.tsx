@@ -24,8 +24,89 @@ const panelVariants = cva('flex min-w-0 flex-col overflow-hidden bg-surface', {
   defaultVariants: { surface: 'floating' },
 })
 
-function Panel({ className, surface, ...props }: React.ComponentProps<'div'> & VariantProps<typeof panelVariants>) {
-  return <div data-slot="panel" className={cn(panelVariants({ surface, className }))} {...props} />
+export interface PanelResize {
+  label: string
+  edge: 'left' | 'right'
+  width: number
+  min: number
+  max: number
+  onResize: (width: number) => void
+}
+
+function Panel({
+  className,
+  surface,
+  resize,
+  style,
+  children,
+  ...props
+}: React.ComponentProps<'div'> & VariantProps<typeof panelVariants> & { resize?: PanelResize }) {
+  const drag = React.useRef<{ x: number; width: number } | null>(null)
+  const resizing = surface !== 'inline' ? resize : undefined
+  const setWidth = (width: number) => {
+    if (resizing) resizing.onResize(Math.round(Math.max(resizing.min, Math.min(resizing.max, width))))
+  }
+
+  return (
+    <div
+      data-slot="panel"
+      className={cn(panelVariants({ surface, className }))}
+      style={resizing ? { ...style, width: resizing.width } : style}
+      {...props}
+    >
+      {children}
+      {resizing && (
+        <div
+          role="separator"
+          tabIndex={0}
+          aria-label={resizing.label}
+          aria-orientation="vertical"
+          aria-valuemin={resizing.min}
+          aria-valuemax={resizing.max}
+          aria-valuenow={resizing.width}
+          className={cn(
+            'absolute inset-y-2 z-10 w-1.5 touch-none cursor-col-resize rounded-full focus-visible:bg-ink/20 focus-visible:outline-none',
+            resizing.edge === 'right' ? 'right-0' : 'left-0',
+          )}
+          onPointerDown={(e) => {
+            if (e.button !== 0) return
+            e.preventDefault()
+            e.stopPropagation()
+            drag.current = { x: e.clientX, width: resizing.width }
+            e.currentTarget.setPointerCapture(e.pointerId)
+          }}
+          onPointerMove={(e) => {
+            if (!drag.current) return
+            e.stopPropagation()
+            const delta = (e.clientX - drag.current.x) * (resizing.edge === 'right' ? 1 : -1)
+            setWidth(drag.current.width + delta)
+          }}
+          onPointerUp={(e) => {
+            drag.current = null
+            if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+          }}
+          onLostPointerCapture={() => {
+            drag.current = null
+          }}
+          onPointerCancel={() => {
+            drag.current = null
+          }}
+          onKeyDown={(e) => {
+            const direction = resizing.edge === 'right' ? 1 : -1
+            let width: number
+            if (e.key === 'ArrowLeft') width = resizing.width - 10 * direction
+            else if (e.key === 'ArrowRight') width = resizing.width + 10 * direction
+            else if (e.key === 'Home') width = resizing.min
+            else if (e.key === 'End') width = resizing.max
+            else return
+            e.preventDefault()
+            e.stopPropagation()
+            setWidth(width)
+          }}
+        />
+      )}
+    </div>
+  )
 }
 
 /** Sticky header: title or tabs on the left, actions on the right. Sentence
