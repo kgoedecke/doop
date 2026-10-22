@@ -4,10 +4,12 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
-import { CLAUDE_MODEL_IDS, normalizeClaudeModel } from '../shared/localAgent.ts'
-import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
-import { isKnownModel, modelFor } from './openaiAgent.ts'
-import { getChatgptModelCatalog, type ChatgptModelCatalog } from './chatgptModels.ts'
+import { DEFAULT_CLAUDE_MODEL } from '../shared/localAgent.ts'
+import { OPENROUTER_MODELS } from '../shared/modelMenu.ts'
+import { modelFor } from './openaiAgent.ts'
+import { getChatgptModelCatalog } from './chatgptModels.ts'
+import { getApiModelCatalog, hasApiModelCatalog } from './providerModels.ts'
+import type { ModelCatalog } from './modelCatalog.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -137,51 +139,33 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
 const DEFAULT_OPENROUTER = env.DOOP_AGENT_OPENROUTER_MODEL
 const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
 
-/* per-kind model policy: how a stored (possibly unset or stale) model id
-   resolves to the one that will run, and which ids the picker may set */
-const MODEL_POLICY: Record<
-  Exclude<AccountKind, 'chatgpt'>,
-  { resolve(model?: string): string; isKnown(model: string): boolean }
-> = {
-  'openai-key': { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
-  'anthropic-key': {
-    resolve: normalizeClaudeModel,
-    isKnown: (model) => CLAUDE_MODEL_IDS.some((id) => id === model),
-  },
-  'openrouter-key': {
-    resolve: (model) => model || DEFAULT_OPENROUTER,
-    isKnown: (model) => OPENROUTER_MODELS.some((option) => option.id === model),
-  },
-  'gemini-key': {
-    resolve: (model) => model || DEFAULT_GEMINI,
-    isKnown: (model) => GEMINI_MODELS.some((option) => option.id === model),
-  },
-}
-
+/** Preserve discovered IDs exactly; local CLI aliases have a separate policy. */
 export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
-  if (account.kind === 'chatgpt') return modelFor(account)
-  return MODEL_POLICY[account.kind].resolve(account.model)
+  if (account.model) return account.model
+  if (account.kind === 'anthropic-key') return DEFAULT_CLAUDE_MODEL
+  if (account.kind === 'gemini-key') return DEFAULT_GEMINI
+  if (account.kind === 'openrouter-key') return DEFAULT_OPENROUTER
+  return modelFor(account)
 }
 
-/** Whether the model this account resolves to can see images. An id off the
- *  curated menu (a server env override) is trusted to have vision except on
- *  OpenRouter, whose roster mixes text-only models — there the conservative
- *  answer is a degraded run rather than a 400 on the first screenshot. */
+/** Discovered catalogs admit only image-capable models. OpenRouter still has
+ * an explicitly curated mix of vision and text-only models. */
 export function accountVisionFor(account: Pick<ModelAccount, 'kind' | 'model'>): boolean {
-  const model = accountModelFor(account)
-  const menu =
-    account.kind === 'openrouter-key' ? OPENROUTER_MODELS : account.kind === 'gemini-key' ? GEMINI_MODELS : null
-  if (!menu) return true
-  const option = menu.find((entry) => entry.id === model)
-  if (option) return option.vision
-  return account.kind !== 'openrouter-key'
+  if (account.kind !== 'openrouter-key') return true
+  return OPENROUTER_MODELS.find((entry) => entry.id === accountModelFor(account))?.vision ?? false
 }
 
-/** Resolve the connected account's discovery catalog without exposing tokens. */
-export async function chatgptModelCatalog(userId: string): Promise<ChatgptModelCatalog> {
+export async function catalogForAccount(account: ModelAccount): Promise<ModelCatalog> {
+  if (account.kind === 'chatgpt') return getChatgptModelCatalog(await withFreshToken(account))
+  if (hasApiModelCatalog(account.kind)) return getApiModelCatalog(account)
+  return { models: OPENROUTER_MODELS }
+}
+
+/** Resolve only the expected provider, even if a connection switches in flight. */
+export async function accountModelCatalog(userId: string, kind: AccountKind): Promise<ModelCatalog> {
   const account = await getAccount(userId)
-  if (!account || account.kind !== 'chatgpt') return { models: [] }
-  return getChatgptModelCatalog(await withFreshToken(account))
+  if (!account || account.kind !== kind) return { models: [], warning: 'Provider changed. Refresh to load its models.' }
+  return catalogForAccount(account)
 }
 
 /** Change only the model columns, so catalog/token refreshes cannot overwrite
@@ -189,10 +173,8 @@ export async function chatgptModelCatalog(userId: string): Promise<ChatgptModelC
 export async function setAccountModel(userId: string, model: string): Promise<AccountStatus> {
   const account = await getAccount(userId)
   if (!account) throw new Error('no model account connected')
-  if (account.kind === 'chatgpt') {
-    const catalog = await getChatgptModelCatalog(await withFreshToken(account))
-    if (!catalog.models.some((option) => option.id === model)) throw new Error(catalog.warning ?? 'unknown model')
-  } else if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
+  const catalog = await catalogForAccount(account)
+  if (!catalog.models.some((option) => option.id === model)) throw new Error(catalog.warning ?? 'unknown model')
   const updated = await db
     .update(modelAccounts)
     .set({ model, updatedAt: Date.now() })
@@ -201,6 +183,7 @@ export async function setAccountModel(userId: string, model: string): Promise<Ac
         eq(modelAccounts.userId, userId),
         eq(modelAccounts.kind, account.kind),
         eq(modelAccounts.connectedAt, account.connectedAt),
+        ...(account.apiKey ? [eq(modelAccounts.apiKey, account.apiKey)] : []),
       ),
     )
     .returning({ userId: modelAccounts.userId })

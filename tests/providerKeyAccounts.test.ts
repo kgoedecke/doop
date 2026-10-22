@@ -51,7 +51,7 @@ it('stores a Gemini key and resets the model on a provider switch', async () => 
   const status = await response.json()
   expect(status).toMatchObject({ connected: true, kind: 'gemini-key', model: 'gemini-3.7-flash' })
   expect(JSON.stringify(status)).not.toContain('AIzaTestKeyLongEnoughToPass123456')
-  expect((await alice.patch('/api/model-account', { model: 'gemini-3.1-pro-preview' })).status).toBe(200)
+  expect((await alice.patch('/api/model-account', { model: 'gemini-3.8-flash' })).status).toBe(200)
   expect((await alice.delete('/api/model-account')).status).toBe(200)
 })
 
@@ -80,4 +80,14 @@ it('validates image-model picks against the registry and this user’s credentia
     available: true,
     selected: true,
   })
+})
+
+it('discovers OpenAI models, accepts an available new ID and rejects off-catalog IDs', async () => {
+  const response = await alice.post('/api/model-account/openai-key', { apiKey: 'sk-synthetic-openai' })
+  const status = await response.json()
+  expect(status.menus['openai-key'].some((model: { id: string }) => model.id === 'gpt-6.1-sol')).toBe(true)
+  expect((await alice.patch('/api/model-account', { model: 'gpt-6.1-sol' })).status).toBe(200)
+  expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ model: 'gpt-6.1-sol' })
+  expect((await alice.patch('/api/model-account', { model: 'gpt-6.9-sol' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account', { model: 'gpt-image-2' })).status).toBe(400)
 })

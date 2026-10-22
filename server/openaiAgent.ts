@@ -28,20 +28,6 @@ import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
 
 export const CHATGPT_URL = env.CHATGPT_RESPONSES_URL
 export const OPENAI_URL = env.OPENAI_RESPONSES_URL
-/**
- * Curated OpenAI API-key choices and the disconnected ChatGPT preview.
- * Connected ChatGPT accounts discover their own menu in chatgptModels.ts;
- * this static list does not restrict those accounts' model selections.
- * Keep the default on Terra so discovering a new tier never opts a user
- * into a different model or price automatically.
- */
-export const AGENT_MODELS = [
-  { id: 'gpt-6-astra', name: 'GPT-6 Astra', blurb: 'Newest flagship — the sharpest reasoning, at the highest price' },
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', blurb: 'Flagship — the most detail and polish, and the priciest' },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', blurb: 'The everyday workhorse. A good default for design work' },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', blurb: 'Fastest and cheapest — fine for small, mechanical edits' },
-] as const
-
 export const DEFAULT_OPENAI_MODEL = env.DOOP_AGENT_OPENAI_MODEL
 const REASONING_EFFORT = env.DOOP_AGENT_OPENAI_EFFORT
 /* Azure deployments are named by their owner and can host non-reasoning
@@ -50,10 +36,6 @@ const REASONING_EFFORT = env.DOOP_AGENT_OPENAI_EFFORT
 const AZURE_REASONING_EFFORT = env.AZURE_OPENAI_REASONING_EFFORT
 /* Azure's v1 surface needs no api-version; older resources can pin one. */
 const AZURE_API_VERSION = env.AZURE_OPENAI_API_VERSION
-
-export function isKnownModel(id: string): boolean {
-  return AGENT_MODELS.some((model) => model.id === id)
-}
 
 /** What this account runs on: the user's choice, else the server default. */
 export function modelFor(account: Pick<ModelAccount, 'model'>): string {
@@ -64,7 +46,9 @@ export function modelFor(account: Pick<ModelAccount, 'model'>): string {
    admits other originators. */
 export const ORIGINATOR = env.CHATGPT_ORIGINATOR
 
-export type TurnBlock = Anthropic.TextBlockParam | Anthropic.ToolUseBlockParam
+export type TurnBlock = (
+  Anthropic.TextBlockParam | (Anthropic.ToolUseBlockParam & { googleThoughtSignature?: string })
+) & { openaiOutput?: ResponseBody['output'] }
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'refusal'
 
 export interface TurnRequest {
@@ -159,6 +143,14 @@ function toInput(messages: Anthropic.MessageParam[]): unknown[] {
       })
       continue
     }
+    // Keep the original output together: reconstructing visible blocks loses
+    // encrypted reasoning and assistant phases needed by stateless tool loops.
+    const replay =
+      message.role === 'assistant' ? (message.content[0] as TurnBlock | undefined)?.openaiOutput : undefined
+    if (replay) {
+      items.push(...replay)
+      continue
+    }
     const userParts: Part[] = []
     const trailingImages: Part[] = []
     for (const block of message.content) {
@@ -229,6 +221,10 @@ interface ResponseBody {
     id?: string
     name?: string
     arguments?: string
+    encrypted_content?: string | null
+    summary?: { type: string; text?: string }[]
+    role?: string
+    phase?: string | null
     content?: { type: string; text?: string; refusal?: string }[]
     /** image_generation_call items: the finished image, base64 */
     result?: string | null
@@ -269,6 +265,14 @@ function fromResponse(body: ResponseBody): TurnResult {
   /* a response with nothing in it would end the loop silently; make it a
      visible failure instead */
   if (content.length === 0 && !refused) throw new Error('OpenAI returned an empty response')
+  if (content[0]) {
+    content[0].openaiOutput = (body.output ?? []).filter(
+      (item) =>
+        item.type === 'message' ||
+        item.type === 'function_call' ||
+        (item.type === 'reasoning' && !!item.encrypted_content),
+    )
+  }
   return { content, stop_reason: stop }
 }
 
@@ -386,6 +390,7 @@ async function runApiKey(account: ModelAccount, req: TurnRequest): Promise<TurnR
       tool_choice: 'auto',
       parallel_tool_calls: false,
       reasoning: { effort: REASONING_EFFORT },
+      include: ['reasoning.encrypted_content'],
       max_output_tokens: req.maxTokens,
       store: false,
     }),

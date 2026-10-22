@@ -2,16 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   _internal,
-  AGENT_MODELS,
   azureResponsesUrl,
-  isKnownModel,
   ModelUnavailableError,
   responseError,
   runAzureTurn,
   runOpenAiTurn,
 } from '../server/openaiAgent.ts'
-import { parseAuthCode } from '../server/modelAccounts.ts'
+import { accountModelFor, parseAuthCode } from '../server/modelAccounts.ts'
 import { getChatgptModelCatalog } from '../server/chatgptModels.ts'
+import { getApiModelCatalog } from '../server/providerModels.ts'
 
 /**
  * The Doop Agent loop is written against Anthropic's message shape. When a run
@@ -119,7 +118,7 @@ describe('OpenAI Responses output -> Anthropic blocks', () => {
       ],
     })
     expect(result.stop_reason).toBe('tool_use')
-    expect(result.content).toEqual([
+    expect(result.content).toMatchObject([
       { type: 'text', text: 'Tightening the hero.' },
       { type: 'tool_use', id: 'call_3', name: 'set_status', input: { status: 'Fixing hero' } },
     ])
@@ -151,7 +150,7 @@ describe('OpenAI Responses output -> Anthropic blocks', () => {
       status: 'completed',
       output: [{ type: 'function_call', call_id: 'call_5', name: 'set_status', arguments: '{oops' }],
     })
-    expect(result.content).toEqual([{ type: 'tool_use', id: 'call_5', name: 'set_status', input: {} }])
+    expect(result.content).toMatchObject([{ type: 'tool_use', id: 'call_5', name: 'set_status', input: {} }])
   })
 })
 
@@ -181,7 +180,7 @@ describe('ChatGPT model discovery', () => {
       },
       { system: 'Check the canvas.', messages: [{ role: 'user', content: 'Confirm.' }], tools: [], maxTokens: 128 },
     )
-    expect(result.content).toEqual([{ type: 'text', text: 'Done' }])
+    expect(result.content).toMatchObject([{ type: 'text', text: 'Done' }])
     expect(JSON.parse(fetch.mock.calls[0]![1].body)).toMatchObject({ model: 'future-model' })
   })
 
@@ -299,17 +298,6 @@ describe('model menu', () => {
     vi.resetModules()
   })
 
-  it('offers GPT-6 Astra above the GPT-5.6 tiers', () => {
-    expect(AGENT_MODELS.map((model) => model.id)).toEqual([
-      'gpt-6-astra',
-      'gpt-5.6-sol',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
-    ])
-    expect(isKnownModel('gpt-6-astra')).toBe(true)
-    expect(isKnownModel('gpt-6')).toBe(false)
-  })
-
   it('defaults to Terra when no override is set, whatever this shell exports', async () => {
     vi.stubEnv('DOOP_AGENT_OPENAI_MODEL', '')
     vi.resetModules()
@@ -401,7 +389,7 @@ describe('Azure OpenAI transport', () => {
       { endpoint: 'https://my-res.openai.azure.com', deployment: 'my-gpt', apiKey: 'azkey' },
       { system: 'be a designer', tools: [], messages: [{ role: 'user', content: 'hi' }], maxTokens: 4096 },
     )
-    expect(result.content).toEqual([{ type: 'text', text: 'done' }])
+    expect(result.content).toMatchObject([{ type: 'text', text: 'done' }])
     expect(seen.url).toBe('https://my-res.openai.azure.com/openai/v1/responses')
     expect(seen.headers?.['api-key']).toBe('azkey')
     expect(seen.headers?.Authorization).toBeUndefined()
@@ -448,7 +436,7 @@ describe('Codex-backend SSE stream', () => {
     )
     const result = fromResponse(body)
     expect(result.stop_reason).toBe('tool_use')
-    expect(result.content).toEqual([
+    expect(result.content).toMatchObject([
       { type: 'tool_use', id: 'call_1', name: 'set_status', input: { status: 'Working' } },
     ])
   })
@@ -460,7 +448,7 @@ describe('Codex-backend SSE stream', () => {
         'data: {"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"authoritative"}]}]}}\n',
       ]),
     )
-    expect(fromResponse(body).content).toEqual([{ type: 'text', text: 'authoritative' }])
+    expect(fromResponse(body).content).toMatchObject([{ type: 'text', text: 'authoritative' }])
   })
 
   it('surfaces a failed stream instead of reporting an empty turn', async () => {
@@ -479,6 +467,243 @@ describe('Codex-backend SSE stream', () => {
         'data: {"type":"response.completed","response":{"status":"completed"}}\n',
       ]),
     )
-    expect(fromResponse(body).content).toEqual([{ type: 'text', text: 'split' }])
+    expect(fromResponse(body).content).toMatchObject([{ type: 'text', text: 'split' }])
+  })
+})
+
+describe('API-key model discovery', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('replays encrypted reasoning, assistant phases and calls unchanged through consecutive OpenAI tool steps', async () => {
+    const outputs = [1, 2].map((step) => [
+      { type: 'reasoning', id: `rs_${step}`, encrypted_content: `synthetic-reasoning-${step}`, summary: [] },
+      {
+        type: 'message',
+        id: `msg_${step}`,
+        role: 'assistant',
+        phase: 'commentary',
+        content: [{ type: 'output_text', text: `Step ${step}`, annotations: [] }],
+      },
+      { type: 'function_call', id: `fc_${step}`, call_id: `call_${step}`, name: 'set_status', arguments: '{}' },
+    ])
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({ output: outputs[0] }))
+      .mockResolvedValueOnce(Response.json({ output: outputs[1] }))
+      .mockResolvedValueOnce(
+        Response.json({ output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done' }] }] }),
+      )
+    const account = {
+      userId: 'replay',
+      kind: 'openai-key' as const,
+      apiKey: 'synthetic',
+      connectedAt: 1,
+      model: 'gpt-6.1-sol',
+    }
+    const messages: Anthropic.MessageParam[] = [{ role: 'user', content: 'Design.' }]
+    for (const step of [1, 2]) {
+      const result = await runOpenAiTurn(account, { system: 'Design.', tools: [], messages, maxTokens: 32000 })
+      messages.push(
+        { role: 'assistant', content: result.content },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: `call_${step}`, content: 'ok' }] },
+      )
+    }
+    await runOpenAiTurn(account, { system: 'Design.', tools: [], messages, maxTokens: 32000 })
+    const body = JSON.parse(String(fetch.mock.calls[2]![1]?.body))
+    expect(body.model).toBe(account.model)
+    expect(body.store).toBe(false)
+    expect(body.include).toContain('reasoning.encrypted_content')
+    expect(body.input.slice(1)).toEqual([
+      ...outputs[0]!,
+      { type: 'function_call_output', call_id: 'call_1', output: 'ok' },
+      ...outputs[1]!,
+      { type: 'function_call_output', call_id: 'call_2', output: 'ok' },
+    ])
+  })
+
+  it('filters OpenAI special-purpose models and sends the selected discovered ID unchanged', async () => {
+    const ids = [
+      'gpt-6.1-sol',
+      'gpt-5.6-terra',
+      'gpt-6-astra',
+      'gpt-6-sol-chat-latest',
+      'gpt-6-sol-codex',
+      'gpt-image-2',
+      'text-embedding-3-large',
+      'gpt-audio',
+      'o3-deep-research',
+      'unknown-model',
+    ]
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({ data: ids.map((id, created) => ({ id, created })) }))
+      .mockResolvedValueOnce(
+        Response.json({
+          status: 'completed',
+          output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done' }] }],
+        }),
+      )
+    const account = {
+      userId: 'openai-catalog',
+      kind: 'openai-key' as const,
+      apiKey: 'sk-synthetic',
+      connectedAt: 1,
+      model: 'gpt-6.1-sol',
+    }
+    const catalog = await getApiModelCatalog(account)
+    expect(catalog.models.map((m) => m.id).sort()).toEqual(['gpt-5.6-terra', 'gpt-6-astra', 'gpt-6.1-sol'])
+    await runOpenAiTurn(account, { system: 'Design.', tools: [], messages: [], maxTokens: 128 })
+    expect(JSON.parse(String(fetch.mock.calls[1]![1]?.body)).model).toBe('gpt-6.1-sol')
+    expect(JSON.stringify(catalog)).not.toContain(account.apiKey)
+  })
+
+  it('paginates Claude, checks capabilities and preserves new model IDs rather than CLI aliases', async () => {
+    const model = (id: string, supported = true, max_tokens = 64000) => ({
+      id,
+      display_name: id,
+      max_tokens,
+      capabilities: { image_input: { supported } },
+    })
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [model('claude-opus-5-5'), model('claude-haiku-4-5', false), model('claude-sonnet-4', true, 8192)],
+          has_more: true,
+          last_id: 'cursor-one',
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            model('claude-sonnet-5-5'),
+            { ...model('claude-opus-4'), lifecycle: 'retired' },
+            { id: 'claude-fable-5-1', display_name: 'Unknown capabilities' },
+          ],
+          has_more: false,
+        }),
+      )
+    const account = {
+      userId: 'claude-catalog',
+      kind: 'anthropic-key' as const,
+      apiKey: 'sk-ant-synthetic',
+      connectedAt: 1,
+      model: 'claude-opus-5-5',
+    }
+    const catalog = await getApiModelCatalog(account)
+    expect(catalog.models.map((m) => m.id)).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5'])
+    expect(new URL(String(fetch.mock.calls[1]![0])).searchParams.get('after_id')).toBe('cursor-one')
+    expect(accountModelFor(account)).toBe('claude-opus-5-5')
+    expect(JSON.stringify(catalog)).not.toContain(account.apiKey)
+  })
+
+  it('paginates Gemini and excludes image, audio, Live, embeddings and unsupported generation methods', async () => {
+    const model = (id: string, methods = ['generateContent'], outputTokenLimit = 65536) => ({
+      name: `models/${id}`,
+      displayName: id,
+      supportedGenerationMethods: methods,
+      outputTokenLimit,
+    })
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        Response.json({
+          models: [
+            model('gemini-3.8-flash'),
+            model('gemini-3.8-flash-tts'),
+            model('gemini-3.1-flash-image'),
+            model('gemini-3.8-live'),
+          ],
+          nextPageToken: 'next',
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          models: [
+            model('gemini-4-argon'),
+            model('gemini-3.1-pro-preview'),
+            { ...model('gemini-2.5-flash-preview-09-2025'), displayName: undefined },
+            model('gemini-embedding-001', ['embedContent']),
+            model('gemini-3.5-flash', ['interactions']),
+            model('gemini-2.5-flash', ['generateContent'], 8192),
+          ],
+        }),
+      )
+    const account = {
+      userId: 'gemini-catalog',
+      kind: 'gemini-key' as const,
+      apiKey: 'synthetic-google-key',
+      connectedAt: 1,
+    }
+    const catalog = await getApiModelCatalog(account)
+    expect(catalog.models.map((m) => m.id)).toEqual([
+      'gemini-4-argon',
+      'gemini-3.8-flash',
+      'gemini-3.1-pro-preview',
+      'gemini-2.5-flash-preview-09-2025',
+    ])
+    expect(catalog.models.at(-1)?.name).toBe('gemini-2.5-flash-preview-09-2025')
+    expect(new URL(String(fetch.mock.calls[1]![0])).searchParams.get('pageToken')).toBe('next')
+    expect(String(fetch.mock.calls[0]![0])).not.toContain(account.apiKey)
+    expect(fetch.mock.calls[0]![1]?.headers).toEqual({ 'x-goog-api-key': account.apiKey })
+  })
+
+  it('coalesces reads, retains a same-key catalog on outages, and clears it on rejection or rotation', async () => {
+    let now = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({ data: [{ id: 'gpt-6.1-sol', created: 1 }] }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(new Response('', { status: 403 }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+    const account = { userId: 'api-cache', kind: 'openai-key' as const, apiKey: 'synthetic-first', connectedAt: 1 }
+    const [first, shared] = await Promise.all([getApiModelCatalog(account), getApiModelCatalog(account)])
+    expect(shared).toEqual(first)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    now += 300001
+    expect(await getApiModelCatalog(account)).toMatchObject({
+      models: first.models,
+      warning: expect.stringContaining('last fetched'),
+    })
+    now += 30001
+    expect(await getApiModelCatalog(account)).toMatchObject({
+      models: [],
+      warning: expect.stringContaining('permission'),
+    })
+    expect(await getApiModelCatalog({ ...account, apiKey: 'synthetic-second' })).toMatchObject({
+      models: [],
+      warning: expect.any(String),
+    })
+    expect(fetch).toHaveBeenCalledTimes(4)
+  })
+
+  it('never serves a partially fetched catalog when pagination fails or repeats', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      Response.json({
+        data: [
+          {
+            id: 'claude-opus-5-5',
+            display_name: 'Opus',
+            max_tokens: 64000,
+            capabilities: { image_input: { supported: true } },
+          },
+        ],
+        has_more: true,
+        last_id: 'same',
+      }),
+    )
+    const result = await getApiModelCatalog({
+      userId: 'bad-pages',
+      kind: 'anthropic-key',
+      apiKey: 'synthetic',
+      connectedAt: 1,
+    })
+    expect(result.models).toEqual([])
+    expect(result.warning).toContain('Could not load')
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 })

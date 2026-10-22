@@ -218,3 +218,49 @@ describe('the request', () => {
     )
   })
 })
+
+it('preserves Gemini thought signatures through a complete tool round trip', async () => {
+  const fetch = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      Response.json({
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  id: 'call-google',
+                  function: { name: 'create_frame', arguments: '{"name":"Hero"}' },
+                  extra_content: { google: { thought_signature: 'opaque-provider-signature' } },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    )
+    .mockResolvedValueOnce(Response.json({ choices: [{ message: { content: 'Done' } }] }))
+  const config = geminiConfig('synthetic', 'gemini-3.8-flash', true)
+  const request = {
+    system: 'Design.',
+    tools: [TOOL],
+    messages: [{ role: 'user' as const, content: 'Make a hero.' }],
+    maxTokens: 1024,
+  }
+  const first = await runChatCompletionsTurn(config, request)
+  await runChatCompletionsTurn(config, {
+    ...request,
+    messages: [
+      ...request.messages,
+      { role: 'assistant', content: first.content },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call-google', content: 'Created.' }] },
+    ],
+  })
+  const body = JSON.parse(String(fetch.mock.calls[1]![1]?.body))
+  expect(body.model).toBe('gemini-3.8-flash')
+  expect(body.messages[2].tool_calls[0]).toMatchObject({
+    id: 'call-google',
+    extra_content: { google: { thought_signature: 'opaque-provider-signature' } },
+  })
+  expect(body.messages[3]).toMatchObject({ role: 'tool', tool_call_id: 'call-google', content: 'Created.' })
+})

@@ -1,10 +1,5 @@
-/**
- * Curated model menus for the BYO providers, shared by server and client the
- * same way CLAUDE_MODELS is (shared/localAgent.ts). Hand-picked rather than
- * fetched from provider catalogs: every entry here has been judged fit for
- * design work, and the `vision` flag is what gates degraded no-screenshot
- * runs, so it must be deliberate, not scraped.
- */
+/** Shared model metadata, the curated OpenRouter roster, and image models.
+ * Connected ChatGPT and direct API-key agent menus are discovered server-side. */
 
 export interface ModelOption {
   id: string
@@ -76,22 +71,6 @@ export const OPENROUTER_MODELS: ModelOption[] = [
 ]
 
 export const DEFAULT_OPENROUTER_MODEL = 'moonshotai/kimi-k2.6'
-
-/** Gemini direct (Google AI Studio API key). */
-export const GEMINI_MODELS: ModelOption[] = [
-  {
-    id: 'gemini-3.1-pro-preview',
-    name: 'Gemini 3.1 Pro',
-    blurb: 'Google’s reasoning flagship — the most thorough.',
-    vision: true,
-  },
-  {
-    id: 'gemini-3.7-flash',
-    name: 'Gemini 3.7 Flash',
-    blurb: 'The everyday workhorse. A good default for design work.',
-    vision: true,
-  },
-]
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.7-flash'
 

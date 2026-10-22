@@ -24,6 +24,7 @@ declare module 'vitest' {
      *  tests/globalSetup.ts; fresh servers copy it instead of replaying the
      *  journal on an empty PGlite (~1s per boot) */
     templateDir: string
+    modelCatalogUrl: string
   }
 }
 
@@ -57,7 +58,16 @@ export function freePort(): Promise<number> {
  * dataDir) to reboot the same database on the same port.
  */
 export function startServer(env: Record<string, string> = {}, reuseDir?: string): Promise<Server> {
-  return boot(env, reuseDir, inject('templateDir'))
+  return boot(
+    {
+      OPENAI_MODELS_URL: `${inject('modelCatalogUrl')}/openai`,
+      ANTHROPIC_MODELS_URL: `${inject('modelCatalogUrl')}/anthropic`,
+      GEMINI_MODELS_URL: `${inject('modelCatalogUrl')}/gemini`,
+      ...env,
+    },
+    reuseDir,
+    inject('templateDir'),
+  )
 }
 
 async function boot(env: Record<string, string>, reuseDir: string | undefined, templateDir?: string): Promise<Server> {

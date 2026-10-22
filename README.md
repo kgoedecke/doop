@@ -253,11 +253,19 @@ Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRoute
 are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
 context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
-Users pick their **model tier** in the composer; Settings manages provider connections and the image-generation model. A connected ChatGPT account
-loads its own live Codex model catalog, refreshed every five minutes and when the window regains
-focus. Only visible models accepting text and screenshots are offered. The composer and model
-selection validation use that same catalog. A temporary discovery failure shows a warning and
-keeps the last fetched list for that account, when available. Other providers retain curated menus.
+Users pick their **model** in the composer; Settings manages provider connections and the
+image-generation model. ChatGPT, OpenAI API-key, Claude API-key and Gemini API-key connections
+load their provider catalogs, cached for five minutes and refreshed by the UI on focus. Only
+models compatible with the agent transport, tools and screenshots are offered. Claude and
+Gemini entries must also support the agent's 32k output budget. OpenAI and Gemini catalogs do
+not describe every capability, so discovery admits reviewed general-purpose model families
+and excludes specialized variants; adding an entirely new family still needs compatibility review.
+The same filtered catalog validates selections and direct API-key runs. A missing or unavailable
+selection prompts the user to choose another model rather than silently changing it. Catalog
+failures show a warning and retain a previous list only for the same credential; authentication
+failures clear it. OpenRouter and local Claude CLI retain their existing menus. Discovery makes
+no billable generation requests. Gemini tool turns preserve Google's required thought signatures.
+OpenAI tool turns preserve encrypted reasoning and assistant phases when replaying response history.
 Discovering new models never changes the user's selected model automatically;
 `DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL` and `DOOP_AGENT_GEMINI_MODEL` only set the
 default they start on. Note that

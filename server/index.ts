@@ -57,9 +57,7 @@ import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentP
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
-import { AGENT_MODELS } from './openaiAgent.ts'
-import { CLAUDE_MODELS } from '../shared/localAgent.ts'
-import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
+import { OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
@@ -736,30 +734,35 @@ app.get('/api/agent-allowance', (req, res) => {
 /* ---- the user's own model account: what keeps the Doop Agent running once
    the free tasks are gone. Tokens live server-side and are never returned. */
 
-/* Disconnected provider previews and API-key menus. A connected ChatGPT
-   account replaces its preview with the live account-specific catalog. */
+/* No invented previews for discovered providers. The active connection
+   supplies its catalog; OpenRouter keeps its curated roster. */
 const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
-  chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'anthropic-key': CLAUDE_MODELS.map((m) => ({ ...m, vision: true })),
+  chatgpt: [],
+  'openai-key': [],
+  'anthropic-key': [],
   'openrouter-key': OPENROUTER_MODELS,
-  'gemini-key': GEMINI_MODELS,
+  'gemini-key': [],
 }
 
 /* Every route that returns an account status returns the SAME shape: the
    client re-renders straight from the response, so dropping the menus on
    a PATCH would collapse the picker until the next reload. */
 async function accountView(userId: string, status: modelAccounts.AccountStatus) {
-  if (status.connected && status.kind === 'chatgpt') {
-    const catalog = await modelAccounts.chatgptModelCatalog(userId).catch(() => ({
+  if (status.connected && status.kind) {
+    const catalog = await modelAccounts.accountModelCatalog(userId, status.kind).catch(() => ({
       models: [] as ModelOption[],
-      warning: 'Reconnect your ChatGPT account to load its model list.',
+      warning: 'Could not load provider models. Retry or reconnect your account.',
     }))
+    const warning =
+      catalog.warning ??
+      (catalog.models.some((model) => model.id === status.model)
+        ? undefined
+        : 'Choose an available model in the composer before starting the agent.')
     return {
       ...status,
       chatgptEnabled: modelAccounts.chatgptConnectEnabled(),
-      menus: { ...MODEL_MENUS, chatgpt: catalog.models },
-      ...(catalog.warning ? { modelCatalogWarning: catalog.warning } : {}),
+      menus: { ...MODEL_MENUS, [status.kind]: catalog.models },
+      ...(warning ? { modelCatalogWarning: warning } : {}),
     }
   }
   return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
