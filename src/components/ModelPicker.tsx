@@ -79,6 +79,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
         </MenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="end" width="lg">
+        {account?.modelCatalogWarning && <DropdownMenuCaption>{account.modelCatalogWarning}</DropdownMenuCaption>}
         {menu.length > 0 ? (
           <>
             <DropdownMenuCaption>Doop Agent model</DropdownMenuCaption>
@@ -93,7 +94,9 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
           </>
         ) : (
           <DropdownMenuCaption className="pb-2 text-ink-soft">
-            No model account connected — the Doop Agent runs on the server’s model when one is set up.
+            {account?.connected
+              ? 'No compatible models are available from this account right now.'
+              : 'No model account connected — the Doop Agent runs on the server’s model when one is set up.'}
           </DropdownMenuCaption>
         )}
         <DropdownMenuItem onSelect={() => navigate('/settings?pane=agent')}>

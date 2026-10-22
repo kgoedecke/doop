@@ -167,7 +167,9 @@ export interface ModelAccountStatus {
   connectedAt?: number
   /** false when the server has switched the ChatGPT flow off */
   chatgptEnabled?: boolean
-  /** the curated menu each provider's picker offers */
+  /** Discovery errors are safe to show; credentials are never returned. */
+  modelCatalogWarning?: string
+  /** The available menu each provider's picker offers. */
   menus?: Record<ModelAccountKind, AgentModelOption[]>
 }
 

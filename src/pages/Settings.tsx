@@ -10,7 +10,7 @@ import { AgentKeys } from '../components/AgentKeys'
 import { Webhooks } from '../components/Webhooks'
 import { AccountMenu } from '../components/DashShell'
 import { railLayout } from '../components/AppRail'
-import { BellIcon, ChevronLeftIcon, KeyIcon, MoonIcon, SparkIcon, UserIcon } from '../components/ui/icons'
+import { BellIcon, ArrowLeftIcon, KeyIcon, MoonIcon, WaypointsIcon, UserIcon } from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { CardDescription, CardHeader, CardTitle, SettingsCard } from '../components/ui/card'
@@ -95,7 +95,7 @@ export function Settings() {
       <DashSidebar variant="rail">
         <DashSidebarBrand />
         <nav className="flex flex-col gap-0.5">
-          <DashNavItem density="rail" icon={<ChevronLeftIcon size="rail" />} onClick={() => navigate(back)}>
+          <DashNavItem density="rail" icon={<ArrowLeftIcon size="rail" />} onClick={() => navigate(back)}>
             {back === '/' ? 'Back to canvases' : 'Back to canvas'}
           </DashNavItem>
         </nav>
@@ -103,7 +103,7 @@ export function Settings() {
         <nav className="flex flex-col gap-0.5">
           <DashNavItem
             density="rail"
-            icon={<SparkIcon size="rail" />}
+            icon={<WaypointsIcon size="rail" />}
             active={pane === 'agent'}
             onClick={() => setPane('agent')}
           >
@@ -150,7 +150,7 @@ export function Settings() {
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare" className="md:hidden">
           <Button variant="ghost" size="bar" onClick={() => navigate(back)}>
-            <ChevronLeftIcon size="rail" /> {back === '/' ? 'Canvases' : 'Canvas'}
+            <ArrowLeftIcon size="rail" /> {back === '/' ? 'Canvases' : 'Canvas'}
           </Button>
           <span className="flex-1" />
           <AccountMenu />
@@ -167,7 +167,7 @@ export function Settings() {
           <Tabs value={pane} onValueChange={(next) => setPane(next as Pane)} className="mt-4 flex md:hidden">
             <TabsList variant="card">
               <TabsTrigger value="agent">
-                <SparkIcon size="rail" /> Doop Agent
+                <WaypointsIcon size="rail" /> Doop Agent
               </TabsTrigger>
               <TabsTrigger value="keys">
                 <KeyIcon size="rail" /> Agent keys

@@ -14,7 +14,7 @@ import { Button } from './ui/button'
 import { CodeBlock } from './ui/code-block'
 import { Disclosure } from './ui/collapsible'
 import { Dot } from './ui/dot'
-import { ChevronLeftIcon, PuzzleIcon } from './ui/icons'
+import { ArrowLeftIcon, PuzzleIcon } from './ui/icons'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { barPrimaryBtn } from './TopBar'
 import { cn } from '@/lib/utils'
@@ -485,7 +485,7 @@ function AgentSteps({
           className="inline-flex items-center gap-1 rounded-sm px-2 py-2 text-xs font-medium text-ink-soft hover:text-ink"
           onClick={onBack}
         >
-          <ChevronLeftIcon width={14} height={14} />
+          <ArrowLeftIcon width={14} height={14} />
           Back
         </button>
         <Button onClick={onClose}>Done</Button>

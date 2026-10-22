@@ -8,8 +8,10 @@ import {
   ModelUnavailableError,
   responseError,
   runAzureTurn,
+  runOpenAiTurn,
 } from '../server/openaiAgent.ts'
 import { parseAuthCode } from '../server/modelAccounts.ts'
+import { getChatgptModelCatalog } from '../server/chatgptModels.ts'
 
 /**
  * The Doop Agent loop is written against Anthropic's message shape. When a run
@@ -150,6 +152,144 @@ describe('OpenAI Responses output -> Anthropic blocks', () => {
       output: [{ type: 'function_call', call_id: 'call_5', name: 'set_status', arguments: '{oops' }],
     })
     expect(result.content).toEqual([{ type: 'tool_use', id: 'call_5', name: 'set_status', input: {} }])
+  })
+})
+
+describe('ChatGPT model discovery', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('sends the selected discovered model to subscription inference without a static alias', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          `data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done' }] }] } })}\n\n`,
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        ),
+      )
+    vi.stubGlobal('fetch', fetch)
+    const result = await runOpenAiTurn(
+      {
+        userId: 'selected-catalog-model',
+        kind: 'chatgpt',
+        accessToken: 'private-token',
+        connectedAt: 1,
+        model: 'future-model',
+      },
+      { system: 'Check the canvas.', messages: [{ role: 'user', content: 'Confirm.' }], tools: [], maxTokens: 128 },
+    )
+    expect(result.content).toEqual([{ type: 'text', text: 'Done' }])
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toMatchObject({ model: 'future-model' })
+  })
+
+  it('discovers new visible screenshot-capable models and shares concurrent requests', async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          models: [
+            {
+              slug: 'future-model',
+              display_name: 'Future model',
+              description: 'From the account catalog',
+              visibility: 'list',
+              input_modalities: ['text', 'image'],
+            },
+            { slug: 'hidden-model', display_name: 'Hidden', visibility: 'hide', input_modalities: ['text', 'image'] },
+            { slug: 'text-only', display_name: 'Text only', visibility: 'list', input_modalities: ['text'] },
+            { slug: 'invalid' },
+          ],
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const account = {
+      userId: 'catalog-concurrent',
+      kind: 'chatgpt' as const,
+      accessToken: 'private-token',
+      accountId: 'account-a',
+      connectedAt: 1,
+    }
+    const [first, second] = await Promise.all([getChatgptModelCatalog(account), getChatgptModelCatalog(account)])
+    expect(first).toEqual({
+      models: [{ id: 'future-model', name: 'Future model', blurb: 'From the account catalog', vision: true }],
+    })
+    expect(second).toEqual(first)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(first)).not.toContain('private-token')
+    const [url, options] = fetch.mock.calls[0]!
+    expect(new URL(String(url)).pathname).toBe('/backend-api/codex/models')
+    expect(options.headers).toMatchObject({ Authorization: 'Bearer private-token', 'chatgpt-account-id': 'account-a' })
+    expect(options.redirect).toBe('error')
+  })
+
+  it('keeps the last catalog during a transient failure but never carries it to another account', async () => {
+    let now = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            models: [
+              { slug: 'model-a', display_name: 'Model A', visibility: 'list', input_modalities: ['text', 'image'] },
+            ],
+          }),
+        ),
+      )
+      .mockRejectedValue(new Error('provider unavailable'))
+    vi.stubGlobal('fetch', fetch)
+    const account = {
+      userId: 'catalog-stale',
+      kind: 'chatgpt' as const,
+      accessToken: 'token-a',
+      accountId: 'account-a',
+      connectedAt: 1,
+    }
+    const live = await getChatgptModelCatalog(account)
+    now += 5 * 60_000 + 1
+    const stale = await getChatgptModelCatalog(account)
+    expect(stale.models).toEqual(live.models)
+    expect(stale.warning).toContain('last fetched list')
+    await getChatgptModelCatalog(account)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    const changed = await getChatgptModelCatalog({ ...account, accountId: 'account-b', accessToken: 'token-b' })
+    expect(changed.models).toEqual([])
+    expect(changed.warning).toContain('Could not load')
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
+  it('removes cached choices when the account credentials are rejected', async () => {
+    let now = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              models: [
+                { slug: 'model-a', display_name: 'Model A', visibility: 'list', input_modalities: ['text', 'image'] },
+              ],
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(new Response('', { status: 401 })),
+    )
+    const account = {
+      userId: 'catalog-rejected',
+      kind: 'chatgpt' as const,
+      accessToken: 'rejected-token',
+      connectedAt: 1,
+    }
+    expect((await getChatgptModelCatalog(account)).models).toHaveLength(1)
+    now += 5 * 60_000 + 1
+    const rejected = await getChatgptModelCatalog(account)
+    expect(rejected.models).toEqual([])
+    expect(rejected.warning).toContain('Reconnect')
   })
 })
 

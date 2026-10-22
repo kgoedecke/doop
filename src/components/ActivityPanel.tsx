@@ -17,7 +17,7 @@ import {
   PanelTabsRoot,
 } from './ui/panel'
 import { Button } from './ui/button'
-import { BookOpenIcon, CheckIcon, ChevronDownIcon, CommentIcon, PulseIcon, SparkIcon } from './ui/icons'
+import { BookOpenIcon, CheckIcon, ChevronDownIcon, CommentIcon, PulseIcon, WaypointsIcon } from './ui/icons'
 import { DotMatrix } from './ui/dot-matrix'
 import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
@@ -87,7 +87,7 @@ export function ActivityPanel({
       <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)}>
         <PanelHeader className="pl-2">
           <PanelTabs aria-label="Agents panel">
-            <PanelIconTab value="tasks" icon={<SparkIcon />} title="Agents">
+            <PanelIconTab value="tasks" icon={<WaypointsIcon />} title="Agents">
               Agents
               {working > 0 && <em className="ml-[7px] text-[11px] font-normal not-italic text-ink-faint">{working}</em>}
             </PanelIconTab>

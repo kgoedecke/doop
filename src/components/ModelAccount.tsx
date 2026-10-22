@@ -44,7 +44,15 @@ export function useModelAccount(): {
   const refresh = useCallback(() => {
     api.modelAccount().then(setAccount, () => {})
   }, [])
-  useEffect(refresh, [refresh])
+  useEffect(() => {
+    refresh()
+    const timer = window.setInterval(refresh, 5 * 60_000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [refresh])
   return { account, refresh, set: setAccount }
 }
 
@@ -670,6 +678,11 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
       {/* the browser cannot run the local CLI, so the plan closes the list as a pointer to the desktop app */}
       {!desktop && <LocalClaudeRow />}
+      {account.modelCatalogWarning && (
+        <p role="status" className="mt-[10px] text-body text-accent-ink">
+          {account.modelCatalogWarning}
+        </p>
+      )}
       {error && <p className="mt-[10px] text-body text-accent-ink">{error}</p>}
     </div>
   )

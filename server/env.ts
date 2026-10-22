@@ -134,6 +134,8 @@ const schema = {
   CHATGPT_AUTH_USER_AGENT: str({ default: 'doop/0.1 (+https://doop.design)' }),
   CHATGPT_DEVICE_URL: str({ default: undefined }),
   CHATGPT_RESPONSES_URL: str({ default: 'https://chatgpt.com/backend-api/codex/responses' }),
+  CHATGPT_MODELS_URL: str({ default: 'https://chatgpt.com/backend-api/codex/models' }),
+  CHATGPT_MODELS_CLIENT_VERSION: str({ default: '0.163.0' }),
   CHATGPT_ORIGINATOR: str({ default: 'codex_cli_rs' }),
   OPENAI_RESPONSES_URL: str({ default: 'https://api.openai.com/v1/responses' }),
   OPENROUTER_CHAT_URL: str({ default: 'https://openrouter.ai/api/v1/chat/completions' }),

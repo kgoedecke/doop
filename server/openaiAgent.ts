@@ -29,13 +29,11 @@ import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
 export const CHATGPT_URL = env.CHATGPT_RESPONSES_URL
 export const OPENAI_URL = env.OPENAI_RESPONSES_URL
 /**
- * The OpenAI tiers a ChatGPT sign-in and an API key can both reach: GPT-6
- * Astra (the September 2026 flagship — on Codex it needs a Plus plan or
- * better, and OpenAI is still rolling it out account by account) on top of
- * the three GPT-5.6 tiers. Users pick one in Settings — they are paying for
- * it, and the tiers trade real money against real quality — so this list is
- * the menu, not a detail. Ordered best-first; the default stays on Terra:
- * Astra bills several times Sol per token, which is a choice to opt into.
+ * Curated OpenAI API-key choices and the disconnected ChatGPT preview.
+ * Connected ChatGPT accounts discover their own menu in chatgptModels.ts;
+ * this static list does not restrict those accounts' model selections.
+ * Keep the default on Terra so discovering a new tier never opts a user
+ * into a different model or price automatically.
  */
 export const AGENT_MODELS = [
   { id: 'gpt-6-astra', name: 'GPT-6 Astra', blurb: 'Newest flagship — the sharpest reasoning, at the highest price' },

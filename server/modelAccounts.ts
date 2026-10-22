@@ -1,12 +1,13 @@
 import { env } from './env.ts'
 import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
 import { CLAUDE_MODEL_IDS, normalizeClaudeModel } from '../shared/localAgent.ts'
 import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import { isKnownModel, modelFor } from './openaiAgent.ts'
+import { getChatgptModelCatalog, type ChatgptModelCatalog } from './chatgptModels.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -138,8 +139,10 @@ const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
 
 /* per-kind model policy: how a stored (possibly unset or stale) model id
    resolves to the one that will run, and which ids the picker may set */
-const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKnown(model: string): boolean }> = {
-  chatgpt: { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
+const MODEL_POLICY: Record<
+  Exclude<AccountKind, 'chatgpt'>,
+  { resolve(model?: string): string; isKnown(model: string): boolean }
+> = {
   'openai-key': { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
   'anthropic-key': {
     resolve: normalizeClaudeModel,
@@ -156,6 +159,7 @@ const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKno
 }
 
 export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
+  if (account.kind === 'chatgpt') return modelFor(account)
   return MODEL_POLICY[account.kind].resolve(account.model)
 }
 
@@ -173,12 +177,34 @@ export function accountVisionFor(account: Pick<ModelAccount, 'kind' | 'model'>):
   return account.kind !== 'openrouter-key'
 }
 
-/** Change which model tier this account runs on. */
+/** Resolve the connected account's discovery catalog without exposing tokens. */
+export async function chatgptModelCatalog(userId: string): Promise<ChatgptModelCatalog> {
+  const account = await getAccount(userId)
+  if (!account || account.kind !== 'chatgpt') return { models: [] }
+  return getChatgptModelCatalog(await withFreshToken(account))
+}
+
+/** Change only the model columns, so catalog/token refreshes cannot overwrite
+ * credentials or resurrect a connection changed while discovery was in flight. */
 export async function setAccountModel(userId: string, model: string): Promise<AccountStatus> {
   const account = await getAccount(userId)
   if (!account) throw new Error('no model account connected')
-  if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
-  await save({ ...account, model })
+  if (account.kind === 'chatgpt') {
+    const catalog = await getChatgptModelCatalog(await withFreshToken(account))
+    if (!catalog.models.some((option) => option.id === model)) throw new Error(catalog.warning ?? 'unknown model')
+  } else if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
+  const updated = await db
+    .update(modelAccounts)
+    .set({ model, updatedAt: Date.now() })
+    .where(
+      and(
+        eq(modelAccounts.userId, userId),
+        eq(modelAccounts.kind, account.kind),
+        eq(modelAccounts.connectedAt, account.connectedAt),
+      ),
+    )
+    .returning({ userId: modelAccounts.userId })
+  if (!updated.length) throw new Error('Model account changed. Refresh Settings and retry.')
   return getStatus(userId)
 }
 

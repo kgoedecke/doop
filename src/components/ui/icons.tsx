@@ -1,6 +1,5 @@
 /** Doop's UI icon set: Lucide (ISC), drawn on a 24 grid with round caps and
- *  joins at a 1.15 stroke — the hairline weight of the white system, so a
- *  glyph sits as quietly as the 1px rings around it.
+ *  joins at a 2 stroke for clear, consistent outlines.
  *
  *  Every icon is re-exported under the name the app already uses, wrapped to
  *  default to 16px, the size inside a button. `size` picks a named step from
@@ -103,7 +102,7 @@ import {
   WrapText,
   SquareDashed,
   Shield,
-  Sparkles,
+  Waypoints,
   Square,
   Sun,
   Trash2,
@@ -119,7 +118,7 @@ import {
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
 
 /** The stroke every chrome glyph is drawn at, in the icon's 24-unit grid. */
-export const ICON_STROKE = 1.15
+export const ICON_STROKE = 2
 
 /** The sizes a glyph is drawn at, by where it sits: 14px beside a rail row's,
  *  a menu item's or a tab's 12.5px label (a hair under its cap height), 16px
@@ -210,7 +209,7 @@ export const ExportIcon = icon(ExternalLink)
 export const PulseIcon = icon(Activity)
 export const BellIcon = icon(Bell)
 export const ChatIcon = icon(MessageCircle)
-export const SparkIcon = icon(Sparkles)
+export const WaypointsIcon = icon(Waypoints)
 export const SearchIcon = icon(Search)
 export const PlusIcon = icon(Plus)
 export const CollapseAllIcon = icon(ChevronsDownUp)
@@ -230,7 +229,16 @@ export const VectorIcon = icon(PenTool)
 export const BookmarkIcon = icon(Bookmark)
 export const PlayIcon = icon(Play)
 export const ArrowUpIcon = icon(ArrowUp)
-export const ArrowLeftIcon = icon(ArrowLeft)
+/** Align the back arrow with the visible text, which sits above its line-box center. */
+export function ArrowLeftIcon({ style, ...props }: IconProps) {
+  return (
+    <ArrowLeft
+      strokeWidth={ICON_STROKE}
+      aria-hidden
+      {...sized({ ...props, style: { translate: '0 -1px', ...style } })}
+    />
+  )
+}
 export const ArrowRightIcon = icon(ArrowRight)
 export const ChevronLeftIcon = icon(ChevronLeft)
 export const GridIcon = icon(LayoutGrid)

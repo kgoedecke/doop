@@ -253,10 +253,12 @@ Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRoute
 are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
 context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
-Either way the user picks their **model tier** in Settings from that provider's curated menu — on
-OpenAI, `gpt-6-astra` (the newest flagship; on a ChatGPT subscription it needs Plus or better and
-OpenAI is still rolling it out per account), `gpt-5.6-sol` (flagship), `gpt-5.6-terra` (the default
-workhorse) or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the choice is theirs;
+Users pick their **model tier** in Settings or the canvas composer. A connected ChatGPT account
+loads its own live Codex model catalog, refreshed every five minutes and when the window regains
+focus. Only visible models accepting text and screenshots are offered. Both pickers and model
+selection validation use that same catalog. A temporary discovery failure shows a warning and
+keeps the last fetched list for that account, when available. Other providers retain curated menus.
+Discovering new models never changes the user's selected model automatically;
 `DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL` and `DOOP_AGENT_GEMINI_MODEL` only set the
 default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so

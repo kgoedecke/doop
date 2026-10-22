@@ -736,8 +736,8 @@ app.get('/api/agent-allowance', (req, res) => {
 /* ---- the user's own model account: what keeps the Doop Agent running once
    the free tasks are gone. Tokens live server-side and are never returned. */
 
-/* one curated menu per account kind, with the vision flag the picker renders;
-   the pre-roster providers all see images */
+/* Disconnected provider previews and API-key menus. A connected ChatGPT
+   account replaces its preview with the live account-specific catalog. */
 const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
   chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
   'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
@@ -749,21 +749,35 @@ const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
 /* Every route that returns an account status returns the SAME shape: the
    client re-renders straight from the response, so dropping the menus on
    a PATCH would collapse the picker until the next reload. */
-function accountView(status: modelAccounts.AccountStatus) {
+async function accountView(userId: string, status: modelAccounts.AccountStatus) {
+  if (status.connected && status.kind === 'chatgpt') {
+    const catalog = await modelAccounts.chatgptModelCatalog(userId).catch(() => ({
+      models: [] as ModelOption[],
+      warning: 'Reconnect your ChatGPT account to load its model list.',
+    }))
+    return {
+      ...status,
+      chatgptEnabled: modelAccounts.chatgptConnectEnabled(),
+      menus: { ...MODEL_MENUS, chatgpt: catalog.models },
+      ...(catalog.warning ? { modelCatalogWarning: catalog.warning } : {}),
+    }
+  }
   return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
 }
 
 app.get('/api/model-account', (req, res) => {
   modelAccounts
     .getStatus(req.user!.id)
-    .then((status) => res.json(accountView(status)))
+    .then(async (status) => res.json(await accountView(req.user!.id, status)))
     .catch(() => res.status(500).json({ error: 'account status unavailable' }))
 })
 
 /* which model tier the connected account runs on */
 app.patch('/api/model-account', async (req, res) => {
   try {
-    res.json(accountView(await modelAccounts.setAccountModel(req.user!.id, String(req.body?.model ?? ''))))
+    res.json(
+      await accountView(req.user!.id, await modelAccounts.setAccountModel(req.user!.id, String(req.body?.model ?? ''))),
+    )
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the model' })
   }
@@ -797,7 +811,12 @@ app.post('/api/model-account/chatgpt', async (req, res) => {
     return res.status(404).json({ error: 'ChatGPT connections are disabled on this server' })
   }
   try {
-    res.json(accountView(await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? ''))))
+    res.json(
+      await accountView(
+        req.user!.id,
+        await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? '')),
+      ),
+    )
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not connect that ChatGPT account' })
   }
@@ -827,7 +846,9 @@ app.delete('/api/model-account/chatgpt/device', (req, res) => {
 
 app.post('/api/model-account/openai-key', async (req, res) => {
   try {
-    res.json(accountView(await modelAccounts.connectApiKey(req.user!.id, String(req.body?.apiKey ?? ''))))
+    res.json(
+      await accountView(req.user!.id, await modelAccounts.connectApiKey(req.user!.id, String(req.body?.apiKey ?? ''))),
+    )
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
   }
@@ -841,7 +862,7 @@ app.post('/api/model-account/anthropic-key', async (req, res) => {
       const preference = await getLocalAgentPreference(req.user!.id)
       await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
     }
-    res.json(accountView(status))
+    res.json(await accountView(req.user!.id, status))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
   }
@@ -859,7 +880,7 @@ for (const kind of ['openrouter-key', 'gemini-key'] as const) {
         const preference = await getLocalAgentPreference(req.user!.id)
         await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
       }
-      res.json(accountView(status))
+      res.json(await accountView(req.user!.id, status))
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
     }
@@ -868,7 +889,7 @@ for (const kind of ['openrouter-key', 'gemini-key'] as const) {
 
 app.delete('/api/model-account', async (req, res) => {
   await modelAccounts.disconnect(req.user!.id)
-  res.json(accountView({ connected: false }))
+  res.json(await accountView(req.user!.id, { connected: false }))
 })
 
 /* ---- which image model generate_image draws with (the shared registry;
