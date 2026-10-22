@@ -30,7 +30,12 @@ import { useCanvasDrawing } from './CanvasDrawing'
 import { layoutZoomFor } from '../lib/layoutZoom'
 
 const MIN_ZOOM = 0.08
-const MAX_ZOOM = 3
+/* The settled world is laid out at up to this zoom too (layoutZoomFor), so
+   the desktop app stays sharp all the way in. That costs little: WebKit and
+   Chromium both tile what is on screen, so backing memory follows the
+   viewport rather than the zoom, and frame documents never re-lay out (each
+   iframe undoes the zoom). Mirrored by FOLLOW_MAX_ZOOM. */
+const MAX_ZOOM = 8
 
 /* The Comment tool's cursor wins over everything under the stage — frames
    included, like the Hand tool's grab — except inside the comment UI itself
@@ -193,8 +198,15 @@ export function Stage({
     layoutZoomRef.current = layoutZoom
     const world = worldRef.current
     if (!world) return
+    /* a new zoom recomputes every length inside the world: anything with a
+       transition (a peer's cursor glides between positions) would animate
+       from its old-zoom value while the world itself snaps, so it jumped
+       off its spot and slid back. Transitions are off for this one change. */
+    world.dataset.rezoom = ''
     world.style.zoom = String(layoutZoom)
     world.style.transform = worldTransform(useStore.getState().viewport, layoutZoom)
+    void world.offsetWidth
+    delete world.dataset.rezoom
   }, [layoutZoom])
 
   /* following a peer: whenever their camera (or, lacking one, their cursor)
@@ -836,7 +848,10 @@ export function Stage({
             />
             {/* `world` is likewise a behaviour hook: pan hit-testing checks
             classList.contains('world') to tell background from frame */}
-            <div className="world absolute left-0 top-0 origin-top-left will-change-transform" ref={worldRef}>
+            <div
+              className="world absolute left-0 top-0 origin-top-left will-change-transform data-rezoom:**:transition-none!"
+              ref={worldRef}
+            >
               {canvas?.frames.map((f) =>
                 f.hidden ? (
                   <HiddenFrameView key={f.id} frame={f} />

@@ -71,7 +71,7 @@
       /** settle the canvas at zoom k: the world takes it as its layout zoom
           and both iframes undo it, the way Stage and FrameView do */
       window.zoom = async (zoom) => {
-        const k = layoutZoomFor(zoom, 3)
+        const k = layoutZoomFor(zoom, 8)
         world.style.zoom = String(k)
         for (const el of [frame, probe]) {
           el.style.zoom = String(counterZoom(k))

@@ -10,6 +10,8 @@ declare global {
       seed: (canvas: Canvas) => void
       comments: (comments: ElementComment[]) => void
       viewport: (viewport: { x: number; y: number; zoom: number }) => void
+      camera: () => { x: number; y: number; zoom: number }
+      peer: (cursor: { x: number; y: number }) => void
       page: (id: string) => void
       state: () => { frames: Frame[]; tool: string; selectedElement: { frameId: string; selector: string } | null }
       undo: () => Promise<void>
@@ -715,6 +717,36 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     const zoomed = await visibleDrawing('Frame')
     expect(zoomed.width).toBeCloseTo(initial.width * 1.5, 1)
     expect(zoomed.height).toBeCloseTo(initial.height * 1.5, 1)
+  })
+
+  it('keeps a peer cursor on its spot while the world switches layout zoom', async () => {
+    await page.evaluate(() => {
+      window.drawingHarness.peer({ x: 200, y: 150 })
+      window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 })
+    })
+    await page.waitForFunction(() => (document.querySelector('.world') as HTMLElement).style.zoom === '1')
+    // sample every frame across the switch: the cursor's transition used to
+    // replay its translate from the old zoom while the world snapped
+    const maxError = await page.evaluate(async () => {
+      const world = document.querySelector<HTMLElement>('.world')!
+      const stage = world.parentElement!.getBoundingClientRect()
+      const cursor = () => document.querySelector('path[d^="M1 1 L16"]')!.closest('div')!
+      let worst = 0
+      let sampling = true
+      const tick = () => {
+        if (!sampling) return
+        const vp = window.drawingHarness.camera()
+        worst = Math.max(worst, Math.abs(cursor().getBoundingClientRect().left - stage.left - (vp.x + 200 * vp.zoom)))
+        requestAnimationFrame(tick)
+      }
+      tick()
+      window.drawingHarness.viewport({ x: -50, y: 0, zoom: 2.4 })
+      while (world.style.zoom !== '2.4') await new Promise((r) => requestAnimationFrame(r))
+      await new Promise((r) => setTimeout(r, 150))
+      sampling = false
+      return worst
+    })
+    expect(maxError).toBeLessThan(1)
   })
 
   it('grabs the visibly top drawing through stacking contexts instead of reverse DOM order', async () => {
