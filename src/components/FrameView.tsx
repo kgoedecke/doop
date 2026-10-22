@@ -663,13 +663,16 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         /* rect refreshes for the same element keep the composer open;
            switching elements (or deselecting) closes it */
-        if ((hit?.selector ?? null) !== activeSelRef.current) setComposing(false)
+        const moved = (hit?.selector ?? null) !== activeSelRef.current
+        if (moved) setComposing(false)
         activeSelRef.current = hit?.selector ?? null
         setActiveHit(hit)
         /* Editing retains an element selection for its Design/HTML panel.
            Moving the caret to another text element updates that selection;
-           leaving edit mode keeps the last element selected. */
-        if (hit) setProbe(hit)
+           leaving edit mode keeps the last element selected. A refresh for
+           the same element (a save while editing) only updates its outline,
+           so it can't take back a pick made in Layers meanwhile. */
+        if (hit) setProbe((p) => (moved || p?.selector === hit.selector ? hit : p))
       }
       if (ev.data?.type === 'doop:code-result' && ev.data.reqId === codeReq.current) {
         setCodeView(typeof ev.data.html === 'string' ? ev.data.html : null)
