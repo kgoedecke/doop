@@ -140,6 +140,10 @@ export function BarPill({ className, ...props }: React.ComponentProps<'div'>) {
   )
 }
 
+/** The brand-filled BarPill (Connect AI). The ring's faint edge is lost
+ *  against the blue, so a light hairline inside the fill draws it instead;
+ *  inset-ring stacks with the ring's drop rather than replacing it. */
+export const barPillAccent = 'bg-blue inset-ring inset-ring-white/8'
 /** A quiet text-and-icon action inside a BarPill. */
 export const barPillBtn =
   'h-[30px] gap-[7px] rounded-[8px] px-2.5 text-[12px] font-medium text-ink hover:bg-paper-deep hover:text-ink [&_svg]:text-ink-soft'

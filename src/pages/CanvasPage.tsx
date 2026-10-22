@@ -21,6 +21,7 @@ import {
   TopBarTitle,
   barIconBtn,
   barPillBtn,
+  barPillAccent,
   barPillAccentBtn,
   barPillIconBtn,
 } from '../components/TopBar'
@@ -529,9 +530,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             </Tooltip>
           </BarPill>
           {/* The accent pill opens the MCP connection modal. */}
-          <BarPill className="bg-blue">
+          <BarPill className={barPillAccent}>
             <Button variant="bare" className={barPillAccentBtn} onClick={openConnect}>
-              <PlusIcon className="size-3.5" />
+              <PlusIcon className="size-4" />
               Connect AI
             </Button>
           </BarPill>
@@ -546,9 +547,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <PeerAvatars others={others} />
             </span>
           </div>
-          <BarPill className="bg-blue">
+          <BarPill className={barPillAccent}>
             <Button variant="bare" className={barPillAccentBtn} onClick={openConnect}>
-              <PlusIcon className="size-3.5" />
+              <PlusIcon className="size-4" />
               <span className="max-sm:hidden">Connect AI</span>
               <span className="sm:hidden">AI</span>
             </Button>
