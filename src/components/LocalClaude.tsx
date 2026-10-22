@@ -11,12 +11,11 @@ import {
   selectLocalAgent,
   useLocalAgent,
 } from '../lib/localAgent'
-import { CLAUDE_MODELS, normalizeClaudeModel, type ClaudeModel } from '../../shared/localAgent'
+import { normalizeClaudeModel } from '../../shared/localAgent'
 import { Button } from './ui/button'
 import { Disclosure } from './ui/collapsible'
 import { AgentIcon } from './AgentIcon'
-import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
-import { CheckIcon, DesktopIcon, DownloadIcon } from './ui/icons'
+import { DesktopIcon, DownloadIcon } from './ui/icons'
 import { cn } from '@/lib/utils'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
 
@@ -43,13 +42,6 @@ function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
           Use your Claude subscription locally.
         </p>
-        <div className="mt-[18px] flex flex-wrap gap-[9px]">
-          {CLAUDE_MODELS.map((model) => (
-            <ToggleChip key={model.id} state="idle" className="bg-paper-deep text-ink-faint opacity-100">
-              {model.name}
-            </ToggleChip>
-          ))}
-        </div>
         <div className="mt-[13px] flex items-center justify-between gap-5 max-md:flex-col max-md:items-start max-md:gap-2">
           <p className="text-[13px] text-ink-faint">
             {active ? 'Waiting for a connected desktop.' : 'Use this plan in the Doop desktop app.'}
@@ -101,8 +93,7 @@ export function LocalClaudeRow() {
   const connected = !!native?.connected && !!native?.enabled
   const supported = hasLocalClaude()
   const selectedModel = normalizeClaudeModel(preference?.model)
-  const selectedBlurb = CLAUDE_MODELS.find((model) => model.id === selectedModel)?.blurb
-  const choose = (model: ClaudeModel = selectedModel) =>
+  const choose = () =>
     act(async () => {
       if (!userId) return
       if (!active || !connected) {
@@ -110,7 +101,7 @@ export function LocalClaudeRow() {
         if (!current?.installed) throw new Error('Install Claude Code to connect.')
         if (!current.connected) throw new Error('Sign in to Claude Code to connect.')
       }
-      await selectLocalAgent(userId, { enabled: true, model })
+      await selectLocalAgent(userId, { enabled: true, model: selectedModel })
     })
 
   if (!isDesktopShell()) return <DesktopOnlyClaudeRow active={active} />
@@ -149,31 +140,6 @@ export function LocalClaudeRow() {
           </dl>
         )}
         <div className={actionsRow}>
-          {connected ? (
-            <ToggleChipGroup
-              aria-label="Claude model"
-              value={selectedModel}
-              disabled={busy || running}
-              onValueChange={(model) => choose(model as ClaudeModel)}
-            >
-              {CLAUDE_MODELS.map((model) => (
-                <ToggleChipItem key={model.id} value={model.id} title={model.blurb}>
-                  {model.id === selectedModel && (
-                    <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
-                  )}
-                  {model.name}
-                </ToggleChipItem>
-              ))}
-            </ToggleChipGroup>
-          ) : (
-            <div className="flex flex-wrap gap-[9px]">
-              {CLAUDE_MODELS.map((model) => (
-                <ToggleChip key={model.id} state="idle">
-                  {model.name}
-                </ToggleChip>
-              ))}
-            </div>
-          )}
           {supported && (
             <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
               {native && !native.installed && canInstallClaude() && (
@@ -238,7 +204,6 @@ export function LocalClaudeRow() {
             </div>
           )}
         </div>
-        {connected && <p className="mt-[10px] text-[13px] text-ink-faint">{selectedBlurb}</p>}
         {!supported && <p className="mt-[10px] text-[13px] text-ink-faint">Update Doop to connect Claude.</p>}
         {supported && native && !native.installed && (
           <p className="mt-[10px] text-[13px] text-ink-faint">

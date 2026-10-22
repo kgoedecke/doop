@@ -253,9 +253,9 @@ Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRoute
 are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
 context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
-Users pick their **model tier** in Settings or the canvas composer. A connected ChatGPT account
+Users pick their **model tier** in the composer; Settings manages provider connections and the image-generation model. A connected ChatGPT account
 loads its own live Codex model catalog, refreshed every five minutes and when the window regains
-focus. Only visible models accepting text and screenshots are offered. Both pickers and model
+focus. Only visible models accepting text and screenshots are offered. The composer and model
 selection validation use that same catalog. A temporary discovery failure shows a warning and
 keeps the last fetched list for that account, when available. Other providers retain curated menus.
 Discovering new models never changes the user's selected model automatically;
@@ -309,7 +309,7 @@ own agent over MCP.
 | `AZURE_OPENAI_REASONING_EFFORT` | _unset_                     | Reasoning effort on Azure runs; unset sends none (non-reasoning-safe)                |
 | `RESIDENT_TASK_LIMIT`           | `0`                         | Free Doop Agent tasks per account; `0` means a connected account from the first task |
 | `DOOP_AGENT_MODEL`              | `claude-opus-5`             | Model for the Doop Agent on the server's Anthropic key                               |
-| `DOOP_AGENT_OPENAI_MODEL`       | `gpt-5.6-terra`             | Default tier on a user's account; each user can pick another in Settings             |
+| `DOOP_AGENT_OPENAI_MODEL`       | `gpt-5.6-terra`             | Default tier on a user's account; each user can pick another in the composer         |
 | `DOOP_AGENT_OPENROUTER_MODEL`   | `moonshotai/kimi-k2.6`      | Default model on a connected OpenRouter key                                          |
 | `DOOP_AGENT_GEMINI_MODEL`       | `gemini-3.7-flash`          | Default model on a connected Gemini key                                              |
 | `CHATGPT_CONNECT_DISABLED`      | _unset_                     | `1` hides the ChatGPT flow, leaving the API-key path                                 |

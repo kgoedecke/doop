@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ModelAccountKind } from '../lib/api'
+import type { AgentModelOption, ModelAccountKind } from '../lib/api'
 import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { navigate } from '../App'
@@ -7,6 +7,9 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { DoopMark } from './Logo'
 import { useModelAccount } from './ModelAccount'
+import { authClient } from '../lib/auth'
+import { hasLocalClaude, selectLocalAgent, useLocalAgent } from '../lib/localAgent'
+import { CLAUDE_MODELS, normalizeClaudeModel } from '../../shared/localAgent'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -26,27 +29,31 @@ const PROVIDER_MARK: Partial<Record<ModelAccountKind, string>> = {
   'anthropic-key': 'claude',
 }
 
-/**
- * The model the Doop Agent runs on, as a quiet dropdown beside the
- * composer's send button. It is the same per-account choice Settings → Doop
- * Agent makes (PATCH /api/model-account), offered from the connected
- * provider's curated menu. With no account connected there is nothing to
- * choose between, so it says so and links to Settings.
- */
+/** Choose the active provider's model in the composer; Settings manages connections. */
 export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const { account, set, refresh } = useModelAccount()
   const [busy, setBusy] = useState(false)
+  const { data: session } = authClient.useSession()
+  const { preference, running } = useLocalAgent()
+  const local = preference?.enabled ?? false
+  const selectedModel = local ? normalizeClaudeModel(preference?.model) : account?.model
   const kind = account?.connected ? account.kind : undefined
-  const menu = (kind && account?.menus?.[kind]) ?? []
-  const current = menu.find((m) => m.id === account?.model)
+  const menu: AgentModelOption[] = local ? CLAUDE_MODELS : ((kind && account?.menus?.[kind]) ?? [])
+  const current = menu.find((m) => m.id === selectedModel)
   const label = current?.name ?? (account?.connected ? (account.model ?? 'Model') : 'Doop Agent')
-  const mark = kind ? PROVIDER_MARK[kind] : undefined
+  const mark = local ? 'claude' : kind ? PROVIDER_MARK[kind] : undefined
 
   async function pick(model: string) {
-    if (model === account?.model) return
+    if (model === selectedModel) return
     setBusy(true)
     try {
-      set(await api.setAgentModel(model))
+      if (local) {
+        const option = CLAUDE_MODELS.find((entry) => entry.id === model)
+        if (!option || !session?.user.id) return
+        await selectLocalAgent(session.user.id, { enabled: true, model: option.id })
+      } else {
+        set(await api.setAgentModel(model))
+      }
       posthog.capture('agent_model_changed', { model, via: 'composer' })
     } catch (e) {
       console.error(e)
@@ -61,9 +68,9 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
       <DropdownMenuTrigger asChild>
         <MenuButton
           variant="quiet"
-          disabled={disabled || busy || !account}
+          disabled={disabled || busy || !account || (local && (running || !hasLocalClaude() || !session?.user.id))}
           aria-label={`Model: ${label}`}
-          className={cn('min-w-0 gap-[5px]', busy && 'animate-[stream-pulse_1.2s_ease-in-out_infinite]')}
+          className={cn('min-w-0 flex-initial gap-[5px]', busy && 'animate-[stream-pulse_1.2s_ease-in-out_infinite]')}
           icon={
             <span className="grid size-3 flex-none place-items-center">
               {mark ? (
@@ -79,13 +86,23 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
         </MenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="end" width="lg">
-        {account?.modelCatalogWarning && <DropdownMenuCaption>{account.modelCatalogWarning}</DropdownMenuCaption>}
+        {!local && account?.modelCatalogWarning && (
+          <DropdownMenuCaption>{account.modelCatalogWarning}</DropdownMenuCaption>
+        )}
         {menu.length > 0 ? (
           <>
             <DropdownMenuCaption>Doop Agent model</DropdownMenuCaption>
-            <DropdownMenuRadioGroup value={account?.model ?? ''} onValueChange={(model) => void pick(model)}>
+            <DropdownMenuRadioGroup value={selectedModel ?? ''} onValueChange={(model) => void pick(model)}>
               {menu.map((m) => (
-                <DropdownMenuRadioItem key={m.id} value={m.id} description={m.blurb}>
+                <DropdownMenuRadioItem
+                  key={m.id}
+                  value={m.id}
+                  description={
+                    m.vision === false
+                      ? `${m.blurb} Text-only: this model can’t see screenshots, so designs aren’t visually reviewed.`
+                      : m.blurb
+                  }
+                >
                   {m.name}
                 </DropdownMenuRadioItem>
               ))}
@@ -100,7 +117,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
           </DropdownMenuCaption>
         )}
         <DropdownMenuItem onSelect={() => navigate('/settings?pane=agent')}>
-          {account?.connected ? 'Model settings…' : 'Connect a model…'}
+          {account?.connected || local ? 'Manage providers…' : 'Connect a provider…'}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

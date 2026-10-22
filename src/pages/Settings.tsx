@@ -32,7 +32,7 @@ type Pane = 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
 
 /* the heading over each pane, and the line under it */
 const panes: Record<Pane, { title: string; blurb: string }> = {
-  agent: { title: 'Doop Agent', blurb: 'Which model account the agent runs on, for every canvas you work on.' },
+  agent: { title: 'Doop Agent', blurb: 'Manage the provider connections the agent uses on your canvases.' },
   keys: { title: 'Agent keys', blurb: 'Bearer credentials that let headless agents design as you.' },
   webhooks: {
     title: 'Webhooks',
@@ -191,7 +191,7 @@ export function Settings() {
                   <CardTitle>Doop Agent</CardTitle>
                   <CardDescription>
                     Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your
-                    desktop. Your provider’s usage limits and charges apply.
+                    desktop. Choose your agent model in the composer. Your provider’s usage limits and charges apply.
                   </CardDescription>
                   {meter && (
                     <div className="mt-[11px] flex flex-col items-start gap-[7px] text-caption text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
