@@ -163,7 +163,7 @@ interface HoverHit {
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
    this component — memo holds as long as the frame and layout zoom are unchanged. */
 export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame: Frame; layoutZoom: number }) {
-  const drawingMove = useDrawingMove(frame)
+  const drawingMove = useDrawingMove(frame, layoutZoom)
   const [pathEdit, setPathEdit] = useState<PathEditSource | null>(null)
   const editRequest = useRef(0)
   const closePathEdit = useCallback(() => {

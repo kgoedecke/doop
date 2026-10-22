@@ -719,6 +719,42 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(zoomed.height).toBeCloseTo(initial.height * 1.5, 1)
   })
 
+  it('lays the drag preview out at design px while the world is zoomed', async () => {
+    const source: Frame = {
+      id: 'source',
+      updatedBy: 'User',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'Source',
+      x: 20,
+      y: 20,
+      width: 250,
+      height: 250,
+      createdAt: 0,
+      updatedAt: 0,
+      html: '<div data-doop-drawing="rectangle" data-name="Rectangle" style="position:absolute;left:40px;top:40px;width:60px;height:40px;background:red"></div>',
+    }
+    await seedFrames([source])
+    await page.evaluate(async () => {
+      window.drawingHarness.viewport({ x: 0, y: 0, zoom: 2 })
+      const world = document.querySelector<HTMLElement>('.world')!
+      while (world.style.zoom !== '2') await new Promise((r) => requestAnimationFrame(r))
+    })
+    const drawing = await visibleDrawing('Source')
+    await page.mouse.move(drawing.x + drawing.width / 2, drawing.y + drawing.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(drawing.x + drawing.width / 2 + 60, drawing.y + drawing.height / 2 + 30, { steps: 5 })
+    const handle = await page.waitForSelector('iframe[title="Moving drawing"]')
+    const preview = (await handle!.contentFrame())!
+    await preview.waitForSelector('[data-doop-drawing]')
+    const inside = await preview.evaluate(() => ({ width: innerWidth, dpr: devicePixelRatio }))
+    const moving = await visibleDrawing('Moving drawing')
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    expect(inside).toEqual({ width: 60, dpr: 1 })
+    expect(moving.width).toBeCloseTo(drawing.width, 1)
+  })
+
   it('keeps a peer cursor on its spot while the world switches layout zoom', async () => {
     await page.evaluate(() => {
       window.drawingHarness.peer({ x: 200, y: 150 })
