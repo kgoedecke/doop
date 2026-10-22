@@ -87,6 +87,7 @@ import { Note } from '../components/ui/note'
 import { Textarea } from '../components/ui/textarea'
 import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from '../components/ui/modal'
 import { createCenteredFrame } from '../lib/framePlacement'
+import { AGENTS_MIN, LAYERS_MIN, fitPanelWidths } from '../lib/panelWidths'
 
 /* The floating chrome's geometry, in px from the canvas area's edges. The
    panels sit 14px in from the edge; on the right the resizable Agents panel
@@ -180,9 +181,6 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       /* Resizing still works when preferences cannot be saved. */
     }
   }, [panelWidths])
-  const maxPanelWidth = Math.min(480, Math.floor(viewportWidth * 0.35))
-  const layersWidth = Math.max(220, Math.min(maxPanelWidth, panelWidths.layers))
-  const agentsWidth = Math.max(260, Math.min(maxPanelWidth, panelWidths.agents))
   const [showActivity, setShowActivity] = useState(() => !window.matchMedia('(max-width: 900px)').matches)
   /* ?connect=1 (the "connect your agent" email) lands on the Connect AI
      modal; the flag comes off the URL once the page is up so a reload or a
@@ -413,6 +411,22 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const panelElement = elementPanelOpen && selectedElement?.frameId === selectedFrame?.id ? selectedElement : null
   /* the frame Inspector or the element panel, whichever has the slot */
   const propertiesShown = !!selectedFrame && !deferPanel && (!!panelElement || inspectorOpen)
+  const fixedChrome = chromeLayout({
+    layersOpen,
+    propertiesShown,
+    agentsOpen: showActivity,
+    layersWidth: 0,
+    agentsWidth: 0,
+  })
+  const panels = fitPanelWidths({
+    saved: panelWidths,
+    viewport: viewportWidth,
+    reserved: fixedChrome.left + fixedChrome.right,
+    layersOpen,
+    agentsOpen: showActivity,
+  })
+  const layersWidth = panels.layers
+  const agentsWidth = panels.agents
   const chrome = chromeLayout({ layersOpen, propertiesShown, agentsOpen: showActivity, layersWidth, agentsWidth })
   const chromeVars = {
     '--chrome-top': isMobile ? '0px' : '50px',
@@ -635,8 +649,8 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                   label: 'Resize Layers panel',
                   edge: 'right',
                   width: layersWidth,
-                  min: 220,
-                  max: maxPanelWidth,
+                  min: LAYERS_MIN,
+                  max: panels.layersMax,
                   onResize: (layers) => setPanelWidths((widths) => ({ ...widths, layers })),
                 }}
               />
@@ -673,8 +687,8 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 label: 'Resize Agents panel',
                 edge: 'left',
                 width: agentsWidth,
-                min: 260,
-                max: maxPanelWidth,
+                min: AGENTS_MIN,
+                max: panels.agentsMax,
                 onResize: (agents) => setPanelWidths((widths) => ({ ...widths, agents })),
               }}
             />
