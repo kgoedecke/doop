@@ -42,6 +42,12 @@
 
 ## 4. Canvas Drawing
 
+- Canvas zoom: `Stage.tsx` lays the `.world` out at CSS zoom k, the settled camera zoom clamped
+  to 1-3, and its transform carries only the camera's movement since (`scale(zoom / k)`); each
+  `FrameView` iframe undoes k (`zoom: 1/k`, `scale(k)`), so frame documents keep design-px
+  viewports and rects. `src/lib/layoutZoom.ts` snaps k to a float32 whose inverse multiplies
+  back to exactly 1, since both engines multiply zoom in float32. WebKit (the desktop app)
+  rasterizes a composited layer at its CSS size, so a transform-only scale went soft past 100%.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.

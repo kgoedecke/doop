@@ -13,6 +13,7 @@ import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
+import { counterZoom } from '../lib/layoutZoom'
 import { recordCreate, recordUpdate, recordUpdates, trackSave } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { gesture } from '../lib/gesture'
@@ -39,6 +40,20 @@ import { ElementResizeHandles } from './ElementResizeHandles'
  *  comment ignore it: only a root with that id ever renders an open popover. */
 function deepLinkedThread(): string | null {
   return new URLSearchParams(location.search).get('comment')
+}
+
+/** Where a pointer event landed relative to an element, in design px (screen
+ *  px over the camera zoom: the frame lives inside the zoomed stage). */
+function designPoint(e: React.MouseEvent, el: Element): { x: number; y: number } {
+  const box = el.getBoundingClientRect()
+  const zoom = useStore.getState().viewport.zoom
+  return { x: (e.clientX - box.left) / zoom, y: (e.clientY - box.top) / zoom }
+}
+
+/** Where a press landed on its target, as `offsetX` measured it; `offsetX`
+ *  itself counts zoomed px in Chromium under the world's CSS zoom. */
+function designOffset(e: React.PointerEvent<HTMLElement>): { x: number; y: number } {
+  return designPoint(e, e.target instanceof HTMLElement ? e.target : e.currentTarget)
 }
 
 /* Counter-scale contract: chrome that keeps constant on-screen size divides
@@ -146,8 +161,8 @@ interface HoverHit {
 
 /* Counter-scaled overlays (labels, pins, popovers) get their scale from the
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
-   this component — memo holds as long as the frame and raster are unchanged. */
-export const FrameView = memo(function FrameView({ frame, raster }: { frame: Frame; raster: number }) {
+   this component — memo holds as long as the frame and layout zoom are unchanged. */
+export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame: Frame; layoutZoom: number }) {
   const drawingMove = useDrawingMove(frame)
   const [pathEdit, setPathEdit] = useState<PathEditSource | null>(null)
   const editRequest = useRef(0)
@@ -223,7 +238,10 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
       e.stopPropagation()
       e.preventDefault()
       if (!s.selectedIds.includes(frame.id)) select(frame.id)
-      if (probeOnClick) probeAt(e.nativeEvent.offsetX, e.nativeEvent.offsetY, 'comment')
+      if (probeOnClick) {
+        const at = designOffset(e)
+        probeAt(at.x, at.y, 'comment')
+      }
       return
     }
     /* a locked frame is not the stage's to select, move or resize: the press
@@ -270,7 +288,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
     setDragging(true)
     clearHover()
     const start = { x: e.clientX, y: e.clientY }
-    const off = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY }
+    const off = designOffset(e)
     const orig = { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
     /* the drag's baseline: finger position and frame rect the deltas are
        measured from. Starts at pointer-down, and re-anchors while a pinch
@@ -941,9 +959,7 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
             style={duping || (dupKeyHeld && !editing) ? { cursor: DUP_CURSOR } : undefined}
             onPointerDown={(e) => startDrag(e, 'move', true)}
             onDoubleClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect()
-              const zoom = useStore.getState().viewport.zoom
-              void enterElementEdit({ x: (e.clientX - rect.left) / zoom, y: (e.clientY - rect.top) / zoom })
+              void enterElementEdit(designPoint(e, e.currentTarget))
             }}
             onPointerMove={(e) => {
               /* the Hand only pans, and a locked frame has nothing to pick: no
@@ -959,10 +975,8 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                 tool === 'hand'
               )
                 return
-              /* screen px → design px: the frame lives inside the zoomed stage */
-              const r = e.currentTarget.getBoundingClientRect()
-              const zoom = useStore.getState().viewport.zoom
-              sendHover((e.clientX - r.left) / zoom, (e.clientY - r.top) / zoom)
+              const at = designPoint(e, e.currentTarget)
+              sendHover(at.x, at.y)
             }}
             onPointerLeave={clearHover}
           >
@@ -973,21 +987,19 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
               data-doop-frame=""
               sandbox="allow-scripts"
               srcDoc={FRAME_BOOTSTRAP}
-              /* Past 100% the canvas scales this iframe up with a transform,
-                 and Chrome rasterizes a sandboxed iframe at its layout size,
-                 so frames went soft. A CSS zoom of k on the element (k from
-                 the Stage, quantized from the settled zoom) renders the
-                 document at k× the device pixels; the counter-scale puts the
-                 box back. Inside, nothing changes: the viewport stays the
-                 design size, so vh/vw and media queries hold, and every rect
-                 the runtime reports is already in design px. Sizing the
-                 iframe k× and zooming the document inside instead broke
-                 viewport units, which CSS zoom does not scale. */
+              /* The world is laid out at CSS zoom k (Stage), which an iframe
+                 would pass into its document: WebKit then lays the document
+                 out at the zoomed width and only scales its 1× raster up.
+                 Undoing k here keeps the document's own zoom at 1, so its
+                 viewport, vh/vw, media queries and every rect the runtime
+                 reports stay in design px; the scale restores the box, and
+                 the document paints into the world at the world's
+                 resolution. */
               style={{
                 width: frame.width,
                 height: frame.height,
-                zoom: raster,
-                transform: `scale(${1 / raster})`,
+                zoom: counterZoom(layoutZoom),
+                transform: `scale(${layoutZoom})`,
                 transformOrigin: '0 0',
               }}
             />

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useStore } from '../lib/store'
+import { useStore, type Viewport } from '../lib/store'
 import type { Frame } from '../../shared/types'
 import { usePageCanvas, currentPageCanvas } from '../lib/pages'
 import { sendWs } from '../lib/ws'
@@ -27,6 +27,7 @@ import { Tooltip } from './ui/tooltip'
 import { BoxIcon, CircleIcon, CommentIcon, CursorIcon, FrameIcon, HandIcon, TextIcon, VectorIcon } from './ui/icons'
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
+import { layoutZoomFor } from '../lib/layoutZoom'
 
 const MIN_ZOOM = 0.08
 const MAX_ZOOM = 3
@@ -35,6 +36,15 @@ const MAX_ZOOM = 3
    included, like the Hand tool's grab — except inside the comment UI itself
    (pins, composer, threads: `data-comment-ui`), which keeps its own cursors. */
 const COMMENT_CURSOR = 'cursor-comment! [&_:not([data-comment-ui]_*)]:cursor-comment!'
+
+/* The world is laid out at CSS zoom k, the settled camera zoom, and its
+   transform carries only what the camera has moved since. WebKit rasterizes a
+   composited layer at its CSS size and stretches it under a scale transform,
+   so a world scaled by its transform alone went soft in the desktop app past
+   100%. The element's own zoom also scales its translate, hence the /k. */
+function worldTransform(vp: Viewport, k: number): string {
+  return `translate(${vp.x / k}px, ${vp.y / k}px) scale(${vp.zoom / k})`
+}
 
 /** The canvas-pinned root comment a ?comment= link names, if it is loaded. */
 function linkedCanvasComment(id: string | null): CanvasComment | null {
@@ -116,8 +126,12 @@ export function Stage({
   const dismissCompose = useCallback(() => setComposeAt(null), [])
   /* where the background menu opened, so Paste drops the frame there */
   const bgAt = useRef({ x: 0, y: 0 })
-  /* iframe oversampling factor — bumped only once the zoom settles */
-  const [raster, setRaster] = useState(1)
+  /* the world's layout zoom (see worldTransform) — caught up with the camera
+     only once the zoom settles, and never below 1, where scaling down a 1×
+     raster stays sharp and nothing needs a relayout; the ref serves the
+     per-frame viewport writes */
+  const [layoutZoom, setLayoutZoom] = useState(1)
+  const layoutZoomRef = useRef(1)
   const fitted = useRef(false)
   const deepLinkHandled = useRef(false)
   const focusedPage = useRef<string | null>(null)
@@ -144,7 +158,7 @@ export function Stage({
       const grid = gridRef.current
       const stage = ref.current
       if (!world || !grid || !stage) return
-      world.style.transform = `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`
+      world.style.transform = worldTransform(vp, layoutZoomRef.current)
       stage.style.setProperty('--zoom', String(vp.zoom))
       const period = 26 * vp.zoom
       grid.style.backgroundSize = `${period}px ${period}px`
@@ -164,8 +178,7 @@ export function Stage({
       if (ref.current) sendViewport(s.viewport, ref.current)
       window.clearTimeout(settle)
       settle = window.setTimeout(() => {
-        const z = useStore.getState().viewport.zoom
-        setRaster(z <= 1 ? 1 : Math.min(3, Math.ceil(z * 2) / 2))
+        setLayoutZoom(layoutZoomFor(useStore.getState().viewport.zoom, MAX_ZOOM))
       }, 250)
     })
     return () => {
@@ -173,6 +186,16 @@ export function Stage({
       window.clearTimeout(settle)
     }
   }, [])
+
+  /* a new layout zoom lands in the same commit as the frames' counter-zoom
+     (FrameView), so no paint sees one without the other */
+  useLayoutEffect(() => {
+    layoutZoomRef.current = layoutZoom
+    const world = worldRef.current
+    if (!world) return
+    world.style.zoom = String(layoutZoom)
+    world.style.transform = worldTransform(useStore.getState().viewport, layoutZoom)
+  }, [layoutZoom])
 
   /* following a peer: whenever their camera (or, lacking one, their cursor)
      moves, ease ours toward the same view. Writes go through
@@ -818,7 +841,7 @@ export function Stage({
                 f.hidden ? (
                   <HiddenFrameView key={f.id} frame={f} />
                 ) : (
-                  <FrameView key={f.id} frame={f} raster={raster} />
+                  <FrameView key={f.id} frame={f} layoutZoom={layoutZoom} />
                 ),
               )}
               <GhostFrames />

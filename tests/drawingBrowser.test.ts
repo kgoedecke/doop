@@ -127,12 +127,12 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       handle!.evaluate((el) => {
         const box = el.getBoundingClientRect()
         const css = getComputedStyle(el)
-        /* the crisp-render zoom on the element and its counter-scale cancel
-           in the box, so width over the design width is the canvas zoom */
+        /* the iframe undoes the world's layout zoom, so its CSS width is the
+           design width and the box over it is the canvas zoom */
         return { x: box.x, y: box.y, scale: box.width / Number.parseFloat(css.width) }
       })
     let result: { x: number; y: number; width: number; height: number } | null = null
-    // The inner rect is in design px whatever the raster; only a viewport
+    // The inner rect is in design px whatever the layout zoom; only a viewport
     // still moving between the two reads could mix two states.
     await expect
       .poll(
@@ -696,7 +696,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     },
   )
 
-  it('measures drawing geometry consistently once the iframe re-rasters for the zoom', async () => {
+  it('measures drawing geometry consistently once the world settles at the zoom', async () => {
     await page.click('[aria-label="Frame"]')
     await drag([200, 200], [600, 600])
     await waitForFrames(1)
@@ -707,9 +707,9 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     const initial = await visibleDrawing('Frame')
     const iframe = (await (await page.$('iframe[title="Frame"]'))!.contentFrame())!
     await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 3 }))
-    // the crisp render is a CSS zoom on the iframe element, counter-scaled;
+    // the settled zoom is the world's CSS zoom, which the iframe element undoes;
     // the document inside keeps its design viewport, so nothing in there changes
-    await page.waitForFunction(() => getComputedStyle(document.querySelector('iframe[title="Frame"]')!).zoom === '3')
+    await page.waitForFunction(() => (document.querySelector('.world') as HTMLElement).style.zoom === '3')
     const designWidth = await page.evaluate(() => window.drawingHarness.state().frames[0]!.width)
     expect(await iframe.evaluate(() => [innerWidth, document.documentElement.style.zoom])).toEqual([designWidth, ''])
     const zoomed = await visibleDrawing('Frame')
