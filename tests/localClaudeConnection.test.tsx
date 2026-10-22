@@ -106,8 +106,9 @@ it('uses the profile model menu and sends the exact deployment selected in the c
   await act(async () => root.render(<ModelPicker />))
   const trigger = container.querySelector('button')!
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  expect(document.querySelector('[role="menu"]')?.textContent).not.toContain('Use a custom model')
   const options = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitemradio"]'))
-  expect(options.map((option) => option.textContent)).toEqual(['Team deploymentCustom provider model'])
+  expect(options.map((option) => option.textContent)).toEqual(['Team deployment'])
   await act(async () => options[0]!.click())
   expect(mocks.select).toHaveBeenCalledExactlyOnceWith('alice', { enabled: true, model: 'team/deployment-v2' })
   expect(mocks.capture).toHaveBeenCalledWith('agent_model_changed', { model: 'custom', via: 'composer' })
@@ -187,36 +188,25 @@ it('shows a failed model change in the open menu and clears the error on reopeni
   expect(document.querySelector('[role="menu"]')?.textContent).not.toContain('Model update failed')
 })
 
-it('reports a lost session during custom entry and clears that error on cancel', async () => {
+it('reports a lost session when selecting a configured model', async () => {
   mocks.state.mockReturnValue({
     preference: { enabled: true, model: 'default' },
-    native: { installed: true, connected: true, enabled: true, customProfile: true, models: [] },
+    native: {
+      installed: true,
+      connected: true,
+      enabled: true,
+      customProfile: true,
+      models: [{ id: 'team/model', name: 'Team model', blurb: '' }],
+    },
   })
   await act(async () => root.render(<ModelPicker />))
   const trigger = container.querySelector('button')!
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
-  const custom = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-    (el) => el.textContent === 'Use a custom model…',
-  )!
-  await act(async () => custom.click())
   mocks.session.mockReturnValue({ data: null })
   await act(async () => root.render(<ModelPicker />))
-  const input = document.querySelector<HTMLInputElement>('#claude-custom-model')!
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'team/model')
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-  await act(async () =>
-    document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
-  )
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('Sign in to Doop')
+  await act(async () => document.querySelector<HTMLElement>('[role="menuitemradio"]')!.click())
+  expect(document.querySelector('[role="menu"]')?.textContent).toContain('Sign in to Doop')
   expect(mocks.select).not.toHaveBeenCalled()
-  const cancel = Array.from(document.querySelectorAll('button')).find((el) => el.textContent === 'Cancel')!
-  await act(async () => cancel.click())
-  mocks.session.mockReturnValue({ data: { user: { id: 'alice' } } })
-  await act(async () => root.render(<ModelPicker />))
-  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
-  expect(document.querySelector('[role="menu"]')?.textContent).not.toContain('Sign in to Doop')
 })
 
 it('does not present the server placeholder as the actual desktop model in a browser', async () => {

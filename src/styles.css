@@ -232,6 +232,41 @@
   --sidebar-ring: var(--ink-faint);
 }
 
+/* Keep the scrollbar's geometry fixed; only its thumb color changes on interaction. */
+@utility scrollbar-subtle {
+  --scrollbar-thumb: transparent;
+  scrollbar-gutter: stable;
+
+  &:hover,
+  &:focus-visible,
+  &:has(:focus-visible) {
+    --scrollbar-thumb: color-mix(in srgb, var(--ink-faint) 55%, transparent);
+  }
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background-color: var(--scrollbar-thumb);
+  }
+
+  &::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  @supports not selector(::-webkit-scrollbar) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+}
+
 /* Base layer: the resets and defaults every screen inherits. Everything that
    used to live below this line — some 6,800 lines of component rules — now
    lives in src/components/ui as real components. */
