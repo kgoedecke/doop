@@ -1,9 +1,24 @@
 import { create } from 'zustand'
 import { api, ApiError } from './api'
 import { useStore } from './store'
-import type { LocalAgentJob, LocalAgentPreference, LocalAgentResult } from '../../shared/localAgent'
+import { isClaudeModel, normalizeClaudeModel } from '../../shared/localAgent'
+import type { LocalAgentJob, LocalAgentPreference, LocalAgentResult, LocalClaudeModel } from '../../shared/localAgent'
 
-type NativeStatus = { installed: boolean; connected: boolean; enabled: boolean; email?: string; plan?: string }
+export type NativeStatus = {
+  installed: boolean
+  connected: boolean
+  enabled: boolean
+  email?: string | null
+  plan?: string | null
+  provider?: string | null
+  models?: LocalClaudeModel[]
+  modelWarning?: string | null
+  modelDiscovery?: boolean
+  customProfile?: boolean
+  model?: string
+  configError?: string | null
+  authMethod?: string | null
+}
 type Bridge = {
   __DOOP_CLAUDE_CLI__?: boolean
   __DOOP_CLAUDE_INSTALL__?: boolean
@@ -39,13 +54,18 @@ export async function refreshLocalAgent(userId: string) {
   return { preference, native }
 }
 
-export async function selectLocalAgent(userId: string, preference: LocalAgentPreference) {
+export async function selectLocalAgent(userId: string, preference: { enabled: boolean; model: string }) {
+  const customProfile = useLocalAgent.getState().native?.customProfile === true
   if (preference.enabled) {
+    if (customProfile && !isClaudeModel(preference.model)) throw new Error('Enter a valid model or deployment ID.')
     await invokeClaude('claude_connect', { userId, enabled: true })
+    if (customProfile) await invokeClaude('claude_set_model', { userId, model: preference.model })
   }
-  const saved = await api.setLocalAgent(preference)
-  // Server routing is authoritative. Disabling local execution must not depend
-  // on the installed CLI responding to a separate status request.
+  // The server dispatches local work but never needs the device's deployment ID.
+  const saved = await api.setLocalAgent({
+    enabled: preference.enabled,
+    model: customProfile ? 'default' : normalizeClaudeModel(preference.model),
+  })
   useLocalAgent.setState({ preference: saved })
   if (preference.enabled) await refreshLocalAgent(userId)
   useStore.getState().allowanceChanged()
@@ -62,7 +82,25 @@ export async function disconnectLocalAgent(userId: string) {
 /** Lives above navigation. One random claimant per webview lifetime prevents
  * another device (or a reloaded page) from taking over a still-running process. */
 export function startLocalAgent(userId: string): () => void {
-  if (!hasLocalClaude()) return () => {}
+  if (!hasLocalClaude()) {
+    // Browsers display routing state but never claim work or load a local catalog.
+    let disposed = false
+    useLocalAgent.setState({ preference: null, native: null, running: false, progress: '', error: '' })
+    const refresh = () => {
+      api.localAgent().then(
+        (preference) => {
+          if (!disposed) useLocalAgent.setState({ preference })
+        },
+        () => {},
+      )
+    }
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => {
+      disposed = true
+      window.removeEventListener('focus', refresh)
+    }
+  }
   const deviceId = crypto.randomUUID()
   let disposed = false
   let polling = false

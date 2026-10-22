@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-claude-set-model"
+description = "Enables the claude_set_model command without any pre-configured scope."
+commands.allow = ["claude_set_model"]
+
+[[permission]]
+identifier = "deny-claude-set-model"
+description = "Denies the claude_set_model command without any pre-configured scope."
+commands.deny = ["claude_set_model"]

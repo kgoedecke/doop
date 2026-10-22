@@ -19,10 +19,15 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde_json = "1"
 toml_edit = "0.25"
 tempfile = "3"
+command-group = "5.0.1"
 # Native "Save as" panel for PNG/JPG exports (the on_download handler in
 # main.rs); used directly rather than through tauri-plugin-dialog because the
 # download callback needs a synchronous answer on the UI thread.
 rfd = "0.16"
+
+[target.'cfg(unix)'.dependencies]
+# Observe CLI exit without reaping before its process group is stopped.
+libc = "0.2"
 
 # Repositioning the traffic lights over the web app's tab strip (main.rs);
 # AppKit resets them on window events, so the shell moves them itself.

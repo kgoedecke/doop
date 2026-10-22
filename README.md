@@ -253,6 +253,52 @@ Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRoute
 are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
 context — an SSRF vector — so custom endpoints stay server-level configuration only.
 
+The desktop app's **Claude Code** connection uses your installed CLI and normal Claude sign-in
+by default. Custom providers use the same connection card and composer model picker. No profile
+selector is needed in the UI.
+
+To use a different local configuration, create `claude.json` in Doop's OS configuration directory:
+
+- macOS: `~/Library/Application Support/design.doop.desktop/claude.json`
+- Windows: `%APPDATA%\design.doop.desktop\claude.json`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/design.doop.desktop/claude.json`
+
+All fields are optional. Omit the file (or use `{}`) for the default Claude Code installation
+and subscription defaults. In that mode, Doop does not import provider or model settings from
+`~/.claude/settings.json` and removes inherited credentials/provider overrides. Set at least one
+of the fields below to opt into custom configuration. Paths must be absolute. For example:
+
+```json
+{
+  "configDir": "/home/you/.claude-work"
+}
+```
+
+`configDir` selects a Claude Code configuration directory; `settings` optionally selects a
+settings JSON file instead of that directory's `settings.json`. `launcher` optionally points to
+an existing executable wrapper that sets provider environment variables and forwards Claude Code
+arguments. Shell aliases cannot be used as executable paths. Provider configuration and model
+options belong in Claude Code's settings or that wrapper, not in Doop's server configuration.
+Doop reads this file again on Refresh and before the next task. After changing providers, select
+an appropriate model in the composer. A task already running keeps its original configuration.
+
+Doop reads the configuration's model menu through Claude Code's SDK initialization protocol,
+including custom entries and gateway-discovered models. The menu reflects Claude Code's
+configuration, not an independently verified inventory of cloud deployments. Custom providers
+must support Claude Code, tool calls and images. Authentication and billing stay with the
+configured provider; no Claude subscription login is required for third-party providers.
+
+The file applies to this OS user's Doop desktop app. Only use trusted configurations: launchers
+and credential helpers can execute code locally. Doop imports connection and model settings but
+keeps its own canvas-only tools and disables user hooks, plugins and project settings. Custom model selections are stored per Doop account in the desktop app's data directory
+(`claude/models.json`). Only the local-execution preference and a standard subscription-model
+placeholder reach the server; custom deployment IDs, credentials and local paths stay on the
+device. Local model controls are excluded from analytics replay/autocapture, and explicit model-change
+events use a generic label for custom profiles. The web app cannot choose a custom model, but can queue canvas tasks for a connected desktop
+while it is open. A queued task uses the receiving desktop's
+selection when it starts; a task already running keeps its original selection.
+Older desktop versions must be updated to use custom configurations.
+
 Users pick their **model** in the composer; Settings manages provider connections and the
 image-generation model. ChatGPT, OpenAI API-key, Claude API-key and Gemini API-key connections
 load their provider catalogs, cached for five minutes and refreshed by the UI on focus. Only
@@ -263,7 +309,7 @@ and excludes specialized variants; adding an entirely new family still needs com
 The same filtered catalog validates selections and direct API-key runs. A missing or unavailable
 selection prompts the user to choose another model rather than silently changing it. Catalog
 failures show a warning and retain a previous list only for the same credential; authentication
-failures clear it. OpenRouter and local Claude CLI retain their existing menus. Discovery makes
+failures clear it. OpenRouter retains its existing menu. Discovery makes
 no billable generation requests. Gemini tool turns preserve Google's required thought signatures.
 OpenAI tool turns preserve encrypted reasoning and assistant phases when replaying response history.
 Discovering new models never changes the user's selected model automatically;

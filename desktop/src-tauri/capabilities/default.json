@@ -23,6 +23,7 @@
       ]
     },
     "allow-claude-status",
+    "allow-claude-set-model",
     "allow-claude-connect",
     "allow-claude-login",
     "allow-claude-install",

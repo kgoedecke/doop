@@ -214,6 +214,7 @@ fn main() {
         .manage(claude::ClaudeState::default())
         .invoke_handler(tauri::generate_handler![
             claude::claude_status,
+            claude::claude_set_model,
             claude::claude_connect,
             claude::claude_login,
             claude::claude_install,
