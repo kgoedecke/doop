@@ -1059,13 +1059,19 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
                   }}
                 />
               )}
-            {flash && (
-              <div
-                className="pointer-events-none absolute -inset-px rounded-[6px] animate-[frame-flash_1.2s_ease-out_forwards]"
-                style={{ '--editing-color': flash.color } as React.CSSProperties}
-              />
-            )}
           </div>
+          {/* someone else just changed this frame: their highlight, the remote
+              editor's outline in their colour, fading out. Outside the body,
+              whose overflow would clip an outline. */}
+          {flash && (
+            <div
+              className={cn(
+                'pointer-events-none absolute inset-0 outline-2 outline-offset-1 outline-solid outline-[var(--editing-color)] animate-[fade-out_1.2s_ease-out_forwards]',
+                !isCanvasElement(frame.html) && 'rounded-[6px]',
+              )}
+              style={{ '--editing-color': flash.color } as React.CSSProperties}
+            />
+          )}
 
           {editing && (
             <div

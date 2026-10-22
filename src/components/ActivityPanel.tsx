@@ -210,13 +210,17 @@ function taskTime(task: AgentTask): string {
 }
 
 /** One task: who, for whom, one time figure; then its mark and what it is doing.
- *  Clicking it flies the camera to where the agent is (or was) working. */
+ *  Clicking it selects the frame where the agent is (or was) working and flies
+ *  the camera there, so the click shows even when the frame is already in view. */
 function RecentTaskRow({ task }: { task: AgentTask }) {
   const canvasId = useStore((s) => s.canvas?.id)
   const frameId = useStore((s) => taskFrameId(task, s))
   const frameName = useStore((s) => s.canvas?.frames.find((f) => f.id === frameId)?.name)
   const goToFrame = () => {
-    if (frameId) useStore.getState().requestFlyTo(frameId)
+    if (!frameId) return
+    const s = useStore.getState()
+    s.select(frameId)
+    s.requestFlyTo(frameId)
   }
   return (
     <div
