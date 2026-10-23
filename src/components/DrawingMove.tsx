@@ -12,7 +12,7 @@ import {
 } from '../lib/drawingMove'
 import { requestFrame } from '../lib/frameBridge'
 import { gesture } from '../lib/gesture'
-import { counterZoom } from '../lib/layoutZoom'
+import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { useStore } from '../lib/store'
 
 interface Preview {
@@ -193,8 +193,9 @@ export function useDrawingMove(frame: Frame, layoutZoom: number) {
               height: preview.rect.height,
             }}
           >
-            {/* undoes the world's layout zoom, as FrameView's iframe does, so
-                the drawing lays out at the width it has in its frame */}
+            {/* treats the world's layout zoom as FrameView's iframe does (pixel
+                density in Chromium, undone elsewhere), so the drawing lays out
+                at the width it has in its frame and stays as sharp */}
             <iframe
               title="Moving drawing"
               sandbox=""
@@ -203,8 +204,9 @@ export function useDrawingMove(frame: Frame, layoutZoom: number) {
               style={{
                 width: preview.rect.width,
                 height: preview.rect.height,
-                zoom: counterZoom(layoutZoom),
-                transform: `scale(${layoutZoom})`,
+                ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
+                  ? null
+                  : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
                 transformOrigin: '0 0',
               }}
             />

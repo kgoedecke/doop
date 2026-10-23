@@ -3,7 +3,7 @@
   <body>
     <script type="module">
       import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
-      import { counterZoom, layoutZoomFor } from '/src/lib/layoutZoom.ts'
+      import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom, layoutZoomFor } from '/src/lib/layoutZoom.ts'
 
       /* a frame whose footer is anchored to the bottom of a 100vh column — the
          layout that lost its footer past 100% canvas zoom */
@@ -68,14 +68,17 @@
         probe.contentWindow.postMessage('q', '*')
         return (await waitFor((d) => d?.probe)).probe
       }
-      /** settle the canvas at zoom k: the world takes it as its layout zoom
-          and both iframes undo it, the way Stage and FrameView do */
-      window.zoom = async (zoom) => {
-        const k = layoutZoomFor(zoom, 16)
+      /** the path FrameView takes in this browser */
+      window.shippedPath = FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY ? 'density' : 'counter'
+      /** settle the canvas at zoom k: the world takes it as its layout zoom,
+          and both iframes either take it as pixel density (Chromium) or undo
+          it (zoom 1/k, scale k: WebKit), the way Stage and FrameView do */
+      window.zoom = async (zoom, path = window.shippedPath) => {
+        const k = layoutZoomFor(zoom, 16, path === 'density')
         world.style.zoom = String(k)
         for (const el of [frame, probe]) {
-          el.style.zoom = String(counterZoom(k))
-          el.style.transform = `scale(${k})`
+          el.style.zoom = path === 'density' ? '' : String(counterZoom(k))
+          el.style.transform = path === 'density' ? '' : `scale(${k})`
         }
         await nextPaint()
         const box = frame.getBoundingClientRect()

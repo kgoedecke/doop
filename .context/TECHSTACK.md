@@ -45,10 +45,11 @@
 - Canvas zoom: the camera runs from 8% to 1600% (`MAX_ZOOM`, mirrored by `FOLLOW_MAX_ZOOM`).
   `Stage.tsx` lays the `.world` out at CSS zoom k, the settled camera zoom clamped
   to 1-16, and its transform carries only the camera's movement since (`scale(zoom / k)`).
-  Chromium passes k into each frame iframe as pixel density, so frame documents keep design-px
-  viewports and rasterize at k×, out of process too (a transform on the iframe only stretched
-  a 1× raster there). Elsewhere (`FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY` false) each
-  `FrameView` iframe undoes k (`zoom: 1/k`, `scale(k)`); `src/lib/layoutZoom.ts` snaps k to a
+  Chromium passes k into each frame iframe (and the drag preview) as pixel density, so frame
+  documents keep design-px viewports and rasterize at k×, out of process too (a transform on
+  the iframe only stretched a 1× raster there); k is the whole number at or above the zoom,
+  since the iframe box snaps to whole pixels and only a whole k keeps every design size exact.
+  Elsewhere (`FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY` false) each `FrameView` iframe undoes k (`zoom: 1/k`, `scale(k)`); `src/lib/layoutZoom.ts` snaps k to a
   float32 whose inverse multiplies back to exactly 1, since engines multiply zoom in float32.
   WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
   scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the

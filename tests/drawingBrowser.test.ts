@@ -751,7 +751,9 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     const moving = await visibleDrawing('Moving drawing')
     await page.keyboard.press('Escape')
     await page.mouse.up()
-    expect(inside).toEqual({ width: 60, dpr: 1 })
+    // Chromium takes the world's 2x layout zoom as the preview's pixel density,
+    // as it does for frames, so the drawing keeps its design width and sharpness
+    expect(inside).toEqual({ width: 60, dpr: 2 })
     expect(moving.width).toBeCloseTo(drawing.width, 1)
   })
 
@@ -777,7 +779,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       }
       tick()
       window.drawingHarness.viewport({ x: -50, y: 0, zoom: 2.4 })
-      while (world.style.zoom !== '2.4') await new Promise((r) => requestAnimationFrame(r))
+      // Chromium lays the world out at the whole zoom above the camera's
+      while (world.style.zoom !== '3') await new Promise((r) => requestAnimationFrame(r))
       await new Promise((r) => setTimeout(r, 150))
       sampling = false
       return worst
