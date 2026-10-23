@@ -1,5 +1,6 @@
 import { useStore } from '../lib/store'
 import { AgentIcon } from './AgentIcon'
+import { XIcon } from './ui/icons'
 
 /** Figma-style "you are following X": a border in the leader's colour around
  *  the stage and a pill naming them. Any pan or zoom of our own lets go, so
@@ -31,12 +32,12 @@ export function FollowFrame() {
         </span>
         <button
           type="button"
-          className="grid size-[18px] place-items-center rounded-full bg-white/25 text-[12px] leading-none hover:bg-white/40"
+          className="grid size-[18px] place-items-center rounded-full bg-white/25 hover:bg-white/40"
           aria-label={`Stop following ${leader.name}`}
           title="Stop following (Esc)"
           onClick={() => stop(null)}
         >
-          ×
+          <XIcon size={11} />
         </button>
       </div>
     </div>
