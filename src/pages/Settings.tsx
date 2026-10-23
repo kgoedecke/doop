@@ -3,17 +3,16 @@ import { navigate } from '../App'
 import { ModelAccountPanel } from '../components/ModelAccount'
 import { ImageModelCard } from '../components/ImageModelCard'
 import { useAllowance } from '../components/TeamAllowance'
-import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import { AccountSettings } from '../components/AccountSettings'
 import { AppearanceSettings } from '../components/AppearanceSettings'
 import { AgentKeys } from '../components/AgentKeys'
 import { Webhooks } from '../components/Webhooks'
 import { AccountMenu } from '../components/DashShell'
 import { railLayout } from '../components/AppRail'
-import { BellIcon, ChevronLeftIcon, KeyIcon, MoonIcon, SparkIcon, UserIcon } from '../components/ui/icons'
+import { BellIcon, ArrowLeftIcon, KeyIcon, MoonIcon, WaypointsIcon, UserIcon } from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
-import { CardDescription, CardHeader, CardTitle, SettingsCard } from '../components/ui/card'
+import { SettingsCard } from '../components/ui/card'
 import { Progress } from '../components/ui/progress'
 import {
   DashContent,
@@ -32,16 +31,20 @@ type Pane = 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
 
 /* the heading over each pane, and the line under it */
 const panes: Record<Pane, { title: string; blurb: string }> = {
-  agent: { title: 'Doop Agent', blurb: 'Which model account the agent runs on, for every canvas you work on.' },
-  keys: { title: 'Agent keys', blurb: 'Bearer credentials that let headless agents design as you.' },
+  agent: {
+    title: 'Doop Agent',
+    blurb:
+      'Manage the agent’s provider connections for your canvases, including Claude Code on your desktop. Choose your agent model in the composer. Your provider’s usage limits and charges apply.',
+  },
+  keys: { title: 'Agent keys', blurb: 'Let headless agents design as you with bearer credentials.' },
   webhooks: {
     title: 'Webhooks',
-    blurb: 'HTTP calls to your systems when something happens on a canvas you can open.',
+    blurb: 'Send HTTP calls to your systems when events occur on a canvas you can open.',
   },
-  account: { title: 'Your account', blurb: 'Who you are on every canvas — and how you get back into this one.' },
+  account: { title: 'Your account', blurb: 'Manage your identity across canvases and how you sign in.' },
   appearance: {
     title: 'Appearance',
-    blurb: 'How Doop looks in this browser: light, dark, or whatever your system is.',
+    blurb: 'Choose a light or dark theme for Doop in this browser, or follow your system setting.',
   },
 }
 
@@ -75,19 +78,14 @@ export function Settings() {
   const from = new URLSearchParams(location.search).get('from')
   const back = from && /^\/c\/[A-Za-z0-9_-]+$/.test(from) ? from : '/'
 
-  const meter = allowance
-    ? allowance.byoModel
-      ? allowance.byoKind === 'gemini-cloud'
-        ? 'Gemini cloud pilot selected — connection managed by your operator.'
-        : allowance.byoKind === 'claude-local'
-          ? 'Claude CLI selected — runs on your connected desktop.'
-          : `Running on your ${allowance.byoKind === 'chatgpt' || !allowance.byoKind ? 'ChatGPT subscription' : `${ACCOUNT_KIND_LABELS[allowance.byoKind]} key`}.`
-      : allowance.limit <= 0
-        ? 'No free tasks on this server — connect an account to use the Doop Agent.'
+  const meter =
+    allowance && !allowance.byoModel
+      ? allowance.limit <= 0
+        ? 'This server has no free tasks. Connect an account to use the Doop Agent.'
         : left === 0
           ? 'Your free tasks are used up.'
           : `${left} of ${allowance.limit} free task${allowance.limit === 1 ? '' : 's'} left.`
-    : null
+      : null
 
   return (
     <DashLayout className={railLayout}>
@@ -95,7 +93,7 @@ export function Settings() {
       <DashSidebar variant="rail">
         <DashSidebarBrand />
         <nav className="flex flex-col gap-0.5">
-          <DashNavItem density="rail" icon={<ChevronLeftIcon size="rail" />} onClick={() => navigate(back)}>
+          <DashNavItem density="rail" icon={<ArrowLeftIcon size="rail" />} onClick={() => navigate(back)}>
             {back === '/' ? 'Back to canvases' : 'Back to canvas'}
           </DashNavItem>
         </nav>
@@ -103,7 +101,7 @@ export function Settings() {
         <nav className="flex flex-col gap-0.5">
           <DashNavItem
             density="rail"
-            icon={<SparkIcon size="rail" />}
+            icon={<WaypointsIcon size="rail" />}
             active={pane === 'agent'}
             onClick={() => setPane('agent')}
           >
@@ -150,7 +148,7 @@ export function Settings() {
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare" className="md:hidden">
           <Button variant="ghost" size="bar" onClick={() => navigate(back)}>
-            <ChevronLeftIcon size="rail" /> {back === '/' ? 'Canvases' : 'Canvas'}
+            <ArrowLeftIcon size="rail" /> {back === '/' ? 'Canvases' : 'Canvas'}
           </Button>
           <span className="flex-1" />
           <AccountMenu />
@@ -161,13 +159,26 @@ export function Settings() {
             <div>
               <DashTitle>{panes[pane].title}</DashTitle>
               <DashSubtitle>{panes[pane].blurb}</DashSubtitle>
+              {pane === 'agent' && meter && (
+                <div className="mt-3 flex flex-col items-start gap-2 text-caption text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
+                  {allowance && allowance.limit > 0 && (
+                    <Progress
+                      className="w-[min(100%,240px)] sm:w-[180px]"
+                      value={left ?? 0}
+                      max={allowance.limit}
+                      aria-label="Free Doop Agent tasks left"
+                    />
+                  )}
+                  <span>{meter}</span>
+                </div>
+              )}
             </div>
           </div>
 
           <Tabs value={pane} onValueChange={(next) => setPane(next as Pane)} className="mt-4 flex md:hidden">
             <TabsList variant="card">
               <TabsTrigger value="agent">
-                <SparkIcon size="rail" /> Doop Agent
+                <WaypointsIcon size="rail" /> Doop Agent
               </TabsTrigger>
               <TabsTrigger value="keys">
                 <KeyIcon size="rail" /> Agent keys
@@ -187,26 +198,6 @@ export function Settings() {
           {pane === 'agent' ? (
             <>
               <SettingsCard>
-                <CardHeader>
-                  <CardTitle>Doop Agent</CardTitle>
-                  <CardDescription>
-                    Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your
-                    desktop. Your provider’s usage limits and charges apply.
-                  </CardDescription>
-                  {meter && (
-                    <div className="mt-[11px] flex flex-col items-start gap-[7px] text-caption text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
-                      {allowance && allowance.limit > 0 && !allowance.byoModel && (
-                        <Progress
-                          className="w-[min(100%,240px)] sm:w-[180px]"
-                          value={left ?? 0}
-                          max={allowance.limit}
-                          aria-label="Free Doop Agent tasks left"
-                        />
-                      )}
-                      <span>{meter}</span>
-                    </div>
-                  )}
-                </CardHeader>
                 <ModelAccountPanel onChange={refresh} />
               </SettingsCard>
               <ImageModelCard />

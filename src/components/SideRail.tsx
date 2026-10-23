@@ -5,7 +5,7 @@ import { navigate } from '../App'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import { BookOpenIcon, CommentIcon, GearIcon, HelpIcon, PulseIcon, SlidersIcon, SparkIcon } from './ui/icons'
+import { BookOpenIcon, CommentIcon, GearIcon, HelpIcon, PulseIcon, SlidersIcon, WaypointsIcon } from './ui/icons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { openSupportChat } from '../lib/posthog'
 import { PresenceFace } from './PeerAvatars'
@@ -124,7 +124,7 @@ export function PanelTabButtons({
         label={working ? `Agents · ${working} working · ⌘K to ask the Doop Agent` : 'Agents · ⌘K to ask the Doop Agent'}
         onClick={() => onOpen('tasks')}
       >
-        <SparkIcon className="size-3.5" />
+        <WaypointsIcon className="size-3.5" />
         {working > 0 && <IslandDot className="bg-success" />}
       </IslandControl>
       <IslandControl

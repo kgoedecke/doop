@@ -2,12 +2,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu'
+import { OPENROUTER_MODELS } from '../shared/modelMenu'
 
 /**
  * The two roster providers in the Settings panel: the OpenRouter section
- * renders a dropdown picker (the roster outgrows chips), text-only models are
- * labelled, and each section's key form posts to its own connect route.
+ * manages connections, and each section's key form posts to its own connect route.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -21,7 +20,7 @@ const MENUS = {
   'openai-key': [],
   'anthropic-key': [],
   'openrouter-key': OPENROUTER_MODELS,
-  'gemini-key': GEMINI_MODELS,
+  'gemini-key': [],
 }
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
 vi.mock('../src/lib/api', () => ({
@@ -56,7 +55,7 @@ afterEach(() => {
   container.remove()
 })
 
-it('shows the connected OpenRouter roster as a dropdown with the text-only label', async () => {
+it('shows the provider connection without a second model picker', async () => {
   mocks.account.mockResolvedValue({
     connected: true,
     kind: 'openrouter-key',
@@ -66,12 +65,8 @@ it('shows the connected OpenRouter roster as a dropdown with the text-only label
   await render()
   expect(container.textContent).toContain('OpenRouter API key')
   expect(container.textContent).toContain('Active · Connected')
-  /* the picker is a dropdown trigger naming the current model, not a chip row */
-  const trigger = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('GLM-5.3'))
-  expect(trigger).toBeDefined()
-  expect(trigger!.textContent).toContain('no visual review')
-  /* and the chosen-model blurb spells the tradeoff out */
-  expect(container.textContent).toContain('designs aren’t visually reviewed')
+  expect(container.querySelector('[role="combobox"]')).toBeNull()
+  expect(container.textContent).not.toContain('GLM-5.3')
 })
 
 it('posts a new Gemini key to its own connect route', async () => {

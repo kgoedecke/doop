@@ -5,6 +5,7 @@ import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAccount, withFreshToken, accountModelFor, accountVisionFor } from './modelAccounts.ts'
+import { getApiModelCatalog, hasApiModelCatalog } from './providerModels.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
 import { ModelAuthError, ModelUnavailableError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
@@ -321,6 +322,16 @@ export async function pickModel(payerId?: string): Promise<AgentModel | null> {
         return null
       })
     : null
-  if (account) return byoModel(account)
+  if (account) {
+    if (hasApiModelCatalog(account.kind)) {
+      const catalog = await getApiModelCatalog(account)
+      if (!catalog.models.some((model) => model.id === accountModelFor(account))) {
+        throw new ModelUnavailableError(
+          catalog.warning ?? 'Choose an available model in the composer before starting the agent.',
+        )
+      }
+    }
+    return byoModel(account)
+  }
   return serverTiers[serverProvider()]()
 }

@@ -23,7 +23,7 @@ const dropdownMenuContentVariants = cva(
   /* never taller than the room Radix measured beside the trigger: a long menu
      (the model list, with its wrapping blurbs) scrolls instead of running off a
      short window */
-  'z-[70] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto rounded-[12px] bg-surface p-1.5 shadow-pop animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
+  'z-[70] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto rounded-[12px] bg-surface p-1.5 shadow-ring animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
   {
     variants: {
       width: {
@@ -129,7 +129,7 @@ function DropdownMenuSeparator({ className, ...props }: React.ComponentProps<typ
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn('my-0.5 h-px bg-line-soft', className)}
+      className={cn('my-1.5 h-px bg-line-soft', className)}
       {...props}
     />
   )
@@ -145,7 +145,7 @@ function DropdownMenuCaption({ className, ...props }: React.ComponentProps<typeo
   return (
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-caption"
-      className={cn('px-2.5 pb-1 pt-[7px] text-caption text-ink-faint', className)}
+      className={cn('px-2.5 py-2 text-caption text-ink-faint', className)}
       {...props}
     />
   )

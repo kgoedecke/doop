@@ -73,3 +73,23 @@ it('cancels an in-flight run when local execution is explicitly disabled', async
   expect(response.status).toBe(200)
   expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith('alice')
 })
+
+it('rejects custom deployment IDs at the hosted preference boundary', async () => {
+  const preference = { enabled: true, model: 'foundry/custom-opus-deployment' }
+  const response = await fetch(origin, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(preference),
+  })
+  expect(response.status).toBe(400)
+  expect(mocks.save).not.toHaveBeenCalled()
+})
+it.each(['--settings', 'bad\nmodel', 'a'.repeat(257)])('rejects invalid deployment IDs: %s', async (model) => {
+  const response = await fetch(origin, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, model }),
+  })
+  expect(response.status).toBe(400)
+  expect(mocks.save).not.toHaveBeenCalled()
+})

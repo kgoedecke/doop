@@ -13,16 +13,16 @@ export function AppearanceSettings() {
       <CardHeader>
         <CardTitle>Theme</CardTitle>
         <CardDescription>
-          Light or dark, across every canvas and page in this browser. System follows your operating system and switches
-          whenever it does.
+          Choose a light or dark theme for every canvas and page in this browser. System follows your operating system
+          and updates when its theme changes.
         </CardDescription>
       </CardHeader>
       <CardRow label="Appearance">
         <ThemePicker />
         <Note>
           {theme === 'system'
-            ? `Following your system — ${resolved} right now.`
-            : 'Set by hand — your system setting is ignored.'}
+            ? `Following your system. The current theme is ${resolved}.`
+            : 'Your selected theme overrides your system setting.'}
         </Note>
       </CardRow>
     </SettingsCard>

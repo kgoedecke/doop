@@ -30,7 +30,7 @@ afterEach(() => {
 })
 it('points a browser at the desktop app instead of offering controls it cannot run', () => {
   expect(container.textContent).toContain('Desktop app')
-  expect(container.textContent).toContain('Use this plan in the Doop desktop app.')
+  expect(container.textContent).toContain('Use Claude Code in the Doop desktop app.')
   expect(container.querySelectorAll('button')).toHaveLength(0)
   const link = container.querySelector('a')
   expect(link?.textContent).toBe('Download desktop app')

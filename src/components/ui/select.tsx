@@ -75,7 +75,7 @@ function SelectContent({
         sideOffset={position === 'popper' ? sideOffset : undefined}
         collisionPadding={12}
         className={cn(
-          'relative z-[70] max-h-[min(320px,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card bg-surface shadow-pop',
+          'relative z-[70] max-h-[min(320px,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card bg-surface shadow-ring',
           'animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
           className,
         )}

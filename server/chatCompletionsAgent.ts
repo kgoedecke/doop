@@ -88,6 +88,7 @@ interface ChatToolCall {
   id: string
   type: 'function'
   function: { name: string; arguments: string }
+  extra_content?: { google: { thought_signature: string } }
 }
 
 function toMessages(system: string, messages: Anthropic.MessageParam[], vision: boolean): ChatMessage[] {
@@ -107,10 +108,12 @@ function toMessages(system: string, messages: Anthropic.MessageParam[], vision: 
       for (const block of message.content) {
         if (block.type === 'text') texts.push(block.text)
         else if (block.type === 'tool_use') {
+          const signature = 'googleThoughtSignature' in block ? block.googleThoughtSignature : undefined
           calls.push({
             id: block.id,
             type: 'function',
             function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+            ...(typeof signature === 'string' ? { extra_content: { google: { thought_signature: signature } } } : {}),
           })
         }
       }
@@ -190,7 +193,11 @@ interface CompletionBody {
     message?: {
       content?: string | null
       refusal?: string | null
-      tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[]
+      tool_calls?: {
+        id?: string
+        function?: { name?: string; arguments?: string }
+        extra_content?: { google?: { thought_signature?: string } }
+      }[]
     }
   }[]
 }
@@ -222,6 +229,11 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
       id: call.id || `call_${randomUUID()}`,
       name: call.function?.name || 'unknown',
       input: input as Record<string, unknown>,
+      // Gemini validates these on subsequent tool turns. Keep them opaque and
+      // attached to their original call through the provider-neutral history.
+      ...(typeof call.extra_content?.google?.thought_signature === 'string'
+        ? { googleThoughtSignature: call.extra_content.google.thought_signature }
+        : {}),
     })
   }
   const truncated = choice.finish_reason === 'length'

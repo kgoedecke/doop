@@ -24,7 +24,7 @@ import {
   KeyIcon,
   ListIcon,
   ShareIcon,
-  SparkIcon,
+  WaypointsIcon,
   TrashIcon,
   UsersIcon,
 } from '@/components/ui/icons'
@@ -180,7 +180,7 @@ function SidebarDemo() {
         <DashNavItem
           as="div"
           density="rail"
-          icon={<SparkIcon {...railIcon} />}
+          icon={<WaypointsIcon {...railIcon} />}
           trailing={<Dot size="sm" className="bg-success" title="working right now" />}
         >
           Claude Code

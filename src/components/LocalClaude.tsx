@@ -11,12 +11,11 @@ import {
   selectLocalAgent,
   useLocalAgent,
 } from '../lib/localAgent'
-import { CLAUDE_MODELS, normalizeClaudeModel, type ClaudeModel } from '../../shared/localAgent'
+import { normalizeClaudeModel } from '../../shared/localAgent'
 import { Button } from './ui/button'
 import { Disclosure } from './ui/collapsible'
 import { AgentIcon } from './AgentIcon'
-import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
-import { CheckIcon, DesktopIcon, DownloadIcon } from './ui/icons'
+import { DesktopIcon, DownloadIcon } from './ui/icons'
 import { cn } from '@/lib/utils'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
 
@@ -26,14 +25,14 @@ const DESKTOP_DOWNLOAD_URL = 'https://doop.design/download/mac'
  *  muted and its only action is getting the desktop app. */
 function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
   return (
-    <section aria-label="Claude Plan — desktop app" className={cn(planRow(false), 'bg-paper-deep/60')}>
+    <section aria-label="Claude Code — desktop app" className={cn(planRow(false), 'bg-paper-deep/60')}>
       <span aria-hidden="true" className={cn(planMark(false), 'border-line bg-paper-deep opacity-50 grayscale')}>
         <AgentIcon name="claude" size={20} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
           <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink-soft max-md:text-[17px]">
-            Claude Plan
+            Claude Code
           </h3>
           <span className={cn(planPill(false), 'inline-flex items-center gap-[5px] bg-paper-deep text-ink-soft')}>
             <DesktopIcon width={14} height={14} aria-hidden />
@@ -41,18 +40,13 @@ function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
           </span>
         </div>
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
-          Use your Claude subscription locally.
+          Run the agent with your local Claude Code configuration.
         </p>
-        <div className="mt-[18px] flex flex-wrap gap-[9px]">
-          {CLAUDE_MODELS.map((model) => (
-            <ToggleChip key={model.id} state="idle" className="bg-paper-deep text-ink-faint opacity-100">
-              {model.name}
-            </ToggleChip>
-          ))}
-        </div>
         <div className="mt-[13px] flex items-center justify-between gap-5 max-md:flex-col max-md:items-start max-md:gap-2">
           <p className="text-[13px] text-ink-faint">
-            {active ? 'Waiting for a connected desktop.' : 'Use this plan in the Doop desktop app.'}
+            {active
+              ? 'Open your connected desktop app to run Claude Code tasks.'
+              : 'Use Claude Code in the Doop desktop app.'}
           </p>
           <a
             className="inline-flex items-center gap-[7px] py-1 text-[13px] font-semibold text-brand hover:underline"
@@ -100,37 +94,42 @@ export function LocalClaudeRow() {
   const active = preference?.enabled ?? false
   const connected = !!native?.connected && !!native?.enabled
   const supported = hasLocalClaude()
-  const selectedModel = normalizeClaudeModel(preference?.model)
-  const selectedBlurb = CLAUDE_MODELS.find((model) => model.id === selectedModel)?.blurb
-  const choose = (model: ClaudeModel = selectedModel) =>
+  const selectedModel = native?.customProfile ? (native.model ?? 'default') : normalizeClaudeModel(preference?.model)
+  const choose = () =>
     act(async () => {
       if (!userId) return
       if (!active || !connected) {
         const { native: current } = await refreshLocalAgent(userId)
+        if (current?.configError) throw new Error(current.configError)
         if (!current?.installed) throw new Error('Install Claude Code to connect.')
-        if (!current.connected) throw new Error('Sign in to Claude Code to connect.')
+        if (!current.connected)
+          throw new Error(
+            !current.provider || current.provider === 'firstParty'
+              ? 'Sign in to Claude Code to connect.'
+              : 'Check your Claude Code profile authentication, then Refresh.',
+          )
       }
-      await selectLocalAgent(userId, { enabled: true, model })
+      await selectLocalAgent(userId, { enabled: true, model: selectedModel })
     })
 
   if (!isDesktopShell()) return <DesktopOnlyClaudeRow active={active} />
 
   return (
-    <section className={planRow(active)}>
+    <section className={cn(planRow(active), 'ph-no-capture')}>
       <span aria-hidden="true" className={planMark(active)}>
         <AgentIcon name="claude" size={20} />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
           <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
-            Claude Plan
+            Claude Code
           </h3>
           <span className={planPill(connected)}>
             {connected ? (active ? 'Active · Connected' : 'Connected') : 'Not connected'}
           </span>
         </div>
         <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
-          Use your Claude subscription locally.
+          Run the agent with your local Claude Code configuration.
         </p>
         {connected && native?.email && (
           <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-[13px] text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
@@ -148,35 +147,16 @@ export function LocalClaudeRow() {
             )}
           </dl>
         )}
+        {native?.configError && (
+          <p role="alert" className="mt-2 text-caption text-accent-ink">
+            {native.configError}
+          </p>
+        )}
+        {native?.modelWarning && <p className="mt-2 text-caption text-ink-faint">{native.modelWarning}</p>}
         <div className={actionsRow}>
-          {connected ? (
-            <ToggleChipGroup
-              aria-label="Claude model"
-              value={selectedModel}
-              disabled={busy || running}
-              onValueChange={(model) => choose(model as ClaudeModel)}
-            >
-              {CLAUDE_MODELS.map((model) => (
-                <ToggleChipItem key={model.id} value={model.id} title={model.blurb}>
-                  {model.id === selectedModel && (
-                    <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
-                  )}
-                  {model.name}
-                </ToggleChipItem>
-              ))}
-            </ToggleChipGroup>
-          ) : (
-            <div className="flex flex-wrap gap-[9px]">
-              {CLAUDE_MODELS.map((model) => (
-                <ToggleChip key={model.id} state="idle">
-                  {model.name}
-                </ToggleChip>
-              ))}
-            </div>
-          )}
           {supported && (
             <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-              {native && !native.installed && canInstallClaude() && (
+              {native && !native.installed && !native.configError && canInstallClaude() && (
                 <Button
                   disabled={busy}
                   onClick={() =>
@@ -194,30 +174,38 @@ export function LocalClaudeRow() {
                   {installing ? 'Installing…' : 'Install Claude Code'}
                 </Button>
               )}
-              {!connected && error && (
-                <Button variant="ghost" disabled={busy} onClick={() => act(() => refreshLocalAgent(userId!))}>
+              {/* Updated shells can reload device-local configuration and model options. */}
+              {(native?.modelDiscovery || (!connected && error)) && (
+                <Button
+                  variant="ghost"
+                  disabled={busy || running}
+                  onClick={() => act(() => refreshLocalAgent(userId!))}
+                >
                   Refresh
                 </Button>
               )}
-              {native?.installed && !native.connected && (
-                <Button
-                  disabled={busy}
-                  onClick={() =>
-                    act(async () => {
-                      await invokeClaude('claude_login')
-                      await refreshLocalAgent(userId!)
-                    })
-                  }
-                >
-                  {busy ? 'Signing in…' : 'Sign in'}
-                </Button>
-              )}
+              {native?.installed &&
+                !native.connected &&
+                !native.configError &&
+                (!native.provider || native.provider === 'firstParty') && (
+                  <Button
+                    disabled={busy}
+                    onClick={() =>
+                      act(async () => {
+                        await invokeClaude('claude_login')
+                        await refreshLocalAgent(userId!)
+                      })
+                    }
+                  >
+                    {busy ? 'Signing in…' : 'Sign in'}
+                  </Button>
+                )}
               {native?.connected && (!active || !connected) && (
                 <Button disabled={busy} onClick={() => choose()}>
                   {active ? 'Connect' : 'Use instead'}
                 </Button>
               )}
-              {connected && (
+              {native?.enabled && (
                 <Button variant="danger" disabled={busy} onClick={() => act(() => disconnectLocalAgent(userId!))}>
                   Disconnect
                 </Button>
@@ -238,7 +226,6 @@ export function LocalClaudeRow() {
             </div>
           )}
         </div>
-        {connected && <p className="mt-[10px] text-[13px] text-ink-faint">{selectedBlurb}</p>}
         {!supported && <p className="mt-[10px] text-[13px] text-ink-faint">Update Doop to connect Claude.</p>}
         {supported && native && !native.installed && (
           <p className="mt-[10px] text-[13px] text-ink-faint">

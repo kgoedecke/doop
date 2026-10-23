@@ -52,10 +52,10 @@ export function AccountSettings() {
     setNameError('')
     const { error } = await authClient.updateUser({ name: name.trim() })
     setSavingName(false)
-    if (error) return setNameError(error.message || 'That name could not be saved')
+    if (error) return setNameError(error.message || 'Your name could not be saved')
     posthog.capture('account_name_changed')
     setDraft(null)
-    setNameNote('Saved — agents pick it up within a minute')
+    setNameNote('Saved. Agents see the change within a minute.')
   }
 
   async function savePassword() {
@@ -70,11 +70,11 @@ export function AccountSettings() {
       revokeOtherSessions: true,
     })
     setSavingPw(false)
-    if (error) return setPwError(error.message || 'That password could not be changed')
+    if (error) return setPwError(error.message || 'Your password could not be changed')
     posthog.capture('account_password_changed')
     setCurrent('')
     setNext('')
-    setPwNote('Password updated — every other session was signed out')
+    setPwNote('Password updated. Every other session was signed out.')
   }
 
   async function setCommentEmails(on: boolean) {
@@ -86,7 +86,7 @@ export function AccountSettings() {
       setNotify(await api.setNotificationPrefs({ commentEmails: on }))
       posthog.capture('comment_emails_toggled', { on })
     } catch {
-      setNotifyError('That could not be saved — try again')
+      setNotifyError('Your notification setting could not be saved. Try again.')
       refreshNotify()
     } finally {
       setSavingNotify(false)
@@ -97,7 +97,7 @@ export function AccountSettings() {
     if (!user?.email) return
     setVerifyNote('')
     const { error } = await authClient.sendVerificationEmail({ email: user.email })
-    setVerifyNote(error ? error.message || 'That email could not be sent' : 'Verification email sent')
+    setVerifyNote(error ? error.message || 'The verification email could not be sent' : 'Verification email sent')
   }
 
   return (
@@ -106,8 +106,8 @@ export function AccountSettings() {
         <CardHeader>
           <CardTitle>Profile</CardTitle>
           <CardDescription>
-            Your name is the identity shown on cursors, in the activity feed, and on everything you leave for an agent.
-            Agents see the change within a minute.
+            Your name appears on cursors, in the activity feed, and on everything you leave for an agent. Agents see the
+            change within a minute.
           </CardDescription>
         </CardHeader>
 
@@ -136,7 +136,7 @@ export function AccountSettings() {
           ) : nameNote ? (
             <Note tone="success">{nameNote}</Note>
           ) : dirty ? (
-            <Note>Changed — not saved yet</Note>
+            <Note>You have unsaved changes</Note>
           ) : null}
         </CardRow>
 
@@ -144,7 +144,7 @@ export function AccountSettings() {
           label="Email"
           action={
             user?.emailVerified ? (
-              <Note>Sign-in address — not changeable yet</Note>
+              <Note>Your sign-in address cannot be changed yet</Note>
             ) : (
               <Button size="sm" onClick={resendVerification}>
                 Resend verification
@@ -162,8 +162,8 @@ export function AccountSettings() {
         <CardHeader>
           <CardTitle>Notifications</CardTitle>
           <CardDescription>
-            Email about what happens on your canvases while you are not looking at them. Your own comments never trigger
-            one.
+            Receive emails about activity on your canvases while you’re not viewing them. Your own comments never
+            trigger an email.
           </CardDescription>
         </CardHeader>
         <CardRow label="Comment emails">
@@ -175,12 +175,14 @@ export function AccountSettings() {
               aria-label="Email me about new comments and replies"
             />
             <span>
-              New comments and replies on canvases you own, were invited to, or wrote in — bundled into one email per
-              canvas every couple of minutes.
+              Receive new comments and replies on canvases you own, were invited to, or wrote in, grouped into one email
+              per canvas every couple of minutes.
             </span>
           </label>
           {notify && !notify.emailConfigured ? (
-            <Note>This doop has no email set up (SMTP_HOST), so nothing is sent either way.</Note>
+            <Note>
+              Email is not configured for this doop (SMTP_HOST). No emails are sent, regardless of this setting.
+            </Note>
           ) : notifyError ? (
             <Note tone="error">{notifyError}</Note>
           ) : null}
@@ -191,7 +193,7 @@ export function AccountSettings() {
         <CardHeader>
           <CardTitle>Password</CardTitle>
           <CardDescription>
-            Changing it signs out every other browser and device — this one stays signed in.
+            Changing your password signs out every other browser and device. This one stays signed in.
           </CardDescription>
         </CardHeader>
         <CardRow

@@ -63,7 +63,7 @@ export function AgentKeys() {
       setMinted({ id: info.id, secret })
       setKeys((current) => [info, ...(current ?? [])])
     } catch (e) {
-      setError(errorMessage(e, 'That key could not be created'))
+      setError(errorMessage(e, 'The key could not be created'))
     } finally {
       setMinting(false)
     }
@@ -76,7 +76,7 @@ export function AgentKeys() {
       setKeys((current) => current?.filter((k) => k.id !== key.id) ?? null)
       if (minted?.id === key.id) setMinted(null)
     } catch (e) {
-      setError(errorMessage(e, 'That key could not be revoked'))
+      setError(errorMessage(e, 'The key could not be revoked'))
     }
   }
 
@@ -85,9 +85,9 @@ export function AgentKeys() {
       <CardHeader>
         <CardTitle>Agent keys</CardTitle>
         <CardDescription>
-          Bearer credentials for the MCP endpoint, for agents that cannot open a browser to sign in — a Mastra workflow,
-          n8n, CI. A key acts as you: everything it designs is attributed to you, and it reaches exactly the canvases
-          you can. Revoking cuts it off immediately.
+          Use bearer credentials to connect agents that can’t open a browser to sign in, such as a Mastra workflow, n8n,
+          or CI, to the MCP endpoint. A key acts as you: its designs are attributed to you, and it can access exactly
+          the canvases you can. Revoking a key removes its access immediately.
         </CardDescription>
       </CardHeader>
 
@@ -117,7 +117,7 @@ export function AgentKeys() {
       {minted && (
         <CardRow label="Your new key">
           <div className="min-w-0 flex-1">
-            <Note tone="success">Copy it now — it is shown once and stored hashed.</Note>
+            <Note tone="success">Copy your key now. It’s shown only once and stored hashed.</Note>
             <CodeBlock className="mt-2" text={minted.secret} />
             <p className="mb-1.5 mt-3 text-caption font-medium text-ink-faint">MCP config for a headless client</p>
             <CodeBlock text={headlessConfig(minted.secret)} />
@@ -144,7 +144,7 @@ export function AgentKeys() {
       ))}
       {keys && keys.length === 0 && !minted && (
         <CardRow label="No keys yet">
-          <Note>Interactive clients (Claude Code, Codex) don’t need one — they sign in with OAuth.</Note>
+          <Note>Interactive clients (Claude Code, Codex) sign in with OAuth and don’t need an agent key.</Note>
         </CardRow>
       )}
       <ConfirmDialog

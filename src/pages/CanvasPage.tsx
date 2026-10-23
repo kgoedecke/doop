@@ -58,6 +58,7 @@ import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
 import {
+  ArrowLeftIcon,
   BrainIcon,
   CopyIcon,
   FolderIcon,
@@ -1101,7 +1102,7 @@ function ImportModal({
                   setError(null)
                 }}
               >
-                ← Back
+                <ArrowLeftIcon size="rail" /> Back
               </Button>
               <Button
                 variant="primary"
@@ -1301,7 +1302,7 @@ function ImportModal({
                   setError(null)
                 }}
               >
-                ← Back
+                <ArrowLeftIcon size="rail" /> Back
               </Button>
               <Button variant="primary" disabled={!!busy || !selectedCount} onClick={importSelected}>
                 {busy === 'importing'

@@ -5,20 +5,17 @@ import { LocalClaudeRow } from './LocalClaude'
 import { authClient } from '../lib/auth'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
 import { isDesktopShell } from '../lib/shell'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
-import type { AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
+import type { DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
 import { CodeBlock } from './ui/code-block'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Dot } from './ui/dot'
-import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { CheckIcon, ChevronDownIcon } from './ui/icons'
 
 /**
  * "Keep the Doop Agent running on my own subscription."
@@ -41,11 +38,32 @@ export function useModelAccount(): {
   set: (next: ModelAccountStatus) => void
 } {
   const [account, setAccount] = useState<ModelAccountStatus | null>(null)
+  /* bumped by every refresh and every saved change, so a slow refresh can't
+     put back the model a newer save or refresh replaced */
+  const version = useRef(0)
   const refresh = useCallback(() => {
-    api.modelAccount().then(setAccount, () => {})
+    const started = ++version.current
+    api.modelAccount().then(
+      (next) => {
+        if (started === version.current) setAccount(next)
+      },
+      () => {},
+    )
   }, [])
-  useEffect(refresh, [refresh])
-  return { account, refresh, set: setAccount }
+  const set = useCallback((next: ModelAccountStatus) => {
+    version.current++
+    setAccount(next)
+  }, [])
+  useEffect(() => {
+    refresh()
+    const timer = window.setInterval(refresh, 5 * 60_000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [refresh])
+  return { account, refresh, set }
 }
 
 /**
@@ -171,7 +189,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           (flow) => {
             if (!cancelled && 'userCode' in flow && flow.status === 'error') {
               setDevice(null)
-              setError(flow.error || 'That sign-in did not complete')
+              setError(flow.error || 'Sign-in did not complete')
             }
           },
           () => {},
@@ -186,7 +204,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   const fail = (e: unknown) => {
     const body = (e as { body?: { error?: string } })?.body
-    setError(body?.error || (e instanceof Error ? e.message : 'That did not work — try again'))
+    setError(body?.error || (e instanceof Error ? e.message : 'The connection could not be updated. Try again.'))
   }
 
   const start = async () => {
@@ -272,20 +290,6 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     }
   }
 
-  const pickModel = async (model: string) => {
-    setBusy(true)
-    setError('')
-    try {
-      set(await api.setAgentModel(model))
-      posthog.capture('agent_model_changed', { model })
-    } catch (e) {
-      fail(e)
-      refresh()
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const remove = async () => {
     setBusy(true)
     try {
@@ -301,89 +305,11 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   if (!account) return null
 
-  const menuFor = (kind: ModelAccountKind): AgentModelOption[] => account.menus?.[kind] ?? []
-  const activeMenu = account.kind ? menuFor(account.kind) : []
-  const chosen = activeMenu.find((m) => m.id === account.model)
   const onChatgpt = account.connected && account.kind === 'chatgpt'
   /* only one account is stored per user, so connecting one replaces the other */
   const replaces = account.connected
 
-  /* On the connected row the picker changes the model; on any other row it
-     only advertises what that plan can run, so it stays inert. A roster too
-     big for a chip row (OpenRouter) becomes a dropdown instead. */
-  const modelPicker = (live: boolean, kind: ModelAccountKind) => {
-    const models = menuFor(kind)
-    if (models.length > 5) {
-      if (!live) {
-        return (
-          <p className="self-center text-body leading-[1.55] text-ink-faint">
-            {models
-              .slice(0, 6)
-              .map((m) => m.name)
-              .join(' · ')}
-            {models.length > 6 ? ' and more' : ''}
-          </p>
-        )
-      }
-      const current = models.find((m) => m.id === account.model)
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              disabled={busy}
-              className="gap-[7px] rounded-pill border border-line px-3 text-body font-medium text-ink"
-            >
-              {current?.name ?? account.model ?? 'Pick a model'}
-              {current?.vision === false && <NoVisionBadge />}
-              <ChevronDownIcon width={14} height={14} aria-hidden />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {models.map((m) => (
-              <DropdownMenuItem key={m.id} onSelect={() => void pickModel(m.id)}>
-                <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
-                  <span className="flex items-center gap-[7px] text-ink">
-                    {m.name}
-                    {m.vision === false && <NoVisionBadge />}
-                  </span>
-                  <span className="text-label leading-[1.45] text-ink-faint">{m.blurb}</span>
-                </span>
-                {m.id === account.model && <Tick />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )
-    }
-    return live ? (
-      <ToggleChipGroup aria-label="Model" value={account.model ?? ''} onValueChange={pickModel} disabled={busy}>
-        {models.map((m) => (
-          <ToggleChipItem key={m.id} value={m.id} title={m.vision === false ? `${m.blurb} ${VISION_NOTE}` : m.blurb}>
-            {m.id === account.model && <Tick />}
-            {m.name}
-          </ToggleChipItem>
-        ))}
-        {/* a server override outside the known tiers still has to be visible */}
-        {account.model && !models.some((m) => m.id === account.model) && (
-          <ToggleChip state="on">{account.model}</ToggleChip>
-        )}
-      </ToggleChipGroup>
-    ) : (
-      /* inert on a row that is not the connected one — a capability list, not a control */
-      <div className="flex flex-wrap gap-[9px]">
-        {models.map((m) => (
-          <ToggleChip key={m.id} state="idle">
-            {m.name}
-          </ToggleChip>
-        ))}
-      </div>
-    )
-  }
-
-  /* Every key-connected provider wears the same section: title + pill, lede,
-     then either the live picker/rotate row, the key-entry flow, or the inert
-     capability row with a Connect button. */
+  /* Provider rows manage connection, key rotation, and activation. */
   const keySection = (cfg: {
     kind: Exclude<ModelAccountKind, 'chatgpt'>
     title: string
@@ -409,7 +335,6 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           {live && showKey !== cfg.kind ? (
             <>
               <div className={actionsRow}>
-                {modelPicker(true, cfg.kind)}
                 <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
                   <Button
                     disabled={busy}
@@ -435,12 +360,6 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                   </Button>
                 </div>
               </div>
-              {chosen && (
-                <p className="mt-[10px] text-body text-ink-faint">
-                  {chosen.blurb}
-                  {chosen.vision === false && ` ${VISION_NOTE}`}
-                </p>
-              )}
             </>
           ) : showKey === cfg.kind ? (
             <div className={planFlow}>
@@ -467,7 +386,6 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             </div>
           ) : (
             <div className={actionsRow}>
-              {modelPicker(false, cfg.kind)}
               <Button
                 className={rowBtn}
                 onClick={() => {
@@ -502,7 +420,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               </span>
             </div>
             <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">
-              Route OpenAI models through your ChatGPT subscription
+              Use OpenAI models with your ChatGPT subscription
             </p>
             {onChatgpt && account.email && (
               <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-body text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
@@ -524,7 +442,6 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             {onChatgpt ? (
               <>
                 <div className={actionsRow}>
-                  {modelPicker(true, 'chatgpt')}
                   <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
                     {(local?.enabled || switchFailed) && (
                       <Button disabled={busy} onClick={() => activateChatgpt(account)}>
@@ -536,14 +453,13 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                     </Button>
                   </div>
                 </div>
-                {chosen && <p className="mt-[10px] text-body text-ink-faint">{chosen.blurb}</p>}
               </>
             ) : device ? (
               <div className={planFlow}>
                 <ol className={maSteps}>
                   <li>
-                    One-time setup: turn on <b>device code authorization</b> in ChatGPT → Settings → Security. (On a
-                    workspace account an admin has to allow it.)
+                    Turn on <b>device code authorization</b> in ChatGPT → Settings → Security once. For a workspace
+                    account, an admin must allow it.
                   </li>
                   <li>
                     Open{' '}
@@ -600,7 +516,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 <ol className={maSteps}>
                   <li>Approve the connection in the tab that just opened.</li>
                   <li>
-                    You will land on a <code>localhost:1455</code> page that <b>fails to load</b> — that is expected.
+                    You’ll reach a <code>localhost:1455</code> page that <b>fails to load</b>. This is expected.
                   </li>
                   <li>Copy that page's full address and paste it below.</li>
                 </ol>
@@ -625,7 +541,6 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               </div>
             ) : (
               <div className={actionsRow}>
-                {modelPicker(false, 'chatgpt')}
                 <Button className={rowBtn} onClick={start} disabled={busy}>
                   {busy ? 'Opening…' : replaces ? 'Use instead' : 'Connect'}
                 </Button>
@@ -638,7 +553,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {keySection({
         kind: 'openai-key',
         title: 'OpenAI API key',
-        lede: 'Pay per token on your own OpenAI account — no ChatGPT subscription involved',
+        lede: 'Pay per token on your own OpenAI account. This does not use a ChatGPT subscription.',
         mark: <OpenAiMark />,
         placeholder: 'sk-…',
       })}
@@ -646,7 +561,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {keySection({
         kind: 'openrouter-key',
         title: 'OpenRouter API key',
-        lede: 'One key for Kimi, Qwen, GLM, DeepSeek, MiniMax, Gemini and more — pay per token on your OpenRouter account',
+        lede: 'Use one key for Kimi, Qwen, GLM, DeepSeek, MiniMax, Gemini and more. Pay per token on your OpenRouter account.',
         mark: <OpenRouterMark />,
         placeholder: 'sk-or-…',
       })}
@@ -654,7 +569,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {keySection({
         kind: 'gemini-key',
         title: 'Gemini API key',
-        lede: 'Google’s Gemini models, plus Nano Banana image generation — pay per token on your Google AI account',
+        lede: 'Use Google’s Gemini models and Nano Banana image generation. Pay per token on your Google AI account.',
         mark: <GeminiMark />,
         placeholder: 'AIza…',
       })}
@@ -670,22 +585,13 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
       {/* the browser cannot run the local CLI, so the plan closes the list as a pointer to the desktop app */}
       {!desktop && <LocalClaudeRow />}
+      {account.modelCatalogWarning && (
+        <p role="status" className="mt-[10px] text-body text-accent-ink">
+          {account.modelCatalogWarning}
+        </p>
+      )}
       {error && <p className="mt-[10px] text-body text-accent-ink">{error}</p>}
     </div>
-  )
-}
-
-const VISION_NOTE = 'Text-only: this model can’t see screenshots, so designs aren’t visually reviewed.'
-
-function Tick() {
-  return <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
-}
-
-function NoVisionBadge() {
-  return (
-    <span className="rounded-[5px] bg-paper-deep px-[6px] py-[1px] text-micro font-medium uppercase tracking-[0.04em] text-ink-faint">
-      no visual review
-    </span>
   )
 }
 

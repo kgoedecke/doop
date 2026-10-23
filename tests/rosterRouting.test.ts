@@ -56,9 +56,45 @@ it('routes a Gemini account with its default model and vision intact', async () 
   mocks.account.mockResolvedValue({ kind: 'gemini-key', userId: 'bob', apiKey: 'AIzaBobKeyLongEnough123456789012' })
   const fetchSpy = vi
     .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      Response.json({
+        models: [
+          {
+            name: 'models/gemini-3.7-flash',
+            displayName: 'Gemini',
+            supportedGenerationMethods: ['generateContent'],
+            outputTokenLimit: 65536,
+          },
+        ],
+      }),
+    )
     .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }), { status: 200 }))
   const model = await pickModel('bob')
   expect(model).toMatchObject({ provider: 'gemini-key', vision: true, label: 'Gemini (gemini-3.7-flash)' })
   expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
   expect(String(fetchSpy.mock.calls[0]![0])).toContain('generativelanguage.googleapis.com')
+})
+
+it('refuses a stale API-key selection before starting inference instead of silently choosing another model', async () => {
+  mocks.account.mockResolvedValue({
+    kind: 'gemini-key',
+    userId: 'stale-selection',
+    apiKey: 'synthetic',
+    model: 'gemini-3.1-flash-image',
+  })
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+    Response.json({
+      models: [
+        {
+          name: 'models/gemini-3.8-flash',
+          displayName: 'Gemini',
+          supportedGenerationMethods: ['generateContent'],
+          outputTokenLimit: 65536,
+        },
+      ],
+    }),
+  )
+  await expect(pickModel('stale-selection')).rejects.toThrow('Choose an available model in the composer')
+  expect(fetchSpy).toHaveBeenCalledTimes(1)
+  expect(fetchSpy.mock.calls[0]![1]?.method).toBeUndefined()
 })

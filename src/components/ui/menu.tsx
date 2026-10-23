@@ -16,7 +16,10 @@ const MenuSurface = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>
       ref={ref}
       data-slot="menu-surface"
       role="menu"
-      className={cn('min-w-[190px] rounded-[12px] bg-surface p-1.5 shadow-pop animate-[chip-in_0.18s_ease]', className)}
+      className={cn(
+        'min-w-[190px] rounded-[12px] bg-surface p-1.5 shadow-ring animate-[chip-in_0.18s_ease]',
+        className,
+      )}
       {...props}
     />
   )
