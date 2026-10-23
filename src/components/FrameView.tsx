@@ -999,9 +999,11 @@ export const FrameView = memo(function FrameView({ frame, raster }: { frame: Fra
             {/* shield keeps pointer events on the canvas, not the iframe;
             lifted while editing so clicks land in the editable document */}
             {(!editing || panMode || tool !== 'select') && <div className="absolute inset-0" />}
+            {/* above the selection outline (z-[3]), or that outline covers the
+            hovered element's tag */}
             {hover && !editing && !pathEdit && !dragging && !resizing && (
               <div
-                className="pointer-events-none absolute z-[3] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                className="pointer-events-none absolute z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
                 style={{ left: hover.rect.x, top: hover.rect.y, width: hover.rect.width, height: hover.rect.height }}
               >
                 <span
