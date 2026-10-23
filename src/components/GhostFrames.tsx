@@ -32,7 +32,7 @@ export function GhostFrames() {
       {working.map((p, i) => (
         <div
           key={p.clientId}
-          className="pointer-events-none absolute rounded-[2px] bg-[color-mix(in_srgb,var(--ghost-color,var(--ink-faint))_4%,transparent)] outline-offset-[-1.5px] [outline:1.5px_dashed_color-mix(in_srgb,var(--ghost-color,var(--ink-faint))_55%,transparent)]"
+          className="pointer-events-none absolute bg-[color-mix(in_srgb,var(--ghost-color,var(--ink-faint))_4%,transparent)] outline-offset-[-1.5px] [outline:1.5px_dashed_color-mix(in_srgb,var(--ghost-color,var(--ink-faint))_55%,transparent)]"
           style={
             {
               left: baseX + i * 720,

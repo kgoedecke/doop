@@ -25,15 +25,15 @@ describe('layout zoom', () => {
   it('stays within a float32 ulp of the settled zoom, clamped to [1, max]', () => {
     expect(layoutZoomFor(0.5, 3)).toBe(1)
     expect(layoutZoomFor(4, 3)).toBe(3)
-    expect(layoutZoomFor(9, 8)).toBe(8)
-    for (let zoom = 1; zoom <= 8; zoom += 0.0007) {
-      expect(Math.abs(layoutZoomFor(zoom, 8) / zoom - 1)).toBeLessThan(2e-7)
+    expect(layoutZoomFor(17, 16)).toBe(16)
+    for (let zoom = 1; zoom <= 16; zoom += 0.0007) {
+      expect(Math.abs(layoutZoomFor(zoom, 16) / zoom - 1)).toBeLessThan(2e-7)
     }
   })
 
   it('gives every layout zoom an iframe zoom that undoes it exactly in float32', () => {
-    for (let zoom = 1; zoom <= 8; zoom += 0.0007) {
-      const k = layoutZoomFor(zoom, 8)
+    for (let zoom = 1; zoom <= 16; zoom += 0.0007) {
+      const k = layoutZoomFor(zoom, 16)
       expect(Math.fround(Math.fround(k) * Math.fround(counterZoom(k)))).toBe(1)
     }
   })
@@ -76,7 +76,7 @@ describe.skipIf(!findBrowserPath())('settled canvas zoom', () => {
 
     /* 1.31 and 1.1111 are zooms whose plain 1/k leaves the document's zoom at
        0.99999994 in float32, which nudged its layout off the design size */
-    for (const k of [1.31, 1.1111, 1.5, 2, 3, 5.5, 8]) {
+    for (const k of [1.31, 1.1111, 1.5, 2, 3, 5.5, 8, 16]) {
       await page.evaluate((k) => window.zoom(k), k)
       expect(await page.evaluate(() => window.rect('body'))).toEqual(rest.body)
       expect(await page.evaluate(() => window.rect('.foot'))).toEqual(rest.foot)

@@ -42,3 +42,11 @@ export function layoutZoomFor(zoom: number, max: number): number {
 export function counterZoom(k: number): number {
   return exactInverse(Math.fround(k)) ?? 1 / k
 }
+
+/** Chromium passes an iframe's CSS zoom into its document as pixel density,
+ *  leaving the document's layout at design px, so frames there need no
+ *  counter-zoom. Sandboxed frames run out of process in Chromium and ignore
+ *  the element's transform when picking a raster scale, so the counter-zoom
+ *  left them stretched from 1×. Other engines keep the counter-zoom. */
+export const FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY =
+  typeof navigator !== 'undefined' && /\b(Chrome|Chromium|Edg)\//.test(navigator.userAgent)

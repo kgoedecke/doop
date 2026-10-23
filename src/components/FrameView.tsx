@@ -1,8 +1,10 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ElementComment, Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { isCanvasElement } from '../lib/drawing'
 import { useDrawingMove } from './DrawingMove'
+import { FrameLabelLayer } from './FrameLabelLayer'
 import { PathEditor } from './PathEditor'
 import { loadPathEdit, type PathEditSource } from '../lib/pathEditing'
 import { currentPageCanvas } from '../lib/pages'
@@ -13,7 +15,7 @@ import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
-import { counterZoom } from '../lib/layoutZoom'
+import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { recordCreate, recordUpdate, recordUpdates, trackSave } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { gesture } from '../lib/gesture'
@@ -66,9 +68,8 @@ const COUNTER_SCALE = '[transform:scale(min(calc(1/var(--zoom,1)),2.4))]'
    its size at every zoom, the way Figma's comment pins do. */
 const POPOVER_SCALE = '[transform:scale(calc(1/var(--zoom,1)))_translateY(calc(-100%_-_8px))]'
 
-/* the inverse of COUNTER_SCALE: a box this wide, once counter-scaled, spans
-   exactly the frame's width on screen */
-const LABEL_WIDTH = '[width:calc(100%*max(var(--zoom,1),calc(1/2.4)))]'
+/* screen px between a frame's name and its top edge, at every zoom */
+const LABEL_GAP = 6
 const EDITOR_CHIP =
   'inline-flex items-center gap-1 rounded-full px-[7px] py-0.5 text-[10px] font-bold text-white animate-[chip-in_0.25s_ease]'
 /* the element toolbar's buttons sit on ink and stay compact */
@@ -95,7 +96,7 @@ export function HiddenFrameView({ frame }: { frame: Frame }) {
         <EyeClosedIcon width={11} height={11} />
         <span>{frame.name}</span>
       </div>
-      <div className="absolute inset-0 rounded-[6px] border border-dashed border-ink-faint bg-paper-deep/40 outline-2 outline-offset-1 outline-dashed outline-brand" />
+      <div className="absolute inset-0 border border-dashed border-ink-faint bg-paper-deep/40 outline-2 outline-offset-1 outline-dashed outline-brand" />
     </div>
   )
 }
@@ -164,6 +165,7 @@ interface HoverHit {
    this component — memo holds as long as the frame and layout zoom are unchanged. */
 export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame: Frame; layoutZoom: number }) {
   const drawingMove = useDrawingMove(frame, layoutZoom)
+  const labelLayer = useContext(FrameLabelLayer)
   const [pathEdit, setPathEdit] = useState<PathEditSource | null>(null)
   const editRequest = useRef(0)
   const closePathEdit = useCallback(() => {
@@ -853,7 +855,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           className={cn(
             'group absolute',
             stream &&
-              "before:pointer-events-none before:absolute before:-inset-[3px] before:rounded-[9px] before:border-2 before:border-dashed before:border-[var(--editing-color,var(--brand))] before:content-[''] before:animate-[stream-pulse_1.1s_ease-in-out_infinite]",
+              "before:pointer-events-none before:absolute before:-inset-[3px] before:border-2 before:border-dashed before:border-[var(--editing-color,var(--brand))] before:content-[''] before:animate-[stream-pulse_1.1s_ease-in-out_infinite]",
           )}
           style={
             {
@@ -873,76 +875,84 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             menuAt.current = { x: e.clientX, y: e.clientY }
           }}
         >
-          <div
-            className={cn(
-              'absolute -top-[26px] left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft',
-              /* the label is counter-scaled from its bottom-left corner, so
-                 its box must be pre-shrunk by the same factor: a full-width
-                 box scaled by 1/zoom would reach far past the frame's right
-                 edge and swallow pointer-downs meant for the frames beside it */
-              LABEL_WIDTH,
-              COUNTER_SCALE,
-            )}
-            style={duping || dupKeyHeld ? { cursor: DUP_CURSOR } : undefined}
-            onPointerDown={(e) => startDrag(e, 'move', false, true)}
-          >
-            {frame.locked && (
-              <Tooltip label="Locked — unlock it from the Layers panel or the Inspector" side="top" align="start">
-                <span className="flex shrink-0 items-center text-ink-faint">
-                  <LockIcon width={11} height={11} />
-                </span>
-              </Tooltip>
-            )}
-            {isSyncedFrame(frame.html) && (
-              <Tooltip label="Synced from a live app" side="top" align="start">
-                <span className="flex shrink-0 items-center text-brand">
-                  <SyncIcon width={11} height={11} />
-                </span>
-              </Tooltip>
-            )}
-            {isGithubFrame(frame.html) && (
-              <Tooltip
-                label={
-                  isGithubPlaceholder(frame.html)
-                    ? 'Found in the repo — awaiting capture'
-                    : 'Imported from a GitHub repo'
-                }
-                side="top"
-                align="start"
+          {labelLayer &&
+            createPortal(
+              <div
+                /* the Stage reads this off the press target, which a portal no
+               longer nests inside the frame */
+                data-frame-locked={frame.locked ? '' : undefined}
+                className="pointer-events-auto absolute flex cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
+                /* screen px, from the camera the Stage publishes: the name sits a
+               fixed gap above the frame's top-left corner and never runs past
+               its right edge, whatever the zoom */
+                style={{
+                  left: `calc(var(--vx, 0px) + ${frame.x}px * var(--zoom, 1))`,
+                  top: `calc(var(--vy, 0px) + ${frame.y}px * var(--zoom, 1))`,
+                  width: `calc(${frame.width}px * var(--zoom, 1))`,
+                  transform: `translateY(calc(-100% - ${LABEL_GAP}px))`,
+                  cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
+                }}
+                onPointerDown={(e) => startDrag(e, 'move', false, true)}
               >
-                <span
-                  className={cn(
-                    'flex shrink-0 items-center',
-                    isGithubPlaceholder(frame.html) ? 'text-ink-faint' : 'text-brand',
+                {frame.locked && (
+                  <Tooltip label="Locked — unlock it from the Layers panel or the Inspector" side="top" align="start">
+                    <span className="flex shrink-0 items-center text-ink-faint">
+                      <LockIcon width={11} height={11} />
+                    </span>
+                  </Tooltip>
+                )}
+                {isSyncedFrame(frame.html) && (
+                  <Tooltip label="Synced from a live app" side="top" align="start">
+                    <span className="flex shrink-0 items-center text-brand">
+                      <SyncIcon width={11} height={11} />
+                    </span>
+                  </Tooltip>
+                )}
+                {isGithubFrame(frame.html) && (
+                  <Tooltip
+                    label={
+                      isGithubPlaceholder(frame.html)
+                        ? 'Found in the repo — awaiting capture'
+                        : 'Imported from a GitHub repo'
+                    }
+                    side="top"
+                    align="start"
+                  >
+                    <span
+                      className={cn(
+                        'flex shrink-0 items-center',
+                        isGithubPlaceholder(frame.html) ? 'text-ink-faint' : 'text-brand',
+                      )}
+                    >
+                      <GithubIcon width={11} height={11} />
+                    </span>
+                  </Tooltip>
+                )}
+                <span className="overflow-hidden text-ellipsis">{frame.name}</span>
+                <span className="flex gap-1">
+                  {stream && (
+                    <span className={EDITOR_CHIP} style={{ background: stream.color }}>
+                      <AgentIcon name={stream.name} size={9} color="#fff" />
+                      {stream.name} is designing
+                      <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
+                    </span>
                   )}
-                >
-                  <GithubIcon width={11} height={11} />
+                  {editors
+                    .filter((p) => p.name !== stream?.name)
+                    .map((p) => (
+                      <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }}>
+                        {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : '✎'} {p.name}
+                      </span>
+                    ))}
                 </span>
-              </Tooltip>
+              </div>,
+              labelLayer,
             )}
-            <span className="overflow-hidden text-ellipsis">{frame.name}</span>
-            <span className="flex gap-1">
-              {stream && (
-                <span className={EDITOR_CHIP} style={{ background: stream.color }}>
-                  <AgentIcon name={stream.name} size={9} color="#fff" />
-                  {stream.name} is designing
-                  <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
-                </span>
-              )}
-              {editors
-                .filter((p) => p.name !== stream?.name)
-                .map((p) => (
-                  <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }}>
-                    {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : '✎'} {p.name}
-                  </span>
-                ))}
-            </span>
-          </div>
 
           <div
             className={cn(
               'absolute inset-0 overflow-hidden',
-              isCanvasElement(frame.html) ? 'bg-transparent' : 'rounded-[6px] border border-line bg-white',
+              isCanvasElement(frame.html) ? 'bg-transparent' : 'border border-line bg-white',
               /* Select keeps the arrow, like Figma: the frame is a thing to
                  point at, not a handle. The Hand tool's grab and the Comment
                  tool's bubble come from the Stage, which overrides every
@@ -988,18 +998,19 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               sandbox="allow-scripts"
               srcDoc={FRAME_BOOTSTRAP}
               /* The world is laid out at CSS zoom k (Stage), which an iframe
-                 would pass into its document: WebKit then lays the document
-                 out at the zoomed width and only scales its 1× raster up.
-                 Undoing k here keeps the document's own zoom at 1, so its
-                 viewport, vh/vw, media queries and every rect the runtime
-                 reports stay in design px; the scale restores the box, and
-                 the document paints into the world at the world's
-                 resolution. */
+                 passes into its document. Chromium takes it as pixel density:
+                 the document keeps its design-px viewport and rasterizes at
+                 k×, even out of process, where a transform on this element
+                 would only stretch a 1× raster. WebKit instead lays the
+                 document out at the zoomed width, so there the zoom is undone
+                 here (keeping viewport, vh/vw, media queries and runtime rects
+                 in design px) and the scale restores the box. */
               style={{
                 width: frame.width,
                 height: frame.height,
-                zoom: counterZoom(layoutZoom),
-                transform: `scale(${layoutZoom})`,
+                ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
+                  ? null
+                  : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
                 transformOrigin: '0 0',
               }}
             />
@@ -1059,7 +1070,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               )}
             {flash && (
               <div
-                className="pointer-events-none absolute -inset-px rounded-[6px] animate-[frame-flash_1.2s_ease-out_forwards]"
+                className="pointer-events-none absolute -inset-px animate-[frame-flash_1.2s_ease-out_forwards]"
                 style={{ '--editing-color': flash.color } as React.CSSProperties}
               />
             )}
