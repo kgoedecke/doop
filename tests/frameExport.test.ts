@@ -164,3 +164,30 @@ it('reports the server error when the PNG to copy fails to render', async () => 
   expect(written).toHaveLength(0)
   expect(useStore.getState().notice?.text).toBe('render rate limit — cached URLs are unaffected')
 })
+
+it('says so without rendering when the browser has no async clipboard', async () => {
+  vi.stubGlobal('fetch', vi.fn())
+  vi.stubGlobal('navigator', {})
+
+  await copyFramePng(frame)
+
+  expect(fetch).not.toHaveBeenCalled()
+  expect(useStore.getState().notice?.text).toBe('This browser can’t copy images')
+})
+
+it('leaves no unhandled rejection when the clipboard refuses before reading the render', async () => {
+  const unhandled = vi.fn()
+  process.on('unhandledRejection', unhandled)
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ error: 'render failed' }, { status: 500 })),
+  )
+  stubClipboard().write.mockRejectedValue(new DOMException('denied', 'NotAllowedError'))
+
+  await copyFramePng(frame)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  process.off('unhandledRejection', unhandled)
+  expect(unhandled).not.toHaveBeenCalled()
+  expect(useStore.getState().notice?.text).toBe('Couldn’t copy the PNG')
+})
