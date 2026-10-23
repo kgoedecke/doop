@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types'
-import { downloadFrameExport } from '../src/lib/frameExport'
+import { copyFramePng, downloadFrameExport } from '../src/lib/frameExport'
 import { useStore } from '../src/lib/store'
 
 const frame: Frame = {
@@ -113,4 +113,54 @@ it('in the desktop shell leaves the outcome to the save panel, which may be canc
 
   expect(clicked).toHaveLength(1)
   expect(useStore.getState().notice).toBeNull()
+})
+
+/* A clipboard that resolves each item's pending data the way browsers do. */
+function stubClipboard() {
+  const written: Blob[] = []
+  vi.stubGlobal(
+    'ClipboardItem',
+    class {
+      constructor(readonly items: Record<string, Promise<Blob>>) {}
+    },
+  )
+  const write = vi.fn(async (items: { items: Record<string, Promise<Blob>> }[]) => {
+    written.push(await items[0]!.items['image/png']!)
+  })
+  vi.stubGlobal('navigator', { clipboard: { write } })
+  return { written, write }
+}
+
+it('copies the PNG, handing the clipboard the pending render so the click still counts', async () => {
+  let respond!: (res: Response) => void
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise<Response>((resolve) => (respond = resolve))),
+  )
+  const { written, write } = stubClipboard()
+
+  const done = copyFramePng(frame)
+  expect(fetch).toHaveBeenCalledWith('/i/export-frame.png?scale=2&download', expect.anything())
+  expect(write).toHaveBeenCalledTimes(1)
+  expect(useStore.getState().notice).toMatchObject({ text: 'Copying PNG…', busy: true })
+
+  respond(new Response('png-bytes'))
+  await done
+
+  expect(await written[0]!.text()).toBe('png-bytes')
+  expect(clicked).toHaveLength(0)
+  expect(useStore.getState().notice).toMatchObject({ text: 'PNG copied', busy: false })
+})
+
+it('reports the server error when the PNG to copy fails to render', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ error: 'render rate limit — cached URLs are unaffected' }, { status: 429 })),
+  )
+  const { written } = stubClipboard()
+
+  await copyFramePng(frame)
+
+  expect(written).toHaveLength(0)
+  expect(useStore.getState().notice?.text).toBe('render rate limit — cached URLs are unaffected')
 })

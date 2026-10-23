@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { api } from '../lib/api'
-import { downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
+import { copyFramePng, downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
 import { deleteFrameTracked, recordUpdate } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
@@ -171,6 +171,14 @@ export function Inspector({
               onClick={() => void downloadFrameExport(frame, 'jpg')}
             >
               JPG
+            </Button>
+            <Button
+              variant="bare"
+              className={cn(fillBtn, 'col-span-2')}
+              title="Copy the image (2×) to paste anywhere"
+              onClick={() => void copyFramePng(frame)}
+            >
+              Copy as PNG
             </Button>
             <Button
               variant="bare"
