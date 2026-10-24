@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.10.0](https://github.com/kgoedecke/doop/compare/v0.9.0...v0.10.0) (2026-10-24)
+
+
+### Features
+
+* **canvas:** add design panel geometry, layout, and appearance controls ([#340](https://github.com/kgoedecke/doop/issues/340)) ([d98df37](https://github.com/kgoedecke/doop/commit/d98df37115931f0e515414ae351232a2afe3f7a0))
+* **canvas:** copy a frame as PNG from its menu and the inspector ([#219](https://github.com/kgoedecke/doop/issues/219)) ([06169b4](https://github.com/kgoedecke/doop/commit/06169b43a5a50d33d4ed649af27a7d0e46af8be0))
+* **canvas:** copy links to specific frame elements ([#338](https://github.com/kgoedecke/doop/issues/338)) ([81fb23a](https://github.com/kgoedecke/doop/commit/81fb23a5c8cf455548e32661e733bba8e948398a))
+* **canvas:** keep zoom sharp up to 800% and steady peer cursors ([#216](https://github.com/kgoedecke/doop/issues/216)) ([aa04e95](https://github.com/kgoedecke/doop/commit/aa04e959bb9dfef75e0abfb6145bb491f817807a))
+* **canvas:** resize elements inside a frame with drag handles ([#343](https://github.com/kgoedecke/doop/issues/343)) ([f897395](https://github.com/kgoedecke/doop/commit/f897395dd1721f8525b86feb4a4006074ddb7456))
+* **design:** link width and height with an aspect ratio toggle ([#342](https://github.com/kgoedecke/doop/issues/342)) ([8ef7396](https://github.com/kgoedecke/doop/commit/8ef739603fe4b05c4bfdc863ee5b9ff53dfbcdd4))
+* **design:** support dragging numeric field units ([#339](https://github.com/kgoedecke/doop/issues/339)) ([1a3373f](https://github.com/kgoedecke/doop/commit/1a3373fdd9c275be801ea054215c26b4e72d1710))
+
+
+### Bug Fixes
+
+* **canvas:** add font selector and text alignment controls ([#337](https://github.com/kgoedecke/doop/issues/337)) ([4e3e8b6](https://github.com/kgoedecke/doop/commit/4e3e8b6600d4004d49ca8533621749b367a89a7c))
+* **canvas:** hide resize handles for unsupported transforms ([91e8bad](https://github.com/kgoedecke/doop/commit/91e8bad07690410b70dcf446895dbf209dabac6d))
+* **canvas:** keep the hover tag above the selection outline ([#218](https://github.com/kgoedecke/doop/issues/218)) ([0531b70](https://github.com/kgoedecke/doop/commit/0531b70ea127a7390e1d1b2fcbb6ecfc2cafe85c))
+* **canvas:** preserve fast element resize gestures ([cb176aa](https://github.com/kgoedecke/doop/commit/cb176aab1d7aef28729a38df6c44a0db49f0edd6))
+* **canvas:** resize flex Fill children with handles ([#211](https://github.com/kgoedecke/doop/issues/211)) ([0ab9cf0](https://github.com/kgoedecke/doop/commit/0ab9cf02386c91e3b55aa1dbc9b51607c4ab18ea))
+* **comments:** make resolved replies readable in the panel ([#332](https://github.com/kgoedecke/doop/issues/332)) ([d1f9752](https://github.com/kgoedecke/doop/commit/d1f9752d3c999fd53967a7efacd90a8ed17e5f55))
+* **drawing:** reject conflicting transfer saves and deletes ([#335](https://github.com/kgoedecke/doop/issues/335)) ([2caad52](https://github.com/kgoedecke/doop/commit/2caad52ef7281d8e4ea1eafa2d27f113c86f6bf1))
+* **ios:** refine canvas interactions and native controls ([#344](https://github.com/kgoedecke/doop/issues/344)) ([bf3ebac](https://github.com/kgoedecke/doop/commit/bf3ebac2b148cd44e03113f6a28132b60ceb65e0))
+* **layers:** preserve visibility during inline text edits ([1df6c0b](https://github.com/kgoedecke/doop/commit/1df6c0b92de2407e6a31e1ea4785eb13c92994fb))
+* **pages:** persist hidden and locked frames in page copies ([7f509bd](https://github.com/kgoedecke/doop/commit/7f509bdd8462928a0d3ca9c1bfe2cd01897df12f))
+* **pages:** restore the selected-frame destination picker ([#334](https://github.com/kgoedecke/doop/issues/334)) ([3edf6e8](https://github.com/kgoedecke/doop/commit/3edf6e85dddf15ef88aad711158a5376264cfb8e))
+* **ui:** replace window.confirm with ConfirmDialog for destructive settings actions ([#205](https://github.com/kgoedecke/doop/issues/205)) ([2f88fa9](https://github.com/kgoedecke/doop/commit/2f88fa9014118b8434fe0b36877d7641c80a5c54))
+
+
+### Documentation
+
+* refresh the README visuals and add agents and integrations ([#207](https://github.com/kgoedecke/doop/issues/207)) ([74e7eb4](https://github.com/kgoedecke/doop/commit/74e7eb4680ee34b05c1f9f1eb046f687f621ccd5))
+
 ## [0.9.0](https://github.com/kgoedecke/doop/compare/v0.8.0...v0.9.0) (2026-10-21)
 
 
