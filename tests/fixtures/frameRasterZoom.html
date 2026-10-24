@@ -3,6 +3,7 @@
   <body>
     <script type="module">
       import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
+      import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom, layoutZoomFor } from '/src/lib/layoutZoom.ts'
 
       /* a frame whose footer is anchored to the bottom of a 100vh column — the
          layout that lost its footer past 100% canvas zoom */
@@ -16,13 +17,19 @@
       window.messages = []
       window.addEventListener('message', (ev) => window.messages.push(ev.data))
 
+      /* the Stage's world, laid out at the settled canvas zoom */
+      const world = document.createElement('div')
+      world.style.cssText = 'position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform'
+      document.body.style.margin = '0'
+      document.body.appendChild(world)
+
       /* the runtime's iframe, as FrameView draws it */
       const frame = document.createElement('iframe')
       frame.setAttribute('data-doop-frame', '')
       frame.sandbox = 'allow-scripts'
       frame.srcdoc = FRAME_BOOTSTRAP
       frame.style.cssText = `display:block;border:0;width:${DESIGN.width}px;height:${DESIGN.height}px;transform-origin:0 0`
-      document.body.appendChild(frame)
+      world.appendChild(frame)
 
       /* a plain iframe that can report what the document sees */
       const probe = document.createElement('iframe')
@@ -32,7 +39,7 @@
         "addEventListener('message', (e) => { if (e.data === 'q') parent.postMessage({ probe: { innerWidth, innerHeight, dpr: devicePixelRatio } }, '*') })" +
         '</scr' +
         'ipt></body>'
-      document.body.appendChild(probe)
+      world.appendChild(probe)
 
       const waitFor = (pred, timeout = 5000) =>
         new Promise((resolve, reject) => {
@@ -61,11 +68,17 @@
         probe.contentWindow.postMessage('q', '*')
         return (await waitFor((d) => d?.probe)).probe
       }
-      /** draw both iframes at raster k, the way FrameView does */
-      window.raster = async (k) => {
+      /** the path FrameView takes in this browser */
+      window.shippedPath = FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY ? 'density' : 'counter'
+      /** settle the canvas at zoom k: the world takes it as its layout zoom,
+          and both iframes either take it as pixel density (Chromium) or undo
+          it (zoom 1/k, scale k: WebKit), the way Stage and FrameView do */
+      window.zoom = async (zoom, path = window.shippedPath) => {
+        const k = layoutZoomFor(zoom, 16, path === 'density')
+        world.style.zoom = String(k)
         for (const el of [frame, probe]) {
-          el.style.zoom = String(k)
-          el.style.transform = `scale(${1 / k})`
+          el.style.zoom = path === 'density' ? '' : String(counterZoom(k))
+          el.style.transform = path === 'density' ? '' : `scale(${k})`
         }
         await nextPaint()
         const box = frame.getBoundingClientRect()

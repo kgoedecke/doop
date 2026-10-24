@@ -2,6 +2,7 @@ import { useState, type MutableRefObject } from 'react'
 import type { Frame } from '../../shared/types'
 import { errorMessage } from '../lib/api'
 import { copyFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
+import { copyFramePng } from '../lib/frameExport'
 import { deleteFramesTracked } from '../lib/history'
 import { setFramesHidden, setFramesLocked } from '../lib/layerEdits'
 import { useStore } from '../lib/store'
@@ -82,6 +83,7 @@ export function FrameContextMenu({ frame, at }: { frame: Frame; at: MutableRefOb
         >
           Copy link
         </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void copyFramePng(frame)}>Copy as PNG</ContextMenuItem>
         <ContextMenuItem onSelect={() => void copyImageUrl(frame)}>Copy image URL</ContextMenuItem>
         <ContextMenuItem onSelect={() => setShowExport(true)}>Export…</ContextMenuItem>
         <ContextMenuItem onSelect={() => setHistoryOpen(true)}>Version history…</ContextMenuItem>

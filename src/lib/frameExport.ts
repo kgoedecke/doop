@@ -97,3 +97,42 @@ export async function downloadFrameExport(frame: Frame, format: FrameExportForma
   inFlight -= 1
   report(outcome)
 }
+
+/** Render the frame and put the PNG itself on the clipboard, reporting
+ *  through the canvas toast like the downloads. ClipboardItem gets the
+ *  pending blob, not an awaited one: WebKit allows the write only while the
+ *  click's user activation is live, and the render can take seconds. */
+export async function copyFramePng(frame: Frame): Promise<void> {
+  /* no async clipboard outside a secure context (a self-hosted instance on
+     plain http) or in older engines: say so before spending a render */
+  if (!('clipboard' in navigator) || typeof ClipboardItem === 'undefined') {
+    useStore.getState().pushNotice('This browser can’t copy images')
+    return
+  }
+  inFlight += 1
+  useStore.getState().pushNotice('Copying PNG…', { busy: true })
+  /* engines differ in what the write rejects with when the blob fails, so
+     the render's reason is kept here rather than read off the error */
+  let failure = 'Couldn’t copy the PNG'
+  const png = (async () => {
+    try {
+      const res = await fetch(frameExportUrl(frame, 'png'), { signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS) })
+      if (res.ok) return await res.blob()
+      failure = await failureOf(res, 'png')
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'TimeoutError') failure = 'The PNG copy timed out — try again'
+    }
+    throw new Error(failure)
+  })()
+  /* the clipboard can refuse without ever reading it */
+  png.catch(() => {})
+  let outcome: string
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+    outcome = 'PNG copied'
+  } catch {
+    outcome = failure
+  }
+  inFlight -= 1
+  report(outcome)
+}

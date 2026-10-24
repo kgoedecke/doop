@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useStore } from '../lib/store'
+import { useStore, type Viewport } from '../lib/store'
 import type { Frame } from '../../shared/types'
 import { usePageCanvas, currentPageCanvas } from '../lib/pages'
 import { sendWs } from '../lib/ws'
@@ -27,14 +27,40 @@ import { Tooltip } from './ui/tooltip'
 import { BoxIcon, CircleIcon, CommentIcon, CursorIcon, FrameIcon, HandIcon, TextIcon, VectorIcon } from './ui/icons'
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
+import { FrameLabelLayer } from './FrameLabelLayer'
+import { layoutZoomFor } from '../lib/layoutZoom'
 
 const MIN_ZOOM = 0.08
-const MAX_ZOOM = 3
+/* The settled world is laid out at up to this zoom too (layoutZoomFor), so
+   the desktop app stays sharp all the way in. That costs little: WebKit and
+   Chromium both tile what is on screen, so backing memory follows the
+   viewport rather than the zoom, and frame documents never re-lay out (each
+   iframe undoes the zoom). Mirrored by FOLLOW_MAX_ZOOM. */
+const MAX_ZOOM = 16
 
 /* The Comment tool's cursor wins over everything under the stage — frames
    included, like the Hand tool's grab — except inside the comment UI itself
    (pins, composer, threads: `data-comment-ui`), which keeps its own cursors. */
 const COMMENT_CURSOR = 'cursor-comment! [&_:not([data-comment-ui]_*)]:cursor-comment!'
+
+/* The world is laid out at CSS zoom k, the settled camera zoom, and its
+   transform carries only what the camera has moved since. WebKit rasterizes a
+   composited layer at its CSS size and stretches it under a scale transform,
+   so a world scaled by its transform alone went soft in the desktop app past
+   100%. The element's own zoom also scales its translate, hence the /k. */
+function worldTransform(vp: Viewport, k: number): string {
+  return `translate(${vp.x / k}px, ${vp.y / k}px) scale(${vp.zoom / k})`
+}
+
+/* The pixel grid, as Figma draws it zoomed in: a hairline on every design-px
+   boundary. Below PIXEL_GRID_FROM the cells are too small to read as anything
+   but a tint, so it fades in from there and is fully on at PIXEL_GRID_FULL. */
+const PIXEL_GRID_FROM = 3
+const PIXEL_GRID_FULL = 5
+
+function pixelGridOpacity(zoom: number): number {
+  return Math.min(1, Math.max(0, (zoom - PIXEL_GRID_FROM) / (PIXEL_GRID_FULL - PIXEL_GRID_FROM)))
+}
 
 /** The canvas-pinned root comment a ?comment= link names, if it is loaded. */
 function linkedCanvasComment(id: string | null): CanvasComment | null {
@@ -98,6 +124,8 @@ export function Stage({
   const drawing = useCanvasDrawing(ref)
   const worldRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
+  const pixelGridRef = useRef<HTMLDivElement>(null)
+  const [labelLayer, setLabelLayer] = useState<HTMLDivElement | null>(null)
   const zoomLabelRef = useRef<HTMLSpanElement>(null)
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
@@ -116,8 +144,12 @@ export function Stage({
   const dismissCompose = useCallback(() => setComposeAt(null), [])
   /* where the background menu opened, so Paste drops the frame there */
   const bgAt = useRef({ x: 0, y: 0 })
-  /* iframe oversampling factor — bumped only once the zoom settles */
-  const [raster, setRaster] = useState(1)
+  /* the world's layout zoom (see worldTransform) — caught up with the camera
+     only once the zoom settles, and never below 1, where scaling down a 1×
+     raster stays sharp and nothing needs a relayout; the ref serves the
+     per-frame viewport writes */
+  const [layoutZoom, setLayoutZoom] = useState(1)
+  const layoutZoomRef = useRef(1)
   const fitted = useRef(false)
   const deepLinkHandled = useRef(false)
   const focusedPage = useRef<string | null>(null)
@@ -144,13 +176,28 @@ export function Stage({
       const grid = gridRef.current
       const stage = ref.current
       if (!world || !grid || !stage) return
-      world.style.transform = `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`
+      world.style.transform = worldTransform(vp, layoutZoomRef.current)
       stage.style.setProperty('--zoom', String(vp.zoom))
+      /* the camera's offset, for chrome drawn in screen px (FrameLabelLayer) */
+      stage.style.setProperty('--vx', `${vp.x}px`)
+      stage.style.setProperty('--vy', `${vp.y}px`)
       const period = 26 * vp.zoom
       grid.style.backgroundSize = `${period}px ${period}px`
+      /* one period of overhang: the layer slides back by up to a period */
+      grid.style.width = grid.style.height = `calc(100% + ${period}px)`
       const gx = (((vp.x % period) + period) % period) - period
       const gy = (((vp.y % period) + period) % period) - period
       grid.style.transform = `translate(${gx}px, ${gy}px)`
+      const pixels = pixelGridRef.current
+      if (pixels) {
+        const opacity = pixelGridOpacity(vp.zoom)
+        pixels.hidden = opacity === 0
+        pixels.style.opacity = String(opacity)
+        pixels.style.backgroundSize = `${vp.zoom}px ${vp.zoom}px`
+        const px = (((vp.x % vp.zoom) + vp.zoom) % vp.zoom) - vp.zoom
+        const py = (((vp.y % vp.zoom) + vp.zoom) % vp.zoom) - vp.zoom
+        pixels.style.transform = `translate(${px}px, ${py}px)`
+      }
       if (zoomLabelRef.current) zoomLabelRef.current.textContent = `${Math.round(vp.zoom * 100)}%`
     }
     apply(useStore.getState().viewport)
@@ -164,8 +211,7 @@ export function Stage({
       if (ref.current) sendViewport(s.viewport, ref.current)
       window.clearTimeout(settle)
       settle = window.setTimeout(() => {
-        const z = useStore.getState().viewport.zoom
-        setRaster(z <= 1 ? 1 : Math.min(3, Math.ceil(z * 2) / 2))
+        setLayoutZoom(layoutZoomFor(useStore.getState().viewport.zoom, MAX_ZOOM))
       }, 250)
     })
     return () => {
@@ -173,6 +219,23 @@ export function Stage({
       window.clearTimeout(settle)
     }
   }, [])
+
+  /* a new layout zoom lands in the same commit as the frames' counter-zoom
+     (FrameView), so no paint sees one without the other */
+  useLayoutEffect(() => {
+    layoutZoomRef.current = layoutZoom
+    const world = worldRef.current
+    if (!world) return
+    /* a new zoom recomputes every length inside the world: anything with a
+       transition (a peer's cursor glides between positions) would animate
+       from its old-zoom value while the world itself snaps, so it jumped
+       off its spot and slid back. Transitions are off for this one change. */
+    world.dataset.rezoom = ''
+    world.style.zoom = String(layoutZoom)
+    world.style.transform = worldTransform(useStore.getState().viewport, layoutZoom)
+    void world.offsetWidth
+    delete world.dataset.rezoom
+  }, [layoutZoom])
 
   /* following a peer: whenever their camera (or, lacking one, their cursor)
      moves, ease ours toward the same view. Writes go through
@@ -808,19 +871,27 @@ export function Stage({
             {/* dot grid on its own composited layer: panning is transform-only
             (zero paint), zooming repaints just this layer's tiny tile */}
             <div
-              className="pointer-events-none absolute left-0 top-0 h-[calc(100%+160px)] w-[calc(100%+160px)] origin-top-left will-change-transform [background-image:radial-gradient(circle,var(--dot)_1.2px,transparent_1.2px)]"
+              className="pointer-events-none absolute left-0 top-0 origin-top-left will-change-transform [background-image:radial-gradient(circle,var(--dot)_1.2px,transparent_1.2px)]"
               ref={gridRef}
             />
+            {/* frame names, in screen px (FrameLabelLayer): under the world,
+                so a frame dragged over another's name covers it as before */}
+            <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
             {/* `world` is likewise a behaviour hook: pan hit-testing checks
             classList.contains('world') to tell background from frame */}
-            <div className="world absolute left-0 top-0 origin-top-left will-change-transform" ref={worldRef}>
-              {canvas?.frames.map((f) =>
-                f.hidden ? (
-                  <HiddenFrameView key={f.id} frame={f} />
-                ) : (
-                  <FrameView key={f.id} frame={f} raster={raster} />
-                ),
-              )}
+            <div
+              className="world absolute left-0 top-0 origin-top-left will-change-transform data-rezoom:**:transition-none!"
+              ref={worldRef}
+            >
+              <FrameLabelLayer.Provider value={labelLayer}>
+                {canvas?.frames.map((f) =>
+                  f.hidden ? (
+                    <HiddenFrameView key={f.id} frame={f} />
+                  ) : (
+                    <FrameView key={f.id} frame={f} layoutZoom={layoutZoom} />
+                  ),
+                )}
+              </FrameLabelLayer.Provider>
               <GhostFrames />
               <FlowOverlay />
               <SnapGuides />
@@ -834,6 +905,13 @@ export function Stage({
                 />
               )}
             </div>
+            {/* the pixel grid lies over the frames, not under them, so it lines
+                up their content; it never takes the pointer */}
+            <div
+              hidden
+              className="pointer-events-none absolute left-0 top-0 h-[calc(100%+16px)] w-[calc(100%+16px)] origin-top-left will-change-transform [--pixel-line:rgb(128_128_128/0.16)] [background-image:linear-gradient(to_right,var(--pixel-line)_1px,transparent_1px),linear-gradient(to_bottom,var(--pixel-line)_1px,transparent_1px)]"
+              ref={pixelGridRef}
+            />
           </div>
         </ContextMenuTrigger>
         <FollowFrame />

@@ -18,6 +18,13 @@
         seed: (canvas) => useStore.getState().setCanvas(canvas),
         comments: (comments) => useStore.getState().setComments(comments),
         viewport: (viewport) => useStore.getState().setViewport(viewport),
+        camera: () => useStore.getState().viewport,
+        /* a collaborator's cursor at a world point */
+        peer: (cursor) =>
+          useStore.setState({
+            presences: { peer: { clientId: 'peer', name: 'Peer', color: '#e0457b', kind: 'human' } },
+            cursors: { peer: cursor },
+          }),
         page: (id) => useStore.getState().setActivePage(id),
         state: () => ({
           frames: useStore.getState().canvas?.frames,

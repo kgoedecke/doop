@@ -10,6 +10,8 @@ declare global {
       seed: (canvas: Canvas) => void
       comments: (comments: ElementComment[]) => void
       viewport: (viewport: { x: number; y: number; zoom: number }) => void
+      camera: () => { x: number; y: number; zoom: number }
+      peer: (cursor: { x: number; y: number }) => void
       page: (id: string) => void
       state: () => { frames: Frame[]; tool: string; selectedElement: { frameId: string; selector: string } | null }
       undo: () => Promise<void>
@@ -128,12 +130,12 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       handle!.evaluate((el) => {
         const box = el.getBoundingClientRect()
         const css = getComputedStyle(el)
-        /* the crisp-render zoom on the element and its counter-scale cancel
-           in the box, so width over the design width is the canvas zoom */
+        /* the iframe undoes the world's layout zoom, so its CSS width is the
+           design width and the box over it is the canvas zoom */
         return { x: box.x, y: box.y, scale: box.width / Number.parseFloat(css.width) }
       })
     let result: { x: number; y: number; width: number; height: number } | null = null
-    // The inner rect is in design px whatever the raster; only a viewport
+    // The inner rect is in design px whatever the layout zoom; only a viewport
     // still moving between the two reads could mix two states.
     await expect
       .poll(
@@ -740,7 +742,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     },
   )
 
-  it('measures drawing geometry consistently once the iframe re-rasters for the zoom', async () => {
+  it('measures drawing geometry consistently once the world settles at the zoom', async () => {
     await page.click('[aria-label="Frame"]')
     await drag([200, 200], [600, 600])
     await waitForFrames(1)
@@ -751,14 +753,83 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     const initial = await visibleDrawing('Frame')
     const iframe = (await (await page.$('iframe[title="Frame"]'))!.contentFrame())!
     await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 3 }))
-    // the crisp render is a CSS zoom on the iframe element, counter-scaled;
+    // the settled zoom is the world's CSS zoom, which the iframe element undoes;
     // the document inside keeps its design viewport, so nothing in there changes
-    await page.waitForFunction(() => getComputedStyle(document.querySelector('iframe[title="Frame"]')!).zoom === '3')
+    await page.waitForFunction(() => (document.querySelector('.world') as HTMLElement).style.zoom === '3')
     const designWidth = await page.evaluate(() => window.drawingHarness.state().frames[0]!.width)
     expect(await iframe.evaluate(() => [innerWidth, document.documentElement.style.zoom])).toEqual([designWidth, ''])
     const zoomed = await visibleDrawing('Frame')
     expect(zoomed.width).toBeCloseTo(initial.width * 1.5, 1)
     expect(zoomed.height).toBeCloseTo(initial.height * 1.5, 1)
+  })
+
+  it('lays the drag preview out at design px while the world is zoomed', async () => {
+    const source: Frame = {
+      id: 'source',
+      updatedBy: 'User',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'Source',
+      x: 20,
+      y: 20,
+      width: 250,
+      height: 250,
+      createdAt: 0,
+      updatedAt: 0,
+      html: '<div data-doop-drawing="rectangle" data-name="Rectangle" style="position:absolute;left:40px;top:40px;width:60px;height:40px;background:red"></div>',
+    }
+    await seedFrames([source])
+    await page.evaluate(async () => {
+      window.drawingHarness.viewport({ x: 0, y: 0, zoom: 2 })
+      const world = document.querySelector<HTMLElement>('.world')!
+      while (world.style.zoom !== '2') await new Promise((r) => requestAnimationFrame(r))
+    })
+    const drawing = await visibleDrawing('Source')
+    await page.mouse.move(drawing.x + drawing.width / 2, drawing.y + drawing.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(drawing.x + drawing.width / 2 + 60, drawing.y + drawing.height / 2 + 30, { steps: 5 })
+    const handle = await page.waitForSelector('iframe[title="Moving drawing"]')
+    const preview = (await handle!.contentFrame())!
+    await preview.waitForSelector('[data-doop-drawing]')
+    const inside = await preview.evaluate(() => ({ width: innerWidth, dpr: devicePixelRatio }))
+    const moving = await visibleDrawing('Moving drawing')
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    // Chromium takes the world's 2x layout zoom as the preview's pixel density,
+    // as it does for frames, so the drawing keeps its design width and sharpness
+    expect(inside).toEqual({ width: 60, dpr: 2 })
+    expect(moving.width).toBeCloseTo(drawing.width, 1)
+  })
+
+  it('keeps a peer cursor on its spot while the world switches layout zoom', async () => {
+    await page.evaluate(() => {
+      window.drawingHarness.peer({ x: 200, y: 150 })
+      window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 })
+    })
+    await page.waitForFunction(() => (document.querySelector('.world') as HTMLElement).style.zoom === '1')
+    // sample every frame across the switch: the cursor's transition used to
+    // replay its translate from the old zoom while the world snapped
+    const maxError = await page.evaluate(async () => {
+      const world = document.querySelector<HTMLElement>('.world')!
+      const stage = world.parentElement!.getBoundingClientRect()
+      const cursor = () => document.querySelector('path[d^="M1 1 L16"]')!.closest('div')!
+      let worst = 0
+      let sampling = true
+      const tick = () => {
+        if (!sampling) return
+        const vp = window.drawingHarness.camera()
+        worst = Math.max(worst, Math.abs(cursor().getBoundingClientRect().left - stage.left - (vp.x + 200 * vp.zoom)))
+        requestAnimationFrame(tick)
+      }
+      tick()
+      window.drawingHarness.viewport({ x: -50, y: 0, zoom: 2.4 })
+      // Chromium lays the world out at the whole zoom above the camera's
+      while (world.style.zoom !== '3') await new Promise((r) => requestAnimationFrame(r))
+      await new Promise((r) => setTimeout(r, 150))
+      sampling = false
+      return worst
+    })
+    expect(maxError).toBeLessThan(1)
   })
 
   it('grabs the visibly top drawing through stacking contexts instead of reverse DOM order', async () => {

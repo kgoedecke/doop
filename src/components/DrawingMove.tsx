@@ -12,6 +12,7 @@ import {
 } from '../lib/drawingMove'
 import { requestFrame } from '../lib/frameBridge'
 import { gesture } from '../lib/gesture'
+import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { useStore } from '../lib/store'
 
 interface Preview {
@@ -26,7 +27,7 @@ type Fallback = (press: Press, move: PointerEvent | null, released: boolean) => 
 
 /** Hit testing happens inside the iframe. Buffer pointer events while it
  * answers so even a fast drag follows the visible element under the press. */
-export function useDrawingMove(frame: Frame) {
+export function useDrawingMove(frame: Frame, layoutZoom: number) {
   const [preview, setPreview] = useState<Preview | null>(null)
   const cleanup = useRef<(() => void) | null>(null)
   const lastClick = useRef<{ selector: string; at: number; x: number; y: number } | null>(null)
@@ -183,18 +184,33 @@ export function useDrawingMove(frame: Frame) {
               }}
             />
           )}
-          <iframe
-            title="Moving drawing"
-            sandbox=""
-            srcDoc={preview.html}
-            className="absolute border-0 bg-transparent opacity-80 [box-shadow:0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
+          <div
+            className="absolute opacity-80 [box-shadow:0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
             style={{
               left: preview.rect.x,
               top: preview.rect.y,
               width: preview.rect.width,
               height: preview.rect.height,
             }}
-          />
+          >
+            {/* treats the world's layout zoom as FrameView's iframe does (pixel
+                density in Chromium, undone elsewhere), so the drawing lays out
+                at the width it has in its frame and stays as sharp */}
+            <iframe
+              title="Moving drawing"
+              sandbox=""
+              srcDoc={preview.html}
+              className="block border-0 bg-transparent"
+              style={{
+                width: preview.rect.width,
+                height: preview.rect.height,
+                ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
+                  ? null
+                  : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
+                transformOrigin: '0 0',
+              }}
+            />
+          </div>
         </div>,
         preview.world,
       ),

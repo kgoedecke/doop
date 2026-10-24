@@ -294,8 +294,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      resolves the element at a point (for the click toolbar), locate finds a
      stored selector again (to place comment pins). Coordinates cross the
      boundary in design px, which are this document's own CSS px: the
-     crisp-render zoom past 100% is a CSS zoom on the iframe element outside,
-     so in here the viewport, vh/vw and every rect stay at design size. */
+     canvas zoom stays outside (the iframe element undoes the world's CSS
+     zoom), so in here the viewport, vh/vw and every rect stay at design size. */
 
   function cssPath(el) {
     var parts = []

@@ -2,7 +2,8 @@ import type { PeerViewport } from '../../shared/types'
 import type { Viewport } from './store'
 
 export const FOLLOW_MIN_ZOOM = 0.08
-export const FOLLOW_MAX_ZOOM = 3
+/* the Stage's own limits: following never zooms past what the canvas allows */
+export const FOLLOW_MAX_ZOOM = 16
 
 /** The camera that shows the same stretch of canvas a peer is looking at.
  *  Screens differ in size, so the peer's visible world rect is fitted (never
