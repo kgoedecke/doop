@@ -63,7 +63,7 @@ export function ZoomControls({
         <DropdownMenuTrigger asChild>
           <ToolbarButton
             aria-label="Zoom level"
-            className={cn(stepBtn, 'w-auto min-w-[48px] px-1.5 font-mono text-[12px] text-ink sm:w-auto sm:px-1.5')}
+            className={cn(stepBtn, 'w-auto min-w-[48px] px-1.5 text-[12px] text-ink sm:w-auto sm:px-1.5')}
           >
             <span ref={labelRef}>100%</span>
           </ToolbarButton>

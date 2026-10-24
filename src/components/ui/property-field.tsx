@@ -41,7 +41,7 @@ export function PropertySection({
   children: ReactNode
 }) {
   return (
-    <section className="border-b border-line-soft px-3 pt-[7px] pb-2.5">
+    <section className="border-b border-line-soft px-3 pt-[7px] pb-2.5 last:border-b-0">
       <div className="mb-[5px] flex min-h-5 items-center justify-between">
         <h3 className="text-[12px] font-normal text-ink-soft">{title}</h3>
         {action}

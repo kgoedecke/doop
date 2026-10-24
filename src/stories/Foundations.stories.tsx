@@ -59,7 +59,7 @@ const FACES = [
   {
     token: '--font-ui / --font-display',
     cls: 'font-sans',
-    family: 'Inter',
+    family: 'macOS system / Inter',
     weights: '400 · 500 · 600',
     role: 'Everything the chrome says: labels, rows, buttons, headings. Display is the same face — the chrome is quiet by design.',
     sample: 'Ask me what to design, Kevin',
@@ -101,7 +101,7 @@ export const Typefaces: Story = {
         </div>
       ))}
       <p className="text-caption text-ink-faint">
-        Retired: Instrument Serif (headlines now use the title step in Inter) and mono uppercase captions (now
+        Retired: Instrument Serif (headlines now use the title step in the UI font) and mono uppercase captions (now
         text-caption in sentence case).
       </p>
     </div>

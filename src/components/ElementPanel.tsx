@@ -77,8 +77,8 @@ import {
 } from './ui/property-field'
 
 const TAB_KEY = 'doop:element-panel-tab'
-/* the runtime answers in a frame or two; the wait lets a streaming agent's
-   chunks settle before every re-read */
+/* Only refreshes wait for streaming chunks to settle; a new selection is
+   inspected immediately. */
 const INSPECT_DELAY_MS = 120
 const HTML_SAVE_DELAY_MS = 700
 
@@ -110,34 +110,49 @@ export function ElementPanel({
   /* the tab sticks across elements and visits: walking the tree in HTML
      view must not snap back to Design on every row */
   const [tab, setTab] = useState<Tab>(readTab)
-  /* the values carry the selector they were read from: switching elements
-     keeps the panel mounted (no blank flash), but the old element's values
-     are shown dimmed and locked until the new element's read lands, so a
-     quick edit can never write them onto the new selection */
+  /* Values belong to their selector. A newly selected element shows loading
+     placeholders until its own read lands, so old values cannot be edited. */
   const [read, setRead] = useState<{ selector: string; info: ElementInfo } | null>(null)
   const info = read?.selector === selector ? read.info : null
-  const stale = read && !info ? read.info : null
+  const inspected = useRef<{ frameId: string; selector: string; ready: boolean } | null>(null)
 
   const tree = useMemo(() => buildLayerTree(frame.html), [frame.html])
   const node = useMemo(() => findLayer(tree, selector), [tree, selector])
   const parentNode = useMemo(() => ancestorsOf(tree, selector)?.at(-1) ?? null, [tree, selector])
+  const hasText = useMemo(() => {
+    if (info) return info.hasText
+    try {
+      const element = new DOMParser().parseFromString(frame.html, 'text/html').querySelector(selector)
+      return Array.from(element?.childNodes ?? []).some(
+        (child) => child.nodeType === Node.TEXT_NODE && /\S/.test(child.textContent ?? ''),
+      )
+    } catch {
+      return false
+    }
+  }, [frame.html, selector, info])
 
   /* re-read after every html change — remote edits and our own saves alike —
      and when the runtime finishes rendering or loading fonts */
   useEffect(() => {
     let live = true
     let timer: number | null = null
+    let request = 0
+    if (inspected.current?.frameId !== frame.id || inspected.current.selector !== selector) {
+      inspected.current = { frameId: frame.id, selector, ready: false }
+    }
     const read = () => {
       if (timer) window.clearTimeout(timer)
-      timer = window.setTimeout(() => {
-        inspectElement(frame.id, selector)
-          .then((next) => {
-            if (live && next) setRead({ selector, info: next })
-          })
-          .catch(console.error)
-      }, INSPECT_DELAY_MS)
+      const currentRequest = ++request
+      inspectElement(frame.id, selector)
+        .then((next) => {
+          if (!live || currentRequest !== request || !next) return
+          inspected.current = { frameId: frame.id, selector, ready: true }
+          setRead({ selector, info: next })
+        })
+        .catch(console.error)
     }
-    read()
+    if (inspected.current.ready) timer = window.setTimeout(read, INSPECT_DELAY_MS)
+    else read()
     const off = onFrameChange(frame.id, read)
     return () => {
       live = false
@@ -227,12 +242,8 @@ export function ElementPanel({
               >
                 <DesignTab key={`${frame.id}:${selector}`} info={info} apply={apply} editGeometry={editGeometry} />
               </PropertyScrubContext.Provider>
-            ) : stale ? (
-              <div aria-busy className="pointer-events-none opacity-50" title="Reading the element…">
-                <DesignTab info={stale} apply={apply} editGeometry={editGeometry} />
-              </div>
             ) : (
-              <Waiting />
+              <Waiting hasText={hasText} />
             )}
           </PanelBody>
         </PanelTabPanel>
@@ -244,8 +255,36 @@ export function ElementPanel({
   )
 }
 
-function Waiting() {
-  return <div className="px-3 py-6 text-center text-[12px] text-ink-faint">Reading the element…</div>
+const LOADING_SECTIONS = [
+  { title: 'Position', rows: ['Type', 'Order'] },
+  { title: 'Layout', rows: ['Min width', 'Display', 'Gap'] },
+  { title: 'Appearance', rows: ['Opacity', 'Radius'] },
+  { title: 'Fill', rows: ['Color'] },
+  { title: 'Stroke', rows: ['Color', 'Width'] },
+  { title: 'Text', rows: ['Font', 'Size', 'Color', 'Align'] },
+]
+
+function Waiting({ hasText }: { hasText: boolean }) {
+  return (
+    <div aria-busy="true">
+      <span role="status" className="sr-only">
+        Reading the element…
+      </span>
+      <div aria-hidden="true">
+        {LOADING_SECTIONS.filter((section) => section.title !== 'Text' || hasText).map((section) => (
+          <PropertySection key={section.title} title={section.title}>
+            {section.rows.map((label) => (
+              <PropertyRow key={label} label={label}>
+                <StaticField>
+                  <span className="h-1.5 w-1/2 rounded-tag bg-ink/10" />
+                </StaticField>
+              </PropertyRow>
+            ))}
+          </PropertySection>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 /* ---- Design tab ---- */

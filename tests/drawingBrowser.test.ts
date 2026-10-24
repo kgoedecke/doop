@@ -16,6 +16,7 @@ declare global {
       state: () => { frames: Frame[]; tool: string; selectedElement: { frameId: string; selector: string } | null }
       undo: () => Promise<void>
       redo: () => Promise<void>
+      pick: (el: { frameId: string; selector: string } | null) => void
     }
   }
 }
@@ -492,6 +493,49 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       await page.keyboard.press('Escape')
     },
   )
+
+  it('keeps a Layers pick when a save refreshes the element being text-edited', async () => {
+    await seedFrames([
+      {
+        id: 'copy',
+        updatedBy: 'User',
+        canvasId: 'c',
+        pageId: 'first',
+        name: 'Copy',
+        x: 30,
+        y: 30,
+        width: 400,
+        height: 300,
+        createdAt: 0,
+        updatedAt: 0,
+        html: '<p id="a">Alpha</p><p id="b">Beta</p>',
+      },
+    ])
+    const handle = await page.waitForSelector('iframe[title="Copy"]')
+    const iframe = (await handle!.contentFrame())!
+    await iframe.waitForSelector('#b')
+    /* the runtime reports the element being text-edited when editing starts,
+       and again after every save while it stays active */
+    const reportActive = () =>
+      iframe.evaluate(() =>
+        parent.postMessage(
+          {
+            type: 'doop:active',
+            hit: { selector: '#a', tag: 'p', text: 'Alpha', snippet: '', rect: { x: 0, y: 0, width: 100, height: 20 } },
+          },
+          '*',
+        ),
+      )
+    await reportActive()
+    await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#a')
+    const beta = { frameId: 'copy', selector: '#b' }
+    await page.evaluate((el) => window.drawingHarness.pick(el), beta)
+    /* let the frame resolve the pick into its outline before the save lands */
+    await new Promise((r) => setTimeout(r, 300))
+    await reportActive()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement)).toEqual(beta)
+  })
 
   it('snaps edited anchors, allows Alt to bypass snapping, and cancels on pointer cancellation', async () => {
     await page.click('[aria-label="Vector path"]')

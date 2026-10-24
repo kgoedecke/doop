@@ -5,9 +5,11 @@ import { useIsMobile } from '../hooks/use-mobile'
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from './ui/sheet'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
+import { IconButton } from './ui/icon-button'
+import { XIcon } from './ui/icons'
 import { ConnectModal } from './ConnectModal'
 
-const obHint = 'text-[12px] leading-[1.45] text-ink-soft'
+const obHint = 'text-body text-ink-soft'
 /* the copy-this-command affordance inside a step */
 const obCopy =
   'self-start rounded-md border-line bg-paper-deep px-[9px] py-1 font-mono text-[11.5px] font-normal text-ink shadow-none hover:translate-x-0 hover:translate-y-0 hover:border-ink-soft hover:bg-paper-deep hover:shadow-none'
@@ -96,7 +98,7 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
         {!progress.connected && (
           <>
             <p className={obHint}>Claude Code, Codex, Cursor or any MCP client can design on this canvas as you.</p>
-            <Button size="sm" className="self-start" onClick={() => setShowConnect(true)}>
+            <Button variant="primary" size="sm" className="mt-0.75 self-start" onClick={() => setShowConnect(true)}>
               Connect AI
             </Button>
           </>
@@ -116,7 +118,7 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
 
       {allDone && (
         <div className="flex flex-col gap-2.5 border-t border-line-soft pt-2.5">
-          <p className="text-[12.5px] leading-[1.5] text-ink-soft">
+          <p className="text-body text-ink-soft">
             That's the loop. One more trick: hover a task in the panel and reply with ↩ — your note becomes an open
             request any agent picks up mid-flight.
           </p>
@@ -171,14 +173,15 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
   }
 
   return (
-    /* bottom left of the open canvas, beside the Layers panel and tool rail
-       (--chrome-left) — clear of the zoom control on the right */
-    <div className="pointer-events-auto absolute bottom-3.5 left-[var(--chrome-left,14px)] z-40 flex w-[300px] flex-col gap-2.5 rounded-[14px] bg-surface px-4 pt-3.5 pb-4 shadow-pop transition-[left] duration-150 max-md:right-4 max-md:bottom-4 max-md:left-auto">
+    /* bottom left of the canvas, beside the Layers panel in the tool rail's
+       column (--rail-left): the rail stops near the top, so the card can hug
+       the panel. Clear of the zoom control on the right */
+    <div className="pointer-events-auto absolute bottom-3.5 left-[var(--rail-left,14px)] z-40 flex w-[340px] flex-col gap-3 rounded-panel bg-surface px-5 pt-4 pb-5 shadow-pop transition-[left] duration-150 max-md:right-4 max-md:bottom-4 max-md:left-auto">
       <header className="flex items-center justify-between">
-        <span className="text-[13px] font-medium">Getting started</span>
-        <Button variant="bare" size="icon-sm" className="text-xs" onClick={dismiss} title="Dismiss">
-          ✕
-        </Button>
+        <span className="text-lead font-semibold">Getting started</span>
+        <IconButton size="sm" className="-mr-1" aria-label="Dismiss" onClick={dismiss}>
+          <XIcon size="rail" />
+        </IconButton>
       </header>
 
       {checklist}
@@ -190,16 +193,16 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
 function Step({ done, label, children }: { done: boolean; label: string; children?: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-2.5">
-      <span className={cn('w-3.5 flex-none text-[13px]', done ? 'text-success-ink' : 'text-ink-faint')}>
+      <span className={cn('w-3.5 flex-none text-copy', done ? 'text-success-ink' : 'text-ink-faint')}>
         {done ? '✓' : '○'}
       </span>
-      <div className="flex flex-col gap-[5px]">
-        <span
-          className={cn('text-[12.5px] font-medium', done ? 'text-ink-faint line-through decoration-1' : 'text-ink')}
-        >
+      {/* the label's line box already leaves room under its text, so it sits
+          tighter to its details than they sit to each other */}
+      <div className="flex flex-col gap-0.5">
+        <span className={cn('text-copy font-medium', done ? 'text-ink-faint line-through decoration-1' : 'text-ink')}>
           {label}
         </span>
-        {children}
+        {children && <div className="flex flex-col gap-[5px]">{children}</div>}
       </div>
     </div>
   )

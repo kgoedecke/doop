@@ -21,10 +21,12 @@
   --color-code: var(--code);
   --color-code-ink: var(--code-ink);
   --color-brand: var(--brand);
+  --color-blue: var(--blue);
   --color-accent-ink: var(--accent-ink);
   --color-dot: var(--dot);
   --color-success: var(--success);
   --color-success-ink: var(--success-ink);
+  --color-success-on-ink: var(--success-on-ink);
   --color-warning: var(--warning);
   --color-warning-ink: var(--warning-ink);
   --font-ui: var(--font-ui);
@@ -149,21 +151,24 @@
   /* Selection blue is the one accent: selection, focus, the live-agent
      signal. Red only means "something failed", which --accent-ink carries. */
   --brand: #0177d3;
+  --blue: #0174cc;
   --accent-ink: #d0341f;
   --dot: #ebebeb;
   /* Status: the fill (--success, --warning) tints and dots, the ink variant
      is text that sits on paper. Both flip with the theme. */
   --success: #1fc16b;
   --success-ink: #0f7a45;
+  --success-on-ink: #6fd8a0;
   --warning: #ff8447;
   --warning-ink: #a8481a;
   /* the silver hairline an active agent's avatar wears in the presence pill */
   --glaze-ring: #c9c9cd;
-  --font-ui: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  /* Apple system aliases resolve on macOS; other platforms start with Inter. */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   /* Display is the SAME sans as the UI — the chrome is quiet by design. The
      home greeting's Hanken Grotesk Light is the one other face (`font-hero`). */
-  --font-display: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-hero: 'Hanken Grotesk', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-display: var(--font-ui);
+  --font-hero: 'Hanken Grotesk', var(--font-ui);
   --font-mono: 'Geist Mono', ui-monospace, monospace;
   /* Ring system: no CSS borders on controls and panels — a 1px shadow ring
      draws the edge, and a soft two-step drop lifts it. --shadow-ring is a
@@ -367,6 +372,7 @@
   --accent-ink: #ff6b57;
   --success: #2fd47c;
   --success-ink: #6fd8a0;
+  --success-on-ink: #0f7a45;
   --warning: #ff9a66;
   --warning-ink: #ffb58c;
   --glaze-ring: #6b6b70;
@@ -384,6 +390,15 @@
   --shadow-elevation-1-focus:
     0 0 0 2px color-mix(in srgb, var(--brand) 32%, transparent), 0 0 0 1px rgba(255, 255, 255, 0.12),
     0 4px 14px -3px rgba(0, 0, 0, 0.4);
+}
+
+/* Canvas chrome shares one quiet elevation, including menus and dialogs
+   portaled to body. The route marker keeps other pages' elevation intact. */
+body:has([data-canvas-ui]) {
+  --shadow-float: var(--shadow-elevation-1);
+  --shadow-pop: var(--shadow-elevation-1);
+  --shadow-modal: var(--shadow-elevation-1);
+  --shadow-elevation-2: var(--shadow-elevation-1);
 }
 
 /* Keyframes: the one thing utilities cannot express. Components reference
@@ -428,17 +443,6 @@
   }
   75% {
     content: '…';
-  }
-}
-
-@keyframes frame-flash {
-  0% {
-    box-shadow: inset 0 0 0 3px var(--editing-color, var(--brand));
-    opacity: 1;
-  }
-  100% {
-    box-shadow: inset 0 0 0 3px var(--editing-color, var(--brand));
-    opacity: 0;
   }
 }
 

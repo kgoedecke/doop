@@ -30,7 +30,7 @@ import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import { EyeClosedIcon, GithubIcon, LockIcon, SyncIcon } from './ui/icons'
+import { CodeIcon, CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
@@ -683,9 +683,16 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         /* rect refreshes for the same element keep the composer open;
            switching elements (or deselecting) closes it */
-        if ((hit?.selector ?? null) !== activeSelRef.current) setComposing(false)
+        const moved = (hit?.selector ?? null) !== activeSelRef.current
+        if (moved) setComposing(false)
         activeSelRef.current = hit?.selector ?? null
         setActiveHit(hit)
+        /* Editing retains an element selection for its Design/HTML panel.
+           Moving the caret to another text element updates that selection;
+           leaving edit mode keeps the last element selected. A refresh for
+           the same element (a save while editing) only updates its outline,
+           so it can't take back a pick made in Layers meanwhile. */
+        if (hit) setProbe((p) => (moved || p?.selector === hit.selector ? hit : p))
       }
       if (ev.data?.type === 'doop:code-result' && ev.data.reqId === codeReq.current) {
         setCodeView(typeof ev.data.html === 'string' ? ev.data.html : null)
@@ -742,7 +749,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   /* ---- inline text editing ---- */
   const canEdit = !!frame.html && !stream && !frame.locked && !/<script/i.test(frame.html)
 
-  async function enterElementEdit(where: Record<string, unknown>) {
+  async function enterElementEdit(where: { x: number; y: number } | { selector: string }) {
     if (!frame.html || stream || frame.locked || editing || pathEdit || useStore.getState().tool !== 'select') return
     const request = ++editRequest.current
     const canvasId = useStore.getState().canvas?.id
@@ -766,13 +773,23 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       closePopovers()
       clearHover()
       setPathEdit(path)
-    } else if (canEdit) enterEdit()
+    } else if (canEdit) enterEdit('x' in where ? where : undefined)
   }
 
-  function enterEdit() {
+  function enterEdit(at?: { x: number; y: number }) {
     select(frame.id)
-    closePopovers()
+    closeElementPopovers()
     clearHover()
+    /* A fast double-click can precede the delayed single-click probe.
+       Resolve its element now so the properties panel opens in that case too. */
+    if (at) {
+      probeIntent.current = 'toolbar'
+      probeReq.current += 1
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'doop:probe', reqId: probeReq.current, x: at.x, y: at.y },
+        '*',
+      )
+    }
     setEditing(true)
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: true }, '*')
   }
@@ -1070,18 +1087,21 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   }}
                 />
               )}
-            {flash && (
-              <div
-                className="pointer-events-none absolute -inset-px animate-[frame-flash_1.2s_ease-out_forwards]"
-                style={{ '--editing-color': flash.color } as React.CSSProperties}
-              />
-            )}
           </div>
+          {/* someone else just changed this frame: their highlight, the remote
+              editor's outline in their colour, fading out. Outside the body,
+              whose overflow would clip an outline. */}
+          {flash && (
+            <div
+              className="pointer-events-none absolute inset-0 outline-2 outline-offset-1 outline-solid outline-[var(--editing-color)] animate-[fade-out_1.2s_ease-out_forwards]"
+              style={{ '--editing-color': flash.color } as React.CSSProperties}
+            />
+          )}
 
           {editing && (
             <div
               className={cn(
-                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center gap-[9px] whitespace-nowrap rounded-full bg-ink py-1 pr-[5px] pl-3 text-[11px] font-semibold text-paper shadow-card animate-[chip-in_0.25s_ease]',
+                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center gap-[9px] whitespace-nowrap rounded-full bg-ink py-1 pr-[5px] pl-3 text-[11px] font-semibold text-paper shadow-card',
                 COUNTER_SCALE,
               )}
               onPointerDown={(e) => e.stopPropagation()}
@@ -1169,7 +1189,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   >
                     {!composing ? (
                       <>
-                        <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop animate-[chip-in_0.18s_ease]">
+                        <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop">
                           <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px text-[11px] font-bold text-paper [font-family:ui-monospace,monospace]">
                             {anchor.tag}
                           </span>
@@ -1181,7 +1201,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                               setComposing(true)
                             }}
                           >
-                            💬 Comment
+                            <CommentIcon size="rail" /> Comment
                           </Button>
                           <Button
                             variant="inverse"
@@ -1193,14 +1213,14 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                               setComposing(true)
                             }}
                           >
-                            ✦ Ask AI
+                            <SparkIcon size="rail" /> Ask AI
                           </Button>
                           <Button
                             variant="inverse"
                             className={EL_TOOLBAR_BTN}
                             onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
                           >
-                            {'</>'} Code
+                            <CodeIcon size="button" /> Code
                           </Button>
                           <Button
                             variant="inverse"
@@ -1218,7 +1238,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                                 enterEdit()
                               }}
                             >
-                              ✎ Edit text
+                              <EditIcon size="rail" /> Edit text
                             </Button>
                           )}
                         </div>

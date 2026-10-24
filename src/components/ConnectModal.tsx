@@ -523,7 +523,7 @@ function ChoiceCard({
       onClick={onClick}
       className={cn(
         'relative flex items-center gap-3 rounded-card border bg-surface py-3.5 pl-3.5 pr-9 text-left text-ink transition-colors',
-        selected ? 'border-brand ring-3 ring-brand/15' : 'border-line hover:border-ink-faint',
+        selected ? 'border-brand' : 'border-line hover:border-ink-faint',
       )}
     >
       <span className="grid size-9 shrink-0 place-items-center rounded-[9px] border border-line-soft bg-paper">

@@ -47,6 +47,8 @@ import {
   Circle,
   CircleHelp,
   CirclePlus,
+  Clipboard,
+  CodeXml,
   Command,
   Clock,
   Compass,
@@ -85,6 +87,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
+  Pencil,
   PenTool,
   Play,
   Plus,
@@ -163,6 +166,7 @@ export const SquareDashedIcon = icon(SquareDashed)
 export const MoreHorizontalIcon = icon(Ellipsis)
 export const ShareIcon = icon(Share2)
 export const CopyIcon = icon(Copy)
+export const ClipboardIcon = icon(Clipboard)
 export const TrashIcon = icon(Trash2)
 export const CheckIcon = icon(Check)
 export const ChevronRightIcon = icon(ChevronRight)
@@ -267,6 +271,8 @@ export const HandIcon = icon(Hand)
 export const CursorIcon = icon(MousePointer2)
 /** comments: the round bubble, as on the side panel's Comments tab in the design */
 export const CommentIcon = icon(MessageCircle)
+export const CodeIcon = icon(CodeXml)
+export const EditIcon = icon(Pencil)
 export const PinIcon = icon(MapPin)
 export const EyeIcon = icon(Eye)
 export const EyeClosedIcon = icon(EyeOff)

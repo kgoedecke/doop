@@ -33,6 +33,8 @@
         }),
         undo,
         redo,
+        /* a Layers row pick */
+        pick: (el) => useStore.getState().pickElement(el),
       }
       createRoot(document.getElementById('root')).render(
         React.createElement(
