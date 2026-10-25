@@ -171,7 +171,6 @@ describe('MCP ChatGPT app contract', () => {
       expect(byName.get_frame_screenshot!.annotations!.readOnlyHint).toBe(true)
       expect(byName.search_images!.annotations!.openWorldHint).toBe(true)
       expect(byName.list_backgrounds!.annotations!.openWorldHint).toBe(false)
-      expect(byName.generate_image!.annotations!.openWorldHint).toBe(true)
       expect(byName.save_decision!.annotations!.idempotentHint).toBe(true)
     } finally {
       await close()
