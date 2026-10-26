@@ -42,6 +42,13 @@ function Panel({
   ...props
 }: React.ComponentProps<'div'> & VariantProps<typeof panelVariants> & { resize?: PanelResize }) {
   const drag = React.useRef<{ x: number; width: number } | null>(null)
+  /* marks the panel while its edge is dragged; styles.css pauses the chrome's
+     position transitions then, so neighbours follow the pointer in step */
+  const [dragging, setDragging] = React.useState(false)
+  const endDrag = () => {
+    drag.current = null
+    setDragging(false)
+  }
   const resizing = surface !== 'inline' ? resize : undefined
   const setWidth = (width: number) => {
     if (resizing) resizing.onResize(Math.round(Math.max(resizing.min, Math.min(resizing.max, width))))
@@ -50,6 +57,7 @@ function Panel({
   return (
     <div
       data-slot="panel"
+      data-panel-resizing={dragging || undefined}
       className={cn(panelVariants({ surface, className }))}
       style={resizing ? { ...style, width: resizing.width } : style}
       {...props}
@@ -73,6 +81,7 @@ function Panel({
             e.preventDefault()
             e.stopPropagation()
             drag.current = { x: e.clientX, width: resizing.width }
+            setDragging(true)
             e.currentTarget.setPointerCapture(e.pointerId)
           }}
           onPointerMove={(e) => {
@@ -82,15 +91,11 @@ function Panel({
             setWidth(drag.current.width + delta)
           }}
           onPointerUp={(e) => {
-            drag.current = null
+            endDrag()
             if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
           }}
-          onLostPointerCapture={() => {
-            drag.current = null
-          }}
-          onPointerCancel={() => {
-            drag.current = null
-          }}
+          onLostPointerCapture={endDrag}
+          onPointerCancel={endDrag}
           onKeyDown={(e) => {
             const direction = resizing.edge === 'right' ? 1 : -1
             let width: number

@@ -401,6 +401,13 @@ body:has([data-canvas-ui]) {
   --shadow-elevation-2: var(--shadow-elevation-1);
 }
 
+/* While a canvas panel's edge is dragged, the chrome positioned off its width
+   (Inspector, side rail, tool rail, zoom pill) jumps with it rather than
+   easing after it, so a growing panel never slides over a neighbour. */
+body:has([data-panel-resizing]) * {
+  transition-duration: 0s !important;
+}
+
 /* Keyframes: the one thing utilities cannot express. Components reference
    these by name (`animate-[chip-in_0.18s_ease]`), so the names are API —
    renaming one means updating its callers. */

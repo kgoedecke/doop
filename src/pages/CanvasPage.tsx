@@ -21,9 +21,8 @@ import {
   TopBarTitle,
   barIconBtn,
   barPillBtn,
-  barPillAccent,
-  barPillAccentBtn,
   barPillIconBtn,
+  barPrimaryBtn,
 } from '../components/TopBar'
 import { LivePresence } from '../components/LivePresence'
 import { ensureTab } from '../lib/desktop'
@@ -463,7 +462,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   return (
     /* --app-inset is 0 normally; the impersonation shell raises it so this
        fixed layer starts below the banner instead of under it */
-    <div data-canvas-ui="" className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] bg-paper">
+    <div className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] bg-paper">
       {/* Floating pills over the canvas, which shows through the transparent
           bar: the title pill on the left, live presence centred, sharing on
           the right. Tablet (xs..md) folds the text actions into the •••
@@ -543,13 +542,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               </span>
             </Tooltip>
           </BarPill>
-          {/* The accent pill opens the MCP connection modal. */}
-          <BarPill className={barPillAccent}>
-            <Button variant="bare" className={barPillAccentBtn} onClick={openConnect}>
-              <PlusIcon className="size-4" />
-              Connect AI
-            </Button>
-          </BarPill>
+          {/* the bar's one black action — it opens the MCP connection modal */}
+          <Button variant="primary" className={barPrimaryBtn} onClick={openConnect}>
+            <PlusIcon className="size-3.5" strokeWidth={1.4} />
+            Connect AI
+          </Button>
         </div>
         <div className="ml-auto hidden items-center gap-1.5 max-md:flex max-xs:order-3">
           <div
@@ -561,13 +558,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <PeerAvatars others={others} />
             </span>
           </div>
-          <BarPill className={barPillAccent}>
-            <Button variant="bare" className={barPillAccentBtn} onClick={openConnect}>
-              <PlusIcon className="size-4" />
-              <span className="max-sm:hidden">Connect AI</span>
-              <span className="sm:hidden">AI</span>
-            </Button>
-          </BarPill>
+          <Button variant="primary" className={barPrimaryBtn} onClick={openConnect}>
+            <PlusIcon className="size-3.5" strokeWidth={1.4} />
+            <span className="max-sm:hidden">Connect AI</span>
+            <span className="sm:hidden">AI</span>
+          </Button>
           <Tooltip label="Canvas actions" side="bottom" align="end">
             <Button
               variant="ghost"
@@ -651,7 +646,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                   width: layersWidth,
                   min: LAYERS_MIN,
                   max: panels.layersMax,
-                  onResize: (layers) => setPanelWidths((widths) => ({ ...widths, layers })),
+                  /* the other panel keeps the width it shows, not a larger saved
+                     one the window had squeezed */
+                  onResize: (layers) =>
+                    setPanelWidths((widths) => ({ layers, agents: showActivity ? panels.agents : widths.agents })),
                 }}
               />
             ) : (
@@ -689,7 +687,8 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 width: agentsWidth,
                 min: AGENTS_MIN,
                 max: panels.agentsMax,
-                onResize: (agents) => setPanelWidths((widths) => ({ ...widths, agents })),
+                onResize: (agents) =>
+                  setPanelWidths((widths) => ({ agents, layers: layersOpen ? panels.layers : widths.layers })),
               }}
             />
           )}

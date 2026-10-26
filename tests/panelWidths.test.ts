@@ -53,4 +53,13 @@ describe('fitPanelWidths', () => {
     expect(fit.layers).toBe(350)
     expect(fit.layersMax).toBe(350)
   })
+
+  it('reaches the advertised maximum without moving the other panel', () => {
+    const base = { viewport: 1000, reserved: 408, layersOpen: true, agentsOpen: true }
+    const squeezed = fitPanelWidths({ ...base, saved: { layers: 350, agents: 350 } })
+    expect(squeezed).toMatchObject({ layers: 286, agents: 306, layersMax: 286 })
+    /* the page saves the resized panel with the other at its fitted width */
+    const resized = fitPanelWidths({ ...base, saved: { layers: squeezed.layersMax, agents: squeezed.agents } })
+    expect(resized).toMatchObject({ layers: 286, agents: 306 })
+  })
 })

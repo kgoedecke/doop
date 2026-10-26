@@ -151,9 +151,14 @@ export function ElementPanel({
         })
         .catch(console.error)
     }
-    if (inspected.current.ready) timer = window.setTimeout(read, INSPECT_DELAY_MS)
+    /* a burst of render and font-load events shares one delayed read */
+    const refresh = () => {
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(read, INSPECT_DELAY_MS)
+    }
+    if (inspected.current.ready) refresh()
     else read()
-    const off = onFrameChange(frame.id, read)
+    const off = onFrameChange(frame.id, refresh)
     return () => {
       live = false
       off()
