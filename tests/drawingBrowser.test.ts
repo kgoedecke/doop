@@ -1186,6 +1186,31 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     },
   )
 
+  it('waits for a pending document before picking the layer to drag', async () => {
+    const box = (left: number) =>
+      `<div style="position:absolute;left:${left}px;top:60px;width:100px;height:80px;background:coral"></div>`
+    await seedFrames([layerFrame(box(50))])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    const before = await visibleDrawing('Layers', 'body > div')
+    /* turn the clock back so the frame's render throttle holds the next
+       document for about a second, as a slow delivery would */
+    await page.evaluate(() => {
+      const now = Date.now.bind(Date)
+      Date.now = () => now() - 1200
+    })
+    /* a collaborator puts a same-tag sibling in front of the box */
+    await seedFrames([layerFrame(box(400) + box(50))])
+    await page.mouse.move(before.x + 40, before.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(before.x + 100, before.y + 40, { steps: 3 })
+    await page.mouse.up()
+    const left = (nth: number) =>
+      visibleDrawing('Layers', `body > div:nth-of-type(${nth})`).then((rect) => rect.x - before.x)
+    await expect.poll(() => left(2), { timeout: 5000 }).toBeCloseTo(60, 0)
+    expect(await left(1)).toBeCloseTo(350, 0)
+    expect(saved[0]?.html).toContain('left:400px;top:60px;width:100px;height:80px;background:coral"></div>')
+  })
+
   it('still enters text editing on double-click and moves the whole frame from its title', async () => {
     const source = layerFrame('<p id="text" style="width:100px;height:80px;margin:50px">Edit me</p>')
     await seedFrames([source])

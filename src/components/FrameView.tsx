@@ -8,7 +8,7 @@ import { FrameLabelLayer } from './FrameLabelLayer'
 import { PathEditor } from './PathEditor'
 import { loadPathEdit, type PathEditSource } from '../lib/pathEditing'
 import { currentPageCanvas } from '../lib/pages'
-import { registerFrameWindow, requestFrame, unregisterFrameWindow } from '../lib/frameBridge'
+import { noteFrameDocument, registerFrameWindow, requestFrame, unregisterFrameWindow } from '../lib/frameBridge'
 import { api } from '../lib/api'
 import { copyElementLink } from '../lib/elementLink'
 import { sendWs } from '../lib/ws'
@@ -488,9 +488,13 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     if (!runtimeReady || editing || suspendPost || html !== frame.html || html === localHtml.current) return
     localHtml.current = null
     const request = ++htmlRequest.current
+    noteFrameDocument(frame.id, null)
     let cancelled = false
     void requestFrame(frame.id, 'doop:html', { html }).then((reply) => {
-      if (reply && !cancelled && request === htmlRequest.current) setRuntimeDocument({ html, request })
+      if (!reply || request !== htmlRequest.current) return
+      /* the runtime shows it whether or not this effect is still current */
+      noteFrameDocument(frame.id, html)
+      if (!cancelled) setRuntimeDocument({ html, request })
     })
     return () => {
       cancelled = true
@@ -957,6 +961,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         // throttle can overwrite a newer style edit still waiting to save.
         localHtml.current = ev.data.html
         setRuntimeDocument({ html: ev.data.html, request: ++htmlRequest.current })
+        noteFrameDocument(frame.id, ev.data.html)
         const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
         useStore.getState().patchFrameLocal(frame.id, { html: ev.data.html })
         trackSave(api.updateFrame(frame.id, { html: ev.data.html }).catch(console.error))

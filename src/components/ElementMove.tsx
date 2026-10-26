@@ -13,6 +13,7 @@ import {
 import {
   editElementGeometry,
   elementMoveTarget,
+  frameShows,
   requestFrame,
   styleGesture,
   type ElementInfo,
@@ -307,18 +308,22 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     surface.addEventListener('lostpointercapture', onLostCapture)
     cleanup.current = cancel
     const selected = s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : undefined
-    const drawingHit = finishing.current.then(() =>
-      frame.html.includes('data-doop-drawing')
+    /* hit-test the document this gesture checks against, not the one the
+       frame still shows while a newer version is on its way in */
+    const drawingHit = finishing.current.then(async () => {
+      if (!(await frameShows(frame.id, frame.html))) return undefined
+      return frame.html.includes('data-doop-drawing')
         ? requestFrame(frame.id, 'doop:drawing-hit', {
             x: origin.x - frame.x,
             y: origin.y - frame.y,
             standalone,
             selected,
           })
-        : null,
-    )
+        : null
+    })
     void drawingHit.then(async (reply) => {
       if (closed) return
+      if (reply === undefined) return cancel()
       hit = (reply?.hit ?? null) as DrawingHit | null
       if (!hit) {
         const response = await requestFrame(frame.id, 'doop:move-hit', {

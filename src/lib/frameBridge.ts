@@ -158,7 +158,45 @@ export function registerFrameWindow(frameId: string, win: Window) {
 }
 
 export function unregisterFrameWindow(frameId: string, win: Window) {
-  if (windows.get(frameId) === win) windows.delete(frameId)
+  if (windows.get(frameId) !== win) return
+  windows.delete(frameId)
+  shownDocuments.delete(frameId)
+}
+
+/* The HTML each frame's runtime has acknowledged showing; absent while a
+   newer document is still on its way there. */
+const shownDocuments = new Map<string, string>()
+const documentListeners = new Map<string, Set<() => void>>()
+
+/** Record what the frame's runtime shows: the acknowledged HTML, or null
+ *  once a newer document has been posted and not yet acknowledged. */
+export function noteFrameDocument(frameId: string, html: string | null) {
+  if (html === null) shownDocuments.delete(frameId)
+  else shownDocuments.set(frameId, html)
+  documentListeners.get(frameId)?.forEach((cb) => cb())
+}
+
+/** Resolve true once the frame's runtime shows `html`, false if it does not
+ *  within the reply timeout. The store can run ahead of the frame's
+ *  throttled render, and a hit test on the older document would name its
+ *  elements, not the ones `html` has in those places. */
+export function frameShows(frameId: string, html: string): Promise<boolean> {
+  if (shownDocuments.get(frameId) === html) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const set = documentListeners.get(frameId) ?? new Set()
+    documentListeners.set(frameId, set)
+    const done = (shown: boolean) => {
+      window.clearTimeout(timer)
+      set.delete(check)
+      if (set.size === 0 && documentListeners.get(frameId) === set) documentListeners.delete(frameId)
+      resolve(shown)
+    }
+    const check = () => {
+      if (shownDocuments.get(frameId) === html) done(true)
+    }
+    const timer = window.setTimeout(() => done(false), REPLY_TIMEOUT_MS)
+    set.add(check)
+  })
 }
 
 /** Re-read after the runtime registers, renders HTML, or loads font faces.
