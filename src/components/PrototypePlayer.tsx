@@ -247,8 +247,13 @@ export function PrototypePlayer({
       .catch(console.error)
   }
 
+  /* the one screen that takes input: the top overlay, else the screen shown */
+  function topEntry(): Entry | undefined {
+    return overlaysRef.current.at(-1) ?? moveRef.current?.to ?? stackRef.current.at(-1)
+  }
+
   function topWindow(): Window | undefined {
-    const top = overlaysRef.current.at(-1) ?? moveRef.current?.to ?? stackRef.current.at(-1)
+    const top = topEntry()
     return top ? windows.current.get(top.key) : undefined
   }
 
@@ -355,8 +360,11 @@ export function PrototypePlayer({
       else windows.current.delete(key)
     },
     onMessage: (data: { type?: string; interaction?: unknown; press?: boolean }) => {
-      if (data.type === 'doop:proto-action') run(data.interaction, !!data.press)
-      else if (data.type === 'doop:proto-release') release()
+      /* a covered screen is switched off, but an action it sent before the
+         switch reached it must not act over the screen on top */
+      if (data.type === 'doop:proto-action') {
+        if (topEntry()?.key === entry.key) run(data.interaction, !!data.press)
+      } else if (data.type === 'doop:proto-release') release()
       /* Escape with the focus in a screen: the same overlay-first path as a
          key pressed on the player itself */
       else if (data.type === 'doop:esc') escape()
@@ -391,14 +399,14 @@ export function PrototypePlayer({
             <ProtoScreen
               {...screenProps(entry)}
               scale={frame ? fitScale(frame, viewport) : 1}
-              interactive={role !== 'from'}
+              interactive={role !== 'from' && !overlays.length}
               onReady={onScreenReady}
             />
           </div>
         )
       })}
 
-      {overlays.map((entry) => {
+      {overlays.map((entry, index) => {
         const frame = frameById(entry.frameId)
         const scale = frame
           ? Math.min(baseScale, fitScale(frame, { w: viewport.w * OVERLAY_FIT, h: viewport.h * OVERLAY_FIT }))
@@ -415,7 +423,12 @@ export function PrototypePlayer({
               data-proto-overlay={entry.frameId}
               style={{ opacity: readyOverlays.has(entry.key) ? 1 : 0 }}
             >
-              <ProtoScreen {...screenProps(entry)} scale={scale} interactive onReady={() => onOverlayReady(entry)} />
+              <ProtoScreen
+                {...screenProps(entry)}
+                scale={scale}
+                interactive={index === overlays.length - 1}
+                onReady={() => onOverlayReady(entry)}
+              />
             </div>
           </div>
         )
@@ -551,7 +564,20 @@ function ProtoScreen({
   }, [booted, html])
 
   useEffect(() => {
-    if (shown) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:proto', on: interactive }, '*')
+    const iframe = iframeRef.current
+    if (!shown || !iframe) return
+    iframe.contentWindow?.postMessage({ type: 'doop:proto', on: interactive }, '*')
+    /* keys go to the focused document: take the focus over from the screen
+       this one now covers (or that it was under), so its key interactions
+       answer instead of that screen's */
+    const focused = document.activeElement
+    if (
+      interactive &&
+      focused instanceof HTMLIFrameElement &&
+      focused !== iframe &&
+      focused.closest('[data-prototype-player]')
+    )
+      iframe.focus()
   }, [shown, interactive])
 
   if (!frame) return <div className="text-body text-code-ink/70">This screen was deleted from the canvas.</div>

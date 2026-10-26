@@ -338,6 +338,46 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       expect(await current()).toBe('HOME')
     })
 
+    /* only the top screen takes input: the screen an overlay covers stays put */
+    const COVERED: Canvas = {
+      ...CANVAS,
+      frames: [
+        frame(
+          'home',
+          `<button id="help" data-doop-on="click" data-doop-action="overlay:menu">Help</button>
+           <div data-doop-on="delay:800" data-doop-action="navigate:detail"></div>
+           <div data-doop-on="key:k" data-doop-action="navigate:detail"></div>`,
+        ),
+        frame('detail', `<button id="back" data-doop-on="click" data-doop-action="back">Back</button>`, 500),
+        frame(
+          'menu',
+          `<button id="close" data-doop-on="click" data-doop-action="close-overlay">Close</button>
+           <div data-doop-on="key:k" data-doop-action="close-overlay"></div>`,
+          1000,
+        ),
+      ],
+    }
+
+    it('runs only the top screen’s delays and keys while an overlay is open', async () => {
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
+      await page.evaluate(() => (window as unknown as Fixture).play('home'))
+      const home = await screen('home')
+      /* a real click focuses the screen that opens the overlay */
+      await home.$eval('#help', (el) => (el as HTMLElement).focus())
+      await clickUntil(home, '#help', async () => !!(await page.$('[data-proto-overlay="menu"]')))
+      await screen('menu')
+      /* home's delay comes due under the overlay and does nothing */
+      await sleep(1000)
+      expect(await current()).toBe('HOME')
+      expect(await page.$('[data-proto-overlay="menu"]')).not.toBeNull()
+
+      /* the key goes to the menu on top, not to home, which held the focus */
+      await page.keyboard.press('k')
+      await page.waitForFunction(() => !document.querySelector('[data-proto-overlay]'))
+      await sleep(200)
+      expect(await current()).toBe('HOME')
+    })
+
     it('starts the delays of a live edit', async () => {
       const home = await start()
       /* the runtime is on once a click takes: an overlay opens */

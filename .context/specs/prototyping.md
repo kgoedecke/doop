@@ -62,7 +62,10 @@ fit, and stays live (each screen re-posts its frame's HTML when the store update
   the Web Animations API (`transitionFrames`). `back` plays the arriving transition in reverse.
   A navigation during a running animation snaps it to its end.
 - Overlays open centered over a scrim at the base screen's scale (fit to 94% of the viewport).
-  The scrim or a `close-overlay` closes the top one; navigating closes them all.
+  The scrim or a `close-overlay` closes the top one; navigating closes them all. Only the top
+  screen is in prototype mode: a covered screen or overlay is switched off (its `delay:` timers
+  stop, and restart when it is uncovered), the player drops any action it still sends, and a
+  screen that comes to the top takes the focus over from the screen it covers.
 - `press` reverts (closes the overlay or goes back) on the next pointer release in any screen,
   while what it opened is still on top. The pressed screen reports that release even after the
   navigation has switched it off.
