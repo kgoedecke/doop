@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { readingOrder } from '../../shared/frameOrder'
+import { MAX_PDF_FRAMES } from '../../shared/pdfLimits'
 import { downloadFramesPdf } from '../lib/frameExport'
 import { posthog } from '../lib/posthog'
 import { ImportStepHeader } from './ImportSources'
@@ -36,6 +37,9 @@ export function ExportModal({
      the checked ones could regroup the rows) */
   const listed = readingOrder(frames)
   const chosen = listed.filter((frame) => selected.has(frame.id))
+  /* the server refuses a longer PDF: keep the checklist open until it fits */
+  const overPdfLimit = chosen.length > MAX_PDF_FRAMES
+  const extra = chosen.length - MAX_PDF_FRAMES
 
   function toggle(frameId: string) {
     setSelected((current) => {
@@ -48,7 +52,7 @@ export function ExportModal({
 
   function run() {
     const [first] = chosen
-    if (!first) return
+    if (!first || overPdfLimit) return
     posthog.capture('frames_exported', { destination: 'pdf', frame_count: chosen.length })
     void downloadFramesPdf(first.canvasId, chosen)
     onClose()
@@ -114,12 +118,14 @@ export function ExportModal({
       </div>
       <div className="mt-6 flex items-center gap-2.5 border-t border-line-soft pt-[18px]">
         <span className="mr-auto min-w-0 text-label leading-[1.4] text-ink-faint">
-          Text stays selectable. A long document can take a few seconds per page.
+          {overPdfLimit
+            ? `A PDF holds at most ${MAX_PDF_FRAMES} frames. Uncheck ${extra} ${extra === 1 ? 'frame' : 'frames'} to download.`
+            : 'Text stays selectable. A long document can take a few seconds per page.'}
         </span>
         <Button variant="ghost" className="flex-none" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" disabled={!chosen.length} onClick={run}>
+        <Button variant="primary" disabled={!chosen.length || overPdfLimit} onClick={run}>
           {chosen.length > 1 ? `Download PDF (${chosen.length} pages)` : 'Download PDF'}
         </Button>
       </div>
