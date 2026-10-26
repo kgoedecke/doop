@@ -1001,9 +1001,9 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let sentinel = dir.path().join("leaked");
             let script = if cancel {
-                "(sleep 1; touch \"$1\") & echo ready; wait"
+                "(sleep 3; touch \"$1\") & echo ready; wait"
             } else {
-                "(sleep 1; touch \"$1\") & echo ready"
+                "(sleep 3; touch \"$1\") & echo ready"
             };
             let mut command = Command::new("/bin/sh");
             command.args(["-c", script, "test"]).arg(&sentinel).stdout(Stdio::piped());
@@ -1014,8 +1014,9 @@ mod tests {
                 if cancel && line == "ready" { stop.store(true, Ordering::SeqCst); }
             });
             assert_eq!(result.is_err(), cancel);
-            assert!(started.elapsed() < Duration::from_secs(1));
-            std::thread::sleep(Duration::from_millis(1100));
+            // well under the descendant's 3s sleep, with room for a slow CI runner
+            assert!(started.elapsed() < Duration::from_secs(2));
+            std::thread::sleep(Duration::from_millis(3200));
             assert!(!sentinel.exists(), "launcher descendant survived cleanup");
         }
     }
