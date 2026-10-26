@@ -84,7 +84,11 @@ export function PrototypePlayer({
     stackRef.current = next
     setStackState(next)
   }
+  /* closing an overlay that holds the focus drops it on the page: the
+     screen it uncovers takes it back (see ProtoScreen) */
+  const focusHandoff = useRef(false)
   const setOverlays = (next: Entry[]) => {
+    if (next.length < overlaysRef.current.length && screenHasFocus()) focusHandoff.current = true
     overlaysRef.current = next
     setOverlaysState(next)
   }
@@ -355,6 +359,11 @@ export function PrototypePlayer({
   const screenProps = (entry: Entry) => ({
     entry,
     frame: frameById(entry.frameId),
+    takeFocus: () => {
+      const handoff = focusHandoff.current
+      focusHandoff.current = false
+      return handoff
+    },
     register: (key: number, win: Window | null) => {
       if (win) windows.current.set(key, win)
       else windows.current.delete(key)
@@ -484,6 +493,12 @@ function readState(): Record<string, unknown> {
   const state: unknown = history.state
   return state && typeof state === 'object' ? (state as Record<string, unknown>) : {}
 }
+/** Whether one of the player's screens holds the keyboard focus. */
+function screenHasFocus(): boolean {
+  const focused = document.activeElement
+  return focused instanceof HTMLIFrameElement && !!focused.closest('[data-prototype-player]')
+}
+
 const KEY_REPLY_MS = 400
 let keyRequests = 0
 
@@ -513,6 +528,7 @@ function ProtoScreen({
   frame,
   scale,
   interactive,
+  takeFocus,
   register,
   onReady,
   onMessage,
@@ -521,6 +537,8 @@ function ProtoScreen({
   frame: Frame | undefined
   scale: number
   interactive: boolean
+  /** true once when the overlay closed over this screen held the focus */
+  takeFocus: () => boolean
   register: (key: number, win: Window | null) => void
   onReady: (key: number) => void
   onMessage: (data: { type?: string; interaction?: unknown; press?: boolean }) => void
@@ -528,9 +546,9 @@ function ProtoScreen({
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [booted, setBooted] = useState(false)
   const [shown, setShown] = useState(false)
-  const latest = useRef({ onReady, onMessage, register })
+  const latest = useRef({ onReady, onMessage, register, takeFocus })
   useLayoutEffect(() => {
-    latest.current = { onReady, onMessage, register }
+    latest.current = { onReady, onMessage, register, takeFocus }
   })
 
   useEffect(() => {
@@ -568,16 +586,11 @@ function ProtoScreen({
     if (!shown || !iframe) return
     iframe.contentWindow?.postMessage({ type: 'doop:proto', on: interactive }, '*')
     /* keys go to the focused document: take the focus over from the screen
-       this one now covers (or that it was under), so its key interactions
-       answer instead of that screen's */
+       this one now covers, or back from the overlay that closed over it, so
+       its key interactions and controls answer instead of that screen's */
+    if (!interactive) return
     const focused = document.activeElement
-    if (
-      interactive &&
-      focused instanceof HTMLIFrameElement &&
-      focused !== iframe &&
-      focused.closest('[data-prototype-player]')
-    )
-      iframe.focus()
+    if ((screenHasFocus() && focused !== iframe) || latest.current.takeFocus()) iframe.focus()
   }, [shown, interactive])
 
   if (!frame) return <div className="text-body text-code-ink/70">This screen was deleted from the canvas.</div>

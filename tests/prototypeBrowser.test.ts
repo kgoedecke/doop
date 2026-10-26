@@ -352,11 +352,20 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
         frame(
           'menu',
           `<button id="close" data-doop-on="click" data-doop-action="close-overlay">Close</button>
+           <button id="more" data-doop-on="click" data-doop-action="overlay:sheet">More</button>
            <div data-doop-on="key:k" data-doop-action="close-overlay"></div>`,
           1000,
         ),
+        frame(
+          'sheet',
+          `<button id="done" data-doop-on="click" data-doop-action="close-overlay">Done</button>
+           <div data-doop-on="key:k" data-doop-action="close-overlay"></div>`,
+          1500,
+        ),
       ],
     }
+    const focusedScreen = () =>
+      page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame)
 
     it('runs only the top screen’s delays and keys while an overlay is open', async () => {
       await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
@@ -375,6 +384,30 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await page.keyboard.press('k')
       await page.waitForFunction(() => !document.querySelector('[data-proto-overlay]'))
       await sleep(200)
+      expect(await current()).toBe('HOME')
+    })
+
+    it('hands the focus back to the uncovered screen as nested overlays close', async () => {
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
+      await page.evaluate(() => (window as unknown as Fixture).play('home'))
+      const home = await screen('home')
+      await home.$eval('#help', (el) => (el as HTMLElement).focus())
+      await clickUntil(home, '#help', async () => !!(await page.$('[data-proto-overlay="menu"]')))
+      const menu = await screen('menu')
+      await page.waitForFunction(
+        () => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame === 'menu',
+      )
+      await clickUntil(menu, '#more', async () => !!(await page.$('[data-proto-overlay="sheet"]')))
+      await screen('sheet')
+      await page.waitForFunction(
+        () => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame === 'sheet',
+      )
+      await page.keyboard.press('k')
+      await page.waitForFunction(() => !document.querySelector('[data-proto-overlay="sheet"]'))
+      await expect.poll(focusedScreen).toBe('menu')
+      await page.keyboard.press('k')
+      await page.waitForFunction(() => !document.querySelector('[data-proto-overlay]'))
+      await expect.poll(focusedScreen).toBe('home')
       expect(await current()).toBe('HOME')
     })
 
