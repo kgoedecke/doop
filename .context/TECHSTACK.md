@@ -29,6 +29,11 @@
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
+- `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
+  each frame onto a page of its own size, pages in the order the frames are listed (a whole page
+  in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
+  order); render limits in `shared/pdfLimits.ts`, which also sizes the browser's download
+  timeout; served by `GET /api/canvases/:id/export.pdf` and MCP `export_frame`.
 
 ## 3. Data and Persistence
 
@@ -39,9 +44,36 @@
 - `@electric-sql/pglite` 0.5.4 - embedded Postgres so `bun run dev` works with zero external
   services.
 - `pg` 8.22.0 - Postgres driver for the real-database path.
+- Automations (`shared/automations.ts`, `server/automations.ts`) support schedules and
+  approval triggers scoped to one canvas. The five-second worker groups up to ten signed-off
+  frames per run. `automation_approvals` retains dispatch receipts independently of the
+  pruned run log. Run state stores the approved source identities, frozen steps, current
+  step, task ID, summaries and result links; database leases serialize execution. Agent tasks
+  and their wait points commit together. The next step waits for completion, checks source
+  approvals and access again, and stops on failure or after one hour. Interrupted external
+  calls require a destination check rather than automatic replay. Integration-owned action
+  hooks create Linear issues or send Slack messages using the workflow owner's connection.
+  Approval presets create draft sizes, translations and companion assets on the watched canvas.
+  The worker queues independent workflows with concurrency four and keeps discovering work
+  while integrations await I/O. Receipt lookup is batched. Later agent briefs include earlier
+  draft-result links and completion summaries, so localization can build on generated sizes.
 
 ## 4. Canvas Drawing
 
+- Canvas zoom: the camera runs from 8% to 1600% (`MAX_ZOOM`, mirrored by `FOLLOW_MAX_ZOOM`).
+  `Stage.tsx` lays the `.world` out at CSS zoom k, the settled camera zoom clamped
+  to 1-16, and its transform carries only the camera's movement since (`scale(zoom / k)`).
+  Chromium passes k into each frame iframe (and the drag preview) as pixel density, so frame
+  documents keep design-px viewports and rasterize at k×, out of process too (a transform on
+  the iframe only stretched a 1× raster there); k is the whole number at or above the zoom,
+  since the iframe box snaps to whole pixels and only a whole k keeps every design size exact.
+  Elsewhere (`FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY` false) each `FrameView` iframe undoes k (`zoom: 1/k`, `scale(k)`); `src/lib/layoutZoom.ts` snaps k to a
+  float32 whose inverse multiplies back to exactly 1, since engines multiply zoom in float32.
+  WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
+  scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the
+  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%). Frame
+  names live in a screen-space layer (`FrameLabelLayer`), placed from `--vx`/`--vy`/`--zoom`, so
+  they keep size, gap and crisp text at every zoom.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
@@ -71,7 +103,9 @@
   completed gesture has its own undo entry. The Layers panel shows the drawing's `data-name`.
   Completed saves survive navigation; unfinished drafts are cancelled. Drawing shortcuts leave
   native fields and rich-text editors alone, except for the drawing textarea's save/cancel keys.
-- `DrawingMove.tsx` renders an unclipped drag preview and highlights the destination frame.
+- `ElementMove.tsx` renders an unclipped drawing preview and highlights the destination frame.
+  Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
+  preserving layout and transforms and committing one undo step per drag.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
   size separately from transformed bounds. Pending pointer events are buffered until its
   reply, so fast drags and cancellation remain reliable. `src/lib/drawingMove.ts` preserves markup and translates coordinates when
@@ -92,6 +126,20 @@
   text runs, rotated or skewed elements, locked layers, locked frames and the Comment tool get no
   grips. `tests/elementResize.test.ts` covers the geometry and `tests/elementResizeBrowser.test.ts`
   drags the grips in Chromium.
+- Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
+  toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
+  chrome step in by `RULER_PX`) (remembered under
+  `doop:rulers`, hidden on phones and under ⌘.). Ticks step 1/2/5×10ⁿ by zoom; labels count from the
+  selected frames' top-left, whose extent is highlighted. Dragging out of a ruler adds a guide;
+  guides drag, drop back on their ruler or Delete to remove, and undo/redo (`history.ts` `guide`
+  entries). Guides live in `canvases.guides` (jsonb, per page, client-generated ids), written one
+  at a time through `PUT`/`DELETE /api/canvases/:id/guides/:guideId` behind `requireCanvas` and
+  broadcast as `guide` room messages; page copies and canvas copies take them along (within
+  `MAX_GUIDES`), a deleted page drops its guides and page undo/redo puts them back. Writes to
+  one guide run in order, and a failed one rolls back only when no newer edit follows. Visible
+  guides join `snapFrame` (frame move/resize, element moves), element resize and drawing points
+  at the same 8-screen-px tolerance; Alt bypasses. Tests: `rulers.test.ts`, `snapGuides.test.ts`,
+  `guides.test.ts`, `guideEdits.test.ts`, `rulersBrowser.test.ts`.
 - `tests/drawing.test.ts` covers geometry, serialization and persistence; `drawingBrowser.test.ts`
   exercises the toolbar and gestures in Chromium, including Bézier paths, frame transfers,
   cancellation, mobile input, and coexistence with canvas comment pins and reply fields.
@@ -101,6 +149,13 @@
 
 ## 5. Security and Secrets
 
+- Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
+  `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
+  `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
+  (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions; the
+  Prototype tab and `PrototypeOverlay.tsx` edit and draw them; MCP has `get_prototype` and
+  `set_prototype_start`. `tests/prototypeBrowser.test.ts` drives the player in Chromium.
+
 - better-auth 1.6.26 - authentication: email/password, generic OIDC/SSO, and Google / Microsoft /
   Apple sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` / `APPLE_*` client pairs; the iOS app
   signs in with Apple natively against `APPLE_APP_BUNDLE_IDENTIFIER`). Configuration and secrets
@@ -108,6 +163,11 @@
   environment (`.env`, documented in `.env.example`); never committed.
 
 ## 6. Build and Dependency Management
+
+- Canvas access: `canvasRole` in `server/access.ts` gives owners, members and workspace members
+  edit, and share-link visitors the link's level (`none` / `view` / `comment` / `edit`). REST,
+  the WebSocket room and MCP gate reads, comments and writes on it separately; spec in
+  `.context/specs/share-link-roles.md`.
 
 - Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
 --frozen-lockfile` in CI.

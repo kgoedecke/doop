@@ -1,7 +1,10 @@
-# Vendored from DioxusLabs/blitz at 0f60502ea724ef703b34220b3847bb3483f70b5f with one
-# fix (src/filters.rs, src/render.rs): CSS filter lengths are scaled by the paint
-# scale, so blur radii and drop-shadow offsets stay in CSS pixels at every zoom.
-# Everything else is the upstream crate; drop this directory once the fix lands
+# Vendored from DioxusLabs/blitz at 0f60502ea724ef703b34220b3847bb3483f70b5f with two
+# fixes:
+# - src/filters.rs, src/render.rs: CSS filter lengths are scaled by the paint scale,
+#   so blur radii and drop-shadow offsets stay in CSS pixels at every zoom.
+# - src/render.rs: `clip-path` clips the element's outline and outer box-shadow too,
+#   as the spec says; they were drawn outside the clip layer.
+# Everything else is the upstream crate; drop this directory once the fixes land
 # upstream and remove the [patch] entry in ../../rust/Cargo.toml.
 [package]
 name = "blitz-paint"

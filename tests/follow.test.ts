@@ -25,8 +25,8 @@ describe('cameraToFollow', () => {
   })
 
   it('never zooms past the stage limits', () => {
-    const leader = { x: 0, y: 0, zoom: 3, width: 10, height: 10 }
-    expect(cameraToFollow(leader, { width: 4000, height: 4000 }).zoom).toBe(3)
+    const leader = { x: 0, y: 0, zoom: 16, width: 10, height: 10 }
+    expect(cameraToFollow(leader, { width: 4000, height: 4000 }).zoom).toBe(16)
   })
 })
 

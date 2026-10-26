@@ -224,6 +224,7 @@ export function AppRail({
   const narrow = (
     <div
       key="narrow"
+      data-icon-motion
       className="flex min-h-full w-full animate-[fade-in_0.25s_ease] flex-col items-center motion-reduce:animate-none"
     >
       <DashSidebarBrand onHome={() => go('/')} />
@@ -289,7 +290,11 @@ export function AppRail({
   /* the full rail; in the phone drawer the hide control closes the drawer
      instead of narrowing the rail */
   const wide = (inDrawer: boolean) => (
-    <div key="wide" className="flex min-h-full w-full animate-[fade-in_0.25s_ease] flex-col motion-reduce:animate-none">
+    <div
+      key="wide"
+      data-icon-motion
+      className="flex min-h-full w-full animate-[fade-in_0.25s_ease] flex-col motion-reduce:animate-none"
+    >
       <DashSidebarBrand onHome={() => go('/')}>
         <span className="ml-auto flex items-center gap-2.5 text-ink-soft">
           <IconButton size="sm" aria-label="Search canvases (⌘K)" onClick={openSearch}>

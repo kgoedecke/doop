@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { colorFor } from '../../shared/types'
-import { useStore } from '../lib/store'
+import { canCommentOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { timeAgo } from '../lib/time'
@@ -102,6 +102,8 @@ function reportLimit(err: unknown) {
 function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
   const { root, frame } = thread
   const resolved = threadState(thread) === 'resolved'
+  /* a view link reads threads; it neither replies nor resolves */
+  const canComment = useStore(canCommentOpenCanvas)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -215,7 +217,7 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
           </ol>
         </Disclosure>
       )}
-      {!resolved && (
+      {!resolved && canComment && (
         <div className="flex items-center gap-1.5 py-1 pr-1.5 pl-[28px]">
           <Input
             variant="bare"

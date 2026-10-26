@@ -7,6 +7,7 @@ import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
+import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type {
   ActivityItem,
   ActorKind,
@@ -41,8 +42,9 @@ function canvasColumns(c: Canvas) {
   return {
     name: c.name,
     pages: c.pages ?? null,
+    guides: c.guides?.length ? c.guides : null,
     ownerId: c.ownerId ?? null,
-    linkAccess: c.linkAccess ?? null,
+    linkAccess: storedLinkAccess(c.linkAccess) ?? null,
     publishedAt: c.publishedAt ?? null,
     description: c.description ?? null,
     category: c.category ?? null,
@@ -347,6 +349,7 @@ async function writeFrame(f: Frame) {
     demo: f.demo ?? null,
     hidden: f.hidden ?? null,
     locked: f.locked ?? null,
+    approval: f.approval ?? null,
   }
   const { id, createdAt, ...set } = row
   await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
@@ -768,8 +771,10 @@ export async function hydrate(): Promise<Hydrated> {
     id: c.id,
     name: c.name,
     pages: c.pages ?? undefined,
+    ...(c.guides?.length ? { guides: c.guides } : {}),
     ownerId: c.ownerId ?? undefined,
-    linkAccess: c.linkAccess === 'edit' ? 'edit' : undefined,
+    /* 'view' / 'comment' / 'edit'; null and anything unknown read as private */
+    linkAccess: storedLinkAccess(c.linkAccess),
     ...(c.publishedAt != null ? { publishedAt: c.publishedAt } : {}),
     ...(c.description ? { description: c.description } : {}),
     ...(isCommunityCategory(c.category) ? { category: c.category } : {}),

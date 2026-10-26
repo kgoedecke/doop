@@ -14,7 +14,8 @@ import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { DESIGN_BRIEF, DESIGN_QUALITY } from './guide.ts'
+import { DESIGN_BRIEF, DESIGN_QUALITY, PROTOTYPES } from './guide.ts'
+import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
@@ -103,6 +104,7 @@ Rules:
 - Queued cards are standalone work requests from the board. A card may be routed through several agents in turn — you own your stage of it and nothing else. If your specialty is to originate work: a new-asset card means create_frame sized for the job, a change request means editing the existing frame. One card, one deliverable.
 - Later stages inherit whatever earlier stages left. Read the frame as it is now; never undo a previous agent's work because you would have done it differently.
 - Resolve frame references against the numbered frame list in the request. A literal frame name wins; otherwise "Frame 1" means the first listed frame, and "the other frame" means the only remaining frame when there are two.
+- Each frame includes human approval metadata. Only ready_for_dev means the current design is approved for implementation; draft and needs_review are not approved. Content or size edits invalidate sign-off. Approval is context, not a new assignment: do only the requested work, and re-read the frame's approval before using it for implementation.
 - Choose a size-aware strategy. For documents over 60,000 characters, call inspect_frame before reading HTML. Use get_frame_html with a query or bounded range only when markup is needed.
 - For requests to copy, match, or borrow another frame's design: screenshot and inspect BOTH the target and reference before editing. Use the reference screenshot and computed design tokens as the source of visual truth. Read target HTML only when you need to preserve its content; do not load a large reference document just to learn its style. For a full redesign, use begin_frame_rewrite, append_frame_rewrite in chunks under 12,000 characters, and commit_frame_rewrite; then screenshot the changed frame.
 - Element comments are pinned to ONE element (you get its CSS selector and an HTML excerpt). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
@@ -121,7 +123,11 @@ Design quality — the bar for anything you originate or restyle (canvas guideli
 ${DESIGN_QUALITY}
 
 Design brief — when your card asks you to ORIGINATE new design work:
-${DESIGN_BRIEF}`
+${DESIGN_BRIEF}
+
+Clickable prototypes:
+${PROTOTYPES}
+- Frame ids are the id= values in the frame list of your request.`
 
 /** The system prompt for one agent: the shared harness rules plus its specialty. */
 function systemFor(role: AgentRole): string {
@@ -386,7 +392,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     const frameList = visibleFrames
       .map(
         (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''})`,
+          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
       )
       .join('\n')
 
@@ -1135,6 +1141,28 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_prototype',
+    description:
+      'List the clickable-prototype wiring of this canvas: each page with its flow start frame, and every interaction (data-doop-on / data-doop-action attributes in frame HTML) with its trigger, action and target. Interactions whose target frame does not exist carry a problem; fix them with edit_frame_html. Call it after wiring a flow.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_prototype_start',
+    description:
+      "Choose the frame a page's clickable prototype starts on (the player at /c/<canvas>/proto opens there). Pass an empty frame_id to clear it; the flow then starts on the page's top-left frame.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        frame_id: { type: 'string', description: "The start frame, or an empty string to clear the page's start" },
+        page_id: {
+          type: 'string',
+          description: "The page; defaults to the start frame's page (the first page when clearing)",
+        },
+      },
+      required: ['frame_id'],
+    },
+  },
+  {
     name: 'screenshot_frame',
     description:
       'Render a frame and SEE it as an image. Call this after every visual change to verify the feedback is actually addressed.',
@@ -1145,6 +1173,9 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ]
+
+/** The resident agents' tool names; tests hold them to the MCP server's (agentToolParity.test.ts). */
+export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
@@ -1235,13 +1266,20 @@ async function execTool(
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         const inspection = await inspectFrame(f)
-        return ok(JSON.stringify(inspection))
+        return ok(
+          JSON.stringify({
+            ...inspection,
+            approvalStatus: f.approval?.status ?? 'draft',
+            approval: f.approval ?? null,
+          }),
+        )
       }
       case 'get_frame_html': {
         const f = store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         const raw = block.input as { query?: string; offset?: number; limit?: number }
+        const approval = `Approval: ${JSON.stringify(f.approval ?? { status: 'draft' })}`
         const query = String(raw.query || '').trim()
         const limit = Math.max(1000, Math.min(Number(raw.limit) || 20_000, MAX_HTML_READ_CHARS))
         if (query) {
@@ -1263,13 +1301,13 @@ async function execTool(
             return `--- match ${match + 1} at ${index}, chars ${start}-${end} ---\n${f.html.slice(start, end)}`
           })
           return ok(
-            `Frame HTML: ${f.html.length} characters; ${matches.length} match(es) for "${query}".\n${snippets.join('\n')}`,
+            `Frame HTML: ${f.html.length} characters; ${matches.length} match(es) for "${query}".\n${approval}\n${snippets.join('\n')}`,
           )
         }
         const offset = Math.max(0, Math.min(Number(raw.offset) || 0, f.html.length))
         const end = Math.min(f.html.length, offset + limit)
         return ok(
-          `Frame HTML: ${f.html.length} characters. Returning chars ${offset}-${end}.${end < f.html.length ? ` Continue with offset=${end}, or use query for a targeted snippet.` : ''}\n\n${f.html.slice(offset, end)}`,
+          `Frame HTML: ${f.html.length} characters. Returning chars ${offset}-${end}.${end < f.html.length ? ` Continue with offset=${end}, or use query for a targeted snippet.` : ''}\n${approval}\n\n${f.html.slice(offset, end)}`,
         )
       }
       case 'edit_frame_html': {
@@ -1639,6 +1677,20 @@ async function execTool(
             ? `saved design guide "${actions.guidelineTitle(doc)}" (${doc.name}, ${doc.markdown.length} chars) — every actor on this canvas now inherits it`
             : `deleted design guide ${raw.name.trim().toLowerCase()}`,
         )
+      }
+      case 'get_prototype': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        return ok(JSON.stringify(prototypeReport(canvas)))
+      }
+      case 'set_prototype_start': {
+        const raw = block.input as { frame_id?: unknown; page_id?: unknown }
+        if (typeof raw.frame_id !== 'string') return fail('frame_id must be a frame id, or an empty string to clear')
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const pageId = typeof raw.page_id === 'string' && raw.page_id ? raw.page_id : undefined
+        const result = setPrototypeStart(canvas, pageId, raw.frame_id.trim() || null, actor)
+        return result.ok ? ok(JSON.stringify({ pages: result.pages })) : fail(result.error)
       }
       case 'screenshot_frame': {
         const f = store.getFrame(input.frame_id)

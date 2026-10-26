@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      html,
+      body,
+      #root {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { flushSync } from 'react-dom'
+      import { PrototypePlayer } from '/src/components/PrototypePlayer.tsx'
+      import { Stage } from '/src/components/Stage.tsx'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import { useStore } from '/src/lib/store.ts'
+      import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
+      import '/src/styles.css'
+      const root = createRoot(document.getElementById('root'))
+      window.messages = []
+      window.addEventListener('message', (ev) => window.messages.push(ev.data))
+      window.seed = (canvas) => useStore.getState().setCanvas(canvas)
+      window.editFrame = (id, html) => {
+        const frame = useStore.getState().canvas.frames.find((f) => f.id === id)
+        useStore.getState().upsertFrame({ ...frame, html, updatedAt: frame.updatedAt + 1 })
+      }
+      window.playerClosed = false
+      /* synchronous, so the previous test's player is gone before a test looks
+         for the new one's screens */
+      const mountPlayer = (props) =>
+        flushSync(() =>
+          root.render(React.createElement(PrototypePlayer, { key: `${props.startFrameId}:${Date.now()}`, ...props })),
+        )
+      window.play = (startFrameId) =>
+        mountPlayer({
+          startFrameId,
+          onClose: () => {
+            window.playerClosed = true
+            root.render(null)
+          },
+        })
+      /* the full-page route's player: each navigation is a browser history entry */
+      window.playSynced = (startFrameId) => mountPlayer({ startFrameId, syncUrl: true })
+      /* a bare frame document, as the canvas mounts one: prototype mode stays
+         off unless a test turns it on */
+      window.addRawFrame = () => {
+        const frame = document.createElement('iframe')
+        frame.id = 'raw'
+        frame.sandbox = 'allow-scripts'
+        frame.srcdoc = FRAME_BOOTSTRAP
+        frame.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:300px;border:0;z-index:99'
+        document.body.appendChild(frame)
+      }
+      /* the editor's stage, for Prototype mode's connectors */
+      window.mountStage = (prototypeMode) => {
+        useStore.getState().setPrototypeMode(prototypeMode)
+        root.render(React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })))
+      }
+      window.fixtureReady = true
+    </script>
+  </body>
+</html>

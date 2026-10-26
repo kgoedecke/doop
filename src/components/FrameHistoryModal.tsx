@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Frame, FrameVersion, FrameVersionInfo } from '../../shared/types'
 import { api, errorMessage } from '../lib/api'
 import { recordUpdate } from '../lib/history'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { timeAgo } from '../lib/time'
 import { AgentIcon } from './AgentIcon'
 import { Badge } from './ui/badge'
@@ -24,6 +24,8 @@ type Shown = Pick<FrameVersion, 'html' | 'width' | 'height'>
 export function FrameHistoryModal({ frame, onClose }: { frame: Frame; onClose: () => void }) {
   /* the live frame: the prop is a snapshot from the menu that opened us */
   const live = useStore((s) => s.canvas?.frames.find((f) => f.id === frame.id)) ?? frame
+  /* a view or comment link may browse the history, not restore from it */
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const [versions, setVersions] = useState<FrameVersionInfo[] | null>(null)
   const [selected, setSelected] = useState<FrameVersionInfo | 'current' | null>(null)
   const [loaded, setLoaded] = useState<FrameVersion | null>(null)
@@ -106,7 +108,7 @@ export function FrameHistoryModal({ frame, onClose }: { frame: Frame; onClose: (
               Back
             </Button>
             <ModalSpacer />
-            {selected && selected !== 'current' && (
+            {selected && selected !== 'current' && !readOnly && (
               <Button variant="primary" disabled={busy || !shown} onClick={() => void restore(selected)}>
                 {busy ? 'Restoring…' : 'Restore this version'}
               </Button>

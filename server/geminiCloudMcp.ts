@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema, type ContentBlock } from '@modelcontextprotocol/sdk/types.js'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { store } from './store.ts'
-import { canAccessCanvas } from './access.ts'
+import { canEditCanvas } from './access.ts'
 import { isBanned } from './auth.ts'
 
 /** Run-scoped capability; Google credentials never reach Doop's web server. */
@@ -15,7 +15,7 @@ export async function handleGeminiCloudMcp(req: Request, res: Response) {
   const canExecute = async () => {
     if (!run || !geminiCloudWorkerFor(run.userId)) return false
     const canvas = store.getCanvas(run.request.canvasId)
-    return !!canvas && canAccessCanvas(run.userId, canvas) && !(await isBanned(run.userId))
+    return !!canvas && canEditCanvas(run.userId, canvas) && !(await isBanned(run.userId))
   }
   if (!run || !(await canExecute())) {
     res.status(403).json({ error: 'Gemini cloud run unavailable' })

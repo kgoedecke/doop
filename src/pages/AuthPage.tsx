@@ -6,7 +6,7 @@ import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
 import type { DesktopSignInProvider, ProviderRedirects } from '../lib/desktopAuth'
 import { safeRelativeTarget } from '../lib/safeTarget'
 import { CODEX_SETUP_PATH } from '../lib/codexConnection'
-import { FIRST_CANVAS_PATH } from '../../shared/firstCanvas'
+import { FIRST_CANVAS_PATH, firstCanvasPathAfterSignup } from '../../shared/firstCanvas'
 import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
@@ -131,11 +131,12 @@ function ssoErrorFromUrl(): string | null {
    to run for this path; the equivalent logic has to travel with the
    request instead. An interrupted flow wins for everyone; otherwise a
    returning user comes back to this page and a new account lands on its
-   first canvas, the same place the email signup goes. */
-function ssoRedirects(): ProviderRedirects {
+   first canvas, the same place the email signup goes, tagged with the
+   provider so the app can report the signup once it lands (App.tsx). */
+function ssoRedirects(provider: DesktopSignInProvider): ProviderRedirects {
   const target = interruptedTarget()
   if (target) return { callbackURL: target, newUserCallbackURL: target }
-  return { callbackURL: location.pathname + location.search, newUserCallbackURL: FIRST_CANVAS_PATH }
+  return { callbackURL: location.pathname + location.search, newUserCallbackURL: firstCanvasPathAfterSignup(provider) }
 }
 
 /** Matches server/auth.ts loginProvidersConfig's response shape. */
@@ -223,7 +224,7 @@ export function AuthPage() {
            signs in through the system browser and gets the session handed
            back over a doop:// link (src/lib/desktopAuth.ts). The browser
            starts the provider round trip itself, from a doop page. */
-        if (!(await beginBrowserSignIn(provider, ssoRedirects()))) {
+        if (!(await beginBrowserSignIn(provider, ssoRedirects(provider)))) {
           setError(startFailed)
           return
         }
@@ -231,7 +232,7 @@ export function AuthPage() {
         setNotice(browserSignInNotice)
         return
       }
-      const res = await start({ ...ssoRedirects(), errorCallbackURL: '/auth' })
+      const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
       if (res.error) setError(res.error.message ?? startFailed)
     } finally {
       setBusy(false)
@@ -310,11 +311,12 @@ export function AuthPage() {
         /* signup with verification required: the account exists but there is
            no session yet — better-auth returns a null token in that case */
         if (mode === 'signup' && !res.data.token) {
-          posthog.capture('account_signed_up')
+          posthog.capture('account_signed_up', { method: 'email' })
           setNotice(`Almost there — we sent a verification link to ${email}. Open it to activate your account.`)
           return
         }
-        posthog.capture(mode === 'signup' ? 'account_signed_up' : 'account_signed_in')
+        if (mode === 'signup') posthog.capture('account_signed_up', { method: 'email' })
+        else posthog.capture('account_signed_in')
         setName(res.data.user.name) // keep cursor/feed identity in sync with the account
         /* land new users on their auto-created first canvas, where the
            demo agent is waiting to perform */

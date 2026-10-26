@@ -1,28 +1,30 @@
 import type { Frame } from '../../shared/types'
-import { useStore } from './store'
+import { pickedSelectors, useStore } from './store'
 import { api, errorMessage } from './api'
 import { requestFrame } from './frameBridge'
 import { deleteFramesTracked, recordUpdate, recordUpdates, trackSave } from './history'
 import {
-  duplicateElement,
+  duplicateElements,
   isElementHidden,
   isElementLocked,
   moveElement,
-  removeElement,
+  removeElements,
   replaceElement,
-  setElementHidden,
   setElementLocked,
+  setElementsHidden,
   shiftElement,
   type DropTarget,
+  type FlowPlacement,
   type MovedElement,
 } from './layers'
 
 /* ---- element edits shared by the Layers rail and the element panel ---- */
 
 export function saveFrameHtml(frame: Frame, html: string) {
-  recordUpdate(frame.id, { html: frame.html }, { html })
+  // Layer commands each need their own undo step, even when invoked rapidly.
+  recordUpdate(frame.id, { html: frame.html }, { html }, true)
   useStore.getState().patchFrameLocal(frame.id, { html })
-  api.updateFrame(frame.id, { html }).catch(console.error)
+  trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
 }
 
 /* ---- locks ---- */
@@ -31,7 +33,7 @@ export function saveFrameHtml(frame: Frame, html: string) {
  *  or the rail: it can be selected in the Layers panel (so it can be
  *  unlocked) and nothing else. */
 export function isLayerLocked(frame: Frame, selector: string): boolean {
-  return isElementLocked(frame.html, selector)
+  return !!frame.locked || isElementLocked(frame.html, selector)
 }
 
 /** Set or clear the element's own lock; false when the selector no longer
@@ -40,11 +42,7 @@ export function isLayerLocked(frame: Frame, selector: string): boolean {
  *  serializes the live document — without the attribute there, the save
  *  would silently drop the lock. */
 export function setLayerLocked(frame: Frame, selector: string, locked: boolean): boolean {
-  const html = setElementLocked(frame.html, selector, locked)
-  if (html === null) return false
-  saveFrameHtml(frame, html)
-  void requestFrame(frame.id, 'doop:lock', { selector, locked })
-  return true
+  return setLayersLocked(frame, [selector], locked)
 }
 
 /** Lock or unlock frames together, as one undo step. Frames already in the
@@ -68,10 +66,25 @@ export function setFramesLocked(frames: Frame[], locked: boolean) {
   }
 }
 
-/** ⌘⇧L: a picked layer toggles its own lock; otherwise the selected frames
- *  lock together, and only unlock once every one of them is locked (a mixed
- *  selection locks the rest first, as Figma does). False when nothing is
- *  selected. */
+/** Set or clear the own lock of every element as one undo step; false when
+ *  any selector no longer resolves. */
+export function setLayersLocked(frame: Frame, selectors: string[], locked: boolean): boolean {
+  let html = frame.html
+  // A lock is an attribute, so the positional paths hold between steps.
+  for (const selector of selectors) {
+    const next = setElementLocked(html, selector, locked)
+    if (next === null) return false
+    html = next
+  }
+  saveFrameHtml(frame, html)
+  for (const selector of selectors) void requestFrame(frame.id, 'doop:lock', { selector, locked })
+  return true
+}
+
+/** ⌘⇧L: picked layers toggle their own locks — together, unlocking only
+ *  once every one is locked; otherwise the selected frames lock together the
+ *  same way (a mixed selection locks the rest first, as Figma does). False
+ *  when nothing is selected. */
 export function toggleLockSelection(): boolean {
   const s = useStore.getState()
   const frames = s.canvas?.frames ?? []
@@ -79,7 +92,9 @@ export function toggleLockSelection(): boolean {
   if (picked) {
     const frame = frames.find((f) => f.id === picked.frameId)
     if (!frame) return false
-    return setLayerLocked(frame, picked.selector, !isElementLocked(frame.html, picked.selector, true))
+    const selectors = pickedSelectors(s)
+    const allLocked = selectors.every((selector) => isElementLocked(frame.html, selector, true))
+    return setLayersLocked(frame, selectors, !allLocked)
   }
   const selected = frames.filter((f) => s.selectedIds.includes(f.id))
   if (!selected.length) return false
@@ -92,8 +107,14 @@ export function toggleLockSelection(): boolean {
  *  pick is dropped so it cannot stand in for a frame selection. A locked
  *  element stays, and stays picked, so it can be unlocked. */
 export function deleteLayer(frame: Frame, selector: string): boolean {
-  if (isLayerLocked(frame, selector)) return false
-  const html = removeElement(frame.html, selector)
+  return deleteLayers(frame, [selector])
+}
+
+/** Remove the elements together, as one undo step; as for one element, a
+ *  locked one keeps the whole set (and the pick) in place. */
+export function deleteLayers(frame: Frame, selectors: string[]): boolean {
+  if (selectors.some((selector) => isLayerLocked(frame, selector))) return false
+  const html = removeElements(frame.html, selectors)
   const store = useStore.getState()
   store.setSelectedElement(null)
   store.setElementPanelOpen(false)
@@ -113,7 +134,7 @@ export function deleteSelection(): boolean {
   const picked = s.selectedElement
   if (picked) {
     const pickedFrame = frames.find((f) => f.id === picked.frameId)
-    if (pickedFrame) deleteLayer(pickedFrame, picked.selector)
+    if (pickedFrame) deleteLayers(pickedFrame, pickedSelectors(s))
     else s.pickElement(null)
     return true
   }
@@ -124,8 +145,22 @@ export function deleteSelection(): boolean {
 }
 
 export function duplicateLayer(frame: Frame, selector: string) {
-  const html = duplicateElement(frame.html, selector)
-  if (html !== null) saveFrameHtml(frame, html)
+  duplicateLayers(frame, [selector])
+}
+
+/** Copy each element in place, right after itself, as one undo step. When
+ *  the copies were made from the pick, the copies become the pick: the
+ *  originals' positional paths would now point at shifted elements. */
+export function duplicateLayers(frame: Frame, selectors: string[]) {
+  if (frame.locked || selectors.some((selector) => isLayerLocked(frame, selector))) return
+  const duplicated = duplicateElements(frame.html, selectors)
+  if (!duplicated) return
+  saveFrameHtml(frame, duplicated.html)
+  const store = useStore.getState()
+  const picked = store.selectedElement?.frameId === frame.id ? pickedSelectors(store) : []
+  if (!picked.some((selector) => selectors.includes(selector))) return
+  store.pickElement(null)
+  for (const selector of duplicated.selectors) store.toggleElement({ frameId: frame.id, selector })
 }
 
 /* ---- the eye: hiding and showing, frames and elements alike ---- */
@@ -161,25 +196,32 @@ export function setFrameHidden(frame: Frame, hidden: boolean) {
  *  selector no longer resolves. The mark lives in the frame's HTML, so it
  *  rides the same save as any other layer edit. */
 export function setLayerHidden(frame: Frame, selector: string, hidden: boolean): boolean {
-  const html = setElementHidden(frame.html, selector, hidden)
+  return setLayersHidden(frame, [selector], hidden)
+}
+
+/** Hide or show every element as one undo step; false when any selector no
+ *  longer resolves. */
+export function setLayersHidden(frame: Frame, selectors: string[], hidden: boolean): boolean {
+  const html = setElementsHidden(frame.html, selectors, hidden)
   if (html === null) return false
   if (html !== frame.html) saveFrameHtml(frame, html)
   // Text editing withholds HTML updates; its next save serializes the live iframe.
-  void requestFrame(frame.id, 'doop:visibility', { selector, hidden })
+  for (const selector of selectors) void requestFrame(frame.id, 'doop:visibility', { selector, hidden })
   return true
 }
 
-/** ⌘⇧H: a picked element flips on its own; otherwise the selected frames
- *  move together — all shown when every one is hidden, hidden otherwise.
- *  False when the key had nothing to act on. */
+/** ⌘⇧H: picked elements move together — all shown when every one is
+ *  hidden, hidden otherwise; with nothing picked the selected frames do the
+ *  same. False when the key had nothing to act on. */
 export function toggleSelectionHidden(): boolean {
   const s = useStore.getState()
   const frames = s.canvas?.frames ?? []
   const picked = s.selectedElement
   if (picked) {
     const frame = frames.find((f) => f.id === picked.frameId)
-    const hidden = frame ? isElementHidden(frame.html, picked.selector) : null
-    if (frame && hidden !== null) setLayerHidden(frame, picked.selector, !hidden)
+    const selectors = pickedSelectors(s)
+    const states = frame ? selectors.map((selector) => isElementHidden(frame.html, selector)) : []
+    if (frame && states.length && !states.includes(null)) setLayersHidden(frame, selectors, !states.every(Boolean))
     return true
   }
   const selected = frames.filter((f) => s.selectedIds.includes(f.id))
@@ -209,9 +251,9 @@ function commitMove(frame: Frame, moved: MovedElement | null): boolean {
 }
 
 /** Drop the element next to, or into, another; false when nothing moved. */
-export function moveLayer(frame: Frame, selector: string, target: DropTarget): boolean {
+export function moveLayer(frame: Frame, selector: string, target: DropTarget, flow?: FlowPlacement): boolean {
   if (isLayerLocked(frame, selector)) return false
-  return commitMove(frame, moveElement(frame.html, selector, target))
+  return commitMove(frame, moveElement(frame.html, selector, target, flow))
 }
 
 /** Finish a drag that began on `pressed`: the element is moved in the frame
@@ -220,10 +262,10 @@ export function moveLayer(frame: Frame, selector: string, target: DropTarget): b
  *  different element (a same-tag sibling inserted above shifts every
  *  nth-of-type below it), so a changed frame drops nothing. False when
  *  nothing moved. */
-export function dropLayer(pressed: Frame, selector: string, target: DropTarget): boolean {
+export function dropLayer(pressed: Frame, selector: string, target: DropTarget, flow?: FlowPlacement): boolean {
   const frame = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
   if (!frame || frame.html !== pressed.html) return false
-  return moveLayer(frame, selector, target)
+  return moveLayer(frame, selector, target, flow)
 }
 
 /** Step the element one layer up (-1) or down (1) among its siblings. */

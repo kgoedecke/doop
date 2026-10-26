@@ -15,6 +15,7 @@ declare global {
       select: (selector: string) => void
       selectFrame: () => void
       deselect: () => void
+      picked: () => string[]
       setTool: (tool: 'select' | 'hand') => void
       setZoom: (zoom: number) => void
       undo: () => Promise<void>
@@ -579,5 +580,38 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     await page.evaluate((s) => window.elementPanelHarness.select(s), '#locked')
     await new Promise((r) => setTimeout(r, 300))
     expect(await page.$('[data-resize-handles]')).toBeNull()
+  }, 20_000)
+
+  it('⇧-click picks several elements in the frame, outlining each, and a plain click narrows back to one', async () => {
+    await reset()
+    async function click(selector: string, { shift = false } = {}) {
+      const frame = (await frameDoc())!
+      const inner = await frame.$eval(selector, (el) => el.getBoundingClientRect().toJSON() as DOMRect)
+      const outer = await page.$eval('iframe', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
+      if (shift) await page.keyboard.down('Shift')
+      await page.mouse.click(outer.left + inner.left + inner.width / 2, outer.top + inner.top + inner.height / 2)
+      if (shift) await page.keyboard.up('Shift')
+    }
+    const picked = () => page.evaluate(() => window.elementPanelHarness.picked())
+
+    await click('#box')
+    await expect.poll(picked).toHaveLength(1)
+    await click('#pad', { shift: true })
+    await expect.poll(picked).toHaveLength(2)
+    await click('#pic', { shift: true })
+    await expect.poll(picked).toHaveLength(3)
+    /* the primary keeps its outline; the other two get their own, and no
+       grips offer to size just one of them */
+    await page.waitForFunction(() => document.querySelectorAll('[data-picked-element]').length === 2)
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+
+    await click('#pad', { shift: true })
+    await expect.poll(picked).toHaveLength(2)
+    await page.waitForFunction(() => document.querySelectorAll('[data-picked-element]').length === 1)
+
+    await click('#box')
+    await expect.poll(picked).toHaveLength(1)
+    await page.waitForFunction(() => document.querySelectorAll('[data-picked-element]').length === 0)
+    await page.waitForFunction(() => !!document.querySelector('[data-resize-handles]'))
   }, 20_000)
 })

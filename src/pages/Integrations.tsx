@@ -3,6 +3,7 @@ import type { CanvasMeta } from '../../shared/types'
 import type { Automation } from '../../shared/automations'
 import { api, type IntegrationsStatus } from '../lib/api'
 import { posthog } from '../lib/posthog'
+import { connectIntegration } from '../lib/integrationConnect'
 import { MetaTile } from '../components/AutomateShell'
 import { AppRail, railLayout } from '../components/AppRail'
 import { clientIntegrations } from '../integrations'
@@ -64,9 +65,10 @@ export function Integrations() {
     if (busy) return
     setBusy(true)
     try {
-      const { url } = await api.startMetaConnect()
-      posthog.capture('integration_connect_started', { provider: 'meta' })
-      location.assign(url)
+      const destination = await connectIntegration('meta', () =>
+        posthog.capture('integration_connect_started', { provider: 'meta' }),
+      )
+      if (destination === 'browser') setBusy(false)
     } catch (error) {
       console.error(error)
       showToast('Couldn’t start the Meta connection')

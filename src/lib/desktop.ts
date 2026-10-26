@@ -20,6 +20,9 @@ import {
 } from './desktopAuth'
 import { isDesktopShell } from './shell'
 import { codexSetupTarget } from './codexConnection'
+import { forgetPendingConnect, isPendingConnect, parseDesktopConnectLink } from './desktopConnect'
+import { safeRelativeTarget } from './safeTarget'
+import { NO_CANVAS, isViewCommand, runViewCommand, syncViewMenu } from './viewMenu'
 
 export type CanvasTab = { id: string; name: string }
 
@@ -162,6 +165,12 @@ export function closeActiveTab() {
  *  attempt there. Detected by the API rather than the version so a local
  *  build tests the same code path as a release. */
 export function supportsBrowserSignIn(): boolean {
+  return receivesDesktopLinks()
+}
+
+/** Whether this shell delivers doop:// links to the page (from 0.2.1): the
+ *  way back for anything the system browser finishes on the app's behalf. */
+export function receivesDesktopLinks(): boolean {
   return typeof shellWindow.__TAURI__?.deepLink?.getCurrent === 'function'
 }
 
@@ -210,10 +219,51 @@ async function completeBrowserSignIn(urls: readonly string[]) {
   location.assign(link.to)
 }
 
+/* ---------- integration connect handoff from the system browser ---------- */
+
+/** Providers whose completion request is on its way; cleared only by the
+ *  reload that follows an answer, or by a request that never got one. */
+const connectsInFlight = new Set<string>()
+
+/** The browser relayed a provider's redirect (shared/desktopConnect.ts,
+ *  step 3). Finish it under this app's session and reload onto the outcome,
+ *  so the Integrations page reads the fresh status and shows the notice.
+ *  Links answering no pending connection are ignored. If the request never
+ *  got an answer (offline, server restarting) the pending record stays, so
+ *  "Open doop" in the browser can deliver the link again. */
+async function completeDesktopConnect(urls: readonly string[]) {
+  const link = urls
+    .map(parseDesktopConnectLink)
+    .find((l) => l !== null && isPendingConnect(l.provider) && !connectsInFlight.has(l.provider))
+  if (!link) return
+  /* a second "Open doop" during a slow exchange must not spend the
+     single-use state twice and replace the success with an error */
+  connectsInFlight.add(link.provider)
+  let response: Response
+  try {
+    response = await fetch(`/api/integrations/${link.provider}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: link.query }),
+    })
+  } catch (err) {
+    console.error(err)
+    connectsInFlight.delete(link.provider)
+    return
+  }
+  forgetPendingConnect(link.provider)
+  const answer: unknown = response.ok ? await response.json().catch(() => null) : null
+  const to = safeRelativeTarget((answer as { to?: string } | null)?.to)
+  location.assign(
+    to ?? `/integrations?${link.provider}Error=${encodeURIComponent('Could not finish connecting. Try again.')}`,
+  )
+}
+
 async function handleDesktopLinks(urls: readonly string[]) {
   const setup = urls.map(codexSetupTarget).find((target) => target !== null)
   if (setup) navigate(setup)
   await completeBrowserSignIn(urls)
+  await completeDesktopConnect(urls)
 }
 
 function listenForDesktopLinks() {
@@ -249,6 +299,14 @@ export function initDesktopShell() {
      it as an event — the page never sees the keystroke. Windows has no menu
      bar, so Ctrl+W arrives as a plain keydown. Both close the active tab. */
   shellWindow.__TAURI__?.event?.listen?.('close-tab', closeActiveTab).catch(console.error)
+  /* the macOS View menu (view_menu.rs): a reload leaves it showing the last
+     canvas until a canvas reports in again, so start it out closed */
+  syncViewMenu(NO_CANVAS)
+  shellWindow.__TAURI__?.event
+    ?.listen?.<unknown>('view-command', (e) => {
+      if (isViewCommand(e.payload)) runViewCommand(e.payload)
+    })
+    .catch(console.error)
   listenForDesktopLinks()
   document.addEventListener('keydown', (e) => {
     if (e.key.toLowerCase() !== 'w' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return

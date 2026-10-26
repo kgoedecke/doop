@@ -46,6 +46,8 @@ import {
   Circle,
   CircleHelp,
   CirclePlus,
+  Clipboard,
+  CodeXml,
   Command,
   Clock,
   Compass,
@@ -59,6 +61,7 @@ import {
   Folder,
   FolderPlus,
   File,
+  FileText,
   Frame,
   Globe,
   Hand,
@@ -84,6 +87,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Paperclip,
+  Pencil,
   PenTool,
   Play,
   Plus,
@@ -102,6 +106,7 @@ import {
   WrapText,
   SquareDashed,
   Shield,
+  Sparkles,
   Waypoints,
   Square,
   Sun,
@@ -112,6 +117,9 @@ import {
   User,
   Users,
   Workflow,
+  Flag,
+  MousePointerClick,
+  SquareMousePointer,
   X,
 } from 'lucide-react'
 
@@ -162,6 +170,7 @@ export const SquareDashedIcon = icon(SquareDashed)
 export const MoreHorizontalIcon = icon(Ellipsis)
 export const ShareIcon = icon(Share2)
 export const CopyIcon = icon(Copy)
+export const ClipboardIcon = icon(Clipboard)
 export const TrashIcon = icon(Trash2)
 export const CheckIcon = icon(Check)
 export const ChevronRightIcon = icon(ChevronRight)
@@ -209,6 +218,7 @@ export const ExportIcon = icon(ExternalLink)
 export const PulseIcon = icon(Activity)
 export const BellIcon = icon(Bell)
 export const ChatIcon = icon(MessageCircle)
+export const SparkIcon = icon(Sparkles)
 export const WaypointsIcon = icon(Waypoints)
 export const SearchIcon = icon(Search)
 export const PlusIcon = icon(Plus)
@@ -222,6 +232,8 @@ export const LayersIcon = icon(Layers)
 export const FrameIcon = icon(Frame)
 /** a page of the canvas, in the Layers panel's Pages list */
 export const PageIcon = icon(File)
+/** a PDF document, the Export modal's PDF destination */
+export const PdfIcon = icon(FileText)
 export const BoxIcon = icon(Square)
 export const TextIcon = icon(Type)
 export const ImageIcon = icon(Image)
@@ -275,6 +287,8 @@ export const HandIcon = icon(Hand)
 export const CursorIcon = icon(MousePointer2)
 /** comments: the round bubble, as on the side panel's Comments tab in the design */
 export const CommentIcon = icon(MessageCircle)
+export const CodeIcon = icon(CodeXml)
+export const EditIcon = icon(Pencil)
 export const PinIcon = icon(MapPin)
 export const EyeIcon = icon(Eye)
 export const EyeClosedIcon = icon(EyeOff)
@@ -303,6 +317,10 @@ export const UploadIcon = icon(Upload)
 export const CalendarIcon = icon(Calendar)
 /** what changed: the clock turned back */
 export const HistoryIcon = icon(RotateCcw)
+/* prototypes: the editor's Prototype mode, a flow's start, the player's hotspot hint */
+export const PrototypeIcon = icon(MousePointerClick)
+export const FlowStartIcon = icon(Flag)
+export const HotspotIcon = icon(SquareMousePointer)
 /** review comments: the square bubble */
 export const MessageSquareIcon = icon(MessageSquare)
 /** draft a page: a page skeleton */

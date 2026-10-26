@@ -44,6 +44,47 @@ describe('moveElement', () => {
     })
     expect(moved?.html).toContain('<p>hello</p><input>')
   })
+
+  it('puts a canvas drop in layout flow while preserving dimensions and transforms', () => {
+    const html = page(
+      '<div><img style="position:absolute;left:40px;top:20px;translate:10px 20px;transform:rotate(15deg);width:80px;height:60px"></div><section></section>',
+    )
+    const result = moveElement(html, 'img', { selector: 'section', place: 'inside' }, { order: '0' })!
+    const doc = new DOMParser().parseFromString(result.html, 'text/html')
+    const image = doc.querySelector('section > img') as HTMLImageElement
+    expect(image.style.position).toBe('relative')
+    expect(image.style.translate).toBe('none')
+    expect(image.style.getPropertyPriority('position')).toBe('important')
+    expect(image.style.transform).toBe('rotate(15deg)')
+    expect(image.style.width).toBe('80px')
+    expect(image.style.height).toBe('60px')
+    expect(doc.querySelector(result.selector)).toBe(image)
+  })
+
+  it('keeps Layers panel moves from rewriting authored layout styles', () => {
+    const result = moveElement(page('<img style="position:absolute;left:40px"><section></section>'), 'img', {
+      selector: 'section',
+      place: 'inside',
+    })
+    expect(result?.html).toContain('<section><img style="position:absolute;left:40px"></section>')
+  })
+
+  it('refuses locked destinations, cycles, and invalid HTML on canvas drops', () => {
+    const locked = page('<div data-doop-locked><section><p>Child</p></section></div><img>')
+    expect(moveElement(locked, 'img', { selector: 'section', place: 'inside' }, { order: '0' })).toBeNull()
+    expect(moveElement(locked, 'img', { selector: 'p', place: 'before' }, { order: '0' })).toBeNull()
+    expect(
+      moveElement(
+        page('<div><section></section></div>'),
+        'div',
+        { selector: 'section', place: 'inside' },
+        { order: '0' },
+      ),
+    ).toBeNull()
+    expect(
+      moveElement(page('<p>Text</p><div>Box</div>'), 'div', { selector: 'p', place: 'inside' }, { order: '0' }),
+    ).toBeNull()
+  })
 })
 
 describe('holdsChildren', () => {

@@ -11,10 +11,15 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   Sign in with Apple (whichever the server advertises on `/api/oidc-config`), canvas library, search,
   workspace filtering, canvas creation/rename/duplicate/delete, navigation,
   account/server settings, frame list and properties, HTML editing, frame and
-  element comments, agent tasks, sharing, and HTML export.
+  element comments, agent tasks, sharing, and PNG/HTML export.
 - **Swift networking**: `DoopClient` talks to the existing REST API using session
   cookies. `CanvasModel` owns the canvas state and its authenticated WebSocket room,
   including reconnection, frame updates, agent tasks, comments and presence.
+  The page picker keeps each page's frames, comments, and collaborator cursors
+  separate. New frames are placed on the selected page; Undo reveals the page of
+  the frame it restores or edits. Reconnecting preserves the current page, and
+  deleting that page falls back to the first remaining page. Legacy canvases
+  without page metadata still open as Page 1.
   The initial WebSocket message supplies the canvas without a second REST download.
   Messages may be up to 64 MiB; larger messages and invalid payloads report a specific
   error instead of retrying forever. Backgrounding cancels the current connection,
@@ -66,9 +71,19 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   most two frames play at once, and when an animation ends the tile is repainted
   at the density the camera wants. Base bitmaps keep the last animation pose.
 - **Element inspection**: tapping inside any frame selects it and hit tests the
-  Blitz DOM automatically, without a separate mode. The chip shows `tag#id.class` and the element's text, the
-  outline shows its box, and Comment posts an element-anchored comment with the
-  same `tag:nth-of-type(n)` selector path the web editor and agents use.
+  Blitz DOM automatically, without a separate mode. A compact, icon-only glass action bar
+  above the prompt offers Copy, Paste, Duplicate, Delete, Comment and Export for
+  the current element or frame. Copies use the system clipboard; element markup
+  is also available as HTML/text in other apps. Paste accepts Doop copies and can
+  place a frame on another canvas/page or an element after the selected element
+  (inside the body when only a frame is selected). Saved edits participate in Undo.
+  Element edits use an isolated WebKit DOMParser with network requests blocked;
+  frame scripts never execute there, and rendering remains in Blitz. Locked
+  elements and stale selections reject edits. Comment retains the element anchor.
+  Export renders a clean PNG in Blitz (up to 2×, 4096 px per side / 8 MP), opens
+  the native share sheet for compatible installed apps, exports HTML, or copies
+  a link with the frame ID and element selector. Sharing a link does not change
+  canvas access. Buttons retain accessible labels and 44-point touch targets.
 - **Scoped prompts**: as on the web, the selection is the prompt bar's scope. A
   chip names the selected frame, or the picked element inside it, and the task is
   queued with that `scope` so the agent edits it in place; the chip's × asks about

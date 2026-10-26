@@ -91,13 +91,18 @@ export async function openIsolatedPage(): Promise<IsolatedPage> {
   }
 }
 
-async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
+export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
   const loaded = await openIsolatedPage()
   const { page } = loaded
   try {
     const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
     await guardPublicPageRequests(page, {
-      allowUrl: (url) => url.origin === assetOrigin && url.pathname.startsWith('/a/'),
+      allowUrl: (url) =>
+        (url.origin === assetOrigin && url.pathname.startsWith('/a/')) ||
+        /* webfonts referenced by imported frames (imports request the
+           source design's families from Google Fonts) */
+        url.origin === 'https://fonts.googleapis.com' ||
+        url.origin === 'https://fonts.gstatic.com',
     })
     await page.setViewport({
       width: Math.max(1, Math.round(frame.width)),
@@ -106,8 +111,17 @@ async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
       height: Math.max(1, Math.min(Math.round(frame.height), 4000)),
       deviceScaleFactor: 1,
     })
+    /* setContent leaves the page on about:blank, where the relative /a/...
+       asset URLs of imported frames resolve nowhere. In the app an iframe
+       inherits the page origin; here a <base> stands in for it — unless the
+       frame brought its own (website imports do). */
+    let html = frame.html || '<!doctype html><html><body></body></html>'
+    if (!/<base\s/i.test(html)) {
+      const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
+      html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : baseTag + html
+    }
     try {
-      await page.setContent(frame.html || '<!doctype html><html><body></body></html>', {
+      await page.setContent(html, {
         waitUntil: 'load',
         timeout: 8000,
       })

@@ -1,8 +1,11 @@
 import { nanoid } from 'nanoid'
 import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
+import type { LinkAccess } from '../shared/canvasRole.ts'
+import { MAX_GUIDES } from '../shared/guides.ts'
 import type {
   Canvas,
+  CanvasGuide,
   CanvasPageInfo,
   CommunityCategory,
   Frame,
@@ -18,7 +21,19 @@ export class PageLimitError extends Error {
   }
 }
 
-type PageCopy = { source: CanvasPageInfo; page: CanvasPageInfo; pages: CanvasPageInfo[]; frames: Frame[] }
+export class GuideLimitError extends Error {
+  constructor() {
+    super(`A canvas holds at most ${MAX_GUIDES} guides.`)
+  }
+}
+
+type PageCopy = {
+  source: CanvasPageInfo
+  page: CanvasPageInfo
+  pages: CanvasPageInfo[]
+  frames: Frame[]
+  guides: CanvasGuide[]
+}
 
 const names = (pages: CanvasPageInfo[]) => pages.map((page) => page.name)
 
@@ -152,6 +167,7 @@ class Store {
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
+      approval: null,
       canvasId,
       createdAt: now,
       updatedAt: now,
@@ -173,6 +189,7 @@ class Store {
       updatedAt: now,
       frames,
       pages: canvasPages(source).map((page) => ({ ...page })),
+      ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
       ...(references?.length ? { references } : {}),
@@ -216,13 +233,22 @@ class Store {
       ...frame,
       id: nanoid(10),
       pageId: page.id,
+      approval: null,
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
     }))
+    const guides: CanvasGuide[] = (canvas.guides ?? [])
+      .filter((guide) => guide.pageId === pageId)
+      .map((guide) => ({ ...guide, id: nanoid(10), pageId: page.id }))
+    /* the copy's guides count against the canvas like any other */
+    if ((canvas.guides?.length ?? 0) + guides.length > MAX_GUIDES) throw new GuideLimitError()
     const next = [...pages]
     next.splice(pages.indexOf(source) + 1, 0, page)
-    await persist.savePageCopy({ ...canvas, pages: next, updatedAt: now }, frames)
+    await persist.savePageCopy(
+      { ...canvas, pages: next, guides: [...(canvas.guides ?? []), ...guides], updatedAt: now },
+      frames,
+    )
     if (this.canvases.get(canvasId) !== canvas) return undefined
     /* a page save may have landed during the write: slot the copy after the
        source wherever it is now (or last, if the source is gone), under a
@@ -234,12 +260,24 @@ class Store {
     canvas.pages.splice(at === -1 ? live.length : at + 1, 0, page)
     canvas.frames.push(...frames)
     for (const frame of frames) this.frameIndex.set(frame.id, canvasId)
+    /* guides placed while the copy was being written stay alongside; the
+       copy keeps only as many of its own as the limit still has room for */
+    const copied = guides.length > 0
+    const room = Math.max(0, MAX_GUIDES - (canvas.guides?.length ?? 0))
+    if (guides.length > room) guides.splice(room)
+    if (guides.length) canvas.guides = [...(canvas.guides ?? []), ...guides]
     canvas.updatedAt = Math.max(canvas.updatedAt, now)
-    if (!samePages(canvas.pages, next)) persist.saveCanvas(canvas)
-    return { source, page, pages: canvas.pages, frames }
+    if (!samePages(canvas.pages, next) || copied) persist.saveCanvas(canvas)
+    return { source, page, pages: canvas.pages, frames, guides }
   }
 
-  setPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[]) {
+  /** Replace the page list. Returns the saved pages (flow starts kept) and
+   *  the guides that went with deleted pages, so peers can drop them;
+   *  undefined when the canvas is gone. */
+  setPages(
+    canvasId: string,
+    pages: import('../shared/types.ts').CanvasPageInfo[],
+  ): { pages: import('../shared/types.ts').CanvasPageInfo[]; dropped: CanvasGuide[] } | undefined {
     const canvas = this.canvases.get(canvasId)
     if (!canvas) return undefined
     const firstId = canvasPages(canvas)[0]!.id
@@ -249,10 +287,59 @@ class Store {
         persist.saveFrame(frame, true)
       }
     }
-    canvas.pages = pages
+    /* a page-list save renames, reorders, adds or deletes pages — it never
+       moves a flow start, which only setFlowStart changes */
+    const current = canvasPages(canvas)
+    const merged = pages.map(({ startFrameId: _ignored, ...page }) => {
+      const startFrameId = current.find((p) => p.id === page.id)?.startFrameId
+      return startFrameId ? { ...page, startFrameId } : page
+    })
+    canvas.pages = merged
+    /* a deleted page takes its guides with it */
+    const kept = (guide: CanvasGuide) => merged.some((page) => page.id === guide.pageId)
+    const dropped = (canvas.guides ?? []).filter((guide) => !kept(guide))
+    if (dropped.length) canvas.guides = canvas.guides!.filter(kept)
     canvas.updatedAt = Date.now()
     persist.saveCanvas(canvas)
-    return pages
+    return { pages: merged, dropped }
+  }
+
+  /** Set (frameId) or clear (null) the frame a page's prototype starts on. */
+  setFlowStart(canvasId: string, pageId: string, frameId: string | null) {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return undefined
+    const pages = canvasPages(canvas)
+    if (!pages.some((p) => p.id === pageId)) return undefined
+    canvas.pages = pages.map((page) => {
+      if (page.id !== pageId) return page
+      const { startFrameId: _previous, ...rest } = page
+      return frameId ? { ...rest, startFrameId: frameId } : rest
+    })
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return canvas.pages
+  }
+
+  /** Add a ruler guide, or move one that exists. Undefined when the canvas
+   *  is gone; throws GuideLimitError on a canvas already holding the most. */
+  setGuide(canvasId: string, guide: CanvasGuide): CanvasGuide | undefined {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return undefined
+    const guides = canvas.guides ?? []
+    const exists = guides.some((g) => g.id === guide.id)
+    if (!exists && guides.length >= MAX_GUIDES) throw new GuideLimitError()
+    canvas.guides = exists ? guides.map((g) => (g.id === guide.id ? guide : g)) : [...guides, guide]
+    persist.saveCanvas(canvas)
+    return guide
+  }
+
+  /** Remove a ruler guide; false when there was no such guide. */
+  deleteGuide(canvasId: string, guideId: string): boolean {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas?.guides?.some((g) => g.id === guideId)) return false
+    canvas.guides = canvas.guides.filter((g) => g.id !== guideId)
+    persist.saveCanvas(canvas)
+    return true
   }
 
   getCanvas(id: string) {
@@ -281,11 +368,11 @@ class Store {
   /** Owner-set link policy ('none' is the default and stored as unset).
    *  Deliberately does not bump updatedAt — a privacy toggle is not a
    *  design edit. */
-  setLinkAccess(id: string, mode: 'edit' | 'none'): Canvas | undefined {
+  setLinkAccess(id: string, mode: LinkAccess): Canvas | undefined {
     const c = this.canvases.get(id)
     if (!c) return undefined
-    if (mode === 'edit') c.linkAccess = 'edit'
-    else delete c.linkAccess
+    if (mode === 'none') delete c.linkAccess
+    else c.linkAccess = mode
     persist.saveCanvas(c)
     return c
   }
@@ -559,7 +646,9 @@ class Store {
 
   updateFrame(
     frameId: string,
-    patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked'>>,
+    patch: Partial<
+      Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'approval'>
+    >,
     by: string,
   ): Frame | undefined {
     const frame = this.getFrame(frameId)
@@ -569,7 +658,14 @@ class Store {
       !canvasPages(this.canvases.get(frame.canvasId)!).some((p) => p.id === patch.pageId)
     )
       return undefined
+    const designChanged = (['html', 'width', 'height'] as const).some(
+      (key) => patch[key] !== undefined && patch[key] !== frame[key],
+    )
     Object.assign(frame, patch)
+    // All writers (including streams, sync and restores) invalidate sign-off.
+    if (designChanged && frame.approval?.status === 'ready_for_dev') {
+      frame.approval = { ...frame.approval, status: 'needs_review' }
+    }
     // Also serves as the optimistic-save version, including writes in the same millisecond.
     frame.updatedAt = Math.max(Date.now(), frame.updatedAt + 1)
     frame.updatedBy = by

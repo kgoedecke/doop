@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { nanoid } from 'nanoid'
 import { canvasPages } from '../../shared/pages'
 import type { CanvasPageInfo } from '../../shared/types'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { savePages, duplicatePage, moveFramesToPage } from '../lib/pageEdits'
 import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
@@ -21,6 +21,8 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   const canvas = useStore((s) => s.canvas)
   const activePageId = useStore((s) => s.activePageId)
   const selectedIds = useStore((s) => s.selectedIds)
+  /* view and comment links switch pages; they add, rename and move none */
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const [busy, setBusy] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -152,7 +154,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
     <>
       {pages.map((page) => (
         <ContextMenu key={page.id}>
-          <ContextMenuTrigger asChild>
+          <ContextMenuTrigger asChild disabled={readOnly}>
             <div
               data-page-id={page.id}
               onContextMenu={() => useStore.getState().setActivePage(page.id)}
@@ -203,7 +205,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                   aria-current={page.id === activePageId ? 'page' : undefined}
                   onPointerDown={(e) => {
                     didDrag.current = false
-                    startDrag(e, page.id)
+                    if (!readOnly) startDrag(e, page.id)
                   }}
                   onClick={(e) => {
                     if (didDrag.current) {
@@ -213,7 +215,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                     useStore.getState().setActivePage(page.id)
                   }}
                   onDoubleClick={() => {
-                    if (busy || didDrag.current) return
+                    if (busy || readOnly || didDrag.current) return
                     setRenaming(page.id)
                     setName(page.name)
                   }}
@@ -259,10 +261,10 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
         <span data-slot="page-section-heading" className={sectionHeading}>
           Pages
         </span>
-        {addPage}
+        {!readOnly && addPage}
       </div>
       <div className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}>{list}</div>
-      {selectedIds.length > 0 && pages.length > 1 && (
+      {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's
            keys stop here; React bubbles the portalled list's keys through this

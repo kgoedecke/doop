@@ -32,6 +32,21 @@ When a deploy ships a new client bundle, long-running windows get a
 "doop was updated — Reload" toast on WebSocket reconnect (see `serverBuild`
 in the `init` message).
 
+## Check for updates
+
+On macOS, **doop → Check for Updates…** compares the installed shell version
+with the stable universal DMG published at `https://doop.design/download/mac`.
+The check runs in the background and shows a native result dialog; when an
+update is available, **Download Update** opens the installer in the browser.
+Open the downloaded DMG and drag doop into Applications to replace the old app.
+Checks do not install updates automatically. Custom `DOOP_APP_URL` builds
+instead explain that an updated build must come from their provider.
+
+The check reads the download route’s redirect to
+`https://github.com/kgoedecke/doop/releases/download/desktop-vX.Y.Z/doop_X.Y.Z_universal.dmg`
+without downloading the installer. Keep that route current when publishing
+releases; a missing or unexpected redirect is shown as a failed check.
+
 ## Develop
 
 Requires the [Rust toolchain](https://rustup.rs) plus this directory's deps (via [bun](https://bun.sh)):
@@ -222,4 +237,14 @@ the source for all platform icons. After replacing it:
 ```sh
 npx tauri icon app-icon.png
 rm -rf src-tauri/icons/ios src-tauri/icons/android
+```
+
+Then rebuild `icon.ico` largest-first. Tauri embeds only the **first** image of the `.ico` as
+the Windows window icon (title bar and taskbar), so a small first entry gets upscaled and looks
+pixelated on high-DPI screens. The rest of the sizes serve the `.exe` and shortcuts:
+
+```sh
+sizes="256 128 64 48 40 32 24 20 16"
+for s in $sizes; do magick app-icon.png -filter Lanczos -resize ${s}x${s} -strip PNG32:/tmp/doop-$s.png; done
+magick $(for s in $sizes; do echo /tmp/doop-$s.png; done) src-tauri/icons/icon.ico
 ```

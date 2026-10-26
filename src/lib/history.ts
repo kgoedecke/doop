@@ -1,5 +1,5 @@
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
-import type { CanvasPageInfo, Frame } from '../../shared/types'
+import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
@@ -22,9 +22,14 @@ type Entry =
       after: CanvasPageInfo[]
       activeBefore: string | null
       activeAfter: string | null
+      /* guides of the pages this change removes in either direction: a page
+         takes its guides with it, so undo/redo puts them back with it */
+      guides?: CanvasGuide[]
     }
   | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean }
   | { type: 'create'; frameId: string; snapshot: Snapshot }
+  /* a ruler guide added (before null), moved, or removed (after null) */
+  | { type: 'guide'; canvasId: string; before: CanvasGuide | null; after: CanvasGuide | null }
   | { type: 'delete'; frameId: string; snapshot: Snapshot }
   /* Destination first, then source removal; reverse that order on undo so
      a failed request can never remove the only copy of a drawing. */
@@ -51,9 +56,18 @@ export function trackSave(p: Promise<unknown>) {
   inflight = inflight.then(() => p.catch(() => undefined))
 }
 
+/* bumped by every clearHistory, so a save that finishes later can tell the
+   history it was made under is gone (another canvas, or a fresh visit) */
+let epoch = 0
+
+export function historyEpoch() {
+  return epoch
+}
+
 export function clearHistory() {
   undoStack = []
   redoStack = []
+  epoch++
 }
 
 function push(entry: Entry) {
@@ -129,6 +143,7 @@ export function recordPages(
   after: CanvasPageInfo[],
   activeBefore: string | null,
   activeAfter: string | null,
+  guides: CanvasGuide[] = [],
 ) {
   if (samePages(before, after)) return
   push({
@@ -138,7 +153,49 @@ export function recordPages(
     after: after.map((p) => ({ ...p })),
     activeBefore,
     activeAfter,
+    ...(guides.length ? { guides: guides.map((g) => ({ ...g })) } : {}),
   })
+}
+
+/** The guides on `canvas` that a page list of `next` would remove with
+ *  their pages. */
+export function guidesLeaving(canvas: Canvas, next: CanvasPageInfo[]): CanvasGuide[] {
+  return (canvas.guides ?? []).filter((g) => !next.some((page) => page.id === g.pageId)).map((g) => ({ ...g }))
+}
+
+/* The departing pages' guides as they are now, replacing what was
+   remembered for those pages: a guide a teammate deleted meanwhile is not
+   brought back, even when none are left on the page. */
+function rememberGuides(kept: CanvasGuide[] = [], departing: string[], now: CanvasGuide[]): CanvasGuide[] {
+  return [...kept.filter((g) => !departing.includes(g.pageId)), ...now]
+}
+
+/* Put back the remembered guides of pages that just came back, those not
+   already there. Each guide is its own request; one that fails (the canvas
+   reached its guide limit meanwhile) does not hold the page change back. */
+async function restoreGuides(canvasId: string, guides: CanvasGuide[], restored: CanvasPageInfo[]) {
+  const back = guides.filter((g) => restored.some((page) => page.id === g.pageId))
+  const results = await Promise.allSettled(
+    back.map(async (guide) => {
+      await api.putGuide(canvasId, guide)
+      const s = useStore.getState()
+      if (s.canvas?.id === canvasId) s.setGuideLocal(guide.id, guide)
+    }),
+  )
+  const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+  const s = useStore.getState()
+  if (!failed.length || s.canvas?.id !== canvasId) return
+  const reason = failed[0]!.reason
+  s.pushNotice(
+    `${failed.length === 1 ? 'A guide' : `${failed.length} guides`} could not be put back: ${
+      reason instanceof Error ? reason.message : 'the save failed.'
+    }`,
+  )
+}
+
+export function recordGuide(canvasId: string, before: CanvasGuide | null, after: CanvasGuide | null) {
+  if (!before && !after) return
+  push({ type: 'guide', canvasId, before, after })
 }
 
 export function recordCreate(frame: Frame) {
@@ -214,7 +271,7 @@ export function deleteFramesTracked(frames: Frame[]) {
 function remapId(oldId: string, newId: string) {
   const visit = (e: Entry) => {
     if (e.type === 'group' || e.type === 'transfer') e.entries.forEach(visit)
-    else if (e.type !== 'pages' && e.frameId === oldId) e.frameId = newId
+    else if (e.type !== 'pages' && e.type !== 'guide' && e.frameId === oldId) e.frameId = newId
   }
   for (const e of [...undoStack, ...redoStack]) visit(e)
 }
@@ -235,7 +292,7 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
    so undo/redo displays the page where the affected designs now live. */
 function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
   if (e.type === 'group' || e.type === 'transfer') return e.entries.flatMap((child) => selectionIds(child, direction))
-  if (e.type === 'pages') return []
+  if (e.type === 'pages' || e.type === 'guide') return []
   if (e.type === 'update' && 'pageId' in (direction === 'redo' ? e.after : e.before)) return [e.frameId]
   const recreated = e.type === (direction === 'redo' ? 'create' : 'delete')
   return recreated ? [e.frameId] : []
@@ -339,7 +396,10 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
     const expected = canvasPages(canvas)
     const next = applyPageChanges(expected, forward ? e.before : e.after, forward ? e.after : e.before)
+    const leaving = guidesLeaving(canvas, next)
     const saved = await api.setPages(canvas.id, next, expected)
+    const departing = expected.filter((page) => !next.some((p) => p.id === page.id)).map((page) => page.id)
+    if (departing.length) e.guides = rememberGuides(e.guides, departing, leaving)
     const current = useStore.getState()
     if (current.canvas?.id !== e.canvasId) throw new Error('Canvas changed')
     if (samePages(canvasPages(current.canvas), expected) || samePages(canvasPages(current.canvas), saved)) {
@@ -347,6 +407,10 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
       const active = forward ? e.activeAfter : e.activeBefore
       if (active) current.setActivePage(active)
     }
+    const restored = saved.filter((page) => !expected.some((p) => p.id === page.id))
+    if (e.guides?.length && restored.length) await restoreGuides(canvas.id, e.guides, restored)
+  } else if (e.type === 'guide') {
+    await applyGuide(e, forward ? e.after : e.before)
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
     const canvas = useStore.getState().canvas
@@ -379,6 +443,25 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     useStore.getState().removeFrame(e.frameId)
   }
   return e
+}
+
+/* Put a guide where the entry says (or remove it), keeping the local copy
+   in step with the server either way. A guide whose page is gone has
+   nowhere to go back to. */
+async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGuide | null) {
+  const canvas = useStore.getState().canvas
+  if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+  const id = (e.after ?? e.before)!.id
+  if (target && !canvasPages(canvas).some((page) => page.id === target.pageId)) throw new Error('Page removed')
+  const current = canvas.guides?.find((guide) => guide.id === id) ?? null
+  useStore.getState().setGuideLocal(id, target)
+  try {
+    if (target) await api.putGuide(canvas.id, target)
+    else await api.deleteGuide(canvas.id, id)
+  } catch (err) {
+    if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setGuideLocal(id, current)
+    throw err
+  }
 }
 
 async function step(direction: 'undo' | 'redo') {

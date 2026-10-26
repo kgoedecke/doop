@@ -25,7 +25,7 @@ const WELCOME_HTML = `<!doctype html>
 <html>
 <head>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400&display=swap');
   * { margin: 0; box-sizing: border-box; }
   body {
     font-family: 'Instrument Sans', system-ui, sans-serif;
@@ -69,23 +69,25 @@ const WELCOME_HTML = `<!doctype html>
     border-radius: 5px;
     white-space: nowrap;
   }
-  /* exact replica of the app's topbar "✦ Connect AI" button (.btn.primary),
-     so the step points at something that looks like what they'll click */
+  /* replica of the app's top-bar Connect AI button (Button variant="primary"
+     with barPrimaryBtn), so the step points at something that looks like
+     what they'll click */
   .btn-chip {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    font-family: 'Instrument Sans', system-ui, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    background: #2743ee;
-    border: 1px solid #2743ee;
-    color: #fff;
-    padding: 8px 14px;
-    border-radius: 8px;
+    gap: 6px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 12.5px;
+    font-weight: 400;
+    background: #111;
+    color: #fdfdfd;
+    padding: 7px 14px;
+    border-radius: 10px;
     white-space: nowrap;
+    vertical-align: middle;
     margin: 0 6px 0 3px;
   }
+  .btn-chip svg { width: 14px; height: 14px; }
   .foot {
     margin-top: auto;
     padding-top: 24px;
@@ -108,7 +110,7 @@ const WELCOME_HTML = `<!doctype html>
     panel on the right, and a line in the activity feed.
   </p>
   <div class="steps">
-    <div class="step"><span class="n">1</span><p>Hit <span class="btn-chip">✦ Connect AI</span> in the top bar and copy the command for your agent.</p></div>
+    <div class="step"><span class="n">1</span><p>Hit <span class="btn-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5v14"/></svg>Connect AI</span> in the top bar and copy the command for your agent.</p></div>
     <div class="step"><span class="n">2</span><p>Approve the connection in the browser popup — your agent then works <em>as you</em>.</p></div>
     <div class="step"><span class="n">3</span><p>Ask it to design something. Watch this canvas while it works.</p></div>
   </div>

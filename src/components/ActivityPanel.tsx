@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { AgentTask } from '../../shared/types'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { timeAgo } from '../lib/time'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ import { AgentIcon } from './AgentIcon'
 import { MemoryPanel } from './MemoryPanel'
 import {
   Panel,
+  type PanelResize,
   PanelBody,
   PanelClose,
   PanelHeader,
@@ -54,6 +55,7 @@ export function ActivityPanel({
   surface = 'floating',
   className,
   style,
+  resize,
 }: {
   canvasId: string
   onClose: () => void
@@ -62,9 +64,11 @@ export function ActivityPanel({
   className?: string
   /** carries `right` while floating — the panel always hugs the right edge */
   style?: CSSProperties
+  resize?: PanelResize
 }) {
   const tab = useStore((s) => s.panelTab)
   const setTab = useStore((s) => s.setPanelTab)
+  const canEdit = useStore(canEditOpenCanvas)
   const [, tick] = useState(0)
   const openThreads = useOpenThreadCount()
   const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
@@ -78,6 +82,7 @@ export function ActivityPanel({
   return (
     <Panel
       surface={surface}
+      resize={resize}
       className={cn(
         surface === 'floating' && 'top-2.5 bottom-3.5 w-[280px] transition-[right] duration-150',
         className,
@@ -125,7 +130,8 @@ export function ActivityPanel({
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
             <RecentTasks />
           </div>
-          <PromptBar canvasId={canvasId} />
+          {/* the composer briefs agents to change frames: editors only */}
+          {canEdit && <PromptBar canvasId={canvasId} />}
         </PanelTabPanel>
         <PanelTabPanel value="comments" className={tabEnter}>
           <CommentsPanel />
@@ -206,13 +212,18 @@ function taskTime(task: AgentTask): string {
 }
 
 /** One task: who, for whom, one time figure; then its mark and what it is doing.
- *  Clicking it flies the camera to where the agent is (or was) working. */
+ *  Clicking it selects the frame where the agent is (or was) working and flies
+ *  the camera there, so the click shows even when the frame is already in view. */
 function RecentTaskRow({ task }: { task: AgentTask }) {
   const canvasId = useStore((s) => s.canvas?.id)
+  const canEdit = useStore(canEditOpenCanvas)
   const frameId = useStore((s) => taskFrameId(task, s))
   const frameName = useStore((s) => s.canvas?.frames.find((f) => f.id === frameId)?.name)
   const goToFrame = () => {
-    if (frameId) useStore.getState().requestFlyTo(frameId)
+    if (!frameId) return
+    const s = useStore.getState()
+    s.select(frameId)
+    s.requestFlyTo(frameId)
   }
   return (
     <div
@@ -254,7 +265,7 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
         >
           {task.status}
         </span>
-        {task.failedAt && task.queuedBy && canvasId && (
+        {task.failedAt && task.queuedBy && canvasId && canEdit && (
           <Button
             variant="danger-solid"
             size="pill"

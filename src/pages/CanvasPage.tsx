@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
 import { MOD_KEY, isHideUiShortcut } from '../lib/keys'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
 import { connect, disconnect, sendWs } from '../lib/ws'
@@ -16,6 +16,7 @@ import {
 import { navigate } from '../App'
 import { DoopMark } from '../components/Logo'
 import {
+  BarDivider,
   BarPill,
   TopBar,
   TopBarTitle,
@@ -37,6 +38,10 @@ import { MobilePanelTabs, SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
+import { ExportModal } from '../components/ExportModal'
+import { canvasPages, pageFrames } from '../../shared/pages'
+import { flowStartFrame } from '../../shared/prototype'
+import type { Frame } from '../../shared/types'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
 import { PresentMode } from '../components/PresentMode'
@@ -49,7 +54,8 @@ import {
   pasteImagesCentered,
 } from '../lib/frameClipboard'
 import { clearHistory, redo, undo } from '../lib/history'
-import { deleteSelection, toggleLockSelection, toggleSelectionHidden } from '../lib/layerEdits'
+import { deleteSelection, duplicateLayers, toggleLockSelection, toggleSelectionHidden } from '../lib/layerEdits'
+import { copyLayers, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
@@ -61,6 +67,7 @@ import {
   ArrowLeftIcon,
   BrainIcon,
   CopyIcon,
+  ExportIcon,
   FolderIcon,
   GithubIcon,
   ImportIcon,
@@ -68,6 +75,7 @@ import {
   MoreHorizontalIcon,
   PlayIcon,
   PlusIcon,
+  PrototypeIcon,
   GearIcon,
   RadioTowerIcon,
   ShareIcon,
@@ -87,31 +95,56 @@ import { Note } from '../components/ui/note'
 import { Textarea } from '../components/ui/textarea'
 import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from '../components/ui/modal'
 import { createCenteredFrame } from '../lib/framePlacement'
+import { RULER_PX } from '../components/Rulers'
+import { NO_CANVAS, onViewCommand, syncViewMenu } from '../lib/viewMenu'
+import { AGENTS_MIN, LAYERS_MIN, fitPanelWidths } from '../lib/panelWidths'
 
 /* The floating chrome's geometry, in px from the canvas area's edges. The
-   panels sit 14px in from the edge; on the right the Agents panel (280)
+   panels sit 14px in from the edge; on the right the resizable Agents panel
    always hugs the edge, the Inspector (244) opens to its left, and the icon
    islands (40) sit left of whatever is open. On the left the tool rail follows the Layers
-   panel (264), or its collapsed 40px island. --chrome-left/--chrome-right
-   mark where the open canvas begins and ends, for the zoom pill and toasts. */
+   panel, or its collapsed 40px island. --chrome-left/--chrome-right
+   mark where the open canvas begins and ends, for the zoom pill and toasts.
+   With rulers on, the chrome layer starts RULER_PX further in on the top
+   and left; --chrome-top and --rail-left include that, these offsets do not. */
 const EDGE = 14
 const LAYERS_W = 264
 const RAIL_W = 40
 const INSPECTOR_W = 244
 const AGENTS_W = 280
+const PANEL_WIDTH_KEY = 'doop:canvas-panel-widths'
+
+function readPanelWidths(): { layers: number; agents: number } {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(PANEL_WIDTH_KEY) ?? 'null')
+    if (saved && typeof saved === 'object' && 'layers' in saved && 'agents' in saved) {
+      return {
+        layers: typeof saved.layers === 'number' && Number.isFinite(saved.layers) ? saved.layers : LAYERS_W,
+        agents: typeof saved.agents === 'number' && Number.isFinite(saved.agents) ? saved.agents : AGENTS_W,
+      }
+    }
+  } catch {
+    /* Unavailable or invalid storage must not prevent opening a canvas. */
+  }
+  return { layers: LAYERS_W, agents: AGENTS_W }
+}
 
 function chromeLayout({
   layersOpen,
   propertiesShown,
   agentsOpen,
+  layersWidth,
+  agentsWidth,
 }: {
   layersOpen: boolean
   propertiesShown: boolean
   agentsOpen: boolean
+  layersWidth: number
+  agentsWidth: number
 }) {
-  const toolRail = layersOpen ? EDGE + LAYERS_W + 12 : EDGE + RAIL_W + 10
-  const properties = agentsOpen ? EDGE + AGENTS_W + 8 : EDGE
-  const island = propertiesShown ? properties + INSPECTOR_W + 10 : agentsOpen ? EDGE + AGENTS_W + 10 : EDGE
+  const toolRail = layersOpen ? EDGE + layersWidth + 12 : EDGE + RAIL_W + 10
+  const properties = agentsOpen ? EDGE + agentsWidth + 8 : EDGE
+  const island = propertiesShown ? properties + INSPECTOR_W + 10 : agentsOpen ? EDGE + agentsWidth + 10 : EDGE
   return { toolRail, properties, island, left: toolRail + RAIL_W + 16, right: island + RAIL_W + 10 }
 }
 
@@ -145,7 +178,26 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const presences = useStore((s) => s.presences)
   const selectedId = useStore((s) => s.selectedId)
   const select = useStore((s) => s.select)
+  /* a view or comment share link: the canvas opens read-only — no imports,
+     no property panels, no edit shortcuts. The server refuses those writes
+     regardless; this keeps the UI from offering them. */
+  const role = useStore(roleOf)
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const isMobile = useIsMobile()
+  const [panelWidths, setPanelWidths] = useState(readPanelWidths)
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const updateWidth = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', updateWidth)
+    return () => window.removeEventListener('resize', updateWidth)
+  }, [])
+  useEffect(() => {
+    try {
+      localStorage.setItem(PANEL_WIDTH_KEY, JSON.stringify(panelWidths))
+    } catch {
+      /* Resizing still works when preferences cannot be saved. */
+    }
+  }, [panelWidths])
   const [showActivity, setShowActivity] = useState(() => !window.matchMedia('(max-width: 900px)').matches)
   /* ?connect=1 (the "connect your agent" email) lands on the Connect AI
      modal; the flag comes off the URL once the page is up so a reload or a
@@ -158,9 +210,18 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
   const [showShare, setShowShare] = useState(false)
-  const [presenting, setPresenting] = useState(false)
+  /* the frame the player was launched on, while presenting */
+  const [presenting, setPresenting] = useState<string | null>(null)
   /* ⌘. acts only over the canvas view, outside PresentMode */
-  const hideUiActive = canHideUi({ view: 'canvas', presenting })
+  const hideUiActive = canHideUi({ view: 'canvas', presenting: !!presenting })
+  const prototypeMode = useStore((s) => s.prototypeMode)
+  const activePageId = useStore((s) => s.activePageId)
+  /* Play starts on the selected frame, or on the page's flow start */
+  const playFrom = useMemo(() => {
+    if (selectedId) return selectedId
+    if (!canvas) return null
+    return flowStartFrame(canvas, activePageId ?? canvasPages(canvas)[0]!.id)?.id ?? null
+  }, [selectedId, canvas, activePageId])
   /* returning from a GitHub App install: the setup redirect appends a signed
      pass — pull it off the URL and open the import modal on the repo picker */
   const [ghInstallPass, setGhInstallPass] = useState<string | null>(() => {
@@ -187,6 +248,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
   const [showImport, setShowImport] = useState(!!ghInstallPass || !!ghInstallError || !!importRequested)
+  const [exporting, setExporting] = useState<{ frames: Frame[]; selected: string[] } | null>(null)
   const [showMobileActions, setShowMobileActions] = useState(false)
   const [showMobileLayers, setShowMobileLayers] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -243,7 +305,8 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
          removes — the frame it lives in only goes when nothing inside it is
          selected. Auto-repeat is ignored: a held key must not take the
          element and then, on the next repeat, the frame under it. */
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.repeat && deleteSelection()) e.preventDefault()
+      const canEdit = canEditOpenCanvas(useStore.getState())
+      if (canEdit && (e.key === 'Delete' || e.key === 'Backspace') && !e.repeat && deleteSelection()) e.preventDefault()
       if (e.key === 'Escape') {
         select(null)
         useStore.getState().setFollowing(null)
@@ -252,40 +315,48 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
          were. Escape deliberately leaves the UI hidden, as in Figma. */
       if (isHideUiShortcut(e) && hideUiActive) {
         e.preventDefault()
-        useStore.getState().toggleUiHidden()
-        if (useStore.getState().uiHidden && !hideUiHinted()) showToast(`UI hidden · ${MOD_KEY}. to show`)
+        toggleHideUi()
         return
       }
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
+      /* undo, redo, hide, lock and duplicate all change the canvas; ⌘C does not */
+      if (canEdit && (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) void redo()
         else void undo()
         return
       }
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'y') {
+      if (canEdit && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'y') {
         e.preventDefault()
         void redo()
         return
       }
       /* ⌘⇧H hides or shows what is selected — the picked element, else the
          frames — as the eye in the Layers panel would */
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'h') {
+      if (canEdit && (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'h') {
         if (toggleSelectionHidden()) e.preventDefault()
         return
       }
       /* ⌘⇧L locks or unlocks what is selected: the picked layer, else the frames */
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l') {
+      if (canEdit && (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l') {
         if (toggleLockSelection()) e.preventDefault()
         return
       }
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-        /* ⌘C and ⌘D act on the whole selection */
-        const frames = useStore.getState().canvas?.frames.filter((f) => selectedIds.includes(f.id)) ?? []
+        const state = useStore.getState()
+        const picked = state.selectedElement
+        const pickedFrame = state.canvas?.frames.find((f) => f.id === picked?.frameId)
+        const frames = state.canvas?.frames.filter((f) => selectedIds.includes(f.id)) ?? []
         /* don't hijack ⌘C when the user is copying selected text */
-        if (e.key === 'c' && frames.length && !window.getSelection()?.toString()) copyFrames(frames)
-        if (e.key === 'd' && frames.length) {
+        if (e.key === 'c' && !window.getSelection()?.toString()) {
+          if (picked && pickedFrame) {
+            e.preventDefault()
+            copyLayers(pickedFrame, pickedSelectors(state))
+          } else if (!picked && frames.length) copyFrames(frames)
+        }
+        if (canEdit && e.key === 'd' && frames.length) {
           e.preventDefault()
-          duplicateFrames(frames)
+          if (picked && pickedFrame) duplicateLayers(pickedFrame, pickedSelectors(state))
+          else if (!picked) duplicateFrames(frames)
         }
       }
     }
@@ -301,6 +372,8 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     function onPaste(e: ClipboardEvent) {
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
+      /* every paste lands a frame or a layer */
+      if (!canEditOpenCanvas(useStore.getState())) return
       const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
       if (images.length) {
         e.preventDefault()
@@ -308,6 +381,12 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           setToast(`Couldn’t paste image — ${err.message}`)
           window.setTimeout(() => setToast(null), 4000)
         })
+      } else if (hasElementClip()) {
+        e.preventDefault()
+        const state = useStore.getState()
+        const picked = state.selectedElement
+        const frame = state.canvas?.frames.find((f) => f.id === (picked?.frameId ?? state.selectedId))
+        if (frame) pasteLayer(frame, picked?.selector ?? null)
       } else if (hasFrameClip()) {
         e.preventDefault()
         pasteFrameCentered(canvasId)
@@ -320,6 +399,20 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   function showToast(msg: string) {
     setToast(msg)
     window.setTimeout(() => setToast(null), 2000)
+  }
+
+  /* ⌘. and View > Show/Hide UI: the first hide in a browser says how to undo it */
+  function toggleHideUi() {
+    useStore.getState().toggleUiHidden()
+    if (useStore.getState().uiHidden && !hideUiHinted()) showToast(`UI hidden · ${MOD_KEY}. to show`)
+  }
+
+  /* Export lists the page's frames, with the canvas selection pre-checked */
+  function openExport() {
+    const s = useStore.getState()
+    if (!s.canvas) return
+    const frames = s.activePageId ? pageFrames(s.canvas, s.activePageId) : s.canvas.frames
+    setExporting({ frames, selected: s.selectedIds.filter((id) => frames.some((f) => f.id === id)) })
   }
 
   /* a pending Memory suggestion gets its own toast beside the side panel;
@@ -348,6 +441,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   }, [latestDecision])
 
   async function addFrame() {
+    if (readOnly) return
     const n = (canvas?.frames.length ?? 0) + 1
     const frame = await createCenteredFrame(canvasId, `Frame ${n}`, STARTER_HTML)
     select(frame.id)
@@ -375,11 +469,61 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const elementPanelOpen = useStore((s) => s.elementPanelOpen)
   const panelElement = elementPanelOpen && selectedElement?.frameId === selectedFrame?.id ? selectedElement : null
   /* the frame Inspector or the element panel, whichever has the slot */
-  const propertiesShown = !!selectedFrame && !deferPanel && (!!panelElement || inspectorOpen)
-  const chrome = chromeLayout({ layersOpen, propertiesShown, agentsOpen: showActivity })
+  const propertiesShown = !readOnly && !!selectedFrame && !deferPanel && (!!panelElement || inspectorOpen)
+  /* ⇧R docks the rulers on the canvas's top and left edges; the bar and the
+     floating chrome step in past them (the same test Stage draws them by) */
+  const rulers = useStore((s) => s.rulers)
+  const chromeHidden = useStore((s) => s.uiHidden)
+  const rulersShown = rulers && !chromeHidden && !isMobile
+  const rulerInset = rulersShown ? RULER_PX : 0
+  const hasSelection = useStore((s) => s.selectedIds.length > 0)
+
+  const fixedChrome = chromeLayout({
+    layersOpen,
+    propertiesShown,
+    agentsOpen: showActivity,
+    layersWidth: 0,
+    agentsWidth: 0,
+  })
+  const panels = fitPanelWidths({
+    saved: panelWidths,
+    viewport: viewportWidth,
+    reserved: fixedChrome.left + fixedChrome.right + rulerInset,
+    layersOpen,
+    agentsOpen: showActivity,
+  })
+  const layersWidth = panels.layers
+  const agentsWidth = panels.agents
+  const chrome = chromeLayout({ layersOpen, propertiesShown, agentsOpen: showActivity, layersWidth, agentsWidth })
+
+  /* the desktop shell's View menu: its toggles act here, and it mirrors
+     their state; leaving the canvas disables its canvas items */
+  useEffect(
+    () =>
+      onViewCommand((command) => {
+        const s = useStore.getState()
+        if (command === 'rulers') s.toggleRulers()
+        else if (command === 'ui' && hideUiActive) toggleHideUi()
+        else if (command === 'layers') s.setLayersOpen(!s.layersOpen)
+        else if (command === 'agents') setShowActivity((open) => !open)
+      }),
+    [hideUiActive], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  useEffect(() => {
+    syncViewMenu({
+      canvas: true,
+      rulers,
+      ui: !uiHidden,
+      uiToggle: hideUiActive,
+      layers: layersOpen,
+      agents: showActivity,
+      selection: hasSelection,
+    })
+  }, [rulers, uiHidden, hideUiActive, layersOpen, showActivity, hasSelection])
+  useEffect(() => () => syncViewMenu(NO_CANVAS), [])
   const chromeVars = {
-    '--chrome-top': isMobile ? '0px' : '50px',
-    '--rail-left': `${chrome.toolRail}px`,
+    '--chrome-top': isMobile ? '0px' : `${50 + rulerInset}px`,
+    '--rail-left': `${chrome.toolRail + rulerInset}px`,
     '--chrome-left': `${chrome.left}px`,
     '--chrome-right': `${chrome.right}px`,
   } as CSSProperties
@@ -421,7 +565,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           unmounting it, so what it holds — a composer draft, the expanded
           layers, a scroll position — is exactly as it was when ⌘. brings it
           back. */}
-      <TopBar variant="canvas" className={cn(uiHidden && 'hidden')}>
+      {/* with rulers on, the top ruler takes the window's top edge and the
+          bar's pills float below it */}
+      <TopBar
+        variant="canvas"
+        className={cn(uiHidden && 'hidden')}
+        style={rulerInset ? { top: rulerInset, left: rulerInset } : undefined}
+      >
         <div className="flex min-w-0 items-center gap-2 max-xs:basis-full">
           <BarPill className="min-w-0 gap-1 pr-3 pl-1">
             <Tooltip label="All canvases" side="bottom" align="start">
@@ -435,7 +585,12 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 <FolderIcon className="size-3.5" />
               </Button>
             </Tooltip>
-            <CanvasName />
+            <CanvasName readOnly={readOnly} />
+            {readOnly && (
+              <Badge tone="outline" title="Your share link lets you look around but not change the design">
+                {role === 'comment' ? 'Can comment' : 'View only'}
+              </Badge>
+            )}
             <Badge className="max-md:hidden" title="Canvas id — agents use this with the MCP tools">
               {canvasId}
             </Badge>
@@ -462,14 +617,23 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             </span>
           </div>
           <BarPill>
-            <Button
-              variant="bare"
-              className={barPillBtn}
-              onClick={() => setShowImport(true)}
-              title="Import a live web page as a frame"
-            >
-              <ImportIcon className="size-3.5" />
-              Import
+            {!readOnly && (
+              <>
+                <Button
+                  variant="bare"
+                  className={barPillBtn}
+                  onClick={() => setShowImport(true)}
+                  title="Import a live web page as a frame"
+                >
+                  <ImportIcon className="size-3.5" />
+                  Import
+                </Button>
+                <BarDivider className="mx-0.5" />
+              </>
+            )}
+            <Button variant="bare" className={barPillBtn} onClick={openExport} title="Export frames as a PDF">
+              <ExportIcon className="size-3.5" />
+              Export
             </Button>
           </BarPill>
           <BarPill>
@@ -477,15 +641,35 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <ShareUpIcon className="size-3.5" />
               Share
             </Button>
-            <Tooltip label={selectedId ? 'Present this frame' : 'Select a frame to present'} side="bottom">
+            <Tooltip
+              label={prototypeMode ? 'Leave Prototype mode' : 'Prototype mode: wire up interactions'}
+              side="bottom"
+            >
+              <Button
+                variant="bare"
+                size="icon-sm"
+                className={cn(barPillIconBtn, prototypeMode && 'bg-paper-deep text-ink')}
+                aria-label="Prototype mode"
+                aria-pressed={prototypeMode}
+                onClick={() => useStore.getState().setPrototypeMode(!prototypeMode)}
+              >
+                <PrototypeIcon className="size-3.5" />
+              </Button>
+            </Tooltip>
+            <Tooltip
+              label={
+                selectedId ? 'Present from this frame' : playFrom ? 'Present the prototype' : 'Add a frame to present'
+              }
+              side="bottom"
+            >
               <span className="inline-flex">
                 <Button
                   variant="bare"
                   size="icon-sm"
                   className={barPillIconBtn}
-                  aria-label="Present selected frame"
-                  disabled={!selectedId}
-                  onClick={() => setPresenting(true)}
+                  aria-label="Present prototype"
+                  disabled={!playFrom}
+                  onClick={() => setPresenting(playFrom)}
                 >
                   <PlayIcon className="size-3.5" />
                 </Button>
@@ -493,7 +677,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             </Tooltip>
           </BarPill>
           {/* the bar's one black action — it opens the MCP connection modal */}
-          <Button variant="primary" className={barPrimaryBtn} onClick={openConnect}>
+          <Button variant="primary" className={cn(barPrimaryBtn, 'shadow-ring')} onClick={openConnect}>
             <PlusIcon className="size-3.5" strokeWidth={1.4} />
             Connect AI
           </Button>
@@ -508,7 +692,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <PeerAvatars others={others} />
             </span>
           </div>
-          <Button variant="primary" className={barPrimaryBtn} onClick={openConnect}>
+          <Button variant="primary" className={cn(barPrimaryBtn, 'shadow-ring')} onClick={openConnect}>
             <PlusIcon className="size-3.5" strokeWidth={1.4} />
             <span className="max-sm:hidden">Connect AI</span>
             <span className="sm:hidden">AI</span>
@@ -537,6 +721,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             'pointer-events-none absolute inset-x-0 bottom-0 top-[50px] max-md:top-14 max-xs:top-[100px]',
             uiHidden && 'hidden',
           )}
+          /* panel offsets are measured from this layer, so moving it past
+             the rulers moves every panel with it */
+          style={rulerInset ? { top: 'var(--chrome-top)', left: rulerInset } : undefined}
         >
           <div className="pointer-events-none absolute top-3.5 right-[var(--chrome-right)] z-30 flex flex-col items-end gap-2 transition-[right] duration-150 [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2">
             {pendingProposal && mutedProposal !== pendingProposal.id && !(showActivity && panelTab === 'memory') && (
@@ -586,7 +773,25 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               line; this per-agent stack is only for windows too narrow for it */}
           <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
           <Onboarding canvasId={canvasId} />
-          {!isMobile && (layersOpen ? <LayersPanel onAddFrame={addFrame} /> : <LayersRailToggle />)}
+          {!isMobile &&
+            (layersOpen ? (
+              <LayersPanel
+                onAddFrame={addFrame}
+                resize={{
+                  label: 'Resize Layers panel',
+                  edge: 'right',
+                  width: layersWidth,
+                  min: LAYERS_MIN,
+                  max: panels.layersMax,
+                  /* the other panel keeps the width it shows, not a larger saved
+                     one the window had squeezed */
+                  onResize: (layers) =>
+                    setPanelWidths((widths) => ({ layers, agents: showActivity ? panels.agents : widths.agents })),
+                }}
+              />
+            ) : (
+              <LayersRailToggle />
+            ))}
           {isMobile && !showActivity && (
             <MobilePanelTabs
               onOpen={(tab) => {
@@ -595,7 +800,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               }}
             />
           )}
-          {!isMobile && selectedFrame && panelElement && !deferPanel && (
+          {!isMobile && !readOnly && selectedFrame && panelElement && !deferPanel && (
             <ElementPanel
               /* keyed by frame, not element: picking the next element swaps
                  the values in place instead of remounting the panel blank */
@@ -605,11 +810,24 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               style={{ right: chrome.properties }}
             />
           )}
-          {!isMobile && selectedFrame && inspectorOpen && !panelElement && !deferPanel && (
+          {!isMobile && !readOnly && selectedFrame && inspectorOpen && !panelElement && !deferPanel && (
             <Inspector frame={selectedFrame} style={{ right: chrome.properties }} />
           )}
           {!isMobile && showActivity && (
-            <ActivityPanel canvasId={canvasId} onClose={() => setShowActivity(false)} style={{ right: EDGE }} />
+            <ActivityPanel
+              canvasId={canvasId}
+              onClose={() => setShowActivity(false)}
+              style={{ right: EDGE }}
+              resize={{
+                label: 'Resize Agents panel',
+                edge: 'left',
+                width: agentsWidth,
+                min: AGENTS_MIN,
+                max: panels.agentsMax,
+                onResize: (agents) =>
+                  setPanelWidths((widths) => ({ agents, layers: layersOpen ? panels.layers : widths.layers })),
+              }}
+            />
           )}
           {!isMobile && (
             <SideRail
@@ -617,7 +835,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               agentsOpen={showActivity}
               onToggleAgents={() => setShowActivity((open) => !open)}
               inspectorOpen={propertiesShown}
-              inspectorAvailable={!!selectedFrame}
+              inspectorAvailable={!!selectedFrame && !readOnly}
               onToggleInspector={() => {
                 const s = useStore.getState()
                 if (propertiesShown) {
@@ -660,16 +878,18 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 >
                   <LayersIcon /> Layers
                 </Button>
-                <Button
-                  variant="ghost"
-                  className="h-11 justify-start gap-2.5 border-line bg-surface px-4"
-                  onClick={() => {
-                    setShowMobileActions(false)
-                    setShowImport(true)
-                  }}
-                >
-                  <ImportIcon /> Import website
-                </Button>
+                {!readOnly && (
+                  <Button
+                    variant="ghost"
+                    className="h-11 justify-start gap-2.5 border-line bg-surface px-4"
+                    onClick={() => {
+                      setShowMobileActions(false)
+                      setShowImport(true)
+                    }}
+                  >
+                    <ImportIcon /> Import website
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   className="h-11 justify-start gap-2.5 border-line bg-surface px-4"
@@ -708,7 +928,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               the open state they read from is untouched, so they are back
               as they were when ⌘. restores the chrome */}
           <Sheet
-            open={!!selectedFrame && inspectorOpen && !deferPanel && !uiHidden}
+            open={!readOnly && !!selectedFrame && inspectorOpen && !deferPanel && !uiHidden}
             onOpenChange={(open) => {
               if (!open) select(null)
             }}
@@ -737,7 +957,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
 
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
-      {presenting && selectedId && <PresentMode frameId={selectedId} onClose={() => setPresenting(false)} />}
+      {presenting && <PresentMode frameId={presenting} onClose={() => setPresenting(null)} />}
       {showShare && canvas && (
         <ShareModal
           key={canvas.id}
@@ -762,6 +982,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             posthog.capture('agent_connection_opened')
             setShowConnect(true)
           }}
+        />
+      )}
+      {exporting && (
+        <ExportModal
+          frames={exporting.frames}
+          initialSelection={exporting.selected}
+          onClose={() => setExporting(null)}
         />
       )}
       {showImport && (
@@ -1782,11 +2009,12 @@ function GithubSection({
 }
 
 /* The canvas title doubles as its rename field. */
-function CanvasName() {
+function CanvasName({ readOnly }: { readOnly: boolean }) {
   const canvas = useStore((s) => s.canvas)
   return (
     <TopBarTitle
       pill
+      readOnly={readOnly}
       loading={!canvas}
       value={canvas?.name ?? ''}
       onCommit={(name) => {

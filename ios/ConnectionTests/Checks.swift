@@ -118,6 +118,7 @@ struct ConnectionChecks {
         precondition(comments.comments.first { $0.id == "canvas-comment" }?.resolvedAt == 20)
         comments.stop()
         try await checkEdits(client)
+        try await checkPages(client)
         print("Canvas connection integration checks passed (large init, 20 restarts, retry, invalid data, oversized receive, deleted canvas, live canvas comments and replies).")
     }
 
@@ -211,6 +212,20 @@ struct ConnectionChecks {
         failNext = true
         await model.addFrame()
         precondition(!model.canUndo, "A failed edit must not create undo history")
+        // Clipboard frame copies belong to the destination page and undo as one creation.
+        var copiedSource = original
+        copiedSource.locked = true; copiedSource.hidden = true
+        model.selectPage("design-page")
+        try await model.pasteFrame(copiedSource)
+        precondition(model.selected?.id != original.id && model.selected?.pageId == "design-page")
+        precondition(model.selected?.html == original.html && model.selected?.width == original.width)
+        precondition(model.selected?.name == original.name + " copy")
+        precondition(model.selected?.hidden != true && model.selected?.locked != true)
+        await model.undo()
+        precondition(!model.canUndo && model.canvas?.frames.isEmpty == true)
+        failNext = true
+        do { try await model.pasteFrame(original); preconditionFailure("Expected paste failure") } catch {}
+        precondition(!model.canUndo && model.canvas?.frames.isEmpty == true)
         try await model.comment("Saved without a socket echo", frameID: "f1")
         precondition(model.comments.count == 1)
         let echo = try JSONSerialization.data(withJSONObject: ["type": "comment", "comment": ["id": "posted", "frameId": "f1", "from": "Tester", "text": "Saved without a socket echo", "at": 30]])
@@ -309,6 +324,136 @@ struct ConnectionChecks {
     @MainActor private static func apply(_ event: [String: Any], to model: CanvasModel) throws {
         let data = try JSONSerialization.data(withJSONObject: event)
         model.apply(try JSONDecoder().decode(CanvasEvent.self, from: data))
+    }
+
+    @MainActor private static func checkPages(_ client: DoopClient) async throws {
+        let model = CanvasModel(id: "pages", client: client)
+        func frame(_ id: String, page: String? = nil, x: Double = 0) -> [String: Any] {
+            var result: [String: Any] = ["id": id, "canvasId": "pages", "name": id, "x": x, "y": 0,
+                                         "width": 100, "height": 100, "html": "<p>\(id)</p>"]
+            if let page { result["pageId"] = page }
+            return result
+        }
+        let pages = [["id": "a", "name": "First"], ["id": "b", "name": "Second"], ["id": "empty", "name": "Empty"]]
+        let originals = [frame("a1", page: "a", x: 10_000), frame("b1", page: "b"), frame("legacy")]
+        func snapshot(_ pages: [[String: String]], frames: [[String: Any]]) throws {
+            try apply(["type": "init", "canvas": ["id": "pages", "name": "Pages", "pages": pages, "frames": frames]], to: model)
+        }
+        try snapshot(pages, frames: originals)
+        precondition(model.activePageID == "a" && model.pageFrames.map(\.id) == ["a1", "legacy"])
+        model.select("a1")
+        model.selectedElement = SelectedElement(frameID: "a1", nodeID: 1, selector: "p", label: "p", text: "a1", rect: .zero, htmlHash: model.selected!.html.hashValue)
+        let pickedElement = model.selectedElement
+        model.select("a1")
+        precondition(model.selectedID == "a1" && model.selectedElement == nil && model.promptScope?.isElement == false,
+                     "Choosing the current frame clears the element scope for whole-frame actions")
+        model.selectedElement = pickedElement
+        let fit = model.viewportCommand
+        model.selectPage("b")
+        precondition(model.pageFrames.map(\.id) == ["b1"] && model.selectedID == nil && model.selectedElement == nil && model.promptScope == nil)
+        precondition(model.viewportCommand > fit)
+        model.selectPage("not-a-page")
+        precondition(model.activePageID == "b")
+        try snapshot(pages, frames: originals)
+        precondition(model.activePageID == "b", "Reconnection keeps a page that still exists")
+
+        func comment(_ id: String, frameID: String? = nil, page: String? = nil, parent: String? = nil) -> [String: Any] {
+            var result: [String: Any] = ["id": id, "from": "Web", "text": id, "at": 1]
+            if let frameID { result["frameId"] = frameID }
+            if let page { result["pageId"] = page }
+            if let parent { result["parentId"] = parent }
+            return result
+        }
+        for value in [comment("on-a", frameID: "a1"), comment("on-b", frameID: "b1"),
+                      comment("pin-b", page: "b"), comment("reply-b", parent: "pin-b"),
+                      comment("orphan", page: "b", parent: "missing"), comment("deleted", frameID: "missing")] {
+            try apply(["type": "comment", "comment": value], to: model)
+        }
+        precondition(Set(model.pageComments.map(\.id)) == ["on-b", "pin-b", "reply-b"])
+        model.selectPage("a")
+        precondition(model.pageComments.map(\.id) == ["on-a"])
+        try apply(["type": "frame:updated", "frame": frame("b1", page: "a")], to: model)
+        precondition(Set(model.pageComments.map(\.id)) == ["on-a", "on-b"], "Frame comments follow the frame's page")
+
+        func viewport(_ page: String) -> [String: Any] {
+            ["pageId": page, "x": 0, "y": 0, "zoom": 1, "width": 390, "height": 844]
+        }
+        try apply(["type": "presence:join", "presence": ["clientId": "web", "name": "Web", "kind": "user", "color": "#fff", "cursor": ["x": 20, "y": 20], "viewport": viewport("b")]], to: model)
+        precondition(model.pagePresences.isEmpty)
+        try apply(["type": "viewport", "clientId": "web", "viewport": viewport("a")], to: model)
+        precondition(model.pagePresences.map(\.clientId) == ["web"])
+
+        model.select("a1")
+        let beforeRemote = model.viewportCommand
+        try apply(["type": "frame:created", "frame": frame("remote", page: "b")], to: model)
+        precondition(!model.pageFrames.contains { $0.id == "remote" } && model.selectedID == "a1" && model.viewportCommand == beforeRemote)
+        try apply(["type": "frame:updated", "frame": frame("a1", page: "b")], to: model)
+        precondition(model.activePageID == "a" && model.selectedID == nil, "A remote move clears selection without changing pages")
+        try apply(["type": "canvas:pages", "pages": [pages[1], ["id": "a", "name": "Renamed"], pages[2]]], to: model)
+        precondition(model.activePage.name == "Renamed" && model.pageFrames.contains { $0.id == "legacy" })
+        precondition(model.canvas?.frames.first { $0.id == "legacy" }?.pageId == "a", "Reordering must preserve the old first page of legacy frames")
+        model.selectPage("empty")
+        precondition(model.pageFrames.isEmpty && model.pageComments.isEmpty)
+        try apply(["type": "canvas:pages", "pages": [pages[1], pages[0]]], to: model)
+        precondition(model.activePageID == "b", "Removing the active page falls back to the current first page")
+        try snapshot([pages[0]], frames: [originals[0]])
+        precondition(model.activePageID == "a", "Reconnect also recovers from a removed page")
+
+        try snapshot(pages, frames: originals)
+        var savedFrames = Dictionary(uniqueKeysWithValues: originals.map { ($0["id"] as! String, $0) })
+        var requests: [[String: Any]] = []
+        var switchDuringSave = false
+        var sequence = 0
+        defer { client.dataHandler = nil }
+        client.dataHandler = { path, method, body in
+            let id = String(path.split(separator: "/").last!)
+            var result: [String: Any] = [:]
+            if method == "POST" {
+                requests.append(body ?? [:])
+                sequence += 1
+                result = body ?? [:]
+                result["id"] = "new-\(sequence)"; result["canvasId"] = "pages"
+                savedFrames["new-\(sequence)"] = result
+                if switchDuringSave { model.selectPage("a") }
+            } else if method == "PATCH" {
+                savedFrames[id]!.merge(body ?? [:]) { _, new in new }
+                result = savedFrames[id]!
+            } else if method == "DELETE" { savedFrames.removeValue(forKey: id) }
+            return try JSONSerialization.data(withJSONObject: result)
+        }
+        model.selectPage("b")
+        await model.addFrame()
+        precondition(requests.last?["pageId"] as? String == "b" && requests.last?["x"] as? Double == 180)
+        precondition(model.selected?.pageId == "b" && model.pageFrames.count == 2)
+        await model.undo()
+        model.selectPage("empty")
+        await model.addFrame()
+        precondition(requests.last?["pageId"] as? String == "empty" && requests.last?["x"] as? Double == 0)
+        await model.undo()
+        precondition(model.pageFrames.isEmpty)
+        model.selectPage("b")
+        switchDuringSave = true
+        await model.addFrame()
+        precondition(model.activePageID == "a" && model.selectedID == nil && !model.pageFrames.contains { $0.id == "new-3" })
+        precondition(savedFrames["new-3"]?["pageId"] as? String == "b", "A pending add stays on the page where it started")
+        await model.undo()
+        switchDuringSave = false
+        try await model.patchFrame("a1", patch: ["name": "Edited first page"])
+        model.selectPage("b")
+        await model.undo()
+        precondition(model.activePageID == "a" && model.selected?.name == "a1", "Undo reveals the affected frame's page")
+        try await model.deleteFrame("a1")
+        model.selectPage("b")
+        await model.undo()
+        precondition(model.activePageID == "a" && model.selected?.pageId == "a", "Restoring a frame reveals its page")
+
+        for pageList: [[String: String]]? in [nil, []] {
+            var document: [String: Any] = ["id": "pages", "name": "Legacy", "frames": [frame("legacy")]]
+            if let pageList { document["pages"] = pageList }
+            try apply(["type": "init", "canvas": document], to: model)
+            precondition(model.activePageID == "pages:page1" && model.activePage.name == "Page 1" && model.pageFrames.count == 1)
+        }
+        print("Canvas page checks passed (isolated frames/comments/cursors, switching, selection, live updates, reconnect, legacy frames, page-local creation and cross-page undo).")
     }
 
     @MainActor private static func wait(_ condition: () -> Bool) async throws {

@@ -18,14 +18,25 @@
         seed: (canvas) => useStore.getState().setCanvas(canvas),
         comments: (comments) => useStore.getState().setComments(comments),
         viewport: (viewport) => useStore.getState().setViewport(viewport),
+        camera: () => useStore.getState().viewport,
+        /* a collaborator's cursor at a world point */
+        peer: (cursor) =>
+          useStore.setState({
+            presences: { peer: { clientId: 'peer', name: 'Peer', color: '#e0457b', kind: 'human' } },
+            cursors: { peer: cursor },
+          }),
         page: (id) => useStore.getState().setActivePage(id),
+        selectFrames: (ids) => useStore.getState().selectMany(ids),
         state: () => ({
           frames: useStore.getState().canvas?.frames,
           tool: useStore.getState().tool,
+          selectedIds: useStore.getState().selectedIds,
           selectedElement: useStore.getState().selectedElement,
         }),
         undo,
         redo,
+        /* a Layers row pick */
+        pick: (el) => useStore.getState().pickElement(el),
       }
       createRoot(document.getElementById('root')).render(
         React.createElement(

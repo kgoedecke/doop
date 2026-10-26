@@ -37,6 +37,10 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
   `expectedPages` to protect collaborators), and target frames with `pageId`.
+- **Clickable prototypes** — wire elements to other frames (click, hover, press, key or delay;
+  navigate, overlay, back, scroll or link, with transitions) in Prototype mode or straight in the
+  HTML, then click through the flow with Play or share `/c/<id>/proto`. Agents use the same
+  `data-doop-*` attributes plus `get_prototype` / `set_prototype_start`.
 - **True multiplayer** — live cursors, presence, per-frame editing indicators, undo/redo, comments
   pinned to elements, and an activity feed, all over one WebSocket room.
 - **Design memory** — pin exemplar frames, capture decisions, and let the distiller propose durable
@@ -114,7 +118,8 @@ The canvas Chat tab keeps a shared conversation alongside the design. Mention an
 queue a design card; its reply threads back into the chat.
 
 The import source picker offers **Website**, **Live app** (the sync snippet), and **GitHub repo**.
-Right-click a frame and choose **Export…** to download PNG or JPG. A progress toast tracks the
+Right-click a frame and choose **Export…** to download PNG, JPG or a vector PDF (of the frame, or of
+every selected frame as one PDF). **Export** in the top bar binds any frames of the page into one PDF. A progress toast tracks the
 render; the desktop app opens its native save panel.
 
 ## Integrations
@@ -125,7 +130,7 @@ render; the desktop app opens its native save panel.
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Linear      | Read issues through MCP, or delegate an issue to Doop: it designs a canvas and reports the result back to Linear ([setup](docs/linear.md)) |
 | Slack       | Mention `@Doop` with a brief; it designs a canvas and posts the result in the thread ([setup](docs/slack.md))                              |
-| Meta Ads    | Pull ad creatives onto a canvas on a schedule with an automation (`/automations`)                                                          |
+| Meta Ads    | Pull ad creatives onto a canvas on a schedule with an [automation](#automations)                                                           |
 | Figma       | Import frames as editable HTML and export frames back to Figma. Doop Cloud only                                                            |
 | Canva       | Import Canva designs as editable frames and send frames back with live text. Doop Cloud only                                               |
 
@@ -140,6 +145,64 @@ correct page. The URL includes the canvas ID, frame ID and URL-encoded CSS
 `selector`, so an AI agent can locate it in the frame HTML. Canvas access rules
 still apply. Selectors that use element IDs survive layout changes; selectors
 based on sibling positions can change when the HTML is restructured.
+
+## Approve screens for development
+
+Select a frame and turn on **Development → Mark as approved** in the inspector,
+or right-click one or more frames and choose **Mark ready for dev**. A green badge
+appears above the screen and in Layers. Hover the toggle row or a badge to see
+who approved it and when. Turn the toggle off to move an approved screen back to draft.
+
+Changing the HTML or frame dimensions switches an approved screen to **Needs review**;
+review it and turn **Mark as approved** on again. Moving, renaming, hiding, locking, or moving
+between pages keeps approval. Copies start as drafts. An approval checks the frame
+revision so a concurrent edit cannot accidentally be approved, and waits for live
+design streams to finish.
+
+Agents can read `approvalStatus` (`draft`, `ready_for_dev`, `needs_review`) and
+`approval` attribution in `get_canvas` and `get_frame`. Call
+`get_canvas({ canvas_id, approval_status: "ready_for_dev" })` to find approved
+screens, then re-read `get_frame` before implementing. Only `ready_for_dev` is
+current sign-off. Approval is set by people in the app. In **Automations**, choose
+**Designs are approved** to run a workflow when frames on a selected canvas become
+ready for dev. Without an enabled workflow, approval only records sign-off.
+
+The REST equivalent is `PUT /api/frames/:id/approval` with
+`{ status: "ready_for_dev" | "draft", expectedUpdatedAt }`. The signed-in user's
+identity supplies the attribution; the endpoint uses the same canvas access rules
+as editing and returns `409` when the reviewed revision is stale.
+
+## Clickable prototypes
+
+Turn frames into a flow you can click through. Switch on **Prototype mode** (top bar), pick an
+element and add an interaction in its **Prototype** tab, or drag the handle on its right edge
+onto another frame. Each interaction is a trigger (click, hover, press, a key or a delay) and an
+action (go to a frame, open one as an overlay, go back, close the overlay, scroll, open a link),
+with an optional transition: dissolve, slide or push. Connectors on the canvas show where every
+element leads, and a **Start** flag marks the frame each page's flow begins on.
+
+<p align="center">
+  <img src=".github/assets/prototype-canvas.jpg" alt="A travel app prototype in Prototype mode: four iPhone screens with liquid-glass panels over photos, blue connectors from a trending card to the destination screen, from Book stay to the booking sheet overlay and from Confirm and pay to the confirmation, and a Start flag on the first screen" width="100%">
+</p>
+
+Press **Play** to run it full screen, or share `/c/<canvas-id>/proto`: the player follows the
+same canvas access rules, and the browser's Back and Forward walk the flow. Frames stay live
+while you play, so an edit on the canvas shows up on the screen you are looking at.
+
+<p align="center">
+  <img src=".github/assets/prototype-player.jpg" alt="The prototype player at phone size, three steps of the flow: tapping the Lago di Braies card on Explore, Book stay opening the booking sheet as an overlay, and Confirm and pay dissolving to the confirmation" width="100%">
+</p>
+
+Interactions are plain attributes on the element in the frame HTML, so they sync, version and
+export with the frame, and agents write them with the same tools they design with:
+
+```html
+<button data-doop-on="click" data-doop-action="navigate:<frameId>" data-doop-transition="push-left">Book stay</button>
+```
+
+Agents check their wiring with `get_prototype`, which flags links to missing frames, and set
+the start with `set_prototype_start`. Both the MCP server and the built-in Doop Agent have them.
+The full attribute reference is in [`.context/specs/prototyping.md`](.context/specs/prototyping.md).
 
 ## iPhone and iPad app
 
@@ -762,6 +825,39 @@ require the same canvas access as every other MCP tool. A reply whose text `@men
 role spends one resident task from the account's allowance — the same free-tier meter that a board
 card, an `@mention` comment, or task feedback consumes (`server/allowance.ts`); plain replies are
 free. `resolve_comment` also costs nothing.
+
+## Automations
+
+An automation runs on a schedule (daily, weekdays or weekly, in any time zone) or
+when designs on a selected canvas are approved. Configure up to six steps at `/automations`.
+Approval presets make different sizes, localize designs, or create companion assets;
+edit the brief to choose dimensions, languages and deliverables. Generated designs start as drafts.
+
+- **Pull steps** land designs on a canvas: **Meta ad creatives** (up to 200 ads, each with its image,
+  name, copy and CTA; `META_APP_ID`/`_SECRET`, read-only `ads_read` scope).
+- **Agent steps** queue a board card for one Doop Agent role, identical to a card a person writes,
+  and billed to the automation's owner. Following steps wait until that card completes.
+- **Create Linear ticket** uses the owner's connected Linear account and selected team.
+  The connection needs permission to create issues.
+- **Post to Slack** uses the owner's Slack installation and a channel ID. Invite @Doop
+  to the destination channel. Both handoff actions include source design links and links
+  produced by earlier steps.
+
+Schedules are checked every minute; approvals and ongoing work every five seconds. One run
+per automation is active at a time. Up to ten approvals are grouped into each run, with each
+approval processed once, including after a restart or run-history cleanup. Enabling a workflow
+watches future approvals; **Run now** also picks up existing, unprocessed approvals.
+Changing an approved source to draft or needs review stops its remaining workflow steps.
+Agent work times out after one hour. Sizes, languages, and asset briefs are editable presets.
+
+Every run has a summary or an actionable error. Interrupted external calls fail visibly instead
+of automatically repeating a possibly successful ticket or message. Check the destination before
+reapproving a design to start another run. Approval receipts are retained until the automation is
+deleted; completed run history is limited to 100 entries. Existing scheduled automations retain
+their schedules and now wait for agent completion between steps.
+
+Types live in [`shared/automations.ts`](shared/automations.ts), the runner in
+[`server/automations.ts`](server/automations.ts).
 
 ## What's in the box
 

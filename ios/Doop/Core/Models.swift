@@ -24,6 +24,14 @@ public struct CanvasDocument: Codable, Identifiable {
     public var ownerId: String?
     public var frames: [DesignFrame]
     public var pages: [CanvasPage]?
+
+    /// Older canvases and frames belong to the first page, matching shared/pages.ts.
+    public var effectivePages: [CanvasPage] {
+        if let pages, !pages.isEmpty { return pages }
+        return [CanvasPage(id: "\(id):page1", name: "Page 1")]
+    }
+
+    public func pageID(for frame: DesignFrame) -> String { frame.pageId ?? effectivePages[0].id }
 }
 
 public struct CanvasPage: Codable, Identifiable {
@@ -31,7 +39,7 @@ public struct CanvasPage: Codable, Identifiable {
     public var name: String
 }
 
-public struct DesignFrame: Codable, Identifiable, Equatable {
+public struct DesignFrame: Codable, Identifiable, Equatable, Sendable {
     public var id: String
     public var canvasId: String
     public var name: String
@@ -101,7 +109,17 @@ public struct CanvasPresence: Codable, Identifiable {
     public var color: String
     public var kind: String
     public var cursor: CanvasPoint?
+    public var viewport: CanvasViewport?
     public var id: String { clientId }
+}
+
+public struct CanvasViewport: Codable {
+    public var pageId: String?
+    public var x: Double
+    public var y: Double
+    public var zoom: Double
+    public var width: Double
+    public var height: Double
 }
 
 public struct CanvasPoint: Codable {
@@ -129,6 +147,7 @@ public struct CanvasEvent: Decodable {
     public var comments: [CanvasComment]?
     public var presences: [CanvasPresence]?
     public var presence: CanvasPresence?
+    public var viewport: CanvasViewport?
     public var clientId: String?
     public var x: Double?
     public var y: Double?

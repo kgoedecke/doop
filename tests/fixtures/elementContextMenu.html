@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { FrameView } from '/src/components/FrameView.tsx'
+      import { FrameLabelLayer } from '/src/components/FrameLabelLayer.ts'
+      import { LayersPanel } from '/src/components/LayersPanel.tsx'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import {
+        ContextMenu,
+        ContextMenuTrigger,
+        ContextMenuContent,
+        ContextMenuItem,
+      } from '/src/components/ui/context-menu.tsx'
+      import { useStore } from '/src/lib/store.ts'
+      import { clearHistory, undo } from '/src/lib/history.ts'
+      import '/src/styles.css'
+
+      window.contextMenuHarness = {
+        seed: (frames, zoom = 1) => {
+          clearHistory()
+          useStore.getState().setCanvas({ id: 'c', name: 'Menus', frames, createdAt: 0, updatedAt: 0 })
+          useStore.getState().select(null)
+          useStore.getState().setViewport({ x: 0, y: 0, zoom })
+          document.documentElement.style.setProperty('--zoom', String(zoom))
+        },
+        selection: () => useStore.getState().selectedElement,
+        updateHtml: (html) => useStore.getState().patchFrameLocal('f', { html }),
+        selectMany: (ids) => useStore.getState().selectMany(ids),
+        undo,
+      }
+
+      function Fixture() {
+        const frames = useStore((s) => s.canvas?.frames ?? [])
+        const zoom = useStore((s) => s.viewport.zoom)
+        /* frame names render into a screen-space layer, as the Stage provides */
+        const [labelLayer, setLabelLayer] = React.useState(null)
+        return React.createElement(
+          TooltipProvider,
+          null,
+          React.createElement(
+            ContextMenu,
+            null,
+            React.createElement(
+              ContextMenuTrigger,
+              { asChild: true },
+              React.createElement(
+                'div',
+                { className: 'stage', style: { position: 'absolute', inset: 0 } },
+                React.createElement('div', { style: { position: 'absolute', inset: 0 }, ref: setLabelLayer }),
+                React.createElement(
+                  'div',
+                  { style: { transform: `scale(${zoom})`, transformOrigin: '0 0' } },
+                  React.createElement(
+                    FrameLabelLayer.Provider,
+                    { value: labelLayer },
+                    frames.map((frame) => React.createElement(FrameView, { key: frame.id, frame, layoutZoom: 1 })),
+                  ),
+                ),
+              ),
+            ),
+            React.createElement(
+              ContextMenuContent,
+              null,
+              React.createElement(ContextMenuItem, null, 'Canvas background'),
+            ),
+          ),
+          React.createElement(
+            'div',
+            { style: { position: 'absolute', right: 0, top: 0, width: 290, height: 800 } },
+            React.createElement(LayersPanel, { onAddFrame: () => {} }),
+          ),
+        )
+      }
+      createRoot(document.getElementById('root')).render(React.createElement(Fixture))
+    </script>
+  </body>
+</html>

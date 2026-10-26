@@ -1,3 +1,4 @@
+import { clientIntegrations } from '../integrations'
 import { useEffect, useRef, useState } from 'react'
 import type { CanvasMeta } from '../../shared/types'
 import { AGENT_ROLES, roleById, roleName } from '../../shared/agents'
@@ -10,6 +11,9 @@ import {
   WEEKDAYS_SHORT,
   incompleteReason,
   type AgentStep,
+  type AutomationTrigger,
+  type SlackStep,
+  type LinearStep,
   type Automation,
   type AutomationExample,
   type AutomationRun,
@@ -22,7 +26,15 @@ import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { FrameThumb } from '../components/FramePreview'
 import { BarDivider, TopBar, TopBarHome, TopBarTitle, barGhostBtn, barPrimaryBtn } from '../components/TopBar'
-import { ClockTile, MetaTile, RunDot, StepChain, formatRunTime } from '../components/AutomateShell'
+import {
+  ApprovalTile,
+  PullMark,
+  ClockTile,
+  MetaTile,
+  RunDot,
+  StepChain,
+  formatRunTime,
+} from '../components/AutomateShell'
 import { RoleMark } from '../components/RoleMark'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -31,7 +43,7 @@ import {
   Panel,
   PanelBody,
   PanelHeader,
-  PanelTab,
+  PanelIconTab,
   PanelTabPanel,
   PanelTabs,
   PanelTabsRoot,
@@ -43,6 +55,7 @@ import { Switch } from '../components/ui/switch'
 import { StatusLabel } from '../components/ui/status-label'
 import { Toast } from '../components/ui/toast'
 import { Tooltip } from '../components/ui/tooltip'
+import { Toolbar, ToolbarControl, ToolbarDot } from '../components/ui/toolbar'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,21 +63,14 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
-import {
-  ChevronDownIcon,
-  PanelCollapseRightIcon,
-  PanelExpandRightIcon,
-  PlayIcon,
-  PulseIcon,
-  XIcon,
-} from '../components/ui/icons'
+import { ChevronDownIcon, PanelCollapseRightIcon, PlayIcon, PulseIcon, XIcon } from '../components/ui/icons'
 import { cn } from '@/lib/utils'
 
 /** A draft is the automation minus what the server owns. */
-type Draft = Pick<Automation, 'name' | 'schedule' | 'steps'>
+type Draft = Pick<Automation, 'name' | 'schedule' | 'steps' | 'trigger'>
 
 function draftOf(a: Automation): Draft {
-  return { name: a.name, schedule: a.schedule, steps: a.steps }
+  return { name: a.name, trigger: a.trigger, schedule: a.schedule, steps: a.steps }
 }
 
 function sameDraft(a: Draft, b: Draft): boolean {
@@ -77,9 +83,10 @@ function newStepId(steps: Step[]): string {
   return `s${n}`
 }
 
-/** Drag the empty ground (or scroll) to move the chain around, the way the
- *  canvas pans. The offset lives on the DOM, not in state — a pan should
- *  never re-render the nodes. Interactive children keep their own gestures. */
+/** Drag the empty ground (or scroll over it) to move the chain around, the way
+ *  the canvas pans. The offset lives on the DOM, not in state — a pan should
+ *  never re-render the nodes. Nodes (`data-pan-node`) and controls keep their
+ *  own gestures. */
 function usePan() {
   const ground = useRef<HTMLDivElement>(null)
   const layer = useRef<HTMLDivElement>(null)
@@ -98,9 +105,12 @@ function usePan() {
     }
     /* the runs panel scrolls itself; text fields keep selection and caret */
     const inPanel = (t: EventTarget | null) => t instanceof Element && !!t.closest('[data-pan-stop]')
-    const textField = (t: EventTarget | null) => t instanceof Element && !!t.closest('input, textarea, select')
+    /* nodes and controls keep their own gestures: a press on a dropdown opens
+       it, a two-finger scroll over a node leaves the chain where it is */
+    const onNode = (t: EventTarget | null) =>
+      t instanceof Element && !!t.closest('[data-pan-node], button, a, input, textarea, select, [role="combobox"]')
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 0 || inPanel(e.target) || textField(e.target)) return
+      if (e.button !== 0 || inPanel(e.target) || onNode(e.target)) return
       press.current = {
         id: e.pointerId,
         startX: e.clientX,
@@ -148,7 +158,9 @@ function usePan() {
         const atBottom = field.scrollTop + field.clientHeight >= field.scrollHeight - 1 && e.deltaY > 0
         if (!atTop && !atBottom) return
       }
+      /* still claimed over a node, so a sideways swipe never turns into browser back */
       e.preventDefault()
+      if (onNode(e.target)) return
       if (e.shiftKey && e.deltaX === 0) {
         offset.current = { x: offset.current.x - e.deltaY, y: offset.current.y }
       } else {
@@ -309,24 +321,38 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
     setDraft({
       name: draft.name === 'Untitled automation' ? example.name : draft.name,
       schedule: { ...example.schedule, tz: draft.schedule.tz },
+      trigger: example.trigger === 'approval' ? { type: 'approval', canvasId: '' } : { type: 'schedule' },
       steps: example.steps.map((s, i) => ({ ...s, id: `s${i + 1}`, canvasId: '' }) as Step),
     })
   }
 
-  function addStep(type: Step['type']) {
+  function addStep(kind: string) {
     if (!draft || draft.steps.length >= MAX_STEPS) return
     const id = newStepId(draft.steps)
     /* a new step lands on the canvas the previous one worked on */
-    const canvasId = draft.steps[draft.steps.length - 1]?.canvasId ?? ''
-    const step: Step =
-      type === 'pull'
-        ? { id, type: 'pull', provider: 'meta', accountId: '', filter: 'active', canvasId }
-        : { id, type: 'agent', title: '', prompt: '', roles: ['doop'], canvasId }
+    const canvasId =
+      draft.trigger.type === 'approval' ? draft.trigger.canvasId : (draft.steps[draft.steps.length - 1]?.canvasId ?? '')
+    const preset = AUTOMATION_EXAMPLES.find((e) => e.id === kind)?.steps[0]
+    const step: Step = preset
+      ? ({ ...preset, id, canvasId } as Step)
+      : kind === 'slack'
+        ? {
+            id,
+            type: 'slack',
+            canvasId,
+            channelId: '',
+            message: 'Approved designs are ready. Here are the designs and workflow results.',
+          }
+        : kind === 'linear'
+          ? { id, type: 'linear', canvasId, teamId: '', title: 'Follow up on approved designs', description: '' }
+          : kind === 'pull'
+            ? { id, type: 'pull', provider: 'meta', accountId: '', filter: 'active', canvasId }
+            : { id, type: 'agent', title: '', prompt: '', roles: ['doop'], canvasId }
     setDraft({ ...draft, steps: [...draft.steps, step] })
     setAdding(false)
   }
 
-  function patchStep(id: string, patch: Partial<PullStep> | Partial<AgentStep>) {
+  function patchStep(id: string, patch: Partial<Step>) {
     if (!draft) return
     setDraft({ ...draft, steps: draft.steps.map((s) => (s.id === id ? ({ ...s, ...patch } as Step) : s)) })
   }
@@ -336,7 +362,9 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
     setDraft({ ...draft, steps: draft.steps.filter((s) => s.id !== id) })
   }
 
-  const incomplete = draft ? incompleteReason(draft.steps) : undefined
+  const approvalCanvasId = draft?.trigger.type === 'approval' ? draft.trigger.canvasId : undefined
+  const stepCanvases = approvalCanvasId === undefined ? canvases : canvases.filter((c) => c.id === approvalCanvasId)
+  const incomplete = draft ? incompleteReason(draft.steps, draft.trigger) : undefined
 
   return (
     <div className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] flex flex-col">
@@ -360,7 +388,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
             <Button
               variant="ghost"
               className={barGhostBtn}
-              disabled={runningNow || !!incomplete}
+              disabled={runningNow || !!incomplete || !automation.enabled}
               onClick={runNow}
               title={incomplete ? `${incomplete} first` : 'Run the automation now'}
             >
@@ -394,14 +422,37 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
           <>
             <div ref={panLayer} className="relative h-full will-change-transform">
               <div className="relative mx-auto flex w-[360px] flex-col pb-24 pt-14">
-                <WhenNode schedule={draft.schedule} onChange={(schedule) => setDraft({ ...draft, schedule })} />
+                <WhenNode
+                  schedule={draft.schedule}
+                  onChange={(schedule) => setDraft({ ...draft, schedule })}
+                  trigger={draft.trigger}
+                  canvases={canvases}
+                  onTriggerChange={(trigger) =>
+                    setDraft({
+                      ...draft,
+                      trigger,
+                      steps:
+                        trigger.type === 'approval'
+                          ? draft.steps.map((s) => ({ ...s, canvasId: trigger.canvasId }))
+                          : draft.steps,
+                    })
+                  }
+                />
                 {draft.steps.map((step) => (
                   <div key={step.id} className="flex flex-col">
                     <Edge />
                     {step.type === 'pull' ? (
                       <PullNode
                         step={step}
-                        canvases={canvases}
+                        canvases={stepCanvases}
+                        integrations={integrations}
+                        onChange={(patch) => patchStep(step.id, patch)}
+                        onRemove={() => removeStep(step.id)}
+                      />
+                    ) : step.type === 'slack' || step.type === 'linear' ? (
+                      <DeliveryNode
+                        step={step}
+                        canvases={stepCanvases}
                         integrations={integrations}
                         onChange={(patch) => patchStep(step.id, patch)}
                         onRemove={() => removeStep(step.id)}
@@ -409,7 +460,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
                     ) : (
                       <AgentNode
                         step={step}
-                        canvases={canvases}
+                        canvases={stepCanvases}
                         onChange={(patch) => patchStep(step.id, patch)}
                         onRemove={() => removeStep(step.id)}
                       />
@@ -439,7 +490,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
                 )}
               </div>
               {draft.steps.length === 0 && (
-                <aside className="absolute left-[calc(50%+240px)] top-14 hidden w-[260px] lg:block">
+                <aside data-pan-node className="absolute left-[calc(50%+240px)] top-14 hidden w-[260px] lg:block">
                   <div className="mb-2 text-caption text-ink-faint">Or start from an example</div>
                   {AUTOMATION_EXAMPLES.map((e) => (
                     <button
@@ -448,14 +499,16 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
                       className="mb-1.5 flex w-full items-center gap-2 rounded-[9px] border border-line bg-surface px-2.5 py-2 text-left text-body font-semibold tracking-[-0.01em] transition-colors hover:border-ink-faint"
                       onClick={() => applyExample(e)}
                     >
-                      <StepChain steps={e.steps} size={18} joined={false} />
+                      <StepChain steps={e.steps} size={18} joined={false} approval={e.trigger === 'approval'} />
                       <span className="min-w-0 truncate">{e.name}</span>
                       <small className="ml-auto text-micro font-normal text-ink-faint">
-                        {e.schedule.kind === 'daily'
-                          ? 'daily'
-                          : e.schedule.kind === 'weekdays'
-                            ? 'weekdays'
-                            : WEEKDAYS_SHORT[e.schedule.weekday]}
+                        {e.trigger === 'approval'
+                          ? 'on approval'
+                          : e.schedule.kind === 'daily'
+                            ? 'daily'
+                            : e.schedule.kind === 'weekdays'
+                              ? 'weekdays'
+                              : WEEKDAYS_SHORT[e.schedule.weekday]}
                       </small>
                     </button>
                   ))}
@@ -473,40 +526,19 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
                     onClose={() => toggleRuns(false)}
                   />
                 ) : (
-                  <nav
+                  <Toolbar
                     aria-label="Runs"
-                    className="absolute right-3 top-3 z-[38] flex w-12 flex-col items-center gap-1.5 rounded-panel border border-line bg-surface p-1.5 shadow-card max-lg:hidden"
+                    orientation="vertical"
+                    className="absolute right-3 top-3 z-[38] max-lg:hidden"
                   >
-                    <Tooltip label="Expand panel" side="left">
-                      <Button
-                        variant="bare"
-                        size="icon"
-                        aria-label="Expand panel"
-                        className="relative size-[34px] rounded-lg text-ink-soft hover:bg-paper-deep hover:text-ink"
-                        onClick={() => toggleRuns(true)}
-                      >
-                        <PanelExpandRightIcon />
-                      </Button>
-                    </Tooltip>
-                    <span aria-hidden className="my-0.5 h-px w-6 bg-line-soft" />
-                    <Tooltip
+                    <ToolbarControl
                       label={automation.lastRun ? `Runs · last ${formatRunTime(automation.lastRun.startedAt)}` : 'Runs'}
-                      side="left"
+                      onClick={() => toggleRuns(true)}
                     >
-                      <Button
-                        variant="bare"
-                        size="icon"
-                        aria-label="Runs"
-                        className="relative size-[34px] rounded-lg text-ink-soft hover:bg-paper-deep hover:text-ink"
-                        onClick={() => toggleRuns(true)}
-                      >
-                        <PulseIcon />
-                        {automation.lastRun?.status === 'failed' && (
-                          <span className="absolute right-[5px] top-[5px] size-1.5 rounded-full bg-accent-ink shadow-[0_0_0_2px_var(--surface)]" />
-                        )}
-                      </Button>
-                    </Tooltip>
-                  </nav>
+                      <PulseIcon />
+                      {automation.lastRun?.status === 'failed' && <ToolbarDot className="bg-accent-ink" />}
+                    </ToolbarControl>
+                  </Toolbar>
                 )}
               </div>
             )}
@@ -554,7 +586,19 @@ function clockLabel(hhmm: string): string {
 }
 
 /** "Every [Monday ▾] at [09:00 ▾]" */
-function WhenNode({ schedule, onChange }: { schedule: Schedule; onChange: (s: Schedule) => void }) {
+function WhenNode({
+  schedule,
+  onChange,
+  trigger,
+  onTriggerChange,
+  canvases,
+}: {
+  schedule: Schedule
+  onChange: (s: Schedule) => void
+  trigger: AutomationTrigger
+  onTriggerChange: (trigger: AutomationTrigger) => void
+  canvases: CanvasMeta[]
+}) {
   const dayValue =
     schedule.kind === 'daily' ? 'daily' : schedule.kind === 'weekdays' ? 'weekdays' : String(schedule.weekday)
   const time = `${pad(schedule.hour)}:${pad(schedule.minute)}`
@@ -563,55 +607,80 @@ function WhenNode({ schedule, onChange }: { schedule: Schedule; onChange: (s: Sc
   if (!times.includes(time)) times.push(time)
   times.sort()
   return (
-    <div className={cn(nodeCls, 'border-ink')}>
+    <div data-pan-node className={cn(nodeCls, 'border-ink')}>
       <Port side="out" />
       <div className="flex items-center gap-[9px]">
-        <ClockTile size={24} />
+        {trigger.type === 'approval' ? <ApprovalTile /> : <ClockTile size={24} />}
         <span className={kCls}>When</span>
-        <span className="ml-auto text-micro text-ink-faint">{schedule.tz.replace(/_/g, ' ')}</span>
-      </div>
-      <div className="mt-2.5 flex items-center gap-2 text-copy">
-        <span className="text-ink-soft">Every</span>
         <Select
-          value={dayValue}
-          onValueChange={(v) => {
-            if (v === 'daily' || v === 'weekdays') onChange({ ...schedule, kind: v })
-            else onChange({ ...schedule, kind: 'weekly', weekday: Number(v) })
-          }}
+          value={trigger.type}
+          onValueChange={(type) => onTriggerChange(type === 'approval' ? { type, canvasId: '' } : { type: 'schedule' })}
         >
-          <SelectTrigger size="sm" aria-label="Which days">
+          <SelectTrigger size="sm" aria-label="Automation trigger">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {WEEKDAYS.map((d, i) => (
-              <SelectItem key={d} value={String(i)}>
-                {d}
-              </SelectItem>
-            ))}
-            <SelectItem value="weekdays">weekday</SelectItem>
-            <SelectItem value="daily">day</SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="text-ink-soft">at</span>
-        <Select
-          value={time}
-          onValueChange={(v) => {
-            const [h, m] = v.split(':').map(Number)
-            onChange({ ...schedule, hour: h ?? 9, minute: m ?? 0 })
-          }}
-        >
-          <SelectTrigger size="sm" aria-label="Time">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {times.map((t) => (
-              <SelectItem key={t} value={t}>
-                {clockLabel(t)}
-              </SelectItem>
-            ))}
+            <SelectItem value="schedule">On a schedule</SelectItem>
+            <SelectItem value="approval">Designs are approved</SelectItem>
           </SelectContent>
         </Select>
       </div>
+      {trigger.type === 'approval' ? (
+        <>
+          <CanvasPicker
+            word="on"
+            value={trigger.canvasId}
+            canvases={canvases}
+            onChange={(canvasId) => onTriggerChange({ ...trigger, canvasId })}
+          />
+          <p className="mt-2 text-caption text-ink-faint">
+            Runs when frames are marked ready for dev. Nearby approvals are grouped; generated designs stay drafts.
+          </p>
+        </>
+      ) : (
+        <div className="mt-2.5 flex items-center gap-2 text-copy">
+          <span className="text-ink-soft">Every</span>
+          <Select
+            value={dayValue}
+            onValueChange={(v) => {
+              if (v === 'daily' || v === 'weekdays') onChange({ ...schedule, kind: v })
+              else onChange({ ...schedule, kind: 'weekly', weekday: Number(v) })
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Which days">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {WEEKDAYS.map((d, i) => (
+                <SelectItem key={d} value={String(i)}>
+                  {d}
+                </SelectItem>
+              ))}
+              <SelectItem value="weekdays">weekday</SelectItem>
+              <SelectItem value="daily">day</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="text-ink-soft">at</span>
+          <Select
+            value={time}
+            onValueChange={(v) => {
+              const [h, m] = v.split(':').map(Number)
+              onChange({ ...schedule, hour: h ?? 9, minute: m ?? 0 })
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Time">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {times.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {clockLabel(t)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
   )
 }
@@ -667,6 +736,127 @@ function CanvasPicker({
   )
 }
 
+function DeliveryNode({
+  step,
+  canvases,
+  integrations,
+  onChange,
+  onRemove,
+}: {
+  step: SlackStep | LinearStep
+  canvases: CanvasMeta[]
+  integrations: IntegrationsStatus | null
+  onChange: (patch: Partial<Step>) => void
+  onRemove: () => void
+}) {
+  const integration = clientIntegrations.find((i) => i.id === step.type)
+  const connected = !!integrations && !!integration?.isConnected(integrations)
+  const [teams, setTeams] = useState<{ id: string; name: string; key: string }[]>([])
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (step.type !== 'linear' || !connected) return
+    let canceled = false
+    api
+      .automationLinearTeams()
+      .then((list) => {
+        if (!canceled) {
+          setTeams(list)
+          setError(null)
+        }
+      })
+      .catch(() => {
+        if (!canceled) setError('Could not load teams. Check your Linear connection.')
+      })
+    return () => {
+      canceled = true
+    }
+  }, [step.type, connected])
+  return (
+    <div data-pan-node className={nodeCls}>
+      <Port side="in" />
+      <Port side="out" />
+      <div className="flex items-center gap-2">
+        <PullMark provider={step.type} />
+        <span className="text-copy font-semibold">
+          {step.type === 'slack' ? 'Post to Slack' : 'Create Linear ticket'}
+        </span>
+        <RemoveStep onRemove={onRemove} />
+      </div>
+      {integrations && !connected && (
+        <Button className="mt-2" variant="solid" size="sm" onClick={() => navigate('/integrations')}>
+          Connect {integration?.name ?? step.type}
+        </Button>
+      )}
+      {step.type === 'slack' ? (
+        <>
+          <Input
+            className="mt-2"
+            aria-label="Slack channel ID"
+            placeholder="Channel ID, e.g. C012ABCDEF"
+            value={step.channelId}
+            onChange={(e) => onChange({ channelId: e.target.value.trim() })}
+          />
+          <p className="mt-1 text-caption text-ink-faint">
+            Copy the ID from Slack channel details and invite @Doop to the channel.
+          </p>
+          <Textarea
+            className="mt-2"
+            aria-label="Slack message"
+            value={step.message}
+            maxLength={MAX_PROMPT}
+            onChange={(e) => onChange({ message: e.target.value })}
+          />
+        </>
+      ) : (
+        <>
+          <Select value={step.teamId} onValueChange={(teamId) => onChange({ teamId })}>
+            <SelectTrigger className="mt-2 w-full" size="sm" aria-label="Linear team">
+              <SelectValue placeholder="Choose a team" />
+            </SelectTrigger>
+            <SelectContent>
+              {teams.map((team) => (
+                <SelectItem key={team.id} value={team.id}>
+                  {team.name} · {team.key}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {error && (
+            <p role="alert" className="mt-1 text-caption text-accent-ink">
+              {error}
+            </p>
+          )}
+          <Input
+            className="mt-2"
+            aria-label="Linear ticket title"
+            placeholder="Ticket title"
+            value={step.title}
+            maxLength={200}
+            onChange={(e) => onChange({ title: e.target.value })}
+          />
+          <Textarea
+            className="mt-2"
+            aria-label="Linear ticket description"
+            placeholder="What needs to happen next?"
+            value={step.description}
+            maxLength={MAX_PROMPT}
+            onChange={(e) => onChange({ description: e.target.value })}
+          />
+        </>
+      )}
+      <p className="mt-2 text-caption text-ink-faint">
+        Includes design links and results. Waits for earlier design tasks to finish.
+      </p>
+      <CanvasPicker
+        word="for"
+        value={step.canvasId}
+        canvases={canvases}
+        onChange={(canvasId) => onChange({ canvasId })}
+      />
+    </div>
+  )
+}
+
 function RemoveStep({ onRemove }: { onRemove: () => void }) {
   return (
     <Tooltip label="Remove step" side="left">
@@ -699,7 +889,7 @@ function PullNode({
   const meta = integrations?.meta
   const accounts = meta?.accounts ?? []
   return (
-    <div className={nodeCls}>
+    <div data-pan-node className={nodeCls}>
       <Port side="in" />
       <Port side="out" />
       <div className="flex items-center gap-[9px]">
@@ -774,7 +964,7 @@ function AgentNode({
   /* one agent per task: a pill picks that role, nothing to un-pick */
   const roles = step.roles
   return (
-    <div className={nodeCls}>
+    <div data-pan-node className={nodeCls}>
       <Port side="in" />
       <Port side="out" />
       <div className="flex items-center gap-[9px]">
@@ -837,11 +1027,12 @@ function AgentNode({
 
 /** The step slot: the two things a step can be, as tiles. It is the empty
  *  automation's first slot and, later, what "+ Add step" opens in place. */
-function StepPicker({ onPick, onCancel }: { onPick: (type: Step['type']) => void; onCancel?: () => void }) {
+function StepPicker({ onPick, onCancel }: { onPick: (kind: string) => void; onCancel?: () => void }) {
   const tile =
     'flex flex-col items-start gap-2 rounded-[9px] border border-line bg-surface px-3 pb-[11px] pt-3 text-left shadow-card transition-colors hover:border-ink-faint focus-visible:outline-2 focus-visible:outline-brand'
   return (
     <div
+      data-pan-node
       className="relative rounded-pill border-[1.5px] border-dashed border-line bg-paper-deep/60 p-3.5"
       onKeyDown={(e) => e.key === 'Escape' && onCancel?.()}
     >
@@ -861,6 +1052,20 @@ function StepPicker({ onPick, onCancel }: { onPick: (type: Step['type']) => void
         )}
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
+        {AUTOMATION_EXAMPLES.filter((e) => e.trigger === 'approval').map((e) => (
+          <button type="button" key={e.id} className={tile} onClick={() => onPick(e.id)}>
+            <RoleMark role={roleById('doop')} size={22} />
+            <b className="text-body font-medium">{e.name}</b>
+            <span className="text-caption text-ink-soft">{e.blurb}</span>
+          </button>
+        ))}
+        {(['linear', 'slack'] as const).map((provider) => (
+          <button type="button" key={provider} className={tile} onClick={() => onPick(provider)}>
+            <PullMark provider={provider} size={22} />
+            <b className="text-body font-medium">{provider === 'linear' ? 'Create Linear ticket' : 'Post to Slack'}</b>
+            <span className="text-caption text-ink-soft">Share design links and results from earlier steps.</span>
+          </button>
+        ))}
         <button type="button" className={tile} autoFocus={!!onCancel} onClick={() => onPick('pull')}>
           <MetaTile size={22} />
           <b className="text-body font-semibold tracking-[-0.012em]">Meta Ads</b>
@@ -912,6 +1117,19 @@ function RunsPanel({
         setMore(list.length >= 20)
       })
       .catch(console.error)
+    const timer = window.setInterval(() => {
+      api
+        .listRuns(automation.id)
+        .then((list) => {
+          setRuns((current) => {
+            if (!current || current.length <= 20) return list
+            const fresh = new Set(list.map((run) => run.id))
+            return [...list, ...current.filter((run) => !fresh.has(run.id))]
+          })
+        })
+        .catch(console.error)
+    }, 5_000)
+    return () => window.clearInterval(timer)
   }, [automation.id, lastRunId])
 
   async function older() {
@@ -929,7 +1147,9 @@ function RunsPanel({
       <PanelTabsRoot value="runs">
         <PanelHeader>
           <PanelTabs>
-            <PanelTab value="runs">Runs</PanelTab>
+            <PanelIconTab value="runs" icon={<PulseIcon />} title="Runs">
+              Runs
+            </PanelIconTab>
           </PanelTabs>
           <Tooltip label="Collapse panel" side="bottom" align="end">
             <Button
@@ -947,7 +1167,11 @@ function RunsPanel({
           <PanelBody className="py-2">
             <ListItem className="bg-paper/60">
               <span className="flex items-center gap-2">
-                <ClockTile size={14} className={cn(!automation.nextRunAt && 'opacity-40')} />
+                {automation.trigger.type === 'approval' ? (
+                  <ApprovalTile size={14} />
+                ) : (
+                  <ClockTile size={14} className={cn(!automation.nextRunAt && 'opacity-40')} />
+                )}
                 <ListTitle className="text-ink-soft">
                   {automation.nextRunAt && !dirty ? 'Next run' : automation.enabled ? 'Next run' : 'Paused'}
                 </ListTitle>
@@ -957,7 +1181,12 @@ function RunsPanel({
               </span>
               {!automation.nextRunAt && automation.enabled && (
                 <ListSummary className="whitespace-normal">
-                  {dirty ? 'Save to see when it runs next.' : (incompleteReason(automation.steps) ?? 'Not scheduled.')}
+                  {dirty
+                    ? 'Save to see when it runs next.'
+                    : (incompleteReason(automation.steps, automation.trigger) ??
+                      (automation.trigger.type === 'approval'
+                        ? 'Waiting for new design approvals.'
+                        : 'Not scheduled.'))}
                 </ListSummary>
               )}
             </ListItem>
@@ -968,10 +1197,12 @@ function RunsPanel({
             ) : runs.length === 0 ? (
               <div className="px-4 py-3 text-xs leading-[1.5] text-ink-faint">
                 No runs yet.{' '}
-                {automation.nextRunAt
-                  ? 'The first one is on the schedule.'
-                  : 'Finish the setup and turn it on, or run it now.'}
-                {!incompleteReason(automation.steps) && (
+                {automation.trigger.type === 'approval'
+                  ? 'Approve designs on the selected canvas to start.'
+                  : automation.nextRunAt
+                    ? 'The first one is on the schedule.'
+                    : 'Finish the setup and turn it on, or run it now.'}
+                {!incompleteReason(automation.steps, automation.trigger) && (
                   <Button variant="ghost" size="sm" className="mt-2.5 block" onClick={onRunNow}>
                     Run now
                   </Button>
@@ -979,7 +1210,8 @@ function RunsPanel({
               </div>
             ) : (
               runs.map((r) => (
-                <ListItem key={r.id}>
+                /* slides in as it arrives, like the Agents panel's rows */
+                <ListItem key={r.id} className="animate-[chip-in_0.25s_ease]">
                   <span className="flex items-center gap-2">
                     <RunDot status={r.status} />
                     <ListTitle>{formatRunTime(r.startedAt)}</ListTitle>

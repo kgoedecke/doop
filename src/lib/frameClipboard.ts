@@ -3,9 +3,7 @@ import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
 import { recordCreate, recordCreates } from './history'
-
-/** Same-origin frame clipboard: survives canvas switches and browser tabs. */
-const CLIP_KEY = 'doop:frame-clipboard'
+import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
@@ -37,6 +35,7 @@ export function copyFrames(frames: Frame[]) {
     })),
   }
   localStorage.setItem(CLIP_KEY, JSON.stringify(clip))
+  localStorage.removeItem(ELEMENT_CLIP_KEY)
 }
 
 export function copyFrame(frame: Frame) {

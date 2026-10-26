@@ -232,6 +232,27 @@
       "when": 1792198605115,
       "tag": "0033_canvas_comments",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792719758584,
+      "tag": "0034_frame_approval",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792742861394,
+      "tag": "0035_approval_automations",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792917173712,
+      "tag": "0036_canvas_guides",
+      "breakpoints": true
     }
   ]
 }

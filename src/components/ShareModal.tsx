@@ -5,6 +5,7 @@ import {
   type Canvas,
   type CommunityCategory,
 } from '../../shared/types'
+import { toLinkAccess, type LinkAccess } from '../../shared/canvasRole'
 import { navigate } from '../App'
 import type { WorkspaceSummary } from '../../shared/types'
 import { api, ApiError, paywalledWorkspace, type CanvasMember } from '../lib/api'
@@ -31,6 +32,23 @@ type SharePatch = Partial<
   Pick<ShareableCanvas, 'linkAccess' | 'memberIds' | 'workspaceId' | 'publishedAt' | 'description' | 'category'>
 >
 
+/* What each share-link level grants, as the picker and the read-out say it. */
+const LINK_ACCESS_LABELS: Record<LinkAccess, string> = {
+  none: 'No access',
+  view: 'View',
+  comment: 'Comment',
+  edit: 'Edit',
+}
+
+const LINK_ACCESS_SUMMARY: Record<LinkAccess, string> = {
+  none: 'Invite-only canvas',
+  view: 'Anyone with the link can view',
+  comment: 'Anyone with the link can comment',
+  edit: 'Anyone with the link can edit',
+}
+
+const LINK_ACCESS_ORDER: readonly LinkAccess[] = ['none', 'view', 'comment', 'edit']
+
 /* One sharing surface for the canvas and dashboard. The caller owns canvas
    state; this component reports optimistic access changes back to it. */
 export function ShareModal({
@@ -47,7 +65,7 @@ export function ShareModal({
   const { data: session } = authClient.useSession()
   const meId = session?.user?.id
   const isOwner = !!canvas.ownerId && canvas.ownerId === meId
-  const linkEdits = canvas.linkAccess === 'edit'
+  const linkAccess = toLinkAccess(canvas.linkAccess)
   const [people, setPeople] = useState<CanvasMember[] | null>(null)
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
   const [upgrade, setUpgrade] = useState<string | null>(null)
@@ -126,14 +144,13 @@ export function ShareModal({
     }
   }
 
-  async function toggleLink(next: boolean) {
-    if (busy) return
-    const linkAccess = next ? 'edit' : 'none'
+  async function setLink(next: LinkAccess) {
+    if (busy || next === linkAccess) return
     setBusy(true)
     setError(null)
     try {
-      await api.setLinkAccess(canvas.id, linkAccess)
-      onChange({ linkAccess })
+      await api.setLinkAccess(canvas.id, next)
+      onChange({ linkAccess: next === 'none' ? undefined : next })
     } catch (caught) {
       setError(
         caught instanceof ApiError ? String(caught.body.error ?? 'access update failed') : 'access update failed',
@@ -256,17 +273,28 @@ export function ShareModal({
         )}
         <div className="mt-2.5 flex flex-col items-stretch justify-between gap-2.5 border-t border-line-soft pt-3.5 sm:flex-row sm:items-center">
           {isOwner ? (
-            <label
-              className="relative flex cursor-pointer items-center gap-2 text-body font-medium text-ink"
-              title="Off = only you and invited people can open this canvas"
-            >
-              <Checkbox checked={linkEdits} disabled={busy} onChange={(event) => toggleLink(event.target.checked)} />
-              Anyone with the link can edit
-            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-body font-medium text-ink">Anyone with the link can…</span>
+              <Select value={linkAccess} disabled={busy} onValueChange={(value) => void setLink(toLinkAccess(value))}>
+                <SelectTrigger
+                  size="sm"
+                  className="w-[132px]"
+                  aria-label="What anyone with the link can do"
+                  title="No access = only you, invited people and workspace members can open this canvas"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LINK_ACCESS_ORDER.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {LINK_ACCESS_LABELS[level]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           ) : (
-            <span className="text-label text-ink-faint">
-              {linkEdits ? 'Anyone with the link can edit' : 'Invite-only canvas'}
-            </span>
+            <span className="text-label text-ink-faint">{LINK_ACCESS_SUMMARY[linkAccess]}</span>
           )}
           <Button className="justify-center gap-2" onClick={copy}>
             <CopyIcon className="size-3.5" />

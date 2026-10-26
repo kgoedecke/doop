@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Frame } from '../../shared/types'
 import { useStore } from '../lib/store'
-import { api } from '../lib/api'
-import { downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
+import { api, errorMessage } from '../lib/api'
+import { beginFrameSave } from '../lib/frameSaves'
+import { copyFramePng, downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
 import { deleteFrameTracked, recordUpdate } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
+import { FrameApprovalControl } from './FrameApproval'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
@@ -41,7 +43,7 @@ export function Inspector({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const saveTimer = useRef<number | null>(null)
+  const queuedSave = useRef<{ timer: number; finish: () => void } | null>(null)
   const copyTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
 
@@ -70,14 +72,27 @@ export function Inspector({
   function onHtmlChange(value: string) {
     setDraft(value)
     setSaveState('dirty')
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(async () => {
+    if (queuedSave.current) {
+      window.clearTimeout(queuedSave.current.timer)
+      queuedSave.current.finish()
+    }
+    const finish = beginFrameSave(frame.id)
+    const timer = window.setTimeout(async () => {
+      if (queuedSave.current?.timer === timer) queuedSave.current = null
       const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
       if (before !== undefined) recordUpdate(frame.id, { html: before }, { html: value })
-      await api.updateFrame(frame.id, { html: value }).catch(console.error)
-      setSaveState('saved')
-      window.setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 1500)
+      try {
+        await api.updateFrame(frame.id, { html: value })
+        setSaveState('saved')
+        window.setTimeout(() => setSaveState((s) => (s === 'saved' ? 'idle' : s)), 1500)
+      } catch (err) {
+        setSaveState('dirty')
+        useStore.getState().pushNotice(errorMessage(err, 'Couldn’t save the design. Please try again.'))
+      } finally {
+        finish()
+      }
     }, 700)
+    queuedSave.current = { timer, finish }
   }
 
   async function copyHtml() {
@@ -142,6 +157,9 @@ export function Inspector({
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <InspectorGroup title="Development">
+          <FrameApprovalControl key={frame.id} frame={frame} hasUnsavedChanges={saveState === 'dirty'} />
+        </InspectorGroup>
         <InspectorGroup title="Position">
           <div className="grid grid-cols-2 gap-1.5">
             <NumInput label="X" value={frame.x} onCommit={(v) => commitMeta({ x: v })} />
@@ -171,6 +189,14 @@ export function Inspector({
               onClick={() => void downloadFrameExport(frame, 'jpg')}
             >
               JPG
+            </Button>
+            <Button
+              variant="bare"
+              className={cn(fillBtn, 'col-span-2')}
+              title="Copy the image (2×) to paste anywhere"
+              onClick={() => void copyFramePng(frame)}
+            >
+              Copy as PNG
             </Button>
             <Button
               variant="bare"

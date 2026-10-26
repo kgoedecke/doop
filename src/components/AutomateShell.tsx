@@ -3,8 +3,9 @@ import { roleById } from '../../shared/agents'
 import { RoleMark } from './RoleMark'
 import { BrandMark } from './ui/brand-mark'
 import { Dot } from './ui/dot'
-import { ClockIcon } from './ui/icons'
+import { CheckIcon, ClockIcon } from './ui/icons'
 import { cn } from '@/lib/utils'
+import { clientIntegrations } from '../integrations'
 
 /**
  * Pieces the Automations and Integrations pages share: the provider and
@@ -50,7 +51,21 @@ export function MetaLogo({ width = 16, className }: Pick<SVGProps<SVGSVGElement>
   return <BrandMark brand="meta" size={Number(width)} className={className} />
 }
 
-type MarkStep = { type: 'pull' } | { type: 'agent'; roles: string[] }
+export function ApprovalTile({ size = 24 }: { size?: number }) {
+  return (
+    <span
+      /* white on the green fill, like text on brand: success-ink nearly
+         matches the fill in dark mode */
+      className="inline-grid flex-none place-items-center rounded-row bg-success text-white"
+      style={{ width: size, height: size }}
+      aria-hidden
+    >
+      <CheckIcon width={size * 0.6} height={size * 0.6} strokeWidth={2.25} />
+    </span>
+  )
+}
+
+type MarkStep = { type: 'pull'; provider?: string } | { type: 'agent'; roles: string[] } | { type: 'slack' | 'linear' }
 
 /** The chain that summarises an automation: clock, then a Meta tile per
  *  pull and a role mark per agent, joined by short dashes when `joined`. */
@@ -59,16 +74,23 @@ export function StepChain({
   size = 26,
   joined = true,
   className,
+  approval = false,
 }: {
   steps: MarkStep[]
   size?: number
   joined?: boolean
   className?: string
+  approval?: boolean
 }) {
-  const marks: React.ReactNode[] = [<ClockTile key="clock" size={size} />]
+  const marks: React.ReactNode[] = [
+    approval ? <ApprovalTile key="approval" size={size} /> : <ClockTile key="clock" size={size} />,
+  ]
   steps.forEach((s, i) => {
-    if (s.type === 'pull') marks.push(<MetaTile key={`p${i}`} size={size} className="border border-line bg-surface" />)
-    else
+    if (s.type === 'pull')
+      marks.push(<PullMark key={`p${i}`} provider={s.provider} size={size} className="border border-line bg-surface" />)
+    else if (s.type === 'slack' || s.type === 'linear')
+      marks.push(<PullMark key={`d${i}`} provider={s.type} size={size} />)
+    else if (s.type === 'agent')
       marks.push(
         <span key={`a${i}`} className="flex">
           {s.roles.map((id, j) => (
@@ -110,4 +132,22 @@ export function formatRunTime(at: number): string {
   const day = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
   const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
   return `${day} · ${time}`
+}
+
+/** The pulling integration's mark. Meta's without a provider (older rows),
+ *  a registered integration's own tile, and a neutral paper tile for one
+ *  that registered none — never another integration's logo. */
+export function PullMark({ provider, size = 24, className }: { provider?: string; size?: number; className?: string }) {
+  if (!provider || provider === 'meta') return <MetaTile size={size} className={className} />
+  const Tile = clientIntegrations.find((i) => i.id === provider)?.Tile
+  if (Tile) return <Tile size={size} className={className} />
+  return (
+    <span
+      className={cn('inline-grid flex-none place-items-center bg-paper-deep font-mono text-ink-soft', className)}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.29), fontSize: Math.round(size * 0.45) }}
+      aria-hidden
+    >
+      {provider.slice(0, 1).toUpperCase()}
+    </span>
+  )
 }

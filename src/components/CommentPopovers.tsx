@@ -3,6 +3,7 @@ import type { ElementComment } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName } from '../../shared/agents'
 import { cn } from '@/lib/utils'
+import { canCommentOpenCanvas, canEditOpenCanvas, useStore } from '../lib/store'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { RoleMark } from './RoleMark'
@@ -147,6 +148,10 @@ export function CommentThread({
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(false)
+  /* a view link reads the thread; replying and resolving need comment
+     access, and re-running an agent needs edit (the server holds both) */
+  const canComment = useStore(canCommentOpenCanvas)
+  const canEdit = useStore(canEditOpenCanvas)
   const listRef = useRef<HTMLDivElement>(null)
   /* a long conversation opens (and grows) scrolled to its newest message */
   useEffect(() => {
@@ -182,28 +187,68 @@ export function CommentThread({
               {c.failedAt ? (
                 <div className="mt-1 flex items-center gap-2 text-[11px] leading-[1.4] text-accent-ink">
                   <span>{c.failureReason ?? 'The agent did not finish.'}</span>
-                  <Button
-                    variant="danger-solid"
-                    size="pill"
-                    className="shrink-0 px-[9px] py-[3px] text-[11px]"
-                    onClick={() => onRetry(c.id)}
-                  >
-                    ↻ Retry
-                  </Button>
+                  {canEdit && (
+                    <Button
+                      variant="danger-solid"
+                      size="pill"
+                      className="shrink-0 px-[9px] py-[3px] text-[11px]"
+                      onClick={() => onRetry(c.id)}
+                    >
+                      ↻ Retry
+                    </Button>
+                  )}
                 </div>
               ) : null}
             </div>
           )
         })}
       </div>
+      {canComment && (
+        <ThreadReply
+          reply={reply}
+          placeholder={canEdit ? 'Reply… (@doop to ask the agent)' : 'Reply…'}
+          failed={failed}
+          sending={sending}
+          mentioned={mentioned}
+          onChange={setReply}
+          onSend={send}
+          onResolve={onResolve}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The reply field and Resolve / Reply actions under an open thread. */
+function ThreadReply({
+  reply,
+  placeholder,
+  failed,
+  sending,
+  mentioned,
+  onChange,
+  onSend,
+  onResolve,
+}: {
+  reply: string
+  placeholder: string
+  failed: boolean
+  sending: boolean
+  mentioned: ReturnType<typeof mentionedRole>
+  onChange: (text: string) => void
+  onSend: () => void
+  onResolve: () => void
+}) {
+  return (
+    <>
       <Textarea
         variant="bare"
         className="mt-2 min-h-[38px] md:text-[13px]"
         value={reply}
-        placeholder="Reply… (@doop to ask the agent)"
-        onChange={(e) => setReply(e.target.value)}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSend()
         }}
       />
       {failed && (
@@ -234,11 +279,11 @@ export function CommentThread({
           size="pill"
           className={cn('px-3 py-[4px] text-xs', !mentioned && 'ml-auto')}
           disabled={!reply.trim() || sending}
-          onClick={send}
+          onClick={onSend}
         >
           {sending ? 'Posting…' : 'Reply'}
         </Button>
       </div>
-    </div>
+    </>
   )
 }

@@ -1,3 +1,4 @@
+import { connectIntegration } from '../../lib/integrationConnect'
 import { useState } from 'react'
 import type { ClientIntegration, SettingsCardProps } from '../index'
 import { ApiError, req, type IntegrationsStatus } from '../../lib/api'
@@ -46,8 +47,7 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
     setBusy(true)
     setError(null)
     try {
-      const { url } = await req<{ url: string }>('/api/integrations/linear/start', { method: 'POST' })
-      location.assign(url)
+      if ((await connectIntegration('linear')) === 'browser') setBusy(false)
     } catch (error) {
       setError(
         error instanceof ApiError ? String(error.body.error ?? 'Could not install Doop.') : 'Could not install Doop.',

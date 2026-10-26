@@ -4,6 +4,20 @@
  * page (the element properties panel) reaches the live document through
  * these calls instead of holding an iframe ref of its own.
  */
+import type { DropTarget, FlowPlacement } from './layers'
+import type { Interaction } from '../../shared/prototype'
+
+export interface LayoutDrop {
+  target: DropTarget
+  styles: FlowPlacement
+  container: ElementInfo['rect']
+  line: ElementInfo['rect']
+}
+
+export async function elementMoveTarget(frameId: string, selector: string, x: number, y: number) {
+  const reply = await requestFrame(frameId, 'doop:move-target', { selector, x, y })
+  return reply?.result as { free: boolean; drop: LayoutDrop | null } | undefined
+}
 
 /** The runtime's summary of one element: computed styles resolved to what
  *  the Design panel shows, plus the inline styles the element already carries.
@@ -65,6 +79,7 @@ export interface ElementInfo {
   visibility: string
   clipsContent: boolean
   backgroundColor: string
+  image: { kind: 'img' | 'background'; src: string; size: string; repeat: string } | null
   /** top, right, bottom, left */
   borderWidths: [number | null, number | null, number | null, number | null]
   /** style and colour of the first side that draws */
@@ -86,6 +101,8 @@ export type StylePatch = Record<string, string | null>
 
 export type GeometryEdit =
   | { kind: 'position'; axis: 'x' | 'y'; value: number }
+  /** Move both axes together to a rendered position in frame pixels. */
+  | { kind: 'move'; x: number; y: number }
   | { kind: 'align'; axis: 'x' | 'y'; edge: 'start' | 'center' | 'end' }
   | { kind: 'rotate'; value: number }
   | { kind: 'flip'; axis: 'x' | 'y' }
@@ -194,6 +211,30 @@ export async function inspectElement(frameId: string, selector: string): Promise
  *  element's fresh properties. */
 export async function styleElement(frameId: string, selector: string, styles: StylePatch): Promise<ElementInfo | null> {
   return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles }))
+}
+
+/** Replace image content through the same live edit/undo path as styles. */
+export async function replaceElementImage(
+  frameId: string,
+  selector: string,
+  image: NonNullable<ElementInfo['image']>,
+  url: string,
+): Promise<ElementInfo | null> {
+  return infoOf(await requestFrame(frameId, 'doop:replace-image', { selector, image, url }))
+}
+
+/** One element with interactions, as the frame runtime reports it. */
+export interface ScannedHotspot {
+  selector: string
+  rect: ElementInfo['rect']
+  interactions: Interaction[]
+}
+
+/** Every element of the live document that carries prototype interactions,
+ *  including ones a script created; empty when the frame is not mounted. */
+export async function scanHotspots(frameId: string): Promise<ScannedHotspot[]> {
+  const reply = await requestFrame(frameId, 'doop:proto-scan', {})
+  return Array.isArray(reply?.items) ? (reply.items as ScannedHotspot[]) : []
 }
 
 /** Preview a whole scrub locally, then save once or restore its original CSS. */

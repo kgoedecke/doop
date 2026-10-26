@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { createServer, type ViteDevServer } from 'vite'
 import type { Browser, Page } from 'puppeteer-core'
 import { findBrowserPath, getBrowser } from '../server/screenshot'
@@ -13,6 +16,7 @@ declare global {
       select: (selector: string) => void
       selectFrame: () => void
       deselect: () => void
+      picked: () => string[]
       setTool: (tool: 'select' | 'hand') => void
       setZoom: (zoom: number) => void
       undo: () => Promise<void>
@@ -28,8 +32,17 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   let page: Page
   let saved: Frame
   let seedId = 0
+  let uploadStatus = 200
+  let uploadGate: Promise<void> | null = null
+  let imageDir: string
+  const replacementSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><rect width="240" height="240" fill="coral"/></svg>'
+  const replacementUrl = `data:image/svg+xml;base64,${Buffer.from(replacementSvg).toString('base64')}`
+  const originalUrl = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="teal"/></svg>').toString('base64')}`
   const errors: string[] = []
   beforeAll(async () => {
+    imageDir = mkdtempSync(path.join(tmpdir(), 'doop-image-fill-'))
+    writeFileSync(path.join(imageDir, 'replacement.svg'), replacementSvg)
     vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
     await vite.listen()
     browser = await getBrowser()
@@ -39,6 +52,19 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.setViewport({ width: 1000, height: 900 })
     await page.setRequestInterception(true)
     page.on('request', async (request) => {
+      if (new URL(request.url()).pathname === '/api/canvases/c/assets') {
+        await uploadGate
+        await request.respond({
+          status: uploadStatus,
+          contentType: 'application/json',
+          body: JSON.stringify(
+            uploadStatus === 200
+              ? { url: replacementUrl, mime: 'image/svg+xml', size: replacementSvg.length }
+              : { error: 'Upload failed. Please try again.' },
+          ),
+        })
+        return
+      }
       // The delayed-font test releases this stylesheet after the panel's first read.
       if (new URL(request.url()).pathname === '/tests/fixtures/late-font.css') return
       if (new URL(request.url()).pathname === '/api/frames/f' && request.method() === 'PATCH') {
@@ -83,6 +109,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page?.close()
     await browser?.close()
     await vite?.close()
+    if (imageDir) rmSync(imageDir, { recursive: true, force: true })
     expect(errors).toEqual([])
   })
 
@@ -195,18 +222,366 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.waitForFunction(() => !document.querySelector('[aria-busy]'))
   }
 
-  async function seedPanel(html: string, selector: string) {
+  async function seedPanel(html: string, selector: string, width = '120') {
     const fixture = String(++seedId)
     saved = { ...saved, html: html.replace('<body', `<body data-panel-fixture="${fixture}"`) }
     await page.evaluate((value) => window.elementPanelHarness.seed(value), saved)
-    const frame = (await (await page.$('iframe'))!.contentFrame())!
+    const frame = (await (await page.waitForSelector('iframe'))!.contentFrame())!
     await frame.waitForFunction((fixture) => document.body.dataset.panelFixture === fixture, {}, fixture)
     await frame.waitForSelector(selector)
     await selectLayer(selector)
     // Selection may initially show the previous read while the new one is debounced.
-    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('[aria-label="Width"]')?.value === '120')
+    await page.waitForFunction(
+      (width) => document.querySelector<HTMLInputElement>('[aria-label="Width"]')?.value === width,
+      {},
+      width,
+    )
     return frame
   }
+
+  async function chooseReplacement() {
+    if (!(await page.$('[aria-label="Image fill settings"]'))) await page.click('[aria-label="Image fill"]')
+    const chooser = page.waitForFileChooser()
+    await page.click('[aria-label="Upload image"]')
+    await (await chooser).accept([path.join(imageDir, 'replacement.svg')])
+  }
+
+  it.each([false, true])(
+    'opens image settings, shows upload for hover or touch, and dismisses with Escape (touch: %s)',
+    async (hasTouch) => {
+      await page.setViewport({ width: 1000, height: 900, hasTouch })
+      await page.waitForFunction(() => !!window.elementPanelHarness)
+      try {
+        await seedPanel(
+          `<body><img id="photo" src="${originalUrl}" style="width:120px;height:80px;object-fit:cover"></body>`,
+          '#photo',
+        )
+        await page.waitForSelector('[aria-label="Image fill"]')
+        expect(await page.$eval('[aria-label="Image fill"]', (el) => el.textContent?.trim())).toBe('Image')
+        await page.click('[aria-label="Image fill"]')
+        await page.waitForSelector('[aria-label="Image fill settings"]')
+        const placement = await page.evaluate(() => {
+          const panel = document.querySelector('[aria-label="Image fill settings"]')!.getBoundingClientRect()
+          const trigger = document.querySelector('[aria-label="Image fill"]')!.getBoundingClientRect()
+          return {
+            right: panel.right,
+            left: panel.left,
+            top: panel.top,
+            bottom: panel.bottom,
+            triggerLeft: trigger.left,
+          }
+        })
+        expect(placement.right).toBeLessThan(placement.triggerLeft)
+        expect(placement.left).toBeGreaterThanOrEqual(12)
+        expect(placement.top).toBeGreaterThanOrEqual(12)
+        expect(placement.bottom).toBeLessThanOrEqual(888)
+        expect(await page.$eval('[aria-label="Image URL"]', (el) => (el as HTMLInputElement).value)).toBe(originalUrl)
+        await expect
+          .poll(
+            async () => {
+              // Reposition the pointer if fonts or collision handling move the
+              // newly opened editor. Touch users must see the action without hover.
+              if (!hasTouch) await page.hover('[aria-label="Upload image"]')
+              return page.$eval('[aria-label="Upload image"] > span', (el) => getComputedStyle(el).opacity)
+            },
+            { timeout: 5000 },
+          )
+          .toBe('1')
+        await page.screenshot({ path: '/tmp/doop-image-fill-editor.png' })
+        await page.keyboard.press('Escape')
+        await page.waitForSelector('[aria-label="Image fill settings"]', { hidden: true })
+        await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Image fill')
+      } finally {
+        await page.setViewport({ width: 1000, height: 900, hasTouch: false })
+        await page.waitForFunction(() => !!window.elementPanelHarness)
+      }
+    },
+    15_000,
+  )
+
+  it('validates image URLs, replaces through Enter, and persists sizing with undo', async () => {
+    const frame = await seedPanel(
+      `<body><img id="photo" src="${originalUrl}" style="width:120px;height:80px;object-fit:cover"></body>`,
+      '#photo',
+    )
+    await page.waitForSelector('[aria-label="Image fill"]')
+    await page.click('[aria-label="Image fill"]')
+    const before = saved.html
+    await number('Image URL', 'javascript:alert(1)')
+    await page.waitForSelector('[role="alert"]')
+    expect(saved.html).toBe(before)
+    await number('Image URL', 'data:image/png;base64,aGVsbG8=')
+    await page.waitForFunction(() => document.querySelector('[role="alert"]')?.textContent?.includes('Couldn’t load'))
+    expect(saved.html).toBe(before)
+    await number('Image URL', replacementUrl)
+    await expect.poll(() => saved.html).toContain(replacementUrl)
+    await page.waitForFunction(() => !document.querySelector('[aria-busy]'))
+    await page.select('[aria-label="Image sizing"]', 'contain')
+    await expect.poll(() => saved.html).toContain('object-fit: contain')
+    expect(await frame.$eval('#photo', (el) => [getComputedStyle(el).width, getComputedStyle(el).height])).toEqual([
+      '120px',
+      '80px',
+    ])
+    await page.evaluate(() => window.elementPanelHarness.undo())
+    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#photo')!).objectFit === 'cover')
+    await page.waitForFunction(
+      () => document.querySelector<HTMLSelectElement>('[aria-label="Image sizing"]')?.value === 'cover',
+    )
+    await page.evaluate(() => window.elementPanelHarness.redo())
+    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#photo')!).objectFit === 'contain')
+    await page.waitForFunction(
+      () => document.querySelector<HTMLSelectElement>('[aria-label="Image sizing"]')?.value === 'contain',
+    )
+    for (const mode of ['fill', 'none', 'scale-down', 'cover']) {
+      await page.select('[aria-label="Image sizing"]', mode)
+      await frame.waitForFunction(
+        (mode) => getComputedStyle(document.querySelector('#photo')!).objectFit === mode,
+        {},
+        mode,
+      )
+    }
+    await expect.poll(() => saved.html).toContain('object-fit: cover')
+  }, 20_000)
+
+  it('replaces responsive images from a local file, preserving their box and supporting undo/redo', async () => {
+    const frame = await seedPanel(
+      `<body><picture><source srcset="${originalUrl}"><img id="photo" src="${originalUrl}" srcset="${originalUrl}" sizes="100vw" alt="A landscape" style="object-fit:cover;border-radius:12px"></picture></body>`,
+      '#photo',
+    )
+    await page.waitForSelector('[aria-label="Image fill"]')
+    await chooseReplacement()
+    await expect.poll(() => saved.html).toContain(replacementUrl)
+    await frame.waitForFunction(
+      (url) => document.querySelector<HTMLImageElement>('#photo')?.currentSrc === url,
+      {},
+      replacementUrl,
+    )
+    expect(
+      await frame.$eval('#photo', (el) => {
+        const cs = getComputedStyle(el)
+        return {
+          width: cs.width,
+          height: cs.height,
+          fit: cs.objectFit,
+          radius: cs.borderRadius,
+          alt: el.getAttribute('alt'),
+          srcset: el.getAttribute('srcset'),
+        }
+      }),
+    ).toEqual({ width: '120px', height: '80px', fit: 'cover', radius: '12px', alt: 'A landscape', srcset: null })
+    expect(await frame.$('source')).toBeNull()
+    await page.evaluate(() => window.elementPanelHarness.undo())
+    await frame.waitForSelector('source')
+    expect(saved.html).not.toContain(replacementUrl)
+    await page.evaluate(() => window.elementPanelHarness.redo())
+    await expect.poll(() => saved.html).toContain(replacementUrl)
+    await page.waitForFunction(
+      (url) => document.querySelector<HTMLImageElement>('[aria-label="Image fill"] img')?.src === url,
+      {},
+      replacementUrl,
+    )
+    await page.screenshot({ path: '/tmp/doop-image-fill.png' })
+  })
+
+  it('replaces CSS image fills without changing their positioning or background color', async () => {
+    const frame = await seedPanel(
+      `<body><div id="photo" style="width:120px;height:80px;background: #123456 url('${originalUrl}') center / cover no-repeat"></div></body>`,
+      '#photo',
+    )
+    await page.waitForSelector('[aria-label="Image fill"]')
+    await chooseReplacement()
+    await expect.poll(() => saved.html).toContain(replacementUrl)
+    expect(
+      await frame.$eval('#photo', (el) => {
+        const cs = getComputedStyle(el)
+        return {
+          image: cs.backgroundImage,
+          size: cs.backgroundSize,
+          position: cs.backgroundPosition,
+          color: cs.backgroundColor,
+        }
+      }),
+    ).toEqual({ image: `url("${replacementUrl}")`, size: 'cover', position: '50% 50%', color: 'rgb(18, 52, 86)' })
+    for (const [mode, size, repeat] of [
+      ['contain', 'contain', 'no-repeat'],
+      ['tile', 'auto', 'repeat'],
+      ['fill', '100% 100%', 'no-repeat'],
+      ['contain', 'contain', 'no-repeat'],
+    ]) {
+      await page.select('[aria-label="Image sizing"]', mode!)
+      await frame.waitForFunction(
+        (size, repeat) => {
+          const cs = getComputedStyle(document.querySelector('#photo')!)
+          return cs.backgroundSize === size && cs.backgroundRepeat === repeat
+        },
+        {},
+        size,
+        repeat,
+      )
+    }
+    await expect.poll(() => saved.html).toContain('background-size: contain')
+  })
+
+  it.each(['', '#photo { width: 50%; height: auto; }'])('preserves image sizing without Typed OM (%s)', async (css) => {
+    const frame = await seedPanel(
+      `<body><style>${css}</style><div id="parent" style="width:240px"><img id="photo" src="${originalUrl}"></div></body>`,
+      '#photo',
+    )
+    await frame.evaluate(() => {
+      Object.defineProperty(document.querySelector('#photo'), 'computedStyleMap', {
+        value: undefined,
+        configurable: true,
+      })
+    })
+    try {
+      await chooseReplacement()
+      await expect.poll(() => saved.html).toContain(replacementUrl)
+      await frame.waitForFunction(
+        (url) => document.querySelector<HTMLImageElement>('#photo')?.currentSrc === url,
+        {},
+        replacementUrl,
+      )
+      expect(await frame.$eval('#photo', (el) => [getComputedStyle(el).width, getComputedStyle(el).height])).toEqual([
+        '120px',
+        '80px',
+      ])
+      if (css) {
+        await frame.$eval('#parent', (el) => {
+          ;(el as HTMLElement).style.width = '480px'
+        })
+        expect(await frame.$eval('#photo', (el) => [getComputedStyle(el).width, getComputedStyle(el).height])).toEqual([
+          '240px',
+          '160px',
+        ])
+      }
+    } finally {
+      await frame.evaluate(() => {
+        delete (document.querySelector('#photo') as unknown as { computedStyleMap?: unknown }).computedStyleMap
+      })
+    }
+  })
+
+  it.each(['row', 'column'])(
+    'keeps flex %s distribution and intrinsic sizing across repeated replacements',
+    async (direction) => {
+      const frame = await seedPanel(
+        `<body><div id="parent" style="display:flex;flex-direction:${direction};width:${direction === 'row' ? 600 : 300}px;${direction === 'column' ? 'height:600px' : ''}"><img id="photo" src="${originalUrl}" style="flex:1 1 auto"><img id="sibling" src="${originalUrl}" style="flex:1 1 auto"></div></body>`,
+        '#photo',
+        '300',
+      )
+      const dimensions = () =>
+        frame.$$eval('#photo, #sibling', (els) =>
+          els.map((el) => [getComputedStyle(el).width, getComputedStyle(el).height]),
+        )
+      const before = await dimensions()
+      const resize = (value: string) =>
+        frame.$eval(
+          '#parent',
+          (el, axis, value) => {
+            ;(el as HTMLElement).style.setProperty(axis, value)
+          },
+          direction === 'row' ? 'width' : 'height',
+          value,
+        )
+      await resize('480px')
+      const resized = await dimensions()
+      await resize('600px')
+      await chooseReplacement()
+      await expect.poll(() => saved.html).toContain(replacementUrl)
+      await frame.waitForFunction(
+        (url) => document.querySelector<HTMLImageElement>('#photo')?.currentSrc === url,
+        {},
+        replacementUrl,
+      )
+      expect(await dimensions()).toEqual(before)
+      await resize('480px')
+      expect(await dimensions()).toEqual(resized)
+      await resize('600px')
+      expect(
+        await frame.$eval('#photo', (el) => [
+          getComputedStyle(el).flexGrow,
+          getComputedStyle(el).flexShrink,
+          getComputedStyle(el).flexBasis,
+        ]),
+      ).toEqual(['1', '1', 'auto'])
+      // A second replacement must keep the first file's layout inputs.
+      await page.waitForFunction(
+        (url) => document.querySelector<HTMLImageElement>('[aria-label="Image fill"] img')?.src === url,
+        {},
+        replacementUrl,
+      )
+      await number('Image URL', originalUrl)
+      await expect.poll(() => saved.html).not.toContain(replacementUrl)
+      await frame.waitForFunction(
+        (url) => document.querySelector<HTMLImageElement>('#photo')?.currentSrc === url,
+        {},
+        originalUrl,
+      )
+      expect(await dimensions()).toEqual(before)
+      await page.evaluate(() => window.elementPanelHarness.undo())
+      await frame.waitForFunction(
+        (url) => document.querySelector<HTMLImageElement>('#photo')?.currentSrc === url,
+        {},
+        replacementUrl,
+      )
+      expect(await dimensions()).toEqual(before)
+    },
+    15_000,
+  )
+
+  it('keeps background color and opacity editable alongside an image fill', async () => {
+    const frame = await seedPanel(
+      `<body><img id="photo" src="${originalUrl}" style="width:120px;height:80px;object-fit:contain;background-color:rgba(255,0,0,.5)"></body>`,
+      '#photo',
+    )
+    await page.waitForSelector('[aria-label="Image fill"]')
+    await number('Fill color', '#123456')
+    await number('Fill opacity', 75)
+    await frame.waitForFunction(
+      () => getComputedStyle(document.querySelector('#photo')!).backgroundColor === 'rgba(18, 52, 86, 0.75)',
+    )
+    expect(await frame.$eval('#photo', (el) => (el as HTMLImageElement).src)).toBe(originalUrl)
+    expect(await frame.$eval('#photo', (el) => getComputedStyle(el).objectFit)).toBe('contain')
+    await expect.poll(() => saved.html).toContain('rgba(18, 52, 86, 0.75)')
+  })
+
+  it('keeps the old image after upload failure and allows retrying the same file', async () => {
+    await seedPanel(`<body><img id="photo" src="${originalUrl}" style="width:120px;height:80px"></body>`, '#photo')
+    await page.waitForSelector('[aria-label="Image fill"]')
+    const before = saved.html
+    uploadStatus = 500
+    try {
+      await chooseReplacement()
+      await page.waitForSelector('[role="alert"]')
+      expect(saved.html).toBe(before)
+    } finally {
+      uploadStatus = 200
+    }
+    await chooseReplacement()
+    await expect.poll(() => saved.html).toContain(replacementUrl)
+  })
+
+  it('does not overwrite a layer changed while its image is uploading', async () => {
+    await seedPanel(`<body><img id="photo" src="${originalUrl}" style="width:120px;height:80px"></body>`, '#photo')
+    await page.waitForSelector('[aria-label="Image fill"]')
+    let release!: () => void
+    uploadGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      await chooseReplacement()
+      await page.waitForSelector('[aria-label="Upload image"][disabled]')
+      saved = { ...saved, html: saved.html.replace('height:80px', 'height:90px') }
+      await page.evaluate((value) => window.elementPanelHarness.remote(value), saved)
+      release()
+      await page.waitForSelector('[role="alert"]')
+      expect(saved.html).not.toContain(replacementUrl)
+      expect(saved.html).toContain('height:90px')
+    } finally {
+      release()
+      uploadGate = null
+    }
+  })
 
   async function number(label: string, value: number | string) {
     const selector = `input[aria-label="${label}"]`

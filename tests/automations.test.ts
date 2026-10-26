@@ -84,7 +84,9 @@ describe('normalize', () => {
       { id: 's1', type: 'pull', provider: 'meta', accountId: 'act_1', filter: 'active', canvasId: 'c1' },
       { id: 's2', type: 'agent', title: '', prompt: 'Review it', roles: ['ux'], canvasId: 'c1' },
     ])
-    expect(normalizeSteps([{ type: 'webhook' }])).toBe('each step is a pull or an agent task')
+    expect(normalizeSteps([{ type: 'webhook' }])).toBe(
+      'each step must be a pull, agent task, Slack message or Linear ticket',
+    )
   })
 
   it('says what is missing before an automation can run', () => {

@@ -4,6 +4,7 @@ import { roleById } from '../../shared/agents'
 import {
   AUTOMATION_EXAMPLES,
   describeSchedule,
+  incompleteReason,
   type Automation,
   type AutomationExample,
   type Step,
@@ -12,7 +13,7 @@ import { api } from '../lib/api'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { AppRail, railLayout } from '../components/AppRail'
-import { ClockTile, MetaTile, RunDot, StepChain, formatRunTime } from '../components/AutomateShell'
+import { ClockTile, MetaTile, PullMark, RunDot, StepChain, formatRunTime } from '../components/AutomateShell'
 import { FrameThumb } from '../components/FramePreview'
 import { RoleMark } from '../components/RoleMark'
 import { Button } from '../components/ui/button'
@@ -45,6 +46,7 @@ export function localTimeZone(): string {
 
 /** "every Monday 09:00" — the schedule as the list rows say it */
 function everyLine(a: Automation): string {
+  if (a.trigger.type === 'approval') return 'when designs are approved'
   return describeSchedule(a.schedule)
     .replace(/^Every /, 'every ')
     .replace(' at ', ' ')
@@ -81,6 +83,7 @@ export function Automations() {
       const created = example
         ? await api.createAutomation({
             name: example.name,
+            trigger: example.trigger === 'approval' ? { type: 'approval', canvasId: '' } : { type: 'schedule' },
             schedule: { ...example.schedule, tz },
             steps: example.steps.map((s, i) => ({ ...s, id: `s${i + 1}`, canvasId: '' }) as Step),
           })
@@ -161,7 +164,7 @@ export function Automations() {
                   </>
                 }
                 title="Nothing runs on its own yet"
-                description="Pull designs in on a schedule, or hand a canvas to an agent every week."
+                description="Run on a schedule or when designs are approved. Create variants, hand off tickets and share updates."
                 action={
                   <Button variant="primary" disabled={busy} onClick={() => create()}>
                     + New automation
@@ -202,7 +205,9 @@ export function Automations() {
                     <div className="flex min-w-0 items-center gap-2.5">
                       {first?.type === 'pull' ? (
                         <MetaTile size={24} className="border border-line bg-surface" />
-                      ) : first ? (
+                      ) : first?.type === 'slack' || first?.type === 'linear' ? (
+                        <PullMark provider={first.type} size={24} />
+                      ) : first?.type === 'agent' ? (
                         <span className="grid size-6 flex-none place-items-center rounded-row border border-line bg-surface">
                           <RoleMark role={roleById(first.roles[0])} size={14} />
                         </span>
@@ -269,7 +274,13 @@ export function Automations() {
                     <span
                       className={cn('hidden text-caption md:block', a.nextRunAt ? 'text-ink-soft' : 'text-ink-faint')}
                     >
-                      {a.nextRunAt ? formatRunTime(a.nextRunAt) : a.enabled ? 'finish setup' : 'paused'}
+                      {a.nextRunAt
+                        ? formatRunTime(a.nextRunAt)
+                        : !a.enabled
+                          ? 'paused'
+                          : a.trigger.type === 'approval' && !incompleteReason(a.steps, a.trigger)
+                            ? 'on approval'
+                            : 'finish setup'}
                     </span>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -326,11 +337,13 @@ export function Examples({ onUse, busy }: { onUse: (example: AutomationExample) 
             className="group flex flex-col gap-2 rounded-card border border-line bg-surface px-4 pb-3.5 pt-4 shadow-card transition-[translate,border-color] duration-150 hover:-translate-y-[3px] hover:border-ink-faint"
             onClick={() => !busy && onUse(e)}
           >
-            <StepChain steps={e.steps} size={26} />
+            <StepChain steps={e.steps} size={26} approval={e.trigger === 'approval'} />
             <b className="mt-1 text-copy font-semibold">{e.name}</b>
             <span className="text-body text-ink-soft">{e.blurb}</span>
             <div className="mt-auto flex items-center pt-1.5 text-caption text-ink-faint">
-              {describeSchedule({ ...e.schedule, tz: 'UTC' }).replace(' at ', ' ')}
+              {e.trigger === 'approval'
+                ? 'When designs are approved'
+                : describeSchedule({ ...e.schedule, tz: 'UTC' }).replace(' at ', ' ')}
               <b className="ml-auto font-sans text-body font-semibold text-ink group-hover:text-accent-ink">Use →</b>
             </div>
           </Pressable>

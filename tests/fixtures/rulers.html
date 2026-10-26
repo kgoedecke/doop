@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body style="margin: 0">
+    <div id="root" style="position: absolute; inset: 40px 0 0; height: auto; overflow: hidden"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { Stage } from '/src/components/Stage.tsx'
+      import { useStore } from '/src/lib/store.ts'
+      import { clearHistory, undo, redo } from '/src/lib/history.ts'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import '/src/styles.css'
+      window.rulersHarness = {
+        seed: (canvas) => {
+          clearHistory()
+          useStore.getState().setCanvas(canvas)
+        },
+        viewport: (viewport) => useStore.getState().setViewport(viewport),
+        select: (ids) => useStore.getState().selectMany(ids),
+        state: () => ({
+          rulers: useStore.getState().rulers,
+          frames: useStore.getState().canvas?.frames ?? [],
+          guides: useStore.getState().canvas?.guides ?? [],
+          selectedGuideId: useStore.getState().selectedGuideId,
+        }),
+        undo,
+        redo,
+      }
+      createRoot(document.getElementById('root')).render(
+        React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {}, rightInset: 0 })),
+      )
+    </script>
+  </body>
+</html>

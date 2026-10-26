@@ -204,12 +204,12 @@ export function Admin() {
                       <MetaLine
                         className="mt-[5px] min-h-0 flex-wrap content-start xs:min-h-[30px]"
                         trailing={
-                          c.linkAccess === 'edit' && (
+                          c.linkAccess !== 'none' && (
                             <Badge
                               className="px-[5px] py-px text-micro"
-                              title="Anyone with the link can edit this canvas"
+                              title={`Anyone with the link can ${c.linkAccess} this canvas`}
                             >
-                              link on
+                              link: {c.linkAccess}
                             </Badge>
                           )
                         }

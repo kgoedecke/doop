@@ -10,6 +10,7 @@ import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escape
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
+  CanvasGuide,
   ActorKind,
   ActivityItem,
   AgentTask,
@@ -1311,8 +1312,31 @@ export function appendFrameHtml(
 /* ------------------------------------------------------------------ */
 
 export function setCanvasPages(canvasId: string, pages: import('../shared/types.ts').CanvasPageInfo[], actor: Actor) {
-  store.setPages(canvasId, pages)
-  broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+  const saved = store.setPages(canvasId, pages)
+  const next = saved?.pages ?? pages
+  broadcast(canvasId, { type: 'canvas:pages', pages: next, actor })
+  for (const guide of saved?.dropped ?? []) broadcast(canvasId, { type: 'guide', id: guide.id, guide: null, actor })
+  return next
+}
+
+/** Point a page's prototype flow at a frame (or clear it); peers get the page list. */
+export function setFlowStart(canvasId: string, pageId: string, frameId: string | null, actor: Actor) {
+  const pages = store.setFlowStart(canvasId, pageId, frameId)
+  if (pages) broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+  return pages
+}
+
+/** Add or move a ruler guide; peers see it at once. Guides are view
+ *  furniture, not design content, so the canvas stays as recently edited
+ *  as it was and no activity is logged. */
+export function setGuide(canvasId: string, guide: CanvasGuide, actor: Actor) {
+  const saved = store.setGuide(canvasId, guide)
+  if (saved) broadcast(canvasId, { type: 'guide', id: saved.id, guide: saved, actor })
+  return saved
+}
+
+export function deleteGuide(canvasId: string, guideId: string, actor: Actor) {
+  if (store.deleteGuide(canvasId, guideId)) broadcast(canvasId, { type: 'guide', id: guideId, guide: null, actor })
 }
 
 /** Copy a page with its frames; peers get the page list and each new frame. */
@@ -1320,6 +1344,7 @@ export async function duplicatePage(canvasId: string, pageId: string, actor: Act
   const copy = await store.duplicatePage(canvasId, pageId, actor.name)
   if (!copy) return undefined
   broadcast(canvasId, { type: 'canvas:pages', pages: copy.pages, actor })
+  for (const guide of copy.guides) broadcast(canvasId, { type: 'guide', id: guide.id, guide, actor })
   for (const frame of copy.frames) {
     broadcast(canvasId, { type: 'frame:created', frame, actor })
     emitCanvasEvent(canvasId, { type: 'frame.created', frame, actor })
@@ -1431,6 +1456,40 @@ export function updateFrame(
 
   touch(frame.canvasId, actor, frame.id)
   return frame
+}
+
+/** Sign-off is a human action, separate from ordinary frame editing. */
+export function setFrameApproval(
+  frameId: string,
+  ready: boolean,
+  user: { id: string; name: string },
+): Frame | undefined {
+  const current = store.getFrame(frameId)
+  if (!current) return undefined
+  if (ready && current.approval?.status === 'ready_for_dev') return current
+  const actor = resolveActor({ name: user.name, kind: 'user' })
+  const approval = ready
+    ? {
+        status: 'ready_for_dev' as const,
+        approvedBy: user.name,
+        approvedByUserId: user.id,
+        approvedAt: Math.max(Date.now(), current.updatedAt + 1),
+        approvedFrameUpdatedAt: current.updatedAt,
+      }
+    : null
+  const frame = store.updateFrame(frameId, { approval }, user.name)!
+  broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+  logActivity(
+    frame.canvasId,
+    actor,
+    ready ? `marked “${frame.name}” ready for dev` : `moved “${frame.name}” back to draft`,
+    frameId,
+  )
+  return frame
+}
+
+export function isFrameStreaming(frameId: string): boolean {
+  return streams.has(frameId) || reveals.has(frameId)
 }
 
 export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-view-menu-state"
+description = "Enables the view_menu_state command without any pre-configured scope."
+commands.allow = ["view_menu_state"]
+
+[[permission]]
+identifier = "deny-view-menu-state"
+description = "Denies the view_menu_state command without any pre-configured scope."
+commands.deny = ["view_menu_state"]

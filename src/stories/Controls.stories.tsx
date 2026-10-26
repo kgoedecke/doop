@@ -8,17 +8,21 @@ import { MenuButton } from '@/components/ui/menu-button'
 import { Pressable } from '@/components/ui/pressable'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Toolbar, ToolbarControl, ToolbarDot } from '@/components/ui/toolbar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
   ArrowUpIcon,
   CalendarIcon,
+  CommentIcon,
   CopyIcon,
   GridIcon,
   HistoryIcon,
   LayoutTemplateIcon,
   MoreHorizontalIcon,
   PanelCollapseIcon,
+  PulseIcon,
   SearchIcon,
+  SparkIcon,
   UserIcon,
   XIcon,
 } from '@/components/ui/icons'
@@ -293,3 +297,42 @@ function SelectDemo() {
 
 /** One value from a short list. `value=""` shows the placeholder; no item may use the empty string. */
 export const Selects: Story = { name: 'Select', render: () => <SelectDemo /> }
+
+/** The canvas editor's floating toolbar. `vertical` is the 40px column pinned
+ *  to the editor's sides (and the automation editor's collapsed Runs panel);
+ *  `ToolbarControl` names each glyph by its tooltip, and `ToolbarDot` marks
+ *  live state on a button's corner. */
+export const Toolbars: Story = {
+  name: 'Toolbar',
+  render: () => (
+    <div className="flex items-start gap-6">
+      <Toolbar aria-label="Canvas panels" orientation="vertical">
+        <ToolbarControl label="Agents · 1 working">
+          <SparkIcon />
+          <ToolbarDot className="bg-success" />
+        </ToolbarControl>
+        <ToolbarControl label="Comments · 2 open">
+          <CommentIcon />
+          <ToolbarDot className="bg-brand" />
+        </ToolbarControl>
+        <ToolbarControl label="Activity">
+          <PulseIcon />
+        </ToolbarControl>
+      </Toolbar>
+      <Toolbar aria-label="Runs" orientation="vertical">
+        <ToolbarControl label="Runs · last run failed">
+          <PulseIcon />
+          <ToolbarDot className="bg-accent-ink" />
+        </ToolbarControl>
+      </Toolbar>
+      <Toolbar aria-label="Actions">
+        <ToolbarControl label="Search" side="bottom">
+          <SearchIcon />
+        </ToolbarControl>
+        <ToolbarControl label="Copy" side="bottom">
+          <CopyIcon />
+        </ToolbarControl>
+      </Toolbar>
+    </div>
+  ),
+}

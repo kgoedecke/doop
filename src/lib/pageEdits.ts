@@ -2,7 +2,7 @@ import type { Canvas, CanvasPageInfo } from '../../shared/types'
 import { canvasPages, framePageId, samePages } from '../../shared/pages'
 import { api, ApiError } from './api'
 import { useStore } from './store'
-import { recordPageCopy, recordPages, recordUpdates, trackSave } from './history'
+import { guidesLeaving, recordPageCopy, recordPages, recordUpdates, trackSave } from './history'
 
 export function savePages(canvas: Canvas, next: CanvasPageInfo[], selectId?: string) {
   const task = savePagesAndRecord(canvas, next, selectId)
@@ -13,12 +13,14 @@ export function savePages(canvas: Canvas, next: CanvasPageInfo[], selectId?: str
 async function savePagesAndRecord(canvas: Canvas, next: CanvasPageInfo[], selectId?: string) {
   const expected = canvasPages(canvas)
   const activeBefore = useStore.getState().activePageId
+  /* the guides a deleted page takes with it, for undo to bring back */
+  const leaving = guidesLeaving(canvas, next)
   try {
     const saved = await api.setPages(canvas.id, next, expected)
     const state = useStore.getState()
     if (state.canvas?.id !== canvas.id) return
     const activeAfter = selectId ?? (saved.some((p) => p.id === activeBefore) ? activeBefore : saved[0]!.id)
-    recordPages(canvas.id, expected, saved, activeBefore, activeAfter)
+    recordPages(canvas.id, expected, saved, activeBefore, activeAfter, leaving)
     // A newer broadcast can arrive before this HTTP response.
     if (!samePages(canvasPages(state.canvas), expected) && !samePages(canvasPages(state.canvas), saved)) return
     state.setPages(saved, canvas.id)

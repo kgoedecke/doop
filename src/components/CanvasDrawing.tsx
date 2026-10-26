@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { useStore } from '../lib/store'
 import { isDrawingTool, resolvePointerAction, type DrawingTool } from '../lib/tools'
 import { gesture } from '../lib/gesture'
+import { visibleGuides } from '../lib/guides'
+import { snapPointToGuides } from '../lib/snap'
 import { isTypingTarget } from '../lib/keys'
 import {
   defaultDrawing,
@@ -114,13 +116,19 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
     const vp = useStore.getState().viewport
     return { x: (clientX - rect.left - vp.x) / vp.zoom, y: (clientY - rect.top - vp.y) / vp.zoom }
   }
+  /** The world point under the pointer, pulled onto the ruler guides unless
+   *  Alt is held — the same bypass as the pen's anchor snapping. */
+  function snappedWorld(ev: { clientX: number; clientY: number; altKey: boolean }): Point {
+    const at = toWorld(ev.clientX, ev.clientY)
+    return ev.altKey ? at : snapPointToGuides(at, visibleGuides(), useStore.getState().viewport.zoom)
+  }
 
   function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     if ((e.target as Element).closest('[data-comment-ui]')) {
       cancel()
       return
     }
-    if ((e.target as Element).closest('[data-drawing-input]')) return
+    if ((e.target as Element).closest('[data-drawing-input], [data-ruler]')) return
     if (!e.isPrimary || gesture.pinching) {
       if (!draftRef.current?.typing) cancel()
       return
@@ -144,14 +152,15 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       finish()
       return
     }
-    const start = toWorld(e.clientX, e.clientY)
+    const start = snappedWorld(e)
     const target = draftRef.current?.target ?? drawingTarget(start, tool)
     if (!target) return
     s.setFollowing(null)
     if (tool === 'path') {
       const points = draftRef.current?.drawing.points ?? []
       const zoom = s.viewport.zoom
-      const snapped = e.altKey ? null : nearestPathAnchor(points, start, zoom)
+      /* the path's own anchors pull harder than the guides do */
+      const snapped = e.altKey ? null : nearestPathAnchor(points, toWorld(e.clientX, e.clientY), zoom)
       const placed = snapped === null ? start : { x: points[snapped]!.x, y: points[snapped]!.y }
       const closing = points.length >= 2 && snapped === 0
       const last = points.at(-1)
@@ -223,13 +232,13 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       if (gesture.pinching) return cancel()
       setDraft({
         target: target!,
-        drawing: drawingBounds(drawTool, start, toWorld(ev.clientX, ev.clientY), ev.shiftKey),
+        drawing: drawingBounds(drawTool, start, snappedWorld(ev), ev.shiftKey),
       })
     }
     function up(ev: PointerEvent) {
       if (ev.pointerId !== pointerId) return
       if (gesture.pinching) return cancel()
-      const end = toWorld(ev.clientX, ev.clientY)
+      const end = snappedWorld(ev)
       const clicked = Math.hypot(end.x - start.x, end.y - start.y) * useStore.getState().viewport.zoom < 3
       const drawing = clicked ? defaultDrawing(drawTool, start) : drawingBounds(drawTool, start, end, ev.shiftKey)
       cleanup.current?.()

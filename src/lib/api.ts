@@ -1,4 +1,5 @@
 import { useStore } from './store'
+import { beginFrameSave } from './frameSaves'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
@@ -18,8 +19,9 @@ import type {
   WorkspaceRole,
   WorkspaceSummary,
 } from '../../shared/types'
-import type { Automation, AutomationRun, Schedule, Step } from '../../shared/automations'
+import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } from '../../shared/automations'
 import type { BillingInterval, Plan } from '../../shared/billing'
+import type { LinkAccess } from '../../shared/canvasRole'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -191,6 +193,7 @@ export interface AutomationInput {
   enabled?: boolean
   schedule?: Schedule
   steps?: Step[]
+  trigger?: AutomationTrigger
 }
 
 /** The Integrations page: per-provider connection state. A provider the
@@ -304,7 +307,7 @@ export const api = {
   renameCanvas: (id: string, name: string) =>
     req('/api/canvases/' + id, { method: 'PATCH', body: JSON.stringify({ name, actor: actor() }) }),
   /* owner-only: what the share link grants people who aren't invited */
-  setLinkAccess: (id: string, linkAccess: 'edit' | 'none') =>
+  setLinkAccess: (id: string, linkAccess: LinkAccess) =>
     req('/api/canvases/' + id, { method: 'PATCH', body: JSON.stringify({ linkAccess }) }),
   /* community gallery: owner-only listing, open browsing and copying */
   publishCanvas: (id: string, listing: { description: string; category: CommunityCategory }) =>
@@ -397,6 +400,18 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ pages, expectedPages }),
     }),
+  setFlowStart: (canvasId: string, pageId: string, frameId: string | null) =>
+    req<import('../../shared/types').CanvasPageInfo[]>(
+      `/api/canvases/${canvasId}/pages/${encodeURIComponent(pageId)}/flow-start`,
+      { method: 'PUT', body: JSON.stringify({ frameId }) },
+    ),
+  putGuide: (canvasId: string, guide: import('../../shared/types').CanvasGuide) =>
+    req<import('../../shared/types').CanvasGuide>(`/api/canvases/${canvasId}/guides/${guide.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ pageId: guide.pageId, axis: guide.axis, at: guide.at }),
+    }),
+  deleteGuide: (canvasId: string, guideId: string) =>
+    req<{ ok: true }>(`/api/canvases/${canvasId}/guides/${guideId}`, { method: 'DELETE' }),
   duplicatePage: (canvasId: string, pageId: string) =>
     req<{
       page: import('../../shared/types').CanvasPageInfo
@@ -413,13 +428,24 @@ export const api = {
         actor: actor(),
       }),
     }),
-  updateFrame: (frameId: string, patch: Partial<Frame>, expectedUpdatedAt?: number) =>
-    req<Frame>('/api/frames/' + frameId, {
-      method: 'PATCH',
-      body: JSON.stringify({ ...patch, expectedUpdatedAt, actor: actor() }),
-    }),
+  updateFrame: async (frameId: string, patch: Partial<Frame>, expectedUpdatedAt?: number) => {
+    const finish = ['html', 'width', 'height'].some((key) => key in patch) ? beginFrameSave(frameId) : () => {}
+    try {
+      return await req<Frame>('/api/frames/' + frameId, {
+        method: 'PATCH',
+        body: JSON.stringify({ ...patch, expectedUpdatedAt, actor: actor() }),
+      })
+    } finally {
+      finish()
+    }
+  },
   deleteFrame: (frameId: string, expectedUpdatedAt?: number) =>
     req('/api/frames/' + frameId, { method: 'DELETE', body: JSON.stringify({ expectedUpdatedAt, actor: actor() }) }),
+  setFrameApproval: (frameId: string, status: 'ready_for_dev' | 'draft', expectedUpdatedAt: number) =>
+    req<Frame>(`/api/frames/${frameId}/approval`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, expectedUpdatedAt }),
+    }),
   /* design history: the states earlier edits replaced, newest first (no HTML) */
   frameVersions: (frameId: string) => req<FrameVersionInfo[]>(`/api/frames/${frameId}/versions`),
   frameVersion: (frameId: string, versionId: string) =>
@@ -534,12 +560,12 @@ export const api = {
     }),
   /* integrations: per-user connections to outside services */
   integrations: () => req<IntegrationsStatus>('/api/integrations'),
-  startMetaConnect: () => req<{ url: string }>('/api/integrations/meta/start', { method: 'POST' }),
+  automationLinearTeams: () => req<{ id: string; name: string; key: string }[]>('/api/integrations/linear/teams'),
   disconnectMeta: () => req<IntegrationsStatus>('/api/integrations/meta', { method: 'DELETE' }),
 }
 
 export interface AdminCanvas extends CanvasMeta {
-  linkAccess: 'edit' | 'none'
+  linkAccess: LinkAccess
   memberCount: number
   owner?: { id: string; name: string; email: string }
 }

@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net'
 const mocks = vi.hoisted(() => ({ wake: vi.fn(), online: vi.fn(), poll: vi.fn(), cancel: vi.fn(), save: vi.fn() }))
 vi.mock('../server/auth.ts', () => ({ isBanned: async () => false }))
 vi.mock('../server/resident.ts', () => ({ onFeedback: mocks.wake }))
-vi.mock('../server/access.ts', () => ({ canAccessCanvas: () => true }))
+vi.mock('../server/access.ts', () => ({ canEditCanvas: () => true }))
 vi.mock('../server/store.ts', () => ({ store: { canvases: new Map([['canvas', { id: 'canvas' }]]) } }))
 vi.mock('../server/localAgentPreferences.ts', () => ({
   getLocalAgentPreference: async () => ({ enabled: true, model: 'claude-sonnet-5' }),

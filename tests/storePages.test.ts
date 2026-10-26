@@ -1,7 +1,11 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types.ts'
 
-const rig = vi.hoisted(() => ({ savedFrames: [] as { id: string; pageId?: string; immediate?: boolean }[] }))
+const rig = vi.hoisted(() => ({
+  savedFrames: [] as { id: string; pageId?: string; immediate?: boolean }[],
+  /* runs while a page copy is being written, before it lands in memory */
+  duringCopy: null as (() => void) | null,
+}))
 vi.mock('../server/db/persist.ts', () => {
   const noop = () => undefined
   return {
@@ -15,12 +19,14 @@ vi.mock('../server/db/persist.ts', () => {
     saveFrame: (frame: Frame, immediate?: boolean) =>
       rig.savedFrames.push({ id: frame.id, pageId: frame.pageId, immediate }),
     saveGuideline: noop,
+    savePageCopy: async () => rig.duringCopy?.(),
     saveMember: noop,
     saveReference: noop,
   }
 })
 import { store } from '../server/store.ts'
-import { pageFrames } from '../shared/pages.ts'
+import { canvasPages, pageFrames } from '../shared/pages.ts'
+import { MAX_GUIDES } from '../shared/guides.ts'
 
 const frame = (id: string, pageId?: string): Frame => ({
   id,
@@ -40,6 +46,7 @@ const frame = (id: string, pageId?: string): Frame => ({
 beforeEach(() => {
   for (const canvas of store.allCanvases()) store.deleteCanvas(canvas.id)
   rig.savedFrames = []
+  rig.duringCopy = null
 })
 
 it('rehomes a frame whose page no longer exists to the first page on boot', () => {
@@ -81,4 +88,19 @@ it('advances a frame version when multiple writes share the same timestamp', () 
   } finally {
     now.mockRestore()
   }
+})
+
+it('keeps a page copy within the guide limit when guides are added while it is written', async () => {
+  const canvas = store.createCanvas('Guide race', 'alice')
+  const [page] = canvasPages(canvas)
+  const guide = (id: string, pageId = 'elsewhere') => ({ id, pageId, axis: 'v' as const, at: 0 })
+  for (let i = 0; i < 10; i++) store.setGuide(canvas.id, guide(`copied${i}`, page!.id))
+  /* room for the copy's ten when it starts; a teammate fills most of it meanwhile */
+  for (let i = 0; i < MAX_GUIDES - 25; i++) store.setGuide(canvas.id, guide(`filler${i}`))
+  rig.duringCopy = () => {
+    for (let i = 0; i < 10; i++) store.setGuide(canvas.id, guide(`late${i}`))
+  }
+  const copy = await store.duplicatePage(canvas.id, page!.id, 'alice')
+  expect(copy!.guides).toHaveLength(5)
+  expect(store.getCanvas(canvas.id)!.guides).toHaveLength(MAX_GUIDES)
 })

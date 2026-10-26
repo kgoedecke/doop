@@ -30,6 +30,7 @@
     "allow-claude-run",
     "allow-claude-stop",
     "allow-claude-add-extension",
-    "allow-codex-add-mcp"
+    "allow-codex-add-mcp",
+    "allow-view-menu-state"
   ]
 }

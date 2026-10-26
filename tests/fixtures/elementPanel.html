@@ -12,7 +12,7 @@
       import { FrameView } from '/src/components/FrameView.tsx'
       import { ElementPanel } from '/src/components/ElementPanel.tsx'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
-      import { useStore } from '/src/lib/store.ts'
+      import { pickedSelectors, useStore } from '/src/lib/store.ts'
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
       import { editElementGeometry } from '/src/lib/frameBridge.ts'
       import '/src/styles.css'
@@ -33,6 +33,7 @@
         geometry: (selector, edit) => editElementGeometry('f', selector, edit),
         selectFrame: () => useStore.getState().select('f'),
         deselect: () => useStore.getState().setSelectedElement(null),
+        picked: () => pickedSelectors(useStore.getState()),
         setTool: (tool) => useStore.getState().setTool(tool),
         setZoom: (zoom) => {
           useStore.getState().setViewport({ x: 0, y: 0, zoom })
@@ -48,7 +49,7 @@
         return React.createElement(
           TooltipProvider,
           null,
-          React.createElement(FrameView, { frame, raster: 1 }),
+          React.createElement(FrameView, { frame, layoutZoom: 1 }),
           selected && React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
         )
       }

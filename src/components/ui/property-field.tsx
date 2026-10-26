@@ -41,7 +41,7 @@ export function PropertySection({
   children: ReactNode
 }) {
   return (
-    <section className="border-b border-line-soft px-3 pt-[7px] pb-2.5">
+    <section className="border-b border-line-soft px-3 pt-[7px] pb-2.5 last:border-b-0">
       <div className="mb-[5px] flex min-h-5 items-center justify-between">
         <h3 className="text-[12px] font-normal text-ink-soft">{title}</h3>
         {action}
@@ -115,31 +115,39 @@ export function NumberField({
   }
   return (
     <label className={cn(fieldCls, disabled && 'opacity-50', className)}>
-      {prefix && (
-        <span className="grid size-3.5 flex-none place-items-center font-sans text-ink-faint" aria-hidden>
-          {prefix}
-        </span>
-      )}
-      <input
-        aria-label={label}
-        disabled={disabled}
-        placeholder={placeholder}
-        className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-faint"
-        value={draft}
-        inputMode="decimal"
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            e.preventDefault()
-            const n = Number(draft) || 0
-            const next = Math.min(max, Math.max(min, n + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)))
-            setDraft(String(next))
-            onCommit(next)
-          }
-        }}
-      />
+      <span className="flex min-w-0 flex-1 items-baseline gap-1">
+        {prefix && (
+          <span
+            className={cn(
+              'grid w-3.5 flex-none place-items-center font-sans text-ink-faint',
+              typeof prefix !== 'string' && 'self-center',
+            )}
+            aria-hidden
+          >
+            {prefix}
+          </span>
+        )}
+        <input
+          aria-label={label}
+          disabled={disabled}
+          placeholder={placeholder}
+          className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-faint"
+          value={draft}
+          inputMode="decimal"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              e.preventDefault()
+              const n = Number(draft) || 0
+              const next = Math.min(max, Math.max(min, n + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)))
+              setDraft(String(next))
+              onCommit(next)
+            }
+          }}
+        />
+      </span>
       <span
         className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
         title={scrub.canScrub ? scrubTitle : undefined}

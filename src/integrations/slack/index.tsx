@@ -1,3 +1,4 @@
+import { connectIntegration } from '../../lib/integrationConnect'
 import { useState } from 'react'
 import type { ClientIntegration, SettingsCardProps } from '../index'
 import { ApiError, req, type IntegrationsStatus } from '../../lib/api'
@@ -30,8 +31,7 @@ function SlackSettingsCard({ status, busy, setBusy, requestDisconnect }: Setting
     setBusy(true)
     setError(null)
     try {
-      const { url } = await req<{ url: string }>('/api/integrations/slack/start', { method: 'POST' })
-      location.assign(url)
+      if ((await connectIntegration('slack')) === 'browser') setBusy(false)
     } catch (error) {
       setError(
         error instanceof ApiError ? String(error.body.error ?? 'Could not install Doop.') : 'Could not install Doop.',

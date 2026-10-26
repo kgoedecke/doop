@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000000000000000000000383 /* SelectionDOM.js in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000382 /* SelectionDOM.js */; };
+		000000000000000000000381 /* CanvasSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000380 /* CanvasSelection.swift */; };
 		000000000000000000000371 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000370 /* Fonts */; };
 		000000000000000000000360 /* Core/CanvasSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000361 /* Core/CanvasSocket.swift */; };
 		000000000000000000000352 /* Core/PendingFrameMoves.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000353 /* Core/PendingFrameMoves.swift */; };
@@ -66,6 +68,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		000000000000000000000382 /* SelectionDOM.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = SelectionDOM.js; sourceTree = "<group>"; };
+		000000000000000000000380 /* CanvasSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelection.swift; sourceTree = "<group>"; };
 		000000000000000000000370 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fonts; sourceTree = "<group>"; };
 		000000000000000000000372 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		000000000000000000000361 /* Core/CanvasSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/CanvasSocket.swift; sourceTree = "<group>"; };
@@ -146,6 +150,8 @@
 				00000000000000000000012D /* DoopClient.swift */,
 				00000000000000000000012E /* CanvasModel.swift */,
 				000000000000000000000130 /* NativeCanvasView.swift */,
+				000000000000000000000382 /* SelectionDOM.js */,
+				000000000000000000000380 /* CanvasSelection.swift */,
 				000000000000000000000310 /* Blitz/BlitzDocument.swift */,
 				000000000000000000000315 /* Blitz/AgentMark.swift */,
 				000000000000000000000311 /* Blitz/BlitzCanvasView.swift */,
@@ -245,6 +251,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0000000000000000000000D2 /* Assets.xcassets in Resources */,
+				000000000000000000000383 /* SelectionDOM.js in Resources */,
 				000000000000000000000371 /* Fonts in Resources */,
 				000000000000000000000332 /* PrivacyInfo.xcprivacy in Resources */,
 			);
@@ -298,6 +305,7 @@
 				000000000000000000000191 /* DoopClient.swift in Sources */,
 				000000000000000000000192 /* CanvasModel.swift in Sources */,
 				000000000000000000000194 /* NativeCanvasView.swift in Sources */,
+				000000000000000000000381 /* CanvasSelection.swift in Sources */,
 				000000000000000000000300 /* Blitz/BlitzDocument.swift in Sources */,
 				000000000000000000000305 /* Blitz/AgentMark.swift in Sources */,
 				000000000000000000000301 /* Blitz/BlitzCanvasView.swift in Sources */,

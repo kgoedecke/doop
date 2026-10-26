@@ -25,6 +25,7 @@
   --color-dot: var(--dot);
   --color-success: var(--success);
   --color-success-ink: var(--success-ink);
+  --color-success-on-ink: var(--success-on-ink);
   --color-warning: var(--warning);
   --color-warning-ink: var(--warning-ink);
   --font-ui: var(--font-ui);
@@ -155,6 +156,7 @@
      is text that sits on paper. Both flip with the theme. */
   --success: #1fc16b;
   --success-ink: #0f7a45;
+  --success-on-ink: #6fd8a0;
   --warning: #ff8447;
   --warning-ink: #a8481a;
   /* the silver hairline an active agent's avatar wears in the presence pill */
@@ -377,6 +379,13 @@
   button {
     font-family: inherit;
   }
+  /* Windows draws a native select's popup from the select's own colours: a
+     transparent select gets a white list while its options inherit the dark
+     theme's light ink. Paint the options from the tokens instead. */
+  option {
+    background-color: var(--surface);
+    color: var(--ink);
+  }
 }
 
 .dark {
@@ -402,6 +411,7 @@
   --accent-ink: #ff6b57;
   --success: #2fd47c;
   --success-ink: #6fd8a0;
+  --success-on-ink: #0f7a45;
   --warning: #ff9a66;
   --warning-ink: #ffb58c;
   --glaze-ring: #6b6b70;
@@ -419,6 +429,13 @@
   --shadow-elevation-1-focus:
     0 0 0 2px color-mix(in srgb, var(--brand) 32%, transparent), 0 0 0 1px rgba(255, 255, 255, 0.12),
     0 4px 14px -3px rgba(0, 0, 0, 0.4);
+}
+
+/* While a canvas panel's edge is dragged, the chrome positioned off its width
+   (Inspector, side rail, tool rail, zoom pill) jumps with it rather than
+   easing after it, so a growing panel never slides over a neighbour. */
+body:has([data-panel-resizing]) * {
+  transition-duration: 0s !important;
 }
 
 /* Keyframes: the one thing utilities cannot express. Components reference
@@ -463,17 +480,6 @@
   }
   75% {
     content: '…';
-  }
-}
-
-@keyframes frame-flash {
-  0% {
-    box-shadow: inset 0 0 0 3px var(--editing-color, var(--brand));
-    opacity: 1;
-  }
-  100% {
-    box-shadow: inset 0 0 0 3px var(--editing-color, var(--brand));
-    opacity: 0;
   }
 }
 
@@ -968,5 +974,184 @@
   .hero-wave > i,
   .chip-beam {
     animation: none;
+  }
+}
+
+/* Rail icons move once when their row is hovered or focused, each glyph in
+   its own small way (drawn here in CSS over the Lucide markup). AppRail marks its two layouts with `data-icon-motion`; the
+   selectors key on Lucide's per-glyph class and child order, so swapping a
+   glyph in icons.tsx means revisiting its rule here. */
+[data-icon-motion] svg.lucide * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg.lucide {
+  --icon-motion: 0.5s var(--ease-out-cubic);
+}
+
+/* all canvases: the four tiles dip in turn */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect {
+  animation: icon-dip var(--icon-motion);
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect:nth-child(2) {
+  animation-delay: 0.06s;
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect:nth-child(3) {
+  animation-delay: 0.12s;
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect:nth-child(4) {
+  animation-delay: 0.18s;
+}
+
+/* owned by me: the head nods */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-user circle,
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-users circle {
+  animation: icon-nod var(--icon-motion);
+}
+/* shared with me: the second person steps in behind */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-users path:is(:nth-child(2), :nth-child(3)) {
+  animation: icon-step-in var(--icon-motion);
+}
+
+/* a workspace: the windows flick on, the door opens upward */
+[data-icon-motion]
+  :is(button, a):is(:hover, :focus-visible)
+  > .lucide-building-2
+  path:is(:nth-child(1), :nth-child(2)) {
+  animation: icon-blink var(--icon-motion);
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-building-2 path:nth-child(2) {
+  animation-delay: 0.08s;
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-building-2 path:nth-child(3) {
+  transform-origin: bottom;
+  animation: icon-rise var(--icon-motion);
+}
+
+/* new workspace and connect an agent: the plus turns a quarter */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-folder-plus,
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-circle-plus {
+  --plus-x: 12px;
+  --plus-y: 13px;
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-circle-plus {
+  --plus-y: 12px;
+}
+[data-icon-motion]
+  :is(button, a):is(:hover, :focus-visible)
+  > .lucide-folder-plus
+  path:is(:nth-child(1), :nth-child(2)),
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-circle-plus path {
+  transform-box: view-box;
+  transform-origin: var(--plus-x) var(--plus-y);
+  animation: icon-quarter-turn var(--icon-motion);
+}
+
+/* community: the meridian swings round the globe */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-globe path:nth-child(2) {
+  animation: icon-spin-y 0.6s var(--ease-in-out-cubic);
+}
+
+/* automations: the link draws from one step to the next, which answers */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-workflow path {
+  /* the connector is ~11 units long: one dash covers it */
+  stroke-dasharray: 12;
+  animation: icon-draw var(--icon-motion);
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-workflow rect:nth-child(3) {
+  animation: icon-dip var(--icon-motion) 0.22s;
+}
+
+/* integrations: the loose block lifts off and settles back in */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-blocks rect {
+  animation: icon-lift var(--icon-motion);
+}
+
+/* search: the lens takes a look around */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg.lucide-search {
+  animation: icon-look var(--icon-motion);
+}
+
+/* hide and show the sidebar: the chevron points the way */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-panel-left-close path:nth-child(3) {
+  animation: icon-nudge-left var(--icon-motion);
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-panel-left-open path:nth-child(3) {
+  animation: icon-nudge-right var(--icon-motion);
+}
+
+@keyframes icon-dip {
+  40% {
+    transform: scale(0.7);
+  }
+}
+@keyframes icon-nod {
+  35% {
+    transform: translateY(-1.5px);
+  }
+  70% {
+    transform: translateY(0.5px);
+  }
+}
+@keyframes icon-step-in {
+  from {
+    transform: translateX(-3px);
+    opacity: 0;
+  }
+}
+@keyframes icon-blink {
+  0%,
+  40% {
+    opacity: 0;
+  }
+}
+@keyframes icon-rise {
+  from {
+    transform: scaleY(0);
+  }
+}
+@keyframes icon-quarter-turn {
+  from {
+    transform: rotate(-90deg);
+  }
+}
+@keyframes icon-spin-y {
+  50% {
+    transform: scaleX(-1);
+  }
+}
+@keyframes icon-draw {
+  from {
+    stroke-dashoffset: 12;
+  }
+}
+@keyframes icon-lift {
+  40% {
+    transform: translate(1.5px, -1.5px) rotate(12deg);
+  }
+}
+@keyframes icon-look {
+  30% {
+    transform: rotate(-14deg);
+  }
+  65% {
+    transform: rotate(8deg);
+  }
+}
+@keyframes icon-nudge-left {
+  40% {
+    transform: translateX(-2px);
+  }
+}
+@keyframes icon-nudge-right {
+  40% {
+    transform: translateX(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-icon-motion] svg.lucide,
+  [data-icon-motion] svg.lucide * {
+    animation: none !important;
   }
 }

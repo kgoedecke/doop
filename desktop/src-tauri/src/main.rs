@@ -42,6 +42,9 @@ use tauri::Emitter;
 mod claude;
 mod claude_extension;
 mod codex;
+#[cfg(target_os = "macos")]
+mod updates;
+mod view_menu;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -137,8 +140,9 @@ const CLOSE_TAB: &str = "close-tab";
 
 /// Tauri's default macOS menu minus "Close Window" (Cmd+W), which is replaced
 /// by "Close Tab" in the File menu. Everything else stays: the app menu
-/// (About/Services/Hide/Quit), Edit (the predefined items are what make
-/// Cmd+C/V/Z reach the webview at all), View and Window.
+/// (with Check for Updates added below About), Edit (the predefined items
+/// are what make Cmd+C/V/Z reach the webview at all), View (the canvas's
+/// view toggles and zoom, src/view_menu.rs) and Window.
 #[cfg(target_os = "macos")]
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let pkg = app.package_info();
@@ -153,6 +157,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         &[
             &PredefinedMenuItem::about(app, None, Some(about))?,
+            &updates::menu_item(app)?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, None)?,
             &PredefinedMenuItem::separator(app)?,
@@ -188,12 +193,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
-    let view = Submenu::with_items(
-        app,
-        "View",
-        true,
-        &[&PredefinedMenuItem::fullscreen(app, None)?],
-    )?;
+    let view = view_menu::submenu(app)?;
     let window = Submenu::with_items(
         app,
         "Window",
@@ -221,7 +221,8 @@ fn main() {
             claude::claude_run,
             claude::claude_stop,
             claude_extension::claude_add_extension,
-            codex::codex_add_mcp
+            codex::codex_add_mcp,
+            view_menu::view_menu_state
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             focus_main_window(app)
@@ -232,6 +233,10 @@ fn main() {
     let builder = builder.menu(build_menu).on_menu_event(|app, event| {
         if event.id() == CLOSE_TAB {
             let _ = app.emit(CLOSE_TAB, ());
+        } else if event.id() == updates::MENU_ID {
+            updates::check(app);
+        } else {
+            view_menu::relay(app, event.id().as_ref());
         }
     });
     builder
@@ -282,7 +287,7 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true;",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true;",
                 app.package_info().version,
                 std::env::consts::OS,
                 cfg!(any(target_os = "macos", target_os = "windows"))

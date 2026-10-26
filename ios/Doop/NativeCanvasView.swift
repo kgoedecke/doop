@@ -10,9 +10,23 @@ struct NativeCanvasView: View {
     @State private var sending = false
     /// The scope key the person dismissed with the chip's ×; a new selection brings the chip back.
     @State private var dismissedScope: String?
-    @State private var exportURL: URL?
+    @State private var actionBusy = false
+    @State private var clipboardAvailable = CanvasClipboard.isAvailable
+    @State private var copiedSelection = false
     private let summary: CanvasSummary
-    private enum Panel: String, Identifiable { case frames, inspector, tasks, comments, export; var id: String { rawValue } }
+    private enum Panel: Identifiable {
+        case frames, inspector, tasks, comments
+        case export(CanvasSelection)
+        var id: String {
+            switch self {
+            case .frames: return "frames"
+            case .inspector: return "inspector"
+            case .tasks: return "tasks"
+            case .comments: return "comments"
+            case .export: return "export"
+            }
+        }
+    }
 
     init(summary: CanvasSummary, client: DoopClient) {
         self.summary = summary
@@ -22,12 +36,26 @@ struct NativeCanvasView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 7) {
-                Circle().fill(model.connected ? .green : .orange).frame(width: 6, height: 6)
-                Text(model.connected ? "Live" : model.connecting ? "Connecting…" : "Disconnected")
+                Menu {
+                    Picker("Page", selection: Binding(get: { model.activePageID }, set: { model.selectPage($0) })) {
+                        ForEach(model.pages) { page in Text(page.name).tag(page.id) }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(model.activePage.name).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }.foregroundStyle(.primary).frame(minHeight: 44)
+                }
+                .disabled(model.canvas == nil)
+                .accessibilityLabel("Page").accessibilityValue(model.activePage.name)
+                .accessibilityIdentifier("canvas.pagePicker")
                 Spacer()
-                if !model.presences.isEmpty { Label("\(model.presences.count) here", systemImage: "person.2") }
-                Text("\(model.canvas?.frames.count ?? 0) \(model.canvas?.frames.count == 1 ? "frame" : "frames")")
-            }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.vertical, 10)
+                Circle().fill(model.connected ? .green : .orange).frame(width: 6, height: 6)
+                    .accessibilityLabel(model.connected ? "Live" : model.connecting ? "Connecting" : "Disconnected")
+                if !model.pagePresences.isEmpty { Label("\(model.pagePresences.count) here", systemImage: "person.2") }
+                Text("\(model.pageFrames.count) \(model.pageFrames.count == 1 ? "frame" : "frames")")
+                    .accessibilityIdentifier("canvas.frameCount")
+            }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 18)
             if let error = model.error ?? model.connectionError {
                 HStack {
                     Text(error).font(.caption)
@@ -37,17 +65,8 @@ struct NativeCanvasView: View {
             }
             ZStack(alignment: .bottom) {
                 VStack(spacing: 10) {
-                    if let element = model.selectedElement {
-                        HStack(spacing: 10) {
-                            Image(systemName: "scope").foregroundStyle(.tint)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(element.label).font(.callout.monospaced().bold()).lineLimit(1)
-                                Text(element.text.isEmpty ? element.selector : element.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            Spacer()
-                            Button("Comment") { sheet = .comments }.font(.callout.bold())
-                            Button { model.selectedElement = nil } label: { Image(systemName: "xmark") }.accessibilityLabel("Clear element selection")
-                        }.padding(.horizontal, 16).padding(.vertical, 12).modifier(FloatingGlass())
+                    if model.selected != nil || clipboardAvailable {
+                        selectionActions
                     }
                     HStack(spacing: 10) {
                         if let scope = promptScope {
@@ -82,7 +101,7 @@ struct NativeCanvasView: View {
                     Button { sheet = .tasks } label: { Label("Agent tasks", systemImage: "sparkles") }
                     Button { sheet = .comments } label: { Label("Comments", systemImage: "bubble.left.and.bubble.right") }
                     ShareLink(item: model.client.server.origin.appendingPathComponent("c/\(model.id)")) { Label("Share canvas link", systemImage: "square.and.arrow.up") }
-                    if model.selected != nil { Button("Export selected frame HTML") { exportFrame() } }
+                    if model.selected != nil { Button("Export selection") { openExport() } }
                 } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Canvas actions")
             }
         }
@@ -93,19 +112,23 @@ struct NativeCanvasView: View {
                 if let frame = model.selected { FrameInspector(model: model, original: frame) }
             case .tasks: TasksPanel(model: model)
             case .comments: CommentsPanel(model: model)
-            case .export:
-                NavigationStack {
-                    VStack(spacing: 24) {
-                        Image(systemName: "doc.text").font(.largeTitle)
-                        if let exportURL { ShareLink("Save or share HTML", item: exportURL).buttonStyle(.borderedProminent) }
-                    }.navigationTitle("Export frame").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { sheet = nil } } }
-                }
+            case .export(let selection):
+                SelectionExportPanel(selection: selection, origin: model.client.server.origin)
             }
         }
-        .onAppear { if scenePhase == .active { model.start() } }
+        .onAppear { clipboardAvailable = CanvasClipboard.isAvailable; if scenePhase == .active { model.start() } }
         .onDisappear { model.stop() }
-        .onChange(of: scenePhase) { phase in if phase == .active { model.start() } else if phase == .background { model.stop() } }
+        .onChange(of: scenePhase) { phase in if phase == .active { clipboardAvailable = CanvasClipboard.isAvailable; model.start() } else if phase == .background { model.stop() } }
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
+            clipboardAvailable = CanvasClipboard.isAvailable
+            copiedSelection = false
+        }
+        .onChange(of: model.promptScope?.key) { _ in copiedSelection = false }
         .onChange(of: model.deleted) { deleted in if deleted { dismiss() } }
+        .onChange(of: model.activePageID) { _ in
+            dismissedScope = nil
+            if sheet?.id == "inspector" || sheet?.id == "export" { sheet = nil }
+        }
     }
 
     private var canvasTools: some View {
@@ -147,30 +170,85 @@ struct NativeCanvasView: View {
     }
     private var framesPanel: some View {
         NavigationStack {
-            List(model.canvas?.frames ?? []) { frame in
-                Button {
-                    model.select(frame.id)
-                    sheet = nil
-                } label: {
-                    HStack {
-                        Image(systemName: "rectangle")
-                        VStack(alignment: .leading) { Text(frame.name); Text("\(Int(frame.width)) × \(Int(frame.height))").font(.caption).foregroundStyle(.secondary) }
-                        Spacer()
-                        if model.selectedID == frame.id { Image(systemName: "checkmark") }
-                    }.padding(.vertical, 5)
+            List {
+                if model.pageFrames.isEmpty { Text("No frames on this page.").foregroundStyle(.secondary) }
+                ForEach(model.pageFrames) { frame in
+                    Button {
+                        model.select(frame.id)
+                        sheet = nil
+                    } label: {
+                        HStack {
+                            Image(systemName: "rectangle")
+                            VStack(alignment: .leading) { Text(frame.name); Text("\(Int(frame.width)) × \(Int(frame.height))").font(.caption).foregroundStyle(.secondary) }
+                            Spacer()
+                            if model.selectedID == frame.id { Image(systemName: "checkmark") }
+                        }.padding(.vertical, 5)
+                    }
                 }
-            }.navigationTitle("Frames")
+            }.navigationTitle(model.activePage.name)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { sheet = nil } } }
         }
     }
-    private func exportFrame() {
-        guard let frame = model.selected else { return }
-        do {
-            let destination = try ExportDirectory().destination(suggestedFilename: frame.name + ".html")
-            try Data(frame.html.utf8).write(to: destination, options: .atomic)
-            exportURL = destination
-            sheet = .export
-        } catch { model.error = error.localizedDescription }
+    private var selectionActions: some View {
+        actionButtons
+        .fixedSize(horizontal: false, vertical: true)
+        .modifier(FloatingGlass())
+        .frame(maxWidth: 360)
+        .padding(.horizontal, 12)
+        .disabled(actionBusy)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Selection actions")
+        .accessibilityIdentifier("canvas.selectionActions")
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 0) {
+            selectionAction(copiedSelection ? "Copied" : "Copy", symbol: copiedSelection ? "checkmark" : "doc.on.doc", id: "copy", disabled: model.selection == nil) {
+                guard let selection = model.selection else { return }
+                runSelectionAction { try await model.copySelection(selection); clipboardAvailable = true; copiedSelection = true }
+            }
+            selectionAction("Paste", symbol: "doc.on.clipboard", id: "paste", disabled: !clipboardAvailable || !model.canEdit) {
+                let selection = model.selection
+                runSelectionAction { try await model.pasteSelection(selection) }
+            }
+            selectionAction("Duplicate", symbol: "plus.square.on.square", id: "duplicate", disabled: !canEditSelection) {
+                guard let selection = model.selection else { return }
+                runSelectionAction { try await model.duplicateSelection(selection) }
+            }
+            selectionAction("Delete", symbol: "trash", id: "delete", disabled: !canEditSelection) {
+                guard let selection = model.selection else { return }
+                runSelectionAction { try await model.deleteSelection(selection) }
+            }
+            selectionAction("Comment", symbol: "bubble.left", id: "comment", disabled: model.selection == nil) { sheet = .comments }
+            selectionAction("Export", symbol: "square.and.arrow.up", id: "export", disabled: model.selection == nil) { openExport() }
+        }.padding(.horizontal, 4).padding(.vertical, 5)
+    }
+
+    private var canEditSelection: Bool { model.canEdit && model.selected != nil && model.selected?.locked != true }
+
+    private func selectionAction(_ title: String, symbol: String, id: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 19))
+            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("canvas." + id)
+        .help(title)
+    }
+
+    private func runSelectionAction(_ action: @escaping () async throws -> Void) {
+        actionBusy = true
+        Task {
+            do { try await action() } catch { model.error = error.localizedDescription }
+            actionBusy = false
+        }
+    }
+
+    private func openExport() {
+        if let selection = model.selection { sheet = .export(selection) }
     }
 }
 
@@ -287,9 +365,9 @@ private struct CommentsPanel: View {
                     if let element = model.selectedElement, !element.text.isEmpty {
                         Text(element.text).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
-                    Picker("Frame", selection: $model.selectedID) {
+                    Picker("Frame", selection: Binding(get: { model.selectedID }, set: { model.select($0) })) {
                         Text("Choose a frame").tag(String?.none)
-                        ForEach(model.canvas?.frames ?? []) { Text($0.name).tag(Optional($0.id)) }
+                        ForEach(model.pageFrames) { Text($0.name).tag(Optional($0.id)) }
                     }
                     TextField("Leave feedback…", text: $text, axis: .vertical).lineLimit(2...5)
                     Button("Post comment") {
@@ -300,8 +378,8 @@ private struct CommentsPanel: View {
                     if let error { Text(error).foregroundStyle(.red) }
                 }
                 Section("Conversation") {
-                    if model.comments.isEmpty { Text("No comments yet.").foregroundStyle(.secondary) }
-                    ForEach(model.comments.sorted { $0.at > $1.at }) { comment in
+                    if model.pageComments.isEmpty { Text("No comments on this page yet.").foregroundStyle(.secondary) }
+                    ForEach(model.pageComments.sorted { $0.at > $1.at }) { comment in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack { Text(comment.from).font(.subheadline.bold()); Spacer(); if comment.resolvedAt != nil { Image(systemName: "checkmark.circle").foregroundStyle(.green) } }
                             Text(comment.text)

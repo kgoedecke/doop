@@ -40,6 +40,8 @@ export function ZoomControls({
   const isMobile = useIsMobile()
   const hasSelection = useStore((s) => s.selectedIds.length > 0)
   const drawing = useStore((s) => isDrawingTool(s.tool))
+  const rulers = useStore((s) => s.rulers)
+  const toggleRulers = useStore((s) => s.toggleRulers)
   /* phones have no room for shortcut hints, and no keyboard to use them */
   const hint = (keys: string) => !isMobile && <MenuHint>{keys}</MenuHint>
   const stepBtn = 'min-h-0'
@@ -79,6 +81,16 @@ export function ZoomControls({
           <DropdownMenuItem onSelect={() => onZoomTo(0.5)}>Zoom to 50%</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onZoomTo(1)}>Zoom to 100%{hint(`${MOD_KEY}0`)}</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onZoomTo(2)}>Zoom to 200%</DropdownMenuItem>
+          {/* phones show no rulers, so there is nothing to toggle there */}
+          {!isMobile && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={toggleRulers}>
+                {rulers ? 'Hide rulers' : 'Show rulers'}
+                {hint('⇧R')}
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
       <ToolbarButton aria-label="Zoom in" className={stepBtn} onClick={onZoomIn}>

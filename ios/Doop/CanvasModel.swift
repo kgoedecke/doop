@@ -12,6 +12,7 @@ final class CanvasModel: ObservableObject {
             // Full frame events and reconnect snapshots can still contain the
             // pre-drop position. Overlay pending moves at every model entry.
             if var document = canvas, pendingMoves.apply(to: &document.frames) { canvas = document }
+            if !pages.contains(where: { $0.id == activePageID }) { selectPage(pages[0].id) }
             pruneSelection()
         }
     }
@@ -19,6 +20,7 @@ final class CanvasModel: ObservableObject {
     @Published var comments: [CanvasComment] = []
     @Published var presences: [CanvasPresence] = []
     @Published var selectedID: String?
+    @Published private(set) var activePageID: String
     @Published var connected = false
     @Published var connecting = false
     @Published var connectionError: String?
@@ -43,8 +45,26 @@ final class CanvasModel: ObservableObject {
     private var pendingMoves = PendingFrameMoves()
     private let connectionLog = Logger(subsystem: "design.doop.ios", category: "canvas.connection")
 
-    init(id: String, client: DoopClient) { self.id = id; self.client = client }
-    var selected: DesignFrame? { canvas?.frames.first { $0.id == selectedID } }
+    init(id: String, client: DoopClient) {
+        self.id = id; self.client = client; self.activePageID = "\(id):page1"
+    }
+    var pages: [CanvasPage] { canvas?.effectivePages ?? [CanvasPage(id: "\(id):page1", name: "Page 1")] }
+    var activePage: CanvasPage { pages.first { $0.id == activePageID } ?? pages[0] }
+    var pageFrames: [DesignFrame] {
+        guard let canvas else { return [] }
+        return canvas.frames.filter { canvas.pageID(for: $0) == activePageID }
+    }
+    var pageComments: [CanvasComment] {
+        let frameIDs = Set(pageFrames.map(\.id))
+        let roots = Set(comments.filter {
+            $0.parentId == nil && ($0.frameId.map { frameIDs.contains($0) } ?? ($0.pageId == activePageID))
+        }.map(\.id))
+        return comments.filter { roots.contains($0.parentId ?? $0.id) }
+    }
+    var pagePresences: [CanvasPresence] {
+        presences.filter { $0.viewport?.pageId == nil || $0.viewport?.pageId == activePageID }
+    }
+    var selected: DesignFrame? { pageFrames.first { $0.id == selectedID } }
     var canEdit: Bool { connected && pendingEdits == 0 && !undoing }
     var canUndo: Bool { canEdit && !undoStack.isEmpty }
 
@@ -142,9 +162,24 @@ final class CanvasModel: ObservableObject {
     }
 
     func select(_ id: String?) {
-        if id != selectedID { selectedElement = nil }
+        // Explicit selections (including Undo) reveal the frame's page. Remote
+        // frame updates instead clear an out-of-page selection in pruneSelection.
+        if let id, let canvas, let frame = canvas.frames.first(where: { $0.id == id }) {
+            selectPage(canvas.pageID(for: frame))
+        }
+        // Choosing a frame explicitly (including the current row in Frames)
+        // switches actions from its picked element to the whole frame.
+        selectedElement = nil
         selectedID = id
         Task { try? await send(["type": "editing", "frameId": id as Any? ?? NSNull()]) }
+    }
+
+    func selectPage(_ pageID: String) {
+        guard pages.contains(where: { $0.id == pageID }), pageID != activePageID else { return }
+        activePageID = pageID
+        select(nil)
+        selectedElement = nil
+        viewportCommand += 1
     }
 
     func apply(_ event: CanvasEvent) {
@@ -170,7 +205,16 @@ final class CanvasModel: ObservableObject {
                 if let height = event.height { canvas?.frames[index].height = height }
             }
         case "canvas:renamed": if let name = event.name { canvas?.name = name }
-        case "canvas:pages": if let pages = event.pages { canvas?.pages = pages }
+        case "canvas:pages":
+            if let pages = event.pages, var document = canvas {
+                // Reordering pages must not move legacy frames to the new first page.
+                let firstPageID = document.effectivePages[0].id
+                for index in document.frames.indices where document.frames[index].pageId == nil {
+                    document.frames[index].pageId = firstPageID
+                }
+                document.pages = pages
+                canvas = document
+            }
         case "canvas:deleted":
             deleted = true; stop()
             Task { await AgentLiveActivities.shared.endCanvas(id: id, client: client) }
@@ -178,6 +222,10 @@ final class CanvasModel: ObservableObject {
         case "comment": if let comment = event.comment { upsert(comment, into: &comments) }
         case "presence:join": if let person = event.presence { upsert(person, into: &presences) }
         case "presence:leave": presences.removeAll { $0.clientId == event.clientId }
+        case "viewport":
+            if let index = presences.firstIndex(where: { $0.clientId == event.clientId }), let viewport = event.viewport {
+                presences[index].viewport = viewport
+            }
         case "cursor":
             if let index = presences.firstIndex(where: { $0.clientId == event.clientId }), let x = event.x, let y = event.y {
                 presences[index].cursor = CanvasPoint(x: x, y: y)
@@ -193,17 +241,19 @@ final class CanvasModel: ObservableObject {
         guard canEdit else { return }
         pendingEdits += 1
         defer { pendingEdits -= 1 }
+        let pageID = activePageID
         do {
-            let right = canvas?.frames.map { $0.x + $0.width }.max() ?? -80
-            let data = try await client.data("/api/canvases/\(id)/frames", method: "POST", body: [
+            let right = pageFrames.map { $0.x + $0.width }.max() ?? -80
+            var body: [String: Any] = [
                 "name": "Untitled frame", "x": right + 80, "y": 0, "width": 390, "height": 844,
                 "html": "<!doctype html><html><body style='margin:0;background:#fff;display:grid;place-items:center;height:100vh;font-family:system-ui;color:#777'><p>What will you make?</p></body></html>"
-            ])
+            ]
+            if canvas?.pages?.isEmpty == false { body["pageId"] = pageID }
+            let data = try await client.data("/api/canvases/\(id)/frames", method: "POST", body: body)
             let frame = try JSONDecoder().decode(DesignFrame.self, from: data)
             if canvas != nil { upsert(frame, into: &canvas!.frames) }
             record(UndoEntry(kind: .create, frameID: frame.id, body: [:]))
-            select(frame.id)
-            viewportCommand += 1
+            if activePageID == pageID { select(frame.id); viewportCommand += 1 }
         } catch { self.error = error.localizedDescription }
     }
 
@@ -218,9 +268,26 @@ final class CanvasModel: ObservableObject {
         if let before { recordUpdate(before: before, after: frame, keys: Array(patch.keys)) }
     }
 
+    func pasteFrame(_ source: DesignFrame) async throws {
+        guard canEdit else { throw CanvasEditError.busy }
+        pendingEdits += 1
+        defer { pendingEdits -= 1 }
+        let pageID = activePageID
+        let right = pageFrames.map { $0.x + $0.width }.max() ?? -80
+        var body: [String: Any] = ["name": source.name + " copy", "html": source.html,
+                                   "x": right + 80, "y": selected?.y ?? 0,
+                                   "width": source.width, "height": source.height]
+        if canvas?.pages?.isEmpty == false { body["pageId"] = pageID }
+        let data = try await client.data("/api/canvases/\(id)/frames", method: "POST", body: body)
+        let frame = try JSONDecoder().decode(DesignFrame.self, from: data)
+        if canvas != nil { upsert(frame, into: &canvas!.frames) }
+        record(UndoEntry(kind: .create, frameID: frame.id, body: [:]))
+        if activePageID == pageID { select(frame.id); viewportCommand += 1 }
+    }
+
     func moveFrame(_ frameID: String, x: Double, y: Double) async {
         guard connected, !undoing, x.isFinite, y.isFinite, abs(x) < 1_000_000, abs(y) < 1_000_000,
-              let before = canvas?.frames.first(where: { $0.id == frameID }) else { return }
+              let before = pageFrames.first(where: { $0.id == frameID }) else { return }
         if moveOrigins[frameID] == nil { moveOrigins[frameID] = before }
         pendingEdits += 1
         defer { pendingEdits -= 1 }
@@ -269,8 +336,9 @@ final class CanvasModel: ObservableObject {
     /// path can point elsewhere once that HTML changes, whichever way the change
     /// arrived (a frame event, a reconnect resync, a reload). Drop it then.
     private func pruneSelection() {
+        if let selectedID, !pageFrames.contains(where: { $0.id == selectedID }) { select(nil) }
         guard let element = selectedElement else { return }
-        let frame = canvas?.frames.first { $0.id == element.frameID }
+        let frame = pageFrames.first { $0.id == element.frameID }
         if frame == nil || frame?.html.hashValue != element.htmlHash { selectedElement = nil }
     }
 
@@ -402,7 +470,7 @@ struct PromptScope: Equatable {
 }
 
 /// An element picked inside a frame by the Blitz hit test.
-struct SelectedElement: Equatable {
+struct SelectedElement: Equatable, Sendable {
     var frameID: String
     var nodeID: UInt64
     /// A CSS path that doop's comment anchors and agents resolve.
@@ -426,7 +494,7 @@ extension CanvasModel {
         var t = 0.0
         Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let frame = self.canvas?.frames.first else { return }
+                guard let self, let frame = self.pageFrames.first else { return }
                 t += 0.05
                 for (index, person) in people.enumerated() {
                     let phase = Double(index) * 2.1

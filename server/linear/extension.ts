@@ -6,9 +6,15 @@ import { agentEnabled, agentToken, finishInstall, getInstallation, startInstall 
 import { disconnectAgent, startLinearWorker } from './jobs.ts'
 import { linearWebhookRouter } from './webhook.ts'
 import { getIssue, LinearError, listIssues, listIssuesInput } from './client.ts'
+import { automationTeams, createAutomationIssue } from './automation.ts'
+import { AutomationPullError } from '../extensions.ts'
 
 export const linearExtension: ServerExtension = {
   id: 'linear',
+  runAutomationAction: (step, ctx) => {
+    if (step.type !== 'linear') throw new Error('Expected a Linear step')
+    return createAutomationIssue(step, ctx.ownerId, ctx.context)
+  },
   webhookRouter: linearWebhookRouter,
   startWorker: startLinearWorker,
   connectionStatus: async (userId) => {
@@ -23,23 +29,27 @@ export const linearExtension: ServerExtension = {
         : { connected: false },
     }
   },
-  connectRouter: ({ respondWithStatus }) => {
-    const router = express.Router()
-    router.post('/start', async (req, res, next) => {
+  oauth: {
+    start: async (userId) => (await startInstall(userId)).url,
+    finish: async (userId, query) => {
       try {
-        res.json(await startInstall(req.user!.id))
-      } catch (error) {
-        if (error instanceof LinearError) return res.status(error.status).json({ error: error.message })
-        next(error)
-      }
-    })
-    router.get('/callback', async (req, res) => {
-      try {
-        await finishInstall(req.user!.id, String(req.query.state ?? ''), String(req.query.code ?? ''))
-        res.redirect('/integrations?linear=connected')
+        await finishInstall(userId, query.state ?? '', query.code ?? '')
+        return '/integrations?linear=connected'
       } catch (error) {
         const message = error instanceof LinearError ? error.message : 'Could not install the Linear agent.'
-        res.redirect(`/integrations?linearError=${encodeURIComponent(message)}`)
+        return `/integrations?linearError=${encodeURIComponent(message)}`
+      }
+    },
+  },
+  connectRouter: ({ respondWithStatus }) => {
+    const router = express.Router()
+    router.get('/teams', async (req, res, next) => {
+      try {
+        res.json(await automationTeams(req.user!.id))
+      } catch (error) {
+        if (error instanceof LinearError || error instanceof AutomationPullError)
+          return res.status(error instanceof LinearError ? error.status : 409).json({ error: error.message })
+        next(error)
       }
     })
     router.post('/token', async (req, res, next) => {

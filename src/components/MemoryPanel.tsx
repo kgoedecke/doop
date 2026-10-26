@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { GuidelineDoc, MemoryReference } from '../../shared/types'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { timeAgo } from '../lib/time'
 import { Button } from './ui/button'
@@ -51,13 +51,15 @@ export function MemoryPanel() {
   const references = useStore((s) => s.canvas?.references ?? [])
   const decisions = useStore((s) => s.decisions)
   const proposals = useStore((s) => s.proposals)
+  /* view and comment links read Memory; they do not curate it */
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   /** slug of the open guide, '' = create a new one, null = closed */
   const [openGuide, setOpenGuide] = useState<string | null>(null)
   const [openRef, setOpenRef] = useState<string | null>(null)
 
   if (!canvasId) return null
 
-  const pending = proposals.filter((p) => p.status === 'pending')
+  const pending = readOnly ? [] : proposals.filter((p) => p.status === 'pending')
   const empty = docs.length === 0 && references.length === 0 && decisions.length === 0 && pending.length === 0
 
   return (
@@ -136,14 +138,16 @@ export function MemoryPanel() {
 
       <ListSection>
         <span>Rules</span>
-        <Button
-          variant="solid"
-          size="sm"
-          className="flex-none text-[11.5px] font-bold"
-          onClick={() => setOpenGuide('')}
-        >
-          + New
-        </Button>
+        {!readOnly && (
+          <Button
+            variant="solid"
+            size="sm"
+            className="flex-none text-[11.5px] font-bold"
+            onClick={() => setOpenGuide('')}
+          >
+            + New
+          </Button>
+        )}
       </ListSection>
       {docs.length === 0 && <ListHint>Style guides every agent reads before designing here.</ListHint>}
       {docs.map((d) => (
@@ -219,6 +223,7 @@ function RefModal({
   reference: MemoryReference | null
   onClose: () => void
 }) {
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   if (!reference) {
     return (
       <Modal size="xl" onClose={onClose}>
@@ -261,15 +266,17 @@ function RefModal({
           />
         </div>
         <ModalActions>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              api.unpinReference(canvasId, reference.id).catch(console.error)
-              onClose()
-            }}
-          >
-            Unpin
-          </Button>
+          {!readOnly && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                api.unpinReference(canvasId, reference.id).catch(console.error)
+                onClose()
+              }}
+            >
+              Unpin
+            </Button>
+          )}
           <ModalSpacer />
           <Button variant="ghost" onClick={onClose}>
             Close
@@ -287,6 +294,7 @@ type Mode = 'read' | 'edit' | 'history'
 function GuideModal({ canvasId, name, onClose }: { canvasId: string; name: string | null; onClose: () => void }) {
   const doc = useStore((s) => s.canvas?.guidelines?.find((d) => d.name === name) ?? null)
   const creating = name === null
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const [mode, setMode] = useState<Mode>('read')
   const [titleDraft, setTitleDraft] = useState('')
   const [draft, setDraft] = useState('')
@@ -393,9 +401,11 @@ function GuideModal({ canvasId, name, onClose }: { canvasId: string; name: strin
             <MarkdownBlock>{doc.markdown}</MarkdownBlock>
             {error && <p className={errorText}>{error}</p>}
             <ModalActions>
-              <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(true)}>
-                Delete
-              </Button>
+              {!readOnly && (
+                <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(true)}>
+                  Delete
+                </Button>
+              )}
               <ConfirmDialog
                 open={confirmDelete}
                 onOpenChange={setConfirmDelete}
@@ -412,18 +422,20 @@ function GuideModal({ canvasId, name, onClose }: { canvasId: string; name: strin
               <Button variant="ghost" disabled={busy} onClick={() => setMode('history')}>
                 History
               </Button>
-              <Button
-                variant="primary"
-                disabled={busy}
-                onClick={() => {
-                  setTitleDraft(guideTitle(doc))
-                  setDraft(doc.markdown)
-                  setError(null)
-                  setMode('edit')
-                }}
-              >
-                Edit
-              </Button>
+              {!readOnly && (
+                <Button
+                  variant="primary"
+                  disabled={busy}
+                  onClick={() => {
+                    setTitleDraft(guideTitle(doc))
+                    setDraft(doc.markdown)
+                    setError(null)
+                    setMode('edit')
+                  }}
+                >
+                  Edit
+                </Button>
+              )}
             </ModalActions>
           </>
         )}
@@ -445,6 +457,7 @@ function GuideHistory({
   onRestore: (markdown: string) => void
   onBack: () => void
 }) {
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const [versions, setVersions] = useState<{ markdown: string; savedAt: number; savedBy: string }[] | null>(null)
   const [previewIdx, setPreviewIdx] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -483,13 +496,15 @@ function GuideHistory({
               Back
             </Button>
             <ModalSpacer />
-            <Button
-              variant="primary"
-              disabled={busy || !preview.markdown || preview.markdown === doc.markdown}
-              onClick={() => onRestore(preview.markdown)}
-            >
-              {busy ? 'Restoring…' : 'Restore this version'}
-            </Button>
+            {!readOnly && (
+              <Button
+                variant="primary"
+                disabled={busy || !preview.markdown || preview.markdown === doc.markdown}
+                onClick={() => onRestore(preview.markdown)}
+              >
+                {busy ? 'Restoring…' : 'Restore this version'}
+              </Button>
+            )}
           </ModalActions>
         </>
       ) : (

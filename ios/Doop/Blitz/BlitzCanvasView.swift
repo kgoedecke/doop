@@ -28,6 +28,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private var zoom: CGFloat = 1
     private var offset = CGPoint(x: 40, y: 80)
     private var fitted = false
+    private var displayedPageID: String?
     private var fitCommand = 0
     private var drag: (id: String, origin: CGPoint, proposedOrigin: CGPoint)?
     private var pinchAnchor = CGPoint.zero
@@ -118,8 +119,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         world.bounds = CGRect(origin: .zero, size: bounds.size)
         world.position = .zero
         chrome.frame = bounds
-        if !fitted, let canvas = model.canvas, !canvas.frames.isEmpty {
-            fit(canvas.frames)
+        if !fitted, !model.pageFrames.isEmpty {
+            fit(model.pageFrames)
             rerenderVisible()
         }
         applyTransform()
@@ -133,7 +134,25 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
 
     /// Reconcile layers with the model. Called by SwiftUI on every change.
     func sync() {
-        let current = model.canvas?.frames ?? []
+        let current = model.pageFrames
+        if displayedPageID != model.activePageID {
+            displayedPageID = model.activePageID
+            // A page change can arrive while dragging or while a render is queued.
+            // End the old interaction before fitting or hit-testing the new page.
+            drag = nil
+            snapGuides = []
+            gestureActive = false
+            for recognizer in gestureRecognizers ?? [] {
+                recognizer.isEnabled = false
+                recognizer.isEnabled = true
+            }
+            relayout?.cancel()
+            pendingWakes.removeAll()
+            fitted = false
+            zoom = 1
+            offset = CGPoint(x: 40, y: 80)
+            applyTransform()
+        }
         let ids = Set(current.map(\.id))
         for (id, frame) in frames where !ids.contains(id) {
             frame.cancel()
@@ -144,7 +163,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         }
         // Fit before creating layers so the first bitmaps are requested at the
         // fitted density, not at 1:1 for every frame on the board.
-        if !fitted, !current.isEmpty, bounds.width > 0 { fit(current) }
+        if (!fitted || frames.isEmpty), !current.isEmpty, bounds.width > 0 { fit(current) }
         var added = false
         for frame in current {
             if let existing = frames[frame.id] {
@@ -227,7 +246,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func syncCursors() {
-        let people = model.presences.filter { $0.cursor != nil }
+        let people = model.pagePresences.filter { $0.cursor != nil }
         let ids = Set(people.map(\.clientId))
         for (id, cursor) in cursors where !ids.contains(id) {
             cursor.layer.removeFromSuperlayer()
@@ -428,7 +447,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             guidePath.addLine(to: toScreen(end))
         }
         snapGuideLayer.path = snapGuides.isEmpty ? nil : guidePath.cgPath
-        for person in model.presences {
+        for person in model.pagePresences {
             guard let cursor = cursors[person.clientId], let point = person.cursor else { continue }
             let world = CGPoint(x: point.x, y: point.y)
             cursor.move(to: toScreen(world), world: world)
@@ -442,7 +461,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         guard let drag, let frame = frames[drag.id] else { snapGuides = []; return }
         // Use the unsnapped finger position on every update so an existing snap
         // never accumulates into the next movement. Model order breaks ties.
-        let others = (model.canvas?.frames ?? []).compactMap { $0.id == drag.id ? nil : frames[$0.id]?.rect }
+        let others = model.pageFrames.compactMap { $0.id == drag.id ? nil : frames[$0.id]?.rect }
         let raw = CGRect(origin: drag.proposedOrigin, size: frame.rect.size)
         let snapped = FrameSnapping.move(raw, among: others, zoom: zoom)
         frame.move(to: snapped.rect.origin)
@@ -452,7 +471,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private func frame(at screenPoint: CGPoint) -> FrameLayer? {
         let point = toWorld(screenPoint)
         // Topmost frame wins: later frames are drawn above earlier ones.
-        return (model.canvas?.frames ?? []).reversed().lazy.compactMap { self.frames[$0.id] }.first { $0.rect.contains(point) }
+        return model.pageFrames.reversed().lazy.compactMap { self.frames[$0.id] }.first { $0.rect.contains(point) }
     }
 
     private func label(at screenPoint: CGPoint) -> String? {
@@ -509,7 +528,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             }
             model.select(frame.id)
         } else {
-            fit(model.canvas?.frames ?? [])
+            fit(model.pageFrames)
         }
         applyTransform()
         scheduleRelayout()

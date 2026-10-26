@@ -1,4 +1,6 @@
 import { FRAME_REPLAY_RUNTIME } from './frameReplayRuntime'
+import { FRAME_DROP_RUNTIME } from './frameDropRuntime'
+import { FRAME_PROTO_RUNTIME } from './frameProtoRuntime'
 
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
@@ -10,6 +12,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 <html><head></head><body><script data-v-boot>
 (function () {
   ${FRAME_REPLAY_RUNTIME}
+  ${FRAME_DROP_RUNTIME}
+  ${FRAME_PROTO_RUNTIME}
   /* horizontal overscroll inside a frame must not chain to the parent page,
      where the browser turns it into a history back/forward swipe. Adopted
      sheet, not a <style> tag — the morph would wipe a tag from <head>. */
@@ -224,6 +228,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       marked[j].removeAttribute('data-v-hover')
     }
     root.querySelectorAll('[data-v-path-hidden]').forEach(function (el) { el.removeAttribute('data-v-path-hidden') })
+    root.querySelectorAll('[data-v-proto-flash]').forEach(function (el) { el.removeAttribute('data-v-proto-flash') })
     root.style.removeProperty('zoom') // crisp-render zoom is ours, not the design's
     if (!root.getAttribute('style')) root.removeAttribute('style')
     return '<!doctype html>\\n' + root.outerHTML
@@ -277,10 +282,20 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     editTimer = setTimeout(postEdited, 400)
   })
 
+  document.addEventListener('contextmenu', function (ev) {
+    if (!editing) return
+    ev.preventDefault()
+    ev.stopPropagation()
+    setEdit(false)
+    parent.postMessage({ type: 'doop:edit-esc' }, '*')
+    parent.postMessage({ type: 'doop:context-menu', x: ev.clientX, y: ev.clientY }, '*')
+  }, true)
+
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
   document.addEventListener('keydown', function (ev) {
     if (ev.key !== 'Escape') return
+    if (protoOn && ev.defaultPrevented) return // the design's own script took it
     if (editing) {
       setEdit(false)
       parent.postMessage({ type: 'doop:edit-esc' }, '*')
@@ -294,8 +309,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      resolves the element at a point (for the click toolbar), locate finds a
      stored selector again (to place comment pins). Coordinates cross the
      boundary in design px, which are this document's own CSS px: the
-     crisp-render zoom past 100% is a CSS zoom on the iframe element outside,
-     so in here the viewport, vh/vw and every rect stay at design size. */
+     canvas zoom stays outside (the iframe element undoes the world's CSS
+     zoom), so in here the viewport, vh/vw and every rect stay at design size. */
 
   function cssPath(el) {
     var parts = []
@@ -368,10 +383,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* Ask the browser which element is actually on top, including stacking
      contexts, clipping, and transformed hit regions. Keep layout dimensions
      separate from the rendered rectangle so a move does not apply scale twice. */
-  function drawingHit(x, y, standalone) {
+  function drawingHit(x, y, standalone, selected) {
     var top = elementAt(x, y)
     var el = standalone ? document.body.firstElementChild : top && top.closest('[data-doop-drawing]')
     if (!el || !el.matches('[data-doop-drawing]') || isLocked(el)) return null
+    var picked = styleTarget(selected)
+    if (!standalone && picked && picked !== el && picked.contains(el) && elementGeometry(picked).enabled) return null
     var rect = designRect(el)
     var css = getComputedStyle(el)
     var width = parseFloat(css.width)
@@ -450,6 +467,28 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return el ? hitInfo(el) : null
   }
 
+  /* Right-click can reach a lock so the menu can unlock it. SVGs are one
+     layer in the rail, and their paths share that same context menu. */
+  function contextHit(x, y) {
+    var el = document.elementFromPoint(x, y)
+    if (!el || el === document.body || el === document.documentElement) return null
+    el = el.closest('[data-doop-locked]') || el.closest('[data-doop-drawing]') || el.closest('svg') || el
+    return hitInfo(el)
+  }
+
+  function moveHit(x, y, selected) {
+    var el = elementAt(x, y)
+    var picked = styleTarget(selected)
+    // A selected group moves as a whole even when the press hits a child.
+    if (el && picked && picked.contains(el) && !isLocked(picked)) el = picked
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (elementGeometry(el).enabled) return hitInfo(el)
+      // Inline text and SVG paths move with their containing box/SVG.
+      el = el.parentElement
+    }
+    return null
+  }
+
   /* the Layers panel selects by selector rather than by point */
   function describe(selector) {
     var el = null
@@ -495,7 +534,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      Capture its non-bubbling load event, including links added by later renders. */
   document.addEventListener('load', function (ev) {
     var el = ev.target
-    if (el && el.tagName === 'LINK' && el.relList.contains('stylesheet')) notifyFrameUpdated()
+    if (el && (el.tagName === 'IMG' || (el.tagName === 'LINK' && el.relList.contains('stylesheet')))) notifyFrameUpdated()
   }, true)
 
   function px(v) {
@@ -551,20 +590,26 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       return applyStyle(selector, { scale: (geometry.scaleX * (edit.axis === 'x' ? -1 : 1)) + ' '
         + (geometry.scaleY * (edit.axis === 'y' ? -1 : 1)) })
     }
-    var axis = edit.axis
-    if (axis !== 'x' && axis !== 'y') return false
     var rect = designRect(el)
-    var bounds = parentBounds(el)
-    var target
-    if (edit.kind === 'position' && isFinite(edit.value)) target = bounds[axis] + edit.value
-    else if (edit.kind === 'align' && geometry.canAlign) {
-      var size = axis === 'x' ? 'width' : 'height'
-      var fraction = { start: 0, center: 0.5, end: 1 }[edit.edge]
-      if (fraction === undefined) return false
-      target = bounds[axis] + (bounds[size] - rect[size]) * fraction
-    } else return false
-    var dx = axis === 'x' ? target - rect.x : 0
-    var dy = axis === 'y' ? target - rect.y : 0
+    var dx = 0, dy = 0
+    if (edit.kind === 'move' && isFinite(edit.x) && isFinite(edit.y)) {
+      dx = edit.x - rect.x
+      dy = edit.y - rect.y
+    } else {
+      var axis = edit.axis
+      if (axis !== 'x' && axis !== 'y') return false
+      var bounds = parentBounds(el)
+      var target
+      if (edit.kind === 'position' && isFinite(edit.value)) target = bounds[axis] + edit.value
+      else if (edit.kind === 'align' && geometry.canAlign) {
+        var size = axis === 'x' ? 'width' : 'height'
+        var fraction = { start: 0, center: 0.5, end: 1 }[edit.edge]
+        if (fraction === undefined) return false
+        target = bounds[axis] + (bounds[size] - rect[size]) * fraction
+      } else return false
+      dx = axis === 'x' ? target - rect.x : 0
+      dy = axis === 'y' ? target - rect.y : 0
+    }
     // Probe the local translation basis. This handles scaled/rotated ancestors and
     // percentage translations without flattening the element's existing transform.
     // All temporary styles are restored synchronously, before painting or saving.
@@ -611,6 +656,56 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     // Unlike getComputedStyle's used px size, Typed OM retains stylesheet percentages/auto.
     try { if (el.computedStyleMap) return String(el.computedStyleMap().get(axis)) } catch (e) {}
     return el.style.getPropertyValue(axis) || cs[axis]
+  }
+
+  function imageFill(el, cs) {
+    if (el.tagName === 'IMG') return { kind: 'img', src: el.currentSrc || el.src || '', size: cs.objectFit, repeat: 'no-repeat' }
+    // A single CSS image fill; leave gradients and layered backgrounds intact.
+    var match = cs.backgroundImage.match(/^url\\("([^"]*)"\\)$/)
+    return match ? { kind: 'background', src: match[1], size: cs.backgroundSize, repeat: cs.backgroundRepeat } : null
+  }
+
+  function preserveImageSize(el, cs) {
+    // Keep the old intrinsic inputs, not the flex/grid layout's used size.
+    // This also works without Typed OM and leaves authored widths, heights,
+    // flex factors and responsive constraints in charge of the actual box.
+    // Already size-contained images (including earlier replacements) do not
+    // derive their layout from the file, so keep their existing overrides.
+    var contain = cs.contain
+    if (!el.naturalWidth || !el.naturalHeight || contain === 'strict' || contain.split(' ').indexOf('size') !== -1) return
+    var ratio = cs.aspectRatio
+    if (ratio.indexOf('auto') !== -1) {
+      ratio = el.naturalWidth + ' / ' + el.naturalHeight
+      // A natural ratio applies to the content box; a CSS ratio follows
+      // box-sizing. Preserve the current outer ratio for padded border boxes.
+      if (cs.boxSizing === 'border-box' && px(cs.width) > 0 && px(cs.height) > 0) ratio = px(cs.width) + ' / ' + px(cs.height)
+    }
+    el.style.setProperty('aspect-ratio', ratio, 'important')
+    el.style.setProperty('contain-intrinsic-size', el.naturalWidth + 'px ' + el.naturalHeight + 'px', 'important')
+    el.style.setProperty('contain', contain === 'none' ? 'size' : contain === 'content' ? 'size layout style paint' : contain + ' size', 'important')
+  }
+
+  function replaceImage(selector, expected, url) {
+    var el = styleTarget(selector)
+    if (!el || isLocked(el) || !expected || typeof url !== 'string' || !url) return false
+    var cs = getComputedStyle(el)
+    var image = imageFill(el, cs)
+    if (!image || image.kind !== expected.kind || image.src !== expected.src) return false
+    if (styleEdit) endStyleEdit(styleEdit.selector, false)
+    if (styleTimer) { clearTimeout(styleTimer); styleTimer = null; postEdited() }
+    if (image.kind === 'img') {
+      preserveImageSize(el, cs)
+      el.removeAttribute('srcset')
+      el.removeAttribute('sizes')
+      if (el.parentElement && el.parentElement.tagName === 'PICTURE') {
+        el.parentElement.querySelectorAll('source').forEach(function (source) { source.remove() })
+      }
+      el.src = url
+    } else {
+      el.style.setProperty('background-image', 'url(' + JSON.stringify(url) + ')', 'important')
+    }
+    postEdited(true)
+    return true
   }
 
   function inspect(selector) {
@@ -691,6 +786,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       visibility: cs.visibility,
       clipsContent: /^(hidden|clip)$/.test(cs.overflowX) && /^(hidden|clip)$/.test(cs.overflowY),
       backgroundColor: cs.backgroundColor,
+      image: imageFill(el, cs),
       /* rounded: the crisp-render zoom snaps hairlines to device pixels */
       borderWidths: [
         Math.round(px(cs.borderTopWidth)),
@@ -815,6 +911,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var applied = applyStyle(d.selector, d.styles)
       parent.postMessage({ type: 'doop:style-result', reqId: d.reqId, ok: applied, info: applied ? inspect(d.selector) : null }, '*')
     }
+    if (d.type === 'doop:replace-image') {
+      var replaced = replaceImage(d.selector, d.image, d.url)
+      parent.postMessage({ type: 'doop:replace-image-result', reqId: d.reqId, info: replaced ? inspect(d.selector) : null }, '*')
+    }
     if (d.type === 'doop:geometry') {
       var changed = editGeometry(d.selector, d.edit)
       parent.postMessage({ type: 'doop:geometry-result', reqId: d.reqId, ok: changed, info: changed ? inspect(d.selector) : null }, '*')
@@ -827,6 +927,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:html' && typeof d.html === 'string' && !editing) {
       render(d.html)
       notifyFrameUpdated()
+      protoHtmlChanged()
       if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:edit') setEdit(!!d.on)
@@ -875,8 +976,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:probe') {
       parent.postMessage({ type: 'doop:probe-result', reqId: d.reqId, hit: probe(d.x, d.y) }, '*')
     }
+    if (d.type === 'doop:context-hit') {
+      parent.postMessage({ type: 'doop:context-hit-result', reqId: d.reqId, hit: contextHit(d.x, d.y) }, '*')
+    }
     if (d.type === 'doop:drawing-hit') {
-      parent.postMessage({ type: 'doop:drawing-hit-result', reqId: d.reqId, hit: drawingHit(d.x, d.y, d.standalone) }, '*')
+      parent.postMessage({ type: 'doop:drawing-hit-result', reqId: d.reqId, hit: drawingHit(d.x, d.y, d.standalone, d.selected) }, '*')
+    }
+    if (d.type === 'doop:move-hit') {
+      parent.postMessage({ type: 'doop:move-hit-result', reqId: d.reqId, hit: moveHit(d.x, d.y, d.selected) }, '*')
+    }
+    if (d.type === 'doop:move-target') {
+      parent.postMessage({ type: 'doop:move-target-result', reqId: d.reqId, result: moveTarget(d.selector, d.x, d.y) }, '*')
     }
     if (d.type === 'doop:path') {
       parent.postMessage({ type: 'doop:path-result', reqId: d.reqId, hit: pathInfo(d) }, '*')
