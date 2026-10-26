@@ -7,6 +7,7 @@ import {
   parseInteractions,
   prototypeLinks,
   scanInteractions,
+  remapFrameTargets,
   type Interaction,
 } from '../shared/prototype'
 import {
@@ -255,5 +256,25 @@ describe('player helpers', () => {
     expect(readProtoHistory(null)).toBeNull()
     expect(readProtoHistory({ doopProto: true })).toBeNull()
     expect(readProtoHistory({ doopProto: true, frameId: 'a', depth: -1 })).toBeNull()
+  })
+})
+
+describe('remapFrameTargets', () => {
+  const ids = new Map([['old', 'new']])
+
+  it('rewrites frame targets in both interaction attribute forms', () => {
+    const json = JSON.stringify([{ on: 'click', action: 'overlay:old' }]).replaceAll('"', '&quot;')
+    const html = `<a data-doop-on="click" data-doop-action="navigate:old">Go</a><b data-doop-interactions="${json}"></b><i data-doop-action='navigate:other'></i>`
+    const out = remapFrameTargets(html, ids)
+    expect(out).toContain('data-doop-action="navigate:new"')
+    expect(out).toContain('overlay:new')
+    expect(out).toContain("data-doop-action='navigate:other'")
+    expect(out).not.toContain(':old')
+  })
+
+  it('leaves text, URLs and longer ids alone', () => {
+    const html =
+      '<p>Use navigate:old to link</p><a href="https://x.test/?q=overlay:old">x</a><a data-doop-action="navigate:old-two"></a>'
+    expect(remapFrameTargets(html, ids)).toBe(html)
   })
 })

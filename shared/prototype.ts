@@ -211,16 +211,20 @@ export function targetsFrame(i: Interaction): i is Interaction & { target: strin
 
 /**
  * Point the frame targets in copied HTML at the copies: every `navigate:` and
- * `overlay:` whose frame is in `ids` takes the new id; targets outside the
- * copy keep pointing where they did. Works on the raw text, so it reaches
- * both attribute forms (entity-encoded JSON included) and interactions a
- * script writes at runtime.
+ * `overlay:` in a `data-doop-action` or `data-doop-interactions` value whose
+ * frame is in `ids` takes the new id (entity-encoded JSON included); targets
+ * outside the copy, and the rest of the document, stay as they are.
  */
 export function remapFrameTargets(html: string, ids: ReadonlyMap<string, string>): string {
-  return html.replace(/\b(navigate|overlay):([\w-]{1,64})(?![\w-])/g, (whole, action: string, target: string) => {
-    const next = ids.get(target)
-    return next ? `${action}:${next}` : whole
-  })
+  return html.replace(
+    /(\s(?:data-doop-action|data-doop-interactions)\s*=\s*)("[^"]*"|'[^']*'|[^\s"'=<>`]+)/gi,
+    (_whole, name: string, value: string) =>
+      name +
+      value.replace(/\b(navigate|overlay):([\w-]{1,64})(?![\w-])/g, (action: string, kind: string, target: string) => {
+        const next = ids.get(target)
+        return next ? `${kind}:${next}` : action
+      }),
+  )
 }
 
 /* ---- reading interactions out of HTML without a DOM (server, MCP) ---- */
