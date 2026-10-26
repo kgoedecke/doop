@@ -27,6 +27,15 @@
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
+- Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected
+  account's picker asks the provider's catalog with the user's own key when it opens (the
+  composer's `ModelPicker`) or mounts (Settings, `useAgentModels`), merging the curated entries of
+  `shared/modelMenu.ts` / `shared/localAgent.ts` on top as `recommended`; a provider without a
+  loader, or one that cannot be reached, gets the curated menu with `live: false`. Anthropic and
+  OpenAI (`/v1/models`) and Gemini (`/v1beta/models`) have loaders, each with a family filter for
+  chat models with tools, images and a 16k output window; a picked id only has to be shaped like
+  the provider's, and the run is the final check. OpenRouter stays on its curated roster (the
+  run-time vision check knows only the roster's flags) and ChatGPT subscriptions on `AGENT_MODELS`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints

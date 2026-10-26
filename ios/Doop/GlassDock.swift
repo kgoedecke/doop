@@ -27,6 +27,29 @@ struct FloatingGlass: ViewModifier {
     }
 }
 
+/// A continuous rounded panel keeps the composer's corners stable as its text grows.
+struct ComposerGlass: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(uiColor: .secondarySystemBackground), in: shape)
+                .overlay(shape.strokeBorder(.primary.opacity(0.12)))
+        } else if #available(iOS 26.0, *), FloatingGlass.liquidGlassAvailable {
+            #if compiler(>=6.2)
+            content.glassEffect(.regular, in: shape)
+            #else
+            content
+            #endif
+        } else {
+            content.background(.regularMaterial, in: shape)
+                .overlay(shape.strokeBorder(.primary.opacity(0.12)))
+                .shadow(color: .black.opacity(0.10), radius: 18, y: 6)
+        }
+    }
+}
+
 struct GlassDock<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {

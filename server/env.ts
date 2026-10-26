@@ -136,6 +136,7 @@ const schema = {
   CHATGPT_RESPONSES_URL: str({ default: 'https://chatgpt.com/backend-api/codex/responses' }),
   CHATGPT_ORIGINATOR: str({ default: 'codex_cli_rs' }),
   OPENAI_RESPONSES_URL: str({ default: 'https://api.openai.com/v1/responses' }),
+  OPENAI_MODELS_URL: str({ default: 'https://api.openai.com/v1/models' }),
   OPENROUTER_CHAT_URL: str({ default: 'https://openrouter.ai/api/v1/chat/completions' }),
   GEMINI_OPENAI_CHAT_URL: str({
     default: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',

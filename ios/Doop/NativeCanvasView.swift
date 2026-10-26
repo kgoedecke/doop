@@ -7,6 +7,16 @@ struct NativeCanvasView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var sheet: Panel?
     @State private var prompt = ""
+    @State private var agentAssignment = AgentAssignment.automatic
+    @State private var modelAccount: AgentModelAccount?
+    @State private var modelPickerOpen = false
+    @State private var loadingModels = false
+    @State private var changingModel = false
+    @State private var modelError: String?
+    @State private var contextReferences: [PromptContextReference] = []
+    @State private var contextPickerOpen = false
+    @State private var dismissedMention: String?
+    @FocusState private var promptFocused: Bool
     @State private var sending = false
     /// The scope key the person dismissed with the chip's ×; a new selection brings the chip back.
     @State private var dismissedScope: String?
@@ -14,6 +24,7 @@ struct NativeCanvasView: View {
     @State private var clipboardAvailable = CanvasClipboard.isAvailable
     @State private var copiedSelection = false
     private let summary: CanvasSummary
+    private let currentUser: DoopUser?
     private enum Panel: Identifiable {
         case frames, inspector, tasks, comments
         case export(CanvasSelection)
@@ -28,7 +39,8 @@ struct NativeCanvasView: View {
         }
     }
 
-    init(summary: CanvasSummary, client: DoopClient) {
+    init(summary: CanvasSummary, client: DoopClient, currentUser: DoopUser? = nil) {
+        self.currentUser = currentUser
         self.summary = summary
         _model = StateObject(wrappedValue: CanvasModel(id: summary.id, client: client))
     }
@@ -65,23 +77,14 @@ struct NativeCanvasView: View {
             }
             ZStack(alignment: .bottom) {
                 VStack(spacing: 10) {
-                    if model.selected != nil || clipboardAvailable {
+                    if modelPickerOpen {
+                        modelPicker
+                    } else if showContextPicker {
+                        contextPicker
+                    } else if model.selected != nil || clipboardAvailable {
                         selectionActions
                     }
-                    HStack(spacing: 10) {
-                        if let scope = promptScope {
-                            PromptScopeChip(scope: scope) { dismissedScope = scope.key }
-                        } else {
-                            Image(systemName: "sparkles").foregroundStyle(.tint)
-                        }
-                        TextField(promptPlaceholder, text: $prompt, axis: .vertical).lineLimit(1...4)
-                            .textFieldStyle(.plain)
-                            .accessibilityIdentifier("canvas.prompt")
-                        Button(action: sendPrompt) {
-                            if sending { ProgressView() } else { Image(systemName: "arrow.up.circle.fill").font(.title) }
-                        }.disabled(sending || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.connected)
-                            .accessibilityLabel("Send design task")
-                    }.padding(.horizontal, 16).padding(.vertical, 14).modifier(FloatingGlass())
+                    composer
                 }.frame(maxWidth: 620).padding(12)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -91,7 +94,9 @@ struct NativeCanvasView: View {
                 BlitzCanvasSurface(model: model)
                     .ignoresSafeArea(.container, edges: .bottom)
             }
-            .overlay(alignment: .topTrailing) { canvasTools.padding(12) }
+            .overlay(alignment: .topTrailing) {
+                if !showContextPicker && !modelPickerOpen { canvasTools.padding(12) }
+            }
         }
         .background(CanvasBackSwipeGuard())
         .navigationTitle(model.canvas?.name ?? summary.name).navigationBarTitleDisplayMode(.inline)
@@ -116,6 +121,7 @@ struct NativeCanvasView: View {
                 SelectionExportPanel(selection: selection, origin: model.client.server.origin)
             }
         }
+        .task { await loadModels() }
         .onAppear { clipboardAvailable = CanvasClipboard.isAvailable; if scenePhase == .active { model.start() } }
         .onDisappear { model.stop() }
         .onChange(of: scenePhase) { phase in if phase == .active { clipboardAvailable = CanvasClipboard.isAvailable; model.start() } else if phase == .background { model.stop() } }
@@ -131,6 +137,306 @@ struct NativeCanvasView: View {
         }
     }
 
+    private var canSend: Bool {
+        !sending && !changingModel && model.connected && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasComposerContext: Bool {
+        promptScope != nil || !contextReferences.isEmpty || agentAssignment != .automatic
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if hasComposerContext {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if case .specialist(let agent) = agentAssignment {
+                            ComposerContextChip(label: agent.name, symbol: "", brand: "doop") {
+                                agentAssignment = .automatic
+                            }
+                        }
+                        if let scope = promptScope {
+                            ComposerContextChip(label: scope.label, symbol: scope.isElement ? "scope" : "rectangle") {
+                                dismissedScope = scope.key
+                            }
+                        }
+                        ForEach(contextReferences) { reference in
+                            ComposerContextChip(label: reference.name, symbol: reference.symbol) {
+                                contextReferences.removeAll { $0.id == reference.id }
+                            }
+                        }
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.bottom, 8)
+            }
+            TextField(promptPlaceholder, text: $prompt, axis: .vertical)
+                .lineLimit(1...5).textFieldStyle(.plain)
+                .font(.callout).padding(.horizontal, 16)
+                .focused($promptFocused)
+                .accessibilityIdentifier("canvas.prompt")
+                .onChange(of: promptFocused) { focused in if focused { modelPickerOpen = false } }
+            HStack(spacing: 8) {
+                Button {
+                    if showContextPicker { closeContextPicker() }
+                    else { modelPickerOpen = false; contextPickerOpen = true; dismissedMention = nil; promptFocused = false }
+                } label: {
+                    Image(systemName: "at").font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(ComposerColors.action)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Mention agents or context")
+                .accessibilityIdentifier("canvas.addContext")
+                Spacer(minLength: 0)
+                Button {
+                    closeContextPicker()
+                    promptFocused = false
+                    modelPickerOpen.toggle()
+                    if modelPickerOpen { Task { await loadModels() } }
+                } label: {
+                    HStack(spacing: 6) {
+                        ComposerBrandMark(name: modelAccount?.kind == "anthropic-key" ? "claude" : "chatgpt", color: ComposerColors.muted)
+                            .frame(width: 14, height: 14)
+                        Text(modelAccount?.label ?? "Auto")
+                            .font(.subheadline)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .foregroundStyle(ComposerColors.muted).padding(.horizontal, 8).frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(sending || changingModel)
+                .accessibilityLabel("Choose model")
+                .accessibilityValue(modelAccount?.label ?? "Auto")
+                .accessibilityIdentifier("canvas.modelPicker")
+                Button(action: sendPrompt) {
+                    Group {
+                        if sending { ProgressView().tint(.white) }
+                        else { Image(systemName: "arrow.up").font(.system(size: 18, weight: .medium)) }
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(ComposerColors.send.opacity(canSend || sending ? 1 : 0.35), in: Circle())
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(!canSend)
+                .accessibilityLabel("Send design task")
+            }
+        }
+        // Pills already have 6 pt of space inside their taller touch target.
+        .padding(.top, hasComposerContext ? 4 : 16)
+        .padding(.bottom, 4)
+        .disabled(sending)
+        .modifier(ComposerGlass())
+        .background(GeometryReader { proxy in Color.clear.preference(key: ComposerHeightKey.self, value: proxy.size.height) })
+        .onPreferenceChange(ComposerHeightKey.self) { model.composerHeight = $0 }
+    }
+
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Doop Agent model").font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                Button { modelPickerOpen = false } label: {
+                    Image(systemName: "xmark").font(.caption).foregroundStyle(ComposerColors.action).frame(width: 44, height: 44)
+                }.buttonStyle(.plain).accessibilityLabel("Close model picker")
+            }.padding(.leading, 12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    if loadingModels || changingModel {
+                        ProgressView(changingModel ? "Saving model…" : "Loading models…")
+                            .padding(12).frame(maxWidth: .infinity)
+                    }
+                    if let modelError {
+                        Text(modelError).font(.callout).foregroundStyle(.secondary).padding(.horizontal, 12)
+                        Button("Retry") { Task { await loadModels() } }.padding(12)
+                    }
+                    if let account = modelAccount, !loadingModels {
+                        if account.options.isEmpty {
+                            Text(account.connected ? "No models are available for this account." :
+                                 "Auto uses the server’s model. Connect a model account to choose your own.")
+                                .font(.callout).foregroundStyle(.secondary).padding(12)
+                        }
+                        ForEach(account.options) { option in
+                            Button { Task { await chooseModel(option.id) } } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(option.name).font(.body)
+                                        if let blurb = option.blurb {
+                                            Text(blurb).font(.caption).foregroundStyle(.secondary)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                    if option.id == account.model { Image(systemName: "checkmark").font(.callout).foregroundStyle(ComposerColors.action) }
+                                }
+                                .padding(12).frame(minHeight: 48).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).disabled(changingModel)
+                            .accessibilityLabel("Use " + option.name)
+                            .accessibilityAddTraits(option.id == account.model ? [.isSelected] : [])
+                        }
+                    }
+                }
+            }.frame(height: modelAccount?.options.isEmpty == false ? 240 : 100)
+            Divider().padding(.horizontal, 12)
+            Link(modelAccount?.connected == true ? "Model settings…" : "Connect a model…",
+                 destination: modelSettingsURL)
+                .font(.callout).padding(12).frame(minHeight: 44)
+        }
+        .padding(8).modifier(ComposerGlass())
+        .accessibilityIdentifier("canvas.modelOptions")
+    }
+
+    private var modelSettingsURL: URL {
+        var url = URLComponents(url: model.client.server.origin.appendingPathComponent("settings"), resolvingAgainstBaseURL: false)!
+        url.queryItems = [URLQueryItem(name: "pane", value: "agent")]
+        return url.url!
+    }
+
+    private func loadModels() async {
+        guard !loadingModels, !changingModel else { return }
+        loadingModels = true
+        defer { loadingModels = false }
+        do {
+            modelAccount = try await model.client.get("/api/model-account")
+            modelError = nil
+        } catch { modelError = error.localizedDescription }
+    }
+
+    private func chooseModel(_ id: String) async {
+        guard !changingModel, modelAccount?.options.contains(where: { $0.id == id }) == true else { return }
+        if id == modelAccount?.model { modelPickerOpen = false; return }
+        changingModel = true
+        defer { changingModel = false }
+        do {
+            let data = try await model.client.data("/api/model-account", method: "PATCH", body: ["model": id])
+            modelAccount = try JSONDecoder().decode(AgentModelAccount.self, from: data)
+            modelError = nil
+            modelPickerOpen = false
+        } catch { modelError = error.localizedDescription }
+    }
+
+    private var mentionQuery: String? { PromptContextReference.mentionQuery(in: prompt) }
+    private var showContextPicker: Bool {
+        contextPickerOpen || (promptFocused && mentionQuery != nil && dismissedMention != prompt)
+    }
+    private var availableContext: [PromptContextReference] {
+        let people = PromptContextReference.people(currentUser: currentUser, presences: model.presences)
+        let frames = (model.canvas?.frames ?? []).map { PromptContextReference(kind: .frame, sourceID: $0.id, name: $0.name) }
+        let query = mentionQuery ?? ""
+        return (people + frames).filter { item in
+            !contextReferences.contains(where: { $0.id == item.id }) &&
+                (query.isEmpty || item.name.localizedCaseInsensitiveContains(query))
+        }
+    }
+
+    private var contextPicker: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Mention").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(action: closeContextPicker) {
+                    Image(systemName: "xmark").font(.caption).foregroundStyle(ComposerColors.action).frame(width: 44, height: 44)
+                }.buttonStyle(.plain).accessibilityLabel("Close context picker")
+            }.padding(.leading, 12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if !availableAgents.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Agents").font(.subheadline).foregroundStyle(.secondary)
+                                .padding(.horizontal, 12).padding(.bottom, 4)
+                            ForEach(availableAgents, id: \.self) { assignment in
+                                Button { selectAgent(assignment) } label: {
+                                    HStack(spacing: 12) {
+                                        ComposerBrandMark(name: "doop").frame(width: 20, height: 20)
+                                        Text(assignment == .automatic ? "Doop" : assignment.label)
+                                            .lineLimit(2).multilineTextAlignment(.leading)
+                                        Spacer(minLength: 0)
+                                        if assignment == agentAssignment { Image(systemName: "checkmark").font(.caption).foregroundStyle(ComposerColors.action) }
+                                    }
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                    .frame(minHeight: 48).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain).disabled(sending)
+                                .accessibilityLabel("Assign to " + (assignment == .automatic ? "Doop" : assignment.label))
+                            }
+                        }
+                    }
+                    ForEach(PromptContextReference.Kind.allCases, id: \.self) { kind in
+                        let items = availableContext.filter { $0.kind == kind }
+                        if !items.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(kind.sectionTitle).font(.subheadline).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12).padding(.bottom, 4)
+                                ForEach(items) { item in
+                                    Button { addContext(item) } label: {
+                                        HStack(spacing: 12) {
+                                            if item.kind == .person {
+                                                Text(item.name.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined())
+                                                    .font(.caption.weight(.medium)).frame(width: 28, height: 28)
+                                                    .background(Color.primary.opacity(0.08), in: Circle())
+                                            } else {
+                                                Image(systemName: item.symbol).font(.title3)
+                                                    .foregroundStyle(ComposerColors.action).frame(width: 28)
+                                            }
+                                            Text(item.name).lineLimit(2).multilineTextAlignment(.leading)
+                                            if item.kind == .person && item.sourceID == currentUser?.id {
+                                                Text("(You)").foregroundStyle(.secondary)
+                                            }
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(.horizontal, 12).padding(.vertical, 8)
+                                        .frame(minHeight: 48).contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Add \(kind.rawValue) \(item.name)")
+                                }
+                            }
+                        }
+                    }
+                    if availableContext.isEmpty && availableAgents.isEmpty {
+                        Text("No matching context").foregroundStyle(.secondary).padding(12)
+                    }
+                }.padding(.bottom, 12)
+            }.frame(height: promptFocused ? 180 : 260)
+        }
+        .padding(8).modifier(ComposerGlass())
+        .accessibilityIdentifier("canvas.contextPicker")
+        .disabled(sending)
+    }
+
+    private var availableAgents: [AgentAssignment] {
+        let query = mentionQuery ?? ""
+        return ([AgentAssignment.automatic] + SpecialistAgent.allCases.map { .specialist($0) }).filter {
+            query.isEmpty || ($0 == .automatic ? "Doop" : $0.label).localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func selectAgent(_ assignment: AgentAssignment) {
+        guard !sending else { return }
+        agentAssignment = assignment
+        finishContextSelection()
+    }
+
+    private func closeContextPicker() {
+        contextPickerOpen = false
+        dismissedMention = prompt
+    }
+
+    private func addContext(_ item: PromptContextReference) {
+        guard !sending else { return }
+        if !contextReferences.contains(where: { $0.id == item.id }) { contextReferences.append(item) }
+        finishContextSelection()
+    }
+
+    private func finishContextSelection() {
+        prompt = PromptContextReference.removingMentionQuery(from: prompt)
+        dismissedMention = prompt
+        contextPickerOpen = false
+        promptFocused = true
+    }
+
     private var canvasTools: some View {
         VStack(spacing: 2) {
             GlassDockButton(label: "Undo", symbol: "arrow.uturn.backward") { Task { await model.undo() } }
@@ -143,7 +449,7 @@ struct NativeCanvasView: View {
             GlassDockButton(label: "Frames", symbol: "square.3.layers.3d") { sheet = .frames }
             GlassDockButton(label: "Frame properties", symbol: "slider.horizontal.3") { sheet = .inspector }
                 .disabled(model.selected == nil || !model.canEdit)
-        }.padding(4).modifier(FloatingGlass())
+        }.padding(.horizontal, 1).padding(.vertical, 4).modifier(FloatingGlass())
     }
 
     /// The selection scopes the prompt, as on the web, until the chip is dismissed.
@@ -158,12 +464,23 @@ struct NativeCanvasView: View {
     }
 
     private func sendPrompt() {
+        guard canSend else { return }
         let value = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         sending = true
         let scope = promptScope?.scope
+        let assignment = agentAssignment
+        let title = PromptContextReference.taskTitle(value, references: contextReferences)
         Task {
-            do { try await model.queue(value, scope: scope); prompt = ""; sheet = .tasks }
+            do {
+                try await model.queue(title, scope: scope, assignment: assignment)
+                prompt = ""
+                contextReferences = []
+                agentAssignment = .automatic
+                contextPickerOpen = false
+                promptFocused = false
+                sheet = .tasks
+            }
             catch { model.error = error.localizedDescription }
             sending = false
         }
@@ -221,7 +538,7 @@ struct NativeCanvasView: View {
             }
             selectionAction("Comment", symbol: "bubble.left", id: "comment", disabled: model.selection == nil) { sheet = .comments }
             selectionAction("Export", symbol: "square.and.arrow.up", id: "export", disabled: model.selection == nil) { openExport() }
-        }.padding(.horizontal, 4).padding(.vertical, 5)
+        }.padding(.horizontal, 4).padding(.vertical, 1)
     }
 
     private var canEditSelection: Bool { model.canEdit && model.selected != nil && model.selected?.locked != true }
@@ -252,27 +569,73 @@ struct NativeCanvasView: View {
     }
 }
 
-/// The prompt bar's scope: the selected frame's name, or the picked element's
-/// `tag#id.class`, with an × that asks without it.
-private struct PromptScopeChip: View {
-    let scope: PromptScope
+private struct ComposerContextChip: View {
+    @ScaledMetric(relativeTo: .subheadline) private var pillHeight = 32.0
+    let label: String
+    let symbol: String
+    var brand: String? = nil
     let dismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: scope.isElement ? "scope" : "rectangle").font(.caption)
-            Text(scope.label).font(.caption.monospaced().bold()).lineLimit(1).truncationMode(.tail)
-            Button(action: dismiss) { Image(systemName: "xmark").font(.caption2.bold()) }
-                .accessibilityLabel(scope.isElement ? "Remove element scope" : "Remove frame scope")
+        HStack(spacing: 6) {
+            if let brand { ComposerBrandMark(name: brand, color: ComposerColors.muted).frame(width: 14, height: 14) }
+            else { Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(ComposerColors.muted) }
+            Text(label).lineLimit(1).truncationMode(.tail)
+            Button(action: dismiss) {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(ComposerColors.muted).frame(width: 32, height: 44)
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("Remove \(label) context")
         }
-        .foregroundStyle(.tint)
-        .padding(.leading, 8).padding(.trailing, 6).padding(.vertical, 5)
-        .background(Color.primary.opacity(0.09), in: Capsule())
-        .frame(maxWidth: 150, alignment: .leading)
+        .font(.subheadline)
+        .padding(.leading, 10)
+        .frame(minHeight: max(44, pillHeight))
+        // Keep the visual pill compact without shrinking the remove control.
+        .background(Capsule().fill(Color.primary.opacity(0.025)).frame(height: pillHeight))
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 1).frame(height: pillHeight))
+        .frame(maxWidth: 260)
         .fixedSize(horizontal: true, vertical: false)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(scope.isElement ? "Scoped to \(scope.label) in \(scope.frameName)" : "Scoped to the frame \(scope.label)")
     }
+}
+
+/// Opaque neutral colors avoid compounding SwiftUI's secondary-style opacity
+/// inside brand paths. The light/dark roles follow the composer reference.
+private enum ComposerColors {
+    static let action = adaptive(light: 0x383836, dark: 0xE6E5E3)
+    static let muted = adaptive(light: 0x7C7A74, dark: 0xADA9A3)
+    static let send = Color(red: 38 / 255, green: 131 / 255, blue: 222 / 255)
+
+    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            if traits.accessibilityContrast == .high { return .label }
+            let value = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((value >> 16) & 255) / 255,
+                           green: CGFloat((value >> 8) & 255) / 255,
+                           blue: CGFloat(value & 255) / 255, alpha: 1)
+        })
+    }
+}
+
+/// Reuses the exact brand paths already used by native collaborator cursors.
+private struct ComposerBrandMark: View {
+    let name: String
+    var color: Color = ComposerColors.action
+    var body: some View {
+        let source = AgentMark.path(for: name)
+        let bounds = source.boundingBoxOfPath
+        GeometryReader { proxy in
+            let scale = min(proxy.size.width / bounds.width, proxy.size.height / bounds.height)
+            let transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
+                tx: (proxy.size.width - bounds.width * scale) / 2 - bounds.minX * scale,
+                ty: (proxy.size.height - bounds.height * scale) / 2 - bounds.minY * scale)
+            Path(source).applying(transform).fill(color)
+        }.accessibilityHidden(true)
+    }
+}
+
+private struct ComposerHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 160
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct FrameInspector: View {

@@ -1253,7 +1253,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
           .catch(async (err: unknown) => {
             const state = await page.evaluate(() => ({
               ...window.drawingHarness.state(),
-              editing: document.body.textContent?.includes('Click any text to edit'),
+              editing: !!document.querySelector('[title="Save and finish editing (Esc)"]'),
             }))
             throw new Error(`${transform}: moving to ${title}: ${JSON.stringify(state)}`, { cause: err })
           })

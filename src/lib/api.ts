@@ -157,6 +157,16 @@ export interface AgentModelOption {
   blurb: string
   /** false = the model cannot see screenshots; runs skip visual review */
   vision?: boolean
+  /** true on a curated entry the provider's live catalog confirmed */
+  recommended?: boolean
+}
+
+/** The connected provider's live model list, or the curated menu when the
+ *  provider could not be asked (`live: false`, with the reason in `error`). */
+export interface AgentModelCatalog {
+  models: AgentModelOption[]
+  live: boolean
+  error?: string
 }
 
 export interface ModelAccountStatus {
@@ -473,6 +483,7 @@ export const api = {
     }),
   agentAllowance: () => req<Allowance>('/api/agent-allowance'),
   modelAccount: () => req<ModelAccountStatus>('/api/model-account'),
+  agentModels: () => req<AgentModelCatalog>('/api/model-account/models'),
   chatgptAuthorize: () =>
     req<{ url: string; state: string; catching: boolean }>('/api/model-account/chatgpt/authorize', { method: 'POST' }),
   startDeviceAuth: () => req<DeviceFlow>('/api/model-account/chatgpt/device', { method: 'POST' }),

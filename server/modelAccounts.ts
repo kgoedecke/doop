@@ -4,8 +4,9 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
-import { CLAUDE_MODEL_IDS, normalizeClaudeModel } from '../shared/localAgent.ts'
+import { normalizeClaudeModel } from '../shared/localAgent.ts'
 import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
+import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
 import { isKnownModel, modelFor } from './openaiAgent.ts'
 
 /**
@@ -140,18 +141,25 @@ const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
    resolves to the one that will run, and which ids the picker may set */
 const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKnown(model: string): boolean }> = {
   chatgpt: { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
-  'openai-key': { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
+  /* the API-key kinds take any id shaped like their provider's: the picker
+     offers what the provider's catalog lists (server/modelCatalog.ts) and the
+     run is the final check, as it always was */
+  'openai-key': { resolve: (model) => modelFor({ model }), isKnown: (model) => OPENAI_API_MODEL.test(model) },
+  /* any Claude id the catalog offered (or the user typed) runs as is; only the
+     pre-catalog aliases and an unset model fall back to the curated default */
   'anthropic-key': {
-    resolve: normalizeClaudeModel,
-    isKnown: (model) => CLAUDE_MODEL_IDS.some((id) => id === model),
+    resolve: (model) => (model && CLAUDE_API_MODEL.test(model) ? model : normalizeClaudeModel(model)),
+    isKnown: (model) => CLAUDE_API_MODEL.test(model),
   },
+  /* OpenRouter keeps its curated roster: the roster's vision flags are what
+     the run-time check knows, and its catalog mixes in text-only models */
   'openrouter-key': {
     resolve: (model) => model || DEFAULT_OPENROUTER,
     isKnown: (model) => OPENROUTER_MODELS.some((option) => option.id === model),
   },
   'gemini-key': {
     resolve: (model) => model || DEFAULT_GEMINI,
-    isKnown: (model) => GEMINI_MODELS.some((option) => option.id === model),
+    isKnown: (model) => GEMINI_API_MODEL.test(model),
   },
 }
 

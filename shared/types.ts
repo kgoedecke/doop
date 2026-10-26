@@ -327,6 +327,8 @@ export interface Actor {
 
 export interface Presence {
   clientId: string
+  /** Authenticated identity for people, shared across their connections. */
+  userId?: string
   name: string
   color: string
   kind: ActorKind

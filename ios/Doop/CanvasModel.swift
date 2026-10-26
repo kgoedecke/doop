@@ -28,6 +28,8 @@ final class CanvasModel: ObservableObject {
     @Published var deleted = false
     @Published var selectedElement: SelectedElement?
     @Published var viewportCommand = 0
+    /// Measured composer height, used when fitting frames above the floating controls.
+    var composerHeight: CGFloat = 160
     @Published private var undoStack: [UndoEntry] = []
     @Published private var pendingEdits = 0
     @Published private var undoing = false
@@ -325,10 +327,9 @@ final class CanvasModel: ObservableObject {
         return PromptScope(scope: CardScope(frameId: frame.id), label: frame.name, frameName: frame.name)
     }
 
-    func queue(_ prompt: String, scope: CardScope? = nil) async throws {
-        var body: [String: Any] = ["title": prompt]
-        if let scope { body["scope"] = scope.body }
-        _ = try await client.data("/api/canvases/\(id)/cards", method: "POST", body: body)
+    func queue(_ prompt: String, scope: CardScope? = nil, assignment: AgentAssignment = .automatic) async throws {
+        let request = CardQueueRequest(title: prompt, scope: scope, assignment: assignment)
+        _ = try await client.data("/api/canvases/\(id)/cards", method: "POST", body: request.body)
     }
 
     /// A comment pinned to an element when one is selected, else to the frame body.

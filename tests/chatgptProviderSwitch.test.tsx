@@ -15,6 +15,7 @@ vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { u
 vi.mock('../src/lib/api', () => ({
   api: {
     modelAccount: mocks.account,
+    agentModels: async () => ({ models: [], live: false }),
     chatgptAuthorize: mocks.authorize,
     startDeviceAuth: mocks.device,
     deviceAuthStatus: mocks.status,

@@ -279,7 +279,7 @@ private struct LibraryView: View {
                 #endif
             }
 
-            .navigationDestination(for: CanvasSummary.self) { canvas in NativeCanvasView(summary: canvas, client: app.client) }
+            .navigationDestination(for: CanvasSummary.self) { canvas in NativeCanvasView(summary: canvas, client: app.client, currentUser: app.user) }
             .onOpenURL { url in
                 guard let link = CanvasLink.parse(url) else { return }
                 if app.canvases.isEmpty { pendingLink = link } else { open(link) }

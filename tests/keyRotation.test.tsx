@@ -2,11 +2,17 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ replace: vi.fn(), disconnect: vi.fn(), selectLocal: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  replace: vi.fn(),
+  disconnect: vi.fn(),
+  selectLocal: vi.fn(),
+  models: vi.fn(async (): Promise<AgentModelCatalog> => ({ models: [], live: false })),
+}))
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
 vi.mock('../src/lib/api', () => ({
   api: {
     modelAccount: async () => ({ connected: true, kind: 'anthropic-key', model: 'claude-opus-5', models: [] }),
+    agentModels: mocks.models,
     connectAnthropicKey: mocks.replace,
     disconnectModelAccount: mocks.disconnect,
   },
@@ -18,6 +24,7 @@ vi.mock('../src/lib/localAgent', () => ({
 vi.mock('../src/lib/store', () => ({ useStore: { getState: () => ({ allowanceChanged: vi.fn() }) } }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/components/LocalClaude', () => ({ LocalClaudeRow: () => null }))
+import type { AgentModelCatalog } from '../src/lib/api'
 import { ModelAccountPanel } from '../src/components/ModelAccount'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
@@ -51,9 +58,17 @@ it('replaces the key without changing the active execution provider', async () =
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'sk-ant-new-test')
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
+  /* the new key may unlock other models: the catalog is asked again, not kept */
+  expect(mocks.models).toHaveBeenCalledTimes(1)
+  mocks.models.mockResolvedValue({
+    models: [{ id: 'claude-opus-5', name: 'Opus 5 (rotated key)', blurb: '', vision: true }],
+    live: true,
+  })
   await act(async () => button('Rotate key').click())
   expect(mocks.replace).toHaveBeenCalledExactlyOnceWith('sk-ant-new-test')
   expect(mocks.selectLocal).not.toHaveBeenCalled()
   expect(mocks.disconnect).not.toHaveBeenCalled()
   expect(container.querySelector('input[type="password"]')).toBeNull()
+  expect(mocks.models).toHaveBeenCalledTimes(2)
+  expect(container.textContent).toContain('Opus 5 (rotated key)')
 })

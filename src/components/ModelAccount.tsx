@@ -8,7 +8,7 @@ import { isDesktopShell } from '../lib/shell'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
-import type { AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
+import type { AgentModelCatalog, AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
 import { CodeBlock } from './ui/code-block'
@@ -46,6 +46,38 @@ export function useModelAccount(): {
   }, [])
   useEffect(refresh, [refresh])
   return { account, refresh, set: setAccount }
+}
+
+/**
+ * The connected provider's live model list, asked for while `wanted` is true
+ * (the picker is open, or the Settings pane is mounted) and again whenever
+ * the provider changes or `generation` is bumped: the Settings panel bumps it
+ * on every connect, rotation and disconnect, since a rotated key keeps the
+ * account's kind and `connectedAt` and would otherwise keep showing the old
+ * key's models. Null until it arrives and whenever it belongs to another
+ * account than the one on screen, so callers fall back to the curated menu.
+ */
+export function useAgentModels(
+  account: ModelAccountStatus | null,
+  wanted: boolean,
+  generation = 0,
+): AgentModelCatalog | null {
+  const kind = account?.connected ? account.kind : undefined
+  const [loaded, setLoaded] = useState<{ kind: ModelAccountKind; generation: number; catalog: AgentModelCatalog }>()
+  useEffect(() => {
+    if (!kind || !wanted) return
+    let stale = false
+    api.agentModels().then(
+      (catalog) => {
+        if (!stale) setLoaded({ kind, generation, catalog })
+      },
+      () => {},
+    )
+    return () => {
+      stale = true
+    }
+  }, [kind, generation, wanted])
+  return loaded && loaded.kind === kind && loaded.generation === generation ? loaded.catalog : null
 }
 
 /**
@@ -94,6 +126,9 @@ const rowBtn = 'max-md:justify-center'
 export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const desktop = isDesktopShell()
   const { account, refresh, set } = useModelAccount()
+  /* bumped by `settle`, so a rotated key reloads the catalog it unlocks */
+  const [catalogGeneration, setCatalogGeneration] = useState(0)
+  const catalog = useAgentModels(account, true, catalogGeneration)
   const { data: session } = authClient.useSession()
   const local = useLocalAgent((s) => s.preference)
   const userId = session?.user.id
@@ -116,6 +151,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const settle = useCallback(
     (next: ModelAccountStatus) => {
       set(next)
+      setCatalogGeneration((generation) => generation + 1)
       setAuthUrl('')
       setWaiting(false)
       setDevice(null)
@@ -301,7 +337,12 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   if (!account) return null
 
-  const menuFor = (kind: ModelAccountKind): AgentModelOption[] => account.menus?.[kind] ?? []
+  /* the connected row offers the provider's live list once it has arrived;
+     every other row advertises its curated menu */
+  const menuFor = (kind: ModelAccountKind): AgentModelOption[] =>
+    (account.connected && kind === account.kind && catalog?.live ? catalog.models : undefined) ??
+    account.menus?.[kind] ??
+    []
   const activeMenu = account.kind ? menuFor(account.kind) : []
   const chosen = activeMenu.find((m) => m.id === account.model)
   const onChatgpt = account.connected && account.kind === 'chatgpt'
@@ -435,12 +476,13 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                   </Button>
                 </div>
               </div>
-              {chosen && (
+              {chosen && (chosen.blurb || chosen.vision === false) && (
                 <p className="mt-[10px] text-body text-ink-faint">
                   {chosen.blurb}
                   {chosen.vision === false && ` ${VISION_NOTE}`}
                 </p>
               )}
+              {catalog?.error && <p className="mt-[10px] text-body text-ink-faint">{catalog.error}</p>}
             </>
           ) : showKey === cfg.kind ? (
             <div className={planFlow}>

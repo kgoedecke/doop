@@ -3,7 +3,9 @@
  * same way CLAUDE_MODELS is (shared/localAgent.ts). Hand-picked rather than
  * fetched from provider catalogs: every entry here has been judged fit for
  * design work, and the `vision` flag is what gates degraded no-screenshot
- * runs, so it must be deliberate, not scraped.
+ * runs, so it must be deliberate, not scraped. Where a provider publishes a
+ * catalog (server/modelCatalog.ts) these entries become the recommendations
+ * at the top of it rather than the whole menu.
  */
 
 export interface ModelOption {
@@ -12,6 +14,8 @@ export interface ModelOption {
   blurb: string
   /** false = the model cannot see images: runs skip visual review entirely */
   vision: boolean
+  /** true on a curated entry the provider's live catalog confirmed */
+  recommended?: boolean
 }
 
 /**

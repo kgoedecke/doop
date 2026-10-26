@@ -27,6 +27,7 @@ vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { u
 vi.mock('../src/lib/api', () => ({
   api: {
     modelAccount: mocks.account,
+    agentModels: async () => ({ models: [], live: false }),
     connectOpenRouterKey: mocks.connectOpenRouter,
     connectGeminiKey: mocks.connectGemini,
   },

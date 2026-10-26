@@ -359,7 +359,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     /// Keep fitted designs clear of the right rail and bottom prompt.
     private var unobscuredViewport: CGRect {
         CGRect(x: 24, y: 24, width: max(1, bounds.width - 100),
-               height: max(1, bounds.height - safeAreaInsets.bottom - 124))
+               height: max(1, bounds.height - safeAreaInsets.bottom - model.composerHeight - 100))
     }
 
     /// After a zoom change settles, re-render visible frames at the new density.

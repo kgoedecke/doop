@@ -1309,12 +1309,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           {editing && (
             <div
               className={cn(
-                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center gap-[9px] whitespace-nowrap rounded-full bg-ink py-1 pr-[5px] pl-3 text-[11px] font-semibold text-paper shadow-card',
+                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center whitespace-nowrap rounded-full bg-ink p-1 text-[11px] font-semibold text-paper shadow-card',
                 COUNTER_SCALE,
               )}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              Click any text to edit
               <Button
                 variant="primary"
                 size="pill"

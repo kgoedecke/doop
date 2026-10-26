@@ -74,6 +74,182 @@ public struct CardScope: Codable, Equatable {
     }
 }
 
+public struct AgentModelOption: Decodable, Identifiable {
+    public let id: String
+    public let name: String
+    public let blurb: String?
+}
+
+/// Uses the same server-owned menu and account preference as desktop.
+public struct AgentModelAccount: Decodable {
+    public let connected: Bool
+    public let kind: String?
+    public let model: String?
+    public let menus: [String: [AgentModelOption]]?
+
+    public var options: [AgentModelOption] {
+        guard connected, let kind else { return [] }
+        return menus?[kind] ?? []
+    }
+    public var label: String {
+        guard connected else { return "Auto" }
+        return options.first { $0.id == model }?.name ?? model ?? "Auto"
+    }
+}
+
+/// References are included as text because the cards API supports a single edit
+/// scope, not structured person mentions. They never notify collaborators.
+public struct PromptContextReference: Identifiable, Equatable {
+    public enum Kind: String, CaseIterable {
+        case person, frame
+        public var sectionTitle: String {
+            switch self {
+            case .person: return "People"
+            case .frame: return "Frames"
+            }
+        }
+    }
+    public let kind: Kind
+    public let sourceID: String
+    public let name: String
+    public var id: String { "\(kind.rawValue):\(sourceID)" }
+    public var symbol: String {
+        switch kind {
+        case .person: return "person.crop.circle"
+        case .frame: return "rectangle"
+        }
+    }
+
+    public init(kind: Kind, sourceID: String, name: String) {
+        self.kind = kind; self.sourceID = sourceID; self.name = name
+    }
+
+    public static func people(currentUser: DoopUser?, presences: [CanvasPresence]) -> [Self] {
+        var people: [Self] = []
+        if let user = currentUser {
+            people.append(Self(kind: .person, sourceID: user.id, name: user.name))
+        }
+        var seen = Set(people.map(\.sourceID))
+        for person in presences where person.kind == "user" {
+            // Older servers expose only connection IDs. Keep those distinct
+            // rather than guessing identity from a potentially shared name.
+            let id = person.userId ?? "client:\(person.clientId)"
+            if seen.insert(id).inserted {
+                people.append(Self(kind: .person, sourceID: id, name: person.name))
+            }
+        }
+        return people
+    }
+
+    /// The multiline text field completes the trailing @ query; email addresses
+    /// and @ characters in the middle of words do not open the picker.
+    private static func mentionRange(in text: String) -> Range<String.Index>? {
+        guard let at = text.lastIndex(of: "@"),
+              at == text.startIndex || text[text.index(before: at)].isWhitespace else { return nil }
+        let suffix = text[text.index(after: at)...]
+        guard !suffix.contains(where: { $0.isNewline }) else { return nil }
+        return at..<text.endIndex
+    }
+
+    public static func mentionQuery(in text: String) -> String? {
+        guard let range = mentionRange(in: text) else { return nil }
+        return String(text[text.index(after: range.lowerBound)...])
+    }
+
+    public static func removingMentionQuery(from text: String) -> String {
+        guard let range = mentionRange(in: text) else { return text }
+        return String(text[..<range.lowerBound])
+    }
+
+    public static func taskTitle(_ prompt: String, references: [Self]) -> String {
+        guard !references.isEmpty else { return prompt }
+        // JSON quoting keeps names containing quotes or line breaks unambiguous.
+        func quoted(_ value: String) -> String {
+            String(decoding: try! JSONEncoder().encode(value), as: UTF8.self)
+        }
+        let lines = references.map {
+            "- \($0.kind.rawValue): \(quoted($0.name)) (id: \(quoted($0.sourceID)))"
+        }
+        return prompt + "\n\nReferenced canvas context:\n" + lines.joined(separator: "\n")
+    }
+}
+
+public enum SpecialistAgent: String, CaseIterable, Identifiable, Hashable {
+    case ux
+    case copy
+    case brand
+    case a11y
+    case polish
+
+    public var id: String { rawValue }
+
+    public var name: String {
+        switch self {
+        case .ux: return "UX Lead"
+        case .copy: return "Copywriter"
+        case .brand: return "Brand Compliance"
+        case .a11y: return "Accessibility"
+        case .polish: return "Visual Polish"
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .ux: return "square.grid.2x2"
+        case .copy: return "text.quote"
+        case .brand: return "paintpalette"
+        case .a11y: return "accessibility"
+        case .polish: return "sparkles"
+        }
+    }
+}
+
+/// Assignment is local to the composer. Auto omits `agents` so the server
+/// keeps its existing default pipeline; a specialist sends one role id.
+public enum AgentAssignment: Hashable {
+    case automatic
+    case specialist(SpecialistAgent)
+
+    public var label: String {
+        switch self {
+        case .automatic: return "Auto"
+        case .specialist(let agent): return agent.name
+        }
+    }
+
+    public var symbol: String {
+        switch self {
+        case .automatic: return "sparkles"
+        case .specialist(let agent): return agent.symbol
+        }
+    }
+
+    public var agentIDs: [String]? {
+        guard case .specialist(let agent) = self else { return nil }
+        return [agent.id]
+    }
+}
+
+/// The exact request body accepted by `POST /api/canvases/:id/cards`.
+public struct CardQueueRequest {
+    public var title: String
+    public var scope: CardScope?
+    public var assignment: AgentAssignment
+
+    public init(title: String, scope: CardScope?, assignment: AgentAssignment = .automatic) {
+        self.title = title
+        self.scope = scope
+        self.assignment = assignment
+    }
+
+    public var body: [String: Any] {
+        var body: [String: Any] = ["title": title]
+        if let scope { body["scope"] = scope.body }
+        if let agentIDs = assignment.agentIDs { body["agents"] = agentIDs }
+        return body
+    }
+}
+
 public struct CanvasTask: Codable, Identifiable, Hashable {
     public var id: String
     public var agentName: String
@@ -105,6 +281,7 @@ public struct CanvasComment: Codable, Identifiable {
 
 public struct CanvasPresence: Codable, Identifiable {
     public var clientId: String
+    public var userId: String? = nil
     public var name: String
     public var color: String
     public var kind: String

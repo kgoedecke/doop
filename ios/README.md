@@ -88,6 +88,18 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   chip names the selected frame, or the picked element inside it, and the task is
   queued with that `scope` so the agent edits it in place; the chip's × asks about
   the whole canvas instead until something else is selected.
+- **Task composer**: a rounded glass panel puts removable context chips above
+  the prompt. The @ button opens an Agents section with Doop brand marks, plus
+  people currently on the canvas and frames. Typing a trailing `@` query filters
+  the same picker. A specialist becomes a removable assignment chip; the default
+  is Doop. People/frame references are appended to the task text with names and
+  IDs; people are not notified. Frame/element selection remains the edit scope.
+  The separate model control beside Send uses the ChatGPT mark (Claude for a
+  Claude account), reads the provider menu from `GET /api/model-account`, and
+  saves choices with `PATCH /api/model-account`, just like desktop. With no
+  connected account it reads Auto and offers a link to connect one. Model choices
+  persist across tasks; a successful send clears references and specialist
+  assignment, while failures retain the draft.
 - **Canvas paper**: the board behind the frames is the `CanvasPaper` colour set in
   `Assets.xcassets`, warm paper in light mode and a charcoal (not black) in dark
   mode so frame edges, labels and cursors stay readable.

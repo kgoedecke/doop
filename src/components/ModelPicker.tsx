@@ -6,7 +6,7 @@ import { navigate } from '../App'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { DoopMark } from './Logo'
-import { useModelAccount } from './ModelAccount'
+import { useAgentModels, useModelAccount } from './ModelAccount'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -30,14 +30,17 @@ const PROVIDER_MARK: Partial<Record<ModelAccountKind, string>> = {
  * The model the Doop Agent runs on, as a quiet dropdown beside the
  * composer's send button. It is the same per-account choice Settings → Doop
  * Agent makes (PATCH /api/model-account), offered from the connected
- * provider's curated menu. With no account connected there is nothing to
- * choose between, so it says so and links to Settings.
+ * provider's live catalog once the menu opens (the curated menu until then,
+ * and when the provider cannot be asked). With no account connected there is
+ * nothing to choose between, so it says so and links to Settings.
  */
 export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const { account, set, refresh } = useModelAccount()
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
+  const catalog = useAgentModels(account, open)
   const kind = account?.connected ? account.kind : undefined
-  const menu = (kind && account?.menus?.[kind]) ?? []
+  const menu = (catalog?.live ? catalog.models : undefined) ?? (kind && account?.menus?.[kind]) ?? []
   const current = menu.find((m) => m.id === account?.model)
   const label = current?.name ?? (account?.connected ? (account.model ?? 'Model') : 'Doop Agent')
   const mark = kind ? PROVIDER_MARK[kind] : undefined
@@ -57,7 +60,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <MenuButton
           variant="quiet"
@@ -89,6 +92,9 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
+            {catalog?.error && (
+              <DropdownMenuCaption className="pb-2 text-ink-faint">{catalog.error}</DropdownMenuCaption>
+            )}
             <DropdownMenuSeparator />
           </>
         ) : (

@@ -67,6 +67,7 @@ import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
 import { AGENT_MODELS } from './openaiAgent.ts'
+import { modelCatalogFor } from './modelCatalog.ts'
 import { CLAUDE_MODELS } from '../shared/localAgent.ts'
 import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
@@ -850,6 +851,18 @@ app.get('/api/model-account', (req, res) => {
     .getStatus(req.user!.id)
     .then((status) => res.json(accountView(status)))
     .catch(() => res.status(500).json({ error: 'account status unavailable' }))
+})
+
+/* the connected provider's live catalog, merged over its curated menu — asked
+   for when a picker opens, so a model released yesterday is already on it */
+app.get('/api/model-account/models', async (req, res) => {
+  try {
+    const account = await modelAccounts.getAccount(req.user!.id)
+    if (!account) return res.json({ models: [], live: false })
+    res.json(await modelCatalogFor(account, MODEL_MENUS[account.kind]))
+  } catch {
+    res.status(500).json({ error: 'models unavailable' })
+  }
 })
 
 /* which model tier the connected account runs on */
@@ -2221,6 +2234,7 @@ wss.on('connection', (ws, upgradeReq) => {
       }
       const presence: Presence = {
         clientId: msg.clientId,
+        userId: session.user.id,
         name: session.user.name, // session identity, not whatever the client claims
         color: colorFor(msg.clientId),
         kind: 'user',
