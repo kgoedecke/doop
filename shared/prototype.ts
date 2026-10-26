@@ -209,6 +209,20 @@ export function targetsFrame(i: Interaction): i is Interaction & { target: strin
   return (i.action === 'navigate' || i.action === 'overlay') && !!i.target
 }
 
+/**
+ * Point the frame targets in copied HTML at the copies: every `navigate:` and
+ * `overlay:` whose frame is in `ids` takes the new id; targets outside the
+ * copy keep pointing where they did. Works on the raw text, so it reaches
+ * both attribute forms (entity-encoded JSON included) and interactions a
+ * script writes at runtime.
+ */
+export function remapFrameTargets(html: string, ids: ReadonlyMap<string, string>): string {
+  return html.replace(/\b(navigate|overlay):([\w-]{1,64})(?![\w-])/g, (whole, action: string, target: string) => {
+    const next = ids.get(target)
+    return next ? `${action}:${next}` : whole
+  })
+}
+
 /* ---- reading interactions out of HTML without a DOM (server, MCP) ---- */
 
 export interface ScannedInteractive {

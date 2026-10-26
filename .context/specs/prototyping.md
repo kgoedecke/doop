@@ -39,6 +39,10 @@ null }`) or the `set_prototype_start` tool; page-list saves (`PUT .../pages`, `s
 keep the server's value. Without a start, or when the start frame is gone, the flow starts on the
 page's top-left visible frame (`flowStartFrame`).
 
+**Copies.** A page or canvas copy rewrites `navigate:` / `overlay:` targets and `startFrameId`
+through its old-to-new frame ids (`remapFrameTargets`), so the copied flow plays on the copies.
+A page copy's links to frames on other pages keep their targets.
+
 **Inert outside the player.** The frame runtime ignores the attributes until the parent sends
 `doop:proto { on: true }`, which only the player does; text-edit mode also suppresses them. On the
 canvas a click therefore still selects. The attributes have no effect on PNG/JPG/PDF exports.

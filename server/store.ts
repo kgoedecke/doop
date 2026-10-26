@@ -3,6 +3,7 @@ import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/page
 import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
+import { remapFrameTargets } from '../shared/prototype.ts'
 import type {
   Canvas,
   CanvasGuide,
@@ -167,6 +168,7 @@ class Store {
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
+      html: remapFrameTargets(frame.html, frameIds),
       approval: null,
       canvasId,
       createdAt: now,
@@ -188,7 +190,10 @@ class Store {
       createdAt: now,
       updatedAt: now,
       frames,
-      pages: canvasPages(source).map((page) => ({ ...page })),
+      pages: canvasPages(source).map(({ startFrameId, ...page }) => {
+        const start = startFrameId && frameIds.get(startFrameId)
+        return start ? { ...page, startFrameId: start } : page
+      }),
       ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
@@ -228,10 +233,19 @@ class Store {
     if (!source) return undefined
     if (pages.length >= MAX_PAGES) throw new PageLimitError()
     const now = Date.now()
-    const page: CanvasPageInfo = { id: nanoid(10), name: copyPageName(source.name, names(pages)) }
-    const frames: Frame[] = pageFrames(canvas, pageId).map((frame) => ({
-      ...frame,
+    const sourceFrames = pageFrames(canvas, pageId)
+    const frameIds = new Map(sourceFrames.map((frame) => [frame.id, nanoid(10)]))
+    const start = source.startFrameId && frameIds.get(source.startFrameId)
+    const page: CanvasPageInfo = {
       id: nanoid(10),
+      name: copyPageName(source.name, names(pages)),
+      ...(start ? { startFrameId: start } : {}),
+    }
+    /* links within the page follow the copy; links to other pages stay */
+    const frames: Frame[] = sourceFrames.map((frame) => ({
+      ...frame,
+      id: frameIds.get(frame.id)!,
+      html: remapFrameTargets(frame.html, frameIds),
       pageId: page.id,
       approval: null,
       createdAt: now,

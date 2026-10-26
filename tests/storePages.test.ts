@@ -104,3 +104,52 @@ it('keeps a page copy within the guide limit when guides are added while it is w
   expect(copy!.guides).toHaveLength(5)
   expect(store.getCanvas(canvas.id)!.guides).toHaveLength(MAX_GUIDES)
 })
+
+it('points a copied page’s prototype links and flow start at the copied frames', async () => {
+  const canvas = store.createCanvas('Prototype copy', 'alice')
+  const [page] = canvasPages(canvas)
+  store.setPages(canvas.id, [page!, { id: 'other-page', name: 'Other' }])
+  const other = store.createFrame(canvas.id, { name: 'Elsewhere', pageId: 'other-page' }, 'alice')!
+  const target = store.createFrame(canvas.id, { name: 'Target', pageId: page!.id }, 'alice')!
+  const multi = JSON.stringify([
+    { on: 'click', action: `overlay:${target.id}` },
+    { on: 'key:Escape', action: `navigate:${other.id}` },
+  ]).replaceAll('"', '&quot;')
+  store.createFrame(
+    canvas.id,
+    {
+      name: 'Start',
+      pageId: page!.id,
+      html: `<a data-doop-on="click" data-doop-action="navigate:${target.id}">Go</a><b data-doop-interactions="${multi}"></b>`,
+    },
+    'alice',
+  )
+  store.setFlowStart(canvas.id, page!.id, target.id)
+
+  const copy = (await store.duplicatePage(canvas.id, page!.id, 'alice'))!
+  const copiedTarget = copy.frames.find((f) => f.name === 'Target')!
+  const copiedStart = copy.frames.find((f) => f.name === 'Start')!
+  expect(copy.page.startFrameId).toBe(copiedTarget.id)
+  expect(copiedStart.html).toContain(`navigate:${copiedTarget.id}`)
+  expect(copiedStart.html).toContain(`overlay:${copiedTarget.id}`)
+  /* the link to a frame on another page was not part of the copy */
+  expect(copiedStart.html).toContain(`navigate:${other.id}`)
+  expect(copiedStart.html).not.toContain(target.id)
+})
+
+it('points a copied canvas’s prototype links and flow starts at the copied frames', async () => {
+  const canvas = store.createCanvas('Prototype canvas', 'alice')
+  const [page] = canvasPages(canvas)
+  const target = store.createFrame(canvas.id, { name: 'Target', pageId: page!.id }, 'alice')!
+  store.createFrame(
+    canvas.id,
+    { name: 'Start', pageId: page!.id, html: `<a data-doop-on="click" data-doop-action="overlay:${target.id}">Go</a>` },
+    'alice',
+  )
+  store.setFlowStart(canvas.id, page!.id, target.id)
+
+  const copy = (await store.duplicateCanvas(canvas.id, 'bob', 'bob'))!
+  const copiedTarget = copy.frames.find((f) => f.name === 'Target')!
+  expect(copy.frames.find((f) => f.name === 'Start')!.html).toContain(`overlay:${copiedTarget.id}`)
+  expect(canvasPages(copy)[0]!.startFrameId).toBe(copiedTarget.id)
+})
