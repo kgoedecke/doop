@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/kgoedecke/doop/compare/desktop-v0.6.0...desktop-v0.7.0) (2026-10-26)
+
+
+### Features
+
+* **canvas:** add rulers and draggable snapping guides ([#372](https://github.com/kgoedecke/doop/issues/372)) ([fdbb07e](https://github.com/kgoedecke/doop/commit/fdbb07e562dbe4d4bd89396d778a9af219314be6))
+* **desktop:** add macOS check for updates menu ([#350](https://github.com/kgoedecke/doop/issues/350)) ([f16644a](https://github.com/kgoedecke/doop/commit/f16644a1fc8e6b758bd85fb7d8355e5d2b939b28))
+
+
+### Bug Fixes
+
+* **desktop:** crisp Windows window icon ([#364](https://github.com/kgoedecke/doop/issues/364)) ([37214b8](https://github.com/kgoedecke/doop/commit/37214b8aa43fec5cb1f03eb1e1fd55655049ead8))
+
 ## [0.6.0](https://github.com/kgoedecke/doop/compare/desktop-v0.5.0...desktop-v0.6.0) (2026-10-21)
 
 
