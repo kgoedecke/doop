@@ -26,10 +26,21 @@ import { gesture } from '../lib/gesture'
 import { hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
 import { MenuHint } from './ui/menu'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
-import { Toolbar, ToolbarButton, ToolbarHighlight } from './ui/toolbar'
+import { Toolbar, ToolbarButton, ToolbarDivider, ToolbarHighlight } from './ui/toolbar'
 import { ZoomControls } from './ZoomControls'
 import { Tooltip } from './ui/tooltip'
-import { BoxIcon, CircleIcon, CommentIcon, CursorIcon, FrameIcon, HandIcon, TextIcon, VectorIcon } from './ui/icons'
+import {
+  BoxIcon,
+  CircleIcon,
+  CommentIcon,
+  CursorIcon,
+  EditModeIcon,
+  FrameIcon,
+  HandIcon,
+  PrototypeModeIcon,
+  TextIcon,
+  VectorIcon,
+} from './ui/icons'
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
@@ -997,7 +1008,7 @@ export function Stage({
             {/* one fill slides between tools; the buttons themselves stay
                 transparent so the pill is the only thing that moves */}
             <ToolbarHighlight activeKey={tool} />
-            {TOOLS.filter((t) => toolAllowed(t.id, role)).map((t) => (
+            {TOOLS.filter((t) => t.id !== 'comment' && toolAllowed(t.id, role)).map((t) => (
               <Tooltip key={t.id} label={`${t.label} (${t.key})`} side="right">
                 <ToolbarButton
                   aria-label={t.label}
@@ -1009,6 +1020,8 @@ export function Stage({
                 </ToolbarButton>
               </Tooltip>
             ))}
+            <ToolbarDivider className="md:mx-0 md:my-1 md:h-px md:w-[18px]" />
+            <ModeSwitch canComment={toolAllowed('comment', role)} />
           </Toolbar>
         </div>
 
@@ -1036,5 +1049,70 @@ export function Stage({
         )}
       </ContextMenu>
     </>
+  )
+}
+
+type Mode = 'edit' | 'prototype' | 'comment'
+
+const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
+  { id: 'edit', label: 'Edit mode', icon: <EditModeIcon /> },
+  { id: 'prototype', label: 'Prototype mode: wire up interactions', icon: <PrototypeModeIcon /> },
+  { id: 'comment', label: 'Comment mode (C)', icon: <CommentIcon /> },
+]
+
+/** The rail's foot: Edit, Prototype or Comment mode. Comment mode is the
+ *  Comment tool (C picks it, Esc drops it back to Select); the other two are
+ *  `prototypeMode` with any other tool. Radios, not pressed buttons, so the
+ *  tool highlight (which follows `aria-pressed`) never lands on them; the
+ *  chosen mode wears a ring instead of the sliding fill. Like any radio
+ *  group it is one tab stop, and the arrow keys move and pick. The phone
+ *  strip has no room for all three at touch size, so it keeps Comment only
+ *  (any tool leaves it; Prototype mode moves to the canvas actions sheet). */
+function ModeSwitch({ canComment }: { canComment: boolean }) {
+  const mode = useStore((s): Mode => (s.tool === 'comment' ? 'comment' : s.prototypeMode ? 'prototype' : 'edit'))
+  const pick = (next: Mode) => {
+    const s = useStore.getState()
+    if (next === 'comment') return s.setTool('comment')
+    s.setPrototypeMode(next === 'prototype')
+    if (s.tool === 'comment') s.setTool('select')
+  }
+  const modes = MODES.filter((m) => m.id !== 'comment' || canComment)
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step =
+      e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
+    if (!step) return
+    e.preventDefault()
+    /* only the visible radios: the phone strip hides Edit and Prototype */
+    const radios = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')].filter((r) => r.offsetParent)
+    const at = radios.indexOf(document.activeElement as HTMLElement)
+    const next = radios[(at + step + radios.length) % radios.length]
+    next?.focus()
+    next?.click()
+  }
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Canvas mode"
+      className="flex items-center gap-0.5 md:flex-col"
+      onKeyDown={onKeyDown}
+    >
+      {modes.map((m) => (
+        <Tooltip key={m.id} label={m.label} side="right">
+          <ToolbarButton
+            role="radio"
+            aria-label={m.label}
+            aria-checked={mode === m.id}
+            tabIndex={mode === m.id ? 0 : -1}
+            className={cn(
+              'aria-checked:bg-surface aria-checked:text-ink aria-checked:shadow-ring',
+              m.id !== 'comment' && 'max-sm:hidden',
+            )}
+            onClick={() => pick(m.id)}
+          >
+            {m.icon}
+          </ToolbarButton>
+        </Tooltip>
+      ))}
+    </div>
   )
 }

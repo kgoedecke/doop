@@ -69,14 +69,14 @@ import {
   CopyIcon,
   ExportIcon,
   FolderIcon,
+  GearIcon,
   GithubIcon,
   ImportIcon,
   LayersIcon,
   MoreHorizontalIcon,
   PlayIcon,
   PlusIcon,
-  PrototypeIcon,
-  GearIcon,
+  PrototypeModeIcon,
   RadioTowerIcon,
   ShareIcon,
   ShareUpIcon,
@@ -184,6 +184,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const role = useStore(roleOf)
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const isMobile = useIsMobile()
+  const prototypeMode = useStore((s) => s.prototypeMode)
   const [panelWidths, setPanelWidths] = useState(readPanelWidths)
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
   useEffect(() => {
@@ -214,7 +215,6 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const [presenting, setPresenting] = useState<string | null>(null)
   /* ⌘. acts only over the canvas view, outside PresentMode */
   const hideUiActive = canHideUi({ view: 'canvas', presenting: !!presenting })
-  const prototypeMode = useStore((s) => s.prototypeMode)
   const activePageId = useStore((s) => s.activePageId)
   /* Play starts on the selected frame, or on the page's flow start */
   const playFrom = useMemo(() => {
@@ -642,21 +642,6 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               Share
             </Button>
             <Tooltip
-              label={prototypeMode ? 'Leave Prototype mode' : 'Prototype mode: wire up interactions'}
-              side="bottom"
-            >
-              <Button
-                variant="bare"
-                size="icon-sm"
-                className={cn(barPillIconBtn, prototypeMode && 'bg-paper-deep text-ink')}
-                aria-label="Prototype mode"
-                aria-pressed={prototypeMode}
-                onClick={() => useStore.getState().setPrototypeMode(!prototypeMode)}
-              >
-                <PrototypeIcon className="size-3.5" />
-              </Button>
-            </Tooltip>
-            <Tooltip
               label={
                 selectedId ? 'Present from this frame' : playFrom ? 'Present the prototype' : 'Add a frame to present'
               }
@@ -862,7 +847,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <div className="border-b border-line-soft px-5 py-4 pr-14">
                 <SheetTitle className="font-display text-lg font-extrabold">Canvas actions</SheetTitle>
                 <SheetDescription className="mt-1 text-xs text-ink-soft">
-                  Layers, import, export, share, or your account settings.
+                  Layers, import, export, share, Prototype mode, or your account settings.
                 </SheetDescription>
               </div>
               {/* the same glyphs as the desktop bar and islands; pages live
@@ -899,6 +884,19 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                   }}
                 >
                   <ShareIcon /> Share canvas
+                </Button>
+                {/* the phone's tool strip has no room for the Edit / Prototype
+                    switch, so Prototype mode toggles here */}
+                <Button
+                  variant="ghost"
+                  className="h-11 justify-start gap-2.5 border-line bg-surface px-4 aria-pressed:bg-paper-deep"
+                  aria-pressed={prototypeMode}
+                  onClick={() => {
+                    setShowMobileActions(false)
+                    useStore.getState().setPrototypeMode(!prototypeMode)
+                  }}
+                >
+                  <PrototypeModeIcon /> {prototypeMode ? 'Leave Prototype mode' : 'Prototype mode'}
                 </Button>
                 <Button
                   variant="ghost"

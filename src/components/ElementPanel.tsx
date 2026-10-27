@@ -213,8 +213,8 @@ export function ElementPanel({
       <PanelTabsRoot
         value={prototypeMode ? 'prototype' : tab}
         onValueChange={(v) => {
-          /* the Prototype tab is Prototype mode: picking it (or the top
-             bar's toggle) turns the canvas connectors on as well */
+          /* the Prototype tab is Prototype mode: picking it (or the tool
+             rail's mode switch) turns the canvas connectors on as well */
           useStore.getState().setPrototypeMode(v === 'prototype')
           if (v !== 'prototype') selectTab(v === 'html' ? 'html' : 'design')
         }}

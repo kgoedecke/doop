@@ -84,6 +84,7 @@ import {
   PanelRightClose,
   Paperclip,
   Pencil,
+  PencilRuler,
   PenTool,
   Play,
   Plus,
@@ -91,6 +92,7 @@ import {
   RadioTower,
   RefreshCw,
   RotateCcw,
+  Route,
   Search,
   Settings,
   Share,
@@ -297,6 +299,9 @@ export const CalendarIcon = icon(Calendar)
 export const HistoryIcon = icon(RotateCcw)
 /* prototypes: the editor's Prototype mode, a flow's start, the player's hotspot hint */
 export const PrototypeIcon = icon(MousePointerClick)
+/** the tool rail's mode switch: drawing and editing, or wiring up the flow */
+export const EditModeIcon = icon(PencilRuler)
+export const PrototypeModeIcon = icon(Route)
 export const FlowStartIcon = icon(Flag)
 export const HotspotIcon = icon(SquareMousePointer)
 /** review comments: the square bubble */
