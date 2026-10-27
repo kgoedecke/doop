@@ -384,8 +384,6 @@ impl ElementCx<'_, '_> {
 
     #[cfg(feature = "svg")]
     fn draw_svg_image_layer(&self, scene: &mut impl PaintScene, layer: &ImageLayerStyles) {
-        use kurbo::Affine;
-
         let Some(bg_image) = layer.image_data else {
             return;
         };
@@ -398,16 +396,19 @@ impl ElementCx<'_, '_> {
             return;
         }
 
-        let (origin_rect, base_transform) = if self.layer_is_fixed(layer) {
-            self.fixed_positioning_area()
+        let (origin_rect, base_transform, clip_rect) = if self.layer_is_fixed(layer) {
+            let (viewport, transform) = self.fixed_positioning_area();
+            (viewport, transform, viewport)
         } else {
-            (self.box_rect(layer.origin), self.transform)
+            (
+                self.box_rect(layer.origin),
+                self.transform,
+                self.box_rect(layer.clip),
+            )
         };
 
         let frame_w = (origin_rect.width() / self.scale) as f32;
         let frame_h = (origin_rect.height() / self.scale) as f32;
-
-        let svg_size = svg.tree.size();
 
         // Size the SVG per the CSS default sizing algorithm
         // (https://drafts.csswg.org/css-images/#default-sizing). An SVG image
@@ -422,10 +423,10 @@ impl ElementCx<'_, '_> {
         }
         .filter(|r| r.is_finite() && *r > 0.0);
 
-        let bg_size = compute_layer_size(
+        let (bg_pos, bg_size) = compute_layer_position_and_size(
             layer,
-            frame_w,
-            frame_h,
+            frame_w as f64,
+            frame_h as f64,
             BackgroundSizeComputeMode::Intrinsic {
                 width: intrinsic_width,
                 height: intrinsic_height,
@@ -433,27 +434,75 @@ impl ElementCx<'_, '_> {
             },
         );
 
-        if bg_size.width <= 0.0 || bg_size.height <= 0.0 {
+        let bg_pos = (bg_pos.to_vec2() * self.scale).to_point();
+        let bg_size = bg_size * self.scale;
+        let [a, b, c, d, _, _] = base_transform.as_coeffs();
+        let Some(image) = super::svg_background::rasterize(
+            &svg.tree,
+            bg_size.width * a.hypot(b),
+            bg_size.height * c.hypot(d),
+        ) else {
             return;
-        }
-
-        let x_ratio = (bg_size.width / svg_size.width() as f64) * self.scale;
-        let y_ratio = (bg_size.height / svg_size.height() as f64) * self.scale;
-
-        let bg_pos = compute_layer_position(
-            layer,
-            frame_w - bg_size.width as f32,
-            frame_h - bg_size.height as f32,
+        };
+        let BackgroundRepeat(repeat_x, repeat_y) = layer.repeat;
+        let mut x = gradient_axis_tiling(
+            *repeat_x,
+            origin_rect.x0,
+            origin_rect.width(),
+            clip_rect.x0,
+            clip_rect.width(),
+            bg_pos.x,
+            bg_size.width,
+        );
+        let mut y = gradient_axis_tiling(
+            *repeat_y,
+            origin_rect.y0,
+            origin_rect.height(),
+            clip_rect.y0,
+            clip_rect.height(),
+            bg_pos.y,
+            bg_size.height,
         );
 
-        let transform = base_transform
-            * kurbo::Affine::translate((
-                origin_rect.x0 + bg_pos.x * self.scale,
-                origin_rect.y0 + bg_pos.y * self.scale,
-            ))
-            * Affine::scale_non_uniform(x_ratio, y_ratio);
-
-        anyrender_svg::render_svg_tree(scene, &svg.tree, transform);
+        // A repeating image brush covers adjacent tiles in a single fill. Space
+        // still draws individual tiles so that the gaps remain transparent.
+        for (axis, repeat) in [(&mut x, repeat_x), (&mut y, repeat_y)] {
+            if matches!(
+                repeat,
+                BackgroundRepeatKeyword::Repeat | BackgroundRepeatKeyword::Round
+            ) {
+                axis.rect_len *= axis.count as f64;
+                axis.count = 1;
+            }
+        }
+        // Space needs one fill per tile. Apply the same work budget as gradients
+        // so tiny spaced tiles cannot block the canvas with millions of fills.
+        // Repeat/round have already collapsed to one fill per axis above.
+        if x.count as u64 * y.count as u64 > 500 {
+            return;
+        }
+        let x_ratio = bg_size.width / image.width as f64;
+        let y_ratio = bg_size.height / image.height as f64;
+        let tile_rect = Rect::new(0.0, 0.0, x.rect_len / x_ratio, y.rect_len / y_ratio);
+        let brush = peniko::ImageBrush {
+            image,
+            sampler: peniko::ImageSampler::new()
+                .with_extend(peniko::Extend::Repeat)
+                .with_quality(to_image_quality(self.style.clone_image_rendering())),
+        };
+        for row in 0..y.count {
+            for col in 0..x.count {
+                // Placement is in the element's local space, before CSS transforms
+                // and the signed offset used to paint a deep-zoom window.
+                let transform = base_transform
+                    * Affine::translate((
+                        x.translate + col as f64 * x.stride,
+                        y.translate + row as f64 * y.stride,
+                    ))
+                    * Affine::scale_non_uniform(x_ratio, y_ratio);
+                scene.fill(Fill::NonZero, transform, brush.as_ref(), None, &tile_rect);
+            }
+        }
     }
 
     fn draw_raster_image_layer(&self, scene: &mut impl PaintScene, layer: &ImageLayerStyles) {
@@ -639,34 +688,52 @@ fn compute_layer_position_and_size(
 
     let bg_size = compute_layer_size(layer, container_w as f32, container_h as f32, size_mode);
 
+    if bg_size.width <= 0.0 || bg_size.height <= 0.0 {
+        return (Point::ZERO, bg_size);
+    }
+
+    let BackgroundRepeat(repeat_x, repeat_y) = layer.repeat;
+
+    let bg_size = if matches!(repeat_x, Round) && matches!(repeat_y, Round) {
+        let count = (container_w / bg_size.width).round().max(1.0);
+        let width = container_w / count;
+
+        let count = (container_h / bg_size.height).round().max(1.0);
+        let height = container_h / count;
+
+        Size::new(width, height)
+    } else if matches!(repeat_x, Round) {
+        let count = (container_w / bg_size.width).round().max(1.0);
+        let width = container_w / count;
+        let auto_height =
+            matches!(layer.size, BackgroundSize::ExplicitSize { height, .. } if height.is_auto());
+        let height = if auto_height {
+            bg_size.height * width / bg_size.width
+        } else {
+            bg_size.height
+        };
+        Size::new(width, height)
+    } else if matches!(repeat_y, Round) {
+        let count = (container_h / bg_size.height).round().max(1.0);
+        let height = container_h / count;
+        let auto_width =
+            matches!(layer.size, BackgroundSize::ExplicitSize { width, .. } if width.is_auto());
+        let width = if auto_width {
+            bg_size.width * height / bg_size.height
+        } else {
+            bg_size.width
+        };
+        Size::new(width, height)
+    } else {
+        bg_size
+    };
+
+    // Percent positions depend on the final size after `round` has resized it.
     let bg_pos = compute_layer_position(
         layer,
         (container_w - bg_size.width) as f32,
         (container_h - bg_size.height) as f32,
     );
-
-    let BackgroundRepeat(repeat_x, repeat_y) = layer.repeat;
-
-    let bg_size = if matches!(repeat_x, Round) && matches!(repeat_y, Round) {
-        let count = (container_w / bg_size.width).round();
-        let width = container_w / count;
-
-        let count = (container_h / bg_size.height).round();
-        let height = container_h / count;
-
-        Size::new(width, height)
-    } else if matches!(repeat_x, Round) {
-        let count = (container_w / bg_size.width).round();
-        let width = container_w / count;
-        Size::new(width, bg_size.height)
-    } else if matches!(repeat_y, Round) {
-        let count = (container_h / bg_size.height).round();
-        let height = container_h / count;
-        Size::new(bg_size.width, height)
-    } else {
-        bg_size
-    };
-
     (bg_pos, bg_size)
 }
 

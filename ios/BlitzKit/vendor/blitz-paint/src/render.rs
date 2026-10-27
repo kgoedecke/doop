@@ -4,6 +4,8 @@ mod box_shadow;
 mod clip_path;
 mod form_controls;
 mod mask;
+#[cfg(feature = "svg")]
+mod svg_background;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

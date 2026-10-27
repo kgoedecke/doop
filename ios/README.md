@@ -172,6 +172,16 @@ The vendored copy carries a second fix: an element with `opacity` or `filter` an
 absolutely positioned children such as cursor labels; the clip now covers the
 element's scrollable overflow.
 
+SVG backgrounds also honor `background-repeat`, position, size, and origin/clip
+boxes, including when painting a deep-zoom tile. Their tiles are rasterized with
+resvg so SVG filters such as `feTurbulence` render as noise instead of a solid
+rectangle. Repeating tiles use an image brush; a weak-keyed, 16 MiB cache per paint
+thread reuses them across paints without retaining documents. Individual textures
+are capped at 4 megapixels / 4096 px per side. `rust/tests/svg_background.rs`
+checks repetition, filtered noise, and full-frame versus region rendering.
+As with gradients, spaced backgrounds requiring more than 500 explicit tile
+draws are skipped to keep painting bounded; repeat/round use a single brush fill.
+
 A third engine gap is worked around in the bridge rather than vendored: Blitz rebuilds
 its style device when the scale changes but does not recascade, and Stylo snaps border
 and outline widths to whole device pixels at cascade time. A frame first styled at a
@@ -180,7 +190,7 @@ pixel (about 11 CSS px) and showed thick borders once zoomed in. `doopblitz_doc_
 now requests a recascade on every scale change; `rescaling_restyles_device_pixel_snapped_borders`
 in `rust/tests/abi.rs` guards it. Both engine issues are worth sending upstream. Known engine gaps on both backends: `text-shadow`, 3D transforms,
 `mix-blend-mode`, CSS counters, `writing-mode`, multi-column, form placeholders and
-`<select>`, emoji fallback, SVG styled through CSS and SVG `<pattern>` fills.
+`<select>`, emoji fallback, SVG styled through CSS and inline SVG `<pattern>` fills.
 
 ## Run
 

@@ -30,7 +30,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 serde_json = "1"
 
-# Local fix for CSS filter scaling; see vendor/blitz-paint/Cargo.toml.
+# Local painting fixes; see vendor/blitz-paint/Cargo.toml.
 [patch."https://github.com/DioxusLabs/blitz"]
 blitz-paint = { path = "../vendor/blitz-paint" }
 
