@@ -312,13 +312,15 @@ kinds of account:
   [pilot setup and verification guide](docs/gemini-cloud-pilot.md).
 - **Claude API key** — pay-as-you-go on the user's own Anthropic account.
 
-The OpenAI, Claude and Gemini key kinds get their model menu from the provider's own catalog,
-asked with that key when the picker opens (`server/modelCatalog.ts`,
-`GET /api/model-account/models`): OpenAI's and Anthropic's `/v1/models`, Gemini's
-`/v1beta/models`. A newly released model is on the menu without an upgrade; the curated entries
-above sit on top as recommendations, a curated tier the key cannot run is left off, and the
-curated menu alone is served if the provider cannot be reached. OpenRouter stays on its curated
-roster, whose hand-checked vision flags are what the run relies on.
+The ChatGPT, OpenAI, Claude and Gemini kinds get their model menu from the provider's own
+catalog, asked with that account's credential when the picker opens (`server/modelCatalog.ts`,
+`GET /api/model-account/models`): the Codex backend's catalog for a ChatGPT subscription (the
+same list the Codex CLI reads, asked as `CHATGPT_CODEX_CLIENT_VERSION`), OpenAI's and
+Anthropic's `/v1/models`, Gemini's `/v1beta/models`. A newly released model is on the menu
+without an upgrade; the curated entries above sit on top as recommendations, a curated tier the
+account cannot run is left off, and the curated menu alone is served if the provider cannot be
+reached. OpenRouter stays on its curated roster, whose hand-checked vision flags are what the
+run relies on.
 
 Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRouter/Gemini endpoints
 are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full

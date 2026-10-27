@@ -859,7 +859,16 @@ app.get('/api/model-account/models', async (req, res) => {
   try {
     const account = await modelAccounts.getAccount(req.user!.id)
     if (!account) return res.json({ models: [], live: false })
-    res.json(await modelCatalogFor(account, MODEL_MENUS[account.kind]))
+    /* a ChatGPT token may have lapsed since the last run; a refresh that
+       fails leaves the stale token to be refused, which the catalog reports
+       as "reconnect" rather than this route failing outright */
+    const live = await Promise.race([
+      modelAccounts.withFreshToken(account).catch(() => account),
+      /* the refresh has no timeout of its own; a stalled token endpoint
+         must not hold the picker past the catalog's own budget */
+      new Promise<typeof account>((resolve) => setTimeout(resolve, 8_000, account).unref()),
+    ])
+    res.json(await modelCatalogFor(live, MODEL_MENUS[account.kind]))
   } catch {
     res.status(500).json({ error: 'models unavailable' })
   }

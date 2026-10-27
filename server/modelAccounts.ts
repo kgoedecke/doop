@@ -7,7 +7,7 @@ import { modelAccounts } from './db/schema.ts'
 import { normalizeClaudeModel } from '../shared/localAgent.ts'
 import { GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
 import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
-import { isKnownModel, modelFor } from './openaiAgent.ts'
+import { modelFor } from './openaiAgent.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -140,10 +140,10 @@ const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
 /* per-kind model policy: how a stored (possibly unset or stale) model id
    resolves to the one that will run, and which ids the picker may set */
 const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKnown(model: string): boolean }> = {
-  chatgpt: { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
-  /* the API-key kinds take any id shaped like their provider's: the picker
-     offers what the provider's catalog lists (server/modelCatalog.ts) and the
-     run is the final check, as it always was */
+  /* the catalog-backed kinds take any id shaped like their provider's: the
+     picker offers what the provider's catalog lists (server/modelCatalog.ts)
+     and the run is the final check, as it always was */
+  chatgpt: { resolve: (model) => modelFor({ model }), isKnown: (model) => OPENAI_API_MODEL.test(model) },
   'openai-key': { resolve: (model) => modelFor({ model }), isKnown: (model) => OPENAI_API_MODEL.test(model) },
   /* any Claude id the catalog offered (or the user typed) runs as is; only the
      pre-catalog aliases and an unset model fall back to the curated default */

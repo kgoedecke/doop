@@ -134,12 +134,73 @@ async function geminiModels(apiKey: string, signal: AbortSignal): Promise<ModelO
   throw new Error('Gemini catalog did not end')
 }
 
-type Loader = (apiKey: string, signal: AbortSignal) => Promise<ModelOption[]>
+const codexPage = z.object({
+  models: z.array(
+    z
+      .object({
+        slug: z.string(),
+        display_name: z.string().optional(),
+        description: z.string().optional(),
+        visibility: z.string().optional(),
+        input_modalities: z.array(z.string()).default([]),
+      })
+      .passthrough(),
+  ),
+})
+
+/** What a ChatGPT subscription may run through the Codex backend, from the
+ *  same undocumented catalog the Codex CLI reads: the backend answers for a
+ *  CLI version it knows (`CHATGPT_CODEX_CLIENT_VERSION`), lists only what the
+ *  account's plan unlocks, and says which models take images. The same
+ *  reasoning-family filter applies: the transport always sends a reasoning
+ *  block. The catalog's own order is kept; it carries no release date. */
+async function chatgptModels(account: ModelAccount, signal: AbortSignal): Promise<ModelOption[]> {
+  if (!account.accessToken) throw new CatalogAccessError()
+  const url = new URL(env.CHATGPT_MODELS_URL)
+  url.searchParams.set('client_version', env.CHATGPT_CODEX_CLIENT_VERSION)
+  const page = codexPage.parse(
+    await fetchCatalog(
+      url,
+      {
+        Authorization: `Bearer ${account.accessToken}`,
+        'User-Agent': env.CHATGPT_AUTH_USER_AGENT,
+        originator: env.CHATGPT_ORIGINATOR,
+        ...(account.accountId ? { 'chatgpt-account-id': account.accountId } : {}),
+      },
+      signal,
+    ),
+  )
+  return page.models
+    .filter(
+      (model) =>
+        (model.visibility ?? 'list') === 'list' &&
+        model.input_modalities.includes('text') &&
+        model.input_modalities.includes('image') &&
+        OPENAI_API_MODEL.test(model.slug) &&
+        !NOT_AN_AGENT_MODEL.test(model.slug),
+    )
+    .map((model) => ({
+      id: model.slug,
+      name: model.display_name || model.slug,
+      blurb: model.description ?? '',
+      vision: true,
+    }))
+}
+
+const keyed =
+  (load: (apiKey: string, signal: AbortSignal) => Promise<ModelOption[]>): Loader =>
+  (account, signal) => {
+    if (!account.apiKey) throw new CatalogAccessError()
+    return load(account.apiKey, signal)
+  }
+
+type Loader = (account: ModelAccount, signal: AbortSignal) => Promise<ModelOption[]>
 
 const LOADERS: Partial<Record<ModelAccount['kind'], Loader>> = {
-  'anthropic-key': anthropicModels,
-  'openai-key': openaiModels,
-  'gemini-key': geminiModels,
+  chatgpt: chatgptModels,
+  'anthropic-key': keyed(anthropicModels),
+  'openai-key': keyed(openaiModels),
+  'gemini-key': keyed(geminiModels),
 }
 
 /** Curated entries the provider confirms come first, in curated order, with
@@ -160,11 +221,22 @@ function merge(curated: ModelOption[], live: ModelOption[]): ModelOption[] {
  *  provider cannot be reached. */
 export async function modelCatalogFor(account: ModelAccount, curated: ModelOption[]): Promise<ModelCatalog> {
   const load = LOADERS[account.kind]
-  if (!load || !account.apiKey) return { models: curated, live: false }
+  const label = ACCOUNT_KIND_LABELS[account.kind]
+  if (!load) return { models: curated, live: false }
   try {
-    return { models: merge(curated, await load(account.apiKey, AbortSignal.timeout(8_000))), live: true }
+    const models = merge(curated, await load(account, AbortSignal.timeout(8_000)))
+    /* a catalog with nothing the agent can run (a plan with no eligible
+       tier, a response shape that lost its modalities) must not empty the
+       picker: the curated menu stays, and the caption says why */
+    if (!models.length) {
+      return {
+        models: curated,
+        live: false,
+        error: `${label} listed no models the agent can run. Showing the built-in list.`,
+      }
+    }
+    return { models, live: true }
   } catch (error) {
-    const label = ACCOUNT_KIND_LABELS[account.kind]
     return {
       models: curated,
       live: false,
