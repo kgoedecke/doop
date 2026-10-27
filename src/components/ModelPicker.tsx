@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { DoopMark } from './Logo'
 import { useAgentModels, useModelAccount } from './ModelAccount'
+import { reasoningEffortOptions } from '../../shared/modelMenu'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -59,6 +60,20 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
     }
   }
 
+  async function pickEffort(effort: string) {
+    if (effort === account?.effort) return
+    setBusy(true)
+    try {
+      set(await api.setAgentEffort(effort))
+      posthog.capture('agent_effort_changed', { effort, via: 'composer' })
+    } catch (e) {
+      console.error(e)
+      refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <DropdownMenu onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -94,6 +109,20 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
             </DropdownMenuRadioGroup>
             {catalog?.error && (
               <DropdownMenuCaption className="pb-2 text-ink-faint">{catalog.error}</DropdownMenuCaption>
+            )}
+            {/* OpenAI models think as hard as asked; the others have no such dial */}
+            {account?.effort && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuCaption>Reasoning effort</DropdownMenuCaption>
+                <DropdownMenuRadioGroup value={account.effort} onValueChange={(effort) => void pickEffort(effort)}>
+                  {reasoningEffortOptions(account.effort).map((e) => (
+                    <DropdownMenuRadioItem key={e.id} value={e.id} description={e.blurb}>
+                      {e.name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </>
             )}
             <DropdownMenuSeparator />
           </>

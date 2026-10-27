@@ -874,9 +874,16 @@ app.get('/api/model-account/models', async (req, res) => {
 })
 
 /* which model tier the connected account runs on */
+/* which model tier the connected account runs on, and (OpenAI kinds) how
+   hard it thinks — one field per request, the status comes back either way */
 app.patch('/api/model-account', async (req, res) => {
   try {
-    res.json(accountView(await modelAccounts.setAccountModel(req.user!.id, String(req.body?.model ?? ''))))
+    const { model, effort } = (req.body ?? {}) as { model?: unknown; effort?: unknown }
+    const status =
+      effort !== undefined
+        ? await modelAccounts.setAccountEffort(req.user!.id, String(effort))
+        : await modelAccounts.setAccountModel(req.user!.id, String(model ?? ''))
+    res.json(accountView(status))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the model' })
   }

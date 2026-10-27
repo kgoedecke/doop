@@ -6,7 +6,7 @@ import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAccount, withFreshToken, accountModelFor, accountVisionFor } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
-import { ModelAuthError, ModelUnavailableError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
+import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
 import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCompletionsAgent.ts'
 
@@ -258,7 +258,7 @@ function byoModel(account: ModelAccount): AgentModel {
   }
   return {
     provider: account.kind,
-    label: `${BYO_LABELS[account.kind]} (${accountModelFor(account)})`,
+    label: `${BYO_LABELS[account.kind]} (${accountModelFor(account)}, ${effortFor(account)} effort)`,
     userId: account.userId,
     async run(req) {
       /* refreshed per turn, not per run: a long design run outlives an

@@ -45,6 +45,12 @@
   family filter for reasoning chat models with tools, images and a 16k output window; a picked id
   only has to be shaped like the provider's, and the run is the final check. OpenRouter stays on
   its curated roster (the run-time vision check knows only the roster's flags).
+- Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
+  in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
+  high / xhigh), set through `PATCH /api/model-account { effort }`, read by `effortFor` in
+  `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
+  user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
+  shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints

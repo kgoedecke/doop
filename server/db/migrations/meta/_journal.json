@@ -260,6 +260,13 @@
       "when": 1793060896296,
       "tag": "0037_local_agent_effort",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793062237684,
+      "tag": "0038_reasoning_effort",
+      "breakpoints": true
     }
   ]
 }

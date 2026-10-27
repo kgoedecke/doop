@@ -8,6 +8,7 @@ import {
   ModelUnavailableError,
   responseError,
   runAzureTurn,
+  runOpenAiTurn,
 } from '../server/openaiAgent.ts'
 import { parseAuthCode } from '../server/modelAccounts.ts'
 
@@ -201,6 +202,38 @@ describe('model menu', () => {
 
     const denied = await responseError(new Response('denied', { status: 401 }), 'OpenAI')
     expect(denied).not.toBeInstanceOf(ModelUnavailableError)
+  })
+})
+
+describe('OpenAI API-key transport', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const done = () =>
+    new Response(
+      JSON.stringify({
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+      }),
+      { status: 200 },
+    )
+  const turn = {
+    system: 'be a designer',
+    tools: [],
+    messages: [{ role: 'user' as const, content: 'hi' }],
+    maxTokens: 4096,
+  }
+  const account = { userId: 'u', kind: 'openai-key' as const, apiKey: 'sk-test', connectedAt: 0 }
+
+  it('thinks as hard as the account asks, and at the server default until it does', async () => {
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string))
+      return done()
+    })
+    await runOpenAiTurn(account, turn)
+    await runOpenAiTurn({ ...account, effort: 'xhigh' }, turn)
+    expect(bodies[0]?.reasoning).toEqual({ effort: 'medium' })
+    expect(bodies[1]?.reasoning).toEqual({ effort: 'xhigh' })
   })
 })
 

@@ -381,6 +381,7 @@ own agent over MCP.
 | `RESIDENT_TASK_LIMIT`           | `0`                         | Free Doop Agent tasks per account; `0` means a connected account from the first task |
 | `DOOP_AGENT_MODEL`              | `claude-opus-5`             | Model for the Doop Agent on the server's Anthropic key                               |
 | `DOOP_AGENT_OPENAI_MODEL`       | `gpt-5.6-terra`             | Default tier on a user's account; each user can pick another in Settings             |
+| `DOOP_AGENT_OPENAI_EFFORT`      | `medium`                    | Default reasoning effort on a user's OpenAI account; each user can pick low–xhigh    |
 | `DOOP_AGENT_OPENROUTER_MODEL`   | `moonshotai/kimi-k2.6`      | Default model on a connected OpenRouter key                                          |
 | `DOOP_AGENT_GEMINI_MODEL`       | `gemini-3.7-flash`          | Default model on a connected Gemini key                                              |
 | `CHATGPT_CONNECT_DISABLED`      | _unset_                     | `1` hides the ChatGPT flow, leaving the API-key path                                 |

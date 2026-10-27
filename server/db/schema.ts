@@ -557,6 +557,8 @@ export const modelAccounts = pgTable('model_accounts', {
   apiKey: text('api_key'),
   /** the model tier this user picked; null = the server default */
   model: text('model'),
+  /** OpenAI reasoning effort this user picked; null = the server default */
+  reasoningEffort: text('reasoning_effort'),
   connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })

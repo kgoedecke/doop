@@ -16,6 +16,8 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Dot } from './ui/dot'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
+import { Segmented, SegmentedItem } from './ui/segmented'
+import { reasoningEffortOptions } from '../../shared/modelMenu'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { CheckIcon, ChevronDownIcon } from './ui/icons'
@@ -329,6 +331,20 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     }
   }
 
+  const pickEffort = async (effort: string) => {
+    setBusy(true)
+    setError('')
+    try {
+      set(await api.setAgentEffort(effort))
+      posthog.capture('agent_effort_changed', { effort })
+    } catch (e) {
+      fail(e)
+      refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const remove = async () => {
     setBusy(true)
     try {
@@ -355,6 +371,22 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const onChatgpt = account.connected && account.kind === 'chatgpt'
   /* only one account is stored per user, so connecting one replaces the other */
   const replaces = account.connected
+
+  /* OpenAI models think as hard as asked: a one-of-four switch under the
+     connected OpenAI row, absent elsewhere (the status carries no effort). */
+  const effortPicker = () =>
+    account.effort ? (
+      <div className="mt-[10px] flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-body text-ink-soft">Reasoning effort</span>
+        <Segmented aria-label="Reasoning effort" value={account.effort} onValueChange={pickEffort} disabled={busy}>
+          {reasoningEffortOptions(account.effort).map((e) => (
+            <SegmentedItem key={e.id} value={e.id} title={e.blurb}>
+              {e.name}
+            </SegmentedItem>
+          ))}
+        </Segmented>
+      </div>
+    ) : null
 
   /* On the connected row the picker changes the model; on any other row it
      only advertises what that plan can run, so it stays inert. A roster too
@@ -490,6 +522,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 </p>
               )}
               {catalog?.error && <p className="mt-[10px] text-body text-ink-faint">{catalog.error}</p>}
+              {effortPicker()}
             </>
           ) : showKey === cfg.kind ? (
             <div className={planFlow}>
@@ -586,6 +619,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                   </div>
                 </div>
                 {chosen && <p className="mt-[10px] text-body text-ink-faint">{chosen.blurb}</p>}
+                {effortPicker()}
               </>
             ) : device ? (
               <div className={planFlow}>

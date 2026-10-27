@@ -176,6 +176,8 @@ export interface ModelAccountStatus {
   plan?: string
   /** the model tier this account runs on right now */
   model?: string
+  /** the reasoning effort in effect; only the OpenAI kinds have one */
+  effort?: string
   connectedAt?: number
   /** false when the server has switched the ChatGPT flow off */
   chatgptEnabled?: boolean
@@ -502,6 +504,8 @@ export const api = {
   disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),
+  setAgentEffort: (effort: string) =>
+    req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ effort }) }),
   imageModels: () => req<{ models: ImageModelStatus[] }>('/api/image-model'),
   setImageModel: (model: string) =>
     req<{ models: ImageModelStatus[] }>('/api/image-model', { method: 'PUT', body: JSON.stringify({ model }) }),

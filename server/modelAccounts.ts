@@ -1,12 +1,18 @@
 import { env } from './env.ts'
 import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
-import { DEFAULT_ANTHROPIC_MODEL, GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
+import {
+  DEFAULT_ANTHROPIC_MODEL,
+  GEMINI_MODELS,
+  OPENROUTER_MODELS,
+  isReasoningEffort,
+  type ReasoningEffort,
+} from '../shared/modelMenu.ts'
 import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
-import { modelFor } from './openaiAgent.ts'
+import { effortFor, modelFor } from './openaiAgent.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -70,6 +76,8 @@ export interface ModelAccount {
   apiKey?: string
   /** model tier the user picked; unset = the server default */
   model?: string
+  /** OpenAI reasoning effort the user picked; unset = the server default */
+  effort?: ReasoningEffort
   connectedAt: number
 }
 
@@ -81,7 +89,15 @@ export interface AccountStatus {
   plan?: string
   /** the model tier in effect, resolved (never null in a status) */
   model?: string
+  /** the reasoning effort in effect, resolved; only the OpenAI kinds have one */
+  effort?: string
   connectedAt?: number
+}
+
+const OPENAI_KINDS: readonly AccountKind[] = ['chatgpt', 'openai-key']
+
+export function takesReasoningEffort(kind: AccountKind): boolean {
+  return OPENAI_KINDS.includes(kind)
 }
 
 export function chatgptConnectEnabled(): boolean {
@@ -110,6 +126,7 @@ function toAccount(row: typeof modelAccounts.$inferSelect): ModelAccount | null 
     ...(row.expiresAt != null ? { expiresAt: row.expiresAt } : {}),
     ...(row.apiKey ? { apiKey: row.apiKey } : {}),
     ...(row.model ? { model: row.model } : {}),
+    ...(isReasoningEffort(row.reasoningEffort) ? { effort: row.reasoningEffort } : {}),
     connectedAt: row.connectedAt,
   }
 }
@@ -129,6 +146,7 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
     ...(account.plan ? { plan: account.plan } : {}),
     /* resolved, so the UI shows what will actually run rather than "default" */
     model: accountModelFor(account),
+    ...(takesReasoningEffort(account.kind) ? { effort: effortFor(account) } : {}),
     connectedAt: account.connectedAt,
   }
 }
@@ -186,8 +204,36 @@ export async function setAccountModel(userId: string, model: string): Promise<Ac
   const account = await getAccount(userId)
   if (!account) throw new Error('no model account connected')
   if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
-  await save({ ...account, model })
+  await savePick(account, { model })
   return getStatus(userId)
+}
+
+/** Change how hard the connected OpenAI model thinks per turn. */
+export async function setAccountEffort(userId: string, effort: string): Promise<AccountStatus> {
+  const account = await getAccount(userId)
+  if (!account) throw new Error('no model account connected')
+  if (!takesReasoningEffort(account.kind)) throw new Error('only OpenAI models take a reasoning effort')
+  if (!isReasoningEffort(effort)) throw new Error('unknown reasoning effort')
+  await savePick(account, { reasoningEffort: effort })
+  return getStatus(userId)
+}
+
+/** Write ONLY the picked column, and only onto the account the pick was
+ *  checked against. A whole-row upsert here would carry the tokens read
+ *  moments ago back over a refresh that landed in between (the refresh token
+ *  is single-use, so that forces a reconnect), and two picks made at once
+ *  would undo each other; matching the kind keeps a pick validated for one
+ *  provider off an account that switched to another meanwhile. */
+async function savePick(
+  account: Pick<ModelAccount, 'userId' | 'kind'>,
+  pick: { model: string } | { reasoningEffort: string },
+): Promise<void> {
+  const written = await db
+    .update(modelAccounts)
+    .set({ ...pick, updatedAt: Date.now() })
+    .where(and(eq(modelAccounts.userId, account.userId), eq(modelAccounts.kind, account.kind)))
+    .returning({ userId: modelAccounts.userId })
+  if (!written.length) throw new Error('the connected account changed — pick again')
 }
 
 async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
@@ -203,6 +249,7 @@ async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
     expiresAt: account.expiresAt ?? null,
     apiKey: account.apiKey ?? null,
     model: account.model ?? null,
+    reasoningEffort: account.effort ?? null,
     connectedAt: now,
     updatedAt: now,
   }
@@ -221,6 +268,7 @@ async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
         expiresAt: row.expiresAt,
         apiKey: row.apiKey,
         model: row.model,
+        reasoningEffort: row.reasoningEffort,
         updatedAt: row.updatedAt,
       },
     })
@@ -740,8 +788,8 @@ async function connectKey(userId: string, kind: AccountKind, apiKey: string): Pr
     userId,
     kind,
     apiKey: key,
-    /* a rotation keeps the chosen model; switching providers resets it */
-    model: previous?.kind === kind ? previous.model : undefined,
+    /* a rotation keeps the chosen model and effort; switching providers resets them */
+    ...(previous?.kind === kind ? { model: previous.model, effort: previous.effort } : {}),
   })
   return getStatus(userId)
 }
