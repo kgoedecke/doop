@@ -15,6 +15,7 @@ import { CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
+import { MIN_FRAME_SIZE } from '../lib/frameResize'
 
 const HTML_OPEN_KEY = 'doop:inspector-html'
 
@@ -168,8 +169,16 @@ export function Inspector({
         </InspectorGroup>
         <InspectorGroup title="Layout">
           <div className="grid grid-cols-2 gap-1.5">
-            <NumInput label="W" value={frame.width} onCommit={(v) => commitMeta({ width: Math.max(120, v) })} />
-            <NumInput label="H" value={frame.height} onCommit={(v) => commitMeta({ height: Math.max(80, v) })} />
+            <NumInput
+              label="W"
+              value={frame.width}
+              onCommit={(v) => commitMeta({ width: Math.max(MIN_FRAME_SIZE, v) })}
+            />
+            <NumInput
+              label="H"
+              value={frame.height}
+              onCommit={(v) => commitMeta({ height: Math.max(MIN_FRAME_SIZE, v) })}
+            />
           </div>
         </InspectorGroup>
         <InspectorGroup title="Export">

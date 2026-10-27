@@ -11,6 +11,8 @@
       import { createRoot } from 'react-dom/client'
       import { FrameView } from '/src/components/FrameView.tsx'
       import { ElementPanel } from '/src/components/ElementPanel.tsx'
+      import { FrameLabelLayer } from '/src/components/FrameLabelLayer.ts'
+      import { layoutZoomFor } from '/src/lib/layoutZoom.ts'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import { pickedSelectors, useStore } from '/src/lib/store.ts'
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
@@ -45,11 +47,28 @@
       function Fixture() {
         const frame = useStore((s) => s.canvas?.frames[0])
         const selected = useStore((s) => s.selectedElement)
+        const zoom = useStore((s) => s.viewport.zoom)
+        /* frame names and size badges render into a screen-space layer, as the Stage provides */
+        const [labelLayer, setLabelLayer] = React.useState(null)
         if (!frame) return null
+        /* the Stage's world: laid out at CSS zoom k, transformed by the rest */
+        const k = layoutZoomFor(zoom, 16)
         return React.createElement(
           TooltipProvider,
           null,
-          React.createElement(FrameView, { frame, layoutZoom: 1 }),
+          React.createElement('div', {
+            style: { position: 'absolute', inset: 0, pointerEvents: 'none' },
+            ref: setLabelLayer,
+          }),
+          React.createElement(
+            'div',
+            { className: 'world', style: { zoom: k, transform: `scale(${zoom / k})`, transformOrigin: '0 0' } },
+            React.createElement(
+              FrameLabelLayer.Provider,
+              { value: labelLayer },
+              React.createElement(FrameView, { frame, layoutZoom: k }),
+            ),
+          ),
           selected && React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
         )
       }

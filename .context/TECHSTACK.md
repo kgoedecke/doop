@@ -150,6 +150,13 @@
   text runs, rotated or skewed elements, locked layers, locked frames and the Comment tool get no
   grips. `tests/elementResize.test.ts` covers the geometry and `tests/elementResizeBrowser.test.ts`
   drags the grips in Chromium.
+- A selected frame wears the same furniture as a selected element (`FrameResizeHandles.tsx`,
+  geometry in `src/lib/frameResize.ts`): a grip in each corner, grabbable edges, a two-pixel
+  ring, all in screen px at every zoom, and a `W × H` badge under the frame in the label layer.
+  A west or north pull moves that edge and keeps the far one still; Shift keeps the ratio; the
+  dragged edges snap to neighbours and guides (`snapFrame` takes the handle). Frames go down to
+  1×1 (`MIN_FRAME_SIZE`, also the Inspector's floor). `tests/frameResize.test.ts` covers the
+  geometry, `tests/frameResizeBrowser.test.ts` drags the grips in Chromium.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
   chrome step in by `RULER_PX`) (remembered under

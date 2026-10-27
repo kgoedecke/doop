@@ -735,6 +735,19 @@ app.post('/api/mcp-consent/:code', async (req, res, next) => {
    'edit' for every other write. `need` is required on purpose: a route
    that forgets it does not compile, rather than defaulting open.
    Both helpers write the error response themselves and return null. */
+/** The signed-in person as the actor of a REST write. The name is the
+ *  account's, never the body's; the body's `actor.clientId` is kept, since it
+ *  is only the browser tab's presence token, which lets the room tell that
+ *  tab's own writes from everyone else's (the remote-edit flash). */
+function userActor(req: express.Request) {
+  const clientId = req.body?.actor?.clientId
+  return actions.resolveActor({
+    name: req.user!.name,
+    kind: 'user',
+    clientId: typeof clientId === 'string' ? clientId.slice(0, 64) : undefined,
+  })
+}
+
 function requireCanvas(req: express.Request, res: express.Response, canvasId: string, need: CanvasRole) {
   const c = store.getCanvas(canvasId)
   if (!c) {
@@ -1213,7 +1226,7 @@ app.patch('/api/canvases/:id', (req, res) => {
     refreshRoomRoles(c.id)
   }
   if (typeof name === 'string' && name.trim()) {
-    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    const actor = userActor(req)
     actions.renameCanvas(c.id, name.trim(), actor)
   }
   res.json({ ok: true })
@@ -1526,7 +1539,7 @@ app.get('/api/canvases/:id/guidelines/:name/history', async (req, res) => {
 
 app.put('/api/canvases/:id/guidelines/:name', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   const { markdown, x, y, title } = req.body ?? {}
   /* no markdown = metadata patch (position/title): content and history untouched */
   if (markdown === undefined) {
@@ -1558,7 +1571,7 @@ app.put('/api/canvases/:id/guidelines/:name', (req, res) => {
 /* design memory: pin/unpin reference frames, accept/dismiss rule proposals */
 app.post('/api/canvases/:id/references', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   try {
     const ref = actions.pinReference(req.params.id, String(req.body?.frameId ?? ''), actor)
     if (!ref) return res.status(404).json({ error: 'canvas or frame not found' })
@@ -1570,7 +1583,7 @@ app.post('/api/canvases/:id/references', (req, res) => {
 
 app.delete('/api/canvases/:id/references/:refId', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   if (!actions.unpinReference(req.params.id, req.params.refId, actor))
     return res.status(404).json({ error: 'reference not found' })
   res.json({ ok: true })
@@ -1578,7 +1591,7 @@ app.delete('/api/canvases/:id/references/:refId', (req, res) => {
 
 app.post('/api/canvases/:id/proposals/:pid', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   const proposal = actions.resolveProposal(req.params.id, req.params.pid, !!req.body?.accept, actor)
   if (!proposal) return res.status(404).json({ error: 'proposal not found' })
   res.json(proposal)
@@ -1640,7 +1653,7 @@ app.put('/api/canvases/:id/pages', (req, res) => {
     return res.status(400).json({ error: 'Move the frames to another page before deleting this page.' })
   }
   const clean = pages.map((p) => ({ id: p.id, name: p.name.trim() }))
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   res.json(actions.setCanvasPages(canvas.id, clean, actor))
 })
 
@@ -1659,7 +1672,7 @@ app.put('/api/canvases/:id/pages/:pageId/flow-start', (req, res) => {
     if (framePageId(canvas, frame) !== req.params.pageId)
       return res.status(400).json({ error: 'the start frame must be on the same page' })
   }
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   res.json(actions.setFlowStart(canvas.id, req.params.pageId, frameId, actor))
 })
 
@@ -1675,7 +1688,7 @@ app.put('/api/canvases/:id/guides/:guideId', (req, res) => {
     canvasPages(canvas).map((page) => page.id),
   )
   if (typeof guide === 'string') return res.status(400).json({ error: guide })
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   try {
     res.json(actions.setGuide(canvas.id, guide, actor))
   } catch (e) {
@@ -1687,7 +1700,7 @@ app.put('/api/canvases/:id/guides/:guideId', (req, res) => {
 app.delete('/api/canvases/:id/guides/:guideId', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   /* idempotent: a guide a collaborator already removed is just as gone */
   actions.deleteGuide(canvas.id, req.params.guideId, actor)
   res.json({ ok: true })
@@ -1698,7 +1711,7 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
   if (!canvas) return
   if (!canvasPages(canvas).some((page) => page.id === req.params.pageId))
     return res.status(404).json({ error: 'page not found' })
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   try {
     const copy = await actions.duplicatePage(canvas.id, req.params.pageId, actor)
     if (!copy) return res.status(404).json({ error: 'page not found' })
@@ -1715,7 +1728,7 @@ app.post('/api/canvases/:id/frames', (req, res) => {
   const { name, pageId, x, y, width, height, html, hidden, locked } = req.body ?? {}
   if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
     return res.status(400).json({ error: 'page not found' })
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   /* `hidden` and `locked` let undo bring a deleted frame back as it was */
   const frame = actions.createFrame(
     req.params.id,
@@ -1740,7 +1753,7 @@ app.patch('/api/frames/:id', (req, res) => {
   const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
   if (!current) return
   const { actor: _ignored, expectedUpdatedAt: _version, ...patch } = req.body ?? {}
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   if (
     patch.pageId !== undefined &&
     !store.getCanvas(store.getFrame(req.params.id)!.canvasId)?.pages?.some((p) => p.id === patch.pageId)
@@ -1773,7 +1786,7 @@ app.put('/api/frames/:id/approval', (req, res) => {
 app.post('/api/frames/:id/append', (req, res) => {
   if (!requireFrame(req, res, req.params.id, 'edit')) return
   const { html_chunk, start, done } = req.body ?? {}
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   const frame = actions.appendFrameHtml(req.params.id, String(html_chunk ?? ''), actor, {
     start: !!start,
     done: !!done,
@@ -1784,7 +1797,7 @@ app.post('/api/frames/:id/append', (req, res) => {
 
 app.delete('/api/frames/:id', (req, res) => {
   if (!requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   const frame = actions.deleteFrame(req.params.id, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
   res.json({ ok: true })
@@ -1807,7 +1820,7 @@ app.get('/api/frames/:id/versions/:versionId', async (req, res) => {
 
 app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
   if (!requireFrame(req, res, req.params.id, 'edit')) return
-  const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+  const actor = userActor(req)
   const restored = await actions.restoreFrameVersion(req.params.id, req.params.versionId, actor)
   if (restored === null) return res.status(404).json({ error: 'version not found' })
   if (!restored) return res.status(404).json({ error: 'frame not found' })
@@ -1976,7 +1989,7 @@ app.post('/api/canvases/:id/import', async (req, res) => {
       if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
 
       const captures = await importSitePages(urls)
-      const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+      const actor = userActor(req)
       const frames = []
       const failures: { url: string; error: string }[] = []
       const rightmost = canvas.frames.reduce((right, frame) => Math.max(right, frame.x + frame.width), 0)
@@ -2025,7 +2038,7 @@ app.post('/api/canvases/:id/import', async (req, res) => {
     assertPublicHttpUrl(url)
     if (!takeImportSlot(req.user!.id)) return res.status(429).json({ error: 'too many imports — wait a minute' })
     const imported = await importPage(url)
-    const actor = actions.resolveActor({ name: req.user!.name, kind: 'user' })
+    const actor = userActor(req)
     const frame = actions.createFrame(
       canvas.id,
       { name: imported.title.slice(0, 80), width: imported.width, height: imported.height, html: imported.html },

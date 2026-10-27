@@ -1,4 +1,6 @@
 import type { CanvasGuide, Frame } from '../../shared/types'
+import type { ResizeHandle } from './elementResize'
+import { MIN_FRAME_SIZE, movingEdges } from './frameResize'
 
 /**
  * Alignment snapping: while a frame moves or resizes, its edges and centers
@@ -42,6 +44,9 @@ interface Target {
 
 /* start / center / end of a span */
 const lines = (pos: number, size: number) => [pos, pos + size / 2, pos + size]
+/* the one edge a resize drags, as an offset from the rect's start */
+const edgeOffset = (edge: 'start' | 'end' | null, size: number) =>
+  edge === 'start' ? [0] : edge === 'end' ? [size] : []
 
 function frameTargets(others: readonly Frame[], key: 'x' | 'y'): Target[] {
   return others.flatMap((o) =>
@@ -68,30 +73,39 @@ function closest(ownOffsets: number[], base: number, targets: readonly Target[],
 
 /** Snap a dragged rect against the other frames and the ruler guides.
  *  Moving considers the frame's start/center/end on both axes; resizing only
- *  the moving right/bottom edges. `zoom` converts the screen-px tolerance to
- *  world units. */
+ *  the edges the handle drags (the right/bottom ones by default). `zoom`
+ *  converts the screen-px tolerance to world units. */
 export function snapFrame(
   mode: 'move' | 'resize',
   rect: Rect,
   others: readonly Frame[],
   zoom: number,
   guides: readonly CanvasGuide[] = [],
+  handle: ResizeHandle = 'se',
 ): Rect & { guides: SnapGuide[] } {
   const tol = SNAP_PX / zoom
   let { x, y, width, height } = rect
   const xTargets = [...frameTargets(others, 'x'), ...guideTargets(guides, 'v')]
   const yTargets = [...frameTargets(others, 'y'), ...guideTargets(guides, 'h')]
-  let gx = closest(mode === 'move' ? lines(0, width) : [width], x, xTargets, tol)
-  let gy = closest(mode === 'move' ? lines(0, height) : [height], y, yTargets, tol)
+  const edges = movingEdges(handle)
+  let gx = closest(mode === 'move' ? lines(0, width) : edgeOffset(edges.x, width), x, xTargets, tol)
+  let gy = closest(mode === 'move' ? lines(0, height) : edgeOffset(edges.y, height), y, yTargets, tol)
   if (mode === 'move') {
     if (gx) x += gx.delta
     if (gy) y += gy.delta
   } else {
-    /* a snap that would shrink past the minimum loses to the clamp */
-    if (gx && width + gx.delta >= 120) width += gx.delta
-    else gx = null
-    if (gy && height + gy.delta >= 80) height += gy.delta
-    else gy = null
+    /* a snap that would shrink past the minimum loses to the clamp; a
+       start edge that snaps carries the position with it */
+    const w = edges.x === 'start' ? width - (gx?.delta ?? 0) : width + (gx?.delta ?? 0)
+    if (gx && w >= MIN_FRAME_SIZE) {
+      if (edges.x === 'start') x += gx.delta
+      width = w
+    } else gx = null
+    const h = edges.y === 'start' ? height - (gy?.delta ?? 0) : height + (gy?.delta ?? 0)
+    if (gy && h >= MIN_FRAME_SIZE) {
+      if (edges.y === 'start') y += gy.delta
+      height = h
+    } else gy = null
   }
   const shown: SnapGuide[] = []
   if (gx)

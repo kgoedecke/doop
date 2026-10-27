@@ -48,6 +48,9 @@ import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
 import { ElementResizeHandles } from './ElementResizeHandles'
+import { FrameResizeHandles } from './FrameResizeHandles'
+import { keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
+import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 
 /** ?comment=<rootId> — the link in a comment email. The thread opens once
  *  Stage has selected the linked frame (deselection closes popovers, and on
@@ -249,6 +252,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     probeOnClick = false,
     panelOnClick = false,
     skipElement = false,
+    /* the grip a resize pulls; a move ignores it */
+    handle: ResizeHandle = 'se',
   ): { move: (event: PointerEvent) => void; up: () => void } | undefined {
     if (pathEdit && probeOnClick) return
     const s = useStore.getState()
@@ -391,11 +396,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       const raw =
         mode === 'move'
           ? { ...from, x: Math.round(from.x + dx), y: Math.round(from.y + dy) }
-          : {
-              ...from,
-              width: Math.max(120, Math.round(from.width + dx)),
-              height: Math.max(80, Math.round(from.height + dy)),
-            }
+          : resizeFrameRect(handle, from, { dx, dy }, { keepRatio: ev.shiftKey })
       /* edges pull onto neighbouring frames' edges/centers and the page's
          ruler guides; ⌥ drags free —
          except that a ⌥⇧ duplicate-drag holds ⌥ for the whole gesture, and
@@ -404,7 +405,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
          hidden frame — there is nothing on the stage to line up with. */
       const others = currentPageCanvas()?.frames.filter((f) => !f.hidden && !groupIds.has(f.id)) ?? []
       const free = ev.altKey && !duplicating
-      const snapped = free ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom, visibleGuides())
+      let snapped = free ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom, visibleGuides(), handle)
+      /* with Shift the ratio wins: the snapped axis leads, the other follows */
+      if (mode === 'resize' && ev.shiftKey && !free) snapped = keepRatioAfterSnap(handle, from, raw, snapped)
       useStore.getState().setSnapGuides(snapped.guides)
       if (mode === 'move') {
         /* the snapped delta of the dragged frame moves the whole group */
@@ -414,7 +417,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           useStore.getState().patchFrameLocal(g.id, { x: g.orig.x + sdx, y: g.orig.y + sdy })
         }
       } else {
-        useStore.getState().patchFrameLocal(frame.id, { width: snapped.width, height: snapped.height })
+        const { x, y, width, height } = snapped
+        useStore.getState().patchFrameLocal(frame.id, { x, y, width, height })
       }
       const live = useStore.getState().canvas?.frames ?? []
       for (const g of group) {
@@ -430,16 +434,26 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       useStore.getState().setSnapGuides([])
       const live = useStore.getState().canvas?.frames ?? []
       const updates: { frameId: string; before: typeof orig; after: typeof orig }[] = []
+      /* a click leaves every frame where it was: nothing to save, and no
+         update for the room to announce. A drag under the click threshold
+         still changed the frame on every move, so what counts is the rect */
       for (const g of group) {
         const f = live.find((x) => x.id === g.id)
         if (!f) continue
         const after = { x: f.x, y: f.y, width: f.width, height: f.height }
+        if (
+          after.x === g.orig.x &&
+          after.y === g.orig.y &&
+          after.width === g.orig.width &&
+          after.height === g.orig.height
+        )
+          continue
         trackSave(api.updateFrame(f.id, after).catch(console.error))
         updates.push({ frameId: f.id, before: g.orig, after })
       }
       const [only, ...more] = updates
       if (only && !more.length) recordUpdate(only.frameId, only.before, only.after)
-      else recordUpdates(updates)
+      else if (more.length) recordUpdates(updates)
       /* a click (no drag) on the frame surface targets the element under
          the cursor: probe it and show the element toolbar */
       if (!moved && probeOnClick) probeAt(off.x, off.y, togglesElement ? 'toggle' : 'toolbar')
@@ -1085,6 +1099,27 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           }}
         >
           {labelLayer &&
+            selected &&
+            !editing &&
+            !pathEdit &&
+            !wantedSel &&
+            createPortal(
+              <div
+                data-frame-size=""
+                /* screen px, under the frame's bottom edge and centred on it,
+                   the way an element's size badge sits */
+                className="pointer-events-none absolute whitespace-nowrap rounded-tag bg-[rgb(60,130,246)] px-2 py-1 text-label font-medium text-white tabular-nums"
+                style={{
+                  left: `calc(var(--vx, 0px) + ${frame.x + frame.width / 2}px * var(--zoom, 1))`,
+                  top: `calc(var(--vy, 0px) + ${frame.y + frame.height}px * var(--zoom, 1))`,
+                  transform: `translate(-50%, ${LABEL_GAP + 4}px)`,
+                }}
+              >
+                {sizeLabel(frame)}
+              </div>,
+              labelLayer,
+            )}
+          {labelLayer &&
             createPortal(
               <div
                 /* the Stage reads this off the press target, which a portal no
@@ -1180,7 +1215,14 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 'outline-2 outline-offset-1 outline-solid outline-[var(--editing-color,var(--brand))]',
               stream && 'border-transparent outline-none',
             )}
-            style={duping || (dupKeyHeld && !editing) ? { cursor: DUP_CURSOR } : undefined}
+            /* the selection ring is screen px like the grips: two pixels
+               straddling the frame's edge at every zoom, so on the pixel grid
+               it runs down the middle of the edge's line, never beside it */
+            style={{
+              outlineWidth: 'calc(2px / var(--zoom, 1))',
+              outlineOffset: 'calc(-1px / var(--zoom, 1))',
+              cursor: duping || (dupKeyHeld && !editing) ? DUP_CURSOR : undefined,
+            }}
             onPointerDown={(e) => startDrag(e, 'move', true)}
             onDoubleClick={(e) => {
               void enterElementEdit(designPoint(e, e.currentTarget))
@@ -1314,11 +1356,15 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               whose overflow would clip an outline. */}
           {flash && (
             <div
-              className={cn(
-                'pointer-events-none absolute inset-0 outline-2 outline-offset-1 outline-solid outline-[var(--editing-color)] animate-[fade-out_1.2s_ease-out_forwards]',
-                !isCanvasElement(frame.html) && 'rounded-[6px]',
-              )}
-              style={{ '--editing-color': flash.color } as React.CSSProperties}
+              /* the selection ring's own geometry, in the editor's colour */
+              className="pointer-events-none absolute inset-0 outline-solid outline-[var(--editing-color)] animate-[fade-out_1.2s_ease-out_forwards]"
+              style={
+                {
+                  '--editing-color': flash.color,
+                  outlineWidth: 'calc(2px / var(--zoom, 1))',
+                  outlineOffset: 'calc(-1px / var(--zoom, 1))',
+                } as React.CSSProperties
+              }
             />
           )}
 
@@ -1492,15 +1538,18 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             )
           })()}
 
-          {!frame.locked && !readOnly && !pathEdit && (
-            <div
-              className={cn(
-                'absolute -right-[7px] -bottom-[7px] h-3.5 w-3.5 cursor-nwse-resize rounded-[4px] border-[1.5px] border-ink bg-surface opacity-0 [transition:opacity_0.12s] group-hover:opacity-100',
-                selected && 'opacity-100',
-              )}
-              onPointerDown={(e) => startDrag(e, 'resize')}
-            />
-          )}
+          {/* the frame's grips: only with Select, and never over a picked
+              element's own grips, which sit under this layer */}
+          {selected &&
+            tool === 'select' &&
+            !wantedSel &&
+            !elementMove.moving &&
+            !frame.locked &&
+            !readOnly &&
+            !pathEdit &&
+            !editing && (
+              <FrameResizeHandles onStart={(e, handle) => startDrag(e, 'resize', false, false, false, handle)} />
+            )}
           {elementMove.preview}
           {pathEdit && <PathEditor frame={frame} initial={pathEdit} onClose={closePathEdit} />}
         </div>
