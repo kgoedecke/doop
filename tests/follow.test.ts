@@ -62,11 +62,23 @@ describe('follow state', () => {
     expect(useStore.getState().following).toBeNull()
   })
 
-  it('records a peer camera on their presence', () => {
+  it('records a peer camera beside the roster, leaving presences untouched', () => {
     const s = useStore.getState()
     s.setPresences([peer])
+    const before = useStore.getState().presences
     s.setPeerViewport('p1', { x: 5, y: 6, zoom: 1.5, width: 900, height: 700 })
-    expect(useStore.getState().presences.p1?.viewport).toEqual({ x: 5, y: 6, zoom: 1.5, width: 900, height: 700 })
+    expect(useStore.getState().peerViewports.p1).toEqual({ x: 5, y: 6, zoom: 1.5, width: 900, height: 700 })
+    expect(useStore.getState().presences).toBe(before)
+    s.removePresence('p1')
+    expect(useStore.getState().peerViewports.p1).toBeUndefined()
+  })
+
+  it('seeds a peer camera from the roster and drops it on a fresh roster', () => {
+    const s = useStore.getState()
+    s.setPresences([{ ...peer, viewport: { x: 1, y: 2, zoom: 1, width: 800, height: 600 } }])
+    expect(useStore.getState().peerViewports.p1?.x).toBe(1)
+    s.setPresences([])
+    expect(useStore.getState().peerViewports.p1).toBeUndefined()
   })
 })
 

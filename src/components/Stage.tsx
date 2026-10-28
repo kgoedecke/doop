@@ -288,14 +288,14 @@ export function Stage({
       const el = ref.current
       const s = useStore.getState()
       if (!el || !s.following) return
-      const leader = s.presences[s.following]
+      const leaderViewport = s.peerViewports[s.following]
       const cursor = s.cursors[s.following]
       const stage = { width: el.clientWidth, height: el.clientHeight }
-      if (leader?.viewport?.pageId && leader.viewport.pageId !== s.activePageId) {
-        s.setActivePage(leader.viewport.pageId)
+      if (leaderViewport?.pageId && leaderViewport.pageId !== s.activePageId) {
+        s.setActivePage(leaderViewport.pageId)
         useStore.setState({ following: s.following })
       }
-      if (leader?.viewport) target = cameraToFollow(leader.viewport, stage)
+      if (leaderViewport) target = cameraToFollow(leaderViewport, stage)
       else if (cursor) target = cameraOnCursor(cursor, stage, s.viewport.zoom)
       else return
       if (!raf) raf = requestAnimationFrame(step)
@@ -307,7 +307,8 @@ export function Stage({
       }
       const started = s.following !== prev.following
       const moved =
-        s.presences[s.following] !== prev.presences[s.following] || s.cursors[s.following] !== prev.cursors[s.following]
+        s.peerViewports[s.following] !== prev.peerViewports[s.following] ||
+        s.cursors[s.following] !== prev.cursors[s.following]
       if (started || moved) retarget()
     })
     /* the stage growing or shrinking changes what we can see: followers of

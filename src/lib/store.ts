@@ -39,6 +39,10 @@ interface State {
   canvas: Canvas | null
   presences: Record<string, Presence>
   cursors: Record<string, { x: number; y: number }>
+  /** peers' cameras, keyed by clientId. Kept out of `presences` on purpose:
+   *  a camera moves many times a second, and a new presences map re-renders
+   *  everything that reads the roster (every FrameView among them). */
+  peerViewports: Record<string, PeerViewport>
   activity: ActivityItem[]
   /** agent task history (newest first) — every set_status becomes a task */
   tasks: AgentTask[]
@@ -259,6 +263,7 @@ export const useStore = create<State>((set, get) => ({
   activePageId: null,
   presences: {},
   cursors: {},
+  peerViewports: {},
   activity: [],
   tasks: [],
   feedback: [],
@@ -361,27 +366,30 @@ export const useStore = create<State>((set, get) => ({
   setPresences: (list) =>
     set((s) => ({
       presences: Object.fromEntries(list.map((p) => [p.clientId, p])),
+      peerViewports: Object.fromEntries(list.flatMap((p) => (p.viewport ? [[p.clientId, p.viewport]] : []))),
       /* a fresh roster (new canvas, reconnect) without our leader ends the follow */
       ...(s.following && !list.some((p) => p.clientId === s.following) ? { following: null } : {}),
     })),
-  upsertPresence: (p) => set((s) => ({ presences: { ...s.presences, [p.clientId]: p } })),
+  upsertPresence: (p) =>
+    set((s) => ({
+      presences: { ...s.presences, [p.clientId]: p },
+      ...(p.viewport ? { peerViewports: { ...s.peerViewports, [p.clientId]: p.viewport } } : {}),
+    })),
   removePresence: (clientId) =>
     set((s) => {
       const presences = { ...s.presences }
       const cursors = { ...s.cursors }
+      const peerViewports = { ...s.peerViewports }
       delete presences[clientId]
       delete cursors[clientId]
+      delete peerViewports[clientId]
       /* the one we were following left: nothing to track any more */
-      return { presences, cursors, ...(s.following === clientId ? { following: null } : {}) }
+      return { presences, cursors, peerViewports, ...(s.following === clientId ? { following: null } : {}) }
     }),
   setPeerViewport: (clientId, viewport) =>
-    set((s) => {
-      const p = s.presences[clientId]
-      if (!p) return {}
-      return { presences: { ...s.presences, [clientId]: { ...p, viewport } } }
-    }),
+    set((s) => (s.presences[clientId] ? { peerViewports: { ...s.peerViewports, [clientId]: viewport } } : {})),
   setFollowing: (following) => {
-    const pageId = following ? get().presences[following]?.viewport?.pageId : undefined
+    const pageId = following ? get().peerViewports[following]?.pageId : undefined
     if (pageId) get().setActivePage(pageId)
     set({ following })
   },
