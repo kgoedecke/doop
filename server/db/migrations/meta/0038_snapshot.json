@@ -1656,6 +1656,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "refresh_token": {
+          "name": "refresh_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "bigint",
