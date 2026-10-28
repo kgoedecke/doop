@@ -918,8 +918,7 @@ export function Stage({
               className="pointer-events-none absolute left-0 top-0 origin-top-left will-change-transform [background-image:radial-gradient(circle,var(--dot)_1.2px,transparent_1.2px)]"
               ref={gridRef}
             />
-            {/* frame names, in screen px (FrameLabelLayer): under the world,
-                so a frame dragged over another's name covers it as before */}
+            {/* the selected frame's size badge, in screen px (FrameLabelLayer) */}
             <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />
             {/* `world` is likewise a behaviour hook: pan hit-testing checks
             classList.contains('world') to tell background from frame */}

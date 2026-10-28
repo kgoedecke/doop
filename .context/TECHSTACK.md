@@ -96,8 +96,10 @@
   WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
   scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the
   viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%). Frame
-  names live in a screen-space layer (`FrameLabelLayer`), placed from `--vx`/`--vy`/`--zoom`, so
-  they keep size, gap and crisp text at every zoom.
+  names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every
+  zoom and stack with their own frame (a later frame covers an earlier frame's name, never the
+  reverse). The selected frame's size badge lives in a screen-space layer (`FrameLabelLayer`),
+  placed from `--vx`/`--vy`/`--zoom`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.

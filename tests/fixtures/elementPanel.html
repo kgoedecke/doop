@@ -19,13 +19,14 @@
       import { editElementGeometry } from '/src/lib/frameBridge.ts'
       import '/src/styles.css'
       window.elementPanelHarness = {
+        /* one frame, or several stacked in order (later ones on top) */
         seed: (frame) => {
           clearHistory()
           useStore.getState().setSelectedElement(null)
           useStore.getState().setCanvas({
             id: 'c',
             name: 'Typography',
-            frames: [frame],
+            frames: [frame].flat(),
             createdAt: 0,
             updatedAt: 0,
           })
@@ -45,10 +46,11 @@
         redo,
       }
       function Fixture() {
-        const frame = useStore((s) => s.canvas?.frames[0])
+        const frames = useStore((s) => s.canvas?.frames)
+        const frame = frames?.[0]
         const selected = useStore((s) => s.selectedElement)
         const zoom = useStore((s) => s.viewport.zoom)
-        /* frame names and size badges render into a screen-space layer, as the Stage provides */
+        /* size badges render into a screen-space layer, as the Stage provides */
         const [labelLayer, setLabelLayer] = React.useState(null)
         if (!frame) return null
         /* the Stage's world: laid out at CSS zoom k, transformed by the rest */
@@ -66,7 +68,7 @@
             React.createElement(
               FrameLabelLayer.Provider,
               { value: labelLayer },
-              React.createElement(FrameView, { frame, layoutZoom: k }),
+              frames.map((f) => React.createElement(FrameView, { key: f.id, frame: f, layoutZoom: k })),
             ),
           ),
           selected && React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),

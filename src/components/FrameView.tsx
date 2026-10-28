@@ -1119,82 +1119,77 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               </div>,
               labelLayer,
             )}
-          {labelLayer &&
-            createPortal(
-              <div
-                /* the Stage reads this off the press target, which a portal no
-               longer nests inside the frame */
-                data-frame-locked={frame.locked ? '' : undefined}
-                data-frame-title=""
-                className="pointer-events-auto absolute flex cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
-                /* screen px, from the camera the Stage publishes: the name sits a
-               fixed gap above the frame's top-left corner and never runs past
-               its right edge, whatever the zoom */
-                style={{
-                  left: `calc(var(--vx, 0px) + ${frame.x}px * var(--zoom, 1))`,
-                  top: `calc(var(--vy, 0px) + ${frame.y}px * var(--zoom, 1))`,
-                  width: `calc(${frame.width}px * var(--zoom, 1))`,
-                  transform: `translateY(calc(-100% - ${LABEL_GAP}px))`,
-                  cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
-                }}
-                onPointerDown={(e) => startDrag(e, 'move', false, true)}
-              >
-                {frame.locked && (
-                  <Tooltip label="Locked — unlock it from the Layers panel or the Inspector" side="top" align="start">
-                    <span className="flex shrink-0 items-center text-ink-faint">
-                      <LockIcon width={11} height={11} />
-                    </span>
-                  </Tooltip>
-                )}
-                {isSyncedFrame(frame.html) && (
-                  <Tooltip label="Synced from a live app" side="top" align="start">
-                    <span className="flex shrink-0 items-center text-brand">
-                      <SyncIcon width={11} height={11} />
-                    </span>
-                  </Tooltip>
-                )}
-                {isGithubFrame(frame.html) && (
-                  <Tooltip
-                    label={
-                      isGithubPlaceholder(frame.html)
-                        ? 'Found in the repo — awaiting capture'
-                        : 'Imported from a GitHub repo'
-                    }
-                    side="top"
-                    align="start"
-                  >
-                    <span
-                      className={cn(
-                        'flex shrink-0 items-center',
-                        isGithubPlaceholder(frame.html) ? 'text-ink-faint' : 'text-brand',
-                      )}
-                    >
-                      <GithubIcon width={11} height={11} />
-                    </span>
-                  </Tooltip>
-                )}
-                <span className="overflow-hidden text-ellipsis">{frame.name}</span>
-                <FrameApprovalBadge frame={frame} />
-                <span className="flex gap-1">
-                  {stream && (
-                    <span className={EDITOR_CHIP} style={{ background: stream.color }}>
-                      <AgentIcon name={stream.name} size={9} color="#fff" />
-                      {stream.name} is designing
-                      <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
-                    </span>
-                  )}
-                  {editors
-                    .filter((p) => p.name !== stream?.name)
-                    .map((p) => (
-                      <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }}>
-                        {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}{' '}
-                        {p.name}
-                      </span>
-                    ))}
+          <div
+            /* the Stage reads this off the press target */
+            data-frame-locked={frame.locked ? '' : undefined}
+            data-frame-title=""
+            /* inside the frame's box, so the name stacks with its own frame:
+               a frame added later covers it, an earlier one never does. It is
+               counter-scaled from its bottom-left corner to screen px, so it
+               sits a fixed gap above the frame's top-left corner and, its box
+               pre-widened by the zoom, never runs past the frame's right edge */
+            className="pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
+            style={{
+              width: 'calc(100% * var(--zoom, 1))',
+              transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
+              cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
+            }}
+            onPointerDown={(e) => startDrag(e, 'move', false, true)}
+          >
+            {frame.locked && (
+              <Tooltip label="Locked — unlock it from the Layers panel or the Inspector" side="top" align="start">
+                <span className="flex shrink-0 items-center text-ink-faint">
+                  <LockIcon width={11} height={11} />
                 </span>
-              </div>,
-              labelLayer,
+              </Tooltip>
             )}
+            {isSyncedFrame(frame.html) && (
+              <Tooltip label="Synced from a live app" side="top" align="start">
+                <span className="flex shrink-0 items-center text-brand">
+                  <SyncIcon width={11} height={11} />
+                </span>
+              </Tooltip>
+            )}
+            {isGithubFrame(frame.html) && (
+              <Tooltip
+                label={
+                  isGithubPlaceholder(frame.html)
+                    ? 'Found in the repo — awaiting capture'
+                    : 'Imported from a GitHub repo'
+                }
+                side="top"
+                align="start"
+              >
+                <span
+                  className={cn(
+                    'flex shrink-0 items-center',
+                    isGithubPlaceholder(frame.html) ? 'text-ink-faint' : 'text-brand',
+                  )}
+                >
+                  <GithubIcon width={11} height={11} />
+                </span>
+              </Tooltip>
+            )}
+            <span className="overflow-hidden text-ellipsis">{frame.name}</span>
+            <FrameApprovalBadge frame={frame} />
+            <span className="flex gap-1">
+              {stream && (
+                <span className={EDITOR_CHIP} style={{ background: stream.color }}>
+                  <AgentIcon name={stream.name} size={9} color="#fff" />
+                  {stream.name} is designing
+                  <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
+                </span>
+              )}
+              {editors
+                .filter((p) => p.name !== stream?.name)
+                .map((p) => (
+                  <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }}>
+                    {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}{' '}
+                    {p.name}
+                  </span>
+                ))}
+            </span>
+          </div>
 
           <div
             data-frame-surface=""
