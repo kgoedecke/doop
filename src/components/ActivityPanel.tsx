@@ -225,6 +225,10 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     s.select(frameId)
     s.requestFlyTo(frameId)
   }
+  const failed = !!task.failedAt
+  const reason = task.failureReason ?? 'The agent did not finish this task.'
+  /* a job's status already is its reason; a card's status is its brief */
+  const separateReason = failed && reason !== task.status
   return (
     <div
       role={frameId ? 'button' : undefined}
@@ -253,32 +257,37 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
       <span className="text-[11px] text-ink-faint tabular-nums">{taskTime(task)}</span>
       <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-ink-soft">
         <TaskMark task={task} />
-        {/* one line, with the whole text on hover; a failure wraps, since
-            its reason is the point */}
+        {/* one line, with the whole text on hover: a card's status is its
+            whole brief, which must never crowd out why it failed */}
         <span
           title={task.status}
-          className={cn(
-            'min-w-0',
-            task.failedAt ? 'whitespace-normal break-words text-accent-ink' : 'truncate',
-            task.auto && 'italic',
-          )}
+          className={cn('min-w-0 truncate', failed && !separateReason && 'text-accent-ink', task.auto && 'italic')}
         >
           {task.status}
         </span>
-        {task.failedAt && task.queuedBy && canvasId && canEdit && (
-          <Button
-            variant="danger-solid"
-            size="pill"
-            className="ml-auto"
-            onClick={(e) => {
-              e.stopPropagation()
-              api.retryCard(canvasId, task.id).catch(reportLimit)
-            }}
-          >
-            Retry
-          </Button>
-        )}
       </span>
+      {failed && (
+        <span className="col-span-2 flex min-w-0 items-start gap-2 pl-[22px]">
+          {separateReason && (
+            <span title={reason} className="line-clamp-3 min-w-0 break-words text-accent-ink">
+              {reason}
+            </span>
+          )}
+          {task.queuedBy && canvasId && canEdit && (
+            <Button
+              variant="danger-solid"
+              size="pill"
+              className="ml-auto flex-none"
+              onClick={(e) => {
+                e.stopPropagation()
+                api.retryCard(canvasId, task.id).catch(reportLimit)
+              }}
+            >
+              Retry
+            </Button>
+          )}
+        </span>
+      )}
     </div>
   )
 }
@@ -288,8 +297,10 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
 function TaskMark({ task }: { task: AgentTask }) {
   if (task.failedAt)
     return (
-      <span className="grid size-3 flex-none place-items-center rounded-full bg-accent-ink text-[8px] font-bold text-white">
-        !
+      <span className="flex size-3 flex-none flex-col items-center justify-center gap-[1px] rounded-full bg-accent-ink">
+        {/* drawn, not typed: a text "!" sits on the font's baseline, off centre */}
+        <span className="h-[4px] w-[1.5px] rounded-full bg-white" />
+        <span className="size-[1.5px] rounded-full bg-white" />
       </span>
     )
   if (task.endedAt)
