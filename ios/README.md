@@ -53,6 +53,25 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   controls what it links; its `svg` feature must stay on, or neither inline `<svg>`
   elements nor SVG images (`<img src="….svg">`, backgrounds) are painted at all.
   SVG images are parsed by usvg, which accepts `em`-sized roots such as iconify's.
+  An inline `<svg>` reaches usvg as standalone markup, so the vendored `blitz-dom`
+  writes the cascade into it: computed fill/stroke (with their widths, caps, dashes
+  and opacities) and `opacity` replace the authored attributes, so class rules,
+  `var()` and `currentColor` apply. `<use>` references are expanded into clones that
+  inherit from the `<use>` site (icon sprites, per-tile colours), and gradients or
+  filters defined in another `<svg>` are copied in. Inline SVG with filters or masks
+  is rasterized by resvg, since anyrender_svg drops both. `tests/svg_inline.rs`
+  covers each case. SVG text gets the page's `@font-face` fonts: each document keeps a
+  usvg font database with them under their CSS family names (only subsets whose
+  `unicode-range` covers Latin, since usvg picks one face per family), and the computed
+  font and `letter-spacing` are written into the markup like the paint.
+- **Fonts and inputs**: variable fonts take their weight through the vendored
+  `anyrender_skia`, which maps parley's normalized coordinates back to design space
+  through the font's `avar` table (upstream interpolated below-default weights from the
+  wrong end, so Fraunces 300 drew heavy and 700 hairline); `opsz` follows the font size
+  as browsers' `font-optical-sizing: auto` does. Empty inputs paint their `placeholder`
+  in the `::placeholder` style. `doopblitz_doc_loading` stays true while a fetched
+  resource waits to be applied, since applying a stylesheet starts its font and image
+  fetches. `tests/fonts_and_inputs.rs` covers these with macOS's own variable fonts.
 - **Device-pixel layout**: Taffy rounds every box to whole CSS pixels after layout,
   which at a paint scale above 1 puts a different number of device pixels on each
   side of a box sitting on a half pixel (a 1.5px outline, a handle centred on it),

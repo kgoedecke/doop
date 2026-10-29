@@ -680,7 +680,10 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             element,
             transform,
             #[cfg(feature = "svg")]
-            svg: element.svg_data(),
+            svg: match element.image_data() {
+                Some(blitz_dom::node::ImageData::Svg(svg)) => Some(&svg.tree),
+                _ => None,
+            },
             text_input: element.text_input_data(),
             list_item: element.list_item_data.as_deref(),
             devtools: self.dom.devtools(),
@@ -726,7 +729,7 @@ struct ElementCx<'dom, 'a> {
     element: &'dom ElementData,
     transform: Affine,
     #[cfg(feature = "svg")]
-    svg: Option<&'dom usvg::Tree>,
+    svg: Option<&'dom Arc<usvg::Tree>>,
     text_input: Option<&'dom TextInputData>,
     list_item: Option<&'dom ListItemLayout>,
     devtools: &'dom DevtoolSettings,
@@ -964,17 +967,35 @@ impl ElementCx<'_, '_> {
                 };
             }
 
-            // Render text
+            // Render text, or the placeholder while the input is empty
             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
-            crate::text::stroke_text(
-                scene,
-                input_data.editor.try_layout().unwrap().lines(),
-                self.context.dom,
-                transform,
-                self.scale,
-                self.node.id,
-                &mut draw_text_context,
-            );
+            let placeholder = input_data
+                .placeholder
+                .as_deref()
+                .filter(|_| input_data.editor.raw_text().is_empty());
+            if let Some(placeholder) = placeholder {
+                draw_text_context.color_override = Some(placeholder.color.as_srgb_color());
+                crate::text::stroke_text(
+                    scene,
+                    placeholder.layout.lines(),
+                    self.context.dom,
+                    transform,
+                    self.scale,
+                    self.node.id,
+                    &mut draw_text_context,
+                );
+                draw_text_context.color_override = None;
+            } else {
+                crate::text::stroke_text(
+                    scene,
+                    input_data.editor.try_layout().unwrap().lines(),
+                    self.context.dom,
+                    transform,
+                    self.scale,
+                    self.node.id,
+                    &mut draw_text_context,
+                );
+            }
         }
     }
 
@@ -1143,6 +1164,29 @@ impl ElementCx<'_, '_> {
             .transform
             .pre_scale_non_uniform(x_scale, y_scale)
             .then_translate(Vec2 { x, y });
+
+        // anyrender_svg omits filters and masks (a turbulence rect paints black), so
+        // trees using them are rasterized by resvg at the painted size, as SVG
+        // backgrounds are.
+        if !svg.filters().is_empty() || !svg.masks().is_empty() {
+            let [a, b, c, d, _, _] = self.transform.as_coeffs();
+            let device_width = paint_size.width as f64 * a.hypot(b);
+            let device_height = paint_size.height as f64 * c.hypot(d);
+            if let Some(image) = svg_background::rasterize(svg, device_width, device_height) {
+                let image_transform = self.transform.then_translate(Vec2 { x, y })
+                    * Affine::scale_non_uniform(
+                        paint_size.width as f64 / image.width as f64,
+                        paint_size.height as f64 / image.height as f64,
+                    );
+                let rect = Rect::new(0.0, 0.0, image.width as f64, image.height as f64);
+                let brush = peniko::ImageBrush {
+                    image,
+                    sampler: ImageSampler::new(),
+                };
+                scene.fill(Fill::NonZero, image_transform, brush.as_ref(), None, &rect);
+                return;
+            }
+        }
 
         anyrender_svg::render_svg_tree(scene, svg, transform);
     }

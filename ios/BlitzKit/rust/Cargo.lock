@@ -59,8 +59,6 @@ dependencies = [
 [[package]]
 name = "anyrender_skia"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "282fdae1228486bcdbc973abf6f45afabcbd1579b63b4c95de9da4a0b893b4b7"
 dependencies = [
  "anyrender",
  "ash",
@@ -80,6 +78,7 @@ dependencies = [
  "peniko",
  "raw-window-handle",
  "skia-safe",
+ "skrifa",
 ]
 
 [[package]]
@@ -233,7 +232,6 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f#0f60502ea724ef703b34220b3847bb3483f70b5f"
 dependencies = [
  "accesskit",
  "anyrender",

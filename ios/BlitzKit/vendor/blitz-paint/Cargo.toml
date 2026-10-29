@@ -6,6 +6,10 @@
 #   as the spec says; they were drawn outside the clip layer.
 # - src/render/background.rs, src/render/svg_background.rs: SVG backgrounds tile
 #   in local coordinates and preserve SVG filter effects such as paper noise.
+# - src/render.rs: inline SVG with filters or masks is rasterized by resvg the same way,
+#   since anyrender_svg drops both (a grain filter painted a black rect).
+# - src/render.rs, src/text.rs: an empty input paints its placeholder layout in the
+#   placeholder colour.
 # Everything else is the upstream crate; drop this directory once the fixes land
 # upstream and remove the [patch] entry in ../../rust/Cargo.toml.
 [package]
