@@ -15,6 +15,7 @@ import {
 import {
   buildLayerTree,
   duplicateElements,
+  elementGone,
   elementHtml,
   isElementHidden,
   isElementLocked,
@@ -352,11 +353,11 @@ export function transferLayer(pressed: Frame, selector: string, over: Frame, tar
         const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
         /* the source was saved again while the destination write was out —
            a quick edit beside the move — and that save already carried the
-           element's removal (its markup is gone from the saved source, not
-           just moved along by a sibling's deletion): the element lives in
-           the destination alone now, and the move stands rather than being
-           rolled back into nothing */
-        if (saved && !shell && remote?.id === source.id && raw !== null && !remote.html.includes(raw)) {
+           element's removal (the element itself is gone from the saved
+           source, not just edited in place or moved along by a sibling's
+           deletion): it lives in the destination alone now, and the move
+           stands rather than being rolled back into nothing */
+        if (saved && !shell && remote?.id === source.id && elementGone(source.html, remote.html, selector)) {
           s.upsertFrame(remote)
           return
         }
@@ -460,7 +461,7 @@ export async function detachLayer(pressed: Frame, selector: string): Promise<boo
     api.updateFrame(source.id, { html: emptied }, source.updatedAt).catch(async (err: unknown) => {
       const s = useStore.getState()
       const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
-      if (remote?.id === source.id && !remote.html.includes(markup)) {
+      if (remote?.id === source.id && elementGone(source.html, remote.html, selector)) {
         s.upsertFrame(remote)
         return
       }

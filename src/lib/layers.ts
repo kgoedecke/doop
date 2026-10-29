@@ -257,6 +257,27 @@ function inDocumentOrder(els: Element[]): Element[] {
   return outermost(els).sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
 }
 
+/** True only when the element `selector` names in `before` is provably gone
+ *  from `after`, a later save of the same frame. Its markup missing proves
+ *  nothing (an edit to its text, style or attributes changes that too), so
+ *  the element is followed by its `data-doop-id` when it has one, and
+ *  otherwise counted by shape (its tag tree, which such an edit keeps):
+ *  gone means `after` holds fewer elements of that shape than `before`. */
+export function elementGone(before: string, after: string, selector: string): boolean {
+  const el = find(parse(before), selector)
+  if (!el || after.includes(el.outerHTML)) return false
+  const doc = parse(after)
+  const id = el.getAttribute(ELEMENT_ID_ATTR)
+  if (id) return ![...doc.querySelectorAll(`[${ELEMENT_ID_ATTR}]`)].some((e) => e.getAttribute(ELEMENT_ID_ATTR) === id)
+  const shape = shapeOf(el)
+  const count = (d: Document) => [...d.getElementsByTagName(el.tagName)].filter((e) => shapeOf(e) === shape).length
+  return count(doc) < count(el.ownerDocument)
+}
+
+function shapeOf(el: Element): string {
+  return `${el.tagName}(${[...el.children].map(shapeOf).join(',')})`
+}
+
 /** The frame's HTML with every element removed, or null when any selector no longer resolves. */
 export function removeElements(html: string, selectors: string[]): string | null {
   const doc = parse(html)
