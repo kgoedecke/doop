@@ -10,6 +10,9 @@ export interface LocalHarnessRequest {
   maxTurns: number
   /** Stops this canvas run without canceling other work for the account. */
   isCanceled?: () => boolean
+  /** fires when the run's work is stopped, so the run ends now rather than
+   *  on the next expiry sweep */
+  signal?: AbortSignal
   execute: (block: Anthropic.ToolUseBlockParam) => Promise<Anthropic.ToolResultBlockParam>
 }
 
@@ -53,7 +56,7 @@ export class LocalAgentRuns {
   ): Promise<LocalAgentResult> {
     const id = randomUUID()
     return new Promise((resolve) => {
-      this.runs.set(id, {
+      const run: Run = {
         userId,
         request,
         resolve,
@@ -70,6 +73,10 @@ export class LocalAgentRuns {
           system: request.system,
           maxTurns: request.maxTurns,
         },
+      }
+      this.runs.set(id, run)
+      request.signal?.addEventListener('abort', () => void this.close(run, { success: false, text: 'Task stopped.' }), {
+        once: true,
       })
     })
   }
@@ -100,6 +107,7 @@ export class LocalAgentRuns {
   }
 
   private async close(run: Run, result: LocalAgentResult) {
+    if (run.closing) return
     run.closing = true
     await run.tail
     this.runs.delete(run.job.id)

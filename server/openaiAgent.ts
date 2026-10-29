@@ -79,6 +79,7 @@ export interface TurnRequest {
   tools: Anthropic.Tool[]
   messages: Anthropic.MessageParam[]
   maxTokens: number
+  signal?: AbortSignal
 }
 
 export interface TurnResult {
@@ -375,6 +376,7 @@ async function runChatgpt(account: ModelAccount, req: TurnRequest): Promise<Turn
       store: false,
       stream: true,
     }),
+    signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'ChatGPT')
   return fromResponse(await readEventStream(res))
@@ -396,6 +398,7 @@ async function runApiKey(account: ModelAccount, req: TurnRequest): Promise<TurnR
       max_output_tokens: req.maxTokens,
       store: false,
     }),
+    signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'OpenAI')
   return fromResponse((await res.json()) as ResponseBody)
@@ -435,6 +438,7 @@ export async function runAzureTurn(config: AzureConfig, req: TurnRequest): Promi
       max_output_tokens: req.maxTokens,
       store: false,
     }),
+    signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'Azure OpenAI')
   return fromResponse((await res.json()) as ResponseBody)

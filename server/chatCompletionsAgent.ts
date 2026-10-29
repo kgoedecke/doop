@@ -247,6 +247,7 @@ export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req:
       tool_choice: 'auto',
       max_tokens: req.maxTokens,
     }),
+    signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, config.label)
   return fromCompletion((await res.json()) as CompletionBody, config.label)

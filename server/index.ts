@@ -2135,6 +2135,13 @@ app.post('/api/canvases/:canvasId/cards/:id/retry', async (req, res) => {
   res.json(card)
 })
 
+app.post('/api/canvases/:canvasId/cards/:id/stop', (req, res) => {
+  if (!requireCanvas(req, res, req.params.canvasId, 'edit')) return
+  const card = actions.stopCard(req.params.canvasId, req.params.id, req.user!.name)
+  if (!card) return res.status(404).json({ error: 'card not found' })
+  res.json(card)
+})
+
 app.post('/api/tasks/:id/feedback', async (req, res) => {
   const canvasId = actions.taskCanvasId(req.params.id)
   if (!canvasId) return res.status(404).json({ error: 'task not found' })

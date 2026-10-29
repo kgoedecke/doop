@@ -81,7 +81,10 @@ export class GeminiCloudRuns {
           system: request.system,
           maxTurns: request.maxTurns,
         }),
-        signal: AbortSignal.timeout(GEMINI_CLOUD_TIMEOUT_MS),
+        signal: AbortSignal.any([
+          AbortSignal.timeout(GEMINI_CLOUD_TIMEOUT_MS),
+          ...(request.signal ? [request.signal] : []),
+        ]),
       })
       if (!response.ok) {
         await response.body?.cancel()

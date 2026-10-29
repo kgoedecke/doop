@@ -520,6 +520,8 @@ export const api = {
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),
   retryCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
+  stopCard: (canvasId: string, cardId: string) =>
+    req(`/api/canvases/${canvasId}/cards/${cardId}/stop`, { method: 'POST' }),
   /** x/y: where a comment on the frame as a whole was left, in design px */
   /** a comment on an element (its positional selector, which the server turns into a stamped
    *  data-doop-id, or the id it already carries) or, with neither, on the frame at the point */

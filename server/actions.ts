@@ -1171,7 +1171,8 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
  *  pipeline, or complete it if that was the last one. */
 export function advanceCard(canvasId: string, cardId: string, by: Actor): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
-  if (!card || card.endedAt) return card
+  /* a card stopped while its run went on stays stopped */
+  if (!card || card.endedAt || card.failedAt) return card
   const pipeline = pipelineOf(card)
   const next = (card.stage ?? 0) + 1
   if (next >= pipeline.length) return completeCard(canvasId, cardId)
@@ -1209,6 +1210,18 @@ export function failCard(canvasId: string, cardId: string, reason: string): Agen
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
   emitCanvasEvent(canvasId, { type: 'task.failed', task: card, reason })
+  /* a run whose every card is now failed lets go of its model call at once */
+  import('./resident.ts').then((r) => r.onCardStopped(canvasId)).catch(() => {})
+  return card
+}
+
+/** A person stops a card, waiting or mid-run. It pauses like any failed card,
+ *  so Retry starts it over. */
+export function stopCard(canvasId: string, cardId: string, by: string): AgentTask | undefined {
+  const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
+  if (!card || card.endedAt || card.failedAt) return card
+  failCard(canvasId, cardId, `Stopped by ${by}.`)
+  logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), `stopped a card: “${card.status}”`)
   return card
 }
 

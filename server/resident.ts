@@ -58,6 +58,15 @@ const MAX_REWRITE_CHARS = 100_000
 /* one run per canvas at a time; feedback arriving mid-run queues a re-run */
 const running = new Set<string>()
 const queued = new Set<string>()
+/* each run in flight on a canvas, as a check that aborts its model call once
+   all of its cards have been stopped */
+const stopChecks = new Map<string, Set<() => void>>()
+
+/** A card on this canvas was stopped or failed: a run left with nothing to do
+ *  drops the turn it is waiting on instead of finishing it. */
+export function onCardStopped(canvasId: string) {
+  for (const check of stopChecks.get(canvasId) ?? []) check()
+}
 
 export function onFeedback(canvasId: string) {
   if (running.has(canvasId)) {
@@ -358,6 +367,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   /* presence otherwise only refreshes on tool activity, and the sweep's TTL
      is shorter than a big generation turn */
   const heartbeat = setInterval(() => actions.heartbeatAgent(canvasId, actor), 15_000)
+  const abort = new AbortController()
+  const stopCheck = () => {
+    if (canceled()) abort.abort()
+  }
 
   if (repoCards.length > 0) {
     try {
@@ -376,6 +389,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     }
   }
 
+  const checks = stopChecks.get(canvasId) ?? new Set()
+  stopChecks.set(canvasId, checks.add(stopCheck))
   try {
     const tasks = actions.getTasks(canvasId)
     const items: FeedbackItem[] = claimed.map((f) => ({
@@ -585,6 +600,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
           maxTurns,
           isCanceled: canceled,
+          signal: abort.signal,
           execute: async (block) => {
             if (runState.blockedWebsiteAccess)
               return {
@@ -603,6 +619,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             return execTool(block, canvasId, actor, runState)
           },
         })
+        if (canceled()) return 'ran'
         finished = result.success
         crashed = !result.success
         messages.push({ role: 'assistant', content: [{ type: 'text', text: result.text }] })
@@ -620,6 +637,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
                 tools: TOOLS,
                 messages,
+                signal: abort.signal,
               }),
             {
               isCanceled: canceled,
@@ -832,6 +850,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       }
     }
   } finally {
+    checks.delete(stopCheck)
+    if (checks.size === 0) stopChecks.delete(canvasId)
     clearInterval(heartbeat)
     /* clear the status — this completes the agent's task in the panel */
     actions.setAgentStatus(canvasId, actor, '')

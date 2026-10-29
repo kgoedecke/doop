@@ -225,6 +225,7 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     s.select(frameId)
     s.requestFlyTo(frameId)
   }
+  const running = !task.endedAt && !task.failedAt
   const failed = !!task.failedAt
   const reason = task.failureReason ?? 'The agent did not finish this task.'
   /* a job's status already is its reason; a card's status is its brief */
@@ -265,6 +266,20 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
         >
           {task.status}
         </span>
+        {running && task.queuedBy && canvasId && canEdit && (
+          <Button
+            variant="ghost"
+            size="pill"
+            className="ml-auto flex-none"
+            title="Stop this task"
+            onClick={(e) => {
+              e.stopPropagation()
+              api.stopCard(canvasId, task.id).catch(console.error)
+            }}
+          >
+            Stop
+          </Button>
+        )}
       </span>
       {failed && (
         <span className="col-span-2 flex min-w-0 items-start gap-2 pl-[22px]">

@@ -37,6 +37,8 @@ export interface AgentTurnRequest {
   tools: Anthropic.Tool[]
   messages: Anthropic.MessageParam[]
   maxTokens: number
+  /** aborts the turn mid-generation: the run's work was stopped */
+  signal?: AbortSignal
 }
 
 export interface AgentTurnResult {
@@ -102,17 +104,20 @@ export async function runAnthropicTurn(
   req: AgentTurnRequest,
 ): Promise<AgentTurnResult> {
   const res = await client.messages
-    .stream({
-      model,
-      max_tokens: req.maxTokens,
-      system: req.system.map((block) => ({
-        type: 'text' as const,
-        text: block.text,
-        ...(block.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
-      })),
-      tools: req.tools,
-      messages: req.messages,
-    })
+    .stream(
+      {
+        model,
+        max_tokens: req.maxTokens,
+        system: req.system.map((block) => ({
+          type: 'text' as const,
+          text: block.text,
+          ...(block.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
+        })),
+        tools: req.tools,
+        messages: req.messages,
+      },
+      { signal: req.signal },
+    )
     .finalMessage()
   const stop: StopReason =
     res.stop_reason === 'refusal'
@@ -146,6 +151,7 @@ function azureTier(): AgentModel | null {
           tools: req.tools,
           messages: req.messages,
           maxTokens: req.maxTokens,
+          signal: req.signal,
         })
       } catch (err) {
         /* these are the SERVER's credentials — "reconnect your account" would
@@ -253,6 +259,7 @@ function byoModel(account: ModelAccount): AgentModel {
           tools: req.tools,
           messages: req.messages,
           maxTokens: req.maxTokens,
+          signal: req.signal,
         }),
     }
   }
@@ -269,6 +276,7 @@ function byoModel(account: ModelAccount): AgentModel {
         tools: req.tools,
         messages: req.messages,
         maxTokens: req.maxTokens,
+        signal: req.signal,
       })
     },
   }
