@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, ElementComment, Frame } from '../shared/types'
 
 declare global {
@@ -25,12 +25,12 @@ declare global {
       pick: (el: { frameId: string; selector: string } | null) => void
     }
     delayedLayerProbe: MessageEvent | null
+    heldMoveHits: MessageEvent[] | null
   }
 }
 
 describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }, () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   let saved: Frame[] = []
   let nextId = 0
@@ -38,12 +38,21 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   const errors: string[] = []
 
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
+    /* holds the frames' hit-test answers while a test sets heldMoveHits; it
+       must listen before the app does, since a window's own listeners run in
+       the order they were added */
+    await page.evaluateOnNewDocument(() => {
+      window.heldMoveHits = null
+      window.addEventListener('message', (event) => {
+        if (event.data?.type !== 'doop:move-hit-result' || !window.heldMoveHits) return
+        window.heldMoveHits.push(event)
+        event.stopImmediatePropagation()
+      })
+    })
     await page.setRequestInterception(true)
     page.on('request', async (req) => {
       const path = new URL(req.url()).pathname
@@ -79,7 +88,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     nextId = 0
     patchRequests = 0
     await page.setViewport({ width: 1200, height: 800 })
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/drawing.html`)
+    await page.goto(fixtureUrl('drawing.html'))
     await page.waitForFunction(() => !!window.drawingHarness)
     await page.evaluate(() =>
       window.drawingHarness.seed({
@@ -101,7 +110,6 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
     expect(errors).toEqual([])
   })
 
@@ -311,14 +319,16 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.waitForFunction(() =>
       window.drawingHarness.state().frames[1]?.html.includes('data-doop-drawing="circle"'),
     )
-    expect(saved[0]!.html).not.toContain('data-doop-drawing')
+    /* a transfer saves the destination first; the source's removal is the
+       save after it, still on its way when the store already shows the move */
+    await expect.poll(() => saved[0]!.html).not.toContain('data-doop-drawing')
     await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.frameId === 'drawn-2')
     await page.waitForSelector('[data-comment-ui] button')
     await page.mouse.click(1100, 550)
     await drag([750, 360], [500, 600])
     const outside = (await waitForFrames(3))[2]!
     expect(outside).toMatchObject({ x: 210, y: 250, width: 40, height: 40, name: 'Circle' })
-    expect(saved[1]!.html).not.toContain('data-doop-drawing')
+    await expect.poll(() => saved[1]!.html).not.toContain('data-doop-drawing')
     for (let i = 0; i < 3; i++) await page.evaluate(() => window.drawingHarness.undo())
     const restored = await waitForFrames(3)
     expect(restored[2]).toMatchObject({ x: 105, y: 255, width: 40, height: 40 })
@@ -802,6 +812,47 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await expect.poll(async () => (await visibleDrawing('Layers', '#second')).x).toBeCloseTo(second.x + 60, 0)
     const outline = await page.$eval('[data-resize-handles]', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
     expect(outline.x).toBeCloseTo(second.x + 60, 0)
+  })
+
+  it('keeps a click a click when its hit test answers after the pointer has moved on', async () => {
+    const source = layerFrame(
+      rectangle + rectangle.replace('id="rect"', 'id="second"').replace('left:50px', 'left:250px'),
+    )
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    const first = await visibleDrawing('Layers', '#rect')
+    const second = await visibleDrawing('Layers', '#second')
+    await page.mouse.click(first.x + 40, first.y + 40)
+    await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#rect')
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 350)))
+    /* a loaded machine: the frame answers the next press only after the
+       button is up and the pointer is on its way to another element */
+    await page.evaluate(() => (window.heldMoveHits = []))
+    await page.mouse.click(first.x + 40, first.y + 40)
+    await page.waitForFunction(() => !!window.heldMoveHits?.length)
+    /* the travel reaches the canvas while the frame is slow to route input;
+       sent here directly, as the iframe would otherwise take it */
+    await page.evaluate(
+      (x, y) => {
+        document.body.dispatchEvent(
+          new PointerEvent('pointermove', { bubbles: true, pointerId: 1, isPrimary: true, clientX: x, clientY: y }),
+        )
+        const held = window.heldMoveHits ?? []
+        window.heldMoveHits = null
+        for (const event of held)
+          window.dispatchEvent(new MessageEvent('message', { data: event.data, source: event.source }))
+      },
+      second.x + 40,
+      second.y + 40,
+    )
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 350)))
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe('#rect')
+    /* the next press waits for whatever the click left running, so once it
+       lands nothing from the click is still on its way */
+    await page.mouse.click(second.x + 40, second.y + 40)
+    await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#second')
+    expect(patchRequests).toBe(0)
+    expect(saved[0]?.html).toBe(source.html)
   })
 
   it.each([0.5, 1, 2])('drags an HTML rectangle directly at zoom %s, saving once with undo/redo', async (zoom) => {

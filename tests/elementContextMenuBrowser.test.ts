@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Frame } from '../shared/types'
 
 declare global {
@@ -26,8 +26,7 @@ const HTML = `<html><head><style>body { margin: 0; padding: 20px }</style></head
 </body></html>`
 
 describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   let saved: Frame
   let deletedFrames = 0
@@ -70,9 +69,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
   }
 
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     // Install before the iframe bootstrap registers its listener. A handler
     // added later cannot stop a message the runtime has already processed.
@@ -98,17 +95,11 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
       } else await request.continue()
     })
-    await browser
-      .defaultBrowserContext()
-      .overridePermissions(vite.resolvedUrls!.local[0]!, [
-        'clipboard-read',
-        'clipboard-write',
-        'clipboard-sanitized-write',
-      ])
+    await browser.grantPermissions(['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write'])
   }, 60_000)
 
   beforeEach(async () => {
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/elementContextMenu.html`)
+    await page.goto(fixtureUrl('elementContextMenu.html'))
     await page.waitForFunction(() => !!window.contextMenuHarness)
     saved = {
       id: 'f',
@@ -135,7 +126,6 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
     expect(errors).toEqual([])
   })
 

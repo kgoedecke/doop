@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Frame as PuppeteerFrame, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Frame as PuppeteerFrame, Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, Frame } from '../shared/types'
 
 type Message = { type?: string; interaction?: { action?: string; target?: string } }
@@ -88,23 +88,19 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 /* The first load transforms the app through a cold Vite dev server, which can
    take longer than the default test timeout on CI. */
 describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
 
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     await page.setViewport({ width: 1000, height: 700 })
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/prototype.html`)
+    await page.goto(fixtureUrl('prototype.html'))
     await page.waitForFunction(() => (window as unknown as Fixture).fixtureReady)
   }, 60_000)
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
   })
 
   async function screen(frameId: string): Promise<PuppeteerFrame> {

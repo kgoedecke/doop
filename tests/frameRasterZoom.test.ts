@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot.ts'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot.ts'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser.ts'
 import { counterZoom, layoutZoomFor } from '../src/lib/layoutZoom.ts'
 
 type Rect = { x: number; y: number; width: number; height: number }
@@ -59,22 +59,18 @@ describe('layout zoom', () => {
 })
 
 describe.skipIf(!findBrowserPath())('settled canvas zoom', () => {
-  let server: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   beforeAll(async () => {
-    server = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await server.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: 1 })
-    await page.goto(`${server.resolvedUrls!.local[0]}tests/fixtures/frameRasterZoom.html`)
+    await page.goto(fixtureUrl('frameRasterZoom.html'))
     await page.waitForFunction(() => window.testReady, { timeout: 60_000 })
   }, 60_000)
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await server?.close()
   })
 
   it('takes the zoom as pixel density in Chromium, the path FrameView ships there', async () => {

@@ -221,6 +221,11 @@
 
 - Vitest 5 - unit/integration tests across `server/` and `src/`; run via `bun run test`
   (`vitest run`). Tests live in `tests/`.
+- Browser tests drive one shared Chromium and one Vite fixture server (`tests/browser.ts`), which
+  `tests/globalSetup.ts` starts and warms (every `tests/fixtures/*.html` loaded once) before any
+  worker runs; a file calls `openBrowser()` for its own context (focus emulated, 30s navigation
+  bound) and `fixtureUrl()` for its page. A test that needs its own Vite server (a proxy) builds it
+  from `fixtureServerConfig()`, so every server shares one dependency hash and cache directory.
 
 ## 8. CI/CD and Delivery
 

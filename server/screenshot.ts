@@ -47,9 +47,23 @@ export async function getBrowser(): Promise<Browser> {
     if (b.connected) return b
     browserPromise = null
   }
-  browserPromise = puppeteer.launch({
+  const launching = launchBrowser()
+  browserPromise = launching
+  /* a launch that failed (a slow cold start past puppeteer's timeout) must not
+     be handed to every later caller: the next one tries again */
+  launching.catch(() => {
+    if (browserPromise === launching) browserPromise = null
+  })
+  return launching
+}
+
+/** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
+ *  for its DevTools endpoint (puppeteer's default, 30s, unless given). */
+export function launchBrowser(timeout?: number): Promise<Browser> {
+  return puppeteer.launch({
     executablePath: findBrowser(),
     headless: true,
+    timeout,
     args: [
       '--no-first-run',
       '--disable-extensions',
@@ -61,7 +75,6 @@ export async function getBrowser(): Promise<Browser> {
       ...(env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
     ],
   })
-  return browserPromise
 }
 
 export interface IsolatedPage {

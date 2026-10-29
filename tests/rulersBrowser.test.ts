@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, HTTPRequest, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { HTTPRequest, Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, CanvasGuide, Frame } from '../shared/types'
 
 declare global {
@@ -39,8 +39,7 @@ const FRAME: Frame = {
 }
 
 describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   const guideRequests: { method: string; id: string; body: Partial<CanvasGuide> | null }[] = []
   let frame = FRAME
@@ -79,16 +78,14 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
   const lastGuideRequest = () => guideRequests.at(-1)
 
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     page.setDefaultTimeout(10_000)
     page.on('pageerror', (err) => errors.push(String(err)))
     await page.setRequestInterception(true)
     page.on('request', (req) => void respond(req))
     await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 2 })
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/rulers.html`)
+    await page.goto(fixtureUrl('rulers.html'))
     await page.waitForFunction(() => !!window.rulersHarness)
     await page.evaluate((f) => {
       window.rulersHarness.seed({
@@ -108,7 +105,6 @@ describe.skipIf(!findBrowserPath())('rulers and guides', { timeout: 30_000 }, ()
     await page?.screenshot({ path: '/tmp/doop-rulers.png' })
     await page?.close()
     await browser?.close()
-    await vite?.close()
     expect(errors).toEqual([])
   })
 

@@ -219,6 +219,10 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     }
     function onMove(ev: PointerEvent) {
       if (ev.pointerId !== pointerId || closed) return
+      /* the press is over once released, even while its hit test is still
+         out: the pointer travelling on to the next press must not turn a slow
+         click into a drag that moves (and saves) the element it clicked */
+      if (released && ev !== released) return
       lastMove = ev
       if (gesture.pinching) return cancel()
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return

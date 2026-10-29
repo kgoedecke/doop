@@ -1,32 +1,31 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureServerConfig, openBrowser, type TestBrowser } from './browser'
 import { freePort, startServer, type Server } from './harness'
 
 describe.skipIf(!findBrowserPath())('page list controls and keyboard history', () => {
   let vite: ViteDevServer
   let server: Server
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   beforeAll(async () => {
     /* vite needs the server's port for its proxy and the server needs vite's
        origin as BETTER_AUTH_URL, so the port is picked before either starts */
     const port = await freePort()
-    vite = await createServer({
-      logLevel: 'error',
-      server: {
-        port: 0,
+    vite = await createServer(
+      fixtureServerConfig({
         proxy: {
           '/api': { target: `http://localhost:${port}` },
           '/ws': { target: `ws://localhost:${port}`, ws: true },
         },
-      },
-    })
+      }),
+    )
     await vite.listen()
     const origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     page.setDefaultTimeout(10_000)
     await page.setViewport({ width: 1400, height: 900 })

@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Frame } from '../shared/types'
 import type { ElementInfo, GeometryEdit } from '../src/lib/frameBridge'
 
@@ -27,8 +27,7 @@ declare global {
 }
 
 describe.skipIf(!findBrowserPath())('element design controls', () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   let saved: Frame
   let seedId = 0
@@ -43,9 +42,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   beforeAll(async () => {
     imageDir = mkdtempSync(path.join(tmpdir(), 'doop-image-fill-'))
     writeFileSync(path.join(imageDir, 'replacement.svg'), replacementSvg)
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => errors.push(String(error)))
@@ -72,7 +69,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
       } else await request.continue()
     })
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/elementPanel.html`)
+    await page.goto(fixtureUrl('elementPanel.html'))
     await page.waitForFunction(() => !!window.elementPanelHarness)
     saved = {
       id: 'f',
@@ -108,7 +105,6 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page?.screenshot({ path: '/tmp/narwhal-element-panel.png' })
     await page?.close()
     await browser?.close()
-    await vite?.close()
     if (imageDir) rmSync(imageDir, { recursive: true, force: true })
     expect(errors).toEqual([])
   })

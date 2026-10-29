@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page, HTTPRequest } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot.ts'
+import type { Page, HTTPRequest } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot.ts'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser.ts'
 
 type ReplayEvent = { type: number; data: { isAttachIframe?: boolean } }
 declare global {
@@ -19,19 +19,12 @@ declare global {
 
 // DOM emulators do not enforce opaque origins or exercise rrweb's real bridge.
 describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
-  let server: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   beforeAll(async () => {
-    server = await createServer({
-      server: { port: 0 },
-      optimizeDeps: { include: ['posthog-js/dist/posthog-recorder', 'posthog-js/dist/rrweb'] },
-      logLevel: 'error',
-    })
-    await server.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
-    await page.goto(`${server.resolvedUrls!.local[0]}tests/fixtures/frameReplay.html`)
+    await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() => window.testReady && window.messages.some((m) => m.type === 'doop:frame-ready'), {
       timeout: 60_000,
     })
@@ -39,7 +32,6 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await server?.close()
   })
 
   async function render(html: string, index = 0) {
@@ -124,7 +116,7 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
     const events = await page.evaluate(() => window.events)
     const replay = await browser.newPage()
     try {
-      await replay.goto(`${server.resolvedUrls!.local[0]}tests/fixtures/frameReplay.html`)
+      await replay.goto(fixtureUrl('frameReplay.html'))
       await replay.waitForFunction(() => window.testReady)
       await replay.evaluate((events) => window.renderReplay(events), events)
       await replay.waitForFunction(() => {

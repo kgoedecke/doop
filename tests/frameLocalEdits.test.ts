@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Frame } from '../shared/types'
 
 declare global {
@@ -11,14 +11,11 @@ declare global {
 }
 
 describe.skipIf(!findBrowserPath())('local frame edits', () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   let saved: Frame
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     await page.setViewport({ width: 1000, height: 900 })
     await page.setRequestInterception(true)
@@ -28,13 +25,12 @@ describe.skipIf(!findBrowserPath())('local frame edits', () => {
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
       } else await request.continue()
     })
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/elementPanel.html`)
+    await page.goto(fixtureUrl('elementPanel.html'))
     await page.waitForFunction(() => !!window.elementPanelHarness)
   }, 60_000)
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
   })
 
   it('does not replay locally saved HTML, but still renders undo', async () => {

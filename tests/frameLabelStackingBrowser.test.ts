@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Frame } from '../shared/types'
 
 /* the elementPanel fixture's harness, as far as this file uses it (the full
@@ -28,8 +28,7 @@ function frame(id: string, x: number, y: number, width: number, height: number):
 }
 
 describe.skipIf(!findBrowserPath())('frame name stacking', () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   const errors: string[] = []
 
@@ -52,21 +51,18 @@ describe.skipIf(!findBrowserPath())('frame name stacking', () => {
   }
 
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.setViewport({ width: 1000, height: 900 })
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/elementPanel.html`)
+    await page.goto(fixtureUrl('elementPanel.html'))
     await page.waitForFunction(() => !!(window as unknown as { elementPanelHarness?: unknown }).elementPanelHarness)
   }, 60_000)
 
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
     expect(errors).toEqual([])
   })
 

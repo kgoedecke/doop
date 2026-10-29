@@ -1,26 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 
 type Message = { type: string; reqId?: string; html?: string; ok?: boolean }
 type Fixture = { messages: Message[]; testReady: boolean }
 
 describe.skipIf(!findBrowserPath())('layer visibility during text editing', () => {
-  let server: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   let seq = 0
   beforeAll(async () => {
-    server = await createServer({
-      server: { port: 0 },
-      optimizeDeps: { include: ['posthog-js/dist/posthog-recorder', 'posthog-js/dist/rrweb'] },
-      logLevel: 'error',
-    })
-    await server.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
-    await page.goto(`${server.resolvedUrls!.local[0]}tests/fixtures/frameReplay.html`)
+    await page.goto(fixtureUrl('frameReplay.html'))
     await page.waitForFunction(() =>
       (window as unknown as Fixture).messages?.some((m) => m.type === 'doop:frame-ready'),
     )
@@ -28,7 +21,6 @@ describe.skipIf(!findBrowserPath())('layer visibility during text editing', () =
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await server?.close()
   })
 
   async function send(message: Record<string, unknown>) {

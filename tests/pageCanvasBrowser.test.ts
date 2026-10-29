@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, Frame } from '../shared/types'
 
 declare global {
@@ -44,30 +44,24 @@ const canvas = (frames: Frame[]): Canvas => ({
   updatedAt: 0,
 })
 
-/* The first load transforms the whole app through a cold Vite dev server, which
-   on a CI runner regularly takes longer than the 5 s default test timeout. */
+/* Each test loads the whole app (hundreds of unbundled modules) in its own body,
+   which on a busy CI runner can take longer than the 5 s default test timeout. */
 describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_000 }, () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
-    await browser
-      .defaultBrowserContext()
-      .overridePermissions(vite.resolvedUrls!.local[0]!, ['clipboard-read', 'clipboard-sanitized-write'])
+    browser = await openBrowser()
+    await browser.grantPermissions(['clipboard-read', 'clipboard-sanitized-write'])
     page = await browser.newPage()
     await page.setViewport({ width: 1200, height: 800 })
   }, 60_000)
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
   })
 
   async function load(data: Canvas, query = '') {
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/pages.html${query}`)
+    await page.goto(fixtureUrl(`pages.html${query}`))
     await page.waitForFunction(() => typeof window.seedPages === 'function')
     await page.evaluate((data) => window.seedPages(data), data)
     await page.waitForSelector('iframe[data-doop-frame]')
