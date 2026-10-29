@@ -17,6 +17,10 @@ struct NativeCanvasView: View {
     @State private var contextPickerOpen = false
     @State private var pagePickerOpen = false
     @State private var peoplePickerOpen = false
+    /// The full-screen frame behind the canvas and the frame of the safe-area-bound content,
+    /// in global coordinates; together they give the size of a system side rail.
+    @State private var screenFrame = CGRect.zero
+    @State private var contentFrame = CGRect.zero
     @State private var dismissedMention: String?
     @FocusState private var promptFocused: Bool
     @State private var sending = false
@@ -73,14 +77,35 @@ struct NativeCanvasView: View {
                 }.frame(maxWidth: 620).padding(12)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .background(GeometryReader { proxy in
+                Color.clear
+                    .onAppear { contentFrame = proxy.frame(in: .global) }
+                    .onChange(of: proxy.frame(in: .global)) { contentFrame = $0 }
+            })
             .background {
-                // The renderer fills the home-indicator area; controls retain
-                // the safe area. CanvasView clips its layers below the header.
+                // The renderer fills the home-indicator area (and a side rail, below);
+                // controls retain the safe area. CanvasView clips its layers below the header.
                 BlitzCanvasSurface(model: model)
-                    .ignoresSafeArea(.container, edges: .bottom)
+                    .overlay(alignment: .bottomTrailing) {
+                        // In a side rail the tools sit in the rail, over the canvas.
+                        if sideRailWidth > 0 && canvasToolsVisible {
+                            // The system centres the rail's buttons inside a 12 pt trailing margin.
+                            canvasTools.frame(width: max(sideRailWidth - 12, 0))
+                                .padding(.trailing, 12)
+                                .padding(.bottom, max(screenFrame.maxY - contentFrame.maxY, 0) + 12)
+                        }
+                    }
+                    .ignoresSafeArea(.container, edges: sideRailWidth > 0 ? [.bottom, .trailing] : .bottom)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { screenFrame = proxy.frame(in: .global) }
+                                .onChange(of: proxy.frame(in: .global)) { screenFrame = $0 }
+                        }.ignoresSafeArea()
+                    }
             }
             .overlay(alignment: .topTrailing) {
-                if !showContextPicker && !modelPickerOpen && !pagePickerOpen && !peoplePickerOpen { canvasTools.padding(12) }
+                if sideRailWidth == 0 && canvasToolsVisible { canvasTools.padding(12) }
             }
             .overlay(alignment: .top) {
                 // A live connection needs no badge; say so only while it is not.
@@ -564,6 +589,19 @@ struct NativeCanvasView: View {
         dismissedMention = prompt
         contextPickerOpen = false
         promptFocused = true
+    }
+
+    private var canvasToolsVisible: Bool {
+        !showContextPicker && !modelPickerOpen && !pagePickerOpen && !peoplePickerOpen
+    }
+
+    /// The width of a system side rail on the trailing edge (iPhone Duo unfolded keeps the
+    /// status bar and navigation buttons in one), or 0. Landscape iPhones inset both sides
+    /// equally, so a rail is a wide trailing inset with none on the leading side.
+    private var sideRailWidth: CGFloat {
+        let trailing = screenFrame.maxX - contentFrame.maxX
+        let leading = contentFrame.minX - screenFrame.minX
+        return trailing > 44 && leading < 1 ? trailing : 0
     }
 
     private var canvasTools: some View {
