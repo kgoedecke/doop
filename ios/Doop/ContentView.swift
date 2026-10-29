@@ -146,7 +146,10 @@ private struct SignInView: View {
                             submitting = false
                         }
                     } label: {
-                        HStack { Spacer(); if submitting { ProgressView().tint(.white) }; Text(registering ? "Create account" : "Sign in").bold(); Spacer() }.padding(.vertical, 8)
+                        // The app tints with .primary, which is white in dark mode, so the label
+                        // takes the background colour rather than the prominent style's white.
+                        HStack { Spacer(); if submitting { ProgressView().tint(Color(uiColor: .systemBackground)) }; Text(registering ? "Create account" : "Sign in").bold(); Spacer() }.padding(.vertical, 8)
+                            .foregroundStyle(Color(uiColor: .systemBackground))
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(submitting || email.isEmpty || password.isEmpty || (registering && name.trimmingCharacters(in: .whitespaces).isEmpty))
