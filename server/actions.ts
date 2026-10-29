@@ -471,11 +471,56 @@ export interface FrameAnchorInput {
 
 export const MAX_ELEMENT_SELECTOR_CHARS = 1_000
 
+/* Stamps that are in a frame's HTML in memory but not yet known to be on
+   disk, per frame: the write that carries them, while one is out. An id is
+   handed out only once its frame write has landed, whichever request made
+   it and whether or not that first write failed. */
+const unsavedStamps = new Map<string, { ids: Set<string>; write?: Promise<void> }>()
+
+/** Resolves true once `id` is in a stored copy of the frame: at once for an
+ *  id that was never pending, else after the write that carries it (a write
+ *  already out is waited for; one that failed is retried once by this
+ *  caller). False when the frame is gone or the write fails. */
+async function stampSaved(frameId: string, id: string): Promise<boolean> {
+  let tried = false
+  for (;;) {
+    const pending = unsavedStamps.get(frameId)
+    if (!pending?.ids.has(id)) return true
+    if (pending.write) {
+      await pending.write
+      continue
+    }
+    const frame = store.getFrame(frameId)
+    if (tried || !frame) return false
+    tried = true
+    /* the row is taken from the frame as it is now: every stamp so far goes in */
+    const carried = new Set(pending.ids)
+    const write: Promise<void> = persist
+      .saveFrameNow(frame)
+      .then(
+        () => {
+          for (const stamp of carried) pending.ids.delete(stamp)
+          if (!pending.ids.size && unsavedStamps.get(frameId) === pending) unsavedStamps.delete(frameId)
+        },
+        (err: unknown) => {
+          console.error(`[comments] element id stamp on frame ${frameId} not written:`, err)
+        },
+      )
+      .finally(() => {
+        if (pending.write === write) pending.write = undefined
+      })
+    pending.write = write
+  }
+}
+
 /** Make the element a positional selector names addressable by id: the id
  *  it already carries, or a fresh `data-doop-id` written into the frame's
  *  HTML as an annotation (sign-off stands, no design-history version, no
- *  activity line). Undefined when the frame is gone, is being streamed into,
- *  or the selector does not resolve in the stored HTML. */
+ *  activity line). Whatever names the id (a comment, a copied link) is
+ *  written after this returns, so the frame carrying it is on disk first.
+ *  Undefined when the frame is gone, is being streamed into, the selector
+ *  does not resolve in the stored HTML, or the stamp cannot be written (it
+ *  then stays in memory, unnamed, and goes to disk with a later save). */
 export async function ensureElementId(
   frameId: string,
   selector: string,
@@ -488,19 +533,14 @@ export async function ensureElementId(
   if (!frame || isFrameStreaming(frameId)) return undefined
   const stamped = stampElementId(frame.html, selector.slice(0, MAX_ELEMENT_SELECTOR_CHARS), { like })
   if (!stamped) return undefined
-  if (stamped.html === frame.html) return { id: stamped.id, frame }
+  if (stamped.html === frame.html)
+    return (await stampSaved(frameId, stamped.id)) ? { id: stamped.id, frame } : undefined
   const next = store.updateFrame(frameId, { html: stamped.html }, by, { annotation: true })
   if (!next) return undefined
-  /* whatever names the id (a comment, a copied link) is written after this
-     returns: the frame carrying it must be on disk first. A failed write
-     hands out no id; the stamp stays in memory, unnamed, and goes to disk
-     with the frame's next save */
-  try {
-    await persist.saveFrameNow(next)
-  } catch (err) {
-    console.error(`[comments] element id stamp on frame ${frameId} not written:`, err)
-    return undefined
-  }
+  const pending = unsavedStamps.get(frameId) ?? { ids: new Set<string>() }
+  pending.ids.add(stamped.id)
+  unsavedStamps.set(frameId, pending)
+  if (!(await stampSaved(frameId, stamped.id))) return undefined
   broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind: 'user' }) })
   return { id: stamped.id, frame: next }
 }
@@ -517,7 +557,11 @@ async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): P
   const snippet = String(input.snippet ?? '').slice(0, 400)
   const selector = String(input.selector ?? '').trim()
   const onElement = selector !== '' && selector !== FRAME_COMMENT_SELECTOR
-  if (isElementId(input.elementId) && hasElementId(frame.html, input.elementId)) {
+  if (
+    isElementId(input.elementId) &&
+    hasElementId(frame.html, input.elementId) &&
+    (await stampSaved(frame.id, input.elementId))
+  ) {
     return { frame, elementId: input.elementId, snippet }
   }
   if (onElement) {

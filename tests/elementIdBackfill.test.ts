@@ -219,4 +219,34 @@ describe('stamping an element for a new comment', () => {
     expect(error).toHaveBeenCalled()
     error.mockRestore()
   })
+
+  it('hands a second request for the same element the id only once the first write has landed', async () => {
+    let release = () => {}
+    mocks.duringFrameWrite = () => new Promise<void>((resolve) => (release = resolve))
+    const first = actions.ensureElementId('f1', 'body > p:nth-of-type(1)', 'bob')
+    const second = actions.ensureElementId('f1', 'body > p:nth-of-type(1)', 'bob')
+    let answered = false
+    void second.then(() => (answered = true))
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    expect(answered).toBe(false)
+    release()
+    const [a, b] = await Promise.all([first, second])
+    expect(b?.id).toBe(a?.id)
+    expect(writes).toEqual(['frame:f1'])
+  })
+
+  it('writes a stamp left unsaved by a failed write before handing its id out again', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mocks.frameFails = true
+    expect(await actions.ensureElementId('f1', 'body > p:nth-of-type(1)', 'bob')).toBeUndefined()
+    const id = /data-doop-id="(\w+)"/.exec(store.getFrame('f1')!.html)![1]!
+    /* still failing: neither path names the id */
+    expect(await actions.ensureElementId('f1', 'body > p:nth-of-type(1)', 'bob')).toBeUndefined()
+    const c = (await actions.addElementComment('f1', { elementId: id, text: 'Bigger', x: 1, y: 2 }, 'bob'))!
+    expect(c.elementId).toBeUndefined()
+    mocks.frameFails = false
+    expect((await actions.ensureElementId('f1', 'body > p:nth-of-type(1)', 'bob'))?.id).toBe(id)
+    expect(writes).toEqual([`comment:${c.id}`, 'frame:f1'])
+    error.mockRestore()
+  })
 })
