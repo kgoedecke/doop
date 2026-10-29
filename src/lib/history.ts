@@ -198,21 +198,35 @@ export function recordGuide(canvasId: string, before: CanvasGuide | null, after:
   push({ type: 'guide', canvasId, before, after })
 }
 
-export function recordCreate(frame: Frame) {
-  push({ type: 'create', frameId: frame.id, snapshot: snapshot(frame) })
+export type HistoryEntry = Entry
+
+export function recordCreate(frame: Frame): HistoryEntry {
+  const entry: Entry = { type: 'create', frameId: frame.id, snapshot: snapshot(frame) }
+  push(entry)
+  return entry
+}
+
+/** Take an entry back out of the history: for an action that was rolled
+ *  back (a move whose save failed) or called off (a cancelled duplicate),
+ *  so the next undo is the last thing that actually happened. */
+export function dropEntry(entry: HistoryEntry) {
+  undoStack = undoStack.filter((e) => e !== entry)
+  redoStack = redoStack.filter((e) => e !== entry)
 }
 
 export function recordDrawingTransfer(
   destination: { before: Frame | null; after: Frame },
   source: { before: Frame; after: Frame | null },
-) {
+): HistoryEntry {
   const added: Entry = destination.before
     ? updateEntry(destination.after.id, { html: destination.before.html }, { html: destination.after.html })!
     : { type: 'create', frameId: destination.after.id, snapshot: snapshot(destination.after) }
   const removed: Entry = source.after
     ? updateEntry(source.before.id, { html: source.before.html }, { html: source.after.html })!
     : { type: 'delete', frameId: source.before.id, snapshot: snapshot(source.before) }
-  push({ type: 'transfer', canvasId: source.before.canvasId, entries: [added, removed] })
+  const entry: Entry = { type: 'transfer', canvasId: source.before.canvasId, entries: [added, removed] }
+  push(entry)
+  return entry
 }
 
 /** A page duplicated together with its frames: one undo step that removes

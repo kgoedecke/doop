@@ -1,13 +1,25 @@
 import type { Frame } from '../../shared/types'
 import { pickedSelectors, useStore } from './store'
-import { api, errorMessage } from './api'
-import { requestFrame } from './frameBridge'
-import { deleteFramesTracked, recordUpdate, recordUpdates, trackSave } from './history'
+import { api, ApiError, errorMessage } from './api'
+import { inspectElement, requestFrame } from './frameBridge'
+import { isCanvasElement } from './drawing'
+import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
 import {
+  deleteFramesTracked,
+  dropEntry,
+  recordDrawingTransfer,
+  recordUpdate,
+  recordUpdates,
+  trackSave,
+} from './history'
+import {
+  buildLayerTree,
   duplicateElements,
+  elementHtml,
   isElementHidden,
   isElementLocked,
   moveElement,
+  placeElement,
   removeElements,
   replaceElement,
   setElementLocked,
@@ -266,6 +278,241 @@ export function dropLayer(pressed: Frame, selector: string, target: DropTarget, 
   const frame = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
   if (!frame || frame.html !== pressed.html) return false
   return moveLayer(frame, selector, target, flow)
+}
+
+/** Whether a layer from another frame may be dropped into `frame`: not a
+ *  locked one, and not a standalone drawing that still holds its shape (it
+ *  is that one shape, not a box for others). A standalone whose shape was
+ *  dragged out is left behind empty, and takes a layer back. */
+export function takesLayers(frame: Frame, hasLayers: boolean): boolean {
+  return !frame.locked && !(hasLayers && isCanvasElement(frame.html))
+}
+
+/** A standalone element is a frame holding one top-level layer with the
+ *  canvas-element marker: the Layers rail shows it as that layer, at the
+ *  root. Its selector, when the frame is one. */
+export function standaloneSelector(frame: Frame): string | null {
+  if (!isCanvasElement(frame.html)) return null
+  const [only, ...more] = buildLayerTree(frame.html)
+  return only && !more.length ? only.selector : null
+}
+
+/** Move the element out of `source` and next to, or into, a layer of
+ *  `dest`: one undo step over both frames. The destination is saved first
+ *  and the source emptied only once that landed, so a failed save can leave
+ *  the element where it was but never nowhere. A standalone element that
+ *  moves into a frame takes its shell with it (the shell was only ever that
+ *  layer). False when the element is locked, the destination refuses layers
+ *  (`takesLayers`), the target cannot take it, or either frame changed
+ *  during the gesture. */
+export function transferLayer(pressed: Frame, selector: string, over: Frame, target: DropTarget): boolean {
+  const frames = useStore.getState().canvas?.frames ?? []
+  const source = frames.find((f) => f.id === pressed.id)
+  const dest = frames.find((f) => f.id === over.id)
+  if (!source || !dest || source.html !== pressed.html || dest.html !== over.html) return false
+  if (isLayerLocked(source, selector) || !takesLayers(dest, buildLayerTree(dest.html).length > 0)) return false
+  const shell = standaloneSelector(source) === selector
+  const scope = newScope()
+  const raw = elementHtml(source.html, selector)
+  /* a standalone's shape fills its shell (100% of it); in a frame those
+     percentages would mean the frame, so it takes the shell's size along */
+  const markup = raw === null ? null : scopeMarkup(shell ? sizedToShell(raw, source) : raw, scope)
+  const moved = markup === null ? null : placeElement(dest.html, target, markup)
+  const emptied = moved && removeElements(source.html, [selector])
+  if (!moved || !emptied) return false
+  /* the frame's own CSS for the subtree comes along, or the layer would land unstyled */
+  const css = renameInCss(carriedCss(source.html, selector, scope), moved.renamed)
+  const placed = { ...moved, html: withCarriedCss(moved.html, css, scope) }
+  const destAfter = { ...dest, html: placed.html }
+  const sourceAfter = shell ? null : { ...source, html: emptied }
+  const store = useStore.getState()
+  store.patchFrameLocal(dest.id, { html: placed.html })
+  if (shell) store.removeFrame(source.id)
+  else store.patchFrameLocal(source.id, { html: emptied })
+  store.select(dest.id)
+  store.setSelectedElement({ frameId: dest.id, selector: placed.selector })
+  /* the entry goes in now, in its place among the edits around it; a move
+     that is rolled back takes it out again, so there is nothing to undo */
+  const entry = recordDrawingTransfer({ before: dest, after: destAfter }, { before: source, after: sourceAfter })
+  /* the destination is saved first; every write is conditional on the
+     version this move started from, so a collaborator's edit in the
+     meantime wins and the screen shows it */
+  let saved: Frame | null = null
+  trackSave(
+    api
+      .updateFrame(dest.id, { html: placed.html }, dest.updatedAt)
+      .then((frame) => {
+        saved = frame
+        return shell
+          ? api.deleteFrame(source.id, source.updatedAt)
+          : api.updateFrame(source.id, { html: emptied }, source.updatedAt)
+      })
+      .catch(async (err: unknown) => {
+        const s = useStore.getState()
+        const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
+        /* the source was saved again while the destination write was out —
+           a quick edit beside the move — and that save already carried the
+           element's removal (its markup is gone from the saved source, not
+           just moved along by a sibling's deletion): the element lives in
+           the destination alone now, and the move stands rather than being
+           rolled back into nothing */
+        if (saved && !shell && remote?.id === source.id && raw !== null && !remote.html.includes(raw)) {
+          s.upsertFrame(remote)
+          return
+        }
+        dropEntry(entry)
+        s.patchFrameLocal(dest.id, { html: dest.html })
+        if (shell) s.upsertFrame(source)
+        else s.patchFrameLocal(source.id, { html: source.html })
+        if (remote) s.upsertFrame(remote)
+        s.pushNotice(errorMessage(err, `Couldn’t move the layer to “${dest.name}”`))
+        if (!saved) return
+        /* the restore is conditional on the version this move wrote: a
+           collaborator's newer save stays, and the screen shows the
+           duplicate the server holds rather than hiding it */
+        await api.updateFrame(dest.id, { html: dest.html }, saved.updatedAt).catch((restoreErr: unknown) => {
+          const theirs = restoreErr instanceof ApiError ? (restoreErr.body.frame as Frame | undefined) : undefined
+          if (theirs?.id === dest.id) useStore.getState().upsertFrame(theirs)
+          else useStore.getState().patchFrameLocal(dest.id, { html: placed.html })
+        })
+      }),
+  )
+  return true
+}
+
+/* the standalone's root with its shell-relative size made absolute */
+function sizedToShell(outerHtml: string, shell: Frame): string {
+  const tpl = document.createElement('template')
+  tpl.innerHTML = outerHtml
+  const el = tpl.content.firstElementChild as HTMLElement | SVGElement | null
+  if (!el) return outerHtml
+  if (el.style.width === '100%') el.style.width = `${shell.width}px`
+  if (el.style.height === '100%') el.style.height = `${shell.height}px`
+  return tpl.innerHTML
+}
+
+/** Lift the element out of its frame onto the canvas, as a standalone
+ *  element of its own at the spot it was rendered (the frame's live
+ *  document measures it; a frame not rendered yet places it at the frame's
+ *  corner). The new frame is created first and the source emptied only
+ *  once that landed; one undo step removes the element and puts the source
+ *  back. False when the element is locked, already standalone, or its
+ *  frame changed since the press. */
+export async function detachLayer(pressed: Frame, selector: string): Promise<boolean> {
+  const source = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
+  if (!source || source.html !== pressed.html) return false
+  if (isLayerLocked(source, selector) || standaloneSelector(source) === selector) return false
+  const markup = elementHtml(source.html, selector)
+  const emptied = markup === null ? null : removeElements(source.html, [selector])
+  if (!markup || !emptied) return false
+  const [node] = buildLayerTree(`<body>${markup}</body>`)
+  const info = await inspectElement(source.id, selector).catch(() => null)
+  const rect = info?.rect ?? { x: 0, y: 0, width: 120, height: 120 }
+  const scope = newScope()
+  const html = withCarriedCss(
+    standaloneDocument(scopeMarkup(markup, scope)),
+    carriedCss(source.html, selector, scope),
+    scope,
+  )
+  if (!html) return false
+  const unchanged = () => useStore.getState().canvas?.frames.find((f) => f.id === source.id)?.html === source.html
+  if (!unchanged()) return false
+  let created: Frame
+  try {
+    created = await api.createFrame(source.canvasId, {
+      name: node?.label ?? 'Layer',
+      /* on the source's page, not whichever page is active or first */
+      pageId: source.pageId,
+      x: Math.round(source.x + rect.x),
+      y: Math.round(source.y + rect.y),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
+      html,
+    })
+  } catch (err) {
+    useStore.getState().pushNotice(errorMessage(err, 'Couldn’t move the layer onto the canvas'))
+    return false
+  }
+  const store = useStore.getState()
+  if (store.canvas?.id !== source.canvasId) return true
+  /* the source may have been edited while the frame was created: that
+     edit wins, and the copy just made goes away again */
+  if (!unchanged()) {
+    store.pushNotice(`“${source.name}” changed during the move; the layer stayed where it was`)
+    trackSave(dropCreated(created))
+    return false
+  }
+  store.upsertFrame(created)
+  store.patchFrameLocal(source.id, { html: emptied })
+  store.select(created.id)
+  const [placed] = buildLayerTree(created.html)
+  if (placed) store.setSelectedElement({ frameId: created.id, selector: placed.selector })
+  /* the entry goes in now, in its place; the source write is conditional
+     on the version the press saw: an edit that landed since wins, the
+     element stays there, the entry comes out and the copy just made goes
+     away — unless that edit already carried the element's removal, in
+     which case the copy is the element's only home and the lift stands */
+  const entry = recordDrawingTransfer(
+    { before: null, after: created },
+    { before: source, after: { ...source, html: emptied } },
+  )
+  trackSave(
+    api.updateFrame(source.id, { html: emptied }, source.updatedAt).catch(async (err: unknown) => {
+      const s = useStore.getState()
+      const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
+      if (remote?.id === source.id && !remote.html.includes(markup)) {
+        s.upsertFrame(remote)
+        return
+      }
+      dropEntry(entry)
+      s.patchFrameLocal(source.id, { html: source.html })
+      if (remote?.id === source.id) s.upsertFrame(remote)
+      s.pushNotice(errorMessage(err, `Couldn’t take the layer out of “${source.name}”`))
+      s.removeFrame(created.id)
+      await dropCreated(created)
+    }),
+  )
+  return true
+}
+
+/* Take back a frame a lift created: conditional on its version, so an
+   edit a collaborator already made to it stays and is shown; a copy the
+   server keeps for any other reason is shown rather than hidden. */
+function dropCreated(created: Frame): Promise<void> {
+  return api.deleteFrame(created.id, created.updatedAt).then(
+    () => undefined,
+    (err: unknown) => {
+      const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
+      useStore.getState().upsertFrame(remote?.id === created.id ? remote : created)
+    },
+  )
+}
+
+/* a transparent document the size of its one element: the markup fills the
+   frame, so resizing the frame resizes the element as it does a drawing */
+function standaloneDocument(markup: string): string {
+  const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
+  doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
+  doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
+  doc.body.setAttribute('data-doop-canvas-element', 'true')
+  doc.body.innerHTML = markup
+  const el = doc.body.firstElementChild as HTMLElement | SVGElement | null
+  if (!el || doc.body.children.length !== 1) return ''
+  /* the element is measured as rendered, transforms included, and that box
+     becomes the frame: a transform, inline or from a carried rule, would
+     apply a second time on top */
+  for (const name of ['transform', 'translate', 'scale', 'rotate']) el.style.setProperty(name, 'none', 'important')
+  for (const [name, value] of [
+    ['position', 'absolute'],
+    ['left', '0'],
+    ['top', '0'],
+    ['width', '100%'],
+    ['height', '100%'],
+    ['margin', '0'],
+    ['box-sizing', 'border-box'],
+  ] as const)
+    el.style.setProperty(name, value)
+  return '<!doctype html>\n' + doc.documentElement.outerHTML
 }
 
 /** Step the element one layer up (-1) or down (1) among its siblings. */

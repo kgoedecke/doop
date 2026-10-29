@@ -355,6 +355,13 @@ export function duplicateElements(html: string, selectors: string[]): { html: st
   return { html: serialize(doc), selectors: copies.map(elementPath) }
 }
 
+/** Rename, in `el` and its descendants, every id `doc` already uses, and
+ *  the references among them — for an element about to enter `doc` from
+ *  another document. Returns the renaming, old id to new. */
+export function uniqueIdsIn(doc: Document, el: Element): Record<string, string> {
+  return renameIds(doc, [el], true)
+}
+
 /** Where a moved element lands relative to its target: as its previous or
  *  next sibling, or as its first child. */
 export type DropPlace = 'before' | 'after' | 'inside'
@@ -376,6 +383,8 @@ export interface MovedElement {
   html: string
   /** the element's selector after the move — its path changes with its position */
   selector: string
+  /** ids the destination already used, by their new names */
+  renamed?: Record<string, string>
 }
 
 /** Insert a clipboard layer as a sibling, keeping ids and SVG references unique. */
@@ -392,7 +401,7 @@ export function insertElements(
   html: string,
   selector: string | null,
   outerHtml: string,
-): { html: string; selectors: string[] } | null {
+): { html: string; selectors: string[]; renamed: Record<string, string> } | null {
   const doc = parse(html)
   const at = selector ? find(doc, selector) : null
   if (selector && (!at || !doc.body.contains(at) || at === doc.body)) return null
@@ -403,7 +412,7 @@ export function insertElements(
   if (!source.children.length) return null
   if ([...source.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())) return null
   const copies = [...source.children]
-  renameIds(doc, copies)
+  const renamed = renameIds(doc, copies)
   let after = at
   for (const copy of copies) {
     if (after) after.after(copy)
@@ -414,7 +423,40 @@ export function insertElements(
   const selectors = copies.map(elementPath)
   const reparsed = parse(next)
   if (copies.some((copy, i) => find(reparsed, selectors[i]!)?.outerHTML !== copy.outerHTML)) return null
-  return { html: next, selectors }
+  return { html: next, selectors, renamed }
+}
+
+/** Put a layer from another frame next to, or into, the target: the markup
+ *  arrives as it left, keeping its own ids unless the destination already
+ *  uses one (then that id, and the references to it, take a fresh name).
+ *  Null when the target is gone, cannot hold the element, sits under a lock,
+ *  or the saved markup would not keep the move. */
+export function placeElement(html: string, target: DropTarget, outerHtml: string): MovedElement | null {
+  const doc = parse(html)
+  const at = find(doc, target.selector)
+  if (!at || !doc.body.contains(at)) return null
+  const parent = target.place === 'inside' ? at : at.parentElement
+  if (!parent || parent === doc.documentElement || parent.closest(`[${LOCK_ATTR}]`)) return null
+  if (target.place === 'inside' && !holdsChildren(at.tagName)) return null
+  // Parse in the slot's own context, as insertElements does, so rows, cells
+  // and SVG children keep their wrappers and namespace.
+  const source = parent.cloneNode(false) as Element
+  source.innerHTML = outerHtml
+  const [el, ...more] = [...source.children]
+  if (!el || more.length) return null
+  if ([...source.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())) return null
+  const renamed = renameIds(doc, [el], true)
+  if (target.place === 'inside') at.prepend(el)
+  else if (target.place === 'before') at.before(el)
+  else at.after(el)
+  const next = serialize(doc)
+  const selector = elementPath(el)
+  /* the saved markup is what everyone re-parses: a drop the parser would
+     restructure — a block into a <p> closes the paragraph and spills its
+     later siblings out — is no drop, so the whole body has to come back as
+     it stands */
+  if (parse(next).body.outerHTML !== doc.body.outerHTML) return null
+  return { html: next, selector, renamed }
 }
 
 /* the neighbouring layer the rail shows: markup that draws nothing is stepped over */
@@ -513,19 +555,26 @@ const URL_REF = /url\(\s*(['"]?)#([^'")\s]+)\1\s*\)/g
  *  selectors resolve to the original subtree — and a reference left on the
  *  old name would keep wiring the copy to the original. Copies made together
  *  share one renaming, so references between them follow along; references
- *  to ids outside the copies are left alone. */
-function renameIds(doc: Document, copies: Element[]) {
+ *  to ids outside the copies are left alone. `clashesOnly` renames only the
+ *  ids the document already holds, for markup that is moving rather than
+ *  copied; the ids it keeps are reserved first, so a renamed one cannot
+ *  land on a kept one. Returns the renaming, old id to new. */
+function renameIds(doc: Document, copies: Element[], clashesOnly = false): Record<string, string> {
   const renamed = new Map<string, string>()
   const taken = new Set<string>()
   const withId = copies.flatMap((copy) => [copy, ...copy.querySelectorAll('[id]')]).filter((n) => n.id)
+  /* a layer moving in from another frame keeps its id while it is free here */
+  const kept = (node: Element) => clashesOnly && !doc.getElementById(node.id)
+  for (const node of withId) if (kept(node)) taken.add(node.id)
   for (const node of withId) {
+    if (kept(node)) continue
     let next = `${node.id}-copy`
     for (let n = 2; doc.getElementById(next) || taken.has(next); n++) next = `${node.id}-copy-${n}`
     renamed.set(node.id, next)
     taken.add(next)
     node.id = next
   }
-  if (renamed.size === 0) return
+  if (renamed.size === 0) return {}
   const rename = (id: string) => renamed.get(id) ?? id
   for (const node of copies.flatMap((copy) => [copy, ...copy.querySelectorAll('*')])) {
     for (const { name, value } of [...node.attributes]) {
@@ -547,4 +596,5 @@ function renameIds(doc: Document, copies: Element[]) {
       if (css !== node.textContent) node.textContent = css
     }
   }
+  return Object.fromEntries(renamed)
 }

@@ -106,7 +106,18 @@
 - `src/lib/drawing.ts` creates rectangles, circles, straight and cubic Bézier SVG paths, text and empty
   frames through the existing frame API. Drawing inside a frame appends a positioned HTML/SVG
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker
-  for transparent canvas chrome; no separate shape schema or protocol is required.
+  for transparent canvas chrome; no separate shape schema or protocol is required. The Layers
+  panel shows one as a single layer at the root (no frame row, no name label on the canvas) and
+  its rows drag between frames and the root: a drop on another frame's row moves the element
+  there (`transferLayer` in `src/lib/layerEdits.ts`, removing a standalone's shell), a drop on
+  the band above a root row or the list's tail lifts it onto the canvas at its rendered spot
+  (`detachLayer`, measured through the frame bridge). On the canvas a standalone element moves
+  through the frame drag (live, snapping, one undo step) and, let go over a frame, goes into it
+  through `moveDrawing`. A layer leaving its frame takes the CSS it
+  relies on along (`src/lib/styleCarry.ts`: the matching rules, their keyframes, font faces and
+  custom properties, as one `<style data-doop-carried>`, every rule scoped through a
+  `data-doop-carried-scope` mark on the moved root so the destination's own layers keep their
+  look); copy/paste across frames carries it the same way. Tests: `layerTransfer.test.ts`, `layersDragAcross.test.tsx`, `styleCarry.test.ts`.
 - The pen snaps to the nearest anchor on its unfinished path within eight screen pixels,
   highlights the target, and previews a closed curve when approaching the first anchor.
   Alt bypasses snapping. Double-clicking a native path opens `PathEditor.tsx`: anchors and

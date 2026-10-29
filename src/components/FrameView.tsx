@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { isCanvasElement } from '../lib/drawing'
+import { drawingDropFrame, moveDrawing, type DrawingHit } from '../lib/drawingMove'
 import { useElementMove } from './ElementMove'
 import { FrameLabelLayer } from './FrameLabelLayer'
 import { PathEditor } from './PathEditor'
@@ -16,7 +17,7 @@ import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
-import { recordCreate, recordUpdate, recordUpdates, trackSave } from '../lib/history'
+import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { visibleGuides } from '../lib/guides'
 import { gesture } from '../lib/gesture'
@@ -226,6 +227,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   const me = getIdentity().clientId
   const editors = Object.values(presences).filter((p) => p.activeFrameId === frame.id && p.clientId !== me)
   const [dragging, setDragging] = useState(false)
+  /* a standalone element dragged over a frame: the frame it would go into,
+     highlighted in the world the way a drawing's drop target is */
+  const [dropTarget, setDropTarget] = useState<{ frame: Frame; world: Element } | null>(null)
   /* a grip on the selected element is being dragged: no hover outlines
      meanwhile, and the selection outline follows the element */
   const [resizing, setResizing] = useState(false)
@@ -362,6 +366,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     let base = { x: start.x, y: start.y, rect: orig }
     let moved = false
     let dupDropped = false
+    /* where the pointer let go, for a standalone element dropped on a frame */
+    let last = { x: start.x, y: start.y }
+    const stage = e.currentTarget.closest('.stage')
     if (duplicating) setDuping(true)
     /* a move carries every selected frame along (locked ones stay put — a
        Layers-panel selection may hold one); a resize is this frame only */
@@ -371,6 +378,58 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       .filter((f) => selectedIds.includes(f.id) && !f.locked)
       .map((f) => ({ id: f.id, orig: { x: f.x, y: f.y, width: f.width, height: f.height } }))
     const groupIds = new Set(group.map((g) => g.id))
+    const world = stage?.querySelector('.world') ?? null
+    /* a standalone element is one thing on the canvas: a drag of it alone
+       can land in a frame, and can be called off */
+    const standaloneMove = mode === 'move' && isCanvasElement(frame.html) && group.length === 1 && !!stage
+    const toWorld = (clientX: number, clientY: number) => {
+      const box = stage!.getBoundingClientRect()
+      const vp = useStore.getState().viewport
+      return { x: (clientX - box.left - vp.x) / vp.zoom, y: (clientY - box.top - vp.y) / vp.zoom }
+    }
+    let target: Frame | null = null
+    let cancelled = false
+    /* the copies an ⌥⇧ drag has left at the origin so far */
+    const copies: { frame: Frame; entry: HistoryEntry }[] = []
+    const pageId = useStore.getState().activePageId
+    let unsubscribe = () => {}
+    /* Escape, a cancelled pointer or a page change puts the element back
+       where it was: nothing is saved and nothing enters a frame */
+    const cancel = () => {
+      if (cancelled) return
+      cancelled = true
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('keydown', onKey, true)
+      unsubscribe()
+      for (const g of group) {
+        useStore.getState().patchFrameLocal(g.id, g.orig)
+        /* peers followed the drag's broadcasts: they follow it back too */
+        sendDrag(g.id, { id: g.id, ...g.orig })
+      }
+      /* a copy that had landed goes, and so does its place in the history:
+         the gesture never happened */
+      for (const { frame: copy, entry } of copies.splice(0)) {
+        dropEntry(entry)
+        useStore.getState().removeFrame(copy.id)
+        void api.deleteFrame(copy.id).catch(console.error)
+      }
+      setDragging(false)
+      if (duplicating) setDuping(false)
+      useStore.getState().setSnapGuides([])
+      setDropTarget(null)
+    }
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') cancel()
+    }
+    if (standaloneMove) {
+      window.addEventListener('pointercancel', cancel)
+      window.addEventListener('keydown', onKey, true)
+      unsubscribe = useStore.subscribe((state) => {
+        if (state.activePageId !== pageId || state.canvas?.id !== frame.canvasId) cancel()
+      })
+    }
 
     function onMove(ev: PointerEvent) {
       if (ev.pointerId !== e.pointerId) return
@@ -381,6 +440,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         return
       }
       if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 4) moved = true
+      last = { x: ev.clientX, y: ev.clientY }
       if (duplicating && moved && !dupDropped) {
         dupDropped = true
         for (const g of group) {
@@ -389,8 +449,15 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           api
             .createFrame(src.canvasId, { name: src.name, html: src.html, ...g.orig })
             .then((f) => {
+              /* a gesture called off takes its copy back, however late the
+                 copy arrives; one that finished keeps it, as an undo step */
+              if (cancelled) {
+                useStore.getState().removeFrame(f.id)
+                void api.deleteFrame(f.id).catch(console.error)
+                return
+              }
               posthog.capture('frame_duplicated', { via: 'drag' })
-              recordCreate(f)
+              copies.push({ frame: f, entry: recordCreate(f) })
             })
             .catch(console.error)
         }
@@ -431,14 +498,59 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         const f = live.find((x) => x.id === g.id)
         if (f) sendDrag(f.id, { id: f.id, x: f.x, y: f.y, width: f.width, height: f.height })
       }
+      if (standaloneMove && moved) {
+        const next = drawingDropFrame(toWorld(ev.clientX, ev.clientY), frame.id)
+        if (next?.id !== target?.id) {
+          target = next
+          setDropTarget(next && world ? { frame: next, world } : null)
+        }
+      }
     }
     function onUp() {
+      if (cancelled) return
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('keydown', onKey, true)
+      unsubscribe()
+      setDropTarget(null)
       setDragging(false)
       if (duplicating) setDuping(false)
       useStore.getState().setSnapGuides([])
       const live = useStore.getState().canvas?.frames ?? []
+      /* a standalone element let go over a frame goes into that frame, as a
+         drawing dragged there does; its own position is not saved, the
+         transfer takes it from where it is now */
+      if (standaloneMove && moved) {
+        const into = drawingDropFrame(toWorld(last.x, last.y), frame.id)
+        const current = live.find((x) => x.id === frame.id)
+        if (into && current) {
+          const rect = { x: current.x, y: current.y, width: current.width, height: current.height }
+          /* the transfer starts from where the element was before the drag,
+             so undo puts it back there rather than where it was let go */
+          useStore.getState().patchFrameLocal(frame.id, orig)
+          const pressed = { ...current, ...orig }
+          /* a drawn shape's transform-aware geometry comes from its document,
+             so it keeps its rotation and scale inside the frame; a lifted
+             element has none and is placed by its box */
+          void requestFrame(frame.id, 'doop:drawing-hit', {
+            /* probed at its centre: a rotated shape leaves its corners empty */
+            x: current.width / 2,
+            y: current.height / 2,
+            standalone: true,
+          })
+            .then((reply) => {
+              const hit = (reply as { hit?: DrawingHit | null } | null)?.hit ?? undefined
+              return moveDrawing(pressed, undefined, rect, into.id, hit)
+            })
+            .catch((err: unknown) => {
+              useStore.getState().patchFrameLocal(frame.id, orig)
+              useStore.getState().pushNotice(err instanceof Error ? err.message : 'Couldn’t move the element')
+            })
+          closePopovers()
+          return
+        }
+      }
       const updates: { frameId: string; before: typeof orig; after: typeof orig }[] = []
       /* a click leaves every frame where it was: nothing to save, and no
          update for the room to announce. A drag under the click threshold
@@ -1137,78 +1249,98 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               </div>,
               labelLayer,
             )}
-          <div
-            /* the Stage reads this off the press target */
-            data-frame-locked={frame.locked ? '' : undefined}
-            data-frame-title=""
-            /* inside the frame's box, so the name stacks with its own frame:
+          {/* a standalone element wears no name on the canvas, as a shape in
+              Figma does not; the Layers rail names it */}
+          {!isCanvasElement(frame.html) && (
+            <div
+              /* the Stage reads this off the press target */
+              data-frame-locked={frame.locked ? '' : undefined}
+              data-frame-title=""
+              /* inside the frame's box, so the name stacks with its own frame:
                a frame added later covers it, an earlier one never does. It is
                counter-scaled from its bottom-left corner to screen px, so it
                sits a fixed gap above the frame's top-left corner and, its box
                pre-widened by the zoom, never runs past the frame's right edge */
-            className="pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
-            style={{
-              width: 'calc(100% * var(--zoom, 1))',
-              transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
-              cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
-            }}
-            onPointerDown={(e) => startDrag(e, 'move', false, true)}
-          >
-            {frame.locked && (
-              <Tooltip label="Locked — unlock it from the Layers panel or the Inspector" side="top" align="start">
-                <span className="flex shrink-0 items-center text-ink-faint">
-                  <LockIcon width={11} height={11} />
-                </span>
-              </Tooltip>
-            )}
-            {isSyncedFrame(frame.html) && (
-              <Tooltip label="Synced from a live app" side="top" align="start">
-                <span className="flex shrink-0 items-center text-brand">
-                  <SyncIcon width={11} height={11} />
-                </span>
-              </Tooltip>
-            )}
-            {isGithubFrame(frame.html) && (
-              <Tooltip
-                label={
-                  isGithubPlaceholder(frame.html)
-                    ? 'Found in the repo — awaiting capture'
-                    : 'Imported from a GitHub repo'
-                }
-                side="top"
-                align="start"
-              >
-                <span
-                  className={cn(
-                    'flex shrink-0 items-center',
-                    isGithubPlaceholder(frame.html) ? 'text-ink-faint' : 'text-brand',
-                  )}
-                >
-                  <GithubIcon width={11} height={11} />
-                </span>
-              </Tooltip>
-            )}
-            <span className="overflow-hidden text-ellipsis">{frame.name}</span>
-            <FrameApprovalBadge frame={frame} />
-            <span className="flex gap-1">
-              {stream && (
-                <span className={EDITOR_CHIP} style={{ background: stream.color }}>
-                  <AgentIcon name={stream.name} size={9} color="#fff" />
-                  {stream.name} is designing
-                  <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
-                </span>
-              )}
-              {editors
-                .filter((p) => p.name !== stream?.name)
-                .map((p) => (
-                  <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }}>
-                    {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}{' '}
-                    {p.name}
+              className="pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
+              style={{
+                width: 'calc(100% * var(--zoom, 1))',
+                transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
+                cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
+              }}
+              onPointerDown={(e) => startDrag(e, 'move', false, true)}
+            >
+              {frame.locked && (
+                <Tooltip label="Locked — unlock it from the Layers panel or the Inspector" side="top" align="start">
+                  <span className="flex shrink-0 items-center text-ink-faint">
+                    <LockIcon width={11} height={11} />
                   </span>
-                ))}
-            </span>
-          </div>
+                </Tooltip>
+              )}
+              {isSyncedFrame(frame.html) && (
+                <Tooltip label="Synced from a live app" side="top" align="start">
+                  <span className="flex shrink-0 items-center text-brand">
+                    <SyncIcon width={11} height={11} />
+                  </span>
+                </Tooltip>
+              )}
+              {isGithubFrame(frame.html) && (
+                <Tooltip
+                  label={
+                    isGithubPlaceholder(frame.html)
+                      ? 'Found in the repo — awaiting capture'
+                      : 'Imported from a GitHub repo'
+                  }
+                  side="top"
+                  align="start"
+                >
+                  <span
+                    className={cn(
+                      'flex shrink-0 items-center',
+                      isGithubPlaceholder(frame.html) ? 'text-ink-faint' : 'text-brand',
+                    )}
+                  >
+                    <GithubIcon width={11} height={11} />
+                  </span>
+                </Tooltip>
+              )}
+              <span className="overflow-hidden text-ellipsis">{frame.name}</span>
+              <FrameApprovalBadge frame={frame} />
+              <span className="flex gap-1">
+                {stream && (
+                  <span className={EDITOR_CHIP} style={{ background: stream.color }}>
+                    <AgentIcon name={stream.name} size={9} color="#fff" />
+                    {stream.name} is designing
+                    <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
+                  </span>
+                )}
+                {editors
+                  .filter((p) => p.name !== stream?.name)
+                  .map((p) => (
+                    <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }}>
+                      {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}{' '}
+                      {p.name}
+                    </span>
+                  ))}
+              </span>
+            </div>
+          )}
 
+          {dropTarget &&
+            createPortal(
+              <div className="pointer-events-none absolute inset-0 z-40">
+                <div
+                  data-drawing-drop-target={dropTarget.frame.id}
+                  className="absolute bg-brand/10 [box-shadow:0_0_0_calc(2px/var(--zoom,1))_var(--brand)]"
+                  style={{
+                    left: dropTarget.frame.x,
+                    top: dropTarget.frame.y,
+                    width: dropTarget.frame.width,
+                    height: dropTarget.frame.height,
+                  }}
+                />
+              </div>,
+              dropTarget.world,
+            )}
           <div
             data-frame-surface=""
             ref={surfaceRef}
@@ -1282,6 +1414,12 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   ? null
                   : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
                 transformOrigin: '0 0',
+                /* Chromium paints an opaque backdrop behind an iframe whose
+                   colour scheme differs from its document's; the page's dark
+                   scheme reaches this element by inheritance while a
+                   standalone element's document is light, so a shape on the
+                   dark canvas sat on a white square */
+                ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
               }}
             />
             {!frame.html && (

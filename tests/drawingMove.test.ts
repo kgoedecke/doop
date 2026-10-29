@@ -104,6 +104,58 @@ describe('moving drawings between frames and canvas', () => {
     expect([...db.values()]).toHaveLength(1)
   })
 
+  it('takes a lifted element into a frame with its carried CSS and its own id', async () => {
+    const lifted: Frame = {
+      ...shape,
+      id: 'lifted',
+      name: 'h1',
+      html: '<!doctype html>\n<html style="width:100%;height:100%"><head><style data-doop-carried="">[data-doop-carried-scope="old"] { --ink: red; }\n:is([data-doop-carried-scope="old"], [data-doop-carried-scope="old"] *):is(#title) { color: var(--ink); }</style></head><body data-doop-canvas-element="true" style="margin:0"><h1 id="title" data-doop-carried-scope="old" style="position:absolute;left:0;top:0;width:100%;height:100%;margin:0">Hi</h1></body></html>',
+    }
+    db.set(lifted.id, { ...lifted })
+    useStore.getState().upsertFrame({ ...lifted })
+    await moveDrawing(lifted, undefined, rect, base.id)
+    const dest = frames().find((f) => f.id === base.id)!
+    const doc = parse(dest.html)
+    const el = doc.querySelector<HTMLElement>('#title')!
+    expect(el.style.position).toBe('fixed')
+    expect(el.style.left).toBe('30px')
+    expect(el.style.width).toBe('80px')
+    const scope = el.getAttribute('data-doop-carried-scope')!
+    expect(scope).not.toBe('old')
+    const carried = doc.querySelector('style[data-doop-carried]')!.textContent!
+    expect(carried).toContain(`[data-doop-carried-scope="${scope}"] {\n  --ink: red;`)
+    expect(carried).toContain(
+      `:is([data-doop-carried-scope="${scope}"], [data-doop-carried-scope="${scope}"] *):is(#title) {`,
+    )
+    expect(carried).not.toContain('old')
+    expect(frames().some((f) => f.id === 'lifted')).toBe(false)
+  })
+
+  it('renames a lifted element’s id, and its carried rules, when the frame already uses it', async () => {
+    const lifted: Frame = {
+      ...shape,
+      id: 'lifted',
+      name: 'h1',
+      html: '<!doctype html>\n<html><head><style data-doop-carried="">:is([data-doop-carried-scope="old"], [data-doop-carried-scope="old"] *):is(#title) { color: red; }</style></head><body data-doop-canvas-element="true" style="margin:0"><h1 id="title" data-doop-carried-scope="old" style="position:absolute;left:0;top:0;width:100%;height:100%;margin:0">Hi</h1></body></html>',
+    }
+    const taken: Frame = {
+      ...base,
+      id: 'taken',
+      name: 'Taken',
+      html: '<b id="title"></b><h1>Keep me</h1>',
+    }
+    db.set(lifted.id, { ...lifted })
+    db.set(taken.id, { ...taken })
+    useStore.getState().upsertFrame({ ...lifted })
+    useStore.getState().upsertFrame({ ...taken })
+    await moveDrawing(lifted, undefined, rect, taken.id)
+    const doc = parse(frames().find((f) => f.id === taken.id)!.html)
+    expect(doc.querySelectorAll('#title')).toHaveLength(1)
+    expect(doc.querySelector('b#title')).not.toBeNull()
+    expect(doc.querySelector('h1#title-copy')).not.toBeNull()
+    expect(doc.querySelector('style[data-doop-carried]')!.textContent).toContain(':is(#title-copy) {')
+  })
+
   it('preserves SVG curves and edited styles through frame-to-frame moves and detaching', async () => {
     const curve = {
       ...shape,

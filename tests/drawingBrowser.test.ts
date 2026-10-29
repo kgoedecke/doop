@@ -656,14 +656,17 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       await page.mouse.move(290, 340)
       await page.mouse.down()
       await page.mouse.move(700, 300, { steps: 4 })
-      await page.waitForSelector('iframe[title="Moving drawing"]')
+      /* a standalone element moves live, like a frame */
+      await page.waitForFunction((x) => window.drawingHarness.state().frames[0]?.x !== x, {}, original!.x)
       if (reason === 'escape') await page.keyboard.press('Escape')
       else if (reason === 'pointer')
         await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1 })))
       else await page.evaluate(() => window.drawingHarness.page('second'))
       await page.mouse.up()
-      expect(await page.$('iframe[title="Moving drawing"]')).toBeNull()
+      /* and goes back where it was when the move is called off */
+      await page.waitForFunction((x) => window.drawingHarness.state().frames[0]?.x === x, {}, original!.x)
       expect(saved).toEqual([original])
+      if (reason === 'page') await page.evaluate(() => window.drawingHarness.page('first'))
     }
   })
 
@@ -1252,6 +1255,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       await seedFrames([source, destination])
       const initial = await visibleDrawing('Source')
       let current = initial
+      let at = 'Source'
       for (const [title, to] of [
         ['Source', [current.x + current.width / 2 + 40, current.y + current.height / 2 + 20]],
         ['Destination', [850, 300]],
@@ -1260,11 +1264,20 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       ] as [string, [number, number]][]) {
         const beforeHtml = saved.map((f) => f.html).join()
         const from: [number, number] = [current.x + current.width / 2, current.y + current.height / 2]
+        /* a standalone element is moved like a frame: live, and snapping to
+           the frames around it — ⌥ keeps this leg at the pointer's own spot,
+           which the geometry below is measured against */
+        const standalone = at === 'Rectangle'
+        if (standalone) await page.keyboard.down('Alt')
         await page.mouse.move(...from)
         await page.mouse.down()
         await page.mouse.move(...to, { steps: 5 })
-        const preview = await visibleDrawing('Moving drawing')
+        /* a layer inside a frame travels as a preview; a standalone element
+           is moved itself, so it is measured live */
+        const preview = await visibleDrawing(standalone ? 'Rectangle' : 'Moving drawing')
         await page.mouse.up()
+        if (standalone) await page.keyboard.up('Alt')
+        at = title
         expect(preview.width).toBeCloseTo(initial.width, 1)
         expect(preview.height).toBeCloseTo(initial.height, 1)
         await page
@@ -1310,9 +1323,12 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
         current = await visibleDrawing(title)
         expect(current.width).toBeCloseTo(initial.width, 1)
         expect(current.height).toBeCloseTo(initial.height, 1)
-        // Regular frame chrome adds a design-pixel border around its iframe.
-        expect(Math.abs(current.x + current.width / 2 - to[0])).toBeLessThanOrEqual(2.1)
-        expect(Math.abs(current.y + current.height / 2 - to[1])).toBeLessThanOrEqual(2.1)
+        // Regular frame chrome adds a design-pixel border around its iframe;
+        // a standalone element lands on whole design pixels, as a frame does,
+        // so its leg may be out by half a design pixel more.
+        const slack = 2.1 + (standalone ? 1 : 0)
+        expect(Math.abs(current.x + current.width / 2 - to[0])).toBeLessThanOrEqual(slack)
+        expect(Math.abs(current.y + current.height / 2 - to[1])).toBeLessThanOrEqual(slack)
         expect(await iframe.$eval('[data-doop-drawing]', (el) => getComputedStyle(el).width)).toBe('60px')
       }
       await page.screenshot({ path: '/tmp/doop-transformed-drawing.png' })

@@ -5,6 +5,8 @@ import { drawingDocument, isCanvasElement, queueDrawingSave, type Point } from '
 import { recordCreate, recordDrawingTransfer, recordUpdates } from './history'
 import { currentPageCanvas } from './pages'
 import { useStore } from './store'
+import { elementPath, uniqueIdsIn } from './layers'
+import { carriedCss, newScope, renameInCss, SCOPE_ATTR, withCarriedCss } from './styleCarry'
 
 export interface DrawingRect extends Point {
   width: number
@@ -29,8 +31,10 @@ export interface DrawingHit {
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html')
 const serialize = (doc: Document) => '<!doctype html>\n' + doc.documentElement.outerHTML
 
-/** Only drawings are eligible for canvas reparenting. Imported content keeps
- *  its existing layout/drag behavior, and locks apply through ancestors. */
+/** Inside a frame only drawings are eligible for canvas reparenting:
+ *  imported content keeps its existing layout/drag behavior. A standalone
+ *  element (no selector) is movable whatever it is — a lifted layer as much
+ *  as a drawn shape. Locks apply through ancestors. */
 export function movableDrawing(frame: Frame, selector?: string): HTMLElement | SVGSVGElement | null {
   if (frame.locked || frame.hidden) return null
   const doc = parse(frame.html)
@@ -40,8 +44,9 @@ export function movableDrawing(frame: Frame, selector?: string): HTMLElement | S
   } catch {
     return null
   }
-  if (!el?.matches('[data-doop-drawing]') || el.closest('[data-doop-locked], [data-doop-hidden]')) return null
-  if (!selector && (!isCanvasElement(frame.html) || doc.body.children.length !== 1)) return null
+  if (!el || el.closest('[data-doop-locked], [data-doop-hidden]')) return null
+  if (selector) return el.matches('[data-doop-drawing]') ? (el as HTMLElement | SVGSVGElement) : null
+  if (!isCanvasElement(frame.html) || doc.body.children.length !== 1) return null
   return el as HTMLElement | SVGSVGElement
 }
 
@@ -171,17 +176,26 @@ export function moveDrawing(
       if (active()) recordUpdates([{ frameId: source.id, before: { html: source.html }, after: { html } }])
       return
     }
+    /* the CSS the element relies on in its source comes along, scoped to
+       it, as it does for a move through the Layers panel */
+    const scope = newScope()
+    let css = carriedCss(source.html, elementPath(original), scope)
     original.remove()
     const sourceHtml = serialize(sourceDoc)
-    el.id = `doop-drawing-${crypto.randomUUID()}`
+    el.setAttribute(SCOPE_ATTR, scope)
     placeDrawing(el, rect, target, hit?.geometry)
     const destinationDoc = target ? parse(target.html) : parse(drawingDocument({ tool: 'frame', ...rect }))
     if (!target) {
       destinationDoc.body.style.background = ''
       destinationDoc.body.setAttribute('data-doop-canvas-element', 'true')
     }
+    /* an element with an id of its own keeps it (its carried rules name it)
+       unless the destination already uses it; then it, and any descendant
+       id the destination uses, take a fresh name, references included */
+    if (!el.id) el.id = `doop-drawing-${crypto.randomUUID()}`
+    css = renameInCss(css, uniqueIdsIn(destinationDoc, el))
     destinationDoc.body.append(el)
-    const html = serialize(destinationDoc)
+    const html = withCarriedCss(serialize(destinationDoc), css, scope)
     const destination = target
       ? await conditional(target, api.updateFrame(target.id, { html }, target.updatedAt))
       : await api.createFrame(source.canvasId, {

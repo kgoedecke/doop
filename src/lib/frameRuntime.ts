@@ -451,11 +451,21 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   /* the topmost unlocked element under a design-space point: a click on a
      locked element falls through to whatever sits beneath it, as in Figma */
+  /* a standalone element (a shape on the canvas with no frame around it)
+     is one thing to point at: whatever is under the pointer, the hit is
+     its root, until a double-click enters it the way a group is entered */
+  function standaloneRoot() {
+    if (editing || !document.body.hasAttribute('data-doop-canvas-element')) return null
+    return document.body.firstElementChild
+  }
+
   function elementAt(x, y) {
     var stack = document.elementsFromPoint(x, y)
+    var root = standaloneRoot()
     for (var i = 0; i < stack.length; i++) {
       var el = stack[i]
       if (el === document.documentElement || el === document.body) return null
+      if (root && root.contains(el)) el = root
       if (!isLocked(el)) return el
     }
     return null

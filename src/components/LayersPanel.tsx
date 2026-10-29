@@ -31,7 +31,11 @@ import {
   setFramesLocked,
   setLayerHidden,
   setLayerLocked,
+  detachLayer,
   shiftLayer,
+  standaloneSelector,
+  takesLayers,
+  transferLayer,
 } from '../lib/layerEdits'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
@@ -98,8 +102,17 @@ type VisibleRow =
       parentKey: string
       /** the frame or an ancestor element is hidden */
       dim: boolean
+      /** the one layer of a standalone element: a shape on the canvas with
+       *  no frame around it, listed at the root as Figma lists one */
+      standalone?: boolean
     }
 type NodeVisibleRow = Extract<VisibleRow, { kind: 'node' }>
+
+/** Where a dragged layer would land: next to or into a row, or at the
+ *  root — out of every frame, as a standalone element on the canvas. */
+type Drop = { key: string; place: DropPlace | 'root' }
+/* the key of the root drop shown under the last row */
+const ROOT_KEY = ''
 
 /* a press has to travel this far before it is a drag rather than a click */
 const DRAG_THRESHOLD = 4
@@ -133,9 +146,6 @@ function visibleRows(frames: Frame[], query: string, expanded: Set<string>): Vis
   for (const frame of frames) {
     const tree = query ? filterLayers(frameTree(frame), query) : null
     if (query && !frame.name.toLowerCase().includes(query) && tree?.length === 0) continue
-    const open = !!query || expanded.has(frame.id)
-    const nodes = open ? (tree ?? frameTree(frame)) : []
-    rows.push({ kind: 'frame', key: frame.id, frame, open, empty: open && nodes.length === 0 })
     const walk = (list: LayerNode[], depth: number, parentKey: string, dim: boolean) => {
       for (const node of list) {
         const key = rowKey(frame.id, node.selector)
@@ -144,6 +154,29 @@ function visibleRows(frames: Frame[], query: string, expanded: Set<string>): Vis
         if (nodeOpen) walk(node.children, depth + 1, key, dim || node.hidden)
       }
     }
+    /* a standalone element is its one layer, at the root */
+    const standalone = standaloneSelector(frame)
+    const shape = standalone ? (tree ?? frameTree(frame)).find((n) => n.selector === standalone) : undefined
+    if (standalone && shape) {
+      const key = rowKey(frame.id, shape.selector)
+      const open = shape.children.length > 0 && (!!query || expanded.has(key))
+      rows.push({
+        kind: 'node',
+        key,
+        frame,
+        node: shape,
+        depth: 0,
+        open,
+        parentKey: '',
+        dim: !!frame.hidden,
+        standalone: true,
+      })
+      if (open) walk(shape.children, 1, key, !!frame.hidden || shape.hidden)
+      continue
+    }
+    const open = !!query || expanded.has(frame.id)
+    const nodes = open ? (tree ?? frameTree(frame)) : []
+    rows.push({ kind: 'frame', key: frame.id, frame, open, empty: open && nodes.length === 0 })
     walk(nodes, 1, frame.id, !!frame.hidden)
   }
   return rows
@@ -190,7 +223,7 @@ export function LayersPanel({
      bound to the window for the length of the press, so they read the rows
      through a ref rather than a stale closure */
   const [drag, setDrag] = useState<NodeVisibleRow | null>(null)
-  const [drop, setDrop] = useState<{ key: string; place: DropPlace } | null>(null)
+  const [drop, setDrop] = useState<Drop | null>(null)
   const rowsRef = useRef<VisibleRow[]>([])
   const didDrag = useRef(false)
 
@@ -248,23 +281,40 @@ export function LayersPanel({
     s.pickElement(row.kind === 'node' ? { frameId: row.frame.id, selector: row.node.selector } : null, true)
   }
 
-  /* the drop under the pointer: a row of the dragged element's frame that is
-     neither the element itself nor inside it */
-  function dropAt(dragged: NodeVisibleRow, x: number, y: number) {
-    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-row-key]')
+  /* the drop under the pointer: a row that is neither the element itself
+     nor inside it. A row of another frame takes the element too, unless that
+     frame is locked or a standalone drawing still holding its shape
+     (transferLayer refuses those, so the line must not promise them); a
+     standalone whose shape was dragged out stays behind empty and takes a
+     layer back */
+  function dropAt(dragged: NodeVisibleRow, x: number, y: number): Drop | null {
+    const under = document.elementFromPoint(x, y)
+    const el = under?.closest<HTMLElement>('[data-row-key]')
     const row = el ? rowsRef.current.find((r) => r.key === el.dataset.rowKey) : undefined
-    if (!row || !el || row.frame.id !== dragged.frame.id || row.key === dragged.key) return null
-    if (row.kind === 'node' && holds(dragged.node, row.node.selector)) return null
+    /* the list's empty tail is the root: out of every frame, onto the canvas */
+    if (!row || !el) return under?.closest('[data-slot="panel-body"]') ? { key: ROOT_KEY, place: 'root' } : null
+    if (row.key === dragged.key) return null
     const rect = el.getBoundingClientRect()
-    return { key: row.key, place: dropOver(row, (y - rect.top) / rect.height) }
+    const fraction = (y - rect.top) / rect.height
+    /* the band above a root row means "beside it, at the root" */
+    const standalone = row.kind === 'node' && !!row.standalone
+    if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND && row.frame.id !== dragged.frame.id)
+      return { key: row.key, place: 'root' }
+    /* a standalone element is one shape, not a box for others */
+    if (standalone) return null
+    if (row.frame.id !== dragged.frame.id && !takesLayers(row.frame, frameTree(row.frame).length > 0)) return null
+    if (row.kind === 'node' && row.frame.id === dragged.frame.id && holds(dragged.node, row.node.selector)) return null
+    return { key: row.key, place: dropOver(row, fraction) }
   }
 
   /* a press on a layer row turns into a drag once it travels; the row is
      dropped where the pointer lets go, and the click that follows a drag is
      swallowed so the drop does not double as a select. The target is read
      again at release (the list may have scrolled under a still pointer),
-     dropLayer checks the frame against the store (a collaborator may have
-     edited it during the drag), and a cancelled gesture drops nothing. */
+     dropLayer and transferLayer check the frames against the store (a
+     collaborator may have edited one during the drag), and a cancelled
+     gesture drops nothing. A drop on another frame's row carries the
+     element over into that frame. */
   function onRowPointerDown(e: ReactPointerEvent<HTMLDivElement>, row: NodeVisibleRow) {
     if (e.button !== 0 || readOnly) return
     const start = { x: e.clientX, y: e.clientY }
@@ -297,7 +347,15 @@ export function LayersPanel({
       if (!wasActive) return
       const target = dropAt(row, ev.clientX, ev.clientY)
       const over = target && rowsRef.current.find((r) => r.key === target.key)
-      if (over && target) dropLayer(row.frame, row.node.selector, targetOf(over, target.place))
+      if (!target) return
+      if (target.place === 'root') {
+        /* a standalone element is at the root already */
+        if (!row.standalone) void detachLayer(row.frame, row.node.selector)
+        return
+      }
+      if (!over) return
+      if (over.frame.id === row.frame.id) dropLayer(row.frame, row.node.selector, targetOf(over, target.place))
+      else transferLayer(row.frame, row.node.selector, over.frame, targetOf(over, target.place))
     }
     const onCancel = () => finish()
     window.addEventListener('pointermove', onMove)
@@ -347,9 +405,12 @@ export function LayersPanel({
         /* a held key repeats: once the element is gone the frame row would
            be next, so only the first press deletes */
         if (e.repeat || readOnly) break
-        /* a locked frame stays (deleteLayers refuses a locked element itself) */
-        if (row?.kind === 'frame') {
-          if (!row.frame.locked) deleteFramesTracked([row.frame])
+        /* a locked frame stays (deleteLayers refuses a locked element itself);
+           a standalone element goes with its frame */
+        if (row?.kind === 'frame' || row?.standalone) {
+          /* a standalone element locked as an element (⌘⇧L) stays too */
+          const locked = row.frame.locked || (row.kind === 'node' && row.node.locked)
+          if (!locked) deleteFramesTracked([row.frame])
         } else if (row) deleteLayers(row.frame, pickedSelectors(useStore.getState()))
         break
       default:
@@ -460,6 +521,9 @@ export function LayersPanel({
             />
           ),
         )}
+        {drop?.key === ROOT_KEY && (
+          <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
+        )}
       </PanelBody>
       <footer className="flex-none px-2.5 pt-1 pb-2.5">
         <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
@@ -515,7 +579,7 @@ function FrameRow({
   selected: boolean
   /** the frame is selected, whether or not an element inside it is */
   current: boolean
-  drop?: DropPlace
+  drop?: Drop['place']
   onToggle: () => void
   onActivate: () => void
 }) {
@@ -580,7 +644,19 @@ function FrameRow({
         </ContextMenuTrigger>
         <FrameContextMenu frame={frame} at={pasteAt} />
       </ContextMenu>
-      {row.empty && <div className="py-1 pl-[46px] text-[11px] text-ink-faint">empty frame</div>}
+      {/* the caption stands in for the frame's body, so a layer dragged
+          onto it lands in the frame as a drop on the frame row would */}
+      {row.empty && (
+        <div
+          data-row-key={row.key}
+          className={cn(
+            'rounded-[7px] py-1 pl-[46px] text-[11px] text-ink-faint',
+            drop === 'inside' && 'shadow-[inset_0_0_0_1.5px_var(--brand)]',
+          )}
+        >
+          empty frame
+        </div>
+      )}
     </>
   )
 }
@@ -597,7 +673,7 @@ function NodeRow({
   row: NodeVisibleRow
   selected: boolean
   dragging: boolean
-  drop?: DropPlace
+  drop?: Drop['place']
   onToggle: () => void
   onActivate: (toggle: boolean) => void
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
@@ -605,6 +681,10 @@ function NodeRow({
   const { frame, node } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const hasChildren = node.children.length > 0
+  /* a standalone element is its frame: the eye, the lock and the menu are
+     the frame's, and a double-click flies to it */
+  const standalone = !!row.standalone
+  const pasteAt = useRef({ x: 0, y: 0 })
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={readOnly}>
@@ -615,17 +695,49 @@ function NodeRow({
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
           icon={<LayerKindIcon kind={node.kind} />}
-          label={node.label}
-          detail={node.detail}
+          label={standalone ? frame.name : node.label}
+          detail={standalone ? undefined : node.detail}
           selected={selected}
-          hidden={node.hidden}
+          /* a standalone element is hidden by its frame or by its own
+             attribute (⌘⇧H sets the latter): the row shows either, and its
+             eye clears both or hides the frame */
+          hidden={standalone ? !!frame.hidden || node.hidden : node.hidden}
           dimmed={row.dim || node.hidden}
-          onToggleHidden={readOnly ? undefined : () => setLayerHidden(frame, node.selector, !node.hidden)}
-          locked={node.locked}
-          onToggleLocked={readOnly ? undefined : () => setLayerLocked(frame, node.selector, !node.locked)}
+          onToggleHidden={
+            readOnly
+              ? undefined
+              : standalone
+                ? () => {
+                    if (frame.hidden || node.hidden) {
+                      if (node.hidden) setLayerHidden(frame, node.selector, false)
+                      if (frame.hidden) setFrameHidden(frame, false)
+                    } else setFrameHidden(frame, true)
+                  }
+                : () => setLayerHidden(frame, node.selector, !node.hidden)
+          }
+          /* a standalone element is locked by its frame or by its own
+             attribute (⌘⇧L sets the latter): the row shows either, and its
+             lock clears both or locks the frame */
+          locked={standalone ? !!frame.locked || node.locked : node.locked}
+          onToggleLocked={
+            readOnly
+              ? undefined
+              : standalone
+                ? () => {
+                    if (frame.locked || node.locked) {
+                      if (node.locked) setLayerLocked(frame, node.selector, false)
+                      if (frame.locked) setFramesLocked([frame], false)
+                    } else setFramesLocked([frame], true)
+                  }
+                : () => setLayerLocked(frame, node.selector, !node.locked)
+          }
           className={cn(dragging && 'opacity-40')}
           onClick={(e) => onActivate(e.shiftKey || e.metaKey || e.ctrlKey)}
-          onContextMenu={() => onActivate(false)}
+          onDoubleClick={standalone ? () => useStore.getState().requestFlyTo(frame.id) : undefined}
+          onContextMenu={() => {
+            pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+            onActivate(false)
+          }}
           onPointerDown={onPointerDown}
           /* the row under the pointer is outlined on the canvas too, as a
              hover over the frame itself would */
@@ -637,7 +749,11 @@ function NodeRow({
           }}
         />
       </ContextMenuTrigger>
-      <ElementContextMenu frame={frame} selector={node.selector} />
+      {standalone ? (
+        <FrameContextMenu frame={frame} at={pasteAt} />
+      ) : (
+        <ElementContextMenu frame={frame} selector={node.selector} />
+      )}
     </ContextMenu>
   )
 }
@@ -653,8 +769,9 @@ type RowProps = Omit<HTMLAttributes<HTMLDivElement>, 'onClick'> & {
   label: string
   detail?: string
   selected: boolean
-  /** where a dragged layer would land on this row */
-  drop?: DropPlace
+  /** where a dragged layer would land on this row; `root` is a line above
+   *  it at the root, out of every frame */
+  drop?: Drop['place']
   trailing?: ReactNode
   /** switched off by its own eye: the crossed eye stays, hover or not */
   hidden?: boolean
@@ -711,14 +828,14 @@ function Row({
       style={{ ...rest.style, paddingLeft: 6 + depth * INDENT }}
       onClick={onClick}
     >
-      {(drop === 'before' || drop === 'after') && (
+      {(drop === 'before' || drop === 'after' || drop === 'root') && (
         <span
           aria-hidden
           className={cn(
             'pointer-events-none absolute right-1 z-[1] h-0.5 rounded-full bg-brand',
-            drop === 'before' ? '-top-px' : '-bottom-px',
+            drop === 'after' ? '-bottom-px' : '-top-px',
           )}
-          style={{ left: 6 + depth * INDENT }}
+          style={{ left: drop === 'root' ? 6 : 6 + depth * INDENT }}
         />
       )}
       <span

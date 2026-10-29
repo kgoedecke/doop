@@ -71,6 +71,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     const s = useStore.getState()
     if (!e.shiftKey && s.selectedIds.includes(frame.id) && s.selectedIds.length > 1) return false
     const standalone = isCanvasElement(frame.html)
+    /* a standalone element is moved like a frame — live under the pointer,
+       snapping to guides, one undo step — by the frame drag, which hands a
+       drop over a frame on to moveDrawing; there is no layer inside it to
+       move on its own */
+    if (standalone) return false
     const surface = e.currentTarget
     const stage = surface.closest('.stage')
     const world = stage?.querySelector('.world')

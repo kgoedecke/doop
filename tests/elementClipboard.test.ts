@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types'
-import { copyLayer, hasElementClip, pasteLayer } from '../src/lib/elementClipboard'
+import { copyLayer, copyLayers, hasElementClip, pasteLayer } from '../src/lib/elementClipboard'
 import { copyFrames, hasFrameClip } from '../src/lib/frameClipboard'
 import { insertElement } from '../src/lib/layers'
 import { useStore } from '../src/lib/store'
@@ -88,6 +88,55 @@ describe('element clipboard', () => {
     copyFrames([frame])
     expect(hasElementClip()).toBe(false)
     expect(hasFrameClip()).toBe(true)
+  })
+
+  it('gives each paste a scope of its own, with the carried sheet renamed to match', () => {
+    const styled: Frame = {
+      ...frame,
+      id: 'styled',
+      html: '<!doctype html><html><head><style>.hi{color:red}</style></head><body><p class="hi">x</p></body></html>',
+    }
+    const other: Frame = {
+      ...frame,
+      id: 'other',
+      html: '<!doctype html><html><head></head><body><b>y</b></body></html>',
+    }
+    useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames: [styled, other], createdAt: 0, updatedAt: 0 })
+    copyLayer(styled, '.hi')
+    expect(pasteLayer(other, null)).toBe(true)
+    expect(
+      pasteLayer(
+        useStore.getState().canvas!.frames.find((f) => f.id === 'other')!,
+        null,
+      ),
+    ).toBe(true)
+    const html = useStore.getState().canvas!.frames.find((f) => f.id === 'other')!.html
+    const scopes = [...html.matchAll(/<p class="hi" data-doop-carried-scope="(\w+)"/g)].map((m) => m[1])
+    expect(scopes).toHaveLength(2)
+    expect(new Set(scopes).size).toBe(2)
+    for (const scope of scopes)
+      expect(html).toContain(`[data-doop-carried-scope="${scope}"] *):is(.hi) { color: red; }`)
+  })
+
+  it('gives each copied root its own scope, with the CSS collected for it alone', () => {
+    const styled: Frame = {
+      ...frame,
+      id: 'styled',
+      html: '<!doctype html><html><head><style>.red{--ink:red} .blue{--ink:blue} .card{color:var(--ink)}</style></head><body><div class="red"><p class="card">a</p></div><div class="blue"><p class="card">b</p></div></body></html>',
+    }
+    const other: Frame = {
+      ...frame,
+      id: 'other',
+      html: '<!doctype html><html><head></head><body><b>y</b></body></html>',
+    }
+    useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames: [styled, other], createdAt: 0, updatedAt: 0 })
+    expect(copyLayers(styled, ['.red > .card', '.blue > .card'])).toBe(true)
+    expect(pasteLayer(other, null)).toBe(true)
+    const html = useStore.getState().canvas!.frames.find((f) => f.id === 'other')!.html
+    const scopes = [...html.matchAll(/<p class="card" data-doop-carried-scope="(\w+)">/g)].map((m) => m[1]!)
+    expect(scopes).toHaveLength(2)
+    expect(html).toContain(`[data-doop-carried-scope="${scopes[0]}"] {\n  --ink: red;`)
+    expect(html).toContain(`[data-doop-carried-scope="${scopes[1]}"] {\n  --ink: blue;`)
   })
 
   it('keeps SVG paint references inside the pasted artwork', () => {
