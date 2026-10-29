@@ -23,11 +23,21 @@ describe('translate guard', () => {
     expect(text.parentNode).toBe(font)
   })
 
-  it('skips inserting before a node that page translation moved', () => {
-    const { parent, text } = translated()
+  it('inserts before the wrapper that now holds the reference node', () => {
+    const { parent, text, font } = translated()
+    const tail = document.createElement('b')
+    parent.append(tail)
     const added = document.createElement('span')
     expect(() => parent.insertBefore(added, text)).not.toThrow()
-    expect(added.parentNode).toBeNull()
+    expect([...parent.childNodes]).toEqual([added, font, tail])
+  })
+
+  it('appends when the reference node left the parent', () => {
+    const { parent, text, font } = translated()
+    font.removeChild(text)
+    const added = document.createElement('span')
+    expect(() => parent.insertBefore(added, text)).not.toThrow()
+    expect([...parent.childNodes]).toEqual([font, added])
   })
 
   it('leaves ordinary removes and inserts alone', () => {
