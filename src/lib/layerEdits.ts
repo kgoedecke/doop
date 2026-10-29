@@ -7,6 +7,7 @@ import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from '
 import {
   deleteFramesTracked,
   dropEntry,
+  keepTransferDestination,
   recordDrawingTransfer,
   recordUpdate,
   recordUpdates,
@@ -361,6 +362,7 @@ export function transferLayer(pressed: Frame, selector: string, over: Frame, tar
         const fate =
           saved && !shell && remote?.id === source.id ? elementFate(source.html, remote.html, selector) : null
         if (remote && fate && fate !== 'kept') {
+          keepTransferDestination(entry)
           s.upsertFrame(remote)
           if (fate === 'unsure') s.pushNotice(changedDuringMove(source))
           return
@@ -472,6 +474,7 @@ export async function detachLayer(pressed: Frame, selector: string): Promise<boo
       const remote = err instanceof ApiError && err.status === 409 ? (err.body.frame as Frame | undefined) : undefined
       const fate = remote?.id === source.id ? elementFate(source.html, remote.html, selector) : null
       if (remote && fate && fate !== 'kept') {
+        keepTransferDestination(entry)
         s.upsertFrame(remote)
         if (fate === 'unsure') s.pushNotice(changedDuringMove(source))
         return

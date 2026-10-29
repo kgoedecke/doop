@@ -214,6 +214,14 @@ export function dropEntry(entry: HistoryEntry) {
   redoStack = redoStack.filter((e) => e !== entry)
 }
 
+/** A transfer whose source half never landed (another save to the source
+ *  won): only the destination half stays, so undo leaves the source as it
+ *  was saved rather than writing the pre-move source over it. The entry
+ *  keeps its place among the edits around it. */
+export function keepTransferDestination(entry: HistoryEntry) {
+  if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, 1)
+}
+
 export function recordDrawingTransfer(
   destination: { before: Frame | null; after: Frame },
   source: { before: Frame; after: Frame | null },
