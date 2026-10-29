@@ -474,3 +474,71 @@ fn clip_path_clips_the_outline() {
         doopblitz_doc_free(doc);
     }
 }
+
+/// A modal centred with `translate(-50%, -50%)` is laid out with its top-left
+/// at the frame's centre and drawn half its size up and left of that. A tap at
+/// the drawn button must pick it, and the rect reported for the selection
+/// highlight must be where the button is drawn, not where it was laid out.
+#[test]
+fn hit_and_rect_follow_a_centering_transform() {
+    let html = CString::new(concat!(
+        "<style>*{margin:0}html,body{width:1440px;height:900px;position:relative}",
+        ".modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:960px;height:720px}",
+        ".foot{position:absolute;left:0;right:0;bottom:0;height:72px;display:flex;align-items:center;justify-content:center}",
+        ".btn{display:inline-flex;width:120px;height:34px}</style>",
+        "<div class=\"scrim\" style=\"position:absolute;inset:0\"></div>",
+        "<div class=\"modal\"><div class=\"foot\"><a class=\"btn\" id=\"go\">Continue</a></div></div>",
+    ))
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    for scale in [1.0f32, 0.5, 2.0] {
+        unsafe {
+            let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 1440, 900, scale);
+            let (mut w, mut h, mut len) = (0u32, 0u32, 0usize);
+            doopblitz_buffer_free(doopblitz_doc_render(doc, &mut w, &mut h, &mut len), len);
+            // The modal is drawn at (240, 90)-(1200, 810); its footer's button is
+            // centred in the bottom 72px: x 660-780, y 757-791.
+            let hit = doopblitz_doc_element_from_point(doc, 720.0, 774.0);
+            let button = doopblitz_doc_query_selector(doc, CString::new("#go").unwrap().as_ptr());
+            assert_ne!(button, 0);
+            assert_eq!(hit, button, "scale {scale}: the drawn button is under the tap");
+            let mut rect = [0f32; 4];
+            assert!(doopblitz_node_rect(doc, button, rect.as_mut_ptr()));
+            assert_eq!(rect, [660.0, 757.0, 120.0, 34.0], "scale {scale}");
+            // Outside the drawn modal, where it was laid out, nothing of it is hit.
+            let miss = doopblitz_doc_element_from_point(doc, 1300.0, 850.0);
+            assert_ne!(miss, button, "scale {scale}");
+            doopblitz_doc_free(doc);
+        }
+    }
+}
+
+/// A child rotated back inside a rotated parent is drawn as an upright square.
+/// Its rect must be that square, not the bounding box of the parent's bounding
+/// box: the transforms compose before the bounds are taken.
+#[test]
+fn rect_composes_nested_transforms_before_bounding() {
+    let html = CString::new(concat!(
+        "<style>*{margin:0}html,body{width:400px;height:400px;position:relative}",
+        ".p{position:absolute;left:100px;top:100px;width:100px;height:100px;transform:rotate(45deg);transform-origin:0 0}",
+        ".c{position:absolute;left:0;top:0;width:100px;height:100px;transform:rotate(-45deg);transform-origin:0 0}</style>",
+        "<div class=\"p\"><div class=\"c\" id=\"c\"></div></div>",
+    ))
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    unsafe {
+        let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 400, 400, 2.0);
+        let (mut w, mut h, mut len) = (0u32, 0u32, 0usize);
+        doopblitz_buffer_free(doopblitz_doc_render(doc, &mut w, &mut h, &mut len), len);
+        let child = doopblitz_doc_query_selector(doc, CString::new("#c").unwrap().as_ptr());
+        assert_ne!(child, 0);
+        let mut rect = [0f32; 4];
+        assert!(doopblitz_node_rect(doc, child, rect.as_mut_ptr()));
+        let expected = [100.0, 100.0, 100.0, 100.0];
+        for (got, want) in rect.iter().zip(expected) {
+            assert!((got - want).abs() < 0.01, "rect {rect:?}, expected {expected:?}");
+        }
+        assert_eq!(doopblitz_doc_element_from_point(doc, 150.0, 150.0), child);
+        doopblitz_doc_free(doc);
+    }
+}
