@@ -1830,7 +1830,7 @@ app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
 app.post('/api/frames/:id/comments', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
   if (!frame) return
-  const { selector, snippet, text } = req.body ?? {}
+  const { selector, snippet, text, x, y } = req.body ?? {}
   if (refuseAgentMention(req, res, frame.canvasId, String(text ?? ''))) return
   /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
@@ -1842,7 +1842,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   }
   const comment = actions.addElementComment(
     req.params.id,
-    { selector: String(selector ?? ''), snippet: String(snippet ?? ''), text: String(text ?? '') },
+    { selector: String(selector ?? ''), snippet: String(snippet ?? ''), text: String(text ?? ''), x, y },
     req.user!.name,
     req.user!.id,
   )

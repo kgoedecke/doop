@@ -5,7 +5,7 @@ import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
 import { canvasPages } from '../shared/pages.ts'
-import { isCanvasComment } from '../shared/comments.ts'
+import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
@@ -451,19 +451,27 @@ export function findComment(commentId: string): ElementComment | undefined {
 
 /** Where a new comment sits: on an element inside a frame, or at a world
  *  point on one page of the canvas. */
-type CommentAnchor = { frame: Frame; selector: string; snippet: string } | { pageId: string; x: number; y: number }
+type CommentAnchor =
+  | { frame: Frame; selector: string; snippet: string; point?: { x: number; y: number } }
+  | { pageId: string; x: number; y: number }
 
 export function addElementComment(
   frameId: string,
-  input: { selector: string; snippet: string; text: string },
+  input: { selector: string; snippet: string; text: string; x?: unknown; y?: unknown },
   from: string,
   fromUserId?: string,
 ): ElementComment | undefined {
   const frame = store.getFrame(frameId)
   if (!frame) return undefined
+  const selector = String(input.selector ?? '').slice(0, 300)
+  /* a comment on the frame as a whole keeps the point it was left at */
+  const point =
+    selector === FRAME_COMMENT_SELECTOR && Number.isFinite(input.x) && Number.isFinite(input.y)
+      ? { x: Number(input.x), y: Number(input.y) }
+      : undefined
   return postComment(
     frame.canvasId,
-    { frame, selector: String(input.selector ?? '').slice(0, 300), snippet: String(input.snippet ?? '').slice(0, 400) },
+    { frame, selector, snippet: String(input.snippet ?? '').slice(0, 400), ...(point ? { point } : {}) },
     input.text,
     from,
     fromUserId,
@@ -503,7 +511,10 @@ export function replyToComment(
 }
 
 function replyAnchor({ root, frame }: { root: ElementComment; frame?: Frame }): CommentAnchor | undefined {
-  if (frame) return { frame, selector: root.selector, snippet: root.snippet }
+  if (frame) {
+    const point = isFrameComment(root) ? { point: { x: root.x, y: root.y } } : {}
+    return { frame, selector: root.selector, snippet: root.snippet, ...point }
+  }
   return isCanvasComment(root) ? { pageId: root.pageId, x: root.x, y: root.y } : undefined
 }
 
@@ -544,7 +555,7 @@ function postComment(
     id: nanoid(8),
     canvasId,
     ...('frame' in anchor
-      ? { frameId: anchor.frame.id, selector: anchor.selector, snippet: anchor.snippet }
+      ? { frameId: anchor.frame.id, selector: anchor.selector, snippet: anchor.snippet, ...anchor.point }
       : { selector: '', snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }),
     from,
     ...(fromUserId ? { fromUserId } : {}),

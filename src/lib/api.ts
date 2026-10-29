@@ -518,7 +518,8 @@ export const api = {
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),
   retryCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
-  addComment: (frameId: string, input: { selector: string; snippet: string; text: string }) =>
+  /** x/y: where a comment on the frame as a whole was left, in design px */
+  addComment: (frameId: string, input: { selector: string; snippet: string; text: string; x?: number; y?: number }) =>
     req(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
   /** a comment pinned to a point on the canvas (world coordinates on a page) rather than to an element */
   addCanvasComment: (canvasId: string, input: { pageId: string; x: number; y: number; text: string }) =>

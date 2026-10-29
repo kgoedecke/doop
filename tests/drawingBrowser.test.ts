@@ -63,6 +63,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
         const frame = { ...saved.find((f) => f.id === id), ...JSON.parse(req.postData()!) }
         saved = saved.map((f) => (f.id === id ? frame : f))
         await req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(frame) })
+      } else if (path.endsWith('/comments') && req.method() === 'POST') {
+        await req.respond({ status: 200, contentType: 'application/json', body: req.postData()! })
       } else if (path.startsWith('/api/frames/') && req.method() === 'DELETE') {
         saved = saved.filter((f) => f.id !== path.split('/').at(-1))
         await req.respond({ status: 200, contentType: 'application/json', body: '{}' })
@@ -1560,6 +1562,69 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.keyboard.press('Enter')
     expect(await page.$eval('[data-drawing-hint]', (el) => el.textContent)).not.toContain('Finish path')
     expect(saved).toHaveLength(0)
+  })
+
+  it('comments on a frame as a whole where the Comment tool finds no element', async () => {
+    await seedFrames([
+      {
+        id: 'plain',
+        updatedBy: 'User',
+        canvasId: 'c',
+        pageId: 'first',
+        name: 'Plain',
+        x: 30,
+        y: 30,
+        width: 400,
+        height: 300,
+        createdAt: 0,
+        updatedAt: 0,
+        html: '<p id="a" style="margin:0">Alpha</p>',
+      },
+    ])
+    const handle = await page.waitForSelector('iframe[title="Plain"]')
+    const text = (await (await (await handle!.contentFrame())!.waitForSelector('#a'))!.boundingBox())!
+    const box = (await handle!.boundingBox())!
+    await page.keyboard.press('c')
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+    await page.waitForSelector('textarea[placeholder="Leave a comment on this frame…"]')
+    /* the whole frame is never an element pick: ⌫ deletes the pick, and `body` would empty the frame */
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement)).toBeNull()
+    /* the composer opens at the click, and the posted point is the click in design px (zoom 2) */
+    const composer = (await (await page.$('[data-comment-ui] textarea'))!.boundingBox())!
+    expect(Math.abs(composer.x - (box.x + box.width / 2))).toBeLessThan(40)
+    const posted = page.waitForRequest((req) => req.url().endsWith('/api/frames/plain/comments'))
+    await page.keyboard.type('Whole frame')
+    await page.keyboard.down('Control')
+    await page.keyboard.press('Enter')
+    await page.keyboard.up('Control')
+    expect(JSON.parse((await posted).postData()!)).toMatchObject({ selector: 'body', x: 200, y: 150 })
+    await page.evaluate(() =>
+      window.drawingHarness.comments([
+        {
+          id: 'whole',
+          canvasId: 'c',
+          frameId: 'plain',
+          selector: 'body',
+          snippet: '',
+          x: 200,
+          y: 150,
+          from: 'Alice',
+          text: 'Whole frame',
+          at: 0,
+        },
+      ]),
+    )
+    const pinHandle = (await page.waitForSelector('[title="Alice: Whole frame"]'))!
+    /* the pin's entrance animation owns its transform until it ends */
+    await pinHandle.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
+    const pin = (await pinHandle.boundingBox())!
+    expect(Math.abs(pin.x + pin.width / 2 - (box.x + box.width / 2))).toBeLessThan(3)
+    expect(Math.abs(pin.y + pin.height / 2 - (box.y + box.height / 2))).toBeLessThan(3)
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('c')
+    await page.mouse.click(text.x + 10, text.y + text.height / 2)
+    await page.waitForSelector('textarea[placeholder="Leave a comment on this element…"]')
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe('#a')
   })
 
   it('keeps all tools reachable on phones, clear of zoom, and accepts touch drawing', async () => {

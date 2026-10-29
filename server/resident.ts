@@ -19,7 +19,7 @@ import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
-import { isCanvasComment } from '../shared/comments.ts'
+import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
@@ -282,6 +282,10 @@ type RunOutcome = 'ran' | 'idle' | 'no-model'
 export function describeCommentAnchor(c: ElementComment, canvas: Canvas | undefined): string {
   if (!isCanvasComment(c)) {
     const fname = (c.frameId && store.getFrame(c.frameId)?.name) || 'unknown frame'
+    if (c.selector === FRAME_COMMENT_SELECTOR) {
+      const at = isFrameComment(c) ? ` at (${Math.round(c.x)}, ${Math.round(c.y)}) in the frame` : ''
+      return `on frame ${c.frameId} "${fname}" as a whole${at}, not one element`
+    }
     return `on frame ${c.frameId} "${fname}", element ${c.selector}\n  element HTML at comment time: ${c.snippet}`
   }
   const pageName = canvas ? canvasPages(canvas).find((page) => page.id === c.pageId)?.name : undefined

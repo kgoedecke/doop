@@ -30,6 +30,7 @@ import { DEFAULT_ROLE_ID } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
+import { FRAME_COMMENT_SELECTOR, isFrameComment } from '../../shared/comments'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
@@ -171,6 +172,11 @@ interface ProbeHit {
 
 /* what a surface click's probe is for; see `probeIntent` */
 type ProbeIntent = 'toolbar' | 'comment' | 'toggle'
+
+/* a comment on the frame as a whole, anchored at the point clicked */
+function frameCommentHit(x: number, y: number): ProbeHit {
+  return { selector: FRAME_COMMENT_SELECTOR, tag: 'frame', text: '', snippet: '', rect: { x, y, width: 0, height: 0 } }
+}
 
 /* `doop:locate` request ids for the outlines of a multi-element pick */
 const PICK_REQ = '__pick__:'
@@ -557,6 +563,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
      composer opened straight away on the hit, or (⇧-click) adding the hit
      to the picked set or dropping it */
   const probeIntent = useRef<ProbeIntent>('toolbar')
+  /* the design-space point the pending probe asks about */
+  const probePoint = useRef({ x: 0, y: 0 })
   const activeSelRef = useRef<string | null>(null)
 
   /* ---- hover inspection (paper.design-style element outlines) ---- */
@@ -635,6 +643,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
        element. A probe that hits nothing clears it then. */
     closeElementPopovers()
     probeIntent.current = intent
+    probePoint.current = { x, y }
     probeTimer.current = window.setTimeout(
       () => {
         probeTimer.current = null
@@ -651,6 +660,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   useEffect(() => {
     if (!runtimeReady) return
     for (const c of comments) {
+      if (isFrameComment(c)) continue
       iframeRef.current?.contentWindow?.postMessage({ type: 'doop:locate', reqId: c.id, selector: c.selector }, '*')
     }
   }, [runtimeReady, html, commentKey]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -659,7 +669,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
      agent edits) the same way pins do */
   const probeSel = probe?.selector ?? null
   useEffect(() => {
-    if (!runtimeReady || !probeSel) return
+    if (!runtimeReady || !probeSel || probeSel === FRAME_COMMENT_SELECTOR) return
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:locate', reqId: '__probe__', selector: probeSel }, '*')
   }, [runtimeReady, html, probeSel])
   useEffect(() => {
@@ -711,7 +721,12 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     const previous = previousProbe.current
     previousProbe.current = probeSel
     const cur = useStore.getState().selectedElement
-    if (probeSel) {
+    if (probeSel === FRAME_COMMENT_SELECTOR) {
+      /* a comment on the whole frame is no element pick: `body` in the
+         selection would hand Delete, Duplicate and the Design panel the
+         frame's entire document */
+      if (cur?.frameId === frame.id) useStore.getState().setSelectedElement(null)
+    } else if (probeSel) {
       const el = { frameId: frame.id, selector: probeSel }
       /* the Comment tool outlines the element without sliding its properties panel in */
       if (useStore.getState().tool === 'comment') useStore.getState().setSelectedElement(el)
@@ -728,7 +743,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     setSeenWantedSel(wantedSel)
     /* Returning to a frame-only link (or closing the element panel) also
        removes the previous element's toolbar and outline. */
-    if (!wantedSel) setProbe(null)
+    if (!wantedSel) setProbe((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
   }
   /* the rest of a multi-element pick: each is outlined like the primary,
      re-located whenever the document changes. A string key keeps the
@@ -775,7 +790,10 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     function onMsg(ev: MessageEvent) {
       if (ev.source !== iframeRef.current?.contentWindow) return
       if (ev.data?.type === 'doop:probe-result' && ev.data.reqId === probeReq.current) {
-        const hit = (ev.data.hit ?? null) as ProbeHit | null
+        const probed = (ev.data.hit ?? null) as ProbeHit | null
+        /* the Comment tool on the frame's own background comments on the frame */
+        const at = probePoint.current
+        const hit = probed ?? (probeIntent.current === 'comment' ? frameCommentHit(at.x, at.y) : null)
         if (probeIntent.current === 'toggle') {
           /* the store moves the primary; the frame resolves it like a Layers pick */
           if (hit) useStore.getState().toggleElement({ frameId: frame.id, selector: hit.selector })
@@ -1293,7 +1311,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 </span>
               </div>
             )}
-            {probe && selected && !editing && !pathEdit && !dragging && (
+            {probe && probe.selector !== FRAME_COMMENT_SELECTOR && selected && !editing && !pathEdit && !dragging && (
               <div
                 /* a one-pixel hairline, the way Paper outlines a selection */
                 className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
@@ -1394,7 +1412,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             return (
               <div data-comment-ui className="pointer-events-none absolute inset-0">
                 {comments.map((c) => {
-                  const pos = pinPos[c.id]
+                  const pos = isFrameComment(c) ? { x: c.x, y: c.y } : pinPos[c.id]
                   if (!pos) return null
                   const open = openThread === c.id
                   const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
@@ -1512,9 +1530,19 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                     ) : (
                       <CommentComposer
                         initialText={composePrefill}
+                        placeholder={
+                          anchor.selector === FRAME_COMMENT_SELECTOR ? 'Leave a comment on this frame…' : undefined
+                        }
                         onSubmit={(text) => {
                           api
-                            .addComment(frame.id, { selector: anchor.selector, snippet: anchor.snippet, text })
+                            .addComment(frame.id, {
+                              selector: anchor.selector,
+                              snippet: anchor.snippet,
+                              text,
+                              ...(anchor.selector === FRAME_COMMENT_SELECTOR
+                                ? { x: anchor.rect.x, y: anchor.rect.y }
+                                : {}),
+                            })
                             .then(() => posthog.capture('element_comment_created'))
                             .catch((err) => {
                               /* an @mention past the free tier raises the wall */

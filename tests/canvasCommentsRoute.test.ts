@@ -109,3 +109,46 @@ describe('POST /api/canvases/:id/comments', () => {
     expect(init.comments[0]?.frameId).toBeUndefined()
   }, 70_000)
 })
+
+describe('POST /api/frames/:id/comments on the frame as a whole', () => {
+  it('keeps the point it was left at, and replies inherit it', async () => {
+    const frame = await (
+      await owner.post(`/api/canvases/${canvasId}/frames`, { name: 'Card', width: 400, height: 300, html: '<p>Hi</p>' })
+    ).json()
+    const res = await owner.post(`/api/frames/${frame.id}/comments`, {
+      selector: 'body',
+      snippet: '',
+      text: 'Here',
+      x: 320,
+      y: 210,
+    })
+    const comment = await res.json()
+    expect(res.status, JSON.stringify(comment)).toBe(200)
+    expect(comment).toMatchObject({ frameId: frame.id, selector: 'body', x: 320, y: 210 })
+    expect(comment.pageId).toBeUndefined()
+    const reply = await (await owner.post(`/api/comments/${comment.id}/replies`, { text: 'Agreed' })).json()
+    expect(reply).toMatchObject({ frameId: frame.id, selector: 'body', x: 320, y: 210, parentId: comment.id })
+  })
+
+  it('drops a point sent with an element comment', async () => {
+    const frame = await (
+      await owner.post(`/api/canvases/${canvasId}/frames`, {
+        name: 'Other',
+        width: 400,
+        height: 300,
+        html: '<p>Hi</p>',
+      })
+    ).json()
+    const comment = await (
+      await owner.post(`/api/frames/${frame.id}/comments`, {
+        selector: 'p',
+        snippet: '<p>Hi</p>',
+        text: 'Here',
+        x: 5,
+        y: 5,
+      })
+    ).json()
+    expect(comment.x).toBeUndefined()
+    expect(comment.y).toBeUndefined()
+  })
+})
