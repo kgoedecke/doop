@@ -289,11 +289,14 @@ struct NativeCanvasView: View {
         .accessibilityIdentifier("canvas.people")
     }
 
-    /// "Agent · Page 2": what the collaborator is and the page they are looking at.
+    /// "Agent · Page 2": what the collaborator is and the page they are looking at. Agents
+    /// (and older clients) report no viewport, so their page is unknown and left out.
     private func presenceDetail(_ presence: CanvasPresence) -> String {
-        let pageID = presence.viewport?.pageId ?? model.pages.first?.id
-        let page = pageID == model.activePageID ? "This page" : model.pages.first { $0.id == pageID }?.name ?? "This page"
-        return [presence.kind == "agent" ? "Agent" : nil, page].compactMap { $0 }.joined(separator: " · ")
+        let page = presence.viewport?.pageId.flatMap { pageID in
+            pageID == model.activePageID ? "This page" : model.pages.first { $0.id == pageID }?.name
+        }
+        let parts = [presence.kind == "agent" ? "Agent" : nil, page].compactMap { $0 }
+        return parts.isEmpty ? "On this canvas" : parts.joined(separator: " · ")
     }
 
     private func openPagePicker() {
@@ -352,8 +355,8 @@ struct NativeCanvasView: View {
     private func pageSummary(_ page: CanvasPage) -> String {
         let frames = model.canvas.map { canvas in canvas.frames.filter { canvas.pageID(for: $0) == page.id }.count } ?? 0
         var parts = ["\(frames) \(frames == 1 ? "frame" : "frames")"]
-        let firstPageID = model.pages.first?.id
-        let here = model.presences.filter { ($0.viewport?.pageId ?? firstPageID) == page.id }.count
+        // Only collaborators known to be on this page; agents report no page.
+        let here = model.presences.filter { $0.viewport?.pageId == page.id }.count
         if here > 0 { parts.append("\(here) here") }
         return parts.joined(separator: " · ")
     }
