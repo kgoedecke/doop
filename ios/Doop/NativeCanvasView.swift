@@ -648,7 +648,9 @@ struct NativeCanvasView: View {
         switch panel {
         case .frames: framesPanel
         case .inspector:
-            if let frame = model.selected { FrameInspector(model: model, original: frame) }
+            // Beside the canvas the panel outlives a change of selection; a new identity per frame
+            // reloads the draft instead of saving one frame's edits onto the next.
+            if let frame = model.selected { FrameInspector(model: model, original: frame).id(frame.id) }
         case .tasks: TasksPanel(model: model)
         case .comments: CommentsPanel(model: model)
         case .pages:
@@ -909,6 +911,7 @@ struct PanelNavigation<Confirm: View, Content: View>: View {
                     }
                     .buttonStyle(.plain)
                     .modifier(FloatingGlass())
+                    .disabled(doneDisabled)
                     .accessibilityLabel("Close panel")
                     .accessibilityIdentifier("canvas.closePanel")
                 }
