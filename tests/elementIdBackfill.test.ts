@@ -25,6 +25,9 @@ vi.mock('../server/db/persist.ts', () => ({
   saveProposal: () => {},
   saveFrame: () => {},
   saveCanvas: () => {},
+  deleteFrame: (id: string) => {
+    writes.push(`delete:${id}`)
+  },
   saveFrameNow: async (f: Frame) => {
     await mocks.duringFrameWrite?.()
     if (mocks.frameFails) throw new Error('db down')
@@ -248,5 +251,20 @@ describe('stamping an element for a new comment', () => {
     expect((await actions.ensureElementId('f1', 'body > p:nth-of-type(1)', 'bob'))?.id).toBe(id)
     expect(writes).toEqual([`comment:${c.id}`, 'frame:f1'])
     error.mockRestore()
+  })
+
+  it('neither shows nor writes back a frame deleted while its stamp was being written', async () => {
+    mocks.duringFrameWrite = async () => {
+      mocks.duringFrameWrite = undefined
+      actions.deleteFrame('f1', { name: 'carol', kind: 'user', color: '#000' })
+    }
+    const c = await actions.addElementComment('f1', { selector: 'body > p:nth-of-type(1)', text: 'Bigger' }, 'bob')
+    expect(c).toBeUndefined()
+    const sent = broadcast.mock.calls.map(([, msg]) => (msg as { type: string }).type)
+    expect(sent).toContain('frame:deleted')
+    expect(sent).not.toContain('frame:updated')
+    expect(sent).not.toContain('comment')
+    /* the stamp's write landed after the delete: the row goes again */
+    expect(writes).toEqual(['delete:f1', 'frame:f1', 'delete:f1'])
   })
 })

@@ -499,6 +499,8 @@ async function stampSaved(frameId: string, id: string): Promise<boolean> {
       .saveFrameNow(frame)
       .then(
         () => {
+          /* deleted while the write was out: the write must not bring it back */
+          if (!store.getFrame(frameId)) persist.deleteFrame(frameId)
           for (const stamp of carried) pending.ids.delete(stamp)
           if (!pending.ids.size && unsavedStamps.get(frameId) === pending) unsavedStamps.delete(frameId)
         },
@@ -533,14 +535,20 @@ export async function ensureElementId(
   if (!frame || isFrameStreaming(frameId)) return undefined
   const stamped = stampElementId(frame.html, selector.slice(0, MAX_ELEMENT_SELECTOR_CHARS), { like })
   if (!stamped) return undefined
-  if (stamped.html === frame.html)
-    return (await stampSaved(frameId, stamped.id)) ? { id: stamped.id, frame } : undefined
+  if (stamped.html === frame.html) {
+    if (!(await stampSaved(frameId, stamped.id))) return undefined
+    /* the frame may have been deleted while the write was awaited */
+    const current = store.getFrame(frameId)
+    return current ? { id: stamped.id, frame: current } : undefined
+  }
   const next = store.updateFrame(frameId, { html: stamped.html }, by, { annotation: true })
   if (!next) return undefined
   const pending = unsavedStamps.get(frameId) ?? { ids: new Set<string>() }
   pending.ids.add(stamped.id)
   unsavedStamps.set(frameId, pending)
   if (!(await stampSaved(frameId, stamped.id))) return undefined
+  /* deleted meanwhile: an update now would put it back on every screen */
+  if (!store.getFrame(frameId)) return undefined
   broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind: 'user' }) })
   return { id: stamped.id, frame: next }
 }
@@ -579,7 +587,10 @@ export async function addElementComment(
 ): Promise<ElementComment | undefined> {
   const frame = store.getFrame(frameId)
   if (!frame || !input.text.trim()) return undefined
-  return postComment(frame.canvasId, await frameAnchor(frame, input, from), input.text, from, fromUserId)
+  const anchor = await frameAnchor(frame, input, from)
+  /* a frame deleted while its element was being stamped takes no comment */
+  if (!store.getFrame(frameId)) return undefined
+  return postComment(frame.canvasId, anchor, input.text, from, fromUserId)
 }
 
 /** The anchor as it is written onto a comment; what the anchor does not
@@ -697,6 +708,7 @@ export async function moveComment(
     const frame = store.getFrame(input.frameId)
     if (!frame || frame.canvasId !== root.canvasId) return undefined
     anchor = await frameAnchor(frame, input, by)
+    if (!store.getFrame(frame.id)) return undefined
   } else {
     if (!canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
     anchor = { pageId: input.pageId, x: input.x, y: input.y }
@@ -1753,6 +1765,7 @@ export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
   finishReveal(frameId)
   const frame = store.deleteFrame(frameId)
   if (!frame) return undefined
+  unsavedStamps.delete(frameId)
   bursts.delete(frameId)
   thumbs.purge(frameId)
   broadcast(frame.canvasId, { type: 'frame:deleted', frameId, actor })
