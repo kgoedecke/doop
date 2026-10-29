@@ -803,15 +803,22 @@ export function carriedCss(sourceHtml: string, selector: string, scope: string):
 const KEYFRAMES = /@(-webkit-)?keyframes\s+([\w-]+)/g
 
 /* `text` with the animation names in `renamed` replaced, inside animation
-   declarations and @keyframes heads only */
-function renameAnimations(text: string, renamed: Map<string, string>): string {
+   declarations, @keyframes heads and the custom properties an animation
+   reads (`animationVars`) only */
+function renameAnimations(text: string, renamed: Map<string, string>, animationVars: Set<string>): string {
   const swap = (value: string) => value.replace(/[\w-]+/g, (token) => renamed.get(token) ?? token)
   return text
     .replace(KEYFRAMES, (hit, prefix: string, name: string) =>
       renamed.has(name) ? `@${prefix ?? ''}keyframes ${renamed.get(name)}` : hit,
     )
-    .replace(/(animation(?:-name)?\s*:\s*)([^;}]*)/g, (_, head: string, value: string) => `${head}${swap(value)}`)
+    .replace(ANIMATION_DECLARATION, (_, head: string, value: string) => `${head}${swap(value)}`)
+    .replace(/((--[\w-]+)\s*:\s*)([^;}]*)/g, (hit, head: string, name: string, value: string) =>
+      animationVars.has(name) ? `${head}${swap(value)}` : hit,
+    )
 }
+
+/* an animation or animation-name declaration, not a custom property whose name ends in one */
+const ANIMATION_DECLARATION = /((?<![\w-])animation(?:-name)?\s*:\s*)([^;}]*)/g
 
 /* the families the @font-face rules of `css` define */
 function fontFaceFamilies(css: string): string[] {
@@ -828,9 +835,19 @@ function fontFaceFamilies(css: string): string[] {
 /* the custom properties a text reads where a font family goes, chains
    (`--type: var(--brand-type)`) followed */
 function fontVariables(text: string): Set<string> {
+  return variablesReadIn(text, /font(?:-family)?\s*:\s*([^;}]*)/gi)
+}
+
+/* the custom properties a text reads where an animation name goes, chains followed */
+function animationVariables(text: string): Set<string> {
+  return variablesReadIn(text, ANIMATION_DECLARATION)
+}
+
+/* the custom properties the values of `declaration` read, and the ones
+   those read in turn; the value is the regex's last group */
+function variablesReadIn(text: string, declaration: RegExp): Set<string> {
   const vars = new Set<string>()
-  for (const m of text.matchAll(/font(?:-family)?\s*:\s*([^;}]*)/gi))
-    for (const v of m[1]!.matchAll(VAR)) vars.add(v[1]!)
+  for (const m of text.matchAll(declaration)) for (const v of m[m.length - 1]!.matchAll(VAR)) vars.add(v[1]!)
   let grew = true
   while (grew) {
     grew = false
@@ -901,13 +918,14 @@ export function withCarriedCss(destHtml: string, css: string, scopes?: string | 
   for (const family of fontFaceFamilies(css))
     if (families.has(family.toLowerCase()) && !renamedFamilies.has(family))
       renamedFamilies.set(family, fresh(family, families))
-  let sheet = css
-  if (renamedAnimations.size) sheet = renameAnimations(sheet, renamedAnimations)
   const inlineStyles = marks
     .flatMap((mark) => [...doc.querySelectorAll(`[${SCOPE_ATTR}="${mark}"] [style], [${SCOPE_ATTR}="${mark}"][style]`)])
     .map((el) => `{${el.getAttribute('style') ?? ''}}`)
     .join('\n')
   const fontVars = fontVariables(`${css}\n${inlineStyles}`)
+  const animationVars = animationVariables(`${css}\n${inlineStyles}`)
+  let sheet = css
+  if (renamedAnimations.size) sheet = renameAnimations(sheet, renamedAnimations, animationVars)
   if (renamedFamilies.size) sheet = renameFamilies(sheet, renamedFamilies, fontVars)
   if (renamedAnimations.size || renamedFamilies.size)
     for (const mark of marks)
@@ -915,9 +933,9 @@ export function withCarriedCss(destHtml: string, css: string, scopes?: string | 
       for (const root of doc.querySelectorAll(`[${SCOPE_ATTR}="${mark}"]`))
         for (const el of [root, ...root.querySelectorAll('[style]')]) {
           const inline = el.getAttribute('style')
-          if (!inline || !/animation|font/.test(inline)) continue
+          if (!inline || !/animation|font|--/.test(inline)) continue
           let next = `{${inline}}`
-          if (renamedAnimations.size) next = renameAnimations(next, renamedAnimations)
+          if (renamedAnimations.size) next = renameAnimations(next, renamedAnimations, animationVars)
           if (renamedFamilies.size) next = renameFamilies(next, renamedFamilies, fontVars)
           el.setAttribute('style', next.slice(1, -1))
         }

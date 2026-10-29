@@ -458,6 +458,23 @@ describe('withCarriedCss', () => {
     expect(out).toContain('@keyframes pop{from{opacity:1}}')
   })
 
+  it('renames a carried animation kept in a custom property, chains and inline definitions included', () => {
+    const dest = page(
+      '<style>@keyframes pop{from{opacity:1}}</style>',
+      '<div data-doop-carried-scope="s" style="--inline-anim: pop"><i style="animation: var(--inline-anim) 2s"></i></div>',
+    )
+    const css =
+      '@keyframes pop { from { opacity: 0; } }\n[data-doop-carried-scope="s"] { --anim: var(--brand-anim); --brand-anim: pop; --label: pop; --my-animation: pop; }\n.x { animation: var(--anim) 1s; }'
+    const out = withCarriedCss(dest, css, 's')
+    expect(out).toContain('@keyframes pop-s {')
+    expect(out).toContain('--brand-anim: pop-s;')
+    expect(out).toContain('--anim: var(--brand-anim);')
+    expect(out).toContain('style="--inline-anim: pop-s"')
+    /* properties no animation reads keep their value, whatever they are called */
+    expect(out).toContain('--label: pop;')
+    expect(out).toContain('--my-animation: pop;')
+  })
+
   it('renames a carried font face the destination already defines, in the sheet and the markup', () => {
     const dest = page(
       '<style>@font-face{font-family:Inter;src:url(theirs.woff2)}</style>',
