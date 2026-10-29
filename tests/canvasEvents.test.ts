@@ -6,6 +6,7 @@ import type { AgentTask, Frame } from '../shared/types.ts'
    been told, and that one bad listener never reaches the mutation. */
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
+  saveFrameNow: async () => {},
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
@@ -75,13 +76,13 @@ beforeEach(() => {
 const alice = { name: 'alice', kind: 'user' as const, color: '#fff' }
 
 describe('what is an event', () => {
-  it('a comment, a reply and a resolve', () => {
-    const root = actions.addElementComment(
+  it('a comment, a reply and a resolve', async () => {
+    const root = (await actions.addElementComment(
       FRAME.id,
       { selector: 'h1', snippet: '<h1/>', text: 'Hi' },
       'alice',
       'alice',
-    )!
+    ))!
     const reply = actions.replyToComment(root.id, 'Yo', 'Doop', 'alice', 'agent')!
     actions.resolveComment(root.id, 'alice')
     expect(seen.map((s) => s.event.type)).toEqual(['comment.created', 'comment.replied', 'comment.resolved'])
@@ -122,25 +123,25 @@ describe('what is an event', () => {
     expect(seen.at(-1)!.event).toMatchObject({ type: 'task.failed', reason: 'rate limited', task: { id: 't1' } })
   })
 
-  it('fires after the room has been told', () => {
+  it('fires after the room has been told', async () => {
     let roomKnew = false
     events.onCanvasEvent(() => {
       roomKnew = broadcasts.includes('comment')
     })
-    actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text: 'Hi' }, 'alice', 'alice')
+    await actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text: 'Hi' }, 'alice', 'alice')
     expect(roomKnew).toBe(true)
   })
 })
 
 describe('listeners', () => {
-  it('a throwing listener is skipped, the mutation and the next listener still happen', () => {
+  it('a throwing listener is skipped, the mutation and the next listener still happen', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const off = events.onCanvasEvent(() => {
       throw new Error('boom')
     })
     const after = vi.fn()
     const offAfter = events.onCanvasEvent(after)
-    const comment = actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text: 'Hi' }, 'alice')
+    const comment = await actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text: 'Hi' }, 'alice')
     expect(comment).toBeDefined()
     expect(after).toHaveBeenCalledTimes(1)
     expect(error).toHaveBeenCalled()
@@ -149,10 +150,10 @@ describe('listeners', () => {
     error.mockRestore()
   })
 
-  it('unsubscribing stops the calls', () => {
+  it('unsubscribing stops the calls', async () => {
     const fn = vi.fn()
     events.onCanvasEvent(fn)()
-    actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text: 'Hi' }, 'alice')
+    await actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1/>', text: 'Hi' }, 'alice')
     expect(fn).not.toHaveBeenCalled()
   })
 })

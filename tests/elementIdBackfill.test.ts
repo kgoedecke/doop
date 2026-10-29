@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => ({ frameFails: false }))
 vi.mock('../server/db/persist.ts', () => ({
   saveTask: () => {},
   saveFeedback: () => {},
-  saveComment: () => {},
+  saveComment: (c: ElementComment) => {
+    writes.push(`comment:${c.id}`)
+  },
   saveActivity: () => {},
   saveDecision: () => {},
   saveProposal: () => {},
@@ -161,5 +163,30 @@ describe('backfillElementIds', () => {
     store.init([{ ...canvas, frames: [frame('f1', deep)] }])
     const counts = await actions.backfillElementIds(new Map([['k1', '#nothing > p']]))
     expect(counts).toEqual({ stamped: 0, lost: 1, failed: 0 })
+  })
+})
+
+describe('stamping an element for a new comment', () => {
+  it('writes the stamped frame before the comment that names its id', async () => {
+    const c = (await actions.addElementComment('f1', { selector: 'body > p:nth-of-type(1)', text: 'Bigger' }, 'bob'))!
+    expect(c.elementId).toMatch(/^[a-z0-9]{6}$/)
+    expect(writes).toEqual(['frame:f1', `comment:${c.id}`])
+    expect(store.getFrame('f1')!.html).toContain(`data-doop-id="${c.elementId}"`)
+  })
+
+  it('pins the comment to the frame at its point when the stamped frame cannot be written', async () => {
+    mocks.frameFails = true
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const c = (await actions.addElementComment(
+      'f1',
+      { selector: 'body > p:nth-of-type(1)', text: 'Bigger', x: 12, y: 34 },
+      'bob',
+    ))!
+    expect(c).toMatchObject({ frameId: 'f1', x: 12, y: 34 })
+    expect(c.elementId).toBeUndefined()
+    expect(writes).toEqual([`comment:${c.id}`])
+    expect(broadcast).not.toHaveBeenCalledWith('c1', expect.objectContaining({ type: 'frame:updated' }))
+    expect(error).toHaveBeenCalled()
+    error.mockRestore()
   })
 })

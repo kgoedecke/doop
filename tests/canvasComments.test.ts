@@ -12,6 +12,7 @@ import { isCanvasComment } from '../shared/comments.ts'
 
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
+  saveFrameNow: async () => {},
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
@@ -151,8 +152,12 @@ describe('threads on a canvas comment', () => {
     expect(actions.getDecisions(CANVAS.id)[0]?.frameId).toBeUndefined()
   })
 
-  it('still needs the frame for an element comment thread', () => {
-    const root = actions.addElementComment(HERO.id, { selector: 'h1', snippet: '<h1/>', text: 'Bigger' }, 'alice')!
+  it('still needs the frame for an element comment thread', async () => {
+    const root = (await actions.addElementComment(
+      HERO.id,
+      { selector: 'h1', snippet: '<h1/>', text: 'Bigger' },
+      'alice',
+    ))!
     expect(actions.openThread(root.id)).toEqual({ root, frame: HERO })
     vi.spyOn(store, 'getFrame').mockReturnValue(undefined)
     expect(actions.openThread(root.id)).toBeUndefined()
@@ -203,8 +208,12 @@ describe('where a canvas comment leads', () => {
     expect(placeBeside({ x: 820, y: 240 }, { width: 800, height: 500 }, [HERO, PRICING])).toEqual({ x: 860, y: 480 })
   })
 
-  it("keeps a frame asked for by an element comment on that frame's page, and lets the model pick a spot", () => {
-    const c = actions.addElementComment(HERO.id, { selector: 'h1', snippet: '<h1/>', text: 'add a FAQ' }, 'alice')!
+  it("keeps a frame asked for by an element comment on that frame's page, and lets the model pick a spot", async () => {
+    const c = (await actions.addElementComment(
+      HERO.id,
+      { selector: 'h1', snippet: '<h1/>', text: 'add a FAQ' },
+      'alice',
+    ))!
     expect(placementFor(c, CANVAS)).toEqual({ pageId: 'p1' })
     const chosen = createFrameInput(
       { name: 'FAQ', width: 800, height: 500, html: '<html></html>', x: 5, y: 6 },
@@ -221,8 +230,12 @@ describe('where a canvas comment leads', () => {
     })
   })
 
-  it('keeps describing element comments by their element', () => {
-    const c = actions.addElementComment(HERO.id, { selector: 'h1', snippet: '<h1>Hi</h1>', text: 'x' }, 'alice')!
+  it('keeps describing element comments by their element', async () => {
+    const c = (await actions.addElementComment(
+      HERO.id,
+      { selector: 'h1', snippet: '<h1>Hi</h1>', text: 'x' },
+      'alice',
+    ))!
     expect(c.elementId).toMatch(/^[a-z0-9]{6}$/)
     expect(describeCommentAnchor(c, CANVAS)).toBe(
       `on frame f1 "Hero", the element with data-doop-id="${c.elementId}"\n  element HTML at comment time: <h1>Hi</h1>`,

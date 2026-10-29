@@ -1841,7 +1841,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
       return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
     }
   }
-  const comment = actions.addElementComment(
+  const comment = await actions.addElementComment(
     req.params.id,
     { selector, elementId, snippet, text: String(text ?? ''), x, y },
     req.user!.name,
@@ -1855,7 +1855,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
    the frame HTML if it has none yet — for a link that outlives edits around
    it. Anyone who may comment may stamp: the write is an annotation, not a
    design change, so it leaves sign-off alone. */
-app.post('/api/frames/:id/element-id', (req, res) => {
+app.post('/api/frames/:id/element-id', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
   if (!frame) return
   const selector = typeof req.body?.selector === 'string' ? req.body.selector.trim() : ''
@@ -1863,7 +1863,7 @@ app.post('/api/frames/:id/element-id', (req, res) => {
     return res.status(400).json({ error: 'selector required' })
   }
   const snippet = typeof req.body?.snippet === 'string' ? req.body.snippet.slice(0, 400) : undefined
-  const stamped = actions.ensureElementId(frame.id, selector, req.user!.name, snippet || undefined)
+  const stamped = await actions.ensureElementId(frame.id, selector, req.user!.name, snippet || undefined)
   if (!stamped) return res.status(409).json({ error: 'the element could not be found in the frame right now' })
   res.json({ elementId: stamped.id, frameUpdatedAt: stamped.frame.updatedAt })
 })
@@ -1947,7 +1947,7 @@ app.post('/api/comments/:id/resolve', (req, res) => {
 
 /* drag a thread's pin somewhere else: onto an element, a frame as a whole
    or the canvas. The whole thread moves, and anyone who may comment may move */
-app.patch('/api/comments/:id/anchor', (req, res) => {
+app.patch('/api/comments/:id/anchor', async (req, res) => {
   const found = actions.findComment(req.params.id)
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId, 'comment')) return
@@ -1967,7 +1967,7 @@ app.patch('/api/comments/:id/anchor', (req, res) => {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
     anchor = { pageId, x: Number(x), y: Number(y) }
   } else return res.status(400).json({ error: 'frameId or pageId required' })
-  const moved = actions.moveComment(req.params.id, anchor, req.user!.name)
+  const moved = await actions.moveComment(req.params.id, anchor, req.user!.name)
   if (!moved) return res.status(404).json({ error: 'frame or page not found' })
   res.json(moved)
 })

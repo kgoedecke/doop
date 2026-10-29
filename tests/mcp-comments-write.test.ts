@@ -13,6 +13,7 @@ import type { Canvas, ElementComment, Frame } from '../shared/types.ts'
  * comment/activity/decision logs back. */
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
+  saveFrameNow: async () => {},
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
@@ -117,8 +118,8 @@ function gate(overrides: Record<string, unknown> = {}): Awaited<ReturnType<typeo
   }
 }
 
-function seedRoot(text: string) {
-  const root = actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1>Hi</h1>', text }, 'alice')
+async function seedRoot(text: string) {
+  const root = await actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1>Hi</h1>', text }, 'alice')
   if (!root) throw new Error('failed to seed a root comment')
   return root
 }
@@ -462,7 +463,7 @@ describe('MCP comment write tools over real action state', () => {
   })
 
   it('stores an agent reply and logs it as an agent action', async () => {
-    const root = seedRoot('Too small')
+    const root = await seedRoot('Too small')
     const { client, close } = await connect()
     try {
       const { parsed, isError } = await call(client, 'reply_to_comment', {
@@ -487,7 +488,7 @@ describe('MCP comment write tools over real action state', () => {
   })
 
   it('captures exactly one decision when a thread is resolved twice', async () => {
-    const root = seedRoot('@Doop make it 48px')
+    const root = await seedRoot('@Doop make it 48px')
     expect(root.forAgent).toBe(true)
     const { client, close } = await connect()
     try {
@@ -524,7 +525,7 @@ describe('MCP comment write tools over real action state', () => {
   })
 
   it('records no decision for a plain human thread', async () => {
-    const root = seedRoot('Nit: align the icon')
+    const root = await seedRoot('Nit: align the icon')
     const { client, close } = await connect()
     try {
       const { isError } = await call(client, 'resolve_comment', {

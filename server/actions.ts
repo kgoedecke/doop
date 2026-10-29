@@ -476,14 +476,14 @@ export const MAX_ELEMENT_SELECTOR_CHARS = 1_000
  *  HTML as an annotation (sign-off stands, no design-history version, no
  *  activity line). Undefined when the frame is gone, is being streamed into,
  *  or the selector does not resolve in the stored HTML. */
-export function ensureElementId(
+export async function ensureElementId(
   frameId: string,
   selector: string,
   by: string,
   /** the live element's excerpt, when known: the stamp is refused if the
    *  saved element at that path is not the one the client saw */
   like?: string,
-): { id: string; frame: Frame } | undefined {
+): Promise<{ id: string; frame: Frame } | undefined> {
   const frame = store.getFrame(frameId)
   if (!frame || isFrameStreaming(frameId)) return undefined
   const stamped = stampElementId(frame.html, selector.slice(0, MAX_ELEMENT_SELECTOR_CHARS), { like })
@@ -491,9 +491,16 @@ export function ensureElementId(
   if (stamped.html === frame.html) return { id: stamped.id, frame }
   const next = store.updateFrame(frameId, { html: stamped.html }, by, { annotation: true })
   if (!next) return undefined
-  /* the comment that follows is written at once and names the id: the
-     frame carrying it must be on disk first, not 400 ms later */
-  persist.saveFrame(next, true)
+  /* whatever names the id (a comment, a copied link) is written after this
+     returns: the frame carrying it must be on disk first. A failed write
+     hands out no id; the stamp stays in memory, unnamed, and goes to disk
+     with the frame's next save */
+  try {
+    await persist.saveFrameNow(next)
+  } catch (err) {
+    console.error(`[comments] element id stamp on frame ${frameId} not written:`, err)
+    return undefined
+  }
   broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind: 'user' }) })
   return { id: stamped.id, frame: next }
 }
@@ -504,7 +511,7 @@ export function ensureElementId(
  *  comment lands on the frame at the point instead, so it is never lost. A
  *  client that sends no point (older apps) still gets a frame comment, one
  *  that is listed without a pin. */
-function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): CommentAnchor {
+async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): Promise<CommentAnchor> {
   const point =
     Number.isFinite(input.x) && Number.isFinite(input.y) ? { x: Number(input.x), y: Number(input.y) } : undefined
   const snippet = String(input.snippet ?? '').slice(0, 400)
@@ -514,21 +521,21 @@ function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): Comment
     return { frame, elementId: input.elementId, snippet }
   }
   if (onElement) {
-    const stamped = ensureElementId(frame.id, selector, by, snippet || undefined)
+    const stamped = await ensureElementId(frame.id, selector, by, snippet || undefined)
     if (stamped) return { frame: stamped.frame, elementId: stamped.id, snippet }
   }
   return { frame, snippet: '', ...(point ? { point } : {}) }
 }
 
-export function addElementComment(
+export async function addElementComment(
   frameId: string,
   input: FrameAnchorInput & { text: string },
   from: string,
   fromUserId?: string,
-): ElementComment | undefined {
+): Promise<ElementComment | undefined> {
   const frame = store.getFrame(frameId)
-  if (!frame) return undefined
-  return postComment(frame.canvasId, frameAnchor(frame, input, from), input.text, from, fromUserId)
+  if (!frame || !input.text.trim()) return undefined
+  return postComment(frame.canvasId, await frameAnchor(frame, input, from), input.text, from, fromUserId)
 }
 
 /** The anchor as it is written onto a comment; what the anchor does not
@@ -621,7 +628,11 @@ export async function backfillElementIds(
  *  frame as a whole or on the canvas, on any frame of the same canvas. The
  *  root and its replies move together, since replies inherit the anchor.
  *  Undefined when the comment, the frame or the page is not there. */
-export function moveComment(commentId: string, input: CommentAnchorInput, by: string): ElementComment | undefined {
+export async function moveComment(
+  commentId: string,
+  input: CommentAnchorInput,
+  by: string,
+): Promise<ElementComment | undefined> {
   const found = findComment(commentId)
   if (!found) return undefined
   const root = found.parentId ? findComment(found.parentId) : found
@@ -632,7 +643,7 @@ export function moveComment(commentId: string, input: CommentAnchorInput, by: st
   if ('frameId' in input) {
     const frame = store.getFrame(input.frameId)
     if (!frame || frame.canvasId !== root.canvasId) return undefined
-    anchor = frameAnchor(frame, input, by)
+    anchor = await frameAnchor(frame, input, by)
   } else {
     if (!canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
     anchor = { pageId: input.pageId, x: input.x, y: input.y }
