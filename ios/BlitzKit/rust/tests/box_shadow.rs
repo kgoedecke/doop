@@ -32,3 +32,28 @@ fn box_shadow_blur_matches_chrome_at_every_scale() {
         assert!(far.abs_diff(248) <= 4, "{scale}x: {far} 20px out");
     }
 }
+
+#[test]
+fn a_masked_element_masks_its_own_shadow() {
+    // `mask-clip` defaults to the border box, so an outer shadow below a faded-out
+    // element is masked away with it (the fade of a screenshot must not show a grey band).
+    let html = CString::new(
+        "<!doctype html><body style='margin:0;background:#fff'><div style='position:absolute;\
+         left:50px;top:20px;width:100px;height:100px;background:#fff;\
+         box-shadow:0 30px 30px 0 #000;mask-image:linear-gradient(#000 50%,transparent)'></div>",
+    )
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    let (mut w, mut h, mut len) = (0, 0, 0);
+    let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 200, 200, 1.0);
+    let buf = doopblitz_doc_render(doc, &mut w, &mut h, &mut len);
+    let pixels = unsafe { std::slice::from_raw_parts(buf, len) }.to_vec();
+    doopblitz_buffer_free(buf, len);
+    doopblitz_doc_free(doc);
+    // Below the box, where the shadow would be darkest.
+    let below = pixels[(140 * w as usize + 100) * 4];
+    assert!(
+        below >= 250,
+        "shadow showed below a masked element: {below}"
+    );
+}

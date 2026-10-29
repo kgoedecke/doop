@@ -232,7 +232,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4#f95f0113390ad14933ed1ac13e80628c9d22e9d4"
+source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -243,7 +243,7 @@ dependencies = [
  "color",
  "cssparser",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4)",
+ "debug_timer 0.1.3 (git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb)",
  "euclid",
  "html-escape",
  "image",
@@ -277,7 +277,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4#f95f0113390ad14933ed1ac13e80628c9d22e9d4"
+source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -288,7 +288,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4#f95f0113390ad14933ed1ac13e80628c9d22e9d4"
+source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -304,7 +304,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4#f95f0113390ad14933ed1ac13e80628c9d22e9d4"
+source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4#f95f0113390ad14933ed1ac13e80628c9d22e9d4"
+source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -756,7 +756,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4#f95f0113390ad14933ed1ac13e80628c9d22e9d4"
+source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
 
 [[package]]
 name = "deranged"
@@ -3323,7 +3323,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/kgoedecke/blitz?rev=f95f0113390ad14933ed1ac13e80628c9d22e9d4#f95f0113390ad14933ed1ac13e80628c9d22e9d4"
+source = "git+https://github.com/kgoedecke/blitz?rev=98827022abbcf9623487df590f18a815ee8c5bfb#98827022abbcf9623487df590f18a815ee8c5bfb"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",

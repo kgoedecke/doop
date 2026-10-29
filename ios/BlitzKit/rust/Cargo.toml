@@ -12,13 +12,13 @@ crate-type = ["staticlib", "rlib"]
 # Blitz from the `doop` branch of kgoedecke/blitz: DioxusLabs/blitz at 0f60502 plus our
 # rendering fixes (inline SVG, web fonts, placeholders, filters), each also sent upstream.
 # Update by rebasing that branch and bumping the rev here.
-blitz-dom = { git = "https://github.com/kgoedecke/blitz", rev = "f95f0113390ad14933ed1ac13e80628c9d22e9d4", default-features = false, features = ["default"] }
+blitz-dom = { git = "https://github.com/kgoedecke/blitz", rev = "98827022abbcf9623487df590f18a815ee8c5bfb", default-features = false, features = ["default"] }
 # Same taffy as the pinned Blitz workspace: the bridge re-rounds layout on the device-pixel grid.
 taffy = { git = "https://github.com/DioxusLabs/taffy", rev = "49152ca29664f9687c714c7732d88ff07d62110a", default-features = false, features = ["std", "content_size"] }
-blitz-html = { git = "https://github.com/kgoedecke/blitz", rev = "f95f0113390ad14933ed1ac13e80628c9d22e9d4", default-features = false }
-blitz-paint = { git = "https://github.com/kgoedecke/blitz", rev = "f95f0113390ad14933ed1ac13e80628c9d22e9d4", default-features = false, features = ["svg"] }
-blitz-net = { git = "https://github.com/kgoedecke/blitz", rev = "f95f0113390ad14933ed1ac13e80628c9d22e9d4", default-features = false, features = ["cache"] }
-blitz-traits = { git = "https://github.com/kgoedecke/blitz", rev = "f95f0113390ad14933ed1ac13e80628c9d22e9d4", default-features = false }
+blitz-html = { git = "https://github.com/kgoedecke/blitz", rev = "98827022abbcf9623487df590f18a815ee8c5bfb", default-features = false }
+blitz-paint = { git = "https://github.com/kgoedecke/blitz", rev = "98827022abbcf9623487df590f18a815ee8c5bfb", default-features = false, features = ["svg"] }
+blitz-net = { git = "https://github.com/kgoedecke/blitz", rev = "98827022abbcf9623487df590f18a815ee8c5bfb", default-features = false, features = ["cache"] }
+blitz-traits = { git = "https://github.com/kgoedecke/blitz", rev = "98827022abbcf9623487df590f18a815ee8c5bfb", default-features = false }
 # Same parley revision as the pinned Blitz commit, for one shared font context.
 parley = { git = "https://github.com/linebender/parley", rev = "718dcb721941fd8e72128833122d31f5a4e80504", default-features = false, features = ["std", "system"] }
 anyrender = "0.14"
