@@ -9,7 +9,11 @@ import type { Canvas, ElementComment, Frame } from '../shared/types.ts'
  */
 
 const writes: string[] = []
-const mocks = vi.hoisted(() => ({ frameFails: false }))
+const mocks = vi.hoisted(() => ({
+  frameFails: false,
+  /* runs while a frame write is out, for whatever a person does meanwhile */
+  duringFrameWrite: undefined as (() => Promise<unknown>) | undefined,
+}))
 vi.mock('../server/db/persist.ts', () => ({
   saveTask: () => {},
   saveFeedback: () => {},
@@ -22,6 +26,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
   saveCanvas: () => {},
   saveFrameNow: async (f: Frame) => {
+    await mocks.duringFrameWrite?.()
     if (mocks.frameFails) throw new Error('db down')
     writes.push(`frame:${f.id}`)
   },
@@ -65,6 +70,7 @@ const broadcast = vi.fn()
 beforeEach(() => {
   writes.length = 0
   mocks.frameFails = false
+  mocks.duringFrameWrite = undefined
   broadcast.mockClear()
   canvas = {
     id: 'c1',
@@ -156,6 +162,30 @@ describe('backfillElementIds', () => {
     expect(counts).toEqual({ stamped: 0, lost: 0, failed: 1 })
     expect(writes).toEqual([])
     expect(broadcast).not.toHaveBeenCalledWith('c1', expect.objectContaining({ type: 'comment' }))
+  })
+
+  it('leaves a thread moved while the frame write was out where it was moved to', async () => {
+    mocks.duringFrameWrite = async () => {
+      mocks.duringFrameWrite = undefined
+      await actions.moveComment('k1', { pageId: 'p1', x: 40, y: 50 }, 'bob')
+      writes.push('moved')
+    }
+    const counts = await actions.backfillElementIds(
+      new Map([
+        ['k1', 'body > p:nth-of-type(1)'],
+        ['k2', 'body > p:nth-of-type(2)'],
+      ]),
+    )
+    expect(counts).toEqual({ stamped: 1, lost: 0, failed: 0 })
+    expect(writes).toEqual(['comment:k1', 'moved', 'frame:f1', 'comment:k2'])
+    const k1 = actions.findComment('k1')!
+    expect(k1).toMatchObject({ pageId: 'p1', x: 40, y: 50 })
+    expect(k1.frameId).toBeUndefined()
+    expect(k1.elementId).toBeUndefined()
+    expect(broadcast).not.toHaveBeenCalledWith('c1', {
+      type: 'comment',
+      comment: expect.objectContaining({ id: 'k1', frameId: 'f1' }),
+    })
   })
 
   it('survives frame HTML nested deeper than the call stack', async () => {

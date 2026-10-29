@@ -607,12 +607,14 @@ export async function backfillElementIds(
         })
       }
       for (const { comment, id } of found) {
+        if (reanchored(comment)) continue
         comment.elementId = id
         await persist.saveCommentNow(comment)
         broadcast(comment.canvasId, { type: 'comment', comment })
         counts.stamped++
       }
       for (const comment of lost) {
+        if (reanchored(comment)) continue
         await persist.saveCommentNow(comment)
         counts.lost++
       }
@@ -622,6 +624,13 @@ export async function backfillElementIds(
     }
   }
   return counts
+}
+
+/* a thread moved while the backfill awaited a write: the move replaced the
+   comment in the log and saved its new anchor (spending the selector), so
+   the object the backfill holds is stale and writing it would undo the move */
+function reanchored(comment: ElementComment): boolean {
+  return findComment(comment.id) !== comment
 }
 
 /** Re-pin a thread where its root pin was dropped: on an element, on a
