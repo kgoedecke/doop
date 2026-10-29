@@ -362,7 +362,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      repo-reading tools; only prompt cards go through the chat loop below */
   const repoCards = allCards.filter((c) => c.kind)
   const cards = allCards.filter((c) => !c.kind)
-  const canceled = () => cards.length > 0 && cards.every((card) => card.failedAt || card.endedAt)
+  /* latched: Retry clears a stopped card's failure on this same object, and
+     the old run, still letting go, must not take the retried card for its own */
+  let stopped = false
+  const canceled = () => (stopped ||= cards.length > 0 && cards.every((card) => card.failedAt || card.endedAt))
 
   /* presence otherwise only refreshes on tool activity, and the sweep's TTL
      is shorter than a big generation turn */

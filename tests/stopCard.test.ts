@@ -117,4 +117,42 @@ describe('a run whose card is stopped', () => {
     expect(cardById('c1')).toMatchObject({ failureReason: 'Stopped by Bob.' })
     expect(cardById('c1').endedAt).toBeUndefined()
   })
+
+  it('stays stopped when Retry lands before the stopped run has let go', async () => {
+    seed([card('c1')])
+    let started!: () => void
+    const running = new Promise<void>((resolve) => (started = resolve))
+    let finishTool!: () => void
+    const pendingTool = new Promise<void>((resolve) => (finishTool = resolve))
+    /* the first run is a harness still waiting on a tool call when it is
+       stopped; the retried card's run never returns */
+    const runHarness = vi
+      .fn()
+      .mockImplementationOnce(async (req: { signal?: AbortSignal }) => {
+        started()
+        await new Promise((resolve) => req.signal?.addEventListener('abort', resolve))
+        await pendingTool
+        return { success: false, text: 'Task stopped.' }
+      })
+      .mockImplementation(() => new Promise(() => {}))
+    mocks.pickModel.mockResolvedValue({
+      provider: 'claude-local',
+      label: 'Test',
+      userId: 'ann',
+      runHarness,
+      run: vi.fn(),
+    })
+
+    const resident = await import('../server/resident.ts')
+    resident.onFeedback(CANVAS)
+    await running
+    actions.stopCard(CANVAS, 'c1', 'Bob')
+    await vi.waitFor(() => expect(runHarness.mock.calls[0]?.[0].signal.aborted).toBe(true))
+    actions.retryCard(CANVAS, 'c1', 'Bob')
+    finishTool()
+
+    /* the retried card is picked up afresh instead of failed by the old run */
+    await vi.waitFor(() => expect(runHarness).toHaveBeenCalledTimes(2))
+    expect(cardById('c1').failedAt).toBeUndefined()
+  })
 })
