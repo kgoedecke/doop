@@ -133,6 +133,12 @@ impl Node {
                         .children
                         .iter()
                         .any(|&id| is_use_clone(&self.tree()[id]));
+                // A `<use>` left unexpanded inside a clone is a circular reference, which
+                // renders nothing; usvg would reject the whole document over it.
+                let is_use = data.name.ns == ns!(svg) && data.name.local == local_name!("use");
+                if is_use && !is_expanded_use && self.is_inside_use_clone() {
+                    return;
+                }
                 let current_color = style.map(|s| s.clone_color().to_css_string());
                 let parent_style = self
                     .parent
@@ -240,6 +246,18 @@ impl Node {
             }
             _ => {}
         }
+    }
+
+    fn is_inside_use_clone(&self) -> bool {
+        let mut current = self.parent;
+        while let Some(id) = current {
+            let node = &self.tree()[id];
+            if is_use_clone(node) {
+                return true;
+            }
+            current = node.parent;
+        }
+        false
     }
 
     /// The first element in tree order with this `id`.

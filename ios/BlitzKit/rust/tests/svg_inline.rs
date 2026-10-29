@@ -37,6 +37,7 @@ const SPRITE: &str = "<svg width='0' height='0' style='position:absolute'><defs>
     <symbol id='ring' viewBox='0 0 100 100'><circle class='ring' cx='50' cy='50' r='30'/></symbol>\
     <symbol id='bar' viewBox='0 0 100 100'><rect width='100' height='100' fill='url(#g)'/></symbol>\
     <rect id='half' width='40' height='100' fill='blue'/>\
+    <symbol id='loop' viewBox='0 0 100 100'><use href='#loop'/><rect width='100' height='100' fill='red'/></symbol>\
     </defs></svg>";
 
 #[test]
@@ -111,4 +112,10 @@ fn filtered_inline_svg_keeps_its_filter() {
     let html = "<svg width='100' height='100'><filter id='f'><feFlood flood-color='red'/></filter>\
         <rect width='100' height='100' fill='blue' filter='url(#f)'/></svg>";
     assert_eq!(centre(html), RED);
+}
+
+#[test]
+fn circular_use_renders_the_rest_of_the_symbol() {
+    let html = format!("{SPRITE}<svg width='100' height='100'><use href='#loop'/></svg>");
+    assert_eq!(centre(&html), RED);
 }

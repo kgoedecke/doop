@@ -13,7 +13,7 @@ use markup5ever::{LocalName, QualName, local_name, ns};
 use crate::BaseDocument;
 use crate::node::Attribute;
 
-/// Marks the root of a clone created for a `<use>` element.
+/// Marks the root of a clone created for a `<use>` element; its value is the target's id.
 pub(crate) const USE_CLONE_ATTR: &str = "data-blitz-use-clone";
 
 /// References inside cloned content are expanded in further passes, up to this depth.
@@ -58,13 +58,17 @@ impl BaseDocument {
             if node.children.iter().any(|&child| self.is_use_clone(child)) {
                 continue;
             }
-            let Some(target_id) = use_href(elem.attrs())
-                .and_then(|href| href.strip_prefix('#'))
-                .and_then(|id| self.get_element_by_id(id))
+            let Some(target) = use_href(elem.attrs()).and_then(|href| href.strip_prefix('#'))
             else {
                 continue;
             };
-            if !self.is_ancestor_or_self(target_id, node_id) {
+            let Some(target_id) = self.get_element_by_id(target) else {
+                continue;
+            };
+            // A circular reference renders nothing, as in browsers.
+            if !self.is_ancestor_or_self(target_id, node_id)
+                && !self.is_inside_clone_of(target, node_id)
+            {
                 found.push((node_id, target_id));
             }
         }
@@ -77,6 +81,23 @@ impl BaseDocument {
                 .iter()
                 .any(|attr| *attr.name.local == *USE_CLONE_ATTR)
         })
+    }
+
+    /// Whether `node_id` sits inside a clone made for a `<use>` of `target`.
+    fn is_inside_clone_of(&self, target: &str, node_id: NodeId) -> bool {
+        let mut current = self.nodes[node_id].parent;
+        while let Some(id) = current {
+            let source = self.nodes[id].element_data().and_then(|elem| {
+                elem.attrs()
+                    .iter()
+                    .find(|attr| *attr.name.local == *USE_CLONE_ATTR)
+            });
+            if source.is_some_and(|attr| attr.value == target) {
+                return true;
+            }
+            current = self.nodes[id].parent;
+        }
+        false
     }
 
     fn is_ancestor_or_self(&self, ancestor_id: NodeId, node_id: NodeId) -> bool {
@@ -102,6 +123,7 @@ impl BaseDocument {
             return;
         };
         let is_symbol = target.name.local == local_name!("symbol");
+        let source = target.id.as_deref().unwrap_or_default().to_string();
         // Without its id, the clone cannot be found in place of the original.
         let mut attrs: Vec<Attribute> = target
             .attrs()
@@ -111,7 +133,7 @@ impl BaseDocument {
             .collect();
         attrs.push(Attribute {
             name: QualName::new(None, ns!(), LocalName::from(USE_CLONE_ATTR)),
-            value: String::new(),
+            value: source.clone(),
         });
 
         let mut mutator = self.mutate();
@@ -141,7 +163,7 @@ impl BaseDocument {
             mutator.set_attribute(
                 clone_id,
                 QualName::new(None, ns!(), LocalName::from(USE_CLONE_ATTR)),
-                "",
+                &source,
             );
             clone_id
         };

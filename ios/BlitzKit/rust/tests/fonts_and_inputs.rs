@@ -209,3 +209,22 @@ fn loading_covers_resources_found_in_a_loaded_stylesheet() {
     );
     assert_eq!(late.ink_span(0..60), direct.ink_span(0..60));
 }
+
+#[test]
+fn textarea_placeholder_keeps_its_line_breaks() {
+    let area = "display:block;width:300px;height:80px;margin:0;padding:0;border:0;\
+                font:20px/30px sans-serif;resize:none";
+    let frame = Frame::paint(
+        320,
+        80,
+        &format!("<textarea placeholder='first&#10;second' style='{area}'></textarea>"),
+    );
+    let grey = |rows: std::ops::Range<usize>| {
+        rows.flat_map(|y| (0..320).map(move |x| (x, y)))
+            .any(|(x, y)| {
+                let [r, g, b] = frame.rgb(x, y);
+                r == g && g == b && r < 200
+            })
+    };
+    assert!(grey(0..30) && grey(30..60), "placeholder not on two lines");
+}

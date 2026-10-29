@@ -18,9 +18,8 @@
 #   out their `placeholder` in the `::placeholder` style (UA colour #757575).
 # - src/document.rs (`has_pending_events`): a resource that has arrived but not been applied yet
 #   counts as loading.
-# Upstream PRs DioxusLabs/blitz#1320, #1267 and #587 cover the CSS paint half; nothing upstream
-# covers `<use>` across `<svg>` elements, SVG web fonts or placeholders yet. Everything else is
-# the upstream crate; drop this directory once the fixes land upstream and remove the [patch]
+# Upstream: `<use>` is DioxusLabs/blitz#1327, SVG web fonts #1326, placeholders #1325; #1320,
+# #1267 and #587 cover the CSS paint half. Everything else is the upstream crate; drop this directory once the fixes land upstream and remove the [patch]
 # entry in ../../rust/Cargo.toml.
 [package]
 name = "blitz-dom"

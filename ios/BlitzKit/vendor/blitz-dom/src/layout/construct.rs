@@ -965,7 +965,11 @@ fn layout_placeholder(
         .unwrap_or(input_style);
     drop(read_guard);
 
-    let parley_style = stylo_to_parley::style(input_element_id, &style);
+    let mut parley_style = stylo_to_parley::style(input_element_id, &style);
+    // A textarea keeps the placeholder's line breaks and spaces, as its editor keeps the value's.
+    if is_multiline {
+        parley_style.white_space_collapse = parley::WhiteSpaceCollapse::Preserve;
+    }
     let scale = doc.viewport.scale_f64() as f32;
     let mut layout = parley::Layout::new();
     {
