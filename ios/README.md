@@ -213,8 +213,8 @@ fitted board's tiny scale therefore kept hairlines that had snapped up to one de
 pixel (about 11 CSS px) and showed thick borders once zoomed in. `doopblitz_doc_set_viewport`
 now requests a recascade on every scale change; `rescaling_restyles_device_pixel_snapped_borders`
 in `rust/tests/abi.rs` guards it. Both engine issues are worth sending upstream. Known engine gaps on both backends: `text-shadow`, 3D transforms,
-`mix-blend-mode`, CSS counters, `writing-mode`, multi-column, form placeholders and
-`<select>`, emoji fallback, SVG styled through CSS and inline SVG `<pattern>` fills.
+`mix-blend-mode`, CSS counters, `writing-mode`, multi-column, `<select>`, emoji
+fallback and inline SVG `<pattern>` fills.
 
 ## Run
 
