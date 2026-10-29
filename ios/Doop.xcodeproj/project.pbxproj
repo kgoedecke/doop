@@ -405,7 +405,7 @@
 					Metal,
 				);
 				SWIFT_OBJC_BRIDGING_HEADER = BlitzKit/include/doopblitz.h;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -461,7 +461,7 @@
 					Metal,
 				);
 				SWIFT_OBJC_BRIDGING_HEADER = BlitzKit/include/doopblitz.h;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -483,7 +483,7 @@
 				INFOPLIST_FILE = DoopActivity/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Doop Agent Status";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios.activity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -505,7 +505,7 @@
 				INFOPLIST_FILE = DoopActivity/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Doop Agent Status";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.2;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = design.doop.ios.activity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
