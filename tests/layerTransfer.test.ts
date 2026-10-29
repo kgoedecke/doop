@@ -308,23 +308,35 @@ describe('transferLayer', () => {
     expect(updateFrame.mock.calls.map(([id]) => id)).toEqual(['f2', 'f1', 'f2'])
   })
 
-  it('rolls back when another editor changed the element in the saved source', async () => {
+  it('keeps the move and says so when the saved source cannot show whether the element is still there', async () => {
     const source = frameWith('f1', page('<div><p>A</p><p>B</p></div>'))
     const dest = frameWith('f2', page('<section></section>'))
-    holdCanvas(source, dest)
-    /* B's text and style were edited meanwhile: its markup changed, but it is still there */
-    const remote = { ...source, html: page('<div><p>A</p><p style="color:red">Bee</p></div>'), updatedAt: 9 }
-    updateFrame
-      .mockImplementationOnce(() => Promise.resolve({ ...frameWith('f2', ''), updatedAt: 7 } as Frame))
-      .mockImplementationOnce(() =>
-        Promise.reject(Object.assign(new ApiError(409, '{}'), { status: 409, body: { frame: remote } })),
-      )
-    expect(transferLayer(source, P_B, dest, { selector: SECTION, place: 'inside' })).toBe(true)
-    for (let i = 0; i < 6; i++) await Promise.resolve()
-    expect(html('f2')).toBe(dest.html)
-    expect(html('f1')).toBe(remote.html)
-    expect(updateFrame.mock.calls.map(([id]) => id)).toEqual(['f2', 'f1', 'f2'])
-    expect(useStore.getState().notice?.text).toBe('Couldn’t move the layer to “f2”')
+    const conflict = (remoteHtml: string) => {
+      const remote = { ...source, html: remoteHtml, updatedAt: 9 }
+      updateFrame
+        .mockImplementationOnce(() => Promise.resolve({ ...frameWith('f2', ''), updatedAt: 7 } as Frame))
+        .mockImplementationOnce(() =>
+          Promise.reject(Object.assign(new ApiError(409, '{}'), { status: 409, body: { frame: remote } })),
+        )
+      return remote
+    }
+    /* B edited in place, or B removed by a quick edit that also added C: the same two paragraphs either way */
+    for (const remoteHtml of [
+      page('<div><p>A</p><p style="color:red">Bee</p></div>'),
+      page('<div><p>A</p><p>C</p></div>'),
+    ]) {
+      updateFrame.mockClear()
+      useStore.setState({ notice: null })
+      holdCanvas(source, dest)
+      const remote = conflict(remoteHtml)
+      expect(transferLayer(source, P_B, dest, { selector: SECTION, place: 'inside' })).toBe(true)
+      for (let i = 0; i < 6; i++) await Promise.resolve()
+      /* the moved copy is never rolled back into nothing */
+      expect(html('f2')).toMatch(/<section><p[^>]*>B<\/p><\/section>/)
+      expect(html('f1')).toBe(remote.html)
+      expect(updateFrame.mock.calls.map(([id]) => id)).toEqual(['f2', 'f1'])
+      expect(useStore.getState().notice?.text).toBe('“f1” changed while the layer moved; check it for a second copy')
+    }
   })
 
   it('follows an element with an id through an edit, and lets the move stand once it is gone', async () => {
@@ -479,7 +491,7 @@ describe('detachLayer', () => {
     expect(deleteFrame).not.toHaveBeenCalled()
   })
 
-  it('drops the lifted copy when another editor changed the element in the saved source', async () => {
+  it('keeps the lifted copy and says so when the saved source cannot show whether the element is still there', async () => {
     const source = frameWith('f1', page('<div><p>A</p><p>B</p></div>'))
     holdCanvas(source)
     const remote = { ...source, html: page('<div><p>A</p><p class="big">B, edited</p></div>'), updatedAt: 9 }
@@ -489,8 +501,9 @@ describe('detachLayer', () => {
     expect(await detachLayer(source, P_B)).toBe(true)
     for (let i = 0; i < 6; i++) await Promise.resolve()
     expect(html('f1')).toBe(remote.html)
-    expect(useStore.getState().canvas?.frames.some((f) => f.id === 'new')).toBe(false)
-    expect(deleteFrame).toHaveBeenCalledWith('new', 0)
+    expect(useStore.getState().canvas?.frames.some((f) => f.id === 'new')).toBe(true)
+    expect(deleteFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().notice?.text).toBe('“f1” changed while the layer moved; check it for a second copy')
   })
 
   it('drops the created frame again when the source save conflicts', async () => {
