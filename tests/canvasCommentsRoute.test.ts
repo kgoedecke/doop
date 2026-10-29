@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { Client, startServer, type Server } from './harness.ts'
+import type { ElementComment } from '../shared/types.ts'
 
 /**
  * POST /api/canvases/:id/comments against the REAL server (see ./harness.ts):
@@ -150,5 +151,96 @@ describe('POST /api/frames/:id/comments on the frame as a whole', () => {
     ).json()
     expect(comment.x).toBeUndefined()
     expect(comment.y).toBeUndefined()
+  })
+})
+
+describe('PATCH /api/comments/:id/anchor', () => {
+  it('moves a thread off an element onto the canvas, onto a frame and back onto an element', async () => {
+    const frame = await (
+      await owner.post(`/api/canvases/${canvasId}/frames`, {
+        name: 'Movable',
+        width: 400,
+        height: 300,
+        html: '<p>Hi</p><button>Go</button>',
+      })
+    ).json()
+    const root = await (
+      await owner.post(`/api/frames/${frame.id}/comments`, { selector: 'p', snippet: '<p>Hi</p>', text: 'Move me' })
+    ).json()
+    const reply = await (await owner.post(`/api/comments/${root.id}/replies`, { text: 'Along' })).json()
+
+    const room = await listen(owner)
+    /* onto the canvas: the frame is gone from root and reply alike */
+    let res = await owner.patch(`/api/comments/${root.id}/anchor`, { pageId, x: 10, y: 20 })
+    let moved = await res.json()
+    expect(res.status, JSON.stringify(moved)).toBe(200)
+    expect(moved).toMatchObject({ id: root.id, pageId, x: 10, y: 20, selector: '', snippet: '' })
+    expect(moved.frameId).toBeUndefined()
+    await until(() => room.messages.filter((m) => m.type === 'comment').length >= 2)
+    room.close()
+    const broadcast = room.messages.filter((m) => m.type === 'comment').map((m) => m.comment as ElementComment)
+    expect(broadcast).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: root.id, pageId, x: 10, y: 20 }),
+        expect.objectContaining({ id: reply.id, parentId: root.id, pageId, x: 10, y: 20 }),
+      ]),
+    )
+    expect(broadcast.every((c) => c.frameId === undefined)).toBe(true)
+
+    /* onto the frame as a whole, named through the reply: the page goes, the point stays */
+    res = await owner.patch(`/api/comments/${reply.id}/anchor`, {
+      frameId: frame.id,
+      selector: 'body',
+      snippet: '',
+      x: 300,
+      y: 200,
+    })
+    moved = await res.json()
+    expect(res.status, JSON.stringify(moved)).toBe(200)
+    expect(moved).toMatchObject({ id: root.id, frameId: frame.id, selector: 'body', x: 300, y: 200 })
+    expect(moved.pageId).toBeUndefined()
+
+    /* onto an element: no point on an element comment */
+    res = await owner.patch(`/api/comments/${root.id}/anchor`, {
+      frameId: frame.id,
+      selector: 'button',
+      snippet: '<button>Go</button>',
+      x: 1,
+      y: 2,
+    })
+    moved = await res.json()
+    expect(moved).toMatchObject({ frameId: frame.id, selector: 'button', snippet: '<button>Go</button>' })
+    expect(moved.x).toBeUndefined()
+    expect(moved.y).toBeUndefined()
+    expect(moved.pageId).toBeUndefined()
+    /* a later reply inherits the new anchor */
+    const later = await (await owner.post(`/api/comments/${root.id}/replies`, { text: 'Still here' })).json()
+    expect(later).toMatchObject({ frameId: frame.id, selector: 'button', parentId: root.id })
+  })
+
+  it('refuses a bad anchor, a frame of another canvas, a missing page and strangers', async () => {
+    const frame = await (
+      await owner.post(`/api/canvases/${canvasId}/frames`, { name: 'Here', width: 100, height: 100, html: '<p>Hi</p>' })
+    ).json()
+    const root = await (
+      await owner.post(`/api/frames/${frame.id}/comments`, { selector: 'p', snippet: '<p>Hi</p>', text: 'Stay' })
+    ).json()
+    const other = await (await owner.post('/api/canvases', { name: 'Elsewhere' })).json()
+    const foreign = await (
+      await owner.post(`/api/canvases/${other.id}/frames`, { name: 'Far', width: 100, height: 100, html: '<p>Hi</p>' })
+    ).json()
+    const status = async (body: unknown) => (await owner.patch(`/api/comments/${root.id}/anchor`, body)).status
+    expect(await status({})).toBe(400)
+    expect(await status({ frameId: frame.id, selector: '' })).toBe(400)
+    expect(await status({ pageId, x: 'left', y: 0 })).toBe(400)
+    expect(await status({ pageId: 'nope', x: 0, y: 0 })).toBe(404)
+    expect(await status({ frameId: 'missing', selector: 'p', snippet: '' })).toBe(404)
+    expect(await status({ frameId: foreign.id, selector: 'p', snippet: '' })).toBe(404)
+    expect((await stranger.patch(`/api/comments/${root.id}/anchor`, { pageId, x: 0, y: 0 })).status).toBe(403)
+    expect((await owner.patch('/api/comments/missing/anchor', { pageId, x: 0, y: 0 })).status).toBe(404)
+    /* none of that moved it: a reply still lands on the element */
+    const reply = await (await owner.post(`/api/comments/${root.id}/replies`, { text: 'Still' })).json()
+    expect(reply).toMatchObject({ frameId: frame.id, selector: 'p' })
+    expect(reply.pageId).toBeUndefined()
   })
 })

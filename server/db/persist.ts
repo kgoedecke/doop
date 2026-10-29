@@ -683,6 +683,13 @@ export function saveComment(c: ElementComment) {
       .onConflictDoUpdate({
         target: t.comments.id,
         set: {
+          /* a moved thread keeps its id and takes a new anchor */
+          frameId: row.frameId,
+          selector: row.selector,
+          snippet: row.snippet,
+          pageId: row.pageId,
+          x: row.x,
+          y: row.y,
           claimedBy: row.claimedBy,
           claimedAt: row.claimedAt,
           failedAt: row.failedAt,

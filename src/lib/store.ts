@@ -85,6 +85,10 @@ interface State {
   /** the element under the pointer in the Layers panel — its frame outlines
    *  it on the canvas, the same as a hover over the frame itself */
   hoveredLayer: { frameId: string; selector: string } | null
+  /** a comment pin being dragged: its thread root and where the pointer
+   *  holds it, in world px — CanvasComments draws the ghost there, above
+   *  every frame, while the pin itself hides */
+  commentDrag: { id: string; x: number; y: number } | null
   /** the element properties panel is showing — opened by a pick (a click on
    *  the frame surface or a Layers row), it then follows whatever element is
    *  selected until it is closed */
@@ -216,6 +220,7 @@ interface State {
   closeCtxMenu(): void
   setSelectedElement(el: { frameId: string; selector: string } | null): void
   setHoveredLayer(el: { frameId: string; selector: string } | null): void
+  setCommentDrag(drag: { id: string; x: number; y: number } | null): void
   /** an element picked by the user — on the frame surface or in the Layers
    *  rail: selects it and opens its properties panel; picking nothing clears
    *  the selection and closes the panel */
@@ -288,6 +293,7 @@ export const useStore = create<State>((set, get) => ({
   selectedElement: null,
   selectedElements: [],
   hoveredLayer: null,
+  commentDrag: null,
   elementPanelOpen: false,
   layersOpen: readLayersOpen(),
   uiHidden: false,
@@ -604,6 +610,7 @@ export const useStore = create<State>((set, get) => ({
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
   closeCtxMenu: () => set({ ctxMenu: null }),
+  setCommentDrag: (commentDrag) => set({ commentDrag }),
   setHoveredLayer: (hoveredLayer) =>
     set((s) =>
       s.hoveredLayer?.frameId === hoveredLayer?.frameId && s.hoveredLayer?.selector === hoveredLayer?.selector

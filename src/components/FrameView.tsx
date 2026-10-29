@@ -767,8 +767,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   }
 
   /* keep comment pins glued to their elements: re-locate whenever the frame's
-     html or the comment set changes */
-  const commentKey = comments.map((c) => c.id).join(',')
+     html or the comment set changes, or a pin is moved onto another element */
+  const commentKey = comments.map((c) => c.id + c.selector).join(',')
   useEffect(() => {
     if (!runtimeReady) return
     for (const c of comments) {

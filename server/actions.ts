@@ -5,7 +5,7 @@ import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
 import { canvasPages } from '../shared/pages.ts'
-import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment } from '../shared/comments.ts'
+import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
@@ -455,6 +455,17 @@ type CommentAnchor =
   | { frame: Frame; selector: string; snippet: string; point?: { x: number; y: number } }
   | { pageId: string; x: number; y: number }
 
+/** An anchor inside a frame, as a client sent it: the selector and snippet
+ *  trimmed, and the point kept only for a comment on the frame as a whole. */
+function frameAnchor(frame: Frame, input: { selector: unknown; snippet: unknown; x?: unknown; y?: unknown }) {
+  const selector = String(input.selector ?? '').slice(0, 300)
+  const point =
+    selector === FRAME_COMMENT_SELECTOR && Number.isFinite(input.x) && Number.isFinite(input.y)
+      ? { x: Number(input.x), y: Number(input.y) }
+      : undefined
+  return { frame, selector, snippet: String(input.snippet ?? '').slice(0, 400), ...(point ? { point } : {}) }
+}
+
 export function addElementComment(
   frameId: string,
   input: { selector: string; snippet: string; text: string; x?: unknown; y?: unknown },
@@ -463,19 +474,59 @@ export function addElementComment(
 ): ElementComment | undefined {
   const frame = store.getFrame(frameId)
   if (!frame) return undefined
-  const selector = String(input.selector ?? '').slice(0, 300)
-  /* a comment on the frame as a whole keeps the point it was left at */
-  const point =
-    selector === FRAME_COMMENT_SELECTOR && Number.isFinite(input.x) && Number.isFinite(input.y)
-      ? { x: Number(input.x), y: Number(input.y) }
-      : undefined
-  return postComment(
-    frame.canvasId,
-    { frame, selector, snippet: String(input.snippet ?? '').slice(0, 400), ...(point ? { point } : {}) },
-    input.text,
-    from,
-    fromUserId,
+  return postComment(frame.canvasId, frameAnchor(frame, input), input.text, from, fromUserId)
+}
+
+/** The anchor as it is written onto a comment; what the anchor does not
+ *  carry is absent, so a moved comment sheds its old frame or page. */
+function anchorFields(
+  anchor: CommentAnchor,
+): Pick<ElementComment, 'frameId' | 'selector' | 'snippet' | 'pageId' | 'x' | 'y'> {
+  return 'frame' in anchor
+    ? { frameId: anchor.frame.id, selector: anchor.selector, snippet: anchor.snippet, ...anchor.point }
+    : { selector: '', snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }
+}
+
+/** Re-pin a thread where its root pin was dropped: on an element, on a
+ *  frame as a whole or on the canvas, on any frame of the same canvas. The
+ *  root and its replies move together, since replies inherit the anchor.
+ *  Undefined when the comment, the frame or the page is not there. */
+export function moveComment(commentId: string, input: CommentAnchorInput, by: string): ElementComment | undefined {
+  const found = findComment(commentId)
+  if (!found) return undefined
+  const root = found.parentId ? findComment(found.parentId) : found
+  if (!root) return undefined
+  const canvas = store.getCanvas(root.canvasId)
+  if (!canvas) return undefined
+  let anchor: CommentAnchor
+  if ('frameId' in input) {
+    const frame = store.getFrame(input.frameId)
+    if (!frame || frame.canvasId !== root.canvasId) return undefined
+    anchor = frameAnchor(frame, input)
+  } else {
+    if (!canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
+    anchor = { pageId: input.pageId, x: input.x, y: input.y }
+  }
+  const fields = anchorFields(anchor)
+  const list = commentLog.get(root.canvasId) ?? []
+  let moved = root
+  list.forEach((c, i) => {
+    if (c.id !== root.id && c.parentId !== root.id) return
+    const { frameId: _frameId, pageId: _pageId, x: _x, y: _y, ...rest } = c
+    const next: ElementComment = { ...rest, ...fields }
+    list[i] = next
+    if (c.id === root.id) moved = next
+    persist.saveComment(next)
+    broadcast(root.canvasId, { type: 'comment', comment: next })
+  })
+  const frame = 'frame' in anchor ? anchor.frame : undefined
+  logActivity(
+    root.canvasId,
+    resolveActor({ name: by, kind: 'user' }),
+    frame ? `moved a comment to “${frame.name}”` : 'moved a comment onto the canvas',
+    frame?.id,
   )
+  return moved
 }
 
 /** A comment pinned to a point on the canvas (world coordinates on one of
@@ -554,9 +605,7 @@ function postComment(
   const comment: ElementComment = {
     id: nanoid(8),
     canvasId,
-    ...('frame' in anchor
-      ? { frameId: anchor.frame.id, selector: anchor.selector, snippet: anchor.snippet, ...anchor.point }
-      : { selector: '', snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }),
+    ...anchorFields(anchor),
     from,
     ...(fromUserId ? { fromUserId } : {}),
     text: clean,

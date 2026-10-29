@@ -9,7 +9,7 @@ import { getIdentity } from '../lib/identity'
 import type { ComposerPlacement } from '../lib/composerPlacement'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
-import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
+import { CommentComposer, CommentPin, CommentThread, PIN_SCALE } from './CommentPopovers'
 import { cn } from '@/lib/utils'
 import { CommentIcon } from './ui/icons'
 
@@ -56,6 +56,10 @@ export function CanvasComments({
   )
   const [openThread, setOpenThread] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  /* a pin being dragged, from this layer or out of a frame: its ghost rides
+     the pointer here, above every frame, where no frame surface clips it */
+  const drag = useStore((s) => s.commentDrag)
+  const dragRoot = drag ? all.find((c) => c.id === drag.id) : undefined
 
   /* the Comments panel asked for one of these threads to open: the request
      is consumed once the thread is up, so a page switch back never reopens it */
@@ -157,6 +161,19 @@ export function CanvasComments({
           </CommentPin>
         )
       })}
+
+      {drag && dragRoot && (
+        <div
+          data-comment-drag
+          className={cn(
+            'pointer-events-none absolute z-[8] grid h-[26px] w-[26px] place-items-center rounded-[50%_50%_50%_4px] border-2 border-white text-[13px] text-white shadow-pop',
+            PIN_SCALE,
+          )}
+          style={{ left: drag.x, top: drag.y, background: colorFor(dragRoot.from) }}
+        >
+          <CommentIcon size={14} />
+        </div>
+      )}
 
       {composeAt && canvasId && (
         <div

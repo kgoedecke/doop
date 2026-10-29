@@ -10,6 +10,7 @@ import type {
   CardScope,
   CommunityCategory,
   CommunityItem,
+  ElementComment,
   Frame,
   FrameVersion,
   FrameVersionInfo,
@@ -22,6 +23,7 @@ import type {
 import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } from '../../shared/automations'
 import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
+import type { CommentAnchorInput } from '../../shared/comments'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -527,6 +529,9 @@ export const api = {
   replyComment: (commentId: string, text: string) =>
     req(`/api/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ text }) }),
   resolveComment: (commentId: string) => req(`/api/comments/${commentId}/resolve`, { method: 'POST' }),
+  /** re-pin a thread (its root or any reply names it) where its pin was dropped */
+  moveComment: (commentId: string, anchor: CommentAnchorInput) =>
+    req<ElementComment>(`/api/comments/${commentId}/anchor`, { method: 'PATCH', body: JSON.stringify(anchor) }),
   retryComment: (commentId: string) => req(`/api/comments/${commentId}/retry`, { method: 'POST' }),
   retryTaskFeedback: (feedbackId: string) => req(`/api/feedback/${feedbackId}/retry`, { method: 'POST' }),
   /* automations: scheduled pulls and agent tasks */

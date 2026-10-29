@@ -191,14 +191,24 @@
   creation queued with transfers, and undo/redo. Browser regressions cover transformed shapes,
   stacking contexts, covered shapes, and delayed hit-test replies.
 
-## 5. Security and Secrets
-
+- Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may
+  comment drags a thread's root pin; a ghost rides the pointer in the world layer
+  (`CanvasComments`), above every frame, since the pin itself sits inside a clipped frame surface.
+  On release the drop point is resolved in order: the topmost visible frame under it is probed
+  (`doop:probe`) for an element, else the frame as a whole at that design point, else the canvas
+  at that world point, so a thread changes kind either way (element → canvas comment and back).
+  `PATCH /api/comments/:id/anchor` (comment role; `CommentAnchorInput` in `shared/comments.ts`)
+  re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
+  sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
+  `canvasCommentsRoute.test.ts`, the drag case in `drawingBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
   (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions; the
   Prototype tab and `PrototypeOverlay.tsx` edit and draw them; MCP has `get_prototype` and
   `set_prototype_start`. `tests/prototypeBrowser.test.ts` drives the player in Chromium.
+
+## 5. Security and Secrets
 
 - better-auth 1.6.26 - authentication: email/password, generic OIDC/SSO, and Google / Microsoft /
   Apple sign-in (social providers, `GOOGLE_*` / `MICROSOFT_*` / `APPLE_*` client pairs; the iOS app

@@ -35,6 +35,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
   let saved: Frame[] = []
   let nextId = 0
   let patchRequests = 0
+  /* the anchors sent by PATCH /api/comments/:id/anchor, in order */
+  let commentMoves: Record<string, unknown>[] = []
   const errors: string[] = []
 
   beforeAll(async () => {
@@ -74,6 +76,9 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
         await req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(frame) })
       } else if (path.endsWith('/comments') && req.method() === 'POST') {
         await req.respond({ status: 200, contentType: 'application/json', body: req.postData()! })
+      } else if (path.startsWith('/api/comments/') && path.endsWith('/anchor') && req.method() === 'PATCH') {
+        commentMoves.push(JSON.parse(req.postData()!))
+        await req.respond({ status: 200, contentType: 'application/json', body: req.postData()! })
       } else if (path.startsWith('/api/frames/') && req.method() === 'DELETE') {
         saved = saved.filter((f) => f.id !== path.split('/').at(-1))
         await req.respond({ status: 200, contentType: 'application/json', body: '{}' })
@@ -87,6 +92,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     saved = []
     nextId = 0
     patchRequests = 0
+    commentMoves = []
     await page.setViewport({ width: 1200, height: 800 })
     await page.goto(fixtureUrl('drawing.html'))
     await page.waitForFunction(() => !!window.drawingHarness)
@@ -1692,6 +1698,125 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.mouse.click(text.x + 10, text.y + text.height / 2)
     await page.waitForSelector('textarea[placeholder="Leave a comment on this element…"]')
     expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe('#a')
+  })
+
+  it('drags a comment pin off its element onto the canvas, onto the frame, and back onto an element', async () => {
+    await seedFrames([
+      {
+        id: 'plain',
+        updatedBy: 'User',
+        canvasId: 'c',
+        pageId: 'first',
+        name: 'Plain',
+        x: 30,
+        y: 30,
+        width: 400,
+        height: 300,
+        createdAt: 0,
+        updatedAt: 0,
+        html: '<p id="a" style="margin:0;width:120px">Alpha</p>',
+      },
+    ])
+    const handle = await page.waitForSelector('iframe[title="Plain"]')
+    await (await handle!.contentFrame())!.waitForSelector('#a')
+    const box = (await handle!.boundingBox())!
+    /* a point inside the paragraph (120 design px wide under the body's 8px margin), at zoom 2 */
+    const inText = { x: box.x + 100, y: box.y + 32 }
+    const onElement = {
+      id: 'moving',
+      canvasId: 'c',
+      frameId: 'plain',
+      selector: '#a',
+      snippet: '<p id="a">Alpha</p>',
+      from: 'Alice',
+      text: 'Move me',
+      at: 0,
+    }
+    await page.evaluate((c) => window.drawingHarness.comments([c]), onElement)
+    const pinBox = async () => {
+      const pin = (await page.waitForSelector('[title="Alice: Move me"]'))!
+      await pin.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)))
+      return (await pin.boundingBox())!
+    }
+    const home = await pinBox()
+    /* the pin hangs off the element's top-right corner, inside the frame */
+    expect(home.x + home.width / 2).toBeGreaterThan(box.x + 200)
+    expect(home.x + home.width / 2).toBeLessThan(box.x + 300)
+    let pin = home
+
+    /* onto empty canvas, right of the frame: the ghost rides along, the pin hides */
+    await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width + 100, box.y + 100, { steps: 6 })
+    await page.waitForSelector('[data-comment-drag]')
+    expect(await page.$eval('[title="Alice: Move me"]', (el) => getComputedStyle(el).opacity)).toBe('0')
+    const ghost = (await (await page.$('[data-comment-drag]'))!.boundingBox())!
+    expect(Math.abs(ghost.x + ghost.width / 2 - (box.x + box.width + 100))).toBeLessThan(3)
+    expect(Math.abs(ghost.y + ghost.height / 2 - (box.y + 100))).toBeLessThan(3)
+    await page.mouse.up()
+    await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
+    expect(commentMoves).toHaveLength(1)
+    /* world px at zoom 2: the frame's right edge is at 430, 100 screen px right of it is 50 more
+       (the frame's box is measured to its 1px border, so the point may land a px over) */
+    expect(commentMoves[0]).toMatchObject({ pageId: 'first' })
+    expect(Math.abs(Number(commentMoves[0]!.x) - 480)).toBeLessThan(2)
+    expect(Math.abs(Number(commentMoves[0]!.y) - 80)).toBeLessThan(2)
+    /* no thread opened from the release */
+    expect(await page.$('textarea[placeholder="Reply… (@doop to ask the agent)"]')).toBeNull()
+    /* the room says where it went: a canvas pin now */
+    const onCanvas = { ...onElement, frameId: undefined, selector: '', snippet: '', pageId: 'first', x: 480, y: 80 }
+    await page.evaluate((c) => window.drawingHarness.comments([c]), onCanvas)
+    pin = await pinBox()
+    expect(Math.abs(pin.x + pin.width / 2 - (box.x + box.width + 100))).toBeLessThan(3)
+
+    /* onto the frame's own background: a comment on the frame as a whole, at that point */
+    await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 })
+    await page.mouse.up()
+    await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
+    expect(commentMoves).toHaveLength(2)
+    expect(commentMoves[1]).toMatchObject({ frameId: 'plain', selector: 'body', snippet: '' })
+    expect(Math.abs(Number(commentMoves[1]!.x) - 200)).toBeLessThan(2)
+    expect(Math.abs(Number(commentMoves[1]!.y) - 150)).toBeLessThan(2)
+    const onFrame = { ...onElement, selector: 'body', snippet: '', x: 200, y: 150 }
+    await page.evaluate((c) => window.drawingHarness.comments([c]), onFrame)
+    pin = await pinBox()
+    expect(Math.abs(pin.x + pin.width / 2 - (box.x + box.width / 2))).toBeLessThan(3)
+
+    /* back onto the paragraph: an element comment again */
+    await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(inText.x, inText.y, { steps: 6 })
+    await page.mouse.up()
+    await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
+    expect(commentMoves).toHaveLength(3)
+    expect(commentMoves[2]).toMatchObject({ frameId: 'plain', selector: '#a' })
+    expect(commentMoves[2]).not.toHaveProperty('x')
+    await page.evaluate((c) => window.drawingHarness.comments([c]), onElement)
+    pin = await pinBox()
+    expect(Math.abs(pin.x - home.x)).toBeLessThan(3)
+    expect(Math.abs(pin.y - home.y)).toBeLessThan(3)
+
+    /* a click still opens the thread, and Esc mid-drag puts the pin back without a move */
+    await page.mouse.click(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.waitForSelector('textarea[placeholder="Reply… (@doop to ask the agent)"]')
+    await page.keyboard.press('Escape')
+    await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width + 100, box.y + 100, { steps: 4 })
+    await page.waitForSelector('[data-comment-drag]')
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
+    await page.mouse.up()
+    expect(commentMoves).toHaveLength(3)
+    expect(await page.$eval('[title="Alice: Move me"]', (el) => getComputedStyle(el).opacity)).toBe('1')
+    /* the cancelled gesture leaves nothing behind: the next click opens the
+       thread, and Escape (no longer swallowed) closes it again */
+    await page.mouse.click(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.waitForSelector('textarea[placeholder="Reply… (@doop to ask the agent)"]')
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('textarea[placeholder="Reply… (@doop to ask the agent)"]'))
   })
 
   it('keeps all tools reachable on phones, clear of zoom, and accepts touch drawing', async () => {

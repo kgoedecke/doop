@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import type { CommentAnchorInput } from '../shared/comments.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
@@ -1925,6 +1926,26 @@ app.post('/api/comments/:id/resolve', (req, res) => {
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId, 'comment')) return
   res.json(actions.resolveComment(req.params.id, req.user!.name))
+})
+
+/* drag a thread's pin somewhere else: onto an element, a frame as a whole
+   or the canvas. The whole thread moves, and anyone who may comment may move */
+app.patch('/api/comments/:id/anchor', (req, res) => {
+  const found = actions.findComment(req.params.id)
+  if (!found) return res.status(404).json({ error: 'comment not found' })
+  if (!requireCanvas(req, res, found.canvasId, 'comment')) return
+  const { frameId, selector, snippet, pageId, x, y } = req.body ?? {}
+  let anchor: CommentAnchorInput
+  if (typeof frameId === 'string') {
+    if (typeof selector !== 'string' || !selector.trim()) return res.status(400).json({ error: 'selector required' })
+    anchor = { frameId, selector, snippet: String(snippet ?? ''), x, y }
+  } else if (typeof pageId === 'string') {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
+    anchor = { pageId, x: Number(x), y: Number(y) }
+  } else return res.status(400).json({ error: 'frameId or pageId required' })
+  const moved = actions.moveComment(req.params.id, anchor, req.user!.name)
+  if (!moved) return res.status(404).json({ error: 'frame or page not found' })
+  res.json(moved)
 })
 
 app.post('/api/comments/:id/retry', async (req, res) => {
