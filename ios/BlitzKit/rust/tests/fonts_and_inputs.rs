@@ -228,3 +228,37 @@ fn textarea_placeholder_keeps_its_line_breaks() {
     };
     assert!(grey(0..30) && grey(30..60), "placeholder not on two lines");
 }
+
+#[test]
+fn long_textarea_placeholder_wraps_at_the_field_width() {
+    let area = "display:block;width:120px;height:80px;margin:0;padding:0;border:0;\
+                font:20px/30px sans-serif;resize:none";
+    let frame = Frame::paint(
+        320,
+        80,
+        &format!("<textarea placeholder='one two three four five six' style='{area}'></textarea>"),
+    );
+    let ink_in = |rows: std::ops::Range<usize>, columns: std::ops::Range<usize>| {
+        rows.flat_map(|y| columns.clone().map(move |x| (x, y)))
+            .any(|(x, y)| frame.rgb(x, y)[0] < 200)
+    };
+    assert!(
+        ink_in(30..60, 0..120),
+        "placeholder did not wrap onto a second line"
+    );
+    assert!(!ink_in(0..80, 125..320), "placeholder ran past the field");
+}
+
+#[test]
+fn placeholder_takes_a_web_font_that_loads_later() {
+    let field = "display:block;width:400px;height:40px;margin:0;padding:0;border:0;\
+                 font:30px Web,sans-serif";
+    let input = format!("<input placeholder='Hamburgefonts' style='{field}'>");
+    let with_font = Frame::paint(
+        420,
+        40,
+        &format!("<style>@font-face{{font-family:Web;src:url({NEW_YORK})}}</style>{input}"),
+    );
+    let fallback = Frame::paint(420, 40, &input);
+    assert_ne!(with_font.ink_span(0..40), fallback.ink_span(0..40));
+}

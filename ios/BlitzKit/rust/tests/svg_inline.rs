@@ -119,3 +119,36 @@ fn circular_use_renders_the_rest_of_the_symbol() {
     let html = format!("{SPRITE}<svg width='100' height='100'><use href='#loop'/></svg>");
     assert_eq!(centre(&html), RED);
 }
+
+#[test]
+fn gradients_from_inline_style_and_css_survive() {
+    let defs = "<defs><linearGradient id='g'><stop offset='0' stop-color='red'/>\
+        <stop offset='1' stop-color='red'/></linearGradient></defs>";
+    let inline = format!(
+        "<svg width='100' height='100'>{defs}<rect width='100' height='100' style='fill:url(#g)'/></svg>"
+    );
+    assert_eq!(centre(&inline), RED);
+    let css = format!(
+        "<style>.g{{fill:url(#g)}}</style><svg width='100' height='100'>{defs}\
+         <rect class='g' width='100' height='100'/></svg>"
+    );
+    assert_eq!(centre(&css), RED);
+}
+
+#[test]
+fn opacity_attribute_and_css_opacity_together_still_paint() {
+    // Two `opacity` attributes made the SVG invalid XML, so nothing painted.
+    let html = "<svg width='100' height='100'><rect width='100' height='100' fill='red' \
+        opacity='0.9' style='opacity:0.5'/></svg>";
+    let [r, g, b] = centre(html);
+    assert_eq!(r, 255);
+    assert!((110..=145).contains(&g) && g == b, "{:?}", [r, g, b]);
+}
+
+#[test]
+fn id_rules_style_use_clones() {
+    let html = format!(
+        "<style>#half{{fill:red}}</style>{SPRITE}<svg width='100' height='100'><use href='#half' x='40'/></svg>"
+    );
+    assert_eq!(pixel(&html, 60, 50), RED);
+}
