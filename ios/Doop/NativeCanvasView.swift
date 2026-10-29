@@ -15,6 +15,8 @@ struct NativeCanvasView: View {
     @State private var modelError: String?
     @State private var contextReferences: [PromptContextReference] = []
     @State private var contextPickerOpen = false
+    @State private var pagePickerOpen = false
+    @State private var peoplePickerOpen = false
     @State private var dismissedMention: String?
     @FocusState private var promptFocused: Bool
     @State private var sending = false
@@ -47,12 +49,6 @@ struct NativeCanvasView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 7) {
-                Spacer()
-                Circle().fill(model.connected ? .green : .orange).frame(width: 6, height: 6)
-                    .accessibilityLabel(model.connected ? "Live" : model.connecting ? "Connecting" : "Disconnected")
-                if !model.pagePresences.isEmpty { Label("\(model.pagePresences.count) here", systemImage: "person.2") }
-            }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 18)
             if let error = model.error ?? model.connectionError {
                 HStack {
                     Text(error).font(.caption)
@@ -62,7 +58,11 @@ struct NativeCanvasView: View {
             }
             ZStack(alignment: .bottom) {
                 VStack(spacing: 10) {
-                    if modelPickerOpen {
+                    if peoplePickerOpen {
+                        peoplePicker
+                    } else if pagePickerOpen {
+                        pagePicker
+                    } else if modelPickerOpen {
                         modelPicker
                     } else if showContextPicker {
                         contextPicker
@@ -80,26 +80,43 @@ struct NativeCanvasView: View {
                     .ignoresSafeArea(.container, edges: .bottom)
             }
             .overlay(alignment: .topTrailing) {
-                if !showContextPicker && !modelPickerOpen { canvasTools.padding(12) }
+                if !showContextPicker && !modelPickerOpen && !pagePickerOpen && !peoplePickerOpen { canvasTools.padding(12) }
+            }
+            .overlay(alignment: .top) {
+                // A live connection needs no badge; say so only while it is not.
+                if !model.connected {
+                    Label(model.connecting ? "Connecting…" : "Offline", systemImage: model.connecting ? "arrow.triangle.2.circlepath" : "wifi.slash")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.top, 12)
+                        .accessibilityIdentifier("canvas.connectionStatus")
+                }
             }
         }
         .background(CanvasBackSwipeGuard())
         .navigationTitle(model.canvas?.name ?? summary.name).navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                if !model.presences.isEmpty {
+                    Button { openPeoplePicker() } label: { Image(systemName: "person.2") }
+                        .accessibilityLabel("\(model.presences.count) \(model.presences.count == 1 ? "person" : "people") on this canvas")
+                        .accessibilityIdentifier("canvas.presence")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Section {
-                        Picker(selection: Binding(get: { model.activePageID }, set: { model.selectPage($0) })) {
-                            ForEach(model.pages) { page in Text(page.name).tag(page.id) }
-                        } label: { Label("Page", systemImage: "doc.on.doc") }
-                        .pickerStyle(.menu)
-                        .disabled(model.canvas == nil)
-                        .accessibilityIdentifier("canvas.pagePicker")
+                        Button { openPagePicker() } label: { Label("Pages", systemImage: "doc.on.doc") }
+                            .disabled(model.canvas == nil)
+                            .accessibilityIdentifier("canvas.pagePicker")
                     }
                     Button { sheet = .tasks } label: { Label("Agent tasks", systemImage: "sparkles") }
                     Button { sheet = .comments } label: { Label("Comments", systemImage: "bubble.left.and.bubble.right") }
                     ShareLink(item: model.client.server.origin.appendingPathComponent("c/\(model.id)")) { Label("Share canvas link", systemImage: "square.and.arrow.up") }
-                    if model.selected != nil { Button("Export selection") { openExport() } }
+                    if model.selected != nil {
+                        Button { openExport() } label: { Label("Export selection", systemImage: "square.and.arrow.up.on.square") }
+                    }
                 } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Canvas actions")
             }
         }
@@ -124,6 +141,8 @@ struct NativeCanvasView: View {
         }
         .onChange(of: model.promptScope?.key) { _ in copiedSelection = false }
         .onChange(of: model.deleted) { deleted in if deleted { dismiss() } }
+        .onChange(of: promptFocused) { focused in if focused { pagePickerOpen = false; peoplePickerOpen = false } }
+        .onChange(of: model.presences.isEmpty) { empty in if empty { peoplePickerOpen = false } }
         .onChange(of: model.activePageID) { _ in
             dismissedScope = nil
             if sheet?.id == "inspector" || sheet?.id == "export" { sheet = nil }
@@ -172,7 +191,7 @@ struct NativeCanvasView: View {
             HStack(spacing: 8) {
                 Button {
                     if showContextPicker { closeContextPicker() }
-                    else { modelPickerOpen = false; contextPickerOpen = true; dismissedMention = nil; promptFocused = false }
+                    else { modelPickerOpen = false; pagePickerOpen = false; peoplePickerOpen = false; contextPickerOpen = true; dismissedMention = nil; promptFocused = false }
                 } label: {
                     Image(systemName: "at").font(.system(size: 18, weight: .regular))
                         .foregroundStyle(ComposerColors.action)
@@ -185,6 +204,8 @@ struct NativeCanvasView: View {
                 Button {
                     closeContextPicker()
                     promptFocused = false
+                    pagePickerOpen = false
+                    peoplePickerOpen = false
                     modelPickerOpen.toggle()
                     if modelPickerOpen { Task { await loadModels() } }
                 } label: {
@@ -223,6 +244,118 @@ struct NativeCanvasView: View {
         .modifier(ComposerGlass())
         .background(GeometryReader { proxy in Color.clear.preference(key: ComposerHeightKey.self, value: proxy.size.height) })
         .onPreferenceChange(ComposerHeightKey.self) { model.composerHeight = $0 }
+    }
+
+    private func openPeoplePicker() {
+        modelPickerOpen = false
+        pagePickerOpen = false
+        contextPickerOpen = false
+        dismissedMention = prompt
+        promptFocused = false
+        peoplePickerOpen = true
+    }
+
+    /// Everyone else on the canvas, people and agents, with the page each is on.
+    private var peoplePicker: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("On this canvas").font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                Button { peoplePickerOpen = false } label: {
+                    Image(systemName: "xmark").font(.caption).foregroundStyle(ComposerColors.action).frame(width: 44, height: 44)
+                }.buttonStyle(.plain).accessibilityLabel("Close people")
+            }.padding(.leading, 12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    if model.presences.isEmpty {
+                        Text("Nobody else is here right now.").foregroundStyle(.secondary).padding(12)
+                    }
+                    ForEach(model.presences) { presence in
+                        HStack(spacing: 12) {
+                            PresenceAvatar(presence: presence).frame(width: 28, height: 28)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(presence.name).lineLimit(1)
+                                Text(presenceDetail(presence)).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 8).frame(minHeight: 48)
+                        .accessibilityElement(children: .combine)
+                    }
+                }.padding(.bottom, 12)
+            }.frame(height: min(CGFloat(max(model.presences.count, 1)) * 60 + 12, 300))
+        }
+        .padding(8).modifier(ComposerGlass())
+        .accessibilityIdentifier("canvas.people")
+    }
+
+    /// "Agent · Page 2": what the collaborator is and the page they are looking at.
+    private func presenceDetail(_ presence: CanvasPresence) -> String {
+        let pageID = presence.viewport?.pageId ?? model.pages.first?.id
+        let page = pageID == model.activePageID ? "This page" : model.pages.first { $0.id == pageID }?.name ?? "This page"
+        return [presence.kind == "agent" ? "Agent" : nil, page].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func openPagePicker() {
+        peoplePickerOpen = false
+        modelPickerOpen = false
+        contextPickerOpen = false
+        dismissedMention = prompt
+        promptFocused = false
+        pagePickerOpen = true
+    }
+
+    /// The canvas's pages, in the composer's glass card like the mention and model pickers.
+    private var pagePicker: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Pages").font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                Button { pagePickerOpen = false } label: {
+                    Image(systemName: "xmark").font(.caption).foregroundStyle(ComposerColors.action).frame(width: 44, height: 44)
+                }.buttonStyle(.plain).accessibilityLabel("Close pages")
+            }.padding(.leading, 12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(model.pages) { page in
+                        let current = page.id == model.activePageID
+                        Button {
+                            model.selectPage(page.id)
+                            pagePickerOpen = false
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: current ? "doc.fill" : "doc").font(.title3)
+                                    .foregroundStyle(ComposerColors.action).frame(width: 28)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(page.name).lineLimit(2).multilineTextAlignment(.leading)
+                                    Text(pageSummary(page)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                if current { Image(systemName: "checkmark").font(.caption).foregroundStyle(ComposerColors.action) }
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .frame(minHeight: 48).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(page.name)
+                        .accessibilityValue(pageSummary(page))
+                        .accessibilityAddTraits(current ? [.isSelected] : [])
+                    }
+                }.padding(.bottom, 12)
+            }.frame(height: min(CGFloat(model.pages.count) * 60 + 12, 300))
+        }
+        .padding(8).modifier(ComposerGlass())
+        .accessibilityIdentifier("canvas.pageOptions")
+    }
+
+    /// "4 frames · 2 here": the page's frames and the people currently on it.
+    private func pageSummary(_ page: CanvasPage) -> String {
+        let frames = model.canvas.map { canvas in canvas.frames.filter { canvas.pageID(for: $0) == page.id }.count } ?? 0
+        var parts = ["\(frames) \(frames == 1 ? "frame" : "frames")"]
+        let firstPageID = model.pages.first?.id
+        let here = model.presences.filter { ($0.viewport?.pageId ?? firstPageID) == page.id }.count
+        if here > 0 { parts.append("\(here) here") }
+        return parts.joined(separator: " · ")
     }
 
     private var modelPicker: some View {
@@ -606,6 +739,24 @@ private enum ComposerColors {
                            green: CGFloat((value >> 8) & 255) / 255,
                            blue: CGFloat(value & 255) / 255, alpha: 1)
         })
+    }
+}
+
+/// A collaborator's face, as on their canvas cursor: an agent's brand mark, or a person's
+/// initials on a tint of their colour.
+private struct PresenceAvatar: View {
+    let presence: CanvasPresence
+    var body: some View {
+        let color = Color(UIColor(hex: presence.color) ?? .systemBlue)
+        ZStack {
+            Circle().fill(color.opacity(presence.kind == "agent" ? 0.12 : 0.22))
+            if presence.kind == "agent" {
+                ComposerBrandMark(name: presence.name, color: color).padding(6)
+            } else {
+                Text(presence.name.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined())
+                    .font(.caption.weight(.medium)).foregroundStyle(color)
+            }
+        }.accessibilityHidden(true)
     }
 }
 

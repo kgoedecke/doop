@@ -1116,7 +1116,7 @@ private final class CursorLayer {
     }
 }
 
-private extension UIColor {
+extension UIColor {
     convenience init?(hex: String) {
         var value = hex.trimmingCharacters(in: .whitespaces)
         if value.hasPrefix("#") { value.removeFirst() }
