@@ -90,7 +90,10 @@ const POPOVER_SCALE = '[transform:scale(calc(1/var(--zoom,1)))_translateY(calc(-
 /* screen px between a frame's name and its top edge, at every zoom */
 const LABEL_GAP = 6
 const EDITOR_CHIP =
-  'inline-flex items-center gap-1 rounded-full px-[7px] py-0.5 text-[10px] font-bold text-white animate-[chip-in_0.25s_ease]'
+  'inline-flex items-center gap-1 rounded-full px-[7px] py-0.5 text-[10px] font-bold text-white animate-[chip-in_0.25s_ease] @max-[180px]/title:px-[4px] @max-[180px]/title:py-[3px]'
+/* a frame narrower on screen than a chip's words keeps only its icon, so
+   neighbouring frames' chips never run into each other */
+const EDITOR_CHIP_TEXT = '@max-[180px]/title:hidden'
 /* the element toolbar's buttons sit on ink and stay compact */
 const EL_TOOLBAR_BTN = 'rounded-[7px] px-2 py-1 text-xs'
 
@@ -1283,8 +1286,15 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                a frame added later covers it, an earlier one never does. It is
                counter-scaled from its bottom-left corner to screen px, so it
                sits a fixed gap above the frame's top-left corner and, its box
-               pre-widened by the zoom, never runs past the frame's right edge */
-              className="pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
+               pre-widened by the zoom, never runs past the frame's right edge.
+               An agent or editor chip is the exception: the name gives way
+               first, then the chip drops its words (a container query on this
+               screen-px width), and only a frame narrower than the bare icon
+               lets it run past the edge, above later frames */
+              className={cn(
+                '@container/title pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 whitespace-nowrap text-[12px] font-semibold text-ink-soft',
+                stream || editors.length > 0 ? 'z-10' : 'overflow-hidden',
+              )}
               style={{
                 width: 'calc(100% * var(--zoom, 1))',
                 transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
@@ -1326,22 +1336,28 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   </span>
                 </Tooltip>
               )}
-              <span className="overflow-hidden text-ellipsis">{frame.name}</span>
+              <span className="min-w-0 overflow-hidden text-ellipsis">{frame.name}</span>
               <FrameApprovalBadge frame={frame} />
-              <span className="flex gap-1">
+              <span className="flex shrink-0 gap-1">
                 {stream && (
-                  <span className={EDITOR_CHIP} style={{ background: stream.color }}>
+                  <span
+                    className={EDITOR_CHIP}
+                    style={{ background: stream.color }}
+                    title={`${stream.name} is designing`}
+                  >
                     <AgentIcon name={stream.name} size={9} color="#fff" />
-                    {stream.name} is designing
-                    <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
+                    <span className={EDITOR_CHIP_TEXT}>
+                      {stream.name} is designing
+                      <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
+                    </span>
                   </span>
                 )}
                 {editors
                   .filter((p) => p.name !== stream?.name)
                   .map((p) => (
-                    <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }}>
-                      {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}{' '}
-                      {p.name}
+                    <span key={p.clientId} className={EDITOR_CHIP} style={{ background: p.color }} title={p.name}>
+                      {p.kind === 'agent' ? <AgentIcon name={p.name} size={9} color="#fff" /> : <EditIcon size={9} />}
+                      <span className={EDITOR_CHIP_TEXT}>{p.name}</span>
                     </span>
                   ))}
               </span>
