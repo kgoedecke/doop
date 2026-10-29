@@ -21,6 +21,11 @@ import { Callout } from '../components/ui/callout'
 /* better-auth deliberately returns the same "invalid email or password" for
    unknown emails and wrong passwords; this tells the two apart so the login
    page can route would-be signups to the right form. */
+/* A request that never reached the server (offline, a blocked request, a
+   dropped connection) rejects instead of returning `res.error`; without a
+   catch the form just stops spinning and says nothing. */
+const NETWORK_ERROR = 'Could not reach doop — check your connection and try again.'
+
 async function accountExists(email: string): Promise<boolean> {
   try {
     const res = await fetch('/api/account-exists', {
@@ -33,6 +38,12 @@ async function accountExists(email: string): Promise<boolean> {
   } catch {
     return true
   }
+}
+
+/* better-auth types the error code as a string, but what arrives is whatever
+   the response carried, and a non-string code crashed the signup form */
+function isUserAlreadyExists(code: unknown): boolean {
+  return typeof code === 'string' && code.startsWith('USER_ALREADY_EXISTS')
 }
 
 function interruptedTarget(): string | null {
@@ -235,6 +246,8 @@ export function AuthPage() {
       }
       const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
       if (res.error) setError(res.error.message ?? startFailed)
+    } catch {
+      setError(NETWORK_ERROR)
     } finally {
       setBusy(false)
     }
@@ -255,6 +268,8 @@ export function AuthPage() {
       setError(null)
       setUnverified(false)
       setNotice('Verification email sent — check your inbox.')
+    } catch {
+      setError(NETWORK_ERROR)
     } finally {
       setBusy(false)
     }
@@ -302,7 +317,7 @@ export function AuthPage() {
           setError('No account found for this email.')
           setSuggestMode('signup')
           posthog.capture('login_no_account_found')
-        } else if (mode === 'signup' && res.error.code?.startsWith('USER_ALREADY_EXISTS')) {
+        } else if (mode === 'signup' && isUserAlreadyExists(res.error.code)) {
           setError('An account with this email already exists.')
           setSuggestMode('signin')
         } else {
@@ -323,6 +338,8 @@ export function AuthPage() {
            demo agent is waiting to perform */
         if (!resumeOAuthFlow() && mode === 'signup') location.href = FIRST_CANVAS_PATH
       }
+    } catch {
+      setError(NETWORK_ERROR)
     } finally {
       setBusy(false)
     }

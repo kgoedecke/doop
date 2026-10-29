@@ -2264,6 +2264,9 @@ app.get('/sitemap.xml', (_req, res) => {
 if (env.isProduction) {
   const dist = path.join(process.cwd(), 'dist')
   app.use(express.static(dist))
+  /* a missing bundle or source map is a 404, not the app shell: HTML served
+     as a .js or .map breaks module loads and source map resolution */
+  app.get('/assets/*', (_req, res) => res.sendStatus(404))
   app.get('*', (_req, res) => res.sendFile(path.join(dist, 'index.html')))
 }
 

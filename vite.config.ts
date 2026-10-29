@@ -23,6 +23,10 @@ export default defineConfig({
        run can outlast the 10s default */
     hookTimeout: 30_000,
   },
+  /* Error tracking resolves minified stack frames through the .map next to
+     each bundle. The source is public (AGPL), so the maps are too; browsers
+     only fetch them when devtools open. */
+  build: { sourcemap: true },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
