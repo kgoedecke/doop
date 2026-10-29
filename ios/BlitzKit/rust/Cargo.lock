@@ -47,8 +47,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "anyrender"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1755d0ef8e00e87b6b825dfbe5a35d34d3b302e97e80a48e93f9cd361fbada06"
+source = "git+https://github.com/kgoedecke/anyrender?rev=229216b1c86c13b8ba00eaf8d274d42f4ce91d80#229216b1c86c13b8ba00eaf8d274d42f4ce91d80"
 dependencies = [
  "kurbo",
  "peniko",
@@ -59,8 +58,7 @@ dependencies = [
 [[package]]
 name = "anyrender_skia"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "282fdae1228486bcdbc973abf6f45afabcbd1579b63b4c95de9da4a0b893b4b7"
+source = "git+https://github.com/kgoedecke/anyrender?rev=229216b1c86c13b8ba00eaf8d274d42f4ce91d80#229216b1c86c13b8ba00eaf8d274d42f4ce91d80"
 dependencies = [
  "anyrender",
  "ash",
@@ -80,6 +78,7 @@ dependencies = [
  "peniko",
  "raw-window-handle",
  "skia-safe",
+ "skrifa",
 ]
 
 [[package]]
@@ -233,7 +232,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f#0f60502ea724ef703b34220b3847bb3483f70b5f"
+source = "git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b#107fb693164f0201d64387eee5c2107c8183102b"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -244,7 +243,7 @@ dependencies = [
  "color",
  "cssparser",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f)",
+ "debug_timer 0.1.3 (git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b)",
  "euclid",
  "html-escape",
  "image",
@@ -278,7 +277,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f#0f60502ea724ef703b34220b3847bb3483f70b5f"
+source = "git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b#107fb693164f0201d64387eee5c2107c8183102b"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -289,7 +288,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f#0f60502ea724ef703b34220b3847bb3483f70b5f"
+source = "git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b#107fb693164f0201d64387eee5c2107c8183102b"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -305,6 +304,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.2"
+source = "git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b#107fb693164f0201d64387eee5c2107c8183102b"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -327,7 +327,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f#0f60502ea724ef703b34220b3847bb3483f70b5f"
+source = "git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b#107fb693164f0201d64387eee5c2107c8183102b"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -756,7 +756,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f#0f60502ea724ef703b34220b3847bb3483f70b5f"
+source = "git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b#107fb693164f0201d64387eee5c2107c8183102b"
 
 [[package]]
 name = "deranged"
@@ -3331,7 +3331,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.2"
-source = "git+https://github.com/DioxusLabs/blitz?rev=0f60502ea724ef703b34220b3847bb3483f70b5f#0f60502ea724ef703b34220b3847bb3483f70b5f"
+source = "git+https://github.com/kgoedecke/blitz?rev=107fb693164f0201d64387eee5c2107c8183102b#107fb693164f0201d64387eee5c2107c8183102b"
 dependencies = [
  "bitflags 2.13.2",
  "stylo",
