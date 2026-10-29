@@ -817,8 +817,9 @@ function renameAnimations(text: string, renamed: Map<string, string>, animationV
     )
 }
 
-/* an animation or animation-name declaration, not a custom property whose name ends in one */
-const ANIMATION_DECLARATION = /((?<![\w-])animation(?:-name)?\s*:\s*)([^;}]*)/g
+/* an animation or animation-name declaration, -webkit- prefixed or not, and
+   not a custom property whose name ends in one */
+const ANIMATION_DECLARATION = /((?<![\w-])(?:-webkit-)?animation(?:-name)?\s*:\s*)([^;}]*)/g
 
 /* the families the @font-face rules of `css` define */
 function fontFaceFamilies(css: string): string[] {

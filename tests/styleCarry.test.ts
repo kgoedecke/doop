@@ -475,6 +475,19 @@ describe('withCarriedCss', () => {
     expect(out).toContain('--my-animation: pop;')
   })
 
+  it('renames a carried animation in -webkit- prefixed declarations too', () => {
+    const dest = page(
+      '<style>@keyframes pop{from{opacity:1}}</style>',
+      '<div data-doop-carried-scope="s" style="-webkit-animation: pop 1s"></div>',
+    )
+    const css =
+      '@keyframes pop { from { opacity: 0; } }\n.x { -webkit-animation: pop 1s; animation: pop 1s; -webkit-animation-name: pop; --x-webkit-animation: pop; }'
+    const out = withCarriedCss(dest, css, 's')
+    expect(out).toContain('-webkit-animation: pop-s 1s; animation: pop-s 1s; -webkit-animation-name: pop-s;')
+    expect(out).toContain('style="-webkit-animation: pop-s 1s"')
+    expect(out).toContain('--x-webkit-animation: pop;')
+  })
+
   it('renames a carried font face the destination already defines, in the sheet and the markup', () => {
     const dest = page(
       '<style>@font-face{font-family:Inter;src:url(theirs.woff2)}</style>',
