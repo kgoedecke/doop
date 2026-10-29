@@ -166,7 +166,7 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
         <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
           <span
             aria-hidden
-            className="grid size-4 flex-none place-items-center rounded-full text-[8px] font-medium text-white"
+            className="grid size-4 flex-none place-items-center rounded-full text-[8px] leading-none font-medium text-white"
             style={{ background: colorFor(root.from) }}
           >
             {root.from.slice(0, 1).toUpperCase()}

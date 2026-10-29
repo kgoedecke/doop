@@ -78,6 +78,9 @@ function Avatar({
       style={{
         width: size,
         height: size,
+        /* inline, so a text-size class (labelClass, a caller's) cannot merge it away;
+           a line box no taller than the type keeps the letter centred in the disc */
+        lineHeight: 1,
         ...(kind === 'user' && tone === 'tint'
           ? { background: `color-mix(in srgb, ${color} 22%, var(--surface))` }
           : {}),
