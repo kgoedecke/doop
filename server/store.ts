@@ -664,6 +664,11 @@ class Store {
       Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'approval'>
     >,
     by: string,
+    opts: {
+      /** the html change only marks elements up (a `data-doop-id` stamp):
+       *  nothing a reviewer signed off on moved, so sign-off stands */
+      annotation?: boolean
+    } = {},
   ): Frame | undefined {
     const frame = this.getFrame(frameId)
     if (!frame) return undefined
@@ -672,9 +677,9 @@ class Store {
       !canvasPages(this.canvases.get(frame.canvasId)!).some((p) => p.id === patch.pageId)
     )
       return undefined
-    const designChanged = (['html', 'width', 'height'] as const).some(
-      (key) => patch[key] !== undefined && patch[key] !== frame[key],
-    )
+    const designChanged =
+      !opts.annotation &&
+      (['html', 'width', 'height'] as const).some((key) => patch[key] !== undefined && patch[key] !== frame[key])
     Object.assign(frame, patch)
     // All writers (including streams, sync and restores) invalidate sign-off.
     if (designChanged && frame.approval?.status === 'ready_for_dev') {

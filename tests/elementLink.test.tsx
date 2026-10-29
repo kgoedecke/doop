@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { elementLink, copyElementLink } from '../src/lib/elementLink'
 import { useStore } from '../src/lib/store'
+import { api } from '../src/lib/api'
 import { LayersPanel } from '../src/components/LayersPanel'
 import { TooltipProvider } from '../src/components/ui/tooltip'
 import type { Frame } from '../shared/types'
@@ -45,26 +46,47 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it.each(['#hero > h1:nth-of-type(1)', '#price\\:usd', '[data-name="A&B + #50% / café"]'])(
-  'round-trips CSS selectors without turning their characters into URL delimiters: %s',
-  (selector) => {
-    const url = new URL(elementLink(frame, selector))
-    expect(url.origin).toBe(location.origin)
-    expect(url.pathname).toBe('/c/canvas')
-    expect([...url.searchParams.keys()]).toEqual(['frame', 'selector'])
-    expect(url.searchParams.get('frame')).toBe(frame.id)
-    expect(url.searchParams.get('selector')).toBe(selector)
-    expect(url.hash).toBe('')
-  },
-)
+it('names the element by its id, not by a selector', () => {
+  const url = new URL(elementLink(frame, 'ab12cd'))
+  expect(url.origin).toBe(location.origin)
+  expect(url.pathname).toBe('/c/canvas')
+  expect([...url.searchParams.keys()]).toEqual(['frame', 'element'])
+  expect(url.searchParams.get('frame')).toBe(frame.id)
+  expect(url.searchParams.get('element')).toBe('ab12cd')
+  expect(url.hash).toBe('')
+})
+
+it('stamps the element first when it carries no id yet, vouching with the live excerpt', async () => {
+  const stamp = vi.spyOn(api, 'ensureElementId').mockResolvedValue({ elementId: 'ab12cd' })
+  await copyElementLink(frame, { selector: '#title', snippet: '<h1 id="title">Hello</h1>' })
+  expect(stamp).toHaveBeenCalledWith(frame.id, '#title', '<h1 id="title">Hello</h1>')
+  expect(writeText).toHaveBeenCalledWith(elementLink(frame, 'ab12cd'))
+  expect(useStore.getState().notice?.text).toBe('Element link copied')
+})
+
+it('uses the id the element already wears without asking the server', async () => {
+  const stamp = vi.spyOn(api, 'ensureElementId')
+  await copyElementLink(frame, { selector: '#title', elementId: 'zz9900' })
+  expect(stamp).not.toHaveBeenCalled()
+  expect(writeText).toHaveBeenCalledWith(elementLink(frame, 'zz9900'))
+})
+
+it('reports a refused stamp without a false success or a rejected promise', async () => {
+  vi.spyOn(api, 'ensureElementId').mockRejectedValueOnce(new Error('409'))
+  await copyElementLink(frame, { selector: '#title' })
+  expect(writeText).not.toHaveBeenCalled()
+  expect(useStore.getState().notice?.text).toBe('Couldn’t copy the element link. Please try again.')
+})
 
 it('reports clipboard failure without a false success or a rejected promise', async () => {
+  vi.spyOn(api, 'ensureElementId').mockResolvedValue({ elementId: 'ab12cd' })
   writeText.mockRejectedValueOnce(new Error('Permission denied'))
-  await copyElementLink(frame, '#title')
+  await copyElementLink(frame, { selector: '#title' })
   expect(useStore.getState().notice?.text).toBe('Couldn’t copy the element link. Please try again.')
 })
 
 it('copies the right-clicked layer even when another element is selected', async () => {
+  const stamp = vi.spyOn(api, 'ensureElementId').mockResolvedValue({ elementId: 'he4o00' })
   useStore.getState().setCanvas({ id: 'canvas', name: 'Canvas', frames: [frame], createdAt: 0, updatedAt: 0 })
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -90,6 +112,8 @@ it('copies the right-clicked layer even when another element is selected', async
   )!
   expect(item).toBeDefined()
   await act(async () => item.click())
-  expect(writeText).toHaveBeenCalledWith(elementLink(frame, '#hero'))
+  /* a Layers row names the element from the saved HTML itself: nothing live to vouch */
+  expect(stamp).toHaveBeenCalledWith(frame.id, '#hero', undefined)
+  expect(writeText).toHaveBeenCalledWith(elementLink(frame, 'he4o00'))
   expect(useStore.getState().notice?.text).toBe('Element link copied')
 })

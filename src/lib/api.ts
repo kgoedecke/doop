@@ -521,8 +521,18 @@ export const api = {
   retryCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
   /** x/y: where a comment on the frame as a whole was left, in design px */
-  addComment: (frameId: string, input: { selector: string; snippet: string; text: string; x?: number; y?: number }) =>
-    req(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
+  /** a comment on an element (its positional selector, which the server turns into a stamped
+   *  data-doop-id, or the id it already carries) or, with neither, on the frame at the point */
+  addComment: (
+    frameId: string,
+    input: { selector?: string; elementId?: string; snippet: string; text: string; x: number; y: number },
+  ) => req<ElementComment>(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
+  /** the stable id of the element a positional selector names, stamped into the frame if needed */
+  ensureElementId: (frameId: string, selector: string, snippet?: string) =>
+    req<{ elementId: string }>(`/api/frames/${frameId}/element-id`, {
+      method: 'POST',
+      body: JSON.stringify({ selector, ...(snippet ? { snippet } : {}) }),
+    }),
   /** a comment pinned to a point on the canvas (world coordinates on a page) rather than to an element */
   addCanvasComment: (canvasId: string, input: { pageId: string; x: number; y: number; text: string }) =>
     req(`/api/canvases/${canvasId}/comments`, { method: 'POST', body: JSON.stringify(input) }),

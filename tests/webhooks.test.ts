@@ -47,7 +47,7 @@ const COMMENT: ElementComment = {
   id: 'cm1',
   canvasId: 'c1',
   frameId: 'f1',
-  selector: 'h1',
+  elementId: 'h1h1h1',
   snippet: '<h1>Hi</h1>',
   from: 'Alice',
   fromUserId: 'alice',

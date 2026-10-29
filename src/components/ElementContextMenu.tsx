@@ -7,18 +7,25 @@ import { MOD_KEY } from '../lib/keys'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 
+/** What the live document said about a right-clicked element; a Layers row
+ *  has none, its selector comes from the saved HTML itself. */
+export interface LiveHit {
+  snippet: string
+  elementId?: string
+}
+
 /** Shared by a layer row and the element under a canvas right-click. */
-export function ElementContextMenu({ frame, selector }: { frame: Frame; selector: string | null }) {
+export function ElementContextMenu({ frame, selector, hit }: { frame: Frame; selector: string | null; hit?: LiveHit }) {
   return (
     <ContextMenuContent>
-      <ElementMenuItems frame={frame} selector={selector} />
+      <ElementMenuItems frame={frame} selector={selector} hit={hit} />
     </ContextMenuContent>
   )
 }
 
 /** Radix mounts these children only while the menu is open. Closed layer
  *  rows must not parse their frame HTML just to render a dormant menu. */
-function ElementMenuItems({ frame, selector }: { frame: Frame; selector: string | null }) {
+function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: string | null; hit?: LiveHit }) {
   const hidden = selector ? isElementHidden(frame.html, selector) : null
   const exists = hidden !== null
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
@@ -58,7 +65,9 @@ function ElementMenuItems({ frame, selector }: { frame: Frame; selector: string 
           <ContextMenuItem onSelect={() => navigator.clipboard.writeText(selector).catch(console.error)}>
             Copy selector
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => void copyElementLink(frame, selector)}>Copy link to element</ContextMenuItem>
+          <ContextMenuItem onSelect={() => void copyElementLink(frame, { selector, ...hit })}>
+            Copy link to element
+          </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={locked} onSelect={() => shiftLayer(frame, selector, -1)}>
             Move up

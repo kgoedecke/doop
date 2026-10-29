@@ -30,6 +30,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
   let page: Page
   let saved: Frame
   let deletedFrames = 0
+  let stamped: string[] = []
   const errors: string[] = []
 
   async function frameDoc() {
@@ -89,10 +90,19 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await page.setViewport({ width: 1200, height: 900 })
     await page.setRequestInterception(true)
     page.on('request', async (request) => {
-      if (new URL(request.url()).pathname === '/api/frames/f') {
+      const pathname = new URL(request.url()).pathname
+      if (pathname === '/api/frames/f') {
         if (request.method() === 'PATCH') saved = { ...saved, ...JSON.parse(request.postData()!) }
         if (request.method() === 'DELETE') deletedFrames++
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
+      } else if (pathname === '/api/frames/f/element-id') {
+        /* the server stamps a data-doop-id onto the element and answers with it */
+        stamped.push(JSON.parse(request.postData()!).selector)
+        await request.respond({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ elementId: 'text00' }),
+        })
       } else await request.continue()
     })
     await browser.grantPermissions(['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write'])
@@ -115,6 +125,7 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       updatedBy: 'Tester',
     }
     deletedFrames = 0
+    stamped = []
     await page.evaluate((frame) => {
       localStorage.clear()
       window.contextMenuHarness.seed([frame])
@@ -179,8 +190,13 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     await expect.poll(() => saved.html).not.toContain('data-doop-hidden')
     await rightClick('#text')
     await choose('Copy link to element')
+    /* the copy waits for the stamp, so the clipboard is read once it has landed */
+    await expect
+      .poll(async () => new URL(await page.evaluate(() => navigator.clipboard.readText())).searchParams.get('element'))
+      .toBe('text00')
+    expect(stamped).toEqual(['#text'])
     const link = new URL(await page.evaluate(() => navigator.clipboard.readText()))
-    expect(link.searchParams.get('selector')).toBe('#text')
+    expect(link.searchParams.has('selector')).toBe(false)
   })
 
   it('does not open the frame or background menu in empty frame space', async () => {

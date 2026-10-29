@@ -1611,7 +1611,6 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
           y: 160,
           from: 'Alice',
           text: 'Keep this',
-          selector: '',
           snippet: '',
           at: 0,
         },
@@ -1677,7 +1676,6 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
           id: 'whole',
           canvasId: 'c',
           frameId: 'plain',
-          selector: 'body',
           snippet: '',
           x: 200,
           y: 150,
@@ -1714,7 +1712,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
         height: 300,
         createdAt: 0,
         updatedAt: 0,
-        html: '<p id="a" style="margin:0;width:120px">Alpha</p>',
+        html: '<p id="a" data-doop-id="aaa000" style="margin:0;width:120px">Alpha</p>',
       },
     ])
     const handle = await page.waitForSelector('iframe[title="Plain"]')
@@ -1726,7 +1724,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       id: 'moving',
       canvasId: 'c',
       frameId: 'plain',
-      selector: '#a',
+      elementId: 'aaa000',
       snippet: '<p id="a">Alpha</p>',
       from: 'Alice',
       text: 'Move me',
@@ -1764,7 +1762,15 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     /* no thread opened from the release */
     expect(await page.$('textarea[placeholder="Reply… (@doop to ask the agent)"]')).toBeNull()
     /* the room says where it went: a canvas pin now */
-    const onCanvas = { ...onElement, frameId: undefined, selector: '', snippet: '', pageId: 'first', x: 480, y: 80 }
+    const onCanvas = {
+      ...onElement,
+      frameId: undefined,
+      elementId: undefined,
+      snippet: '',
+      pageId: 'first',
+      x: 480,
+      y: 80,
+    }
     await page.evaluate((c) => window.drawingHarness.comments([c]), onCanvas)
     pin = await pinBox()
     expect(Math.abs(pin.x + pin.width / 2 - (box.x + box.width + 100))).toBeLessThan(3)
@@ -1776,10 +1782,12 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.mouse.up()
     await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
     expect(commentMoves).toHaveLength(2)
-    expect(commentMoves[1]).toMatchObject({ frameId: 'plain', selector: 'body', snippet: '' })
+    expect(commentMoves[1]).toMatchObject({ frameId: 'plain', snippet: '' })
+    expect(commentMoves[1]).not.toHaveProperty('selector')
+    expect(commentMoves[1]).not.toHaveProperty('elementId')
     expect(Math.abs(Number(commentMoves[1]!.x) - 200)).toBeLessThan(2)
     expect(Math.abs(Number(commentMoves[1]!.y) - 150)).toBeLessThan(2)
-    const onFrame = { ...onElement, selector: 'body', snippet: '', x: 200, y: 150 }
+    const onFrame = { ...onElement, elementId: undefined, snippet: '', x: 200, y: 150 }
     await page.evaluate((c) => window.drawingHarness.comments([c]), onFrame)
     pin = await pinBox()
     expect(Math.abs(pin.x + pin.width / 2 - (box.x + box.width / 2))).toBeLessThan(3)
@@ -1791,8 +1799,10 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.mouse.up()
     await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
     expect(commentMoves).toHaveLength(3)
-    expect(commentMoves[2]).toMatchObject({ frameId: 'plain', selector: '#a' })
-    expect(commentMoves[2]).not.toHaveProperty('x')
+    /* the runtime's path for the server to stamp from, the id the element already wears,
+       and the point for the server to fall back to */
+    expect(commentMoves[2]).toMatchObject({ frameId: 'plain', selector: '#a', elementId: 'aaa000' })
+    expect(Math.abs(Number(commentMoves[2]!.x) - 50)).toBeLessThan(3)
     await page.evaluate((c) => window.drawingHarness.comments([c]), onElement)
     pin = await pinBox()
     expect(Math.abs(pin.x - home.x)).toBeLessThan(3)

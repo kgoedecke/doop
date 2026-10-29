@@ -315,6 +315,15 @@ export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
   })
 }
 
+/** Write the frame now and resolve once it is on disk, for a caller that
+ *  must write something naming the frame's content afterwards. */
+export async function saveFrameNow(f: Frame): Promise<void> {
+  const existing = frameTimers.get(f.id)
+  if (existing) clearTimeout(existing)
+  frameTimers.delete(f.id)
+  await writeFrame(f)
+}
+
 export function saveFrame(f: Frame, immediate = false) {
   const existing = frameTimers.get(f.id)
   if (existing) clearTimeout(existing)
@@ -653,11 +662,22 @@ export function saveFeedback(fb: TaskFeedback) {
 }
 
 export function saveComment(c: ElementComment) {
+  swallow(writeComment(c))
+}
+
+/** The comment's write, for a caller that must know it landed. */
+export function saveCommentNow(c: ElementComment): Promise<void> {
+  return writeComment(c)
+}
+
+async function writeComment(c: ElementComment): Promise<void> {
   const row = {
     id: c.id,
     canvasId: c.canvasId,
     frameId: c.frameId ?? null,
-    selector: c.selector,
+    elementId: c.elementId ?? null,
+    /* the pre-element-id anchor is spent once the comment is saved again */
+    selector: null,
     snippet: c.snippet,
     pageId: c.pageId ?? null,
     x: c.x ?? null,
@@ -676,29 +696,28 @@ export function saveComment(c: ElementComment) {
     resolvedAt: c.resolvedAt ?? null,
     parentId: c.parentId ?? null,
   }
-  swallow(
-    db
-      .insert(t.comments)
-      .values(row)
-      .onConflictDoUpdate({
-        target: t.comments.id,
-        set: {
-          /* a moved thread keeps its id and takes a new anchor */
-          frameId: row.frameId,
-          selector: row.selector,
-          snippet: row.snippet,
-          pageId: row.pageId,
-          x: row.x,
-          y: row.y,
-          claimedBy: row.claimedBy,
-          claimedAt: row.claimedAt,
-          failedAt: row.failedAt,
-          failureReason: row.failureReason,
-          resolvedBy: row.resolvedBy,
-          resolvedAt: row.resolvedAt,
-        },
-      }),
-  )
+  await db
+    .insert(t.comments)
+    .values(row)
+    .onConflictDoUpdate({
+      target: t.comments.id,
+      set: {
+        /* a moved thread keeps its id and takes a new anchor */
+        frameId: row.frameId,
+        elementId: row.elementId,
+        selector: row.selector,
+        snippet: row.snippet,
+        pageId: row.pageId,
+        x: row.x,
+        y: row.y,
+        claimedBy: row.claimedBy,
+        claimedAt: row.claimedAt,
+        failedAt: row.failedAt,
+        failureReason: row.failureReason,
+        resolvedBy: row.resolvedBy,
+        resolvedAt: row.resolvedAt,
+      },
+    })
 }
 
 export function saveActivity(canvasId: string, item: ActivityItem) {
@@ -740,6 +759,9 @@ export interface Hydrated {
   tasks: Map<string, AgentTask[]> // canvasId -> newest first
   feedback: Map<string, TaskFeedback[]>
   comments: Map<string, ElementComment[]>
+  /** comment id -> the positional CSS path an element comment was anchored
+   *  by before element ids; `backfillElementIds` turns each into a stamp */
+  legacyCommentSelectors: Map<string, string>
   activity: Map<string, ActivityItem[]>
   decisions: Map<string, DesignDecision[]>
   proposals: Map<string, MemoryProposal[]>
@@ -912,9 +934,13 @@ export async function hydrate(): Promise<Hydrated> {
   }
 
   const comments = new Map<string, ElementComment[]>()
+  const legacyCommentSelectors = new Map<string, string>()
   for (const row of commentRows) {
     const list = comments.get(row.canvasId) ?? []
     if (list.length >= LOG_CAP) continue
+    if (row.elementId == null && row.frameId != null && row.selector && row.selector !== 'body') {
+      legacyCommentSelectors.set(row.id, row.selector)
+    }
     const interrupted = row.claimedBy != null && row.resolvedAt == null && row.failedAt == null
     const failedAt = row.failedAt ?? (interrupted ? now : undefined)
     const failureReason = row.failureReason ?? (interrupted ? interruptedReason : undefined)
@@ -923,7 +949,7 @@ export async function hydrate(): Promise<Hydrated> {
       id: row.id,
       canvasId: row.canvasId,
       ...(row.frameId != null ? { frameId: row.frameId } : {}),
-      selector: row.selector,
+      ...(row.elementId != null ? { elementId: row.elementId } : {}),
       snippet: row.snippet,
       ...(row.pageId != null ? { pageId: row.pageId } : {}),
       ...(row.x != null ? { x: row.x } : {}),
@@ -998,7 +1024,7 @@ export async function hydrate(): Promise<Hydrated> {
     proposals.set(row.canvasId, list)
   }
 
-  return { canvases, tasks, feedback, comments, activity, decisions, proposals }
+  return { canvases, tasks, feedback, comments, legacyCommentSelectors, activity, decisions, proposals }
 }
 
 /** One-time import of the pre-DB data/store.json so existing canvases survive. */

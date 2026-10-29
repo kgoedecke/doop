@@ -10,6 +10,7 @@ import { FrameView, HiddenFrameView } from './FrameView'
 import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
 import { placeComposer } from '../lib/composerPlacement'
 import { isCanvasComment, type CanvasComment } from '../../shared/comments'
+import { elementIdSelector, isElementId } from '../../shared/elementId'
 import { canvasPages } from '../../shared/pages'
 import { FlowOverlay } from './FlowOverlay'
 import { PrototypeOverlay } from './PrototypeOverlay'
@@ -489,7 +490,8 @@ export function Stage({
     const target = focusId ? useStore.getState().canvas?.frames.find((f) => f.id === focusId) : null
     if (target) {
       deepLinkHandled.current = true
-      focusFrame(target, params?.get('selector') ?? null)
+      const element = params?.get('element')
+      focusFrame(target, isElementId(element) ? elementIdSelector(element) : null)
       return
     }
     const pinned = params ? linkedCanvasComment(params.get('comment')) : null

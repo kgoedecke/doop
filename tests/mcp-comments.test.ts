@@ -49,7 +49,7 @@ function comment(overrides: Partial<ElementComment> & { id: string }): ElementCo
   return {
     canvasId: CANVAS.id,
     frameId: FRAME_A.id,
-    selector: '.hero h1',
+    elementId: 'hero01',
     snippet: '<h1>Hi</h1>',
     from: 'alice',
     text: 'note',
@@ -166,7 +166,15 @@ describe('get_comments MCP tool', () => {
   })
 
   it('returns canvas comments with their page and point, and leaves them out of a frame filter', async () => {
-    const onCanvas = comment({ id: 'm4', frameId: undefined, pageId: 'p1', x: 820, y: 240, selector: '', snippet: '' })
+    const onCanvas = comment({
+      id: 'm4',
+      frameId: undefined,
+      pageId: 'p1',
+      x: 820,
+      y: 240,
+      elementId: undefined,
+      snippet: '',
+    })
     const onFrame = comment({ id: 'm1', at: 1 })
     vi.spyOn(actions, 'getComments').mockReturnValue([onCanvas, onFrame])
     const { client, close } = await connect()

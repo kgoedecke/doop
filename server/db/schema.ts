@@ -365,10 +365,14 @@ export const comments = pgTable(
   {
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
-    /* element comment: the frame + selector + snippet; canvas comment: no
-       frame, a page and a world point instead (selector/snippet empty) */
+    /* element comment: the frame + the element's data-doop-id + snippet;
+       frame comment: the frame and a design point; canvas comment: no frame,
+       a page and a world point instead. `selector` is the positional CSS path
+       comments were anchored by before element ids: read once at boot to
+       stamp the element and fill `element_id`, never written again. */
     frameId: text('frame_id'),
-    selector: text('selector').notNull(),
+    elementId: text('element_id'),
+    selector: text('selector'),
     snippet: text('snippet').notNull(),
     pageId: text('page_id'),
     x: doublePrecision('x'),

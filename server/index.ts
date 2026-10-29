@@ -1831,7 +1831,7 @@ app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
 app.post('/api/frames/:id/comments', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
   if (!frame) return
-  const { selector, snippet, text, x, y } = req.body ?? {}
+  const { selector, elementId, snippet, text, x, y } = req.body ?? {}
   if (refuseAgentMention(req, res, frame.canvasId, String(text ?? ''))) return
   /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
@@ -1843,12 +1843,29 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   }
   const comment = actions.addElementComment(
     req.params.id,
-    { selector: String(selector ?? ''), snippet: String(snippet ?? ''), text: String(text ?? ''), x, y },
+    { selector, elementId, snippet, text: String(text ?? ''), x, y },
     req.user!.name,
     req.user!.id,
   )
   if (!comment) return res.status(404).json({ error: 'frame not found or empty text' })
   res.json(comment)
+})
+
+/* the stable id of an element inside a frame — stamped as data-doop-id into
+   the frame HTML if it has none yet — for a link that outlives edits around
+   it. Anyone who may comment may stamp: the write is an annotation, not a
+   design change, so it leaves sign-off alone. */
+app.post('/api/frames/:id/element-id', (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'comment')
+  if (!frame) return
+  const selector = typeof req.body?.selector === 'string' ? req.body.selector.trim() : ''
+  if (!selector || selector.length > actions.MAX_ELEMENT_SELECTOR_CHARS) {
+    return res.status(400).json({ error: 'selector required' })
+  }
+  const snippet = typeof req.body?.snippet === 'string' ? req.body.snippet.slice(0, 400) : undefined
+  const stamped = actions.ensureElementId(frame.id, selector, req.user!.name, snippet || undefined)
+  if (!stamped) return res.status(409).json({ error: 'the element could not be found in the frame right now' })
+  res.json({ elementId: stamped.id, frameUpdatedAt: stamped.frame.updatedAt })
 })
 
 /* a comment pinned to a point on the canvas (world coordinates on one of its
@@ -1934,11 +1951,18 @@ app.patch('/api/comments/:id/anchor', (req, res) => {
   const found = actions.findComment(req.params.id)
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId, 'comment')) return
-  const { frameId, selector, snippet, pageId, x, y } = req.body ?? {}
+  const { frameId, selector, elementId, snippet, pageId, x, y } = req.body ?? {}
   let anchor: CommentAnchorInput
   if (typeof frameId === 'string') {
-    if (typeof selector !== 'string' || !selector.trim()) return res.status(400).json({ error: 'selector required' })
-    anchor = { frameId, selector, snippet: String(snippet ?? ''), x, y }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
+    anchor = {
+      frameId,
+      ...(typeof selector === 'string' ? { selector } : {}),
+      ...(typeof elementId === 'string' ? { elementId } : {}),
+      snippet: String(snippet ?? ''),
+      x: Number(x),
+      y: Number(y),
+    }
   } else if (typeof pageId === 'string') {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
     anchor = { pageId, x: Number(x), y: Number(y) }
@@ -2385,6 +2409,18 @@ wss.on('connection', (ws, upgradeReq) => {
 
 server.listen(PORT, () => {
   console.log(`⟡ doop server     http://localhost:${PORT}`)
+  /* comments anchored before element ids: stamped now, while serving, so a
+     slow or failing row can never keep the server from coming up */
+  if (data.legacyCommentSelectors.size > 0) {
+    actions
+      .backfillElementIds(data.legacyCommentSelectors)
+      .then(({ stamped, lost, failed }) =>
+        console.log(
+          `[comments] element ids: ${stamped} comment(s) re-anchored, ${lost} lost their element, ${failed} left for the next boot`,
+        ),
+      )
+      .catch((err) => console.error('[comments] element id backfill failed:', err))
+  }
   console.log(`⟡ mcp endpoint      http://localhost:${PORT}/mcp`)
   console.log(`⟡ websocket         ws://localhost:${PORT}/ws`)
   /* The Doop Agent failing silently is the one "why is nothing happening?"

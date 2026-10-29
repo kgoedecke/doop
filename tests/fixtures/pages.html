@@ -22,6 +22,28 @@
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import '/src/styles.css'
       window.seedPages = (canvas) => useStore.getState().setCanvas(canvas)
+      window.pickElement = (frameId, selector) => useStore.getState().pickElement({ frameId, selector })
+      window.frameHtml = (frameId) => useStore.getState().canvas?.frames.find((f) => f.id === frameId)?.html
+      /* the one API call an element link makes: stamp the element's data-doop-id
+         into the frame HTML, as server/elementIds.ts does, and answer with it */
+      const realFetch = window.fetch.bind(window)
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url
+        const match = /^\/api\/frames\/([^/]+)\/element-id$/.exec(url)
+        if (!match) return realFetch(input, init)
+        const { selector } = JSON.parse(init.body)
+        const frame = useStore.getState().canvas?.frames.find((f) => f.id === match[1])
+        const doc = new DOMParser().parseFromString(frame?.html ?? '', 'text/html')
+        const el = doc.querySelector(selector)
+        if (!el) return new Response(JSON.stringify({ error: 'no element' }), { status: 409 })
+        const elementId = el.getAttribute('data-doop-id') || Math.random().toString(36).slice(2, 8).padEnd(6, '0')
+        el.setAttribute('data-doop-id', elementId)
+        useStore.getState().patchFrameLocal(frame.id, { html: doc.documentElement.outerHTML })
+        return new Response(JSON.stringify({ elementId }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
       window.pageState = () => ({
         activePageId: useStore.getState().activePageId,
         viewport: useStore.getState().viewport,

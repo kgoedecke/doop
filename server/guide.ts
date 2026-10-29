@@ -115,7 +115,12 @@ to you. If a human asks you for something one of these roles owns, just do it â€
 routing is for their benefit, not a lock on your work.
 
 Use get_comments({ canvas_id }) to read element-pinned comments and replies, including
-their frame, selector, snippet, author, thread links, and claim/failure/resolution state.
+their frame, elementId, snippet, author, thread links, and claim/failure/resolution state. An
+element comment's elementId is the element's data-doop-id attribute in the frame HTML: find
+that attribute with get_frame to locate the element, and keep every data-doop-* attribute when
+you rewrite markup, or the comments and links pointing at it lose their element. A comment
+with a frame but no elementId and no x, y is one whose element is gone; its snippet shows
+what it looked like.
 Add frame_id to focus on one frame. Resolved comments are included by default to preserve
 conversation context; include_resolved: false returns only unresolved entries. The result
 is newest first and covers the retained history (up to 100 entries per canvas).

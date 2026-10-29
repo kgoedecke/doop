@@ -25,6 +25,8 @@ export const DRAG_THRESHOLD_PX = 3
 /** What the runtime answers a `doop:probe` with, as far as a pin needs. */
 export interface CommentDropHit {
   selector: string
+  /** the `data-doop-id` the element already carries, if any */
+  elementId?: string
   snippet: string
 }
 
@@ -73,15 +75,29 @@ export async function resolveCommentDrop(
   const y = point.y - frame.y
   const hit = await probe(frame.id, x, y)
   if (hit && hit.selector !== FRAME_COMMENT_SELECTOR) {
-    return { frameId: frame.id, selector: hit.selector, snippet: hit.snippet }
+    /* the point rides along: should the element not be found in the saved
+       HTML, the server pins the thread to the frame there instead */
+    return {
+      frameId: frame.id,
+      selector: hit.selector,
+      ...(hit.elementId ? { elementId: hit.elementId } : {}),
+      snippet: hit.snippet,
+      x,
+      y,
+    }
   }
-  return { frameId: frame.id, selector: FRAME_COMMENT_SELECTOR, snippet: '', x, y }
+  return { frameId: frame.id, snippet: '', x, y }
 }
 
 async function probeFrame(frameId: string, x: number, y: number): Promise<CommentDropHit | null> {
   const reply = await requestFrame(frameId, 'doop:probe', { x, y })
   const hit = reply?.hit as CommentDropHit | null | undefined
-  return hit && typeof hit.selector === 'string' ? { selector: hit.selector, snippet: hit.snippet ?? '' } : null
+  if (!hit || typeof hit.selector !== 'string') return null
+  return {
+    selector: hit.selector,
+    ...(typeof hit.elementId === 'string' ? { elementId: hit.elementId } : {}),
+    snippet: hit.snippet ?? '',
+  }
 }
 
 /** Re-pin the thread where its pin was let go. Nothing is sent when the

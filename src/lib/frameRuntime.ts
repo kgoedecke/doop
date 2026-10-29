@@ -370,6 +370,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (snippet.length > 400) snippet = snippet.slice(0, 397) + '...'
     return {
       selector: cssPath(el),
+      /* the stable id comments and links use, when something has stamped one */
+      elementId: el.getAttribute('data-doop-id') || undefined,
       tag: el.tagName.toLowerCase(),
       text: (el.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80),
       snippet: snippet,

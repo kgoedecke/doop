@@ -444,22 +444,24 @@ export interface TaskFeedback {
   failureReason?: string
 }
 
-/** A comment pinned to a specific element inside a frame, or to a point on
- *  the canvas itself. Comments that mention @Doop are routed to the resident
- *  agent; others are notes for the humans in the room.
+/** A comment pinned to a specific element inside a frame, to a frame as a
+ *  whole, or to a point on the canvas itself. Comments that mention @Doop are
+ *  routed to the resident agent; others are notes for the humans in the room.
  *
- *  Two anchors: an element comment carries `frameId` + `selector` + `snippet`;
- *  a canvas comment carries `pageId` + `x` + `y` (world coordinates) and no
- *  `frameId`, with `selector` and `snippet` empty. `isCanvasComment` in
- *  shared/comments.ts tells them apart. */
+ *  Three anchors (`shared/comments.ts` tells them apart): an element comment
+ *  carries `frameId` + `elementId` (the element's `data-doop-id` in the frame
+ *  HTML) + `snippet`; a frame comment carries `frameId` + `x` + `y` (design
+ *  px) and no `elementId`; a canvas comment carries `pageId` + `x` + `y`
+ *  (world coordinates) and no `frameId`. An element comment whose element
+ *  could not be found again has `frameId` and `snippet` only. */
 export interface ElementComment {
   id: string
   canvasId: string
   /** the frame the element lives in; absent on a canvas comment */
   frameId?: string
-  /** CSS selector of the anchored element, resolved at comment time ('' on a canvas comment) */
-  selector: string
-  /** outerHTML excerpt of the element, for agent context and dead-anchor display ('' on a canvas comment) */
+  /** the anchored element's `data-doop-id`; absent on frame and canvas comments */
+  elementId?: string
+  /** outerHTML excerpt of the element, for agent context and dead-anchor display ('' off an element) */
   snippet: string
   /** canvas comment: the page it sits on … */
   pageId?: string

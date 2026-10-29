@@ -19,7 +19,7 @@ import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
-import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment } from '../shared/comments.ts'
+import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
@@ -107,7 +107,7 @@ Rules:
 - Each frame includes human approval metadata. Only ready_for_dev means the current design is approved for implementation; draft and needs_review are not approved. Content or size edits invalidate sign-off. Approval is context, not a new assignment: do only the requested work, and re-read the frame's approval before using it for implementation.
 - Choose a size-aware strategy. For documents over 60,000 characters, call inspect_frame before reading HTML. Use get_frame_html with a query or bounded range only when markup is needed.
 - For requests to copy, match, or borrow another frame's design: screenshot and inspect BOTH the target and reference before editing. Use the reference screenshot and computed design tokens as the source of visual truth. Read target HTML only when you need to preserve its content; do not load a large reference document just to learn its style. For a full redesign, use begin_frame_rewrite, append_frame_rewrite in chunks under 12,000 characters, and commit_frame_rewrite; then screenshot the changed frame.
-- Element comments are pinned to ONE element (you get its CSS selector and an HTML excerpt). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
+- Element comments are pinned to ONE element (you get its data-doop-id and an HTML excerpt at comment time). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
 - Canvas comments are pinned to a point on the page, not to an element (you get the point and the frames nearest to it). The request is about what sits around that point: edit those frames in place, or add a new frame near the point when the comment asks for something new — never rework the whole page because of a canvas comment.
 - Frames are complete HTML documents with inline CSS. Keep each frame's existing style and structure; change what the feedback requires.
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
@@ -282,11 +282,13 @@ type RunOutcome = 'ran' | 'idle' | 'no-model'
 export function describeCommentAnchor(c: ElementComment, canvas: Canvas | undefined): string {
   if (!isCanvasComment(c)) {
     const fname = (c.frameId && store.getFrame(c.frameId)?.name) || 'unknown frame'
-    if (c.selector === FRAME_COMMENT_SELECTOR) {
-      const at = isFrameComment(c) ? ` at (${Math.round(c.x)}, ${Math.round(c.y)}) in the frame` : ''
-      return `on frame ${c.frameId} "${fname}" as a whole${at}, not one element`
+    if (isFrameComment(c)) {
+      return `on frame ${c.frameId} "${fname}" as a whole at (${Math.round(c.x)}, ${Math.round(c.y)}) in the frame, not one element`
     }
-    return `on frame ${c.frameId} "${fname}", element ${c.selector}\n  element HTML at comment time: ${c.snippet}`
+    if (c.elementId === undefined) {
+      return `on frame ${c.frameId} "${fname}", an element that is no longer in the frame\n  element HTML at comment time: ${c.snippet}`
+    }
+    return `on frame ${c.frameId} "${fname}", the element with data-doop-id="${c.elementId}"\n  element HTML at comment time: ${c.snippet}`
   }
   const pageName = canvas ? canvasPages(canvas).find((page) => page.id === c.pageId)?.name : undefined
   const near = canvas ? framesAround(pageFrames(canvas, c.pageId), c.x, c.y) : []
@@ -515,7 +517,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         : '') +
       `\n\nAddress everything above now.` +
       (comments.length > 0
-        ? ` For element comments, use the selector and HTML excerpt to find the exact element in the frame's HTML — the live document may have drifted since the comment was left, so match on content, not position. A canvas comment is about the frames around its point, not about one element.`
+        ? ` For element comments, find the element by its data-doop-id attribute in the frame's HTML (get_frame); the HTML excerpt shows it as it was when the comment was left. Keep every data-doop-* attribute on the elements you rewrite — comments and links point at them. A canvas comment is about the frames around its point, not about one element.`
         : '')
 
     console.log(

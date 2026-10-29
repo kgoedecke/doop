@@ -199,6 +199,10 @@ export class Client {
     return this.req(p, { method: 'PATCH', body: JSON.stringify(body) })
   }
 
+  put(p: string, body: unknown) {
+    return this.req(p, { method: 'PUT', body: JSON.stringify(body) })
+  }
+
   delete(p: string) {
     return this.req(p, { method: 'DELETE' })
   }

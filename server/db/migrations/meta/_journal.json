@@ -267,6 +267,13 @@
       "when": 1793062237684,
       "tag": "0038_reasoning_effort",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793303436354,
+      "tag": "0039_comment_element_ids",
+      "breakpoints": true
     }
   ]
 }

@@ -16,12 +16,24 @@
 - Express 4.19.2 - HTTP server framework in `server/`.
 - React 18.3.1 - UI framework in `src/`.
 - Zustand 4.5.4 - client-side state management.
-- Element links use `/c/<canvasId>?frame=<frameId>&selector=<encoded CSS selector>`.
-  `src/lib/elementLink.ts` owns copying from the element toolbar and Layers menu;
-  `Stage.tsx` focuses its page and frame; `FrameView.tsx` resolves the selector in
-  the ready iframe, including script-created elements, and falls back to frame
-  details if it no longer resolves. Browser regressions in
-  `tests/pageCanvasBrowser.test.ts` cover initial loading, cross-page links,
+- Element ids (`shared/elementId.ts`): anything outside a frame that points at an element
+  inside it uses the element's `data-doop-id` attribute, stamped into the frame HTML the first
+  time something needs it (a comment, an element link) and kept by agents like every other
+  `data-doop-*` attribute. The server stamps (`server/elementIds.ts`, parse5 by source offset,
+  so nothing else is re-serialized; `actions.ensureElementId`, exposed as
+  `POST /api/frames/:id/element-id` to the comment role) as an annotation: `store.updateFrame`'s
+  `annotation` option keeps `ready_for_dev` sign-off, and no version or activity line is written.
+  A positional path that does not resolve in the saved HTML (a script-made element, a frame
+  mid-stream) is refused, and a comment falls back to the frame at its point. The frame runtime's
+  probe reports an existing id as `elementId`; its positional `cssPath` is now only the editor's
+  internal selection language.
+- Element links use `/c/<canvasId>?frame=<frameId>&element=<data-doop-id>` (no selector form,
+  and no backwards compatibility for the old one). `src/lib/elementLink.ts` owns copying from the
+  element toolbar and Layers menu, stamping first when the element has no id; `Stage.tsx`
+  focuses its page and frame; `FrameView.tsx` resolves the id in the ready iframe, including
+  script-created elements, re-picks the positional path so the Layers panel follows, and falls
+  back to frame details if nothing carries the id. Browser regressions in
+  `tests/pageCanvasBrowser.test.ts` cover initial loading, cross-page links, stamping on copy,
   clipboard round trips, history and script-created or script-removed elements.
 - Radix UI primitives (`@radix-ui/react-*`, ^1.x-2.x) + shadcn 4.19.0 - accessible UI primitives
   generated into `src/components/ui`.
@@ -191,6 +203,17 @@
   creation queued with transfers, and undo/redo. Browser regressions cover transformed shapes,
   stacking contexts, covered shapes, and delayed hit-test replies.
 
+- Comment anchors (`shared/comments.ts`): an element comment is `frameId` + `elementId` (the
+  element's `data-doop-id`) + `snippet`; a frame comment is `frameId` + design-px `x`/`y` and no
+  `elementId`; a canvas comment is `pageId` + world `x`/`y`. One whose element is gone keeps the
+  frame and snippet only and is listed without a pin. The browser still sends the runtime's
+  positional selector (plus `elementId` when the element already wears one, and always the
+  point); the server stamps and stores the id. `FrameView` places pins by
+  `doop:locate` on `[data-doop-id="…"]`. Comments stored before element ids carry their old
+  selector in the `selector` column, which `actions.backfillElementIds` resolves once after the
+  server starts listening, frame by frame with awaited, ordered writes (the stamped frame, then
+  the comments naming its ids); unresolvable paths become lost anchors, a row that throws or a
+  frame write that fails is logged and left for the next boot. Tests: `elementIdBackfill.test.ts`.
 - Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may
   comment drags a thread's root pin; a ghost rides the pointer in the world layer
   (`CanvasComments`), above every frame, since the pin itself sits inside a clipped frame surface.
@@ -200,7 +223,7 @@
   `PATCH /api/comments/:id/anchor` (comment role; `CommentAnchorInput` in `shared/comments.ts`)
   re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
   sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
-  `canvasCommentsRoute.test.ts`, the drag case in `drawingBrowser.test.ts`.
+  `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingBrowser.test.ts`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`

@@ -224,6 +224,8 @@ export async function inspectFrame(frame: Frame): Promise<FrameInspection> {
       }
 
       function selectorFor(el: Element): string {
+        const doopId = el.getAttribute('data-doop-id')
+        if (doopId) return `[data-doop-id="${doopId}"]`
         if (el.id && el.id.length < 80) return `#${CSS.escape(el.id)}`
         const parts: string[] = []
         let node: Element | null = el

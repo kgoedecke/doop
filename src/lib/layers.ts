@@ -1,3 +1,5 @@
+import { ELEMENT_ID_ATTR } from '../../shared/elementId'
+
 /**
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
  * on the parent side (the iframe is sandboxed, so the panel cannot walk the
@@ -560,6 +562,16 @@ const URL_REF = /url\(\s*(['"]?)#([^'")\s]+)\1\s*\)/g
  *  copied; the ids it keeps are reserved first, so a renamed one cannot
  *  land on a kept one. Returns the renaming, old id to new. */
 function renameIds(doc: Document, copies: Element[], clashesOnly = false): Record<string, string> {
+  /* a copy is a new element: the comments and links on the original stay
+     the original's (a layer moving in from another frame keeps its id) */
+  for (const copy of copies) {
+    for (const node of [copy, ...copy.querySelectorAll(`[${ELEMENT_ID_ATTR}]`)]) {
+      /* a layer moving in from a duplicated frame can bring an id this
+         document already holds: the element here keeps its comments */
+      const taken = doc.querySelector(`[${ELEMENT_ID_ATTR}="${CSS.escape(node.getAttribute(ELEMENT_ID_ATTR) ?? '')}"]`)
+      if (!clashesOnly || taken) node.removeAttribute(ELEMENT_ID_ATTR)
+    }
+  }
   const renamed = new Map<string, string>()
   const taken = new Set<string>()
   const withId = copies.flatMap((copy) => [copy, ...copy.querySelectorAll('[id]')]).filter((n) => n.id)

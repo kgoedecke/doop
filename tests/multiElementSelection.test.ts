@@ -11,7 +11,8 @@ vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/lib/frameBridge', () => ({ requestFrame: () => Promise.resolve(null) }))
 
 const { pickedSelectors, useStore } = await import('../src/lib/store')
-const { duplicateElements, elementsHtml, insertElements, removeElements } = await import('../src/lib/layers')
+const { duplicateElements, elementsHtml, insertElements, placeElement, removeElements } =
+  await import('../src/lib/layers')
 const { deleteSelection, duplicateLayers, toggleLockSelection, toggleSelectionHidden } =
   await import('../src/lib/layerEdits')
 const { copyLayers, pasteLayer } = await import('../src/lib/elementClipboard')
@@ -121,6 +122,30 @@ describe('multi-element html edits', () => {
 
     const pasted = doc(insertElements(page(''), null, '<input id="a"><label for="a">Name</label>')!.html)
     expect(pasted.querySelector('label')?.htmlFor).toBe(pasted.querySelector('input')?.id)
+  })
+
+  it('leaves the comment and link ids on the original: a copy or a paste starts without one', () => {
+    const marked = page('<section data-doop-id="sec000"><p data-doop-id="par000">in</p></section>')
+    const section = 'body:nth-of-type(1) > section:nth-of-type(1)'
+    const doc = (html: string) => new DOMParser().parseFromString(html, 'text/html')
+    const duplicated = doc(duplicateElements(marked, [section])!.html)
+    expect([...duplicated.querySelectorAll('section')].map((s) => s.getAttribute('data-doop-id'))).toEqual([
+      'sec000',
+      null,
+    ])
+    expect([...duplicated.querySelectorAll('p')].map((p) => p.getAttribute('data-doop-id'))).toEqual(['par000', null])
+    const pasted = doc(insertElements(marked, section, '<p data-doop-id="par000">pasted</p>')!.html)
+    expect([...pasted.querySelectorAll('p')].map((p) => p.getAttribute('data-doop-id'))).toEqual(['par000', null])
+    /* a layer moving in (from a duplicated frame) keeps its id only while this document is free of it */
+    const paragraph = `${section} > p:nth-of-type(1)`
+    const clash = doc(
+      placeElement(marked, { selector: paragraph, place: 'before' }, '<p data-doop-id="par000">moved</p>')!.html,
+    )
+    expect([...clash.querySelectorAll('p')].map((p) => p.getAttribute('data-doop-id'))).toEqual([null, 'par000'])
+    const free = doc(
+      placeElement(marked, { selector: paragraph, place: 'before' }, '<p data-doop-id="new000">moved</p>')!.html,
+    )
+    expect([...free.querySelectorAll('p')].map((p) => p.getAttribute('data-doop-id'))).toEqual(['new000', 'par000'])
   })
 
   it('copies in document order and pastes the layers together', () => {

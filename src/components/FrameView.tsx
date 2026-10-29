@@ -24,14 +24,15 @@ import { gesture } from '../lib/gesture'
 import { resolvePointerAction } from '../lib/tools'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
-import { ElementContextMenu } from './ElementContextMenu'
+import { ElementContextMenu, type LiveHit } from './ElementContextMenu'
 import { CodePanel } from './CodePanel'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
 import { DEFAULT_ROLE_ID } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
-import { FRAME_COMMENT_SELECTOR, isFrameComment } from '../../shared/comments'
+import { FRAME_COMMENT_SELECTOR, isElementComment, isFrameComment } from '../../shared/comments'
+import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
@@ -161,6 +162,10 @@ function useThrottledValue<T>(value: T, ms: number): T {
 
 interface ProbeHit {
   selector: string
+  /** the `data-doop-id` the element already wears, if something stamped one */
+  elementId?: string
+  /** where the click landed, in design px, when the hit came from one */
+  point?: { x: number; y: number }
   tag: string
   text: string
   snippet: string
@@ -193,7 +198,9 @@ interface HoverHit {
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
    this component — memo holds as long as the frame and layout zoom are unchanged. */
 export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame: Frame; layoutZoom: number }) {
-  const [menuTarget, setMenuTarget] = useState<'frame' | 'loading' | { selector: string | null; html: string }>('frame')
+  const [menuTarget, setMenuTarget] = useState<
+    'frame' | 'loading' | { selector: string | null; html: string; hit?: LiveHit }
+  >('frame')
   const [menuProbe, setMenuProbe] = useState<{ request: number; html: string; x: number; y: number } | null>(null)
   const menuKind = useRef<'frame' | 'element'>('frame')
   const menuRequest = useRef(0)
@@ -654,7 +661,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       const live = store.canvas?.frames.find((f) => f.id === frame.id)
       if (cancelled || menuProbe.request !== menuRequest.current || store.ctxMenu?.frameId !== frame.id) return
       const hit = live?.html === menuProbe.html ? (reply?.hit as ProbeHit | null) : null
-      setMenuTarget({ selector: hit?.selector ?? null, html: menuProbe.html })
+      setMenuTarget({
+        selector: hit?.selector ?? null,
+        html: menuProbe.html,
+        ...(hit ? { hit: { snippet: hit.snippet, ...(hit.elementId ? { elementId: hit.elementId } : {}) } } : {}),
+      })
       setMenuProbe(null)
       setProbe(hit ?? null)
       store.setSelectedElement(hit ? { frameId: frame.id, selector: hit.selector } : null)
@@ -768,12 +779,15 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
 
   /* keep comment pins glued to their elements: re-locate whenever the frame's
      html or the comment set changes, or a pin is moved onto another element */
-  const commentKey = comments.map((c) => c.id + c.selector).join(',')
+  const commentKey = comments.map((c) => c.id + (c.elementId ?? '')).join(',')
   useEffect(() => {
     if (!runtimeReady) return
     for (const c of comments) {
-      if (isFrameComment(c)) continue
-      iframeRef.current?.contentWindow?.postMessage({ type: 'doop:locate', reqId: c.id, selector: c.selector }, '*')
+      if (!isElementComment(c)) continue
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: 'doop:locate', reqId: c.id, selector: elementIdSelector(c.elementId) },
+        '*',
+      )
     }
   }, [runtimeReady, html, commentKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -905,7 +919,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         const probed = (ev.data.hit ?? null) as ProbeHit | null
         /* the Comment tool on the frame's own background comments on the frame */
         const at = probePoint.current
-        const hit = probed ?? (probeIntent.current === 'comment' ? frameCommentHit(at.x, at.y) : null)
+        const hit = probed
+          ? { ...probed, point: at }
+          : probeIntent.current === 'comment'
+            ? frameCommentHit(at.x, at.y)
+            : null
         if (probeIntent.current === 'toggle') {
           /* the store moves the primary; the frame resolves it like a Layers pick */
           if (hit) useStore.getState().toggleElement({ frameId: frame.id, selector: hit.selector })
@@ -929,8 +947,13 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         if (live?.frameId !== frame.id || live.selector !== selectSel.current) return
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         closePopovers()
-        if (hit) setProbe(hit)
-        else {
+        if (hit) {
+          setProbe(hit)
+          /* an element link names the element by id; from here on the
+             selection speaks the positional path the Layers panel knows */
+          if (hit.selector !== live.selector)
+            useStore.getState().pickElement({ frameId: frame.id, selector: hit.selector })
+        } else {
           /* The live document is authoritative for linked elements and
              Layers picks, including nodes created or removed by scripts. */
           const s = useStore.getState()
@@ -1647,7 +1670,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                             variant="inverse"
                             className={EL_TOOLBAR_BTN}
                             aria-label="Copy link to element"
-                            onClick={() => void copyElementLink(frame, anchor.selector)}
+                            onClick={() => void copyElementLink(frame, anchor)}
                           >
                             Copy link
                           </Button>
@@ -1672,14 +1695,17 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                           anchor.selector === FRAME_COMMENT_SELECTOR ? 'Leave a comment on this frame…' : undefined
                         }
                         onSubmit={(text) => {
+                          /* the point rides along with an element too: should the
+                             element not be found in the saved HTML (a script made
+                             it), the comment lands on the frame there instead */
                           api
                             .addComment(frame.id, {
                               selector: anchor.selector,
+                              ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
                               snippet: anchor.snippet,
                               text,
-                              ...(anchor.selector === FRAME_COMMENT_SELECTOR
-                                ? { x: anchor.rect.x, y: anchor.rect.y }
-                                : {}),
+                              x: anchor.point?.x ?? anchor.rect.x,
+                              y: anchor.point?.y ?? anchor.rect.y,
                             })
                             .then(() => posthog.capture('element_comment_created'))
                             .catch((err) => {
@@ -1727,7 +1753,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           <ContextMenuItem disabled>Finding element…</ContextMenuItem>
         </ContextMenuContent>
       ) : (
-        <ElementContextMenu frame={frame} selector={menuTarget.selector} />
+        <ElementContextMenu frame={frame} selector={menuTarget.selector} hit={menuTarget.hit} />
       )}
     </ContextMenu>
   )

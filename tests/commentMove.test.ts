@@ -56,21 +56,30 @@ describe('resolveCommentDrop', () => {
       return { selector: '#cta', snippet: '<button id="cta">Go</button>' }
     })
     expect(asked).toEqual([['over', 50, 25]])
-    expect(anchor).toEqual({ frameId: 'over', selector: '#cta', snippet: '<button id="cta">Go</button>' })
+    /* the point rides along, for the server to fall back to the frame */
+    expect(anchor).toEqual({ frameId: 'over', selector: '#cta', snippet: '<button id="cta">Go</button>', x: 50, y: 25 })
+    /* an element that already wears its id says so, and is kept by it */
+    const stamped = await resolveCommentDrop(canvas, 'first', { x: 150, y: 75 }, async () => ({
+      selector: '#cta',
+      elementId: 'cta000',
+      snippet: '<button id="cta">Go</button>',
+    }))
+    expect(stamped).toMatchObject({ frameId: 'over', selector: '#cta', elementId: 'cta000' })
   })
 
   it('anchors to the frame as a whole, at the point, when nothing is under it', async () => {
     expect(await resolveCommentDrop(canvas, 'first', { x: 150, y: 75 }, noElement)).toEqual({
       frameId: 'over',
-      selector: 'body',
       snippet: '',
       x: 50,
       y: 25,
     })
     /* a runtime answering with the body is the same as no element */
-    expect(
-      await resolveCommentDrop(canvas, 'first', { x: 10, y: 10 }, async () => ({ selector: 'body', snippet: '' })),
-    ).toMatchObject({ frameId: 'under', selector: 'body', x: 10, y: 10 })
+    const onBody = await resolveCommentDrop(canvas, 'first', { x: 10, y: 10 }, async () => ({
+      selector: 'body',
+      snippet: '',
+    }))
+    expect(onBody).toEqual({ frameId: 'under', snippet: '', x: 10, y: 10 })
   })
 
   it('anchors to the canvas off every frame', async () => {
@@ -85,16 +94,27 @@ describe('resolveCommentDrop', () => {
 })
 
 describe('sameCommentAnchor', () => {
-  const base: ElementComment = { id: 'k', canvasId: 'c', selector: '', snippet: '', from: 'A', text: 'T', at: 0 }
+  const base: ElementComment = { id: 'k', canvasId: 'c', snippet: '', from: 'A', text: 'T', at: 0 }
   it('tells a drop back onto the same anchor from a move', () => {
-    const onElement = { ...base, frameId: 'f', selector: '#a', snippet: '<p id="a">' }
-    expect(sameCommentAnchor(onElement, { frameId: 'f', selector: '#a', snippet: '' })).toBe(true)
-    expect(sameCommentAnchor(onElement, { frameId: 'f', selector: '#b', snippet: '' })).toBe(false)
-    expect(sameCommentAnchor(onElement, { frameId: 'g', selector: '#a', snippet: '' })).toBe(false)
+    const onElement = { ...base, frameId: 'f', elementId: 'aaaaaa', snippet: '<p id="a">' }
+    const at = { x: 3, y: 4 }
+    /* the same element wears the same id; an unstamped element is another one */
+    expect(
+      sameCommentAnchor(onElement, { frameId: 'f', selector: '#a', elementId: 'aaaaaa', snippet: '', ...at }),
+    ).toBe(true)
+    expect(
+      sameCommentAnchor(onElement, { frameId: 'f', selector: '#b', elementId: 'bbbbbb', snippet: '', ...at }),
+    ).toBe(false)
+    expect(sameCommentAnchor(onElement, { frameId: 'f', selector: '#b', snippet: '', ...at })).toBe(false)
+    expect(
+      sameCommentAnchor(onElement, { frameId: 'g', selector: '#a', elementId: 'aaaaaa', snippet: '', ...at }),
+    ).toBe(false)
+    expect(sameCommentAnchor(onElement, { frameId: 'f', snippet: '', ...at })).toBe(false)
     expect(sameCommentAnchor(onElement, { pageId: 'first', x: 1, y: 2 })).toBe(false)
-    const onFrame = { ...base, frameId: 'f', selector: 'body', x: 10, y: 20 }
-    expect(sameCommentAnchor(onFrame, { frameId: 'f', selector: 'body', snippet: '', x: 10, y: 20 })).toBe(true)
-    expect(sameCommentAnchor(onFrame, { frameId: 'f', selector: 'body', snippet: '', x: 11, y: 20 })).toBe(false)
+    const onFrame = { ...base, frameId: 'f', x: 10, y: 20 }
+    expect(sameCommentAnchor(onFrame, { frameId: 'f', snippet: '', x: 10, y: 20 })).toBe(true)
+    expect(sameCommentAnchor(onFrame, { frameId: 'f', snippet: '', x: 11, y: 20 })).toBe(false)
+    expect(sameCommentAnchor(onFrame, { frameId: 'f', selector: '#a', snippet: '', x: 10, y: 20 })).toBe(false)
     const onCanvas = { ...base, pageId: 'first', x: 1, y: 2 }
     expect(sameCommentAnchor(onCanvas, { pageId: 'first', x: 1, y: 2 })).toBe(true)
     expect(sameCommentAnchor(onCanvas, { pageId: 'first', x: 1, y: 3 })).toBe(false)

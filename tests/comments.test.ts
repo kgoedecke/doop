@@ -31,12 +31,12 @@ const canvas = {
 } as unknown as Canvas
 
 function comment(id: string, frameId: string, at: number, extra: Partial<ElementComment> = {}): ElementComment {
-  return { id, canvasId: 'c', frameId, selector: 'h1', snippet: '', from: 'Ada', text: id, at, ...extra }
+  return { id, canvasId: 'c', frameId, elementId: 'h1h1h1', snippet: '', from: 'Ada', text: id, at, ...extra }
 }
 
 /* a comment pinned to a point on the canvas: a page and world coordinates, no frame */
 function canvasComment(id: string, pageId: string, at: number, extra: Partial<ElementComment> = {}): ElementComment {
-  return { id, canvasId: 'c', pageId, x: 10, y: 20, selector: '', snippet: '', from: 'Ada', text: id, at, ...extra }
+  return { id, canvasId: 'c', pageId, x: 10, y: 20, snippet: '', from: 'Ada', text: id, at, ...extra }
 }
 
 /* the store keeps comments newest first */
