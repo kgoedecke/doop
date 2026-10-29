@@ -59,7 +59,12 @@ async function click(el: Element | undefined) {
 }
 
 it('holds a PDF over the frame limit on the checklist until enough frames are unchecked', async () => {
-  const many = Array.from({ length: MAX_PDF_FRAMES + 2 }, (_, i) => ({ ...base, id: `f${i}`, name: `F${i}`, x: i * 200 }))
+  const many = Array.from({ length: MAX_PDF_FRAMES + 2 }, (_, i) => ({
+    ...base,
+    id: `f${i}`,
+    name: `F${i}`,
+    x: i * 200,
+  }))
   const dialog = await open(many)
   const action = () =>
     Array.from(dialog.querySelectorAll('button')).find((b) => b.textContent?.startsWith('Download PDF'))!

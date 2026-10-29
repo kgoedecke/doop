@@ -134,4 +134,8 @@ function ToolbarHighlight({ activeKey, className }: { activeKey: string; classNa
   )
 }
 
-export { Toolbar, ToolbarButton, ToolbarControl, ToolbarDot, ToolbarHighlight }
+function ToolbarDivider({ className, ...props }: React.ComponentProps<'div'>) {
+  return <div data-slot="toolbar-divider" className={cn('mx-0.5 h-[18px] w-px bg-line-soft', className)} {...props} />
+}
+
+export { Toolbar, ToolbarButton, ToolbarControl, ToolbarDivider, ToolbarDot, ToolbarHighlight }
