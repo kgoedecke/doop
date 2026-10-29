@@ -30,7 +30,11 @@ struct FloatingGlass: ViewModifier {
 /// A continuous rounded panel keeps the composer's corners stable as its text grows.
 struct ComposerGlass: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    private let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+    private let shape: RoundedRectangle
+
+    init(cornerRadius: CGFloat = 24) {
+        shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    }
 
     func body(content: Content) -> some View {
         if reduceTransparency {

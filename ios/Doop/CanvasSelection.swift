@@ -142,7 +142,6 @@ enum SelectionImageExport {
 struct SelectionExportPanel: View {
     let selection: CanvasSelection
     let origin: URL
-    @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var error: String?
     @State private var copied = false
@@ -150,7 +149,7 @@ struct SelectionExportPanel: View {
     @State private var files: [URL] = []
 
     var body: some View {
-        NavigationStack {
+        PanelNavigation("Export selection", inline: true, doneDisabled: busy) {
             List {
                 Section {
                     Button { export(image: true) } label: { Label("Share as image", systemImage: "photo") }
@@ -171,8 +170,6 @@ struct SelectionExportPanel: View {
                 if busy { HStack { ProgressView(); Text("Preparing export…") } }
                 if let error { Text(error).foregroundStyle(.red) }
             }
-            .navigationTitle("Export selection").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.disabled(busy) } }
             .sheet(item: $share) { item in NativeExportShare(url: item.url) }
         }
         .interactiveDismissDisabled(busy)

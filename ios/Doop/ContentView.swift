@@ -216,14 +216,15 @@ private struct LibraryView: View {
                             .font(.custom("HankenGrotesk-Regular_Light", size: 34, relativeTo: .largeTitle))
                         Text("Pick up an idea. Or start something new.").foregroundStyle(.secondary)
                     }.padding(.top, 12)
-                    HStack {
+                    // The count sits beside the scope it counts, not at the far edge.
+                    HStack(spacing: 4) {
                         Picker("Workspace", selection: $workspace) {
                             Text("All canvases").tag("all")
                             Text("Personal").tag("personal")
                             ForEach(app.workspaces) { Text($0.name).tag($0.id) }
                         }.pickerStyle(.menu)
-                        Spacer()
                         Text("\(filtered.count) \(filtered.count == 1 ? "canvas" : "canvases")").font(.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
                     }
                     if let error = app.error { Text(error).foregroundStyle(.red).font(.callout) }
                     if filtered.isEmpty {

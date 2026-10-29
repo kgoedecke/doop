@@ -32,7 +32,7 @@ struct NativeCanvasView: View {
     private let summary: CanvasSummary
     private let currentUser: DoopUser?
     private enum Panel: Identifiable {
-        case frames, inspector, tasks, comments
+        case frames, inspector, tasks, comments, pages
         case export(CanvasSelection)
         var id: String {
             switch self {
@@ -40,6 +40,7 @@ struct NativeCanvasView: View {
             case .inspector: return "inspector"
             case .tasks: return "tasks"
             case .comments: return "comments"
+            case .pages: return "pages"
             case .export: return "export"
             }
         }
@@ -95,7 +96,7 @@ struct NativeCanvasView: View {
                                 .padding(.bottom, max(screenFrame.maxY - contentFrame.maxY, 0) + 12)
                         }
                     }
-                    .ignoresSafeArea(.container, edges: sideRailWidth > 0 ? [.bottom, .trailing] : .bottom)
+                    .ignoresSafeArea(.container, edges: sideRailWidth > 0 ? [.top, .bottom, .trailing] : .bottom)
                     .background {
                         GeometryReader { proxy in
                             Color.clear
@@ -107,6 +108,27 @@ struct NativeCanvasView: View {
             .overlay(alignment: .topTrailing) {
                 if sideRailWidth == 0 && canvasToolsVisible { canvasTools.padding(12) }
             }
+            .overlay(alignment: .trailing) {
+                if let panel = sidePanel {
+                    // Hosted on its own so the panel's navigation title and toolbar (for its
+                    // sheet form) do not reach the canvas's navigation bar.
+                    SidePanelHost(content: panelContent(panel)
+                        .environment(\.closeCanvasPanel, CloseCanvasPanel { sheet = nil }))
+                        .id(panel.id)
+                        .frame(width: sidePanelWidth)
+                        .frame(maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+                        .modifier(ComposerGlass(cornerRadius: 34))
+                        .padding(.top, 4).padding(.bottom, 12).padding(.trailing, 4)
+                        // Down to the screen's foot, like the rail. The top stays under the
+                        // navigation bar: the bar takes every touch in its band, even see-through,
+                        // so a header up there could not be tapped.
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .accessibilityIdentifier("canvas.sidePanel")
+                }
+            }
+            .animation(.snappy(duration: 0.25), value: sidePanel?.id)
             .overlay(alignment: .top) {
                 // A live connection needs no badge; say so only while it is not.
                 if !model.connected {
@@ -120,8 +142,22 @@ struct NativeCanvasView: View {
             }
         }
         .background(CanvasBackSwipeGuard())
-        .navigationTitle(model.canvas?.name ?? summary.name).navigationBarTitleDisplayMode(.inline)
+        // With a side rail the buttons live in the rail and the name is a glass pill over the
+        // canvas, so the bar holds nothing: let the canvas show through it, as through the rail.
+        .navigationTitle(sideRailWidth > 0 ? "" : model.canvas?.name ?? summary.name).navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(sideRailWidth > 0 ? .hidden : .automatic, for: .navigationBar)
         .toolbar {
+            if sideRailWidth > 0 {
+                // The bar's title is hidden with a side rail; the name is a leading item, which
+                // the system draws as a glass pill level with the rail's clock. It opens Pages.
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { openPagePicker() } label: {
+                        Text(model.canvas?.name ?? summary.name).font(.headline).lineLimit(1)
+                    }
+                    .accessibilityLabel("Canvas \(model.canvas?.name ?? summary.name), pages")
+                    .accessibilityIdentifier("canvas.name")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 if !model.presences.isEmpty {
                     Button { openPeoplePicker() } label: { Image(systemName: "person.2") }
@@ -145,19 +181,23 @@ struct NativeCanvasView: View {
                 } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Canvas actions")
             }
         }
-        .sheet(item: $sheet) { panel in
-            switch panel {
-            case .frames: framesPanel
-            case .inspector:
-                if let frame = model.selected { FrameInspector(model: model, original: frame) }
-            case .tasks: TasksPanel(model: model)
-            case .comments: CommentsPanel(model: model)
-            case .export(let selection):
-                SelectionExportPanel(selection: selection, origin: model.client.server.origin)
-            }
+        // With a side rail, panels open beside the canvas instead of as sheets.
+        .sheet(item: Binding(get: { sideRailWidth > 0 ? nil : sheet }, set: { sheet = $0 })) { panel in
+            panelContent(panel)
         }
         .task { await loadModels() }
-        .onAppear { clipboardAvailable = CanvasClipboard.isAvailable; if scenePhase == .active { model.start() } }
+        .onAppear {
+            clipboardAvailable = CanvasClipboard.isAvailable; if scenePhase == .active { model.start() }
+            #if DEBUG
+            switch UserDefaults.standard.string(forKey: "openPanel") {
+            case "frames": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { sheet = .frames }
+            case "comments": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { sheet = .comments }
+            case "tasks": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { sheet = .tasks }
+            case "pages": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { openPagePicker() }
+            default: break
+            }
+            #endif
+        }
         .onDisappear { model.stop() }
         .onChange(of: scenePhase) { phase in if phase == .active { clipboardAvailable = CanvasClipboard.isAvailable; model.start() } else if phase == .background { model.stop() } }
         .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
@@ -330,7 +370,7 @@ struct NativeCanvasView: View {
         contextPickerOpen = false
         dismissedMention = prompt
         promptFocused = false
-        pagePickerOpen = true
+        if sideRailWidth > 0 { sheet = .pages } else { pagePickerOpen = true }
     }
 
     /// The canvas's pages, in the composer's glass card like the mention and model pickers.
@@ -344,36 +384,40 @@ struct NativeCanvasView: View {
                 }.buttonStyle(.plain).accessibilityLabel("Close pages")
             }.padding(.leading, 12)
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(model.pages) { page in
-                        let current = page.id == model.activePageID
-                        Button {
-                            model.selectPage(page.id)
-                            pagePickerOpen = false
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: current ? "doc.fill" : "doc").font(.title3)
-                                    .foregroundStyle(ComposerColors.action).frame(width: 28)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(page.name).lineLimit(2).multilineTextAlignment(.leading)
-                                    Text(pageSummary(page)).font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 0)
-                                if current { Image(systemName: "checkmark").font(.caption).foregroundStyle(ComposerColors.action) }
-                            }
-                            .padding(.horizontal, 12).padding(.vertical, 8)
-                            .frame(minHeight: 48).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(page.name)
-                        .accessibilityValue(pageSummary(page))
-                        .accessibilityAddTraits(current ? [.isSelected] : [])
-                    }
+                pageRows { id in
+                    model.selectPage(id)
+                    pagePickerOpen = false
                 }.padding(.bottom, 12)
             }.frame(height: min(CGFloat(model.pages.count) * 60 + 12, 300))
         }
         .padding(8).modifier(ComposerGlass())
         .accessibilityIdentifier("canvas.pageOptions")
+    }
+
+    private func pageRows(pick: @escaping (String) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(model.pages) { page in
+                let current = page.id == model.activePageID
+                Button { pick(page.id) } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: current ? "doc.fill" : "doc").font(.title3)
+                            .foregroundStyle(ComposerColors.action).frame(width: 28)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(page.name).lineLimit(2).multilineTextAlignment(.leading)
+                            Text(pageSummary(page)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if current { Image(systemName: "checkmark").font(.caption).foregroundStyle(ComposerColors.action) }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .frame(minHeight: 48).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(page.name)
+                .accessibilityValue(pageSummary(page))
+                .accessibilityAddTraits(current ? [.isSelected] : [])
+            }
+        }
     }
 
     /// "4 frames · 2 here": the page's frames and the people currently on it.
@@ -591,6 +635,32 @@ struct NativeCanvasView: View {
         promptFocused = true
     }
 
+    /// The panel open beside the canvas: with a side rail, panels are not sheets.
+    private var sidePanel: Panel? { sideRailWidth > 0 ? sheet : nil }
+
+    /// A wide layout gets a side panel like a split view; a narrow one a near-full card.
+    private var sidePanelWidth: CGFloat {
+        let width = contentFrame.width
+        return width >= 600 ? min(max(width * 0.45, 320), 440) : max(width - 16, 0)
+    }
+
+    @ViewBuilder private func panelContent(_ panel: Panel) -> some View {
+        switch panel {
+        case .frames: framesPanel
+        case .inspector:
+            if let frame = model.selected { FrameInspector(model: model, original: frame) }
+        case .tasks: TasksPanel(model: model)
+        case .comments: CommentsPanel(model: model)
+        case .pages:
+            // Beside the canvas the list stays open, so a pick shows at once and the next is a tap away.
+            PanelNavigation("Pages") {
+                ScrollView { pageRows { model.selectPage($0) }.padding(.horizontal, 8).padding(.vertical, 8) }
+            }
+        case .export(let selection):
+            SelectionExportPanel(selection: selection, origin: model.client.server.origin)
+        }
+    }
+
     private var canvasToolsVisible: Bool {
         !showContextPicker && !modelPickerOpen && !pagePickerOpen && !peoplePickerOpen
     }
@@ -653,7 +723,7 @@ struct NativeCanvasView: View {
         }
     }
     private var framesPanel: some View {
-        NavigationStack {
+        PanelNavigation(model.activePage.name) {
             List {
                 if model.pageFrames.isEmpty { Text("No frames on this page.").foregroundStyle(.secondary) }
                 ForEach(model.pageFrames) { frame in
@@ -669,8 +739,7 @@ struct NativeCanvasView: View {
                         }.padding(.vertical, 5)
                     }
                 }
-            }.navigationTitle(model.activePage.name)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { sheet = nil } } }
+            }
         }
     }
     private var selectionActions: some View {
@@ -783,6 +852,114 @@ private enum ComposerColors {
     }
 }
 
+/// Hosts a panel beside the canvas in its own hosting controller, so the navigation title and
+/// toolbar it sets for its sheet form stay out of the canvas's navigation bar.
+private struct SidePanelHost<Content: View>: UIViewControllerRepresentable {
+    let content: Content
+    func makeUIViewController(context: Context) -> UIHostingController<Content> {
+        let controller = UIHostingController(rootView: content)
+        controller.view.backgroundColor = .clear
+        // The card floats inside the screen's edges, so only the keyboard should inset it.
+        if #available(iOS 16.4, *) { controller.safeAreaRegions = .keyboard }
+        return controller
+    }
+    func updateUIViewController(_ controller: UIHostingController<Content>, context: Context) {
+        controller.rootView = content
+    }
+}
+
+/// A panel's chrome. As a sheet it is a NavigationStack with the title, Cancel and Done (or the
+/// panel's own action); beside the canvas it is a header with the title and that action, because
+/// a NavigationStack there pops the canvas and a navigation title reaches the canvas's bar.
+struct PanelNavigation<Confirm: View, Content: View>: View {
+    private let title: String
+    private let inline: Bool
+    private let cancellable: Bool
+    private let doneDisabled: Bool
+    private let confirm: Confirm
+    private let content: Content
+    @Environment(\.closeCanvasPanel) private var closePanel
+    @Environment(\.dismiss) private var dismiss
+
+    init(_ title: String, inline: Bool = false, cancellable: Bool = false, doneDisabled: Bool = false,
+         @ViewBuilder confirm: () -> Confirm, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.inline = inline
+        self.cancellable = cancellable
+        self.doneDisabled = doneDisabled
+        self.confirm = confirm()
+        self.content = content()
+    }
+
+    private var hasConfirm: Bool { Confirm.self != EmptyView.self }
+
+    var body: some View {
+        if closePanel != nil {
+            // A floating glass card, like the system share sheet: lists drop their grouped
+            // backdrop so the glass shows through, and the card closes itself.
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text(title).font(.title3.weight(.semibold)).lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    confirm
+                    Button { closePanel?() } label: {
+                        Image(systemName: "xmark").font(.body.weight(.medium))
+                            .frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .modifier(FloatingGlass())
+                    .accessibilityLabel("Close panel")
+                    .accessibilityIdentifier("canvas.closePanel")
+                }
+                .padding(.leading, 22).padding(.trailing, 14).padding(.top, 14).padding(.bottom, 8)
+                Divider().padding(.horizontal, 22)
+                content.scrollContentBackground(.hidden)
+            }
+        } else {
+            NavigationStack {
+                content
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(inline ? .inline : .automatic)
+                    .toolbar {
+                        if cancellable {
+                            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            if hasConfirm { confirm } else { Button("Done") { dismiss() }.disabled(doneDisabled) }
+                        }
+                    }
+            }
+        }
+    }
+}
+
+extension PanelNavigation where Confirm == EmptyView {
+    init(_ title: String, inline: Bool = false, doneDisabled: Bool = false, @ViewBuilder content: () -> Content) {
+        self.init(title, inline: inline, doneDisabled: doneDisabled, confirm: { EmptyView() }, content: content)
+    }
+}
+
+/// Closes a canvas panel shown beside the canvas. Panels are written as sheets and close with
+/// `dismiss()`, which beside the canvas would leave the canvas instead.
+struct CloseCanvasPanel {
+    private let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    func callAsFunction() { action() }
+}
+
+private struct CloseCanvasPanelKey: EnvironmentKey {
+    static let defaultValue: CloseCanvasPanel? = nil
+}
+
+extension EnvironmentValues {
+    /// Set when a panel is shown beside the canvas rather than as a sheet.
+    var closeCanvasPanel: CloseCanvasPanel? {
+        get { self[CloseCanvasPanelKey.self] }
+        set { self[CloseCanvasPanelKey.self] = newValue }
+    }
+}
+
 /// A collaborator's face, as on their canvas cursor: an agent's brand mark, or a person's
 /// initials on a tint of their colour.
 private struct PresenceAvatar: View {
@@ -827,6 +1004,7 @@ private struct FrameInspector: View {
     @ObservedObject var model: CanvasModel
     let original: DesignFrame
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeCanvasPanel) private var closePanel
     @State private var name = ""
     @State private var width = 390.0
     @State private var height = 844.0
@@ -835,7 +1013,8 @@ private struct FrameInspector: View {
     @State private var saving = false
     @State private var deleting = false
     var body: some View {
-        NavigationStack {
+        PanelNavigation("Frame properties", inline: true, cancellable: true,
+                        confirm: { Button(saving ? "Saving…" : "Save", action: save).disabled(saving) }) {
             Form {
                 Section("Frame") {
                     TextField("Name", text: $name)
@@ -849,14 +1028,9 @@ private struct FrameInspector: View {
                 if let error { Section { Text(error).foregroundStyle(.red) } }
                 Section { Button("Delete frame", role: .destructive) { deleting = true } }
             }
-            .navigationTitle("Frame properties").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save", action: save).disabled(saving) }
-            }
             .onAppear { name = original.name; width = original.width; height = original.height; html = original.html }
             .confirmationDialog("Delete this frame?", isPresented: $deleting, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) { Task { do { try await model.deleteFrame(original.id); dismiss() } catch { self.error = error.localizedDescription } } }
+                Button("Delete", role: .destructive) { Task { do { try await model.deleteFrame(original.id); close() } catch { self.error = error.localizedDescription } } }
             }
         }
     }
@@ -874,15 +1048,17 @@ private struct FrameInspector: View {
             patch["html"] = html
         }
         saving = true
-        Task { do { if !patch.isEmpty { try await model.patchFrame(original.id, patch: patch) }; dismiss() } catch { self.error = error.localizedDescription }; saving = false }
+        Task { do { if !patch.isEmpty { try await model.patchFrame(original.id, patch: patch) }; close() } catch { self.error = error.localizedDescription }; saving = false }
     }
+
+    /// Closes the sheet, or the side panel when shown beside the canvas.
+    private func close() { if let closePanel { closePanel() } else { dismiss() } }
 }
 
 private struct TasksPanel: View {
     @ObservedObject var model: CanvasModel
-    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        NavigationStack {
+        PanelNavigation("Agent tasks") {
             List {
                 if model.tasks.isEmpty { Text("Ask your agent to design something. Tasks appear here as the team works.").foregroundStyle(.secondary) }
                 ForEach(model.tasks.sorted { $0.startedAt > $1.startedAt }) { task in
@@ -895,48 +1071,155 @@ private struct TasksPanel: View {
                         }
                     }.padding(.vertical, 8)
                 }
-            }.navigationTitle("Agent tasks").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            }
         }
     }
 }
 
 private struct CommentsPanel: View {
     @ObservedObject var model: CanvasModel
-    @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var sending = false
     @State private var error: String?
+    @FocusState private var composing: Bool
+
+    private var threads: [(root: CanvasComment, replies: [CanvasComment])] {
+        let comments = model.pageComments
+        return comments.filter { $0.parentId == nil }.sorted { $0.at > $1.at }.map { root in
+            (root, comments.filter { $0.parentId == root.id }.sorted { $0.at < $1.at })
+        }
+    }
+
+    private var canPost: Bool {
+        !sending && model.selectedID != nil && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
-        NavigationStack {
-            List {
-                Section(model.selectedElement.map { "Comment on \($0.label)" } ?? "Add a frame comment") {
-                    if let element = model.selectedElement, !element.text.isEmpty {
-                        Text(element.text).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+        PanelNavigation("Comments") {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if threads.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "bubble.left.and.bubble.right").font(.largeTitle).foregroundStyle(.secondary)
+                            Text("No comments yet").font(.headline)
+                            Text("Feedback on this page shows up here.").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        .multilineTextAlignment(.center).padding(.top, 64)
                     }
+                    ForEach(Array(threads.enumerated()), id: \.element.root.id) { index, thread in
+                        if index > 0 { Divider() }
+                        CommentThreadCard(root: thread.root, replies: thread.replies, frameName: frameName(thread.root))
+                    }
+                }
+                .padding(.horizontal, 22).padding(.vertical, 4)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        }
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let element = model.selectedElement {
+                Label(element.label, systemImage: "scope")
+                    .font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+                    .padding(.horizontal, 6)
+            }
+            TextField("Leave feedback…", text: $text, axis: .vertical)
+                .lineLimit(1...5).focused($composing)
+                .padding(.horizontal, 6).padding(.top, 4)
+            HStack(spacing: 8) {
+                Menu {
                     Picker("Frame", selection: Binding(get: { model.selectedID }, set: { model.select($0) })) {
-                        Text("Choose a frame").tag(String?.none)
                         ForEach(model.pageFrames) { Text($0.name).tag(Optional($0.id)) }
                     }
-                    TextField("Leave feedback…", text: $text, axis: .vertical).lineLimit(2...5)
-                    Button("Post comment") {
-                        guard let id = model.selectedID else { return }
-                        sending = true
-                        Task { do { try await model.comment(text, frameID: id); text = "" } catch { self.error = error.localizedDescription }; sending = false }
-                    }.disabled(sending || model.selectedID == nil || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if let error { Text(error).foregroundStyle(.red) }
+                } label: {
+                    Label(model.pageFrames.first { $0.id == model.selectedID }?.name ?? "Choose a frame",
+                          systemImage: "rectangle.on.rectangle")
+                        .font(.subheadline).lineLimit(1)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(.primary.opacity(0.06), in: Capsule())
                 }
-                Section("Conversation") {
-                    if model.pageComments.isEmpty { Text("No comments on this page yet.").foregroundStyle(.secondary) }
-                    ForEach(model.pageComments.sorted { $0.at > $1.at }) { comment in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack { Text(comment.from).font(.subheadline.bold()); Spacer(); if comment.resolvedAt != nil { Image(systemName: "checkmark.circle").foregroundStyle(.green) } }
-                            Text(comment.text)
-                            Text(model.canvas?.frames.first(where: { $0.id == comment.frameId })?.name ?? (comment.frameId == nil ? "Canvas" : "Deleted frame")).font(.caption).foregroundStyle(.secondary)
-                        }.padding(.vertical, 6)
+                .foregroundStyle(model.selectedID == nil ? .secondary : .primary)
+                Spacer(minLength: 0)
+                Button(action: post) {
+                    Group {
+                        if sending { ProgressView() } else { Image(systemName: "arrow.up").font(.body.weight(.semibold)) }
                     }
+                    .frame(width: 34, height: 34)
+                    .foregroundStyle(canPost ? Color(uiColor: .systemBackground) : .secondary)
+                    .background(canPost ? Color.primary : Color.primary.opacity(0.08), in: Circle())
                 }
-            }.navigationTitle("Comments").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+                .disabled(!canPost)
+                .accessibilityLabel("Post comment")
+            }
+            if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 6) }
         }
+        .padding(10)
+        .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 6)
+    }
+
+    private func frameName(_ comment: CanvasComment) -> String {
+        guard let id = comment.frameId else { return "Canvas" }
+        return model.canvas?.frames.first { $0.id == id }?.name ?? "Deleted frame"
+    }
+
+    private func post() {
+        guard let id = model.selectedID else { return }
+        sending = true
+        error = nil
+        Task {
+            do { try await model.comment(text, frameID: id); text = "" } catch { self.error = error.localizedDescription }
+            sending = false
+        }
+    }
+}
+
+private struct CommentThreadCard: View {
+    let root: CanvasComment
+    let replies: [CanvasComment]
+    let frameName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Label(frameName, systemImage: "rectangle.on.rectangle").lineLimit(1)
+                Spacer(minLength: 0)
+                if root.resolvedAt != nil {
+                    Label("Resolved", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+            }
+            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            CommentRow(comment: root)
+            ForEach(replies) { CommentRow(comment: $0).padding(.leading, 38) }
+        }
+        .padding(.vertical, 14)
+        .opacity(root.resolvedAt == nil ? 1 : 0.7)
+    }
+}
+
+private struct CommentRow: View {
+    let comment: CanvasComment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(comment.from.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined())
+                .font(.caption.weight(.semibold)).foregroundStyle(.tint)
+                .frame(width: 28, height: 28)
+                .background(.tint.opacity(0.15), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(comment.from).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text(Date(timeIntervalSince1970: comment.at / 1000).formatted(.relative(presentation: .named)))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Text(comment.text).font(.subheadline).textSelection(.enabled)
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
