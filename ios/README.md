@@ -53,7 +53,7 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   controls what it links; its `svg` feature must stay on, or neither inline `<svg>`
   elements nor SVG images (`<img src="….svg">`, backgrounds) are painted at all.
   SVG images are parsed by usvg, which accepts `em`-sized roots such as iconify's.
-  An inline `<svg>` reaches usvg as standalone markup, so the vendored `blitz-dom`
+  An inline `<svg>` reaches usvg as standalone markup, so the forked `blitz-dom`
   writes the cascade into it: computed fill/stroke (with their widths, caps, dashes
   and opacities) and `opacity` replace the authored attributes, so class rules,
   `var()` and `currentColor` apply. `<use>` references are expanded into clones that
@@ -64,7 +64,7 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   usvg font database with them under their CSS family names (only subsets whose
   `unicode-range` covers Latin, since usvg picks one face per family), and the computed
   font and `letter-spacing` are written into the markup like the paint.
-- **Fonts and inputs**: variable fonts take their weight through the vendored
+- **Fonts and inputs**: variable fonts take their weight through the forked
   `anyrender_skia`, which maps parley's normalized coordinates back to design space
   through the font's `avar` table (upstream interpolated below-default weights from the
   wrong end, so Fraunces 300 drew heavy and 700 hairline); `opsz` follows the font size
@@ -173,20 +173,25 @@ shot -- <html> <w> <h> <scale> [out.ppm]` paints one frame the way the app does,
 `cargo run --release --example memory -- <dir> <copies> <scale>` reports resident
 memory for a board of documents.
 
-`BlitzKit/vendor/blitz-paint` is the upstream `blitz-paint` crate at the pinned commit
-with one fix, wired in through `[patch]` in `rust/Cargo.toml`: CSS filter lengths
+Blitz comes from the `doop` branch of [kgoedecke/blitz](https://github.com/kgoedecke/blitz/tree/doop):
+the upstream commit we pin, plus our rendering fixes as commits on top, each also sent
+upstream as its own PR. anyrender (the paint backends) comes the same way from the
+`doop` branch of [kgoedecke/anyrender](https://github.com/kgoedecke/anyrender/tree/doop),
+through `[patch.crates-io]`. To change the engine, commit to the fork branch and bump the
+rev in `rust/Cargo.toml`; to follow upstream, rebase the branch and drop commits that have
+landed. The fixes, in `blitz-paint` first: CSS filter lengths
 (blur radii, drop-shadow offsets) are scaled with the paint scale. Upstream applies
 them in device pixels, so a `blur(22px)` hero looked like fog zoomed out and barely
-blurred on a 3× screen. Remove the vendored copy once the fix lands upstream.
+blurred on a 3× screen.
 
-The vendored copy also adds `paint_scene_region`, a signed-offset entry point for
+The fork also adds `paint_scene_region`, a signed-offset entry point for
 painting a window of a document (the upstream offset is an unsigned shift), and fixes
 the painter's culling window to follow that offset; without it a tile only showed
 elements that happened to fall within the tile's own size measured from the frame
 origin. `cargo run --release --example tile -- <html> <w> <h> <scale> <x> <y> <rw>
 <rh> <out>` checks a tile against the same window of a full render.
 
-The vendored copy carries a second fix: an element with `opacity` or `filter` and
+It carries a second fix: an element with `opacity` or `filter` and
 `overflow: visible` had its layer clipped to its own border box, cutting off
 absolutely positioned children such as cursor labels; the clip now covers the
 element's scrollable overflow.
@@ -201,7 +206,7 @@ checks repetition, filtered noise, and full-frame versus region rendering.
 As with gradients, spaced backgrounds requiring more than 500 explicit tile
 draws are skipped to keep painting bounded; repeat/round use a single brush fill.
 
-A third engine gap is worked around in the bridge rather than vendored: Blitz rebuilds
+A third engine gap is worked around in the bridge rather than in the fork: Blitz rebuilds
 its style device when the scale changes but does not recascade, and Stylo snaps border
 and outline widths to whole device pixels at cascade time. A frame first styled at a
 fitted board's tiny scale therefore kept hairlines that had snapped up to one device

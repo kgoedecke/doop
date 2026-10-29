@@ -15,9 +15,6 @@ ios/DerivedData*/
 ios/.build/
 ios/BlitzKit/rust/target/
 ios/BlitzKit/lib/
-
-# Vendored Rust crates, kept as close to upstream as possible
-ios/BlitzKit/vendor/
 storybook-static/
 
 # agent worktrees (git worktrees under the repo)
