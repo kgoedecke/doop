@@ -202,12 +202,44 @@ because of Gatekeeper, downloaders must approve it under System Settings →
 Privacy & Security → "Open Anyway". Fine for testers, not for the public —
 don't link it from the site.
 
-The Windows installer is **always unsigned** — there is no Authenticode
-certificate configured. SmartScreen shows "Windows protected your PC" on
-first run; users click "More info" → "Run anyway". Signing it is the
-equivalent of the Apple setup below: a code-signing certificate wired into
-`bundle.windows` in `src-tauri/tauri.conf.json` (see the Tauri Windows
-code-signing guide). Until then, same rule as the DMG: testers only.
+The Windows app and installer are signed with [Azure Artifact
+Signing](https://learn.microsoft.com/azure/artifact-signing/) on tag and
+dispatch builds (see below); PR builds and forks without the `AZURE_*`
+variables build unsigned, and SmartScreen shows "Windows protected your PC" on
+those ("More info" → "Run anyway"). A signed build shows the verified publisher
+straight away; SmartScreen may still warn on the first downloads of a new
+version until it has built reputation.
+
+### Windows signing (Azure Artifact Signing)
+
+The `nsis-windows` job logs the Azure CLI in through GitHub OIDC (no client
+secret is stored), and Tauri's `bundle.windows.signCommand`, set only in CI,
+runs `scripts/sign-windows.ps1` on the app `.exe`, the installer and its
+uninstaller: `signtool` with Microsoft's `Microsoft.ArtifactSigning.Client`
+library (version and checksum pinned in the workflow). The job fails if any
+of them is left unsigned.
+
+What Azure holds (subscription "Azure subscription 1", resource group
+`ResourceGroup`):
+
+- Artifact Signing account `Doop` (East US, `https://eus.codesigning.azure.net`)
+  with the public-trust certificate profile `doop-public`, issued from the
+  individual identity validation (it expires 2027-10-30; renew it in the
+  portal before then).
+- App registration `doop-desktop-signing`, holding the **Artifact Signing
+  Certificate Profile Signer** role on the account, with a federated
+  credential for `repo:kgoedecke/doop:environment:desktop-release`.
+
+On the GitHub side the repo needs a `desktop-release` environment and two
+repository variables (they are identifiers, not secrets):
+
+```sh
+gh variable set AZURE_CLIENT_ID   # the app registration's Application (client) ID
+gh variable set AZURE_TENANT_ID   # the directory (tenant) ID
+```
+
+Signing from another repo means adding a federated credential for that repo's
+`desktop-release` environment to the app registration.
 
 ### One-time signing setup (needs an Apple Developer membership)
 

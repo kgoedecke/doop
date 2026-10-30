@@ -48,8 +48,13 @@ in `.github/actions/setup-desktop`:
   `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` repo secrets exist (see
   `desktop/README.md`). Without them the DMG is unsigned - it still works, but downloaders must
   approve it via System Settings -> Privacy & Security.
-- The Windows installer is unsigned (no Authenticode certificate configured): SmartScreen warns on
-  first run and users click "More info" -> "Run anyway".
+- Windows signing: Azure Artifact Signing (account `Doop`, East US, profile `doop-public`). The
+  `nsis-windows` job runs in the `desktop-release` environment, logs in through OIDC (app
+  registration `doop-desktop-signing`, federated on that environment; `AZURE_CLIENT_ID` /
+  `AZURE_TENANT_ID` repo variables, no secret) and passes a CI-only `signCommand` to Tauri
+  (`desktop/scripts/sign-windows.ps1`: signtool + the pinned `Microsoft.ArtifactSigning.Client`
+  dlib), so the app exe, installer and uninstaller are signed; `signtool verify` gates the job. PR
+  builds and repos without the variables stay unsigned. Setup: `desktop/README.md`.
 - Connecting an OAuth integration (Meta, Linear, Slack) from the app opens the
   provider in the system browser and returns over a `doop://integration/<id>` link; the app
   finishes it under its own session (`shared/desktopConnect.ts`). This is web-only: shells from
