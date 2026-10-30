@@ -41,7 +41,11 @@ it('uses the payer key and selected Claude model on the server without a local h
   expect(mocks.key).toHaveBeenCalledWith('sk-ant-alice')
   expect(mocks.headers).toHaveBeenCalledWith(undefined)
   expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
-  expect(mocks.stream).toHaveBeenCalledWith(expect.objectContaining({ model: 'claude-opus-5', max_tokens: 1024 }))
+  expect(mocks.stream).toHaveBeenCalledWith(
+    expect.objectContaining({ model: 'claude-opus-5', max_tokens: 1024 }),
+    /* the abort signal that lets a stopped card end its turn mid-generation */
+    { signal: undefined },
+  )
 })
 
 it('reports invalid credentials as a reconnectable account error', async () => {
