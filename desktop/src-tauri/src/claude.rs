@@ -901,6 +901,8 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(3));
     }
 
+    // The login shell is asked on Unix only, and these paths are Unix ones.
+    #[cfg(unix)]
     #[test]
     fn reads_the_shells_claude_past_start_up_noise() {
         let home = Path::new("/Users/me");
