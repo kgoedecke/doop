@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.11.0](https://github.com/kgoedecke/doop/compare/v0.10.0...v0.11.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** stop Doop agent tasks mid-flight ([#262](https://github.com/kgoedecke/doop/issues/262)) ([f8ca5bb](https://github.com/kgoedecke/doop/commit/f8ca5bb4bdd7f3cb86a73e2a2f89b6b3ddd23c21))
+* **canvas:** add an Edit / Prototype / Comment mode switch to the tool rail ([#381](https://github.com/kgoedecke/doop/issues/381)) ([be87fb8](https://github.com/kgoedecke/doop/commit/be87fb8440fb75322f163603e27deec68e458983))
+* **comments:** anchor comments and element links by data-doop-id ([#398](https://github.com/kgoedecke/doop/issues/398)) ([18e3c39](https://github.com/kgoedecke/doop/commit/18e3c39e3dee62cfd62195802636a7c28e855f64))
+* **comments:** move a comment pin by drag ([#393](https://github.com/kgoedecke/doop/issues/393)) ([e4d41c5](https://github.com/kgoedecke/doop/commit/e4d41c5e3c8c0c2b8d945a96ab85b72e2a8de0ff))
+* **desktop:** follow new Claude models by alias, and pick the effort ([#251](https://github.com/kgoedecke/doop/issues/251)) ([bfcec7d](https://github.com/kgoedecke/doop/commit/bfcec7d318cf03df440a852844fd0033a05e5e47))
+* **ios:** glass side panels beside the canvas on iPhone Duo ([d6fec6d](https://github.com/kgoedecke/doop/commit/d6fec6d58cdc727e1579f2a6dfa441a08b405de0))
+* **ios:** move page picker and frame count into the canvas actions menu ([#248](https://github.com/kgoedecke/doop/issues/248)) ([21ddd8c](https://github.com/kgoedecke/doop/commit/21ddd8c7f79780550aaa7f7d48d02416f81969dc))
+* **ios:** pages and people pickers, drop the canvas status row ([f4968e4](https://github.com/kgoedecke/doop/commit/f4968e42cf8dfbba61e6494152ae0c918bf06652))
+* **ios:** put the canvas tools in a system side rail ([7a87238](https://github.com/kgoedecke/doop/commit/7a87238b5d8ec676ef8f3861484994b4d1d45d32))
+* **layers:** drag layers between frames and onto the canvas ([#380](https://github.com/kgoedecke/doop/issues/380)) ([8ad1742](https://github.com/kgoedecke/doop/commit/8ad17428f96c49f7430501a424755def291c1e85))
+* **models:** discover ChatGPT subscription models from the Codex catalog ([#250](https://github.com/kgoedecke/doop/issues/250)) ([ad028ab](https://github.com/kgoedecke/doop/commit/ad028ab9ae2a0e2bd26c3f2718361e32d48e2b58))
+* **models:** let users pick the OpenAI reasoning effort ([#246](https://github.com/kgoedecke/doop/issues/246)) ([b28219a](https://github.com/kgoedecke/doop/commit/b28219a779169b53303aec48e8cd45c0e555e042))
+
+
+### Bug Fixes
+
+* **activity:** show why a card failed, not its whole brief ([#382](https://github.com/kgoedecke/doop/issues/382)) ([87aa8f8](https://github.com/kgoedecke/doop/commit/87aa8f8dd13ea13b982fb624a240f1c0d1283e69))
+* **canvas:** give frames corner grips, a size badge and a 1px floor ([#379](https://github.com/kgoedecke/doop/issues/379)) ([88e54bb](https://github.com/kgoedecke/doop/commit/88e54bb3a60140526d3a3953f21e6e78f0a63a53))
+* **canvas:** hit-test layer drags on the frame's current document ([5802eb7](https://github.com/kgoedecke/doop/commit/5802eb7401fc32f3c3f23fe2c2c97584359c575f))
+* **canvas:** keep agent chips visible on zoomed-out frames ([#265](https://github.com/kgoedecke/doop/issues/265)) ([5eb27d6](https://github.com/kgoedecke/doop/commit/5eb27d66155160adeb4443d6b92d1d7173e8f248))
+* **canvas:** stack a frame's name with its own frame ([#387](https://github.com/kgoedecke/doop/issues/387)) ([f7d1da2](https://github.com/kgoedecke/doop/commit/f7d1da2e20fb32c7c00f0ca39d11ae3b7054ab3e))
+* comment anchor races and layer-carry edge cases from the [#261](https://github.com/kgoedecke/doop/issues/261) review ([#263](https://github.com/kgoedecke/doop/issues/263)) ([9319a7c](https://github.com/kgoedecke/doop/commit/9319a7c2c1b3426b3d3529c09d4df6ea2cc26856))
+* **comments:** comment on a frame where no element is under the pointer ([#391](https://github.com/kgoedecke/doop/issues/391)) ([cbd6de2](https://github.com/kgoedecke/doop/commit/cbd6de2788c820d31903764581e35971ae8d2ba3))
+* **db:** keep integrations.refresh_token in the ported drizzle snapshots ([e43e6cd](https://github.com/kgoedecke/doop/commit/e43e6cdf46169850df9c03a0181ba4665881963a))
+* **desktop:** run the Claude Code the login shell runs, and let Settings choose one ([#271](https://github.com/kgoedecke/doop/issues/271)) ([eaf183b](https://github.com/kgoedecke/doop/commit/eaf183ba852bc078c89ed06ad5d8488c9543e4d2))
+* **desktop:** run the newest Claude Code found, and say when it is too old ([#254](https://github.com/kgoedecke/doop/issues/254)) ([ba7b602](https://github.com/kgoedecke/doop/commit/ba7b6025450fc77b0390e50f145ee8ea67a090f8))
+* **export:** keep a PDF over the frame limit on the checklist ([e70fbab](https://github.com/kgoedecke/doop/commit/e70fbabfbec0c9cef80f96d91733b74111801c9b))
+* **ios:** do not place agents on the first page ([f73f868](https://github.com/kgoedecke/doop/commit/f73f868b32e4c9c6d51d423afcb68afde5a5dc3b))
+* **ios:** keep side-panel inspector drafts on their frame and exports open while busy ([a9b24cc](https://github.com/kgoedecke/doop/commit/a9b24cc9a81e4eda47e539b6999200e58a5e2cb0))
+* **ios:** mask an element's shadow with it ([dc55336](https://github.com/kgoedecke/doop/commit/dc553367d57603203cc1d0d1c6db15caa0c3dbbe))
+* **ios:** paint gradient text and match box-shadow blur to browsers ([fba5e8d](https://github.com/kgoedecke/doop/commit/fba5e8d3932e212f93b573253c2e48d04f7ce16a))
+* **ios:** render sprite SVGs, web fonts and placeholders like the web ([#392](https://github.com/kgoedecke/doop/issues/392)) ([4636a84](https://github.com/kgoedecke/doop/commit/4636a84114a5afd8c91e9210d16df4815c565937))
+* **ios:** show the sign-in button's label in dark mode ([8c7af8b](https://github.com/kgoedecke/doop/commit/8c7af8b40bc6a5be153d748ba654a9be3021c326))
+* **ios:** tile SVG backgrounds and render texture filters ([#378](https://github.com/kgoedecke/doop/issues/378)) ([aba2c97](https://github.com/kgoedecke/doop/commit/aba2c9793344be4a5ae16d0733ed4ddc8e5e6109))
+* **mcp:** make tool annotations match what each tool does ([#266](https://github.com/kgoedecke/doop/issues/266)) ([4b04ac1](https://github.com/kgoedecke/doop/commit/4b04ac14dbd5865652baa9b345e502bac5d8dc90))
+* **prototype:** hand the focus back when an overlay closes ([74961ce](https://github.com/kgoedecke/doop/commit/74961ce04919671f4c4718b55b862b64d84cb4ef))
+* **prototype:** let only the top screen run while overlays are open ([cb7d5b7](https://github.com/kgoedecke/doop/commit/cb7d5b7c6341ff60bcb2eccd3d3ab4e07308304f))
+* **prototype:** point copied pages and canvases at their own frames ([061bc48](https://github.com/kgoedecke/doop/commit/061bc486eb9d30800ebff3e4d9680e3f7c4f365f))
+* **prototype:** remap copied frame targets only inside interaction attributes ([506bc24](https://github.com/kgoedecke/doop/commit/506bc2460a420d1b99b315cfb1417598d169de1b))
+* survive page translation, report auth network errors, ship source maps ([#264](https://github.com/kgoedecke/doop/issues/264)) ([9560cd4](https://github.com/kgoedecke/doop/commit/9560cd4975b064673869e9709f806ae3d7b216f5))
+* **test:** root out the flaky browser tests in CI ([#394](https://github.com/kgoedecke/doop/issues/394)) ([cfd6c22](https://github.com/kgoedecke/doop/commit/cfd6c223635a287c8fe2184e30ba3d8369d58820))
+* **ui:** centre the initials in avatar discs ([#390](https://github.com/kgoedecke/doop/issues/390)) ([5264a8a](https://github.com/kgoedecke/doop/commit/5264a8a3f3e5f42d87a8bbf1beabc16b79e3418f))
+* **ui:** draw icons from the Lucide set instead of text glyphs ([#244](https://github.com/kgoedecke/doop/issues/244)) ([6dedda8](https://github.com/kgoedecke/doop/commit/6dedda83b049626004a4f1db10dc7671d9d2d606))
+
+
+### Performance
+
+* **canvas:** keep peer cameras out of the presences map ([#384](https://github.com/kgoedecke/doop/issues/384)) ([6a54ff5](https://github.com/kgoedecke/doop/commit/6a54ff517685c37302f6cf5e3a411cb3df1bd0bf))
+
+
+### Documentation
+
+* **readme:** bring the README up to date with the open-source build ([#258](https://github.com/kgoedecke/doop/issues/258)) ([a9659ae](https://github.com/kgoedecke/doop/commit/a9659ae76d39511ad5c959fdbb3c42ab3e80bbbe))
+* **readme:** list all 40 MCP tools, prototype tools included ([#256](https://github.com/kgoedecke/doop/issues/256)) ([d261a85](https://github.com/kgoedecke/doop/commit/d261a85d3f9d87ac0653bb8512915f4e5bdff2b9))
+
 ## [0.10.0](https://github.com/kgoedecke/doop/compare/v0.9.0...v0.10.0) (2026-10-26)
 
 
