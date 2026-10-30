@@ -217,6 +217,8 @@ fn main() {
             claude::claude_connect,
             claude::claude_login,
             claude::claude_install,
+            claude::claude_choose_cli,
+            claude::claude_reset_cli,
             claude::claude_run,
             claude::claude_stop,
             claude_extension::claude_add_extension,
@@ -286,7 +288,7 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true;",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true;",
                 app.package_info().version,
                 std::env::consts::OS,
                 cfg!(any(target_os = "macos", target_os = "windows"))

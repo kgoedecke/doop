@@ -2,11 +2,12 @@
 use serde_json::{json, Value};
 use std::{
     collections::HashSet,
+    ffi::{OsStr, OsString},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -42,11 +43,12 @@ pub fn shutdown(state: &ClaudeState) {
 
 /// Every place a Claude Code install lands: the native installer's
 /// `~/.local/bin`, the npm-local install `claude migrate-installer` leaves in
-/// `~/.claude/local`, whatever is on PATH (a GUI app's PATH is short), and the
-/// Homebrew/npm global locations. Users accumulate more than one over time,
-/// and an old npm global (1.x) neither knows `auth status` nor shares a login
-/// with the install they use, so the NEWEST one found is the one to run.
-fn candidates() -> Vec<PathBuf> {
+/// `~/.claude/local`, the login shell's PATH and the app's own (a GUI app's
+/// PATH is short), and the Homebrew/npm global locations. Users accumulate
+/// more than one over time, and an old npm global (1.x) neither knows
+/// `auth status` nor shares a login with the install they use, so when the
+/// shell names none worth running the NEWEST one found is the one to run.
+fn candidates(shell_path: Option<&OsStr>) -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
     let name = if cfg!(windows) {
         "claude.exe"
@@ -59,7 +61,7 @@ fn candidates() -> Vec<PathBuf> {
         candidates.push(home.join(".local/bin").join(name));
         candidates.push(home.join(".claude/local").join(name));
     }
-    if let Some(path) = std::env::var_os("PATH") {
+    for path in [shell_path.map(OsStr::to_os_string), std::env::var_os("PATH")].into_iter().flatten() {
         candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(name)));
     }
     candidates.extend([
@@ -93,6 +95,10 @@ fn parse_version(line: &str) -> Option<Version> {
     Some((parts.next()??, parts.next()??, parts.next()??))
 }
 
+fn version_text((a, b, c): Version) -> String {
+    format!("{a}.{b}.{c}")
+}
+
 /// The newest of the candidates by `--version`; one that will not say falls
 /// to the back, and the first candidate stands in when none will.
 fn newest(versioned: Vec<(PathBuf, Option<Version>)>) -> Option<PathBuf> {
@@ -105,55 +111,235 @@ fn newest(versioned: Vec<(PathBuf, Option<Version>)>) -> Option<PathBuf> {
         .or(first)
 }
 
-fn version_of(path: &PathBuf) -> Option<String> {
+fn version_of(path: &Path, env_path: Option<&OsStr>) -> Option<Version> {
     let mut cmd = Command::new(path);
-    quiet(&mut cmd);
+    quiet(&mut cmd, env_path);
     cmd.arg("--version");
     let mut first = None;
     let ok = collect(cmd.spawn().ok()?, Duration::from_secs(10), Arc::new(AtomicBool::new(false)), |line| {
         if first.is_none() { first = Some(line.to_string()); }
     }).unwrap_or(false);
-    if ok { first } else { None }
+    if ok { first.as_deref().and_then(parse_version) } else { None }
 }
 
-/// The Claude Code to run and the version it reported (None when it would
-/// not say). Probed every time: this runs on a refresh, a sign-in, an install
-/// check and once per run, one `--version` per installed binary, and a cache
-/// here would hide an update made in place a moment ago.
-fn resolved() -> Result<(PathBuf, Option<Version>), String> {
-    let versioned: Vec<_> = candidates().into_iter().map(|p| { let v = version_of(&p).as_deref().and_then(parse_version); (p, v) }).collect();
-    let path = newest(versioned.clone()).ok_or("Claude CLI not found. Install Claude Code, then refresh.")?;
-    let version = versioned.iter().find(|(p, _)| *p == path).and_then(|(_, v)| *v);
-    Ok((path, version))
+/// What the person's terminal sees: the `claude` its `command -v` names (an
+/// alias included, which is how `claude migrate-installer` leaves it) and the
+/// PATH it runs under. A GUI app starts with `/usr/bin:/bin:/usr/sbin:/sbin`,
+/// which misses both the install people use and the `node` an npm install's
+/// `#!/usr/bin/env node` needs, so every Claude Code this shell starts runs
+/// under the login shell's PATH.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ShellView {
+    claude: Option<PathBuf>,
+    path: Option<OsString>,
 }
 
-fn executable() -> Result<PathBuf, String> {
-    resolved().map(|(path, _)| path)
+const SHELL_BEGIN: &str = "__DOOP_SHELL_BEGIN__";
+const SHELL_PATH: &str = "__DOOP_SHELL_PATH__";
+/// Start-up files print what they like (a motd, a prompt theme's warning), so
+/// the answer comes after a marker and only that part is read.
+const SHELL_PROBE: &str =
+    "printf '\\n__DOOP_SHELL_BEGIN__\\n'; command -v claude; printf '\\n__DOOP_SHELL_PATH__%s\\n' \"$PATH\"";
+const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
+
+static SHELL_VIEW: Mutex<Option<ShellView>> = Mutex::new(None);
+
+/// The login shell's view, asked once and kept: an interactive shell start
+/// runs the person's rc files, too slow and too eventful for every status
+/// poll. `fresh` (the Refresh button) asks again.
+fn shell_view(fresh: bool) -> ShellView {
+    let Ok(mut cached) = SHELL_VIEW.lock() else {
+        return ShellView::default();
+    };
+    if fresh || cached.is_none() {
+        *cached = Some(login_shell().map(|shell| probe_shell(&shell, SHELL_TIMEOUT)).unwrap_or_default());
+    }
+    cached.clone().unwrap_or_default()
+}
+
+#[cfg(unix)]
+fn login_shell() -> Option<PathBuf> {
+    std::env::var_os("SHELL").map(PathBuf::from).filter(|p| p.is_absolute() && p.is_file())
+}
+
+/// Windows has no login shell to ask; the fixed locations and PATH stand.
+#[cfg(not(unix))]
+fn login_shell() -> Option<PathBuf> {
+    None
+}
+
+/// Runs `shell -l -i -c SHELL_PROBE` into a file rather than a pipe: a
+/// start-up file that leaves a background process holding stdout would
+/// otherwise keep the read open past the timeout.
+fn probe_shell(shell: &Path, timeout: Duration) -> ShellView {
+    static PROBES: AtomicUsize = AtomicUsize::new(0);
+    let file = std::env::temp_dir().join(format!(
+        "doop-shell-{}-{}.txt",
+        std::process::id(),
+        PROBES.fetch_add(1, Ordering::SeqCst)
+    ));
+    let view = (|| {
+        let out = std::fs::File::create(&file).ok()?;
+        let mut child = Command::new(shell)
+            .args(["-l", "-i", "-c", SHELL_PROBE])
+            .stdin(Stdio::null())
+            .stdout(out)
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let started = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if started.elapsed() < timeout => std::thread::sleep(Duration::from_millis(25)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        }
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        Some(parse_shell_probe(&std::fs::read_to_string(&file).ok()?, home.as_deref()))
+    })();
+    let _ = std::fs::remove_file(&file);
+    view.unwrap_or_default()
+}
+
+fn parse_shell_probe(output: &str, home: Option<&Path>) -> ShellView {
+    let mut view = ShellView::default();
+    let Some((_, answer)) = output.rsplit_once(SHELL_BEGIN) else {
+        return view;
+    };
+    for line in answer.lines() {
+        if let Some(path) = line.strip_prefix(SHELL_PATH) {
+            view.path = Some(OsString::from(path)).filter(|p| !p.is_empty());
+        } else if view.claude.is_none() && view.path.is_none() {
+            view.claude = command_target(line.trim(), home);
+        }
+    }
+    view
+}
+
+/// `command -v` prints a path, `alias claude=…` (zsh) or `alias claude='…'`
+/// (bash), or a bare name for a function or builtin. Only an absolute path,
+/// or an alias whose first word is one, names a file to run; an alias's
+/// arguments are dropped, since run_cli passes its own.
+fn command_target(line: &str, home: Option<&Path>) -> Option<PathBuf> {
+    let target = match line.strip_prefix("alias ") {
+        Some(alias) => {
+            let value = alias.split_once('=')?.1.trim_matches(|c| c == '\'' || c == '"');
+            value.split_whitespace().next()?
+        }
+        None => line,
+    };
+    let path = match target.strip_prefix("~/").or_else(|| target.strip_prefix("$HOME/")) {
+        Some(rest) => home?.join(rest),
+        None => PathBuf::from(target),
+    };
+    path.is_absolute().then_some(path)
+}
+
+/// Where the Claude Code being run came from, as Settings words it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Source {
+    /// picked in Settings with the file panel
+    Chosen,
+    /// what `claude` runs in the person's terminal
+    Shell,
+    /// the newest of the known locations
+    Found,
+}
+
+impl Source {
+    fn name(self) -> &'static str {
+        match self {
+            Source::Chosen => "chosen",
+            Source::Shell => "shell",
+            Source::Found => "found",
+        }
+    }
+}
+
+struct Claude {
+    path: PathBuf,
+    version: Option<Version>,
+    source: Source,
+    /// the login shell's PATH, which every process started from `path` gets
+    env_path: Option<OsString>,
+    /// a pick from Settings whose file is gone, set aside for this resolve
+    chosen_missing: Option<PathBuf>,
+}
+
+/// The shell's `claude` when it is new enough to drive, else the newest of the
+/// installs found (probed only then: one `--version` per install).
+fn pick(
+    shell: Option<(PathBuf, Option<Version>)>,
+    found: impl FnOnce() -> Vec<(PathBuf, Option<Version>)>,
+) -> Option<(PathBuf, Option<Version>, Source)> {
+    if let Some((path, version)) = shell.filter(|(_, version)| supported(*version)) {
+        return Some((path, version, Source::Shell));
+    }
+    let found = found();
+    let path = newest(found.clone())?;
+    let version = found.iter().find(|(p, _)| *p == path).and_then(|(_, v)| *v);
+    Some((path, version, Source::Found))
+}
+
+/// The Claude Code to run: the one picked in Settings, else the one the login
+/// shell runs, else the newest install found. Probed every time (the shell's
+/// view aside): this runs on a refresh, a sign-in, an install check and once
+/// per run, and a cache here would hide an update made in place a moment ago.
+fn resolved(app: &AppHandle, fresh: bool) -> Result<Claude, String> {
+    let env_path = shell_view(fresh).path;
+    let shell = shell_view(false).claude;
+    let probe = |path: PathBuf| {
+        let version = version_of(&path, env_path.as_deref());
+        (path, version)
+    };
+    let mut chosen_missing = None;
+    if let Some(path) = chosen_cli(app)? {
+        if path.is_file() {
+            let version = version_of(&path, env_path.as_deref());
+            return Ok(Claude { path, version, source: Source::Chosen, env_path, chosen_missing });
+        }
+        chosen_missing = Some(path);
+    }
+    let shell = shell.filter(|p| p.is_file()).map(probe);
+    let (path, version, source) = pick(shell, || {
+        candidates(env_path.as_deref()).into_iter().map(probe).collect()
+    })
+    .ok_or("Claude CLI not found. Install Claude Code, then refresh.")?;
+    Ok(Claude { path, version, source, env_path, chosen_missing })
 }
 
 /// A command for a Claude Code already resolved: one probe per action, the
-/// path and version then carried through the checks and the spawn.
-fn command_at(path: &Path) -> Command {
-    let mut cmd = Command::new(path);
-    quiet(&mut cmd);
+/// path, version and PATH then carried through the checks and the spawn.
+fn command_at(claude: &Claude) -> Command {
+    let mut cmd = Command::new(&claude.path);
+    quiet(&mut cmd, claude.env_path.as_deref());
     cmd
 }
 
 /// The one resolve a sign-in or run makes, refusing a Claude Code below the
 /// floor; the UI has already said what to do about it.
-fn supported_command() -> Result<Command, String> {
-    let (path, version) = resolved()?;
-    if supported(version) {
-        return Ok(command_at(&path));
+fn supported_command(app: &AppHandle) -> Result<Command, String> {
+    let claude = resolved(app, false)?;
+    if supported(claude.version) {
+        return Ok(command_at(&claude));
     }
-    let found = version.map(|(a, b, c)| format!("{a}.{b}.{c}")).unwrap_or_else(|| "an unknown version".into());
-    Err(format!("Claude Code {found} at {} is older than the {MIN_CLAUDE_VERSION_TEXT} Doop needs. Run `claude update`, then Refresh.", path.display()))
+    let found = claude.version.map(version_text).unwrap_or_else(|| "an unknown version".into());
+    Err(format!("Claude Code {found} at {} is older than the {MIN_CLAUDE_VERSION_TEXT} Doop needs. Run `claude update`, then Refresh.", claude.path.display()))
 }
 
-/// Piped, stdin-less, API-key-free and (on Windows) without a console window:
-/// every Claude Code process this shell starts, probes included.
-fn quiet(cmd: &mut Command) {
+/// Piped, stdin-less, API-key-free, under the login shell's PATH when known
+/// and (on Windows) without a console window: every Claude Code process this
+/// shell starts, probes included.
+fn quiet(cmd: &mut Command, env_path: Option<&OsStr>) {
     subscription_environment(cmd);
+    if let Some(path) = env_path {
+        cmd.env("PATH", path);
+    }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -271,24 +457,73 @@ fn collect(
     result
 }
 
+/// `fresh` (the Refresh button; absent from pages older than it) asks the
+/// login shell again instead of keeping its first answer.
 #[tauri::command]
-pub async fn claude_status(app: AppHandle, user_id: String) -> Result<Value, String> {
+pub async fn claude_status(app: AppHandle, user_id: String, fresh: Option<bool>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let enabled = enabled_users(&app)?.contains(&user_id);
-        let Ok((path, version)) = resolved() else { return Ok(json!({"installed": false, "connected": false, "enabled": enabled})); };
-        let mut cmd = command_at(&path);
+        let Ok(claude) = resolved(&app, fresh.unwrap_or(false)) else { return Ok(json!({"installed": false, "connected": false, "enabled": enabled})); };
+        let mut cmd = command_at(&claude);
         cmd.current_dir(directory(&app)?).args(["auth", "status"]);
         let mut output = String::new();
         let ok = collect(cmd.spawn().map_err(|e| e.to_string())?, Duration::from_secs(20), Arc::new(AtomicBool::new(false)), |line| { if output.len() < 32_000 { output.push_str(line); } })?;
         let auth: Value = serde_json::from_str(&output).unwrap_or(Value::Null);
         // Below the floor, or so old that `auth status` answers with usage text
         // or a crash rather than JSON: nothing from here can work, say so.
-        let outdated = !supported(version) || !auth.is_object();
+        let outdated = !supported(claude.version) || !auth.is_object();
         Ok(json!({"installed": true, "connected": !outdated && ok && auth["loggedIn"] == true, "enabled": enabled,
             "email": auth["email"], "plan": auth["subscriptionType"], "authMethod": auth["authMethod"],
-            "outdated": outdated, "cliPath": path.to_string_lossy(), "minVersion": MIN_CLAUDE_VERSION_TEXT,
-            "cliVersion": version.map(|(a, b, c)| format!("{a}.{b}.{c}"))}))
+            "outdated": outdated, "cliPath": claude.path.to_string_lossy(), "minVersion": MIN_CLAUDE_VERSION_TEXT,
+            "cliVersion": claude.version.map(version_text), "cliSource": claude.source.name(),
+            "chosenMissing": claude.chosen_missing.map(|p| p.to_string_lossy().into_owned())}))
     }).await.map_err(|e| e.to_string())?
+}
+
+fn chosen_file(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(directory(app)?.join("cli.json"))
+}
+
+/// The Claude Code picked in Settings, if one was.
+fn chosen_cli(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let file = chosen_file(app)?;
+    if !file.exists() {
+        return Ok(None);
+    }
+    let saved: Value = serde_json::from_slice(&std::fs::read(file).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(saved["path"].as_str().map(PathBuf::from))
+}
+
+/// Picks the Claude Code to run. The path comes from the native file panel,
+/// never from the page: it is the program this shell will execute.
+#[tauri::command]
+pub async fn claude_choose_cli(app: AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut picker = rfd::FileDialog::new().set_title("Choose Claude Code");
+        if let Some(dir) = resolved(&app, false).ok().and_then(|c| c.path.parent().map(Path::to_path_buf)) {
+            picker = picker.set_directory(dir);
+        }
+        let Some(path) = picker.pick_file() else { return Ok(false) };
+        let Some(version) = version_of(&path, shell_view(false).path.as_deref()) else {
+            return Err(format!("{} did not answer as Claude Code. Choose the claude executable.", path.display()));
+        };
+        if !supported(Some(version)) {
+            return Err(format!("Claude Code {} at {} is older than the {MIN_CLAUDE_VERSION_TEXT} Doop needs. Run `claude update`, or choose another.", version_text(version), path.display()));
+        }
+        let path = path.to_str().ok_or("Choose a Claude Code whose path is valid UTF-8.")?;
+        std::fs::write(chosen_file(&app)?, json!({"path": path}).to_string()).map_err(|e| e.to_string())?;
+        Ok(true)
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// Forgets the pick, so the shell's or the newest install runs again.
+#[tauri::command]
+pub fn claude_reset_cli(app: AppHandle) -> Result<(), String> {
+    match std::fs::remove_file(chosen_file(&app)?) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+        _ => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -342,7 +577,7 @@ bash "$installer"
 pub async fn claude_install(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = INSTALLING.try_lock().map_err(|_| "Claude Code installation is already running.")?;
-        if executable().is_ok() { return Ok(()); }
+        if resolved(&app, true).is_ok() { return Ok(()); }
         let accepted = rfd::MessageDialog::new().set_title("Install Claude Code?")
             .set_description("Download and run Anthropic's official installer on this computer? Claude Code installs for your user account and manages its own updates.")
             .set_buttons(rfd::MessageButtons::OkCancel).show();
@@ -353,7 +588,7 @@ pub async fn claude_install(app: AppHandle) -> Result<(), String> {
             Duration::from_secs(600), Arc::new(AtomicBool::new(false)), |_| {})
             .map_err(|_| "Installation did not finish in time. Refresh to check, or use the installation guide.")?;
         if !ok { return Err("Installation failed. Check your internet connection or use the installation guide.".into()); }
-        let mut verify = command_at(&executable()?);
+        let mut verify = command_at(&resolved(&app, true)?);
         verify.arg("--version");
         let ok = collect(verify.spawn().map_err(|e| e.to_string())?,
             Duration::from_secs(20), Arc::new(AtomicBool::new(false)), |_| {})?;
@@ -365,7 +600,7 @@ pub async fn claude_install(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn claude_login(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut cmd = supported_command()?;
+        let mut cmd = supported_command(&app)?;
         cmd.current_dir(directory(&app)?).args(["auth", "login"]);
         let ok = collect(
             cmd.spawn().map_err(|e| e.to_string())?,
@@ -495,7 +730,7 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
             .map_err(|e| e.to_string())?
             .write_all(system.as_bytes())
             .map_err(|e| e.to_string())?;
-        let mut cmd = supported_command()?;
+        let mut cmd = supported_command(app)?;
         cmd.current_dir(&dir)
             .args([
                 "-p",
@@ -664,6 +899,73 @@ mod tests {
         let error = collect(child, Duration::from_secs(15), Arc::new(AtomicBool::new(false)), |_| {}).unwrap_err();
         assert!(error.contains("2 MB"));
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn reads_the_shells_claude_past_start_up_noise() {
+        let home = Path::new("/Users/me");
+        let probe = |answer: &str| parse_shell_probe(&format!("Last login: Thu\nwelcome{SHELL_BEGIN}\n{answer}\n{SHELL_PATH}/a/bin:/usr/bin\n"), Some(home));
+        let claude = |answer: &str| probe(answer).claude;
+        assert_eq!(probe("/opt/claude").path, Some(OsString::from("/a/bin:/usr/bin")));
+        assert_eq!(claude("/Users/me/.local/bin/claude"), Some(PathBuf::from("/Users/me/.local/bin/claude")));
+        assert_eq!(claude("alias claude=/Users/me/.claude/local/claude"), Some(PathBuf::from("/Users/me/.claude/local/claude")));
+        assert_eq!(claude("alias claude='~/.claude/local/claude --verbose'"), Some(PathBuf::from("/Users/me/.claude/local/claude")));
+        assert_eq!(claude("alias claude=\"$HOME/bin/claude\""), Some(PathBuf::from("/Users/me/bin/claude")));
+        assert_eq!(claude("/Applications/My Tools/claude"), Some(PathBuf::from("/Applications/My Tools/claude")));
+        // a function or builtin names no file; nor does a relative alias
+        assert_eq!(claude("claude"), None);
+        assert_eq!(claude("alias claude=npx"), None);
+        assert_eq!(claude(""), None);
+        // only what follows the last marker counts, so an rc file echoing one is harmless
+        assert_eq!(
+            parse_shell_probe(&format!("{SHELL_BEGIN}\n/wrong/claude\n{SHELL_BEGIN}\n\n{SHELL_PATH}\n"), Some(home)),
+            ShellView::default()
+        );
+        assert_eq!(parse_shell_probe("zsh: command not found: compinit", Some(home)), ShellView::default());
+    }
+
+    #[test]
+    fn prefers_the_shells_claude_unless_it_is_too_old() {
+        let shell = PathBuf::from("/Users/me/.claude/local/claude");
+        let other = PathBuf::from("/Users/me/.local/bin/claude");
+        let unused = || -> Vec<(PathBuf, Option<Version>)> { panic!("the installs are probed only when the shell's is passed over") };
+        assert_eq!(pick(Some((shell.clone(), Some((2, 1, 100)))), unused), Some((shell.clone(), Some((2, 1, 100)), Source::Shell)));
+        let found = || vec![(other.clone(), Some((2, 1, 281)))];
+        assert_eq!(pick(Some((shell.clone(), Some((1, 0, 61)))), found), Some((other.clone(), Some((2, 1, 281)), Source::Found)));
+        assert_eq!(pick(Some((shell.clone(), None)), found), Some((other.clone(), Some((2, 1, 281)), Source::Found)));
+        assert_eq!(pick(None, found), Some((other.clone(), Some((2, 1, 281)), Source::Found)));
+        assert_eq!(pick(None, Vec::new), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn asks_the_login_shell_and_runs_npm_installs_under_its_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("doop-shell-test-{}", std::process::id()));
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = |path: &Path, body: &str| {
+            std::fs::write(path, body).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        };
+        // An npm install: a script whose interpreter only the shell's PATH has.
+        script(&bin.join("doop-test-node"), "#!/bin/sh\necho '2.1.300 (Claude Code)'\n");
+        script(&bin.join("claude"), "#!/usr/bin/env doop-test-node\n");
+        // A shell whose start-up prints noise and extends PATH, as nvm does; its args are -l -i -c PROBE.
+        let shell = dir.join("shell");
+        script(&shell, &format!("#!/bin/sh\nprintf 'Last login: today'\nPATH='{}':$PATH\nexport PATH\neval \"$4\"\n", bin.display()));
+        let view = probe_shell(&shell, Duration::from_secs(10));
+        assert_eq!(view.claude, Some(bin.join("claude")));
+        let path = view.path.clone().unwrap();
+        assert!(path.to_string_lossy().starts_with(&*bin.to_string_lossy()));
+        assert_eq!(version_of(&bin.join("claude"), Some(&path)), Some((2, 1, 300)));
+        assert_eq!(version_of(&bin.join("claude"), Some(OsStr::new("/usr/bin:/bin"))), None);
+        // A shell that never finishes starting is given up on.
+        script(&shell, "#!/bin/sh\nsleep 30\n");
+        let started = Instant::now();
+        assert_eq!(probe_shell(&shell, Duration::from_millis(300)), ShellView::default());
+        assert!(started.elapsed() < Duration::from_secs(5));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

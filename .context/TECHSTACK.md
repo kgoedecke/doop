@@ -45,7 +45,13 @@
   `claude-*` id accepted by shape (`isClaudeModel`, mirrored by `valid_model` in the shell before the
   value becomes an argument); `effort` (`CLAUDE_EFFORTS`, `local_agent_preferences.effort`) rides the
   job and becomes `--effort`. A pre-alias shell's "Invalid model" is reworded by
-  `localAgentRuns` into an update prompt.
+  `localAgentRuns` into an update prompt. Which `claude` runs: the one picked in Settings
+  (`claude_choose_cli`, a native file panel, never a page-supplied path; `cli.json` in the app's
+  data dir), else what the login shell's `command -v claude` names (aliases included) when it is
+  2.1+, else the newest known install. The shell is asked once per launch (`$SHELL -l -i -c`, 5s
+  bound; Refresh asks again) and its `PATH` is given to every CLI process, since a GUI app's
+  `/usr/bin:/bin` PATH lacks the `node` an npm install needs. Shells advertise this with
+  `__DOOP_CLAUDE_CHOOSE__`.
 - Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected
   account's picker asks the provider's catalog with the user's own key when it opens (the
   composer's `ModelPicker`) or mounts (Settings, `useAgentModels`), merging the curated entries of

@@ -5,6 +5,7 @@ import { isDesktopShell } from '../lib/shell'
 import {
   disconnectLocalAgent,
   hasLocalClaude,
+  canChooseClaude,
   canInstallClaude,
   invokeClaude,
   refreshLocalAgent,
@@ -30,6 +31,13 @@ import { cn } from '@/lib/utils'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
 
 const DESKTOP_DOWNLOAD_URL = 'https://doop.design/download/mac'
+
+/** How the desktop found the Claude Code it runs, closing the "Using …" line. */
+const CLI_SOURCE_NOTE = {
+  chosen: ', chosen by you.',
+  shell: ', the one your terminal runs.',
+  found: ', the newest install found.',
+} as const
 
 /** The plan as a browser sees it: nothing to connect here, so the row is
  *  muted and its only action is getting the desktop app. */
@@ -133,6 +141,15 @@ export function LocalClaudeRow() {
       })
       setPin('')
     })
+  const chooseCli = () =>
+    act(async () => {
+      if (await invokeClaude<boolean>('claude_choose_cli')) await refreshLocalAgent(userId!)
+    })
+  const resetCli = () =>
+    act(async () => {
+      await invokeClaude('claude_reset_cli')
+      await refreshLocalAgent(userId!)
+    })
 
   if (!isDesktopShell()) return <DesktopOnlyClaudeRow active={active} />
 
@@ -222,7 +239,7 @@ export function LocalClaudeRow() {
                 </Button>
               )}
               {!connected && (error || native?.outdated) && (
-                <Button variant="ghost" disabled={busy} onClick={() => act(() => refreshLocalAgent(userId!))}>
+                <Button variant="ghost" disabled={busy} onClick={() => act(() => refreshLocalAgent(userId!, true))}>
                   Refresh
                 </Button>
               )}
@@ -312,8 +329,35 @@ export function LocalClaudeRow() {
           <p className="mt-[10px] text-[13px] text-ink-faint">
             Claude Code {native.cliVersion ?? ''} at <code className={planAsCode}>{native.cliPath}</code> is older than
             the {native.minVersion ?? ''} Doop needs. Run <code className={planAsCode}>claude update</code> in a
-            terminal, or remove it so Doop finds your newer install, then Refresh.
+            terminal, or {canChooseClaude() ? 'choose another install' : 'remove it so Doop finds your newer install'},
+            then Refresh.
           </p>
+        )}
+        {supported && native?.installed && canChooseClaude() && (
+          <div className="mt-[10px] flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-ink-faint">
+            {/* an outdated install is already named in the warning above */}
+            {!native.outdated && (
+              <p className="min-w-0">
+                {native.chosenMissing && (
+                  <>
+                    The Claude Code you chose at <code className={planAsCode}>{native.chosenMissing}</code> is
+                    gone.{' '}
+                  </>
+                )}
+                Using Claude Code{native.cliVersion ? ` ${native.cliVersion}` : ''} at{' '}
+                <code className={planAsCode}>{native.cliPath}</code>
+                {native.cliSource ? CLI_SOURCE_NOTE[native.cliSource] : '.'}
+              </p>
+            )}
+            <Button variant="link" size="inline" disabled={busy || running} onClick={chooseCli}>
+              Choose…
+            </Button>
+            {(native.cliSource === 'chosen' || native.chosenMissing) && (
+              <Button variant="link" size="inline" disabled={busy || running} onClick={resetCli}>
+                Use default
+              </Button>
+            )}
+          </div>
         )}
         {supported && native && !native.installed && (
           <p className="mt-[10px] text-[13px] text-ink-faint">

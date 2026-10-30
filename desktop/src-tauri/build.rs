@@ -5,6 +5,8 @@ fn main() {
             "claude_connect",
             "claude_login",
             "claude_install",
+            "claude_choose_cli",
+            "claude_reset_cli",
             "claude_run",
             "claude_stop",
             "claude_add_extension",
