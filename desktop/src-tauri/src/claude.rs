@@ -168,18 +168,35 @@ fn login_shell() -> Option<PathBuf> {
     None
 }
 
+/// A new file only this user can read, never one already there: the temp
+/// directory may be shared, and a name planted ahead as a symlink must not
+/// redirect the write (`create_new` refuses any existing entry, links included).
+fn create_private(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
 /// Runs `shell -l -i -c SHELL_PROBE` into a file rather than a pipe: a
 /// start-up file that leaves a background process holding stdout would
 /// otherwise keep the read open past the timeout.
 fn probe_shell(shell: &Path, timeout: Duration) -> ShellView {
     static PROBES: AtomicUsize = AtomicUsize::new(0);
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let file = std::env::temp_dir().join(format!(
-        "doop-shell-{}-{}.txt",
+        "doop-shell-{}-{}-{nonce}.txt",
         std::process::id(),
         PROBES.fetch_add(1, Ordering::SeqCst)
     ));
+    let Ok(out) = create_private(&file) else {
+        return ShellView::default();
+    };
     let view = (|| {
-        let out = std::fs::File::create(&file).ok()?;
         let mut child = Command::new(shell)
             .args(["-l", "-i", "-c", SHELL_PROBE])
             .stdin(Stdio::null())
@@ -223,21 +240,52 @@ fn parse_shell_probe(output: &str, home: Option<&Path>) -> ShellView {
 
 /// `command -v` prints a path, `alias claude=…` (zsh) or `alias claude='…'`
 /// (bash), or a bare name for a function or builtin. Only an absolute path,
-/// or an alias whose first word is one, names a file to run; an alias's
-/// arguments are dropped, since run_cli passes its own.
+/// or an alias whose command is one, names a file to run; an alias's
+/// arguments are dropped, since run_cli passes its own. The printed value is
+/// one quoted shell word holding the alias's text, whose first word is the
+/// command, so a path with spaces survives in either quoting.
 fn command_target(line: &str, home: Option<&Path>) -> Option<PathBuf> {
     let target = match line.strip_prefix("alias ") {
-        Some(alias) => {
-            let value = alias.split_once('=')?.1.trim_matches(|c| c == '\'' || c == '"');
-            value.split_whitespace().next()?
-        }
-        None => line,
+        Some(alias) => first_word(&first_word(alias.split_once('=')?.1)?)?,
+        None => line.to_string(),
     };
     let path = match target.strip_prefix("~/").or_else(|| target.strip_prefix("$HOME/")) {
         Some(rest) => home?.join(rest),
         None => PathBuf::from(target),
     };
     path.is_absolute().then_some(path)
+}
+
+/// The first word of `text` as a POSIX shell reads it: single quotes are
+/// literal, double quotes and a bare backslash escape, unquoted whitespace
+/// ends the word. None for no word or an unterminated quote.
+fn first_word(text: &str) -> Option<String> {
+    let mut word = String::new();
+    let mut chars = text.trim_start().chars();
+    while let Some(c) = chars.next() {
+        match c {
+            c if c.is_whitespace() => break,
+            '\'' => loop {
+                match chars.next()? {
+                    '\'' => break,
+                    c => word.push(c),
+                }
+            },
+            '"' => loop {
+                match chars.next()? {
+                    '"' => break,
+                    '\\' => match chars.next()? {
+                        c @ ('"' | '\\' | '$' | '`') => word.push(c),
+                        c => word.extend(['\\', c]),
+                    },
+                    c => word.push(c),
+                }
+            },
+            '\\' => word.push(chars.next()?),
+            c => word.push(c),
+        }
+    }
+    (!word.is_empty()).then_some(word)
 }
 
 /// Where the Claude Code being run came from, as Settings words it.
@@ -484,15 +532,27 @@ fn chosen_file(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(directory(app)?.join("cli.json"))
 }
 
-/// The Claude Code picked in Settings, if one was.
+/// The Claude Code picked in Settings, if one was. A file that cannot be read
+/// or parsed counts as no pick, so it never stands between a person and the
+/// installs that do work.
 fn chosen_cli(app: &AppHandle) -> Result<Option<PathBuf>, String> {
     let file = chosen_file(app)?;
-    if !file.exists() {
-        return Ok(None);
-    }
-    let saved: Value = serde_json::from_slice(&std::fs::read(file).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    Ok(saved["path"].as_str().map(PathBuf::from))
+    Ok(read_chosen(&file))
+}
+
+fn read_chosen(file: &Path) -> Option<PathBuf> {
+    let saved: Value = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+    saved["path"].as_str().map(PathBuf::from)
+}
+
+/// Saves the pick whole or not at all: written beside the file, then renamed
+/// over it, so a crash mid-write leaves the previous pick in place.
+fn write_chosen(file: &Path, path: &str) -> std::io::Result<()> {
+    let staged = file.with_extension("json.tmp");
+    std::fs::write(&staged, json!({"path": path}).to_string())?;
+    std::fs::rename(&staged, file).inspect_err(|_| {
+        let _ = std::fs::remove_file(&staged);
+    })
 }
 
 /// Picks the Claude Code to run. The path comes from the native file panel,
@@ -512,7 +572,7 @@ pub async fn claude_choose_cli(app: AppHandle) -> Result<bool, String> {
             return Err(format!("Claude Code {} at {} is older than the {MIN_CLAUDE_VERSION_TEXT} Doop needs. Run `claude update`, or choose another.", version_text(version), path.display()));
         }
         let path = path.to_str().ok_or("Choose a Claude Code whose path is valid UTF-8.")?;
-        std::fs::write(chosen_file(&app)?, json!({"path": path}).to_string()).map_err(|e| e.to_string())?;
+        write_chosen(&chosen_file(&app)?, path).map_err(|e| e.to_string())?;
         Ok(true)
     }).await.map_err(|e| e.to_string())?
 }
@@ -918,12 +978,52 @@ mod tests {
         assert_eq!(claude("claude"), None);
         assert_eq!(claude("alias claude=npx"), None);
         assert_eq!(claude(""), None);
+        // a path with spaces, as zsh and bash print it, and escaped
+        let spaced = Some(PathBuf::from("/Applications/My Tools/claude"));
+        assert_eq!(claude("alias claude='\"/Applications/My Tools/claude\" --verbose'"), spaced);
+        assert_eq!(claude("alias claude='/Applications/My\\ Tools/claude'"), spaced);
+        assert_eq!(claude("alias claude=\"'/Applications/My Tools/claude'\""), spaced);
+        // bash's '\'' for a quote inside the alias text, which escapes it in turn
+        assert_eq!(claude("alias claude='/opt/it\\'\\''s/claude'"), Some(PathBuf::from("/opt/it's/claude")));
+        assert_eq!(claude("alias claude='/opt/claude"), None);
         // only what follows the last marker counts, so an rc file echoing one is harmless
         assert_eq!(
             parse_shell_probe(&format!("{SHELL_BEGIN}\n/wrong/claude\n{SHELL_BEGIN}\n\n{SHELL_PATH}\n"), Some(home)),
             ShellView::default()
         );
         assert_eq!(parse_shell_probe("zsh: command not found: compinit", Some(home)), ShellView::default());
+    }
+
+    #[test]
+    fn a_pick_is_saved_whole_and_a_broken_one_is_no_pick() {
+        let dir = std::env::temp_dir().join(format!("doop-chosen-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("cli.json");
+        assert_eq!(read_chosen(&file), None);
+        write_chosen(&file, "/opt/My Tools/claude").unwrap();
+        assert_eq!(read_chosen(&file), Some(PathBuf::from("/opt/My Tools/claude")));
+        assert!(!file.with_extension("json.tmp").exists());
+        std::fs::write(&file, "{\"pa").unwrap();
+        assert_eq!(read_chosen(&file), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_probe_file_is_never_one_already_there() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("doop-private-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("victim");
+        std::fs::write(&target, "keep").unwrap();
+        let planted = dir.join("planted");
+        std::os::unix::fs::symlink(&target, &planted).unwrap();
+        assert!(create_private(&planted).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        let fresh = dir.join("fresh");
+        create_private(&fresh).unwrap();
+        assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

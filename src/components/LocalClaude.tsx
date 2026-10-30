@@ -333,10 +333,12 @@ export function LocalClaudeRow() {
             then Refresh.
           </p>
         )}
-        {supported && native?.installed && canChooseClaude() && (
+        {/* shown with no install found too: one Doop did not find can still be picked */}
+        {supported && native && canChooseClaude() && (
           <div className="mt-[10px] flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-ink-faint">
+            {!native.installed && <p className="min-w-0">Installed somewhere Doop did not look?</p>}
             {/* an outdated install is already named in the warning above */}
-            {!native.outdated && (
+            {native.installed && !native.outdated && (
               <p className="min-w-0">
                 {native.chosenMissing && (
                   <>

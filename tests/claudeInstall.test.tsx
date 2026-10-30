@@ -134,3 +134,13 @@ it('hides the choice from desktop shells that cannot make it', async () => {
   expect(button('Choose…')).toBeUndefined()
   expect(container.textContent).not.toContain('Using Claude Code')
 })
+
+it('lets a person choose an install Doop did not find', async () => {
+  await render({ installed: false, connected: false, enabled: false })
+  expect(container.textContent).toContain('Installed somewhere Doop did not look?')
+  expect(container.textContent).not.toContain('Using Claude Code')
+  mocks.invoke.mockResolvedValue(true)
+  await act(async () => button('Choose…')!.click())
+  expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('claude_choose_cli')
+  expect(mocks.refresh).toHaveBeenLastCalledWith('tester')
+})
