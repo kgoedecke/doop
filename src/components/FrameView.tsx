@@ -1287,14 +1287,10 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                counter-scaled from its bottom-left corner to screen px, so it
                sits a fixed gap above the frame's top-left corner and, its box
                pre-widened by the zoom, never runs past the frame's right edge.
-               An agent or editor chip is the exception: the name gives way
-               first, then the chip drops its words (a container query on this
-               screen-px width), and only a frame narrower than the bare icon
-               lets it run past the edge, above later frames */
-              className={cn(
-                '@container/title pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 whitespace-nowrap text-[12px] font-semibold text-ink-soft',
-                stream || editors.length > 0 ? 'z-10' : 'overflow-hidden',
-              )}
+               Below 180px on screen (a container query on that width) the
+               editor chips drop their words and move to the front, so on a
+               zoomed-out canvas it is the name and badges that get cut off */
+              className="@container/title pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
               style={{
                 width: 'calc(100% * var(--zoom, 1))',
                 transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
@@ -1338,7 +1334,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               )}
               <span className="min-w-0 overflow-hidden text-ellipsis">{frame.name}</span>
               <FrameApprovalBadge frame={frame} />
-              <span className="flex shrink-0 gap-1">
+              <span className="flex shrink-0 gap-1 @max-[180px]/title:order-first">
                 {stream && (
                   <span
                     className={EDITOR_CHIP}
