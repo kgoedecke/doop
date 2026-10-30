@@ -63,20 +63,18 @@ parts that apply to Doop are in `handleMcpRequest`:
 
 ### Annotation policy
 
-- `readOnlyHint: true` only for tools that change nothing about the design: reads, searches,
-  screenshots, export URLs. Reads that take `agent_name` (`get_canvas`, `get_frame_screenshot`,
-  `get_guidelines`, `list_guidelines`) also deliver, and thereby claim, the human feedback
-  addressed to that agent. That is bookkeeping about the caller's own inbox, not a change to
-  the canvas, so they stay read-only: the hint decides whether the host asks the person before
-  running a tool, and asking before every read would make the app unusable. `get_feedback`
-  exists to claim work, so it is the one feedback-claiming write.
-- `destructiveHint: true` for deletion and whole-content overwrites: `delete_frame`,
-  `set_canvas_pages` (can delete pages), `set_frame_html` and `set_guidelines` (replace). The
-  streaming path (`append_frame_html`, `start: true`) and `edit_frame_html` stay non-destructive:
-  they are how designs are made and ChatGPT would otherwise ask to confirm every section.
-- `openWorldHint: true` for anything reaching the public internet: website viewing/importing,
-  stock photos, icons, logos, inspiration, `upload_asset` and `import_psd` (fetch a URL).
-  `list_backgrounds` and `generate_image` are bounded services, so `false`.
+- `readOnlyHint: true` only for tools that change nothing anywhere: reads, searches,
+  screenshots, export URLs (`export_frame` returns a link). A read-only tool never claims human feedback: `withFeedbackNotice` only says requests are
+  waiting and points to `get_feedback`, which claims them (a stored write, so not read-only),
+  as do the tools that change the canvas. OpenAI rejected the first submission (2026-10-29)
+  partly because reads claimed feedback while marked read-only.
+- `destructiveHint: true` for anything that can remove or overwrite content: `delete_frame`,
+  `set_canvas_pages` (can delete pages), `set_frame_html`, `set_guidelines` and
+  `restore_frame_version` (replace), `append_frame_html` (`start: true` clears the frame) and
+  `edit_frame_html` (find-and-replace can delete content).
+- `openWorldHint: true` for anything reaching a third party: website viewing/importing, stock
+  photos, icons, logos, inspiration, `upload_asset` (fetches a URL),
+  `generate_image` (OpenAI). `list_backgrounds` serves Doop's own library, so `false`.
 
 ## The preview card (`server/chatgptApp.ts`)
 
@@ -170,7 +168,7 @@ the package; the dashboard rejects them.
 6. Test through [ChatGPT Plugins](https://chatgpt.com/plugins) first (**+ → Add custom MCP server**):
    connect, install the resulting plugin, run a brief, check that the preview card renders,
    that "Open in Doop" opens the canvas, and that a revoked token re-triggers the sign-in.
-7. Submit. Annotation justifications are no longer required; appeal if automated review flags one.
+7. Deploy, then **Rescan** the draft (the hints come from the scan, not the form), and submit. Put per-tool annotation justifications in "Additional Submission Context"; reviewer credentials live under **⋯ → Edit review information**.
 
 Example prompts for the listing:
 
