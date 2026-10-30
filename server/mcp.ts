@@ -473,7 +473,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       title: 'Get a canvas and its frames',
       _meta: previewToolMeta('Reading the canvas…', 'Canvas loaded'),
       description:
-        'Get a canvas: its name and frames with position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so any human feedback waiting for you is delivered with the result.',
+        'Get a canvas: its name and frames with position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so the result can tell you when human feedback is waiting (claim it with get_feedback).',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
