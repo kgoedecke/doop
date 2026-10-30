@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/kgoedecke/doop/compare/desktop-v0.7.0...desktop-v0.8.0) (2026-10-30)
+
+
+### Features
+
+* **desktop:** follow new Claude models by alias, and pick the effort ([#251](https://github.com/kgoedecke/doop/issues/251)) ([bfcec7d](https://github.com/kgoedecke/doop/commit/bfcec7d318cf03df440a852844fd0033a05e5e47))
+
+
+### Bug Fixes
+
+* **desktop:** run the Claude Code the login shell runs, and let Settings choose one ([#271](https://github.com/kgoedecke/doop/issues/271)) ([eaf183b](https://github.com/kgoedecke/doop/commit/eaf183ba852bc078c89ed06ad5d8488c9543e4d2))
+* **desktop:** run the newest Claude Code found, and say when it is too old ([#254](https://github.com/kgoedecke/doop/issues/254)) ([ba7b602](https://github.com/kgoedecke/doop/commit/ba7b6025450fc77b0390e50f145ee8ea67a090f8))
+
 ## [0.7.0](https://github.com/kgoedecke/doop/compare/desktop-v0.6.0...desktop-v0.7.0) (2026-10-26)
 
 
