@@ -61,7 +61,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 - History: every replace and stream files the design it overwrote. list_frame_versions shows a frame's earlier states; restore_frame_version brings one back (HTML and size) when a human asks for the previous version or your rework turned out worse.
 - Images: real imagery makes designs. search_images finds stock photos (you SEE thumbnails and pick), search_icons finds 200k+ UI icons as hotlinkable SVGs, search_logos finds real company logos by brand name or domain — call it once per brand BEFORE writing any logo wall, integration row, press bar or testimonial, and never ship a placeholder tile, "LOGO" text or an invented wordmark in its place, list_backgrounds shows a page of curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly scenes) as thumbnails — browse it when a section wants atmosphere rather than defaulting to a flat CSS gradient, judge by eye whether one fits the frame, and draw your own when none does, upload_asset stores your own file (remote file → source_url; local file → local_file=true, returns a curl command) and returns a permanent URL. generate_image makes a new image from a prompt (a full-bleed hero background in the frame's exact palette, illustration, a product render, brand-specific hero art that stock cannot supply) and stores it as a permanent asset — reach for it when search_images cannot deliver the exact visual, or when the human asks for a generated image; it costs the human money or quota, so one considered prompt beats five drafts. Never inline images as data: URIs.
 - Websites: when a request names an existing site or URL — a redesign of it, or "like acme.com" — call import_webpage FIRST so an editable HTML snapshot lands on the canvas. Leave that source frame unchanged and design in a separate frame. view_website is only for read-only inspection when the page should not be added. If Doop cannot capture the site, do not retry with view_website because it uses the same capture path. Use your own browser or web tool and work only from content you actually observe; if that is unavailable, ask the user for screenshots or an HTML export rather than inventing content.
-${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks — address them before continuing.
+${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
 - Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.`
@@ -151,6 +151,20 @@ function appendFeedback<T extends ToolContent>(result: T, canvasId: string, acto
   result.content.push({
     type: 'text' as const,
     text: `HUMAN FEEDBACK — open request(s) on this canvas, now assigned to YOU:\n${lines.join('\n')}\nAddress this NOW, before continuing your plan: locate the frame in question (get_canvas / get_frame), make the change, and review with get_frame_screenshot. If it concerns another agent's frame, edit it anyway — a human request overrides the don't-touch-others'-frames etiquette. Update your set_status to say what you're picking up.`,
+  })
+  return result
+}
+
+/** The read-only tools' share of the feedback channel: says open human
+ *  feedback is waiting without claiming it, so a read never writes. Claiming
+ *  stays with get_feedback and the tools that change the canvas. */
+function appendFeedbackNotice<T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T {
+  if (!actor) return result
+  const open = actions.openFeedbackFor(canvasId, actor.name).length
+  if (open === 0) return result
+  result.content.push({
+    type: 'text' as const,
+    text: `HUMAN FEEDBACK — ${open} open request${open === 1 ? '' : 's'} on this canvas. Call get_feedback({ canvas_id, agent_name }) NOW to claim and read ${open === 1 ? 'it' : 'them'}, and address ${open === 1 ? 'it' : 'them'} before continuing your plan.`,
   })
   return result
 }
@@ -266,6 +280,8 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
      read-only agent could never carry out. */
   const withFeedback = <T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T =>
     roleAllows(roleOn(canvasId), 'edit') ? appendFeedback(result, canvasId, actor) : result
+  const withFeedbackNotice = <T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T =>
+    roleAllows(roleOn(canvasId), 'edit') ? appendFeedbackNotice(result, canvasId, actor) : result
   const withStatusNudge = <T extends ToolContent>(result: T, canvasId: string, actor?: Actor): T =>
     roleAllows(roleOn(canvasId), 'edit') ? appendStatusNudge(result, canvasId, actor) : result
   const noComment = (id: string) => err(`no comment with id ${id} on this canvas`)
@@ -373,7 +389,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         })
         content.push({ type: 'text' as const, text: INSPIRATION_USAGE_NOTE })
         const result = { content }
-        return canvas_id ? withFeedback(result, canvas_id, actorFrom(agent_name)) : result
+        return canvas_id ? withFeedbackNotice(result, canvas_id, actorFrom(agent_name)) : result
       } catch (e) {
         return err(e instanceof Error ? e.message : 'inspiration search failed')
       }
@@ -492,7 +508,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
           : []),
       ]
       return withPreview(
-        withFeedback(
+        withFeedbackNotice(
           text({
             id: c.id,
             name: c.name,
@@ -546,7 +562,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
           guidelines: [],
           note: 'No style guides on this canvas yet. Set one with set_guidelines when a human hands you brand or style rules.',
         })
-      return withFeedback(
+      return withFeedbackNotice(
         text({
           guidelines: docs.map((d) => ({
             name: d.name,
@@ -588,7 +604,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         )
       }
       if (agent_name) actions.markGuidelinesSeen(canvas_id, actorFrom(agent_name).name)
-      return withFeedback(text(doc.markdown), canvas_id, agent_name ? actorFrom(agent_name) : undefined)
+      return withFeedbackNotice(text(doc.markdown), canvas_id, agent_name ? actorFrom(agent_name) : undefined)
     },
   )
 
@@ -659,7 +675,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
             : 'no style references pinned on this canvas yet',
         )
       }
-      return withFeedback(
+      return withFeedbackNotice(
         text({
           id: ref.id,
           title: ref.title,
@@ -863,7 +879,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
     {
       title: 'Claim open human feedback',
       description:
-        'Fetch and claim any open human feedback requests on a canvas. Feedback normally arrives automatically inside your other tool results, so you rarely need this — use it when you are specifically checking for feedback, e.g. an agent whose job is to poll the canvas every few minutes and address whatever humans have requested. Claiming assigns the requests to you: address each one, then review with get_frame_screenshot.',
+        'Fetch and claim any open human feedback requests on a canvas. Tools that change the canvas deliver feedback automatically and read-only tools announce waiting requests, so call this when a result says feedback is waiting, or when you are specifically checking for feedback, e.g. an agent whose job is to poll the canvas every few minutes and address whatever humans have requested. Claiming assigns the requests to you: address each one, then review with get_frame_screenshot.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: { canvas_id: z.string(), agent_name: agentName },
     },
@@ -1017,7 +1033,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       const f = frameFor(frame_id, 'view')
       if (!f) return noFrame(frame_id)
       arrive(f.canvasId, agent_name)
-      return withFeedback(
+      return withFeedbackNotice(
         text({ ...frameSummary(f), html: f.html }),
         f.canvasId,
         agent_name ? actorFrom(agent_name) : undefined,
@@ -1175,7 +1191,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       title: 'Generate an image with AI',
       description:
         "Generate an image from a text prompt and store it as a permanent asset on this origin — returns the URL to embed plus a preview you can look at. Use it for visuals stock search cannot supply: brand-specific illustration, a product render, a mascot, abstract hero art in the frame's exact palette. Prefer search_images for ordinary photography. It runs on the connecting human's connected ChatGPT subscription or OpenAI key (else the server's key) and costs them quota or money, so write ONE considered prompt: subject, style, composition, palette hexes, lighting, what to leave out. Generation takes 20–60 seconds. ONLY generate when the design genuinely needs it or the human asked.",
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       inputSchema: {
         prompt: z.string().describe('What to draw: subject, style, composition, palette, lighting, mood'),
         aspect: z
@@ -1292,7 +1308,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
           text: 'Embed the chosen image_url directly (<img src> or CSS background, object-fit: cover), or upload_asset with source_url for a permanent copy. Pexels license: free to use and modify, no attribution required.',
         })
         const result = { content }
-        return canvas_id ? withFeedback(result, canvas_id, actorFrom(agent_name)) : result
+        return canvas_id ? withFeedbackNotice(result, canvas_id, actorFrom(agent_name)) : result
       } catch (e) {
         return err(e instanceof Error ? e.message : 'photo search failed')
       }
@@ -1349,7 +1365,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         })
         content.push({ type: 'text' as const, text: backgrounds.BACKGROUND_USAGE_NOTE })
         const result = { content }
-        return canvas_id ? withFeedback(result, canvas_id, actorFrom(agent_name)) : result
+        return canvas_id ? withFeedbackNotice(result, canvas_id, actorFrom(agent_name)) : result
       } catch (e) {
         return err(e instanceof Error ? e.message : 'background search failed')
       }
@@ -1379,7 +1395,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
           ...(icons.length === 0 ? { note: `No results for "${query}" — try a synonym or broader concept.` } : {}),
           usage: imageSearch.ICON_USAGE_NOTE,
         })
-        return canvas_id ? withFeedback(result, canvas_id, actorFrom(agent_name)) : result
+        return canvas_id ? withFeedbackNotice(result, canvas_id, actorFrom(agent_name)) : result
       } catch (e) {
         return err(e instanceof Error ? e.message : 'icon search failed')
       }
@@ -1436,7 +1452,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         }
         content.push({ type: 'text' as const, text: imageSearch.LOGO_USAGE_NOTE })
         const result = { content }
-        return canvas_id ? withFeedback(result, canvas_id, actorFrom(agent_name)) : result
+        return canvas_id ? withFeedbackNotice(result, canvas_id, actorFrom(agent_name)) : result
       } catch (e) {
         return err(e instanceof Error ? e.message : 'logo search failed')
       }
@@ -1618,7 +1634,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         /* the ChatGPT card loads this exact image next — serve it from cache */
         primeImage(f, scale ?? 1, png)
         return withPreview(
-          withFeedback(
+          withFeedbackNotice(
             {
               content: [
                 { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
@@ -1646,7 +1662,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       title: 'Stream HTML into a frame',
       description:
         'Stream a design into a frame section by section — every chunk renders for viewers the moment it arrives, so they watch the design build up live. Prefer this over set_frame_html when creating or reworking a whole design. Send the HTML in document order, ONE complete section per call (head+styles first, then the hero, then each following section), roughly 1–4 KB per chunk. Set start=true on the FIRST chunk (replaces any existing content and shows a live "designing…" badge) and done=true on the LAST chunk. End chunks at element boundaries — partial HTML is healed, but a complete section paints cleanly. When reworking, keep data-doop-* attributes on elements you carry over (comments and links point at data-doop-id).',
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
         html_chunk: z
@@ -1687,7 +1703,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       _meta: previewToolMeta('Editing the frame…', 'Frame edited'),
       description:
         'Make a targeted edit to a frame: exact find-and-replace in its HTML. Use this for small tweaks (copy, a color, spacing, one element) instead of resending the whole document — the change morphs into the rendered frame in place. old_str must appear EXACTLY ONCE in the current HTML (call get_frame first if unsure); include enough surrounding context to make it unique. Keep data-doop-* attributes on the element you edit: comments and links point at its data-doop-id.',
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
         old_str: z.string().describe('Exact text to find in the frame HTML — must occur exactly once'),

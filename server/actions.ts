@@ -357,17 +357,23 @@ export function addTaskFeedback(
   return undefined
 }
 
-/** Open feedback this agent may take: everything addressed to it, plus
- *  untargeted feedback — that part stays a canvas-level queue where the first
- *  identified agent call wins. */
-export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
-  const pending = (feedbackLog.get(canvasId) ?? []).filter(
+/** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
+ *  tools mention without assigning anything. */
+export function openFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
+  return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
       (!f.targetAgent || f.targetAgent === agentName) &&
       (payer === undefined || (f.fromUserId ?? '') === payer),
   )
+}
+
+/** Open feedback this agent may take: everything addressed to it, plus
+ *  untargeted feedback — that part stays a canvas-level queue where the first
+ *  identified agent call wins. */
+export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
+  const pending = openFeedbackFor(canvasId, agentName, payer)
   for (const f of pending) {
     f.deliveredAt = Date.now()
     f.claimedBy = agentName

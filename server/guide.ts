@@ -149,9 +149,10 @@ Do not spam it: one update per phase of work, not one per tool call.
 ## Human feedback — TOP PRIORITY
 
 Humans reply to agent tasks from the canvas UI. Each reply is an OPEN REQUEST on the
-canvas — not mail for one agent. The first agent to make an identified call picks it
-up: it arrives inside your tool results as a block starting with "HUMAN FEEDBACK",
-and picking it up assigns it to you. When you see one:
+canvas — not mail for one agent. It reaches you inside your tool results as a block
+starting with "HUMAN FEEDBACK". A tool that changes the canvas (and get_feedback) picks
+it up and assigns it to you; a read-only tool only says requests are waiting, so call
+get_feedback to claim them. When you see one:
 
 - Stop and address it BEFORE continuing your own plan — a human watching the canvas
   outranks your todo list.
