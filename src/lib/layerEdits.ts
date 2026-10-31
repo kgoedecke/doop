@@ -1,7 +1,7 @@
 import type { Frame } from '../../shared/types'
 import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
-import { editElementGeometry, inspectElement, requestFrame } from './frameBridge'
+import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
 import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
 import {
@@ -163,8 +163,9 @@ export function nudgeSelection(dx: number, dy: number): boolean {
   const picked = s.selectedElement
   if (!picked) return false
   const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
-  if (!frame || frame.locked) return true
-  editElementGeometry(frame.id, picked.selector, { kind: 'nudge', dx, dy }).catch(console.error)
+  if (!frame || isCanvasElement(frame.html)) return false
+  if (frame.locked) return true
+  void nudgeElements(frame.id, pickedSelectors(s), dx, dy)
   return true
 }
 

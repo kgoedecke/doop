@@ -108,6 +108,14 @@ export type GeometryEdit =
   | { kind: 'flip'; axis: 'x' | 'y' }
   | { kind: 'nudge'; dx: number; dy: number }
 
+export function nudgeElements(frameId: string, selectors: string[], dx: number, dy: number) {
+  return requestFrame(frameId, 'doop:nudge', { selectors, dx, dy })
+}
+
+export function settleFrames() {
+  return Promise.all([...windows.keys()].map((frameId) => requestFrame(frameId, 'doop:settle', {})))
+}
+
 export async function editElementGeometry(
   frameId: string,
   selector: string,

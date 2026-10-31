@@ -320,7 +320,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       const canEdit = canEditOpenCanvas(useStore.getState())
       if (canEdit && (e.key === 'Delete' || e.key === 'Backspace') && !e.repeat && deleteSelection()) e.preventDefault()
       const nudge = ARROW_NUDGE[e.key]
-      if (canEdit && nudge && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (canEdit && nudge && t.tagName !== 'SELECT' && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const step = e.shiftKey ? 10 : 1
         if (nudgeSelection(nudge[0] * step, nudge[1] * step)) e.preventDefault()
         return

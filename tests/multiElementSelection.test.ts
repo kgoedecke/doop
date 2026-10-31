@@ -8,7 +8,10 @@ vi.mock('../src/lib/api', () => ({
   errorMessage: (_err: unknown, fallback: string) => fallback,
 }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
-vi.mock('../src/lib/frameBridge', () => ({ requestFrame: () => Promise.resolve(null) }))
+vi.mock('../src/lib/frameBridge', () => ({
+  requestFrame: () => Promise.resolve(null),
+  settleFrames: () => Promise.resolve([]),
+}))
 
 const { pickedSelectors, useStore } = await import('../src/lib/store')
 const { duplicateElements, elementsHtml, insertElements, placeElement, removeElements } =

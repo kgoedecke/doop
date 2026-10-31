@@ -922,6 +922,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
+    if (d.type === 'doop:settle') {
+      if (styleTimer) {
+        clearTimeout(styleTimer)
+        styleTimer = null
+        postEdited()
+      }
+      parent.postMessage({ type: 'doop:settle-result', reqId: d.reqId }, '*')
+    }
     if (d.type === 'doop:style' && d.styles && typeof d.styles === 'object') {
       var applied = applyStyle(d.selector, d.styles)
       parent.postMessage({ type: 'doop:style-result', reqId: d.reqId, ok: applied, info: applied ? inspect(d.selector) : null }, '*')
@@ -929,6 +937,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:replace-image') {
       var replaced = replaceImage(d.selector, d.image, d.url)
       parent.postMessage({ type: 'doop:replace-image-result', reqId: d.reqId, info: replaced ? inspect(d.selector) : null }, '*')
+    }
+    if (d.type === 'doop:nudge' && Array.isArray(d.selectors)) {
+      var picked = d.selectors.map(function (selector) {
+        try { return { selector: selector, el: document.querySelector(selector) } } catch (e) { return { selector: selector, el: null } }
+      })
+      var moved = picked.filter(function (p) {
+        return p.el && !picked.some(function (other) { return other.el && other.el !== p.el && other.el.contains(p.el) })
+      }).map(function (p) { return editGeometry(p.selector, { kind: 'nudge', dx: d.dx, dy: d.dy }) })
+      parent.postMessage({ type: 'doop:nudge-result', reqId: d.reqId, ok: moved.indexOf(true) !== -1 }, '*')
     }
     if (d.type === 'doop:geometry') {
       var changed = editGeometry(d.selector, d.edit)

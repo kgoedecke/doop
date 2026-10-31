@@ -22,6 +22,7 @@ vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 const inspect = vi.fn(() => Promise.resolve({ rect: { x: 10, y: 20, width: 50, height: 30 } }))
 vi.mock('../src/lib/frameBridge', () => ({
   requestFrame: () => Promise.resolve(null),
+  settleFrames: () => Promise.resolve([]),
   inspectElement: () => inspect(),
 }))
 
