@@ -7,11 +7,12 @@ import { useAllowance } from '../components/TeamAllowance'
 import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import { AccountSettings } from '../components/AccountSettings'
 import { AppearanceSettings } from '../components/AppearanceSettings'
+import { GeneralSettings } from '../components/GeneralSettings'
 import { AgentKeys } from '../components/AgentKeys'
 import { Webhooks } from '../components/Webhooks'
 import { AccountMenu } from '../components/DashShell'
 import { railLayout } from '../components/AppRail'
-import { BellIcon, ChevronLeftIcon, KeyIcon, MoonIcon, SparkIcon, UserIcon } from '../components/ui/icons'
+import { BellIcon, ChevronLeftIcon, KeyIcon, MoonIcon, GearIcon, SparkIcon, UserIcon } from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { CardDescription, CardHeader, CardTitle, SettingsCard } from '../components/ui/card'
@@ -29,10 +30,11 @@ import {
   DashTitle,
 } from '../components/ui/dash'
 
-type Pane = 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
+type Pane = 'general' | 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
 
 /* the heading over each pane, and the line under it */
 const panes: Record<Pane, { title: PlainMessageKey; blurb: PlainMessageKey }> = {
+  general: { title: 'settings.generalTitle', blurb: 'settings.generalBlurb' },
   agent: { title: 'settings.agentTitle', blurb: 'settings.agentBlurb' },
   keys: { title: 'settings.keysTitle', blurb: 'settings.keysBlurb' },
   webhooks: { title: 'settings.webhooksTitle', blurb: 'settings.webhooksBlurb' },
@@ -101,6 +103,14 @@ export function Settings() {
         <nav className="flex flex-col gap-0.5">
           <DashNavItem
             density="rail"
+            icon={<GearIcon size="rail" />}
+            active={pane === 'general'}
+            onClick={() => setPane('general')}
+          >
+            General
+          </DashNavItem>
+          <DashNavItem
+            density="rail"
             icon={<SparkIcon size="rail" />}
             active={pane === 'agent'}
             onClick={() => setPane('agent')}
@@ -163,7 +173,13 @@ export function Settings() {
           </div>
 
           <Tabs value={pane} onValueChange={(next) => setPane(next as Pane)} className="mt-4 flex md:hidden">
-            <TabsList variant="card">
+            <TabsList
+              variant="card"
+              className="grid h-auto grid-cols-2 group-data-horizontal/tabs:h-auto sm:grid-cols-3 [&>*]:h-8"
+            >
+              <TabsTrigger value="general">
+                <GearIcon size="rail" /> {t('settings.generalTitle')}
+              </TabsTrigger>
               <TabsTrigger value="agent">
                 <SparkIcon size="rail" /> {t('settings.agentTitle')}
               </TabsTrigger>
@@ -182,7 +198,9 @@ export function Settings() {
             </TabsList>
           </Tabs>
 
-          {pane === 'agent' ? (
+          {pane === 'general' ? (
+            <GeneralSettings />
+          ) : pane === 'agent' ? (
             <>
               <SettingsCard>
                 <CardHeader>

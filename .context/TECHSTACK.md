@@ -336,6 +336,9 @@
   (the "on" chip wears the drifting colour beam from `src/styles.css`) and a composer. A prompt makes
   a canvas named after it (`src/lib/homePrompt.ts`), queues it as the first board card asking for N
   drafts, and opens the canvas; a card that cannot queue rides along as the canvas composer's draft.
+  The hero's top-right close button asks to "Hide Prompt Box" before hiding the whole prompt area.
+  `src/lib/homePreferences.ts` remembers the choice in this browser under `doop.home.prompt-box-hidden`;
+  Settings → General → Show Prompt Box restores it. The preference also updates other open tabs.
   Import makes a canvas and opens it with `?import=1`, which `CanvasPage` turns into the import
   picker. `GET /api/canvases` adds `people` (owner, then members) for the tiles' avatar stacks.
   The rail is `src/components/AppRail.tsx`, mounted by Home, Automations, Integrations, Community,
