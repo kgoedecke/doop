@@ -449,7 +449,7 @@ export function wrapRepoHtml(
   const inject =
     markerMeta(conn.id, screen) +
     `<meta http-equiv="Content-Security-Policy" content="${SNAPSHOT_CSP}">` +
-    `<base href="${base}">`
+    `<base href="${base.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">`
   return injectHead(sanitizeSnapshotHtml(html), inject)
 }
 
