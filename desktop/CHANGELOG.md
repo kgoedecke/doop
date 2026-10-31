@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/kgoedecke/doop/compare/desktop-v0.8.0...desktop-v0.9.0) (2026-10-31)
+
+
+### Features
+
+* **desktop:** sign the Windows app and installer with Azure Artifact Signing ([#273](https://github.com/kgoedecke/doop/issues/273)) ([d47def3](https://github.com/kgoedecke/doop/commit/d47def3382a5080123722c16306c56ada33a04d9))
+
 ## [0.8.0](https://github.com/kgoedecke/doop/compare/desktop-v0.7.0...desktop-v0.8.0) (2026-10-30)
 
 
