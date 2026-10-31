@@ -1718,7 +1718,11 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       if (count === 0) return err('old_str not found in the frame HTML. Call get_frame to see the current content.')
       if (count > 1)
         return err(`old_str occurs ${count} times — include more surrounding context so it matches exactly once.`)
-      const frame = actions.updateFrame(frame_id, { html: f.html.replace(old_str, new_str) }, actorFrom(agent_name))!
+      const frame = actions.updateFrame(
+        frame_id,
+        { html: f.html.replace(old_str, () => new_str) },
+        actorFrom(agent_name),
+      )!
       return withPreview(
         withStatusNudge(
           withFeedback(
