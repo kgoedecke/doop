@@ -264,6 +264,13 @@ export type Env = ReturnType<typeof parse>
    importer sees the new one. Nothing outside this file assigns it. */
 export let env: Env = parse()
 
+/** Windows browser install roots: both Program Files directories and the current user's LocalAppData. */
+export function windowsBrowserDirectories(): string[] {
+  return [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(
+    (dir): dir is string => !!dir,
+  )
+}
+
 /** Re-read process.env. For tests that change a variable after import;
  *  the server itself parses once at boot. */
 export function reloadEnv(): void {
