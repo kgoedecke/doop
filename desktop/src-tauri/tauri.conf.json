@@ -14,6 +14,15 @@
           "doop"
         ]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDMTFCREY0MzhGNkM1NjkKUldScHhmWTQ5TDBSdkJBV0Zaa3MvY01HWWRIaHhTd1NQazRlMERpUFBSLy95eU5EdEFCRmRPOE8K",
+      "endpoints": [
+        "https://doop.design/desktop/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "app": {

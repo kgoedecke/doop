@@ -1,39 +1,205 @@
-//! Manual checks use the same published installer as the website. A HEAD
-//! request reads its release tag without downloading or following the DMG.
+//! Self-update through tauri-plugin-updater. Official release builds read the
+//! signed feed named in tauri.conf.json (`plugins.updater`) shortly after
+//! launch and then once a day, download a newer shell in the background and
+//! offer to restart into it. On macOS the app menu's Check for Updates… runs
+//! the same check on demand and reports every outcome; background checks
+//! stay silent unless an update is ready.
+//!
+//! The feed (latest.json, written by desktop-release.yml) and every package
+//! it names are signed with the key whose public half is in tauri.conf.json;
+//! the plugin refuses a package whose signature does not verify.
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use rfd::{AsyncMessageDialog, MessageButtons, MessageDialogResult, MessageLevel};
-use semver::Version;
-use tauri::{menu::MenuItem, AppHandle, Manager};
-use tauri_plugin_opener::OpenerExt;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
-pub const MENU_ID: &str = "check-for-updates";
-const MENU_LABEL: &str = "Check for Updates…";
-const DOWNLOAD_URL: &str = "https://doop.design/download/mac";
-const RELEASE_PREFIX: &str = "https://github.com/kgoedecke/doop/releases/download/desktop-v";
+const FIRST_CHECK: Duration = Duration::from_secs(15);
+const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+const RESTART: &str = "Restart Now";
+const LATER: &str = "Later";
 
-struct UpdateMenu(MenuItem<tauri::Wry>);
-
-pub fn menu_item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
-    let item = MenuItem::with_id(app, MENU_ID, MENU_LABEL, true, None::<&str>)?;
-    app.manage(UpdateMenu(item.clone()));
-    Ok(item)
+#[derive(Default)]
+pub struct UpdateState {
+    /// One check (and its dialog) at a time, whoever started it.
+    busy: AtomicBool,
+    /// A verified download the person put off. A later check offers it again
+    /// without downloading, and on macOS it is installed on quit.
+    ready: Mutex<Option<(Update, Vec<u8>)>>,
 }
 
-/// Menu events run on the UI thread. Disable the item before spawning work
-/// and keep it disabled through the result dialog to prevent duplicate checks.
-pub fn check(app: &AppHandle) {
-    let item = app.state::<UpdateMenu>().0.clone();
-    if !item.is_enabled().unwrap_or(false) || item.set_enabled(false).is_err() {
+#[derive(Clone, Copy, PartialEq)]
+enum Trigger {
+    Background,
+    Manual,
+}
+
+/// Official installers point at doop.design. Replacing a self-hosted shell
+/// with one would silently change its server, and a debug build would be
+/// replaced by a release.
+fn updates_enabled() -> bool {
+    !cfg!(debug_assertions)
+        && matches!(
+            crate::APP_URL.trim_end_matches('/'),
+            "https://doop.design" | "https://www.doop.design"
+        )
+}
+
+pub fn start(app: &AppHandle) {
+    app.manage(UpdateState::default());
+    if !updates_enabled() {
         return;
     }
-    let _ = item.set_text("Checking for Updates…");
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        show_result(&app).await;
-        let _ = item.set_text(MENU_LABEL);
-        let _ = item.set_enabled(true);
+        tokio::time::sleep(FIRST_CHECK).await;
+        loop {
+            run(&app, Trigger::Background).await;
+            tokio::time::sleep(CHECK_EVERY).await;
+        }
     });
+}
+
+/// Runs on exit: a download put off with Later replaces the app bundle now,
+/// so the next launch is the new version. Windows installs by running the
+/// installer, which relaunches the app, so it waits for the next prompt.
+pub fn install_on_quit(app: &AppHandle) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let Some(state) = app.try_state::<UpdateState>() else {
+        return;
+    };
+    let ready = state.ready.lock().ok().and_then(|mut ready| ready.take());
+    if let Some((update, bytes)) = ready {
+        if let Err(error) = update.install(&bytes) {
+            eprintln!("Installing doop {} on quit failed: {error}", update.version);
+        }
+    }
+}
+
+async fn run(app: &AppHandle, trigger: Trigger) {
+    let state = app.state::<UpdateState>();
+    if state.busy.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    menu::checking(app, true);
+    match ready_update(app).await {
+        Ok(Some((update, bytes))) => offer(app, update, bytes).await,
+        Ok(None) if trigger == Trigger::Manual => {
+            let current = &app.package_info().version;
+            dialog(
+                app,
+                "You’re up to date",
+                &format!("doop {current} is up to date."),
+            )
+            .show()
+            .await;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("Desktop update check failed: {error}");
+            if trigger == Trigger::Manual {
+                dialog(
+                    app,
+                    "Couldn’t check for updates",
+                    "Check your internet connection and try again in a moment.",
+                )
+                .set_level(MessageLevel::Error)
+                .show()
+                .await;
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    menu::checking(app, false);
+    state.busy.store(false, Ordering::Release);
+}
+
+/// The newest release, downloaded and verified, or None when this is it.
+async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, String> {
+    let handle = app.clone();
+    let updater = app
+        .updater_builder()
+        // Windows: the installer is launched and the process exits at once.
+        .on_before_exit(move || {
+            crate::claude::shutdown(&handle.state::<crate::claude::ClaudeState>())
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let kept = app
+        .state::<UpdateState>()
+        .ready
+        .lock()
+        .ok()
+        .and_then(|mut ready| ready.take_if(|(kept, _)| kept.version == update.version));
+    if let Some(kept) = kept {
+        return Ok(Some(kept));
+    }
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(Some((update, bytes)))
+}
+
+async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
+    let later = if cfg!(target_os = "macos") {
+        "\n\nChoose Later to install it when you quit doop."
+    } else {
+        ""
+    };
+    let choice = dialog(
+        app,
+        "A new version of doop is ready",
+        &format!(
+            "doop {} is ready to install. You have {}.\n\nRestarting stops an agent run in progress.{later}",
+            update.version,
+            app.package_info().version
+        ),
+    )
+    .set_buttons(MessageButtons::OkCancelCustom(RESTART.into(), LATER.into()))
+    .show()
+    .await;
+    if !accepted(&choice) {
+        if let Ok(mut ready) = app.state::<UpdateState>().ready.lock() {
+            *ready = Some((update, bytes));
+        }
+        return;
+    }
+    crate::claude::shutdown(&app.state::<crate::claude::ClaudeState>());
+    // Windows does not return from a successful install: the plugin starts
+    // the installer, which relaunches the app, and exits.
+    match update.install(&bytes) {
+        Ok(()) => app.restart(),
+        Err(error) => {
+            eprintln!("Installing doop {} failed: {error}", update.version);
+            dialog(
+                app,
+                "Couldn’t install the update",
+                "Download the latest doop from doop.design and install it over this version.",
+            )
+            .set_level(MessageLevel::Error)
+            .show()
+            .await;
+        }
+    }
+}
+
+/// Windows shows custom labels only with comctl v6 and otherwise answers
+/// with plain OK / Cancel, so OK counts as the custom confirm.
+fn accepted(choice: &MessageDialogResult) -> bool {
+    match choice {
+        MessageDialogResult::Ok => true,
+        MessageDialogResult::Custom(label) => label == RESTART,
+        _ => false,
+    }
 }
 
 fn dialog(app: &AppHandle, title: &str, description: &str) -> AsyncMessageDialog {
@@ -46,177 +212,71 @@ fn dialog(app: &AppHandle, title: &str, description: &str) -> AsyncMessageDialog
     }
 }
 
-async fn show_result(app: &AppHandle) {
-    // Official installers point at doop.design. Replacing a self-hosted shell
-    // with one would silently change its server.
-    if !matches!(
-        crate::APP_URL.trim_end_matches('/'),
-        "https://doop.design" | "https://www.doop.design"
-    ) {
-        dialog(app, "Custom desktop build", "This app connects to a custom Doop server. Contact whoever provided this app for an updated desktop build.")
-            .show().await;
-        return;
+/// The macOS app menu's Check for Updates… item. Windows has no menu bar
+/// (the page draws its own tab strip), so it relies on the scheduled checks.
+#[cfg(target_os = "macos")]
+pub mod menu {
+    use super::*;
+    use tauri::menu::MenuItem;
+
+    pub const MENU_ID: &str = "check-for-updates";
+    const LABEL: &str = "Check for Updates…";
+
+    struct UpdateMenu(MenuItem<tauri::Wry>);
+
+    pub fn item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
+        let item = MenuItem::with_id(app, MENU_ID, LABEL, true, None::<&str>)?;
+        app.manage(UpdateMenu(item.clone()));
+        Ok(item)
     }
 
-    let current = &app.package_info().version;
-    match latest_version(DOWNLOAD_URL).await {
-        Ok(latest) if latest.cmp_precedence(current).is_gt() => {
-            let choice = dialog(
-                app,
-                "A new version of doop is available",
-                &format!("doop {latest} is available. You have {current}.\n\nDownload the installer, then open it and drag doop into Applications to replace this version."),
-            )
-            .set_buttons(MessageButtons::OkCancelCustom("Download Update".into(), "Not Now".into()))
-            .show().await;
-            if choice == MessageDialogResult::Custom("Download Update".into())
-                && app.opener().open_url(DOWNLOAD_URL, None::<&str>).is_err()
-            {
+    /// Menu events run on the UI thread; the item stays disabled from the
+    /// click through the result dialog so checks cannot stack.
+    pub fn check(app: &AppHandle) {
+        if !updates_enabled() {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
                 dialog(
-                    app,
-                    "Couldn’t open the download",
-                    &format!("Open {DOWNLOAD_URL} in your browser to download the update."),
+                    &app,
+                    "Custom desktop build",
+                    "This app connects to a custom Doop server or is a development build. Contact whoever provided this app for an updated desktop build.",
                 )
-                .set_level(MessageLevel::Error)
                 .show()
                 .await;
-            }
+            });
+            return;
         }
-        Ok(_) => {
-            dialog(
-                app,
-                "You’re up to date",
-                &format!("doop {current} is up to date."),
-            )
-            .show()
-            .await;
-        }
-        Err(error) => {
-            eprintln!("Desktop update check failed: {error}");
-            dialog(
-                app,
-                "Couldn’t check for updates",
-                "Check your internet connection and try again in a moment.",
-            )
-            .set_level(MessageLevel::Error)
-            .show()
-            .await;
-        }
+        checking(app, true);
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { run(&app, Trigger::Manual).await });
     }
-}
 
-async fn latest_version(endpoint: &str) -> Result<Version, String> {
-    let response = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(15))
-        .user_agent(concat!("doop-desktop/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| e.to_string())?
-        .head(endpoint)
-        .header(reqwest::header::CACHE_CONTROL, "no-cache")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !response.status().is_redirection() {
-        return Err(format!("Unexpected download status: {}", response.status()));
+    pub(super) fn checking(app: &AppHandle, busy: bool) {
+        if let Some(menu) = app.try_state::<UpdateMenu>() {
+            let _ = menu.0.set_enabled(!busy);
+            let _ = menu.0.set_text(if busy {
+                "Checking for Updates…"
+            } else {
+                LABEL
+            });
+        }
     }
-    let location = response
-        .headers()
-        .get(reqwest::header::LOCATION)
-        .and_then(|value| value.to_str().ok())
-        .ok_or("Missing download location")?;
-    release_version(location)
-}
-
-fn release_version(location: &str) -> Result<Version, String> {
-    let (version, filename) = location
-        .strip_prefix(RELEASE_PREFIX)
-        .and_then(|path| path.split_once('/'))
-        .ok_or("Unrecognized desktop release URL")?;
-    let version = Version::parse(version).map_err(|e| e.to_string())?;
-    if !version.pre.is_empty() || filename != format!("doop_{version}_universal.dmg") {
-        return Err("Expected a stable universal macOS installer".into());
-    }
-    Ok(version)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpListener;
 
     #[test]
-    fn checks_headers_without_downloading_and_rejects_failed_responses() {
-        let location = format!("Location: {RELEASE_PREFIX}0.6.0/doop_0.6.0_universal.dmg\r\n");
-        for (status, headers, succeeds) in [
-            ("302 Found", location.as_str(), true),
-            ("200 OK", location.as_str(), false),
-            ("302 Found", "", false),
-            ("503 Service Unavailable", "", false),
-        ] {
-            let server = TcpListener::bind("127.0.0.1:0").unwrap();
-            let endpoint = format!("http://{}/download/mac", server.local_addr().unwrap());
-            let response = format!(
-                "HTTP/1.1 {status}\r\n{headers}Content-Length: 0\r\nConnection: close\r\n\r\n"
-            );
-            let request = std::thread::spawn(move || {
-                let (mut stream, _) = server.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                let mut reader = BufReader::new(&stream);
-                let mut request_line = String::new();
-                reader.read_line(&mut request_line).unwrap();
-                loop {
-                    let mut line = String::new();
-                    if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                        break;
-                    }
-                }
-                stream.write_all(response.as_bytes()).unwrap();
-                request_line
-            });
-            let result = tauri::async_runtime::block_on(latest_version(&endpoint));
-            assert_eq!(request.join().unwrap(), "HEAD /download/mac HTTP/1.1\r\n");
-            assert_eq!(result.is_ok(), succeeds, "{status}: {result:?}");
-            if succeeds {
-                assert_eq!(result.unwrap(), Version::new(0, 6, 0));
-            }
-        }
+    fn restarts_only_on_the_confirm_button() {
+        assert!(accepted(&MessageDialogResult::Custom(RESTART.into())));
+        assert!(accepted(&MessageDialogResult::Ok));
+        assert!(!accepted(&MessageDialogResult::Custom(LATER.into())));
+        assert!(!accepted(&MessageDialogResult::Cancel));
     }
 
     #[test]
-    fn reads_published_installer_version_and_compares_numerically() {
-        let latest =
-            release_version(&format!("{RELEASE_PREFIX}0.10.0/doop_0.10.0_universal.dmg")).unwrap();
-        for (current, newer) in [
-            ("0.9.0", true),
-            ("0.10.0", false),
-            ("0.11.0", false),
-            ("0.10.0-beta.1", true),
-            ("0.10.0+custom", false),
-        ] {
-            assert_eq!(
-                latest
-                    .cmp_precedence(&Version::parse(current).unwrap())
-                    .is_gt(),
-                newer
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_unexpected_downloads_instead_of_reporting_up_to_date() {
-        for location in [
-            DOWNLOAD_URL.to_string(),
-            format!("{RELEASE_PREFIX}invalid/doop_invalid_universal.dmg"),
-            format!("{RELEASE_PREFIX}0.6.0-beta.1/doop_0.6.0-beta.1_universal.dmg"),
-            format!("{RELEASE_PREFIX}0.6.0/doop_0.5.0_universal.dmg"),
-            format!("{RELEASE_PREFIX}0.6.0/doop_0.6.0_x64-setup.exe"),
-            format!("{RELEASE_PREFIX}0.6.0/doop_0.6.0_universal.dmg/extra"),
-            "https://example.com/desktop-v0.6.0/doop_0.6.0_universal.dmg".into(),
-        ] {
-            assert!(release_version(&location).is_err(), "{location}");
-        }
+    fn debug_builds_never_update() {
+        assert!(!updates_enabled());
     }
 }

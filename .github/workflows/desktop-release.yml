@@ -13,6 +13,14 @@
 # Signing on tag and dispatch builds once the AZURE_CLIENT_ID and
 # AZURE_TENANT_ID repo variables exist (see desktop/README.md); PR builds and
 # repos without them stay unsigned.
+#
+# Self-update: with the TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD) secrets set,
+# both builds also produce updater packages signed with the key whose public
+# half is in tauri.conf.json, and a tag release writes latest.json and copies
+# it onto the fixed `desktop-updates` release, which doop.design/desktop/
+# latest.json redirects to (see desktop/README.md). Tags fail without the key
+# so a release never leaves installed apps behind; other builds skip the
+# updater packages.
 name: Desktop Release
 
 on:
@@ -44,21 +52,31 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           # unset secrets take precedence over none at all: tauri treats an
           # empty env var as configured and fails, so drop the empty ones
-          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [ -z "${!v}" ]; then unset "$v"; fi
           done
           if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
             echo "::warning::APPLE_* secrets not set — building an UNSIGNED dmg (System Settings → Open Anyway required)"
           fi
-          bunx tauri build --target universal-apple-darwin --bundles dmg
+          updater=$(bash scripts/updater-config.sh)
+          bunx tauri build --target universal-apple-darwin --bundles app,dmg --config "$updater"
       - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: doop-dmg
           path: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: doop-macos-update
+          path: |
+            desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: ignore
 
   nsis-windows:
     runs-on: windows-latest
@@ -123,12 +141,19 @@ jobs:
       - name: Build Windows installer (signed when Artifact Signing is set up)
         working-directory: desktop
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          for v in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
+          updater=$(bash scripts/updater-config.sh)
           if [ "$SIGN" = true ]; then
-            bunx tauri build --bundles nsis --config "$TAURI_SIGN_CONFIG"
+            bunx tauri build --bundles nsis --config "$TAURI_SIGN_CONFIG" --config "$updater"
           else
             echo "::warning::not signing the Windows installer (PR build, or AZURE_* variables not set)"
-            bunx tauri build --bundles nsis
+            bunx tauri build --bundles nsis --config "$updater"
           fi
       - name: Verify signatures
         if: env.SIGN == 'true'
@@ -143,7 +168,9 @@ jobs:
       - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: doop-windows-setup
-          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/nsis/*.exe.sig
           if-no-files-found: error
 
   release:
@@ -155,10 +182,48 @@ jobs:
         with:
           path: installers
           merge-multiple: true
+      - name: Write the update feed
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#desktop-v}"
+          base="https://github.com/$REPO/releases/download/$TAG"
+          cd installers
+          # every release has its own asset URLs, so give the macOS package a versioned name
+          mv doop.app.tar.gz "doop_${version}_universal.app.tar.gz"
+          mv doop.app.tar.gz.sig "doop_${version}_universal.app.tar.gz.sig"
+          mac="doop_${version}_universal.app.tar.gz"
+          win="doop_${version}_x64-setup.exe"
+          jq -n \
+            --arg version "$version" \
+            --arg notes "https://github.com/$REPO/releases/tag/$TAG" \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg mac_url "$base/$mac" --arg mac_sig "$(cat "$mac.sig")" \
+            --arg win_url "$base/$win" --arg win_sig "$(cat "$win.sig")" \
+            '{version: $version, notes: $notes, pub_date: $date, platforms: {
+              "darwin-aarch64": {url: $mac_url, signature: $mac_sig},
+              "darwin-x86_64": {url: $mac_url, signature: $mac_sig},
+              "windows-x86_64": {url: $win_url, signature: $win_sig}
+            }}' > latest.json
+          cat latest.json
       - name: Attach installers to release
         uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
         with:
           files: |
             installers/*.dmg
             installers/*.exe
+            installers/*.app.tar.gz
+            installers/*.sig
+            installers/latest.json
           fail_on_unmatched_files: true
+      # last, once the packages it names are public: installed apps read this copy
+      - name: Publish the update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view desktop-updates >/dev/null 2>&1 ||
+            gh release create desktop-updates --prerelease --latest=false --title 'Desktop update feed' \
+              --notes 'latest.json for the desktop app updater. Replaced by every desktop-v* release; do not delete.'
+          gh release upload desktop-updates installers/latest.json --clobber

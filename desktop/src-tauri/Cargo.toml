@@ -23,13 +23,15 @@ tempfile = "3"
 # main.rs); used directly rather than through tauri-plugin-dialog because the
 # download callback needs a synchronous answer on the UI thread.
 rfd = "0.16"
+# Self-update from the signed feed in tauri.conf.json (src/updates.rs); tokio
+# only for the timer between scheduled checks.
+tauri-plugin-updater = "2"
+tokio = { version = "1", features = ["time"] }
 
 # Repositioning the traffic lights over the web app's tab strip (main.rs);
 # AppKit resets them on window events, so the shell moves them itself.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
-reqwest = { version = "0.13", default-features = false, features = ["native-tls", "system-proxy"] }
-semver = "1"
 
 [profile.release]
 strip = true
