@@ -177,6 +177,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/desktop-v')
     needs: [dmg-macos, nsis-windows]
     runs-on: ubuntu-latest
+    # one feed write at a time, so the version check below cannot race
+    concurrency:
+      group: desktop-update-feed
+      cancel-in-progress: false
     steps:
       - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
@@ -226,4 +230,15 @@ jobs:
           gh release view desktop-updates >/dev/null 2>&1 ||
             gh release create desktop-updates --prerelease --latest=false --title 'Desktop update feed' \
               --notes 'latest.json for the desktop app updater. Replaced by every desktop-v* release; do not delete.'
+          # a rerun of an older tag (or a release finishing late) must not move
+          # installed apps back: keep the feed when it already names a newer version
+          if gh release download desktop-updates --pattern latest.json --output published.json 2>/dev/null; then
+            published=$(jq -r .version published.json)
+            ours=$(jq -r .version installers/latest.json)
+            newest=$(printf '%s\n%s\n' "$published" "$ours" | sort -V | tail -1)
+            if [ "$published" != "$ours" ] && [ "$newest" = "$published" ]; then
+              echo "::warning::the feed already names $published; leaving it in place of $ours"
+              exit 0
+            fi
+          fi
           gh release upload desktop-updates installers/latest.json --clobber

@@ -120,26 +120,18 @@ async fn run(app: &AppHandle, trigger: Trigger) {
 }
 
 /// The newest release, downloaded and verified, or None when this is it.
+/// A download put off with Later is offered again without the network when
+/// the feed cannot be reached, and dropped when the feed no longer names it.
 async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, String> {
-    let handle = app.clone();
-    let updater = app
-        .updater_builder()
-        // Windows: the installer is launched and the process exits at once.
-        .on_before_exit(move || {
-            crate::claude::shutdown(&handle.state::<crate::claude::ClaudeState>())
-        })
-        .build()
-        .map_err(|e| e.to_string())?;
-    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
-        return Ok(None);
+    let update = match newest(app).await {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            take_kept(app, |_| true);
+            return Ok(None);
+        }
+        Err(error) => return take_kept(app, |_| true).map(Some).ok_or(error),
     };
-    let kept = app
-        .state::<UpdateState>()
-        .ready
-        .lock()
-        .ok()
-        .and_then(|mut ready| ready.take_if(|(kept, _)| kept.version == update.version));
-    if let Some(kept) = kept {
+    if let Some(kept) = take_kept(app, |kept| kept.version == update.version) {
         return Ok(Some(kept));
     }
     let bytes = update
@@ -147,6 +139,28 @@ async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, Stri
         .await
         .map_err(|e| e.to_string())?;
     Ok(Some((update, bytes)))
+}
+
+async fn newest(app: &AppHandle) -> Result<Option<Update>, String> {
+    let handle = app.clone();
+    app.updater_builder()
+        // Windows: the installer is launched and the process exits at once.
+        .on_before_exit(move || {
+            crate::claude::shutdown(&handle.state::<crate::claude::ClaudeState>())
+        })
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn take_kept(app: &AppHandle, wanted: impl FnOnce(&Update) -> bool) -> Option<(Update, Vec<u8>)> {
+    app.state::<UpdateState>()
+        .ready
+        .lock()
+        .ok()?
+        .take_if(|(kept, _)| wanted(kept))
 }
 
 async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
