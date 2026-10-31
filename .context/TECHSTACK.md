@@ -260,6 +260,16 @@
   (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, provider client IDs/secrets) come from the
   environment (`.env`, documented in `.env.example`); never committed.
 
+- Reading a failed auth call (`src/lib/authError.ts`): only our own API sends a string
+  `error.code`, so `authErrorCode` is what `AuthPage.tsx` matches on and `authErrorMessage`
+  is what it shows. Railway's edge answers in its own shape whenever it cannot reach the
+  container (every deploy restart) — `status`, a NUMERIC `code`, `message`, `request_id` — and
+  better-fetch spreads that body into `error`, numeric code and all, so a code match that called
+  a string method on it threw inside the submit handler and left the form silent. A code that is
+  not a string matches nothing, and such a message (`Application failed to respond`) becomes a
+  plain try-again rather than being shown. Tests: `authError.test.ts`,
+  `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
+
 ## 6. Build and Dependency Management
 
 - Canvas access: `canvasRole` in `server/access.ts` gives owners, members and workspace members
