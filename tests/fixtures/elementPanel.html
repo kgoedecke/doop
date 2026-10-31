@@ -17,6 +17,7 @@
       import { pickedSelectors, useStore } from '/src/lib/store.ts'
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
       import { editElementGeometry } from '/src/lib/frameBridge.ts'
+      import { nudgeSelection } from '/src/lib/layerEdits.ts'
       import '/src/styles.css'
       window.elementPanelHarness = {
         /* one frame, or several stacked in order (later ones on top) */
@@ -37,6 +38,8 @@
         selectFrame: () => useStore.getState().select('f'),
         deselect: () => useStore.getState().setSelectedElement(null),
         picked: () => pickedSelectors(useStore.getState()),
+        pickAlso: (selector) => useStore.getState().toggleElement({ frameId: 'f', selector }),
+        nudge: nudgeSelection,
         setTool: (tool) => useStore.getState().setTool(tool),
         setZoom: (zoom) => {
           useStore.getState().setViewport({ x: 0, y: 0, zoom })
