@@ -129,9 +129,9 @@ jobs:
         if: env.SIGN == 'true'
         shell: pwsh
         run: |
-          $files = @(Get-ChildItem desktop/src-tauri/target/release/*.exe) +
-            @(Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*.exe)
-          foreach ($file in $files) {
+          # the installer is what ships; the app exe inside it was signed while
+          # bundling (target/release keeps an unsigned copy, so it is not checked)
+          foreach ($file in Get-ChildItem desktop/src-tauri/target/release/bundle/nsis/*.exe) {
             & $env:SIGNTOOL_PATH verify /pa /v $file.FullName
             if ($LASTEXITCODE -ne 0) { throw "$($file.Name) is not signed" }
           }
