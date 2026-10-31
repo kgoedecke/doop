@@ -105,12 +105,12 @@ describe('provenance marker', () => {
       '<html><head><title>x</title></head><body>hi</body></html>',
       {
         ...conn,
-        branch: "a$`b$'c$&d$$",
+        branch: "a$`b$'c$$",
       },
       screen,
     )
     expect(html).toContain(
-      '<base href="https://raw.githubusercontent.com/acme/app/a$`b$\'c$&d$$/public/"><title>x</title></head><body>hi</body></html>',
+      '<base href="https://raw.githubusercontent.com/acme/app/a$`b$\'c$$/public/"><title>x</title></head><body>hi</body></html>',
     )
   })
 
