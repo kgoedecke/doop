@@ -94,6 +94,11 @@ jobs:
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1
           if (-not $signtool) { throw 'signtool.exe not found' }
+          # GitHub's OIDC assertion outlives neither a cold Rust compile nor the
+          # wait until the first file is signed, so fetch the signing token now:
+          # the Azure CLI caches it (about an hour) and the dlib reuses it
+          az account get-access-token --scope https://codesigning.azure.net/.default --output none
+          if ($LASTEXITCODE -ne 0) { throw 'could not get an Artifact Signing token' }
           # only the Azure CLI session from the login step may authenticate
           $metadata = Join-Path $env:RUNNER_TEMP artifact-signing.json
           @{
