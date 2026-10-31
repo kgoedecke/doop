@@ -175,6 +175,8 @@ const schema = {
   GITHUB_APP_CLIENT_ID: str({ default: undefined }),
   GITHUB_APP_CLIENT_SECRET: str({ default: undefined }),
   GITHUB_APP_PRIVATE_KEY: str({ default: undefined }),
+  GITHUB_API_URL: origin({ default: 'https://api.github.com' }),
+  GITHUB_OAUTH_TOKEN_URL: str({ default: 'https://github.com/login/oauth/access_token' }),
   PEXELS_API_KEY: str({ default: undefined }),
   BRANDFETCH_CLIENT_ID: str({ default: undefined }),
   CONTEXT_DEV_API_KEY: str({ default: undefined }),

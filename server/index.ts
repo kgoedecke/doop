@@ -1359,17 +1359,17 @@ app.post('/api/canvases/:id/github', async (req, res) => {
   try {
     /* app mode: a signed pass from the install round-trip stands in for the
        token, binding the GitHub App installation to this canvas */
-    let installationId: string | undefined
+    let installationIds: string[] | undefined
     if (typeof req.body?.pass === 'string') {
       const verified = githubApp.verifyInstallPass(req.body.pass, c.id)
       if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
-      installationId = verified.installationId
+      installationIds = verified.installationIds
     }
     const conn = await github.createConnection({
       canvasId: c.id,
       repo: String(req.body?.repo ?? ''),
       token: typeof req.body?.token === 'string' ? req.body.token : undefined,
-      installationId,
+      installationIds,
       branch: typeof req.body?.branch === 'string' ? req.body.branch : undefined,
       createdBy: req.user!.id,
     })
@@ -1392,7 +1392,19 @@ app.post('/api/canvases/:id/github/app/start', (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
   if (!githubApp.appEnabled()) return res.status(400).json({ error: 'the GitHub App is not configured' })
-  res.json({ url: githubApp.installUrl(githubApp.signInstallState(c.id, req.user!.id)) })
+  /* authorize first: it finds installations the user already has, so a new
+     canvas skips the install screen (see the setup callback) */
+  res.json({ url: githubApp.oauthBounceUrl(githubApp.signFindState(c.id, req.user!.id)) })
+})
+
+/* "Add repositories on GitHub" from the repo picker: a plain link the
+   picker opens in a new tab, straight to the install screen with a state
+   for this canvas, so a fresh install on another account returns here too. */
+app.get('/api/canvases/:id/github/app/install', (req, res) => {
+  const c = requireDurableCanvas(req, res, req.params.id)
+  if (!c) return
+  if (!githubApp.appEnabled()) return res.status(400).json({ error: 'the GitHub App is not configured' })
+  res.redirect(githubApp.installUrl(githubApp.signInstallState(c.id, req.user!.id)))
 })
 
 /* GitHub's post-install redirect (the app's callback URL, with "request
@@ -1408,10 +1420,26 @@ app.get('/api/github/app/setup', async (req, res) => {
      homepage redirect reads as "nothing happened" */
   const fail = (canvasId: string, reason: string) =>
     res.redirect(`/c/${encodeURIComponent(canvasId)}?ghError=${encodeURIComponent(reason)}`)
-  const succeed = (canvasId: string, installationId: string) =>
+  const succeed = (canvasId: string, installationIds: string[]) =>
     res.redirect(
-      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.signInstallPass(canvasId, installationId))}`,
+      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.signInstallPass(canvasId, installationIds))}`,
     )
+
+  /* return leg of Connect's authorize step: the installations this GitHub
+     user already has go straight to the repo picker; none, on to install */
+  const find = githubApp.verifyFindState(rawState)
+  if (find) {
+    if (!code) return fail(find.canvasId, 'GitHub authorization was cancelled — connect again when you’re ready')
+    try {
+      const installationIds = await githubApp.userInstallationIds(code)
+      if (installationIds?.length) return succeed(find.canvasId, installationIds)
+      if (installationIds)
+        return res.redirect(githubApp.installUrl(githubApp.signInstallState(find.canvasId, find.userId)))
+    } catch {
+      /* fall through to the error redirect */
+    }
+    return fail(find.canvasId, 'GitHub couldn’t confirm your account — try connecting again')
+  }
 
   /* return leg of the already-installed bounce: the authorize round-trip
      produced the code the configure screen didn't */
@@ -1419,7 +1447,7 @@ app.get('/api/github/app/setup', async (req, res) => {
   if (oauth) {
     try {
       if (await githubApp.verifyInstallationOwner(code, oauth.installationId))
-        return succeed(oauth.canvasId, oauth.installationId)
+        return succeed(oauth.canvasId, [oauth.installationId])
     } catch {
       /* fall through to the error redirect */
     }
@@ -1438,7 +1466,7 @@ app.get('/api/github/app/setup', async (req, res) => {
   if (!code) return res.redirect(githubApp.oauthBounceUrl(githubApp.signOauthState(state.canvasId, installationId)))
 
   try {
-    if (await githubApp.verifyInstallationOwner(code, installationId)) return succeed(state.canvasId, installationId)
+    if (await githubApp.verifyInstallationOwner(code, installationId)) return succeed(state.canvasId, [installationId])
   } catch {
     /* fall through to the error redirect */
   }
@@ -1451,7 +1479,7 @@ app.get('/api/canvases/:id/github/app/repos', async (req, res) => {
   const verified = githubApp.verifyInstallPass(String(req.query.pass ?? ''), c.id)
   if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
   try {
-    res.json(await githubApp.listInstallationRepos(verified.installationId))
+    res.json(await githubApp.listReposAcross(verified.installationIds))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not list the installation’s repositories' })
   }
