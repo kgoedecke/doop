@@ -1349,7 +1349,8 @@ async function execTool(
         if (count === 0) return fail('"find" text not found — call get_frame_html and copy the exact text')
         if (count > 1)
           return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
-        actions.updateFrame(input.frame_id, { html: f.html.replace(input.find, input.replace) }, actor)
+        const replacement = input.replace
+        actions.updateFrame(input.frame_id, { html: f.html.replace(input.find, () => replacement) }, actor)
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
         return ok('applied')
