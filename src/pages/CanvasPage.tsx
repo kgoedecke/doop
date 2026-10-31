@@ -1932,7 +1932,7 @@ function GithubSection({
       .catch(() => setAppEnabled(false))
   }, [canvasId])
 
-  /* back from GitHub's install screen: swap the pass for the repo list */
+  /* back from GitHub: swap the pass for the repo list */
   useEffect(() => {
     if (!installPass) return
     api
@@ -1966,7 +1966,6 @@ function GithubSection({
     try {
       const conn = await api.connectGithub(canvasId, { repo: fullName, pass: installPass })
       setConnections((c) => [conn, ...(c ?? [])])
-      setPickerRepos((r) => r?.filter((x) => x.fullName !== fullName) ?? null)
       setBusy(null)
       posthog.capture('github_repo_connected', { via: 'app' })
     } catch (e) {
@@ -2015,6 +2014,11 @@ function GithubSection({
     setConnections((c) => c?.filter((x) => x.id !== connId) ?? null)
   }
 
+  /* the picker offers what this canvas has not connected yet */
+  const unconnectedRepos = pickerRepos?.filter(
+    (r) => !connections?.some((conn) => conn.repo.toLowerCase() === r.fullName.toLowerCase()),
+  )
+
   if (forbidden) {
     return (
       <>
@@ -2055,10 +2059,10 @@ function GithubSection({
             </div>
           </div>
         ))}
-        {pickerRepos && (
+        {unconnectedRepos && (
           <div className="flex flex-col gap-1.5 rounded-[11px] border border-line bg-paper p-2.5">
             <b className="text-[12px] text-ink-soft">{t('canvas.pickRepo')}</b>
-            {pickerRepos.map((r) => (
+            {unconnectedRepos.map((r) => (
               <div key={r.fullName} className="flex items-center gap-2 text-[13px]">
                 <GithubIcon width={13} height={13} className="shrink-0 text-ink-faint" />
                 <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px]">
@@ -2075,7 +2079,19 @@ function GithubSection({
                 </Button>
               </div>
             ))}
-            {!pickerRepos.length && <Note>{t('canvas.allConnected')}</Note>}
+            {!unconnectedRepos.length && <Note>{t('canvas.allConnected')}</Note>}
+            <div className="flex items-center gap-3 pt-1">
+              <Button variant="bare" size="inline" className="text-ink-faint" asChild>
+                <a href={`/api/canvases/${canvasId}/github/app/install`} target="_blank" rel="noreferrer">
+                  Add repositories on GitHub
+                </a>
+              </Button>
+              {/* asks GitHub again rather than re-reading the pass: an
+                  installation made in the other tab is only in a new one */}
+              <Button variant="bare" size="inline" className="text-ink-faint" disabled={!!busy} onClick={startInstall}>
+                Refresh list
+              </Button>
+            </div>
           </div>
         )}
         {appEnabled && !pickerRepos && (

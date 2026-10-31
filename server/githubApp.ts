@@ -19,15 +19,19 @@ import { createHmac, createSign, timingSafeEqual } from 'node:crypto'
  * plus BETTER_AUTH_SECRET: the handoff signatures must never fall back to
  * the public dev secret while real installations are bindable.
  *
+ * Connect starts on GitHub's authorize screen, not the install screen
+ * (`signFindState`): connections belong to one canvas, and for someone who
+ * already installed the app the install screen is a settings page that never
+ * returns. The code that comes back lists the user's installations; none
+ * sends them on to install (`signInstallState`).
+ *
  * Install handoff integrity: installation ids are small guessable integers,
- * so binding one to a canvas requires proof the install round-trip actually
- * happened for THAT canvas. `signInstallState` goes out with the install
- * link; the setup callback verifies it and issues `signInstallPass`
- * (canvas + installation), which the client must echo to list repos or
- * create a connection. HMAC over the auth secret, 15-minute expiry.
+ * so binding one to a canvas requires proof the round-trip actually happened
+ * for THAT canvas and that GitHub's user can access the installation. The
+ * setup callback verifies both and issues `signInstallPass` (canvas +
+ * installations), which the client must echo to list repos or create a
+ * connection. HMAC over the auth secret, 15-minute expiry.
  */
-
-const GH_API = 'https://api.github.com'
 
 function privateKey(): string | undefined {
   const raw = env.GITHUB_APP_PRIVATE_KEY
@@ -76,7 +80,7 @@ export function appJwt(now = Date.now()): string {
 }
 
 async function appFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(GH_API + path, {
+  return fetch(env.GITHUB_API_URL + path, {
     ...init,
     headers: {
       Authorization: `Bearer ${appJwt()}`,
@@ -128,7 +132,7 @@ export async function listInstallationRepos(installationId: string): Promise<Ins
   const token = await installationToken(installationId)
   const repos: InstallationRepo[] = []
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await fetch(`${GH_API}/installation/repositories?per_page=100&page=${page}`, {
+    const res = await fetch(`${env.GITHUB_API_URL}/installation/repositories?per_page=100&page=${page}`, {
       headers: ghHeaders(token),
     })
     if (!res.ok) throw new Error(`GitHub App repo listing error ${res.status}`)
@@ -139,15 +143,53 @@ export async function listInstallationRepos(installationId: string): Promise<Ins
   return repos
 }
 
-/** The setup callback's ownership proof: the app requests user authorization
- *  during install, so GitHub appends an OAuth code identifying WHO completed
- *  it. Exchange it and require that user to actually have this installation —
- *  without this, any valid state could bind a guessed installation id from a
- *  different account and read its private repo list. The user token is used
- *  once and discarded. */
-export async function verifyInstallationOwner(code: string, installationId: string): Promise<boolean> {
-  if (!code) return false
-  const res = await fetch('https://github.com/login/oauth/access_token', {
+/** Every repo across a pass's installations (a personal account and an org
+ *  can each hold one), first installation first, each repo listed once. An
+ *  installation removed since the pass was issued drops out on its own; only
+ *  when none answers is the listing an error. */
+export async function listReposAcross(installationIds: string[]): Promise<InstallationRepo[]> {
+  const settled = await Promise.allSettled(installationIds.map(listInstallationRepos))
+  const lists = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []))
+  if (!lists.length) throw firstFailure(settled)
+  const seen = new Set<string>()
+  return lists.flat().filter((r) => {
+    const key = r.fullName.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/** The installation among `installationIds` that grants `repo`, or
+ *  undefined — app mode binds exactly what the user selected on GitHub. A
+ *  failing installation is skipped; its error surfaces only when no other
+ *  installation grants the repo. */
+export async function installationForRepo(installationIds: string[], repo: string): Promise<string | undefined> {
+  const failures: PromiseRejectedResult[] = []
+  for (const id of installationIds) {
+    try {
+      const repos = await listInstallationRepos(id)
+      if (repos.some((r) => r.fullName.toLowerCase() === repo.toLowerCase())) return id
+    } catch (reason) {
+      failures.push({ status: 'rejected', reason })
+    }
+  }
+  if (failures.length) throw firstFailure(failures)
+  return undefined
+}
+
+function firstFailure(settled: PromiseSettledResult<unknown>[]): unknown {
+  const failed = settled.find((s) => s.status === 'rejected')
+  return failed?.reason ?? new Error('no GitHub App installation answered')
+}
+
+/** Installations of this app the OAuth code's user can access, or undefined
+ *  when GitHub would not identify the user. The user token is used once and
+ *  discarded. Installation ids are guessable integers, so this list is the
+ *  only thing that may put an installation into a pass. */
+export async function userInstallationIds(code: string): Promise<string[] | undefined> {
+  if (!code) return undefined
+  const res = await fetch(env.GITHUB_OAUTH_TOKEN_URL, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'doop-import' },
     body: JSON.stringify({
@@ -156,19 +198,29 @@ export async function verifyInstallationOwner(code: string, installationId: stri
       code,
     }),
   })
-  if (!res.ok) return false
+  if (!res.ok) return undefined
   const { access_token } = (await res.json()) as { access_token?: string }
-  if (!access_token) return false
+  if (!access_token) return undefined
+  const ids: string[] = []
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const r = await fetch(`${GH_API}/user/installations?per_page=100&page=${page}`, {
+    const r = await fetch(`${env.GITHUB_API_URL}/user/installations?per_page=100&page=${page}`, {
       headers: ghHeaders(access_token),
     })
-    if (!r.ok) return false
+    if (!r.ok) return undefined
     const body = (await r.json()) as { installations: { id: number }[] }
-    if (body.installations.some((i) => String(i.id) === installationId)) return true
+    ids.push(...body.installations.map((i) => String(i.id)))
     if (body.installations.length < 100) break
   }
-  return false
+  return ids
+}
+
+/** The setup callback's ownership proof for a fresh install: the app
+ *  requests user authorization during install, so GitHub appends an OAuth
+ *  code identifying WHO completed it, and that user must actually have the
+ *  installation — without this, any valid state could bind a guessed
+ *  installation id from a different account and read its private repo list. */
+export async function verifyInstallationOwner(code: string, installationId: string): Promise<boolean> {
+  return (await userInstallationIds(code))?.includes(installationId) ?? false
 }
 
 /* ------------------------------------------------------------------ */
@@ -215,17 +267,37 @@ export function verifyInstallState(state: string): { canvasId: string; userId: s
   return fields ? { canvasId: fields[0]!, userId: fields[1]! } : undefined
 }
 
+/** A pass names at most this many installations — the URL stays short and
+ *  the repo picker's fan-out stays bounded. */
+const MAX_PASS_INSTALLATIONS = 10
+
 /** Issued by the setup callback after GitHub redirects back; the client
- *  echoes it to list the installation's repos and bind one to the canvas. */
-export function signInstallPass(canvasId: string, installationId: string, now = Date.now()): string {
-  if (/[.]/.test(canvasId + installationId)) throw new Error('invalid id')
-  return pack('gh-pass', [canvasId, installationId], now + STATE_TTL_MS)
+ *  echoes it to list the installations' repos and bind one to the canvas.
+ *  Several installations when the user's existing ones were found at once. */
+export function signInstallPass(canvasId: string, installationIds: string[], now = Date.now()): string {
+  const ids = installationIds.slice(0, MAX_PASS_INSTALLATIONS)
+  if (!ids.length || /[.]/.test(canvasId) || !ids.every((id) => /^\d+$/.test(id))) throw new Error('invalid id')
+  return pack('gh-pass', [canvasId, ids.join(',')], now + STATE_TTL_MS)
 }
 
-export function verifyInstallPass(pass: string, canvasId: string): { installationId: string } | undefined {
+export function verifyInstallPass(pass: string, canvasId: string): { installationIds: string[] } | undefined {
   const fields = unpack('gh-pass', pass, 2)
   if (!fields || fields[0] !== canvasId) return undefined
-  return { installationId: fields[1]! }
+  return { installationIds: fields[1]!.split(',') }
+}
+
+/** Goes out with the authorize link "Connect GitHub" opens first: the code
+ *  it brings back lists the installations the user already has, so a new
+ *  canvas reaches the repo picker without visiting the install screen —
+ *  which, for an installed app, is GitHub's settings page with no way back. */
+export function signFindState(canvasId: string, userId: string, now = Date.now()): string {
+  if (/[.]/.test(canvasId + userId)) throw new Error('invalid id')
+  return pack('gh-find', [canvasId, userId], now + STATE_TTL_MS)
+}
+
+export function verifyFindState(state: string): { canvasId: string; userId: string } | undefined {
+  const fields = unpack('gh-find', state, 2)
+  return fields ? { canvasId: fields[0]!, userId: fields[1]! } : undefined
 }
 
 export function installUrl(state: string): string {
@@ -251,6 +323,9 @@ export function verifyOauthState(state: string): { canvasId: string; installatio
   return fields ? { canvasId: fields[0]!, installationId: fields[1]! } : undefined
 }
 
+/** GitHub's authorize screen, returning to the setup callback — instant for
+ *  a user who already authorized the app. Carries a find state or an
+ *  already-installed bounce state. */
 export function oauthBounceUrl(oauthState: string): string {
   const params = new URLSearchParams({
     client_id: env.GITHUB_APP_CLIENT_ID ?? '',
