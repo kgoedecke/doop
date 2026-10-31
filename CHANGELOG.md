@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/kgoedecke/doop/compare/v0.11.0...v0.12.0) (2026-10-31)
+
+
+### Features
+
+* **desktop:** sign the Windows app and installer with Azure Artifact Signing ([#273](https://github.com/kgoedecke/doop/issues/273)) ([d47def3](https://github.com/kgoedecke/doop/commit/d47def3382a5080123722c16306c56ada33a04d9))
+
+
+### Bug Fixes
+
+* **desktop:** fetch the Artifact Signing token right after the Azure login ([#276](https://github.com/kgoedecke/doop/issues/276)) ([994e860](https://github.com/kgoedecke/doop/commit/994e860665b248895157f23785c11eba5a0272fc))
+
 ## [0.11.0](https://github.com/kgoedecke/doop/compare/v0.10.0...v0.11.0) (2026-10-30)
 
 
