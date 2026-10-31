@@ -132,6 +132,20 @@ export const FRAME_DROP_RUNTIME = `
     return absoluteDrop(parent, source).styles
   }
 
+  function freeSurface(el) {
+    var floating = 0
+    for (var node = el.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 3 && node.textContent.trim()) return false
+      if (node.nodeType !== 1 || ['SCRIPT', 'STYLE', 'LINK', 'META', 'TEMPLATE'].indexOf(node.tagName) !== -1) continue
+      var cs = getComputedStyle(node)
+      if (cs.display === 'none') continue
+      if (cs.position !== 'absolute' && cs.position !== 'fixed') return false
+      floating++
+    }
+    var position = getComputedStyle(el).position
+    return floating > 0 || position === 'absolute' || position === 'fixed'
+  }
+
   function moveTarget(selector, x, y, at) {
     var source = styleTarget(selector)
     var empty = { free: false, drop: null }
@@ -162,7 +176,7 @@ export const FRAME_DROP_RUNTIME = `
         if (coordinate - start < edge || start + size - coordinate < edge) parent = outer
       }
     }
-    if (floating && parent === source.parentElement) return { free: true, drop: null }
+    if (floating && (parent === source.parentElement || freeSurface(parent))) return { free: true, drop: null }
     if (!straightLayout(parent)) return empty
     if (freeform(parent, source)) return { free: false, drop: absoluteDrop(parent, source, at) }
     var axes = dropAxes(parent)
