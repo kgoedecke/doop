@@ -1085,6 +1085,21 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(moved.translate).not.toBe('none')
   })
 
+  it('puts a floating layer in flow inside an absolute container whose flow content sits in a display:contents wrapper', async () => {
+    await seedFrames([
+      layerFrame(`<style>#box{position:absolute;left:200px;top:100px;width:200px;height:100px;display:flex;padding:20px;background:#ddd}#chip{position:absolute;left:20px;top:20px;width:60px;height:40px;background:red}</style>
+      <div id="chip"></div><div id="box"><div style="display:contents"><span id="label">Label</span></div></div>`),
+    ])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 }))
+    const chip = await visibleDrawing('Layers', '#chip')
+    const label = await visibleDrawing('Layers', '#label')
+    await drag([chip.x + 30, chip.y + 20], [label.x + label.width / 2, label.y + label.height / 2])
+    await expect.poll(() => patchRequests).toBe(1)
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    await iframe.waitForSelector('#box #chip')
+    expect(await iframe.$eval('#chip', (el) => getComputedStyle(el).position)).toBe('relative')
+  })
+
   it('moves an absolutely positioned image into an empty container and puts it in flow', async () => {
     await seedFrames([
       layerFrame(`<style>#photo {position:absolute!important;left:20px;top:20px;translate:10px 5px}</style>

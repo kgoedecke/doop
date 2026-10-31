@@ -36,32 +36,26 @@ export const FRAME_DROP_RUNTIME = `
     return true
   }
 
-  function floats(el) {
+  function freeSurface(el) {
+    var floating = 0
+    for (var node = el.firstChild; node; node = node.nextSibling) {
+      if (node.nodeType === 3 && node.textContent.trim()) return false
+      if (node.nodeType !== 1 || ['SCRIPT', 'STYLE', 'LINK', 'META', 'TEMPLATE'].indexOf(node.tagName) !== -1) continue
+      var cs = getComputedStyle(node)
+      if (cs.display === 'none') continue
+      if (cs.position !== 'absolute' && cs.position !== 'fixed') return false
+      floating++
+    }
     var position = getComputedStyle(el).position
-    return position === 'absolute' || position === 'fixed'
-  }
-
-  function flowChildren(parent, source) {
-    return Array.prototype.filter.call(parent.children, function (el) {
-      if (el === source || ['SCRIPT', 'STYLE', 'LINK', 'META', 'TEMPLATE'].indexOf(el.tagName) !== -1) return false
-      var cs = getComputedStyle(el), rect = designRect(el)
-      return cs.display !== 'none' && cs.visibility !== 'hidden' && !floats(el) && rect.width > 0 && rect.height > 0
-    })
-  }
-
-  function freeSurface(parent, children) {
-    if (children.length) return false
-    var text = Array.prototype.some.call(parent.childNodes, function (node) {
-      return node.nodeType === 3 && node.textContent.trim()
-    })
-    return !text && (floats(parent) || Array.prototype.some.call(parent.children, floats))
+    return floating > 0 || position === 'absolute' || position === 'fixed'
   }
 
   function moveTarget(selector, x, y) {
     var source = styleTarget(selector)
     var empty = { free: false, drop: null }
     if (!source || isLocked(source)) return empty
-    var floating = floats(source)
+    var position = getComputedStyle(source).position
+    var floating = position === 'absolute' || position === 'fixed'
     if (!straightLayout(source.parentElement)) return { free: true, drop: null }
     if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return { free: floating, drop: null }
     var stack = document.elementsFromPoint(x, y)
@@ -86,11 +80,16 @@ export const FRAME_DROP_RUNTIME = `
         if (coordinate - start < edge || start + size - coordinate < edge) parent = outer
       }
     }
-    var children = flowChildren(parent, source)
-    if (floating && (parent === source.parentElement || freeSurface(parent, children))) return { free: true, drop: null }
+    if (floating && (parent === source.parentElement || freeSurface(parent))) return { free: true, drop: null }
     if (!straightLayout(parent)) return empty
     var axes = dropAxes(parent)
     var bounds = designRect(parent)
+    var children = Array.prototype.filter.call(parent.children, function (el) {
+      if (el === source || ['SCRIPT', 'STYLE', 'LINK', 'META', 'TEMPLATE'].indexOf(el.tagName) !== -1) return false
+      var cs = getComputedStyle(el), rect = designRect(el)
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.position !== 'absolute'
+        && cs.position !== 'fixed' && rect.width > 0 && rect.height > 0
+    })
     var best = null, distance = Infinity
     children.forEach(function (child) {
       var rect = designRect(child)
