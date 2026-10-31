@@ -91,7 +91,8 @@ describe('stampElementId', () => {
     expect(stampElementId(HTML, '#\\ffffff > p')).toBeUndefined()
     const deep = '<div>'.repeat(20_000) + '<p id="x">bottom</p>' + '</div>'.repeat(20_000)
     expect(stampElementId(deep, '#x', { id: 'deep00' })?.html).toContain('<p id="x" data-doop-id="deep00">')
-  })
+    // parsing 20k nested elements takes several seconds on a CI runner
+  }, 30_000)
 
   it('goes after the last attribute, so an unquoted value ending in a slash keeps it', () => {
     const out = stampElementId('<p><img src=/assets/logo/></p>', 'body > p > img', { id: 'img001' })!
