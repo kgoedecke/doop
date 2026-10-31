@@ -1057,6 +1057,34 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(await iframe.$$eval('#list > div', (els) => els.map((el) => el.id))).toEqual(['two', 'three', 'one'])
   })
 
+  const tile = (w: number, h: number) =>
+    `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'/%3E`
+  const collage = `<style>.t{position:relative;width:640px;height:360px}.p{position:absolute;top:0;height:360px;overflow:hidden}.p img,.s{position:absolute}</style>
+    <div class="t" id="t"><div class="p" id="left" style="left:0;width:280px"><img id="photo" style="left:-40px;top:-30px;width:500px" src="${tile(500, 450)}"></div><div class="p" id="right" style="left:280px;width:360px"><img id="other" style="left:-40px;top:-30px;width:600px" src="${tile(600, 450)}"></div><div class="s" id="flag" style="left:400px;top:40px;width:160px;height:100px;background:red"></div><img class="s" id="badge" style="left:20px;top:250px;width:90px;height:60px" src="${tile(90, 60)}"></div>`
+
+  it.each([
+    ['#photo', '#flag', 'left'],
+    ['#photo', '#badge', 'left'],
+    ['#photo', '#right', 'left'],
+    ['#flag', '#left', 't'],
+  ])('keeps floating layer %s free when dropped over %s', async (layer, over, parent) => {
+    await seedFrames([layerFrame(collage)])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 }))
+    const from = await visibleDrawing('Layers', layer)
+    const to = await visibleDrawing('Layers', over)
+    await drag([from.x + from.width / 2, from.y + from.height / 2], [to.x + to.width / 2, to.y + to.height / 2])
+    await expect.poll(() => patchRequests).toBe(1)
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    const moved = await iframe.$eval(layer, (el) => ({
+      parent: el.parentElement?.id,
+      position: getComputedStyle(el).position,
+      translate: getComputedStyle(el).translate,
+    }))
+    expect(moved.parent).toBe(parent)
+    expect(moved.position).toBe('absolute')
+    expect(moved.translate).not.toBe('none')
+  })
+
   it('moves an absolutely positioned image into an empty container and puts it in flow', async () => {
     await seedFrames([
       layerFrame(`<style>#photo {position:absolute!important;left:20px;top:20px;translate:10px 5px}</style>
