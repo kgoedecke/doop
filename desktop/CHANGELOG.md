@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/kgoedecke/doop/compare/desktop-v0.9.0...desktop-v0.10.0) (2026-10-31)
+
+
+### Features
+
+* **desktop:** update the app automatically from a signed feed ([#285](https://github.com/kgoedecke/doop/issues/285)) ([3298742](https://github.com/kgoedecke/doop/commit/329874207677d7cf4790b3231aab46fc7f9462e7))
+
 ## [0.9.0](https://github.com/kgoedecke/doop/compare/desktop-v0.8.0...desktop-v0.9.0) (2026-10-31)
 
 
