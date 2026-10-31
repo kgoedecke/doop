@@ -32,20 +32,40 @@ When a deploy ships a new client bundle, long-running windows get a
 "doop was updated — Reload" toast on WebSocket reconnect (see `serverBuild`
 in the `init` message).
 
-## Check for updates
+## Updates
 
-On macOS, **doop → Check for Updates…** compares the installed shell version
-with the stable universal DMG published at `https://doop.design/download/mac`.
-The check runs in the background and shows a native result dialog; when an
-update is available, **Download Update** opens the installer in the browser.
-Open the downloaded DMG and drag doop into Applications to replace the old app.
-Checks do not install updates automatically. Custom `DOOP_APP_URL` builds
-instead explain that an updated build must come from their provider.
+Official release builds update themselves through `tauri-plugin-updater`
+(`src-tauri/src/updates.rs`). Fifteen seconds after launch and then once a day
+the shell reads `https://doop.design/desktop/latest.json`, downloads a newer
+version in the background and asks to restart into it. **Later** keeps the
+download: macOS installs it when the app quits, Windows asks again at the next
+check. On macOS, **doop → Check for Updates…** runs the same check on demand
+and also reports "up to date" and failures; Windows has no menu bar and relies
+on the scheduled checks. Debug builds and custom `DOOP_APP_URL` builds never
+update (replacing a self-hosted shell with the official one would change its
+server).
 
-The check reads the download route’s redirect to
-`https://github.com/kgoedecke/doop/releases/download/desktop-vX.Y.Z/doop_X.Y.Z_universal.dmg`
-without downloading the installer. Keep that route current when publishing
-releases; a missing or unexpected redirect is shown as a failed check.
+The feed and its packages are produced by `desktop-release.yml`:
+
+- Both builds pass `scripts/updater-config.sh`'s override, which turns on
+  `createUpdaterArtifacts` when the `TAURI_SIGNING_PRIVATE_KEY` /
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are set: macOS adds a signed
+  `doop.app.tar.gz`, Windows signs the NSIS installer itself (`.exe.sig`). A
+  `desktop-v*` tag fails without the key; other builds skip the packages.
+- The release job renames the macOS package to `doop_X.Y.Z_universal.app.tar.gz`,
+  writes `latest.json` (the three platform entries point at the tag's assets),
+  attaches everything to the release and then copies `latest.json` onto the
+  fixed `desktop-updates` prerelease (never mark it latest, never delete it).
+- `doop.design/desktop/latest.json` redirects there (the hosted deployment serves it),
+  so the feed can move without shipping a new shell.
+
+The key's public half is `plugins.updater.pubkey` in `tauri.conf.json`; the
+plugin refuses any package that does not verify against it. Losing the private
+key means no installed app can be updated again without a manual reinstall, so
+it is backed up with the Apple signing material. Shells released before the
+updater (0.9.x and older) have none: their Check for Updates… reads the DMG
+redirect at `https://doop.design/download/mac`, so keep that route current
+too.
 
 ## Develop
 

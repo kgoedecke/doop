@@ -42,7 +42,6 @@ use tauri::Emitter;
 mod claude;
 mod claude_extension;
 mod codex;
-#[cfg(target_os = "macos")]
 mod updates;
 mod view_menu;
 
@@ -157,7 +156,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         &[
             &PredefinedMenuItem::about(app, None, Some(about))?,
-            &updates::menu_item(app)?,
+            &updates::menu::item(app)?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, None)?,
             &PredefinedMenuItem::separator(app)?,
@@ -229,13 +228,14 @@ fn main() {
             focus_main_window(app)
         }))
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_deep_link::init());
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(target_os = "macos")]
     let builder = builder.menu(build_menu).on_menu_event(|app, event| {
         if event.id() == CLOSE_TAB {
             let _ = app.emit(CLOSE_TAB, ());
-        } else if event.id() == updates::MENU_ID {
-            updates::check(app);
+        } else if event.id() == updates::menu::MENU_ID {
+            updates::menu::check(app);
         } else {
             view_menu::relay(app, event.id().as_ref());
         }
@@ -265,6 +265,7 @@ fn main() {
             app.deep_link().register_all()?;
             let focus_handle = app.handle().clone();
             app.deep_link().on_open_url(move |_event| focus_main_window(&focus_handle));
+            updates::start(app.handle());
 
             let handle = app.handle().clone();
             let entry = format!("{}/auth", base_url());
@@ -377,6 +378,7 @@ fn main() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 claude::shutdown(&app.state::<claude::ClaudeState>());
+                updates::install_on_quit(app);
             }
         });
 }

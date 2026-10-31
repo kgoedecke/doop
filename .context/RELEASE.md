@@ -38,10 +38,17 @@ Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the 
 in `.github/actions/setup-desktop`:
 
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
-  with `bunx tauri build --target universal-apple-darwin --bundles dmg`, `nsis-windows` builds
+  with `bunx tauri build --target universal-apple-darwin --bundles app,dmg`, `nsis-windows` builds
   `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, and a final `release`
   job (`needs` both) attaches the two to one GitHub Release - so a tag is never published with
   only one installer.
+- Self-update (`tauri-plugin-updater`, `desktop/src-tauri/src/updates.rs`): with the
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets set, both builds also
+  emit signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
+  it onto the fixed `desktop-updates` prerelease, which `doop.design/desktop/latest.json`
+  redirects to (served by the hosted deployment). A tag fails without the key. Installed official
+  shells check at launch and daily, download in the background and offer a restart. The key
+  pair lives in the signing backup; its public half is `plugins.updater.pubkey`.
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
   workflow artifacts instead (keeps the pipeline validated without cutting a release).
 - macOS signing/notarization: automatic once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
