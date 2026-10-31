@@ -607,6 +607,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (edit.kind === 'move' && isFinite(edit.x) && isFinite(edit.y)) {
       dx = edit.x - rect.x
       dy = edit.y - rect.y
+    } else if (edit.kind === 'nudge' && isFinite(edit.dx) && isFinite(edit.dy)) {
+      dx = edit.dx
+      dy = edit.dy
     } else {
       var axis = edit.axis
       if (axis !== 'x' && axis !== 'y') return false

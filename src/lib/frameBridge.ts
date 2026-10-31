@@ -106,6 +106,7 @@ export type GeometryEdit =
   | { kind: 'align'; axis: 'x' | 'y'; edge: 'start' | 'center' | 'end' }
   | { kind: 'rotate'; value: number }
   | { kind: 'flip'; axis: 'x' | 'y' }
+  | { kind: 'nudge'; dx: number; dy: number }
 
 export async function editElementGeometry(
   frameId: string,

@@ -1366,6 +1366,28 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     15_000,
   )
 
+  it('adds up a fast run of nudges sent before any of them lands', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #nudged { position: absolute; left: 20px; top: 30px; width: 120px; height: 40px }
+    </style></head><body><div id="nudged"></div></body></html>`,
+      '#nudged',
+    )
+    await page.evaluate(() =>
+      Promise.all(
+        Array.from({ length: 5 }, () =>
+          window.elementPanelHarness.geometry('#nudged', { kind: 'nudge', dx: 1, dy: -10 }),
+        ),
+      ),
+    )
+    const position = () => frame.$eval('#nudged', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
+    expect(await position()).toEqual([25, -20])
+    await expect.poll(() => saved.html).toContain('translate: 5px -50px')
+    await page.evaluate(() => window.elementPanelHarness.undo())
+    await expect.poll(position).toEqual([20, 30])
+  })
+
   it('preserves stylesheet-derived image dimensions when unlinking', async () => {
     const src = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>')}`
     const frame = await seedScrubTarget('', {
