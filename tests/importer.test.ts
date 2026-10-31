@@ -424,6 +424,18 @@ describe('webpage capture', () => {
     expect(page.close).toHaveBeenCalledOnce()
   })
 
+  it('inlines stylesheets that contain $ replacement patterns as written', async () => {
+    const child = 'a::after { content: "$` $\' $& $$" }'
+    publicUrlMocks.fetchPinned
+      .mockResolvedValueOnce(css("@import url('/child.css'); body { color: red }"))
+      .mockResolvedValueOnce(css(child))
+    stubContextPageWithSheets(['https://example.com/app.css'])
+
+    const imported = await importPage('https://example.com')
+
+    expect(imported.html).toContain(`<style data-doop-import>\n${child} body { color: red }\n\n</style></head>`)
+  })
+
   it('returns a bounded screenshot and text preview when requested', async () => {
     const screenshot = Buffer.from('agent-preview')
     const page = stubPage({
