@@ -1,5 +1,6 @@
-import { env } from './env.ts'
+import { env, windowsBrowserDirectories } from './env.ts'
 import fs from 'node:fs'
+import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
@@ -8,6 +9,8 @@ import { guardPublicPageRequests } from './publicUrl.ts'
  * Render a frame's HTML in headless Chrome so agents can *see* their work.
  * Uses the system browser via puppeteer-core — no bundled download.
  */
+
+const windowsDirectories = process.platform === 'win32' ? windowsBrowserDirectories() : []
 
 const CHROME_PATHS = [
   env.CHROME_PATH,
@@ -18,6 +21,9 @@ const CHROME_PATHS = [
   '/usr/bin/google-chrome',
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
+  ...windowsDirectories.map((dir) => path.join(dir, 'Google', 'Chrome', 'Application', 'chrome.exe')),
+  ...windowsDirectories.map((dir) => path.join(dir, 'Microsoft', 'Edge', 'Application', 'msedge.exe')),
+  ...windowsDirectories.map((dir) => path.join(dir, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe')),
 ].filter((p): p is string => !!p)
 
 /** The first usable local browser executable, or null when there is none. */
