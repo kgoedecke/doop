@@ -26,13 +26,14 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: ./.github/actions/setup-desktop
       # release-please bumps Cargo.toml but cannot bump Cargo.lock, so copy the
-      # shell's own version line across before --locked (no registry needed)
+      # shell's own version line across before --locked (no registry needed);
+      # \r? and tr: the Windows checkout has CRLF line endings
       - name: Align Cargo.lock with Cargo.toml
         shell: bash
         working-directory: desktop/src-tauri
         run: |
-          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          perl -0pi -e "s/(name = \"doop-desktop\"\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1 | tr -d '\r')
+          perl -0pi -e "s/(name = \"doop-desktop\"\r?\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
           grep -A1 'name = "doop-desktop"' Cargo.lock
       - run: cargo test --locked
         working-directory: desktop/src-tauri
@@ -53,13 +54,14 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: ./.github/actions/setup-desktop
       # release-please bumps Cargo.toml but cannot bump Cargo.lock, so copy the
-      # shell's own version line across before --locked (no registry needed)
+      # shell's own version line across before --locked (no registry needed);
+      # \r? and tr: the Windows checkout has CRLF line endings
       - name: Align Cargo.lock with Cargo.toml
         shell: bash
         working-directory: desktop/src-tauri
         run: |
-          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          perl -0pi -e "s/(name = \"doop-desktop\"\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1 | tr -d '\r')
+          perl -0pi -e "s/(name = \"doop-desktop\"\r?\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
           grep -A1 'name = "doop-desktop"' Cargo.lock
       - run: cargo test --locked
         working-directory: desktop/src-tauri
@@ -77,13 +79,14 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: ./.github/actions/setup-desktop
       # release-please bumps Cargo.toml but cannot bump Cargo.lock, so copy the
-      # shell's own version line across before --locked (no registry needed)
+      # shell's own version line across before --locked (no registry needed);
+      # \r? and tr: the Windows checkout has CRLF line endings
       - name: Align Cargo.lock with Cargo.toml
         shell: bash
         working-directory: desktop/src-tauri
         run: |
-          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          perl -0pi -e "s/(name = \"doop-desktop\"\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1 | tr -d '\r')
+          perl -0pi -e "s/(name = \"doop-desktop\"\r?\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
           grep -A1 'name = "doop-desktop"' Cargo.lock
       - run: cargo test --locked
         working-directory: desktop/src-tauri
