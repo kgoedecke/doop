@@ -32,18 +32,22 @@ The CI build uses `bun run --bun build` to match the `oven/bun` Docker build sta
 where `node` commands run with Bun. Extension tests also build with both runtimes
 and run the Bun-built archive under Node, including its nested runtime dependencies.
 
-## Desktop app (Tauri: macOS DMG + Windows NSIS installer)
+## Desktop app (Tauri: macOS DMG + Windows NSIS installer + Linux AppImage)
 
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup
 in `.github/actions/setup-desktop`:
 
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
   with `bunx tauri build --target universal-apple-darwin --bundles app,dmg`, `nsis-windows` builds
-  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, and a final `release`
-  job (`needs` both) attaches the two to one GitHub Release - so a tag is never published with
-  only one installer.
+  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `appimage-linux` builds
+  `doop_<version>_amd64.AppImage` with `bunx tauri build --bundles appimage` on ubuntu-22.04
+  (the glibc floor), and a final `release` job (`needs` all three) attaches them to one GitHub
+  Release - so a tag is never published with an installer missing. doop.design's
+  `/download/mac`, `/download/windows` and `/download/linux` (doop-marketing) redirect to the
+  newest release's DMG, setup.exe and AppImage. The AppImage is not code-signed; `doop://` is
+  registered at launch (`register_all` in `main.rs`).
 - Self-update (`tauri-plugin-updater`, `desktop/src-tauri/src/updates.rs`): with the
-  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets set, both builds also
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets set, every build also
   emit signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
   it onto the fixed `desktop-updates` prerelease, which `doop.design/desktop/latest.json`
   redirects to (served by the hosted deployment). A tag fails without the key. Installed official

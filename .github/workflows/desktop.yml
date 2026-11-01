@@ -68,3 +68,33 @@ jobs:
         with:
           name: doop-windows-unsigned
           path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # the webview (WebKitGTK 4.1), tray/appindicator and SVG icon libraries
+      # tauri links against on Linux; 22.04 keeps the AppImage's glibc floor
+      # low enough for older distros
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf
+      - uses: ./.github/actions/setup-desktop
+      # release-please bumps Cargo.toml but cannot bump Cargo.lock, so copy the
+      # shell's own version line across before --locked (no registry needed)
+      - name: Align Cargo.lock with Cargo.toml
+        shell: bash
+        working-directory: desktop/src-tauri
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          perl -0pi -e "s/(name = \"doop-desktop\"\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
+          grep -A1 'name = "doop-desktop"' Cargo.lock
+      - run: cargo test --locked
+        working-directory: desktop/src-tauri
+      - run: bunx tauri build --bundles appimage
+        working-directory: desktop
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: doop-linux
+          path: desktop/src-tauri/target/release/bundle/appimage/*.AppImage

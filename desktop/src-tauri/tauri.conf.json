@@ -37,7 +37,8 @@
     "targets": [
       "app",
       "dmg",
-      "nsis"
+      "nsis",
+      "appimage"
     ],
     "category": "Productivity",
     "icon": [

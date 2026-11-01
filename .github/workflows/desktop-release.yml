@@ -1,8 +1,8 @@
 # Builds the distributable desktop installers: a universal macOS DMG (Apple
-# Silicon + Intel) and a Windows NSIS setup .exe.
-# - Tag `desktop-v*` → builds both, then one release job attaches them to a
-#   GitHub Release. The release is only created once both builds succeeded,
-#   so a tag never ends up published with a single installer.
+# Silicon + Intel), a Windows NSIS setup .exe and a Linux x64 AppImage.
+# - Tag `desktop-v*` → builds all three, then one release job attaches them
+#   to a GitHub Release. The release is only created once every build
+#   succeeded, so a tag never ends up published with some installers missing.
 # - Manual dispatch → builds and uploads the installers as workflow artifacts.
 # - PRs touching this file → same as dispatch, so the pipeline stays validated.
 #
@@ -14,8 +14,11 @@
 # AZURE_TENANT_ID repo variables exist (see desktop/README.md); PR builds and
 # repos without them stay unsigned.
 #
+# The AppImage is not code-signed (Linux has no OS-level equivalent); its
+# updater signature below is what installed apps check.
+#
 # Self-update: with the TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD) secrets set,
-# both builds also produce updater packages signed with the key whose public
+# every build also produces updater packages signed with the key whose public
 # half is in tauri.conf.json, and a tag release writes latest.json and copies
 # it onto the fixed `desktop-updates` release, which doop.design/desktop/
 # latest.json redirects to (see desktop/README.md). Tags fail without the key
@@ -173,9 +176,40 @@ jobs:
             desktop/src-tauri/target/release/bundle/nsis/*.exe.sig
           if-no-files-found: error
 
+  appimage-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # the webview (WebKitGTK 4.1), tray/appindicator and SVG icon libraries
+      # tauri links against on Linux; 22.04 keeps the AppImage's glibc floor
+      # low enough for older distros
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf
+      - uses: ./.github/actions/setup-desktop
+      - name: Build AppImage
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          for v in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
+          updater=$(bash scripts/updater-config.sh)
+          bunx tauri build --bundles appimage --config "$updater"
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: doop-linux-appimage
+          path: |
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/desktop-v')
-    needs: [dmg-macos, nsis-windows]
+    needs: [dmg-macos, nsis-windows, appimage-linux]
     runs-on: ubuntu-latest
     # one feed write at a time, so the version check below cannot race
     concurrency:
@@ -199,16 +233,19 @@ jobs:
           mv doop.app.tar.gz.sig "doop_${version}_universal.app.tar.gz.sig"
           mac="doop_${version}_universal.app.tar.gz"
           win="doop_${version}_x64-setup.exe"
+          linux="doop_${version}_amd64.AppImage"
           jq -n \
             --arg version "$version" \
             --arg notes "https://github.com/$REPO/releases/tag/$TAG" \
             --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg mac_url "$base/$mac" --arg mac_sig "$(cat "$mac.sig")" \
             --arg win_url "$base/$win" --arg win_sig "$(cat "$win.sig")" \
+            --arg linux_url "$base/$linux" --arg linux_sig "$(cat "$linux.sig")" \
             '{version: $version, notes: $notes, pub_date: $date, platforms: {
               "darwin-aarch64": {url: $mac_url, signature: $mac_sig},
               "darwin-x86_64": {url: $mac_url, signature: $mac_sig},
-              "windows-x86_64": {url: $win_url, signature: $win_sig}
+              "windows-x86_64": {url: $win_url, signature: $win_sig},
+              "linux-x86_64": {url: $linux_url, signature: $linux_sig}
             }}' > latest.json
           cat latest.json
       - name: Attach installers to release
@@ -217,6 +254,7 @@ jobs:
           files: |
             installers/*.dmg
             installers/*.exe
+            installers/*.AppImage
             installers/*.app.tar.gz
             installers/*.sig
             installers/latest.json

@@ -5,7 +5,7 @@ A thin [Tauri](https://tauri.app) shell around the hosted app. It loads
 every deploy is instantly "in" the desktop app and the binary only
 needs a new release when the shell itself changes (icon, menu, Tauri bump).
 
-The released installers (macOS DMG and Windows NSIS setup) talk to the hosted
+The released installers (macOS DMG, Windows NSIS setup and Linux AppImage) talk to the hosted
 service at doop.design. Self-hosting your own doop instance? Build a shell for
 it without patching anything:
 
@@ -187,23 +187,32 @@ policy; an existing CLI login is not a promise of unlimited usage.
 ## Build
 
 ```sh
-bun run build  # macOS: .app + .dmg; Windows: NSIS .exe in src-tauri/target/release/bundle/
+bun run build  # macOS: .app + .dmg; Windows: NSIS .exe; Linux: AppImage; in src-tauri/target/release/bundle/
 ```
 
-CI (`.github/workflows/desktop.yml`) builds an unsigned macOS .app and Windows
-NSIS installer on every PR that touches `desktop/`, on pushes to `main` (to
+Linux builds need WebKitGTK 4.1 and friends first (Debian/Ubuntu:
+`sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf`).
+
+CI (`.github/workflows/desktop.yml`) builds an unsigned macOS .app, Windows
+NSIS installer and Linux AppImage on every PR that touches `desktop/`, on pushes to `main` (to
 keep the Rust build cache warm), and on manual dispatch. The toolchain setup
 shared by every desktop job lives in `.github/actions/setup-desktop`.
 
 ## Releasing Desktop Installers
 
 `.github/workflows/desktop-release.yml` builds a universal (Apple Silicon +
-Intel) DMG for macOS and an NSIS installer for Windows:
+Intel) DMG for macOS, an NSIS installer for Windows and an x64 AppImage for
+Linux:
 
-- push a tag `desktop-v*` → both installers attached to a GitHub Release. The
-  release is created only after both builds succeed, so a tag never ships
-  with one installer missing.
-- manual dispatch → DMG and Windows installer as workflow artifacts
+- push a tag `desktop-v*` → all three installers attached to a GitHub Release.
+  The release is created only after every build succeeds, so a tag never ships
+  with an installer missing.
+- manual dispatch → the installers as workflow artifacts
+
+The AppImage is built on Ubuntu 22.04, so it runs on distros with glibc 2.35
+or newer. It is not code-signed; downloaders `chmod +x` it and run it. It
+registers `doop://` with the desktop on launch and updates itself in place
+from the same signed feed as the other platforms.
 
 Versions are bumped by release-please: commits touching `desktop/` open a
 "chore(desktop): release x.y.z" PR that updates `package.json`,
