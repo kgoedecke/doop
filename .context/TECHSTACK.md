@@ -39,6 +39,13 @@
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
+- Design inspiration (`server/inspiration.ts`, `search_inspiration` in MCP and the resident agent):
+  One Page Love's API (`ONEPAGELOVE_API_KEY`; unset, the tool tells agents to brief without an
+  exemplar). `/v1/search` resolves the query to taxonomy filters, `/v1/inspirations?status=live`
+  returns the sites with style, colour, fonts and sections, dropping the broadest filter until
+  something matches; six-hour in-memory cache for the free plan's 1,000 requests a day. Every
+  result credits One Page Love and the authors with the entry's link (their terms). Tests:
+  `inspiration.test.ts`.
 - Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
   team through two MCP tools, which the resident agent has under the same names. `report_issue`
   (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
