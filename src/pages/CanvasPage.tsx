@@ -24,6 +24,7 @@ import {
   barPillBtn,
   barPillIconBtn,
   barPrimaryBtn,
+  barPrimaryCompactBtn,
 } from '../components/TopBar'
 import { LivePresence } from '../components/LivePresence'
 import { ensureTab } from '../lib/desktop'
@@ -119,6 +120,8 @@ const RAIL_W = 40
 const INSPECTOR_W = 244
 /* the bar's height on desktop */
 const BAR_H = 50
+/* the docked bar is a flat strip, so it can sit a little tighter */
+const DOCKED_BAR_H = 44
 /* how far what floats over the canvas keeps from a docked column */
 const FLOAT_GAP = 10
 /* the narrowest stage docked panels squeeze it to, while their minimums allow */
@@ -557,7 +560,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   }, [rulers, uiHidden, hideUiActive, layersOpen, showActivity, hasSelection])
   useEffect(() => () => syncViewMenu(NO_CANVAS), [])
   const chromeVars = {
-    '--chrome-top': isMobile ? '0px' : `${BAR_H + rulerInset}px`,
+    '--chrome-top': isMobile ? '0px' : `${(docked ? DOCKED_BAR_H : BAR_H) + rulerInset}px`,
     '--rail-left': `${chrome.toolRail + rulerInset}px`,
     /* what floats over the canvas (the zoom pill, toasts) keeps clear of a
        docked column's edge */
@@ -573,7 +576,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   /* docked, the stage is the gap between the bar and the columns; ⌘. gives
      it the whole window back */
   const stageBounds: StageInsets | undefined =
-    docked && !uiHidden ? { top: BAR_H, right: chrome.right, bottom: 0, left: chrome.left } : undefined
+    docked && !uiHidden ? { top: DOCKED_BAR_H, right: chrome.right, bottom: 0, left: chrome.left } : undefined
   const meFace = { name: me.name, color: presences[me.clientId]?.color ?? 'var(--brand)' }
 
   function openConnect() {
@@ -645,7 +648,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             )}
           </BarPill>
         </div>
-        <div className={cn('absolute left-1/2 -translate-x-1/2 max-[1180px]:hidden', docked ? 'top-[7px]' : 'top-3.5')}>
+        <div className={cn('absolute left-1/2 -translate-x-1/2 max-[1180px]:hidden', docked ? 'top-1' : 'top-3.5')}>
           <LivePresence me={meFace} others={others} onRenameSelf={() => setRenaming(true)} />
         </div>
         <div className="ml-auto flex flex-none items-center gap-2 max-md:hidden">
@@ -710,7 +713,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             </Tooltip>
           </BarPill>
           {/* the bar's one black action — it opens the MCP connection modal */}
-          <Button variant="primary" className={cn(barPrimaryBtn, 'shadow-ring')} onClick={openConnect}>
+          <Button
+            variant="primary"
+            className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
+            onClick={openConnect}
+          >
             <PlusIcon className="size-3.5" strokeWidth={1.4} />
             {t('canvas.connectAi')}
           </Button>
@@ -725,7 +732,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <PeerAvatars others={others} />
             </span>
           </div>
-          <Button variant="primary" className={cn(barPrimaryBtn, 'shadow-ring')} onClick={openConnect}>
+          <Button
+            variant="primary"
+            className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
+            onClick={openConnect}
+          >
             <PlusIcon className="size-3.5" strokeWidth={1.4} />
             <span className="max-sm:hidden">{t('canvas.connectAi')}</span>
             <span className="sm:hidden">{t('canvas.connectAiShort')}</span>
@@ -756,7 +767,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           )}
           /* panel offsets are measured from this layer, so moving it past
              the rulers moves every panel with it */
-          style={rulerInset ? { top: 'var(--chrome-top)', left: rulerInset } : undefined}
+          style={rulerInset || docked ? { top: 'var(--chrome-top)', left: rulerInset } : undefined}
         >
           <div className="pointer-events-none absolute top-3.5 right-[var(--chrome-right)] z-30 flex flex-col items-end gap-2 transition-[right] duration-150 [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2">
             {pendingProposal && mutedProposal !== pendingProposal.id && !(showActivity && panelTab === 'memory') && (

@@ -121,10 +121,10 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
       const r = el.getBoundingClientRect()
       return { left: r.left, right: r.right, top: r.top }
     })
-    /* the columns butt against the stage on both sides, under the bar */
+    /* the columns butt against the stage on both sides, under the 44px bar */
     expect(Math.abs(stage.left - area.left)).toBeLessThanOrEqual(1)
     expect(Math.abs(stage.right - area.right)).toBeLessThanOrEqual(1)
-    expect(stage.top).toBe(50)
+    expect(stage.top).toBe(44)
     expect(frame.left).toBeGreaterThan(stage.left)
     expect(frame.right).toBeLessThan(stage.right)
     expect(Math.abs((frame.left + frame.right) / 2 - (stage.left + stage.right) / 2)).toBeLessThan(2)

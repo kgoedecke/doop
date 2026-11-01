@@ -118,7 +118,7 @@ export function SideRail({
   if (!docked) return islands
   return (
     <div
-      className="pointer-events-auto absolute inset-y-0 z-[38] flex w-10 flex-col items-center border-l border-line-soft bg-surface"
+      className="pointer-events-auto absolute inset-y-0 z-[38] flex w-10 flex-col items-center border-l border-line-soft bg-surface pb-3"
       style={style}
     >
       {islands}
