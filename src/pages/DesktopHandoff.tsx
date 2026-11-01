@@ -4,6 +4,7 @@ import { desktopAuthDeepLink, parseDesktopHandoffQuery } from '../lib/desktopAut
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
 import { Button } from '../components/ui/button'
 import { Callout } from '../components/ui/callout'
+import { useT } from '../lib/i18n'
 
 /* Step 2 of the desktop sign-in (src/lib/desktopAuth.ts): the system browser
    lands here signed in, after the identity provider. Mint a one-time token
@@ -12,6 +13,7 @@ import { Callout } from '../components/ui/callout'
    leave in the browser's history. The challenge travels along unchanged: the
    app only redeems a link that answers the sign-in it started. */
 export function DesktopHandoff() {
+  const t = useT()
   const request = useMemo(() => parseDesktopHandoffQuery(location.search), [])
   const [link, setLink] = useState<string | null>(null)
   const [mintFailed, setMintFailed] = useState(false)
@@ -36,17 +38,15 @@ export function DesktopHandoff() {
 
   return (
     <AuthScreen>
-      <AuthCard title={failed ? 'Something went wrong.' : "You're signed in."}>
+      <AuthCard title={failed ? t('auth.somethingWentWrongTitle') : t('auth.desktopSignedIn')}>
         {failed ? (
-          <Callout tone="error">
-            Could not hand the sign-in over to the doop app. Go back to the app and try again.
-          </Callout>
+          <Callout tone="error">{t('auth.desktopHandoffFailed')}</Callout>
         ) : (
           <>
-            <AuthCardText>Sending you back to the doop app… You can close this tab afterwards.</AuthCardText>
+            <AuthCardText>{t('auth.desktopSendingBack')}</AuthCardText>
             {link && (
               <Button asChild className="mt-1">
-                <a href={link}>Open doop</a>
+                <a href={link}>{t('auth.openDoop')}</a>
               </Button>
             )}
           </>

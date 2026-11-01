@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { ArrowLeftIcon, ArrowRightIcon } from './ui/icons'
 import { ModalLede, ModalTitle } from './ui/modal'
+import { useT } from '@/lib/i18n'
 
 /**
  * The import modal's two-step chrome: a picker of source cards, then one
@@ -21,12 +22,11 @@ export interface ImportSource {
 }
 
 export function SourcePicker({ sources, onPick }: { sources: ImportSource[]; onPick: (id: string) => void }) {
+  const t = useT()
   return (
     <>
-      <ModalTitle>Import into Doop</ModalTitle>
-      <ModalLede>
-        Pick a source. Imports that find several pages or frames show a review before anything lands.
-      </ModalLede>
+      <ModalTitle>{t('panels.importTitle')}</ModalTitle>
+      <ModalLede>{t('panels.importLede')}</ModalLede>
       <div className="mt-6 grid grid-cols-1 gap-3 xs:grid-cols-2 md:grid-cols-3">
         {sources.map((source) => (
           <button
@@ -47,7 +47,7 @@ export function SourcePicker({ sources, onPick }: { sources: ImportSource[]; onP
             <b className="mt-4 text-lead font-semibold tracking-[-0.012em]">{source.title}</b>
             <span className="mt-1 text-body leading-[1.45] text-ink-soft">{source.blurb}</span>
             {source.soon ? (
-              <span className="absolute right-4 top-4 text-caption text-ink-faint">Soon</span>
+              <span className="absolute right-4 top-4 text-caption text-ink-faint">{t('panels.importSoon')}</span>
             ) : (
               <span className="absolute bottom-3.5 right-4 text-accent-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                 <ArrowRightIcon className="size-4" />
@@ -83,12 +83,13 @@ export function ImportStepFooter({
   backDisabled?: boolean
   children?: ReactNode
 }) {
+  const t = useT()
   return (
     <div className="mt-6 flex items-center gap-2.5 border-t border-line-soft pt-[18px]">
       <span className="mr-auto min-w-0 text-label leading-[1.4] text-ink-faint">{note}</span>
       <Button variant="ghost" className="flex-none gap-2" disabled={backDisabled} onClick={onBack}>
         <ArrowLeftIcon className="size-3.5" />
-        Back
+        {t('common.back')}
       </Button>
       {children}
     </div>

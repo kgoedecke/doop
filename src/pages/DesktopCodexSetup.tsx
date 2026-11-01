@@ -3,19 +3,18 @@ import { ConnectModal } from '../components/ConnectModal'
 import { Button } from '../components/ui/button'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
 import { parseCodexSetup } from '../lib/codexConnection'
+import { useT } from '../lib/i18n'
 
 export function DesktopCodexSetup() {
+  const t = useT()
   const request = parseCodexSetup(location.search, location.origin)
   if (!request) {
     return (
       <AuthScreen>
-        <AuthCard title="Open the matching Doop server">
-          <AuthCardText>
-            This setup link is for a different Doop server or is incomplete. Open Connect AI in the desktop app for that
-            server, or use the manual Codex setup in your browser.
-          </AuthCardText>
+        <AuthCard title={t('connect.codexSetupTitle')}>
+          <AuthCardText>{t('connect.codexSetupBody')}</AuthCardText>
           <Button className="self-start" onClick={() => navigate('/')}>
-            Back to Doop
+            {t('connect.backToDoop')}
           </Button>
         </AuthCard>
       </AuthScreen>

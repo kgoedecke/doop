@@ -1,5 +1,7 @@
 import type { ResizeHandle } from '../lib/elementResize'
-import { RESIZE_CORNERS, RESIZE_EDGES, handleAnchor, handleCursor, handleLabel, movesWidth } from '../lib/elementResize'
+import { RESIZE_CORNERS, RESIZE_EDGES, handleAnchor, handleCursor, movesWidth } from '../lib/elementResize'
+import { useT } from '../lib/i18n'
+import { handleLabelKey } from './ElementResizeHandles'
 
 /* on-screen pixels, divided by the Stage's `--zoom` so a grip stays the
    same size at every zoom, like the selection outline's hairline — the same
@@ -22,6 +24,7 @@ export function FrameResizeHandles({
 }: {
   onStart: (e: React.PointerEvent<HTMLDivElement>, handle: ResizeHandle) => void
 }) {
+  const t = useT()
   return (
     <div data-frame-resize-handles="" className="pointer-events-none absolute inset-0 z-[5]">
       {RESIZE_EDGES.map((handle) => {
@@ -31,7 +34,7 @@ export function FrameResizeHandles({
           <div
             key={handle}
             data-frame-resize-handle={handle}
-            aria-label={handleLabel(handle)}
+            aria-label={t(handleLabelKey(handle))}
             className="pointer-events-auto absolute touch-none"
             style={{
               left: `${anchor.x * 100}%`,
@@ -51,7 +54,7 @@ export function FrameResizeHandles({
           <div
             key={handle}
             data-frame-resize-handle={handle}
-            aria-label={handleLabel(handle)}
+            aria-label={t(handleLabelKey(handle))}
             className="pointer-events-auto absolute flex touch-none items-center justify-center"
             style={{
               left: `${anchor.x * 100}%`,

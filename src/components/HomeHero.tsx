@@ -29,6 +29,7 @@ import {
   MessageSquareIcon,
   UploadIcon,
 } from './ui/icons'
+import { useT, type PlainMessageKey } from '../lib/i18n'
 
 /**
  * The home page's front door: the hopping Disc-D, a greeting, a strip of
@@ -51,9 +52,9 @@ export interface HeroActions {
 /** a chip either fills the composer with a brief or runs an action */
 interface Chip {
   id: string
-  label: string
+  label: PlainMessageKey
   icon: ReactNode
-  prompt?: string
+  prompt?: PlainMessageKey
   action?: keyof Omit<HeroActions, 'onPrompt'>
 }
 
@@ -62,35 +63,35 @@ const chipIcon = { width: 13, height: 13 } as const
 const CHIPS: Chip[] = [
   {
     id: 'landing',
-    label: 'Draft a landing page',
+    label: 'home.chipLanding',
     icon: <LayoutTemplateIcon {...chipIcon} />,
-    prompt: 'Draft a landing page for ',
+    prompt: 'home.chipLandingPrompt',
   },
   {
     id: 'recap',
-    label: 'Recap a session',
+    label: 'home.chipRecap',
     icon: <CalendarIcon {...chipIcon} />,
-    prompt: 'Recap what happened on my canvases this week, as one summary frame.',
+    prompt: 'home.chipRecapPrompt',
   },
   {
     id: 'changed',
-    label: 'What changed',
+    label: 'home.chipChanged',
     icon: <HistoryIcon {...chipIcon} />,
-    prompt: 'What changed across my canvases this week?',
+    prompt: 'home.chipChangedPrompt',
   },
   {
     id: 'automation',
-    label: 'Run an automation',
+    label: 'home.chipAutomation',
     icon: <span className="font-mono text-caption">/</span>,
     action: 'onAutomations',
   },
-  { id: 'agents', label: 'Connect your agents', icon: <CirclePlusIcon {...chipIcon} />, action: 'onConnectAgents' },
-  { id: 'import', label: 'Import a design', icon: <UploadIcon {...chipIcon} />, action: 'onImport' },
+  { id: 'agents', label: 'home.chipAgents', icon: <CirclePlusIcon {...chipIcon} />, action: 'onConnectAgents' },
+  { id: 'import', label: 'home.chipImport', icon: <UploadIcon {...chipIcon} />, action: 'onImport' },
   {
     id: 'comments',
-    label: 'Review comments',
+    label: 'home.chipComments',
     icon: <MessageSquareIcon {...chipIcon} />,
-    prompt: 'Go through the open comments on my canvases and address each one.',
+    prompt: 'home.chipCommentsPrompt',
   },
 ]
 
@@ -130,6 +131,7 @@ export function HomeHero({
   const [beamAt, setBeamAt] = useState(3)
   const [hovered, setHovered] = useState<number | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const t = useT()
 
   useLayoutEffect(() => {
     if (inputRef.current) autosize(inputRef.current)
@@ -170,7 +172,7 @@ export function HomeHero({
   function runChip(chip: Chip) {
     if (chip.action) return actions[chip.action]()
     if (chip.prompt) {
-      setText(chip.prompt)
+      setText(t(chip.prompt))
       inputRef.current?.focus()
     }
   }
@@ -195,7 +197,8 @@ export function HomeHero({
           <DoopMark animated size="fill" className="block" />
         </span>
         <h1 className="font-hero text-title font-light leading-none md:text-display">
-          Ask me what to design{firstName ? ', ' : ''}
+          {t('home.greeting')}
+          {firstName ? ', ' : ''}
           {firstName && <span className="text-ink-faint">{firstName}</span>}
         </h1>
       </div>
@@ -228,7 +231,7 @@ export function HomeHero({
                       <i />
                     </span>
                   )}
-                  {chip.label}
+                  {t(chip.label)}
                 </Chip>
               )
             })}
@@ -252,8 +255,8 @@ export function HomeHero({
             rows={1}
             value={text}
             disabled={busy}
-            placeholder="What changed across my canvases this week?"
-            aria-label="Ask Doop what to design"
+            placeholder={t('home.composerPlaceholder')}
+            aria-label={t('home.composerAria')}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             className="min-h-[52px] text-lead placeholder:text-ink-ghost md:text-lead"
@@ -264,24 +267,24 @@ export function HomeHero({
               focus="ring"
               className="gap-[7px] rounded-row text-ink-soft transition-colors hover:text-ink"
               onClick={actions.onImport}
-              title="Attach a design to start from"
+              title={t('home.attachTitle')}
             >
-              <AttachmentIcon width={14} height={14} /> Files
+              <AttachmentIcon width={14} height={14} /> {t('home.files')}
             </Pressable>
             <span className="flex-1" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <MenuButton
                   variant="quiet"
-                  aria-label={`Drafts per prompt: ${drafts}`}
+                  aria-label={t('home.draftsAria', { count: drafts })}
                   className="whitespace-nowrap"
                   icon={<CopyIcon width={14} height={14} />}
                 >
-                  {drafts} {drafts === 1 ? 'draft' : 'drafts'}
+                  {t('home.drafts', { count: drafts })}
                 </MenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="end" width="md">
-                <DropdownMenuCaption>Drafts per prompt</DropdownMenuCaption>
+                <DropdownMenuCaption>{t('home.draftsCaption')}</DropdownMenuCaption>
                 <DropdownMenuRadioGroup
                   value={String(drafts)}
                   onValueChange={(next) => {
@@ -293,9 +296,9 @@ export function HomeHero({
                     <DropdownMenuRadioItem
                       key={n}
                       value={String(n)}
-                      description={n === 1 ? 'One take on the brief' : `${n} takes, side by side, to pick from`}
+                      description={t('home.draftsDescription', { count: n })}
                     >
-                      {n} {n === 1 ? 'draft' : 'drafts'}
+                      {t('home.drafts', { count: n })}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
@@ -306,7 +309,7 @@ export function HomeHero({
               variant="primary"
               size="lg"
               shape="round"
-              aria-label="Send"
+              aria-label={t('home.send')}
               disabled={busy || !text.trim()}
               onClick={submit}
             >
@@ -319,7 +322,7 @@ export function HomeHero({
           onClick={actions.onIntegrations}
           className="group mx-[14px] flex w-[calc(100%-28px)] items-center rounded-b-card bg-sub px-5 pb-2.5 pt-3 text-body text-ink-soft transition-colors hover:text-ink"
         >
-          Connect your existing designs for better results
+          {t('home.connectDesigns')}
           <ChevronRightIcon
             width={12}
             height={12}

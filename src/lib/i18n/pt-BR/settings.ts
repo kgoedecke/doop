@@ -1,0 +1,56 @@
+import type { Catalog } from '..'
+
+export const settings: Catalog['settings'] = {
+  sectionLabel: 'Configurações',
+  backToCanvases: 'Voltar aos canvases',
+  backToCanvas: 'Voltar ao canvas',
+  canvases: 'Canvases',
+  canvas: 'Canvas',
+
+  agentTitle: 'Doop Agent',
+  agentBlurb: 'Em qual conta de modelo o agente roda, em todos os canvases em que você trabalha.',
+  keysTitle: 'Chaves de agente',
+  keysBlurb: 'Credenciais bearer que deixam agentes sem interface desenharem em seu nome.',
+  webhooksTitle: 'Webhooks',
+  webhooksBlurb: 'Chamadas HTTP para os seus sistemas quando algo acontece em um canvas que você pode abrir.',
+  accountTitle: 'Sua conta',
+  accountTab: 'Conta',
+  accountBlurb: 'Quem você é em cada canvas — e como voltar a entrar neste.',
+  appearanceTitle: 'Aparência',
+  appearanceBlurb: 'Como o Doop aparece neste navegador: claro ou escuro, e o idioma em que ele fala.',
+
+  agentCardDescription:
+    'Escolha como o Doop Agent roda nos seus canvases: uma conta de modelo conectada ou o Claude CLI no seu computador. Os limites de uso e as cobranças do seu provedor se aplicam.',
+  freeTasksLeftLabel: 'Tarefas gratuitas restantes do Doop Agent',
+  meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado — conexão gerenciada pelo seu operador.',
+  meterClaudeLocal: 'Claude CLI selecionado — roda no seu computador conectado.',
+  meterChatgpt: 'Rodando na sua assinatura do ChatGPT.',
+  meterProviderKey: 'Rodando na sua chave da {provider}.',
+  meterNoFreeTasks: 'Este servidor não oferece tarefas gratuitas — conecte uma conta para usar o Doop Agent.',
+  meterUsedUp: 'Suas tarefas gratuitas acabaram.',
+  meterLeft: {
+    one: '{left} de {count} tarefa gratuita restante.',
+    other: '{left} de {count} tarefas gratuitas restantes.',
+  },
+
+  themeTitle: 'Tema',
+  themeDescription:
+    'Claro ou escuro, em todos os canvases e páginas deste navegador. Sistema segue o seu sistema operacional e muda sempre que ele mudar.',
+  themeRow: 'Aparência',
+  themeAria: 'Tema',
+  themeSystem: 'Sistema',
+  themeLight: 'Claro',
+  themeDark: 'Escuro',
+  themeFollowingSystem: 'Seguindo o sistema — {resolved} agora.',
+  themeResolvedLight: 'claro',
+  themeResolvedDark: 'escuro',
+  themeSetByHand: 'Definido manualmente — a configuração do sistema é ignorada.',
+
+  languageTitle: 'Idioma',
+  languageDescription:
+    'O idioma em que as telas do Doop aparecem neste navegador. Enquanto você não escolher um, vale o padrão configurado neste servidor.',
+  languageRow: 'Idioma',
+  languageAria: 'Idioma',
+  languagePicked: 'Escolhido neste navegador.',
+  languageServerDefault: 'Padrão do servidor — escolha um para mantê-lo neste navegador.',
+}

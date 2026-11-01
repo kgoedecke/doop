@@ -1,6 +1,7 @@
 import { bool, cleanEnv, EnvMissingError, makeExactValidator, port, str } from 'envalid'
 import type { ReporterOptions } from 'envalid'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENROUTER_MODEL } from '../shared/modelMenu.ts'
+import { FALLBACK_LOCALE, LOCALES } from '../shared/locales.ts'
 
 /**
  * Every environment variable the server reads, declared once with its type
@@ -66,6 +67,8 @@ const nonNegativeInt = int(0)
 const schema = {
   NODE_ENV: str({ choices: ['development', 'test', 'production'], default: 'development' }),
   PORT: port({ default: 4400 }),
+  /* the interface language for anyone who has not picked one in Settings */
+  DEFAULT_LOCALE: str({ choices: LOCALES, default: FALLBACK_LOCALE }),
   /* unset = embedded Postgres (PGlite) under ./data/pg */
   DATABASE_URL: str({ default: undefined }),
 

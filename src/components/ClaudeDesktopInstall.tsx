@@ -3,8 +3,10 @@ import { addToClaudeDesktop, canAddToClaudeDesktop } from '../lib/claudeConnecti
 import { posthog } from '../lib/posthog'
 import { Button } from './ui/button'
 import { InstallBlock } from './ui/install-block'
+import { useT } from '../lib/i18n'
 
 export function ClaudeDesktopInstall({ mcpUrl }: { mcpUrl: string }) {
+  const t = useT()
   const [state, setState] = useState<'idle' | 'opening' | 'opened'>('idle')
   const [error, setError] = useState('')
 
@@ -26,25 +28,27 @@ export function ClaudeDesktopInstall({ mcpUrl }: { mcpUrl: string }) {
       action={
         canAddToClaudeDesktop() ? (
           <Button variant="solid" disabled={state === 'opening'} onClick={() => void connect()}>
-            {state === 'opening' ? 'Opening Claude…' : state === 'opened' ? 'Open Claude again' : 'Add to Claude'}
+            {state === 'opening'
+              ? t('workspace.claudeOpening')
+              : state === 'opened'
+                ? t('workspace.claudeOpenAgain')
+                : t('workspace.claudeAdd')}
           </Button>
         ) : (
-          <p>
-            Open this server in an updated Doop desktop app to add Claude directly. In a browser, you can use the manual
-            installation below.
-          </p>
+          <p>{t('workspace.claudeNeedsDesktop')}</p>
         )
       }
-      status={state === 'opened' && 'Confirm the installation in Claude, then approve the Doop sign-in.'}
+      status={state === 'opened' && t('workspace.claudeConfirm')}
       error={error}
-      manualLabel="Install manually"
+      manualLabel={t('workspace.installManually')}
       manual={
         <p>
           <a className="underline underline-offset-2" href="/claude-extension/doop.mcpb" download="doop.mcpb">
-            Download extension
+            {t('workspace.downloadExtension')}
           </a>
-          , then open it with Claude Desktop. Set <strong>Doop server URL</strong> to{' '}
-          <code className="break-all">{mcpUrl}</code>. If the file doesn’t open, use Claude’s{' '}
+          {t('workspace.claudeManualOpen')} <strong>Doop server URL</strong> {t('workspace.claudeManualTo')}{' '}
+          <code className="break-all">{mcpUrl}</code>
+          {t('workspace.claudeManualFallback')}{' '}
           <strong>Settings → Extensions → Advanced settings → Install Extension</strong>.
         </p>
       }

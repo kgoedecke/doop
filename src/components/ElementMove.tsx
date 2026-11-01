@@ -23,6 +23,7 @@ import { gesture } from '../lib/gesture'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
 import { visibleGuides } from '../lib/guides'
 import { snapFrame } from '../lib/snap'
+import { useT } from '../lib/i18n'
 import { dropLayer } from '../lib/layerEdits'
 import { useStore } from '../lib/store'
 
@@ -49,6 +50,7 @@ export interface ElementMoveHit {
 /** Hit testing happens inside the iframe. Buffer pointer events while it
  * answers so even a fast drag follows the visible element under the press. */
 export function useElementMove(frame: Frame, layoutZoom: number) {
+  const t = useT()
   const [preview, setPreview] = useState<Preview | null>(null)
   const [moving, setMoving] = useState(false)
   const [layoutDrop, setLayoutDrop] = useState<{
@@ -429,7 +431,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
                     density in Chromium, undone elsewhere), so the drawing lays out
                     at the width it has in its frame and stays as sharp */}
                 <iframe
-                  title="Moving drawing"
+                  title={t('stage.movingDrawing')}
                   sandbox=""
                   srcDoc={preview.html}
                   className="block border-0 bg-transparent"

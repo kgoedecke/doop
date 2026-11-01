@@ -3,6 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n'
 import { XIcon } from './icons'
 
 /* Doop's modal, measured off the reference design: a white card with 22px corners on a
@@ -107,6 +108,7 @@ function Modal({
      *  tap. Off only for a modal whose header draws its own */
     showClose?: boolean
   }) {
+  const t = useT()
   const overlayRef = React.useRef<HTMLDivElement>(null)
   const contentRef = React.useRef<HTMLDivElement>(null)
   React.useLayoutEffect(
@@ -128,7 +130,7 @@ function Modal({
         >
           {showClose && (
             <DialogPrimitive.Close
-              aria-label="Close"
+              aria-label={t('common.close')}
               className="absolute top-2.5 right-2.5 z-[1] grid size-6 place-items-center rounded-full bg-ink/[0.06] text-ink/50 transition-colors hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
             >
               <XIcon className="size-3" />

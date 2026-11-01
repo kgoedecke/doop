@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { CanvasMeta } from '../../shared/types'
 import { cn } from '@/lib/utils'
+import { useT } from '../lib/i18n'
 import { timeAgo } from '../lib/time'
 import { FrameThumb } from './FramePreview'
 import { Modal } from './ui/modal'
@@ -24,6 +25,7 @@ export function CanvasSearchModal({
   onOpen: (canvas: CanvasMeta) => void
   onClose: () => void
 }) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -55,7 +57,7 @@ export function CanvasSearchModal({
   }
 
   return (
-    <Modal size="lg" onClose={onClose} className="p-0 sm:p-0" aria-label="Search canvases">
+    <Modal size="lg" onClose={onClose} className="p-0 sm:p-0" aria-label={t('rail.searchCanvases')}>
       <SearchField
         ref={inputRef}
         variant="bar"
@@ -65,13 +67,13 @@ export function CanvasSearchModal({
           setCursor(0)
         }}
         onKeyDown={onKeyDown}
-        placeholder="Search canvases"
-        aria-label="Search canvases"
+        placeholder={t('rail.searchCanvases')}
+        aria-label={t('rail.searchCanvases')}
         inputClassName="text-copy md:text-copy"
       />
-      <div className="max-h-[60vh] overflow-y-auto p-2" role="listbox" aria-label="Results">
+      <div className="max-h-[60vh] overflow-y-auto p-2" role="listbox" aria-label={t('rail.results')}>
         {results.length === 0 ? (
-          <p className="px-3 py-6 text-center text-body text-ink-faint">No canvas matches “{query.trim()}”.</p>
+          <p className="px-3 py-6 text-center text-body text-ink-faint">{t('rail.noMatch', { query: query.trim() })}</p>
         ) : (
           results.map((c, i) => (
             <Pressable
@@ -90,8 +92,8 @@ export function CanvasSearchModal({
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-body font-medium text-ink">{c.name}</span>
                 <span className="mt-px block text-caption text-ink-faint">
-                  {c.frameCount} frame{c.frameCount === 1 ? '' : 's'} · edited {timeAgo(c.updatedAt)}
-                  {c.shared ? ' · shared with you' : ''}
+                  {t('rail.frameCount', { count: c.frameCount })} · {t('rail.edited', { time: timeAgo(c.updatedAt) })}
+                  {c.shared ? ` · ${t('rail.sharedWithYou')}` : ''}
                 </span>
               </span>
             </Pressable>

@@ -1,6 +1,7 @@
 import { useStore } from '../lib/store'
 import { AgentIcon } from './AgentIcon'
 import { XIcon } from './ui/icons'
+import { useT } from '../lib/i18n'
 
 /** Figma-style "you are following X": a border in the leader's colour around
  *  the stage and a pill naming them. Any pan or zoom of our own lets go, so
@@ -9,6 +10,7 @@ import { XIcon } from './ui/icons'
  *  avatars would otherwise cover it; the 7px plus the 3px border lines it up
  *  with the tool rail. */
 export function FollowFrame() {
+  const t = useT()
   const leader = useStore((s) => (s.following ? s.presences[s.following] : undefined))
   const stop = useStore((s) => s.setFollowing)
   if (!leader) return null
@@ -22,7 +24,7 @@ export function FollowFrame() {
         style={{ background: leader.color }}
       >
         <span>
-          Following{' '}
+          {t('canvas.following')}{' '}
           {leader.kind === 'agent' && (
             <>
               <AgentIcon name={leader.name} size={11} color="#fff" />{' '}
@@ -33,8 +35,8 @@ export function FollowFrame() {
         <button
           type="button"
           className="grid size-[18px] place-items-center rounded-full bg-white/25 hover:bg-white/40"
-          aria-label={`Stop following ${leader.name}`}
-          title="Stop following (Esc)"
+          aria-label={t('canvas.stopFollowing', { name: leader.name })}
+          title={t('canvas.stopFollowingEsc')}
           onClick={() => stop(null)}
         >
           <XIcon size={11} />

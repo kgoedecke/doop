@@ -1,6 +1,7 @@
 import * as React from 'react'
 
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n'
 import { Disclosure } from './collapsible'
 import { Note } from './note'
 
@@ -13,7 +14,7 @@ function InstallBlock({
   status,
   error,
   manual,
-  manualLabel = 'Set up manually',
+  manualLabel,
   className,
 }: {
   /** the button or link that installs, or a sentence when this setup cannot */
@@ -27,6 +28,7 @@ function InstallBlock({
   manualLabel?: React.ReactNode
   className?: string
 }) {
+  const t = useT()
   return (
     <div data-slot="install-block" className={cn('mt-2.5 text-label leading-relaxed text-ink-soft', className)}>
       {action}
@@ -41,7 +43,7 @@ function InstallBlock({
         </Note>
       )}
       {manual && (
-        <Disclosure label={manualLabel} className="mt-3">
+        <Disclosure label={manualLabel ?? t('ui.setUpManually')} className="mt-3">
           {manual}
         </Disclosure>
       )}

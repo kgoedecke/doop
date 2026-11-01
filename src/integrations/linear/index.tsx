@@ -8,6 +8,7 @@ import { Modal, ModalActions, ModalLede, ModalTitle } from '../../components/ui/
 import { Note } from '../../components/ui/note'
 import { DisconnectButton, IntegrationCard } from '../ui'
 import { BrandMark } from '@/components/ui/brand-mark'
+import { useT } from '@/lib/i18n'
 
 interface LinearStatus {
   connected: boolean
@@ -27,6 +28,7 @@ function LinearTile({ size = 24, className }: { size?: number; className?: strin
 }
 
 function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnect, showToast }: SettingsCardProps) {
+  const t = useT()
   const linear = statusOf(status)
   const [open, setOpen] = useState(false)
   const [token, setToken] = useState('')
@@ -50,7 +52,9 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
       if ((await connectIntegration('linear')) === 'browser') setBusy(false)
     } catch (error) {
       setError(
-        error instanceof ApiError ? String(error.body.error ?? 'Could not install Doop.') : 'Could not install Doop.',
+        error instanceof ApiError
+          ? String(error.body.error ?? t('automations.installFailed'))
+          : t('automations.installFailed'),
       )
       setBusy(false)
     }
@@ -70,12 +74,12 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
       setToken('')
       setReplacing(false)
       setOpen(false)
-      showToast(hasKey ? 'Linear key replaced.' : 'Linear connected.')
+      showToast(hasKey ? t('automations.linearKeyReplaced') : t('automations.linearConnected'))
     } catch (error) {
       setError(
         error instanceof ApiError
-          ? String(error.body.error ?? 'Could not connect Linear.')
-          : 'Could not connect Linear.',
+          ? String(error.body.error ?? t('automations.linearConnectFailed'))
+          : t('automations.linearConnectFailed'),
       )
     } finally {
       setBusy(false)
@@ -89,14 +93,18 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
         name="Linear"
         detail={
           linear.agent?.connected
-            ? `Doop agent · ${linear.agent.workspaceName}`
+            ? t('automations.doopAgentIn', { workspace: linear.agent.workspaceName ?? '' })
             : linear.connected
-              ? (linear.accountName ?? 'Linear account')
-              : 'Delegate tickets to the Doop design agent'
+              ? (linear.accountName ?? t('automations.linearAccount'))
+              : t('automations.linearPitch')
         }
         connected={linear.connected}
         footnote={
-          linear.agent?.connected ? 'Automatic design pickup' : linear.connected ? 'Read-only ticket access' : ''
+          linear.agent?.connected
+            ? t('automations.automaticPickup')
+            : linear.connected
+              ? t('automations.readOnlyAccess')
+              : ''
         }
         actions={
           <>
@@ -106,37 +114,27 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
               disabled={busy}
               onClick={() => setOpen(true)}
             >
-              {linear.connected ? 'Manage' : 'Connect'}
+              {linear.connected ? t('automations.manage') : t('automations.connect')}
             </Button>
             {linear.connected && <DisconnectButton disabled={busy} onClick={requestDisconnect} />}
           </>
         }
       />
       <Modal open={open} onClose={closeSetup} size="md">
-        <ModalTitle>{linear.connected ? 'Manage Linear' : 'Connect Linear'}</ModalTitle>
-        <ModalLede>Choose how Doop works with your Linear workspace.</ModalLede>
+        <ModalTitle>{linear.connected ? t('automations.manageLinear') : t('automations.connectLinear')}</ModalTitle>
+        <ModalLede>{t('automations.linearLede')}</ModalLede>
         <div className="mt-5 flex flex-col gap-5">
-          {linear.agent?.connected && (
-            <p className="text-copy text-ink-soft">
-              Delegate an issue to Doop in Linear. The design and canvas link arrive automatically.
-            </p>
-          )}
+          {linear.agent?.connected && <p className="text-copy text-ink-soft">{t('automations.linearDelegate')}</p>}
           {linear.agentConfigured && !linear.agent?.connected && (
             <div className="flex flex-col gap-2">
-              <h3 className="text-copy font-semibold">Automatic design pickup</h3>
-              <p className="text-copy leading-relaxed text-ink-soft">
-                Install Doop in a Linear workspace you administer. Delegated tickets create private canvases in your
-                Doop account and run on your connected model account or task allowance. Workspace members who can
-                delegate to Doop can start these runs.
-              </p>
+              <h3 className="text-copy font-semibold">{t('automations.automaticPickup')}</h3>
+              <p className="text-copy leading-relaxed text-ink-soft">{t('automations.linearInstallBody')}</p>
               <Button size="sm" disabled={busy} onClick={() => void installAgent()}>
-                Install Doop agent
+                {t('automations.installAgent')}
               </Button>
             </div>
           )}
-          {!linear.agentConfigured && !linear.agent?.connected && (
-            <Note>Automatic design pickup needs a Linear app configured by this server’s administrator.</Note>
-          )}
+          {!linear.agentConfigured && !linear.agent?.connected && <Note>{t('automations.linearNeedsApp')}</Note>}
           {error && (
             <Note role="alert" tone="error">
               {error}
@@ -144,7 +142,7 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
           )}
           {hasKey && !replacing && (
             <Button variant="bare" size="sm" disabled={busy} onClick={() => setReplacing(true)}>
-              Replace key
+              {t('automations.replaceKey')}
             </Button>
           )}
           {(!linear.connected || replacing) && (
@@ -155,24 +153,24 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
                 void connect()
               }}
             >
-              <h3 className="text-copy font-semibold">Read-only ticket access</h3>
+              <h3 className="text-copy font-semibold">{t('automations.readOnlyAccess')}</h3>
               <p className="text-copy leading-relaxed text-ink-soft">
-                Create a personal API key in Linear under{' '}
+                {t('automations.linearKeyBefore')}{' '}
                 <a
                   href="https://linear.app/settings/account/security"
                   target="_blank"
                   rel="noreferrer"
                   className="text-ink-soft underline underline-offset-2"
                 >
-                  Settings → Security &amp; access
+                  {t('automations.linearKeyLink')}
                 </a>{' '}
-                with read access to the teams you want agents to see. The key is stored on the server.
+                {t('automations.linearKeyAfter')}
               </p>
               <div className="flex gap-2">
                 <Input
                   type="password"
                   autoComplete="off"
-                  aria-label="Linear personal API key"
+                  aria-label={t('automations.linearKeyLabel')}
                   placeholder="lin_api_…"
                   value={token}
                   disabled={busy}
@@ -184,12 +182,12 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
                   }}
                 />
                 <Button type="submit" size="sm" disabled={busy || !token.trim()}>
-                  {busy ? 'Checking…' : replacing ? 'Save key' : 'Connect'}
+                  {busy ? t('automations.checking') : replacing ? t('automations.saveKey') : t('automations.connect')}
                 </Button>
               </div>
               {replacing && (
                 <>
-                  <Note>Your current key stays connected until the replacement is verified.</Note>
+                  <Note>{t('automations.linearKeyStays')}</Note>
                   <Button
                     type="button"
                     variant="bare"
@@ -201,7 +199,7 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
                       setReplacing(false)
                     }}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                 </>
               )}
@@ -210,7 +208,7 @@ function LinearSettingsCard({ status, busy, setBusy, setStatus, requestDisconnec
         </div>
         <ModalActions>
           <Button variant="bare" disabled={busy} onClick={closeSetup}>
-            Close
+            {t('common.close')}
           </Button>
         </ModalActions>
       </Modal>
@@ -225,6 +223,5 @@ export const linearIntegration: ClientIntegration = {
   SettingsCard: LinearSettingsCard,
   isConnected: (status) => statusOf(status).connected,
   disconnect: () => req<IntegrationsStatus>('/api/integrations/linear', { method: 'DELETE' }),
-  disconnectCopy:
-    'Stop automatic pickup and pending Linear design work, and remove ticket access. Existing canvases stay. To remove the Doop agent from Linear too, uninstall the app in Linear Settings.',
+  disconnectCopy: 'automations.linearDisconnectCopy',
 }

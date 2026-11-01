@@ -4,6 +4,7 @@ import { useStore } from '../lib/store'
 import { locatePresence } from '../lib/locate'
 import { Avatar } from './ui/avatar'
 import { cn } from '@/lib/utils'
+import { useT, type Translate } from '../lib/i18n'
 
 /** True for an agent that is working right now — it posted a status. */
 export function isActiveAgent(p: Presence): boolean {
@@ -55,11 +56,13 @@ const stacked = 'relative z-[1] -ml-[7px] rounded-full first:ml-0'
 const clickable =
   'transition-transform hover:z-10 hover:-translate-y-px focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint'
 
-function presenceLabel(p: Presence) {
-  return `${p.name}${p.kind === 'agent' ? (p.owner ? ` (${p.owner}'s agent)` : ' (agent)') : ''}${p.status ? ` — ${p.status}` : ''}`
+function presenceLabel(p: Presence, t: Translate) {
+  const agent = p.owner ? t('canvas.agentOf', { owner: p.owner }) : t('canvas.agent')
+  return `${p.name}${p.kind === 'agent' ? ` (${agent})` : ''}${p.status ? ` — ${p.status}` : ''}`
 }
 
 function FollowAvatar({ presence: p }: { presence: Presence }) {
+  const t = useT()
   const followed = useStore((s) => s.following === p.clientId)
   const setFollowing = useStore((s) => s.setFollowing)
   return (
@@ -68,7 +71,7 @@ function FollowAvatar({ presence: p }: { presence: Presence }) {
       /* lifted so the next avatar in the stack does not paint over the halo */
       className={cn(stacked, clickable, followed && 'relative z-10')}
       aria-pressed={followed}
-      title={followed ? `Stop following ${p.name}` : `Follow ${p.name} around the canvas`}
+      title={followed ? t('canvas.stopFollowing', { name: p.name }) : t('canvas.followAround', { name: p.name })}
       onClick={() => setFollowing(followed ? null : p.clientId)}
     >
       <PresenceFace
@@ -83,12 +86,13 @@ function FollowAvatar({ presence: p }: { presence: Presence }) {
 }
 
 function JumpAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDelay: number }) {
+  const t = useT()
   const locatable = useStore((s) => locatePresence(p, s) !== undefined)
   const active = isActiveAgent(p)
   const face = <PresenceFace name={p.name} color={p.color} kind={p.kind} glaze={active} glazeDelay={glazeDelay} />
   if (!locatable) {
     return (
-      <span className={cn(stacked, 'relative', active && 'z-[2]')} title={presenceLabel(p)}>
+      <span className={cn(stacked, 'relative', active && 'z-[2]')} title={presenceLabel(p, t)}>
         {face}
       </span>
     )
@@ -97,7 +101,7 @@ function JumpAvatar({ presence: p, glazeDelay }: { presence: Presence; glazeDela
     <button
       type="button"
       className={cn(stacked, clickable, 'relative', active && 'z-[2]')}
-      title={`${presenceLabel(p)} — click to go where it is working`}
+      title={t('canvas.goWhereWorking', { label: presenceLabel(p, t) })}
       onClick={() => {
         const s = useStore.getState()
         const at = locatePresence(p, s)

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { setFramesApproval } from '../lib/frameApproval'
 import { useStore } from '../lib/store'
+import { getLocale, useT, type Translate } from '../lib/i18n'
 import { useFrameSaves } from '../lib/frameSaves'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -9,17 +10,24 @@ import { CheckIcon, ClockIcon } from './ui/icons'
 import { Switch } from './ui/switch'
 import { Tooltip } from './ui/tooltip'
 
+/** Who signed the frame off, and when; "previously" once it changed since. */
+function approvalLine(t: Translate, approval: NonNullable<Frame['approval']>): string {
+  const vars = { name: approval.approvedBy, date: new Date(approval.approvedAt).toLocaleString(getLocale()) }
+  return approval.status === 'ready_for_dev' ? t('stage.approvedByOn', vars) : t('stage.previouslyApprovedByOn', vars)
+}
+
 export function FrameApprovalBadge({ frame, compact = false }: { frame: Frame; compact?: boolean }) {
+  const t = useT()
   const approval = frame.approval
   if (!approval) return null
   const ready = approval.status === 'ready_for_dev'
-  const label = ready ? 'Ready for dev' : 'Needs review'
+  const label = ready ? t('stage.readyForDev') : t('stage.needsReview')
   const Icon = ready ? CheckIcon : ClockIcon
   return (
     <Badge
       tone={ready ? 'success' : 'banned'}
       className="shrink-0"
-      title={`${label} · ${ready ? 'Approved' : 'Previously approved'} by ${approval.approvedBy} on ${new Date(approval.approvedAt).toLocaleString()}`}
+      title={`${label} · ${approvalLine(t, approval)}`}
       aria-label={label}
     >
       <Icon className="size-3" aria-hidden />
@@ -35,6 +43,7 @@ export function FrameApprovalControl({
   frame: Frame
   hasUnsavedChanges?: boolean
 }) {
+  const t = useT()
   const [saving, setSaving] = useState(false)
   const streaming = useStore((s) => !!s.streams[frame.id])
   const pendingSave = useFrameSaves((s) => !!s.pending[frame.id])
@@ -50,20 +59,13 @@ export function FrameApprovalControl({
   }
   return (
     <div className="flex flex-col gap-2">
-      <Tooltip
-        label={
-          frame.approval
-            ? `${ready ? 'Approved' : 'Previously approved'} by ${frame.approval.approvedBy} on ${new Date(frame.approval.approvedAt).toLocaleString()}`
-            : undefined
-        }
-        side="left"
-      >
+      <Tooltip label={frame.approval ? approvalLine(t, frame.approval) : undefined} side="left">
         <label className="flex h-5 cursor-pointer items-center justify-between gap-2 text-label text-ink-faint">
-          Mark as approved
+          {t('stage.markAsApproved')}
           <Switch
             size="sm"
             className="data-[state=checked]:bg-success"
-            aria-label="Mark as approved"
+            aria-label={t('stage.markAsApproved')}
             aria-busy={saving}
             checked={ready}
             disabled={saving || (!ready && awaitingChanges)}
@@ -77,20 +79,14 @@ export function FrameApprovalControl({
         </div>
       )}
       <p className="text-caption text-ink-faint">
-        {ready
-          ? 'Agents can see this screen is approved for implementation.'
-          : frame.approval
-            ? 'This design changed after approval. Review it before marking it ready again.'
-            : 'Approve this screen to let your team and agents know it’s ready to build.'}
+        {ready ? t('stage.approvalReady') : frame.approval ? t('stage.approvalChanged') : t('stage.approvalPrompt')}
       </p>
       {saving && (
         <p role="status" className="text-caption text-ink-faint">
-          Saving…
+          {t('stage.saving')}
         </p>
       )}
-      {!ready && awaitingChanges && (
-        <p className="text-caption text-ink-faint">Wait for changes to finish saving before approving.</p>
-      )}
+      {!ready && awaitingChanges && <p className="text-caption text-ink-faint">{t('stage.approvalWait')}</p>}
       {frame.approval && !ready && (
         <Button
           size="inline"
@@ -99,7 +95,7 @@ export function FrameApprovalControl({
           disabled={saving}
           onClick={() => void save('draft')}
         >
-          Move to draft
+          {t('stage.moveToDraft')}
         </Button>
       )}
     </div>

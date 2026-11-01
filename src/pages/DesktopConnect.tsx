@@ -3,6 +3,7 @@ import { desktopConnectLink, parseDesktopConnectQuery } from '../lib/desktopConn
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
 import { Button } from '../components/ui/button'
 import { Callout } from '../components/ui/callout'
+import { useT } from '../lib/i18n'
 
 /* Step 2 of connecting an integration from the desktop app
    (shared/desktopConnect.ts): the provider sent the system browser back,
@@ -10,6 +11,7 @@ import { Callout } from '../components/ui/callout'
    over the doop:// scheme; the app finishes the connection under its own
    account, whoever is signed in to this browser. */
 export function DesktopConnect() {
+  const t = useT()
   const link = useMemo(() => {
     const request = parseDesktopConnectQuery(location.search)
     return request && desktopConnectLink(request.provider, request.query)
@@ -21,20 +23,16 @@ export function DesktopConnect() {
 
   return (
     <AuthScreen>
-      <AuthCard title={link ? 'Back to the doop app.' : 'Something went wrong.'}>
+      <AuthCard title={link ? t('auth.desktopConnectTitle') : t('auth.somethingWentWrongTitle')}>
         {link ? (
           <>
-            <AuthCardText>
-              Doop finishes connecting in the app, for the account signed in there. You can close this tab afterwards.
-            </AuthCardText>
+            <AuthCardText>{t('auth.desktopConnectBody')}</AuthCardText>
             <Button asChild className="mt-1">
-              <a href={link}>Open doop</a>
+              <a href={link}>{t('auth.openDoop')}</a>
             </Button>
           </>
         ) : (
-          <Callout tone="error">
-            Could not hand the connection over to the doop app. Go back to the app and try again.
-          </Callout>
+          <Callout tone="error">{t('auth.desktopConnectFailed')}</Callout>
         )}
       </AuthCard>
     </AuthScreen>

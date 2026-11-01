@@ -63,6 +63,7 @@ import {
   PlusIcon,
   SearchIcon,
 } from './ui/icons'
+import { useT } from '@/lib/i18n'
 
 /* the tree indents 16px per level; frame rows sit at depth 0 */
 const INDENT = 16
@@ -217,6 +218,7 @@ export function LayersPanel({
   )
   const pickedRows = useMemo(() => new Set(pickedKeys.split('\n')), [pickedKeys])
   const setLayersOpen = useStore((s) => s.setLayersOpen)
+  const t = useT()
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   /* the row being dragged and where it would land; the pointer handlers are
@@ -432,17 +434,17 @@ export function LayersPanel({
       <PanelHeader className="h-10 pl-3.5">
         <span className="flex items-center gap-2">
           <LayersIcon className="size-3.5" />
-          Layers
+          {t('panels.layersTitle')}
         </span>
         {surface === 'inline' ? (
-          <PanelClose label="Close" onClick={onClose} />
+          <PanelClose label={t('common.close')} onClick={onClose} />
         ) : (
-          <Tooltip label="Collapse panel" side="bottom" align="end">
+          <Tooltip label={t('panels.layersCollapsePanel')} side="bottom" align="end">
             <Button
               variant="bare"
               size="icon-sm"
               className="size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
-              aria-label="Collapse panel"
+              aria-label={t('panels.layersCollapsePanel')}
               onClick={() => setLayersOpen(false)}
             >
               <PanelCollapseIcon className="size-3.5" />
@@ -455,23 +457,29 @@ export function LayersPanel({
       <PagesPanel />
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span data-slot="frame-section-heading" className={sectionHeading}>
-          Layers
+          {t('panels.layersTitle')}
         </span>
         <span className="flex gap-1">
-          <Tooltip label="Collapse all" side="bottom">
+          <Tooltip label={t('panels.layersCollapseAll')} side="bottom">
             <Button
               variant="bare"
               size="icon-sm"
               className={sectionBtn}
-              aria-label="Collapse all"
+              aria-label={t('panels.layersCollapseAll')}
               onClick={() => setExpanded(new Set())}
             >
               <CollapseAllIcon className="size-3.5" />
             </Button>
           </Tooltip>
           {!readOnly && (
-            <Tooltip label="New frame" side="bottom" align="end">
-              <Button variant="bare" size="icon-sm" className={sectionBtn} aria-label="New frame" onClick={onAddFrame}>
+            <Tooltip label={t('panels.layersNewFrame')} side="bottom" align="end">
+              <Button
+                variant="bare"
+                size="icon-sm"
+                className={sectionBtn}
+                aria-label={t('panels.layersNewFrame')}
+                onClick={onAddFrame}
+              >
                 <PlusIcon className="size-3.5" />
               </Button>
             </Tooltip>
@@ -490,12 +498,12 @@ export function LayersPanel({
         }}
       >
         {frames.length === 0 && (
-          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">
-            No frames yet. Press + to add one, or ask the agent for a design.
-          </div>
+          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">{t('panels.layersEmpty')}</div>
         )}
         {frames.length > 0 && rows.length === 0 && (
-          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">Nothing matches “{query.trim()}”.</div>
+          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">
+            {t('panels.layersNoMatch', { query: query.trim() })}
+          </div>
         )}
         {rows.map((row) =>
           row.kind === 'frame' ? (
@@ -532,7 +540,7 @@ export function LayersPanel({
             variant="bare"
             inputSize="auto"
             className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
-            placeholder="Search layers"
+            placeholder={t('panels.layersSearch')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -547,20 +555,17 @@ export function LayersPanel({
 export function LayersRailToggle() {
   const setLayersOpen = useStore((s) => s.setLayersOpen)
   const count = usePageCanvas()?.frames.length ?? 0
+  const t = useT()
   return (
     <Toolbar
-      aria-label="Layers panel"
+      aria-label={t('panels.layersRailAria')}
       orientation="vertical"
       className="pointer-events-auto absolute top-2.5 left-3.5 z-[35]"
     >
-      <ToolbarControl label="Expand panel" side="right" onClick={() => setLayersOpen(true)}>
+      <ToolbarControl label={t('panels.layersExpandPanel')} side="right" onClick={() => setLayersOpen(true)}>
         <PanelExpandIcon />
       </ToolbarControl>
-      <ToolbarControl
-        label={`Layers · ${count} ${count === 1 ? 'frame' : 'frames'}`}
-        side="right"
-        onClick={() => setLayersOpen(true)}
-      >
+      <ToolbarControl label={t('panels.layersRailCount', { count })} side="right" onClick={() => setLayersOpen(true)}>
         <LayersIcon />
       </ToolbarControl>
     </Toolbar>
@@ -593,6 +598,7 @@ function FrameRow({
   )
   /* Paste from this menu lands mid-stage rather than under the rail */
   const pasteAt = useRef({ x: 0, y: 0 })
+  const t = useT()
   return (
     <>
       <ContextMenu>
@@ -625,7 +631,7 @@ function FrameRow({
                 {stream && (
                   <span className={editorChip} style={{ background: stream.color }}>
                     <AgentIcon name={stream.name} size={8} color="#fff" />
-                    designing…
+                    {t('panels.layersDesigning')}
                   </span>
                 )}
                 {/* who else is in the frame right now: a colour dot each, no
@@ -654,7 +660,7 @@ function FrameRow({
             drop === 'inside' && 'shadow-[inset_0_0_0_1.5px_var(--brand)]',
           )}
         >
-          empty frame
+          {t('panels.layersEmptyFrame')}
         </div>
       )}
     </>
@@ -806,6 +812,7 @@ function Row({
   ...rest
 }: RowProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const t = useT()
   /* a selection made in the frame may sit far down the tree — bring it into view */
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: 'nearest' })
@@ -874,7 +881,7 @@ function Row({
         >
           {onToggleHidden && (
             <RowToggle
-              label={hidden ? 'Show' : 'Hide'}
+              label={hidden ? t('panels.layersShow') : t('panels.layersHide')}
               on={!!hidden}
               selected={selected}
               onToggle={onToggleHidden}
@@ -883,7 +890,7 @@ function Row({
           )}
           {onToggleLocked && (
             <RowToggle
-              label={locked ? 'Unlock' : 'Lock'}
+              label={locked ? t('panels.layersUnlock') : t('panels.layersLock')}
               on={!!locked}
               selected={selected}
               onToggle={onToggleLocked}

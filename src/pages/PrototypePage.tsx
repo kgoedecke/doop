@@ -7,6 +7,7 @@ import { navigate } from '../lib/navigate'
 import { PrototypePlayer } from '../components/PrototypePlayer'
 import { Button } from '../components/ui/button'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
+import { useT } from '@/lib/i18n'
 
 /**
  * /c/<canvasId>/proto[?frame=<id>|?page=<id>] — the prototype player as a
@@ -20,6 +21,7 @@ export function PrototypePage({ canvasId }: { canvasId: string }) {
   const notFound = useStore((s) => s.canvasNotFound)
   /* read once: later navigations rewrite ?frame= as the flow moves on */
   const [query] = useState(() => new URLSearchParams(location.search))
+  const t = useT()
 
   useEffect(() => {
     connect(canvasId)
@@ -33,10 +35,10 @@ export function PrototypePage({ canvasId }: { canvasId: string }) {
   if (notFound)
     return (
       <AuthScreen>
-        <AuthCard title="Prototype not found" align="center">
-          <AuthCardText>This canvas doesn’t exist, or the link is wrong.</AuthCardText>
+        <AuthCard title={t('panels.protoNotFound')} align="center">
+          <AuthCardText>{t('panels.protoNotFoundText')}</AuthCardText>
           <Button className="self-center" onClick={() => navigate('/')}>
-            Back to your canvases
+            {t('panels.protoBackToCanvases')}
           </Button>
         </AuthCard>
       </AuthScreen>
@@ -49,10 +51,10 @@ export function PrototypePage({ canvasId }: { canvasId: string }) {
   if (!start)
     return (
       <AuthScreen>
-        <AuthCard title="Nothing to play yet" align="center">
-          <AuthCardText>This page of the canvas has no frames.</AuthCardText>
+        <AuthCard title={t('panels.protoNothing')} align="center">
+          <AuthCardText>{t('panels.protoNothingText')}</AuthCardText>
           <Button className="self-center" onClick={() => navigate(`/c/${canvasId}`)}>
-            Open the canvas
+            {t('panels.protoOpenCanvas')}
           </Button>
         </AuthCard>
       </AuthScreen>

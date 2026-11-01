@@ -12,6 +12,7 @@ import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread, PIN_SCALE } from './CommentPopovers'
 import { cn } from '@/lib/utils'
 import { CommentIcon } from './ui/icons'
+import { useT } from '../lib/i18n'
 
 /** Where the Comment tool was clicked on empty canvas: a world point on the
  *  active page. `at` makes a second click on the same spot a new request. */
@@ -47,6 +48,7 @@ export function CanvasComments({
   /** the composer posted or was cancelled */
   onComposeDone: () => void
 }) {
+  const t = useT()
   const canvasId = useStore((s) => s.canvas?.id)
   const pageId = useStore((s) => (s.canvas ? (s.activePageId ?? canvasPages(s.canvas)[0]!.id) : null))
   const all = useStore((s) => s.comments)
@@ -192,7 +194,7 @@ export function CanvasComments({
             className={cn('absolute -top-[13px]', composeAt.placement.side === 'left' ? 'right-[20px]' : 'left-[20px]')}
             style={composeAt.placement.shift ? { transform: `translateX(${composeAt.placement.shift}px)` } : undefined}
           >
-            <CommentComposer placeholder="Leave a comment here…" onSubmit={post} onCancel={close} />
+            <CommentComposer placeholder={t('stage.commentHere')} onSubmit={post} onCancel={close} />
           </div>
         </div>
       )}

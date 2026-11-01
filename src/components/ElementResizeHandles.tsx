@@ -11,7 +11,6 @@ import {
   RESIZE_EDGES,
   handleAnchor,
   handleCursor,
-  handleLabel,
   movesHeight,
   movesWidth,
   resizePatch,
@@ -20,6 +19,7 @@ import {
   type ResizeHandle,
   type Size,
 } from '../lib/elementResize'
+import { useT, type PlainMessageKey } from '../lib/i18n'
 
 export interface ElementRect {
   x: number
@@ -45,6 +45,14 @@ const BADGE_CLASS =
 const BADGE_TRANSFORM = 'translate(-50%, calc(10px / var(--zoom, 1))) scale(calc(1 / var(--zoom, 1)))'
 /* a press that travels less than this is a click, not a resize */
 const MOVE_THRESHOLD_PX = 2
+
+/** A grip's accessible name: which way it resizes. Shared with the frame's
+ *  grips (FrameResizeHandles). */
+export function handleLabelKey(handle: ResizeHandle): PlainMessageKey {
+  if (!movesHeight(handle)) return 'stage.resizeWidth'
+  if (!movesWidth(handle)) return 'stage.resizeHeight'
+  return 'stage.resize'
+}
 
 /** The selection furniture of an element inside a frame, the way Paper draws
  *  it: a square grip in each corner, grabbable (unmarked) edges, and the box's
@@ -72,6 +80,7 @@ export function ElementResizeHandles({
      size in the live document */
   const stop = useRef<(() => void) | null>(null)
   useEffect(() => () => stop.current?.(), [])
+  const t = useT()
 
   function start(e: React.PointerEvent, handle: ResizeHandle) {
     if (e.button !== 0) return
@@ -275,7 +284,7 @@ export function ElementResizeHandles({
           <div
             key={handle}
             data-resize-handle={handle}
-            aria-label={handleLabel(handle)}
+            aria-label={t(handleLabelKey(handle))}
             className="pointer-events-auto absolute touch-none"
             style={{
               left: `${anchor.x * 100}%`,
@@ -296,7 +305,7 @@ export function ElementResizeHandles({
           <div
             key={handle}
             data-resize-handle={handle}
-            aria-label={handleLabel(handle)}
+            aria-label={t(handleLabelKey(handle))}
             className={CORNER_CLASS}
             style={{
               left: `${anchor.x * 100}%`,

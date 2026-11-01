@@ -3,6 +3,7 @@ import { authClient } from '../lib/auth'
 import { api } from '../lib/api'
 import type { NotificationSettings } from '../../shared/notifications'
 import { posthog } from '../lib/posthog'
+import { useT } from '../lib/i18n'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
@@ -16,6 +17,7 @@ import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from '.
  *  get back into one. Everything here is better-auth's own account surface —
  *  no endpoints of ours. */
 export function AccountSettings() {
+  const t = useT()
   const { data: session } = authClient.useSession()
   const user = session?.user
 
@@ -52,10 +54,10 @@ export function AccountSettings() {
     setNameError('')
     const { error } = await authClient.updateUser({ name: name.trim() })
     setSavingName(false)
-    if (error) return setNameError(error.message || 'That name could not be saved')
+    if (error) return setNameError(error.message || t('account.nameSaveFailed'))
     posthog.capture('account_name_changed')
     setDraft(null)
-    setNameNote('Saved — agents pick it up within a minute')
+    setNameNote(t('account.nameSaved'))
   }
 
   async function savePassword() {
@@ -70,11 +72,11 @@ export function AccountSettings() {
       revokeOtherSessions: true,
     })
     setSavingPw(false)
-    if (error) return setPwError(error.message || 'That password could not be changed')
+    if (error) return setPwError(error.message || t('account.passwordChangeFailed'))
     posthog.capture('account_password_changed')
     setCurrent('')
     setNext('')
-    setPwNote('Password updated — every other session was signed out')
+    setPwNote(t('account.passwordUpdated'))
   }
 
   async function setCommentEmails(on: boolean) {
@@ -86,7 +88,7 @@ export function AccountSettings() {
       setNotify(await api.setNotificationPrefs({ commentEmails: on }))
       posthog.capture('comment_emails_toggled', { on })
     } catch {
-      setNotifyError('That could not be saved — try again')
+      setNotifyError(t('account.notifySaveFailed'))
       refreshNotify()
     } finally {
       setSavingNotify(false)
@@ -97,25 +99,22 @@ export function AccountSettings() {
     if (!user?.email) return
     setVerifyNote('')
     const { error } = await authClient.sendVerificationEmail({ email: user.email })
-    setVerifyNote(error ? error.message || 'That email could not be sent' : 'Verification email sent')
+    setVerifyNote(error ? error.message || t('account.verificationSendFailed') : t('account.verificationSent'))
   }
 
   return (
     <>
       <SettingsCard>
         <CardHeader>
-          <CardTitle>Profile</CardTitle>
-          <CardDescription>
-            Your name is the identity shown on cursors, in the activity feed, and on everything you leave for an agent.
-            Agents see the change within a minute.
-          </CardDescription>
+          <CardTitle>{t('account.profileTitle')}</CardTitle>
+          <CardDescription>{t('account.profileDescription')}</CardDescription>
         </CardHeader>
 
         <CardRow
-          label="Name"
+          label={t('account.nameRow')}
           action={
             <Button size="sm" disabled={!dirty || savingName} onClick={saveName}>
-              {savingName ? 'Saving…' : 'Save'}
+              {savingName ? t('account.saving') : t('common.save')}
             </Button>
           }
           control={
@@ -127,7 +126,7 @@ export function AccountSettings() {
                 setNameError('')
               }}
               maxLength={60}
-              aria-label="Display name"
+              aria-label={t('account.displayNameAria')}
             />
           }
         >
@@ -136,51 +135,49 @@ export function AccountSettings() {
           ) : nameNote ? (
             <Note tone="success">{nameNote}</Note>
           ) : dirty ? (
-            <Note>Changed — not saved yet</Note>
+            <Note>{t('account.nameUnsaved')}</Note>
           ) : null}
         </CardRow>
 
         <CardRow
-          label="Email"
+          label={t('account.emailRow')}
           action={
             user?.emailVerified ? (
-              <Note>Sign-in address — not changeable yet</Note>
+              <Note>{t('account.emailNotChangeable')}</Note>
             ) : (
               <Button size="sm" onClick={resendVerification}>
-                Resend verification
+                {t('account.resendVerification')}
               </Button>
             )
           }
         >
           <span className="min-w-0 font-mono text-body [overflow-wrap:anywhere]">{user?.email}</span>
-          {user?.emailVerified ? <Badge tone="success">verified</Badge> : <Badge>unverified</Badge>}
+          {user?.emailVerified ? (
+            <Badge tone="success">{t('account.verified')}</Badge>
+          ) : (
+            <Badge>{t('account.unverified')}</Badge>
+          )}
           {verifyNote && <Note tone="success">{verifyNote}</Note>}
         </CardRow>
       </SettingsCard>
 
       <SettingsCard>
         <CardHeader>
-          <CardTitle>Notifications</CardTitle>
-          <CardDescription>
-            Email about what happens on your canvases while you are not looking at them. Your own comments never trigger
-            one.
-          </CardDescription>
+          <CardTitle>{t('account.notificationsTitle')}</CardTitle>
+          <CardDescription>{t('account.notificationsDescription')}</CardDescription>
         </CardHeader>
-        <CardRow label="Comment emails">
+        <CardRow label={t('account.commentEmailsRow')}>
           <label className="relative flex cursor-pointer items-center gap-2.5 text-body text-ink">
             <Checkbox
               checked={notify?.commentEmails ?? true}
               disabled={!notify || !notify.emailConfigured || savingNotify}
               onChange={(e) => void setCommentEmails(e.target.checked)}
-              aria-label="Email me about new comments and replies"
+              aria-label={t('account.commentEmailsAria')}
             />
-            <span>
-              New comments and replies on canvases you own, were invited to, or wrote in — bundled into one email per
-              canvas every couple of minutes.
-            </span>
+            <span>{t('account.commentEmailsLabel')}</span>
           </label>
           {notify && !notify.emailConfigured ? (
-            <Note>This doop has no email set up (SMTP_HOST), so nothing is sent either way.</Note>
+            <Note>{t('account.emailNotConfigured')}</Note>
           ) : notifyError ? (
             <Note tone="error">{notifyError}</Note>
           ) : null}
@@ -189,13 +186,11 @@ export function AccountSettings() {
 
       <SettingsCard>
         <CardHeader>
-          <CardTitle>Password</CardTitle>
-          <CardDescription>
-            Changing it signs out every other browser and device — this one stays signed in.
-          </CardDescription>
+          <CardTitle>{t('account.passwordTitle')}</CardTitle>
+          <CardDescription>{t('account.passwordDescription')}</CardDescription>
         </CardHeader>
         <CardRow
-          label="Current password"
+          label={t('account.currentPassword')}
           control={
             <Input
               type="password"
@@ -205,15 +200,15 @@ export function AccountSettings() {
                 setPwError('')
               }}
               autoComplete="current-password"
-              aria-label="Current password"
+              aria-label={t('account.currentPassword')}
             />
           }
         />
         <CardRow
-          label="New password"
+          label={t('account.newPassword')}
           action={
             <Button size="sm" disabled={savingPw || !current || next.length < 8} onClick={savePassword}>
-              {savingPw ? 'Updating…' : 'Update password'}
+              {savingPw ? t('account.updatingPassword') : t('account.updatePassword')}
             </Button>
           }
           control={
@@ -225,7 +220,7 @@ export function AccountSettings() {
                 setPwError('')
               }}
               autoComplete="new-password"
-              aria-label="New password"
+              aria-label={t('account.newPassword')}
             />
           }
         >
@@ -234,7 +229,7 @@ export function AccountSettings() {
           ) : pwNote ? (
             <Note tone="success">{pwNote}</Note>
           ) : (
-            <Note>At least 8 characters</Note>
+            <Note>{t('account.passwordMinLength')}</Note>
           )}
         </CardRow>
       </SettingsCard>

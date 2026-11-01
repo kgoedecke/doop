@@ -17,7 +17,8 @@ import { Input } from './ui/input'
 import { Dot } from './ui/dot'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { Segmented, SegmentedItem } from './ui/segmented'
-import { reasoningEffortOptions } from '../../shared/modelMenu'
+import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
+import { t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { CheckIcon, ChevronDownIcon } from './ui/icons'
@@ -114,6 +115,14 @@ function planName(plan: string): string {
   )
 }
 
+/** The effort picker's labels; the ids are what the server stores. */
+const EFFORT_LABELS: Record<ReasoningEffort, { name: PlainMessageKey; blurb: PlainMessageKey }> = {
+  low: { name: 'models.effortLow', blurb: 'models.effortLowBlurb' },
+  medium: { name: 'models.effortMedium', blurb: 'models.effortMediumBlurb' },
+  high: { name: 'models.effortHigh', blurb: 'models.effortHighBlurb' },
+  xhigh: { name: 'models.effortXhigh', blurb: 'models.effortXhighBlurb' },
+}
+
 const planFlow = 'mt-[14px]'
 const maSteps = 'mb-3 ml-[18px] mt-[10px] text-body leading-[1.7] text-ink-soft [&_code]:font-mono [&_code]:text-label'
 const maWaiting = 'mt-[10px] flex items-center gap-[9px] text-body text-ink-soft'
@@ -126,6 +135,7 @@ const maInput = 'rounded-pill border-ink px-3 py-[10px] font-mono focus:ring-0 m
 const rowBtn = 'max-md:justify-center'
 
 export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
+  const t = useT()
   const desktop = isDesktopShell()
   const { account, refresh, set } = useModelAccount()
   /* bumped by `settle`, so a rotated key reloads the catalog it unlocks */
@@ -186,7 +196,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         await selectServer()
       } catch {
         setSwitchFailed(true)
-        setError('ChatGPT connected, but switching providers failed. Retry the switch without signing in again.')
+        /* the free translator keeps this callback stable for the polling effect */
+        setError(translate('models.chatgptSwitchFailed'))
       } finally {
         setBusy(false)
       }
@@ -216,7 +227,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           (flow) => {
             if (!cancelled && 'userCode' in flow && flow.status === 'error') {
               setDevice(null)
-              setError(flow.error || 'That sign-in did not complete')
+              setError(flow.error || translate('models.signInIncomplete'))
             }
           },
           () => {},
@@ -231,7 +242,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   const fail = (e: unknown) => {
     const body = (e as { body?: { error?: string } })?.body
-    setError(body?.error || (e instanceof Error ? e.message : 'That did not work — try again'))
+    setError(body?.error || (e instanceof Error ? e.message : t('models.failedRetry')))
   }
 
   const start = async () => {
@@ -377,13 +388,22 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const effortPicker = () =>
     account.effort ? (
       <div className="mt-[10px] flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="text-body text-ink-soft">Reasoning effort</span>
-        <Segmented aria-label="Reasoning effort" value={account.effort} onValueChange={pickEffort} disabled={busy}>
-          {reasoningEffortOptions(account.effort).map((e) => (
-            <SegmentedItem key={e.id} value={e.id} title={e.blurb}>
-              {e.name}
-            </SegmentedItem>
-          ))}
+        <span className="text-body text-ink-soft">{t('models.reasoningEffort')}</span>
+        <Segmented
+          aria-label={t('models.reasoningEffort')}
+          value={account.effort}
+          onValueChange={pickEffort}
+          disabled={busy}
+        >
+          {reasoningEffortOptions(account.effort).map((e) => {
+            /* a server default outside the four keeps its raw id as its name */
+            const labels = isReasoningEffort(e.id) ? EFFORT_LABELS[e.id] : undefined
+            return (
+              <SegmentedItem key={e.id} value={e.id} title={labels ? t(labels.blurb) : t('models.effortServerDefault')}>
+                {labels ? t(labels.name) : e.name}
+              </SegmentedItem>
+            )
+          })}
         </Segmented>
       </div>
     ) : null
@@ -401,7 +421,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               .slice(0, 6)
               .map((m) => m.name)
               .join(' · ')}
-            {models.length > 6 ? ' and more' : ''}
+            {models.length > 6 ? t('models.andMore') : ''}
           </p>
         )
       }
@@ -414,7 +434,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               disabled={busy}
               className="gap-[7px] rounded-pill border border-line px-3 text-body font-medium text-ink"
             >
-              {current?.name ?? account.model ?? 'Pick a model'}
+              {current?.name ?? account.model ?? t('models.pickModel')}
               {current?.vision === false && <NoVisionBadge />}
               <ChevronDownIcon width={14} height={14} aria-hidden />
             </Button>
@@ -437,9 +457,18 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       )
     }
     return live ? (
-      <ToggleChipGroup aria-label="Model" value={account.model ?? ''} onValueChange={pickModel} disabled={busy}>
+      <ToggleChipGroup
+        aria-label={t('models.model')}
+        value={account.model ?? ''}
+        onValueChange={pickModel}
+        disabled={busy}
+      >
         {models.map((m) => (
-          <ToggleChipItem key={m.id} value={m.id} title={m.vision === false ? `${m.blurb} ${VISION_NOTE}` : m.blurb}>
+          <ToggleChipItem
+            key={m.id}
+            value={m.id}
+            title={m.vision === false ? `${m.blurb} ${t('models.visionNote')}` : m.blurb}
+          >
             {m.id === account.model && <Tick />}
             {m.name}
           </ToggleChipItem>
@@ -481,7 +510,11 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               {cfg.title}
             </h3>
             <span className={planPill(live)}>
-              {live && showKey !== cfg.kind ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+              {live && showKey !== cfg.kind
+                ? local?.enabled
+                  ? t('models.connected')
+                  : t('models.activeConnected')
+                : t('models.notConnected')}
             </span>
           </div>
           <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">{cfg.lede}</p>
@@ -498,7 +531,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                       setShowKey(cfg.kind)
                     }}
                   >
-                    Rotate key
+                    {t('models.rotateKey')}
                   </Button>
                   {local?.enabled && (
                     <Button
@@ -507,18 +540,18 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                         selectServer().catch(fail)
                       }}
                     >
-                      Use instead
+                      {t('models.useInstead')}
                     </Button>
                   )}
                   <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                    Disconnect
+                    {t('models.disconnect')}
                   </Button>
                 </div>
               </div>
               {chosen && (chosen.blurb || chosen.vision === false) && (
                 <p className="mt-[10px] text-body text-ink-faint">
                   {chosen.blurb}
-                  {chosen.vision === false && ` ${VISION_NOTE}`}
+                  {chosen.vision === false && ` ${t('models.visionNote')}`}
                 </p>
               )}
               {catalog?.error && <p className="mt-[10px] text-body text-ink-faint">{catalog.error}</p>}
@@ -526,9 +559,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             </>
           ) : showKey === cfg.kind ? (
             <div className={planFlow}>
-              <p className="mb-3 mt-2 text-body leading-[1.55] text-ink-soft">
-                The key is stored on the server and never shown again.
-              </p>
+              <p className="mb-3 mt-2 text-body leading-[1.55] text-ink-soft">{t('models.keyStoredNote')}</p>
               <Input
                 className={maInput}
                 value={apiKey}
@@ -540,10 +571,10 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               />
               <div className={maActions}>
                 <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
-                  {busy ? 'Saving…' : live ? 'Rotate key' : 'Save key'}
+                  {busy ? t('models.saving') : live ? t('models.rotateKey') : t('models.saveKey')}
                 </Button>
                 <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
               </div>
             </div>
@@ -558,7 +589,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 }}
                 disabled={busy}
               >
-                {replaces ? 'Use instead' : 'Connect'}
+                {replaces ? t('models.useInstead') : t('models.connect')}
               </Button>
             </div>
           )}
@@ -577,24 +608,26 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
               <h3 className="font-display text-heading font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-heading">
-                Codex Plan
+                {t('models.codexPlan')}
               </h3>
               <span className={planPill(onChatgpt)}>
-                {onChatgpt ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+                {onChatgpt
+                  ? local?.enabled
+                    ? t('models.connected')
+                    : t('models.activeConnected')
+                  : t('models.notConnected')}
               </span>
             </div>
-            <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">
-              Route OpenAI models through your ChatGPT subscription
-            </p>
+            <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">{t('models.codexLede')}</p>
             {onChatgpt && account.email && (
               <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-body text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
-                <dt>Connected as</dt>
+                <dt>{t('models.connectedAs')}</dt>
                 <dd className="min-w-0">
                   <code className={planAsCode}>{account.email}</code>
                 </dd>
                 {account.plan && (
                   <>
-                    <dt className="max-md:mt-2">Plan</dt>
+                    <dt className="max-md:mt-2">{t('models.plan')}</dt>
                     <dd className="min-w-0">
                       <code className={planAsCode}>{planName(account.plan)}</code>
                     </dd>
@@ -610,11 +643,11 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                   <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
                     {(local?.enabled || switchFailed) && (
                       <Button disabled={busy} onClick={() => activateChatgpt(account)}>
-                        {switchFailed ? 'Retry switch' : 'Use instead'}
+                        {switchFailed ? t('models.retrySwitch') : t('models.useInstead')}
                       </Button>
                     )}
                     <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                      Disconnect
+                      {t('models.disconnect')}
                     </Button>
                   </div>
                 </div>
@@ -625,33 +658,35 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               <div className={planFlow}>
                 <ol className={maSteps}>
                   <li>
-                    One-time setup: turn on <b>device code authorization</b> in ChatGPT → Settings → Security. (On a
-                    workspace account an admin has to allow it.)
+                    {t('models.deviceStep1Before')}
+                    <b>{t('models.deviceStep1Bold')}</b>
+                    {t('models.deviceStep1After')}
                   </li>
                   <li>
-                    Open{' '}
+                    {t('models.deviceStep2Before')}{' '}
                     <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
                       {device.verificationUrl.replace(/^https:\/\//, '')}
                     </a>{' '}
-                    and enter this code:
+                    {t('models.deviceStep2After')}
                   </li>
                 </ol>
                 <CodeBlock text={device.userCode} />
                 <p className={maWaiting}>
-                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" /> Waiting for approval…
+                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" />{' '}
+                  {t('models.waitingApproval')}
                 </p>
                 <div className={maActions}>
                   <Button asChild variant="primary" className={rowBtn}>
                     <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
-                      Open verification page
+                      {t('models.openVerificationPage')}
                     </a>
                   </Button>
                   <Button variant="ghost" className={rowBtn} onClick={cancelDevice}>
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                 </div>
                 <Button variant="bare" size="sm" className={maToggle} onClick={usePasteFlow} disabled={busy}>
-                  Device codes not available on your account? Use the browser sign-in instead
+                  {t('models.useBrowserSignIn')}
                 </Button>
               </div>
             ) : waiting ? (
@@ -659,8 +694,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 {/* Doop holds the loopback port itself, so approving is the
                     whole job — this row flips on its own. */}
                 <p className={maWaiting}>
-                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" /> Waiting for you to
-                  approve it in the other tab…
+                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" />{' '}
+                  {t('models.waitingOtherTab')}
                 </p>
                 <div className={maActions}>
                   <Button asChild variant="ghost" className={rowBtn}>
@@ -674,18 +709,22 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                     className={cn(maToggle, 'mt-0 underline')}
                     onClick={() => setWaiting(false)}
                   >
-                    Paste the redirect URL instead
+                    {t('models.pasteRedirectInstead')}
                   </Button>
                 </div>
               </div>
             ) : authUrl ? (
               <div className={planFlow}>
                 <ol className={maSteps}>
-                  <li>Approve the connection in the tab that just opened.</li>
+                  <li>{t('models.pasteStep1')}</li>
                   <li>
-                    You will land on a <code>localhost:1455</code> page that <b>fails to load</b> — that is expected.
+                    {t('models.pasteStep2Before')}
+                    <code>localhost:1455</code>
+                    {t('models.pasteStep2Middle')}
+                    <b>{t('models.pasteStep2Bold')}</b>
+                    {t('models.pasteStep2After')}
                   </li>
-                  <li>Copy that page's full address and paste it below.</li>
+                  <li>{t('models.pasteStep3')}</li>
                 </ol>
                 <Input
                   className={maInput}
@@ -697,7 +736,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 />
                 <div className={maActions}>
                   <Button variant="primary" className={rowBtn} onClick={finish} disabled={busy || !redirect.trim()}>
-                    {busy ? 'Connecting…' : 'Finish connecting'}
+                    {busy ? t('models.connecting') : t('models.finishConnecting')}
                   </Button>
                   <Button asChild variant="ghost" className={rowBtn}>
                     <a href={authUrl} target="_blank" rel="noreferrer noopener">
@@ -710,7 +749,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               <div className={actionsRow}>
                 {modelPicker(false, 'chatgpt')}
                 <Button className={rowBtn} onClick={start} disabled={busy}>
-                  {busy ? 'Opening…' : replaces ? 'Use instead' : 'Connect'}
+                  {busy ? t('models.opening') : replaces ? t('models.useInstead') : t('models.connect')}
                 </Button>
               </div>
             )}
@@ -720,24 +759,24 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
       {keySection({
         kind: 'openai-key',
-        title: 'OpenAI API key',
-        lede: 'Pay per token on your own OpenAI account — no ChatGPT subscription involved',
+        title: t('models.openaiKeyTitle'),
+        lede: t('models.openaiKeyLede'),
         mark: <OpenAiMark />,
         placeholder: 'sk-…',
       })}
 
       {keySection({
         kind: 'openrouter-key',
-        title: 'OpenRouter API key',
-        lede: 'One key for Kimi, Qwen, GLM, DeepSeek, MiniMax, Gemini and more — pay per token on your OpenRouter account',
+        title: t('models.openrouterKeyTitle'),
+        lede: t('models.openrouterKeyLede'),
         mark: <OpenRouterMark />,
         placeholder: 'sk-or-…',
       })}
 
       {keySection({
         kind: 'gemini-key',
-        title: 'Gemini API key',
-        lede: 'Google’s Gemini models, plus Nano Banana image generation — pay per token on your Google AI account',
+        title: t('models.geminiKeyTitle'),
+        lede: t('models.geminiKeyLede'),
         mark: <GeminiMark />,
         placeholder: 'AIza…',
       })}
@@ -745,8 +784,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {desktop && <LocalClaudeRow />}
       {keySection({
         kind: 'anthropic-key',
-        title: 'Claude API key',
-        lede: 'Pay per token on your Anthropic account. Runs on Doop’s server.',
+        title: t('models.claudeKeyTitle'),
+        lede: t('models.claudeKeyLede'),
         mark: <AgentIcon name="claude" size={20} />,
         placeholder: 'sk-ant-…',
       })}
@@ -758,16 +797,15 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   )
 }
 
-const VISION_NOTE = 'Text-only: this model can’t see screenshots, so designs aren’t visually reviewed.'
-
 function Tick() {
   return <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
 }
 
 function NoVisionBadge() {
+  const t = useT()
   return (
     <span className="rounded-[5px] bg-paper-deep px-[6px] py-[1px] text-micro font-medium uppercase tracking-[0.04em] text-ink-faint">
-      no visual review
+      {t('models.noVisualReview')}
     </span>
   )
 }

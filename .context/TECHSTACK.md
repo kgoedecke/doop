@@ -295,6 +295,15 @@
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
+- Interface language (`src/lib/i18n/`, no library): English (`en/`, the source catalog, one
+  `as const` namespace per area) and Brazilian Portuguese (`pt-BR/`, typed `Catalog`, so a missing
+  key fails typecheck). Components call `useT()` and `t('namespace.key', vars)`; `{name}`
+  placeholders are type-checked, `{ one, other }` values pick a plural by `{count}`, and a key kept
+  in a table is a `PlainMessageKey` translated at render. The active language is this browser's pick
+  (`doop-locale` in `localStorage`, Settings -> Appearance or the account menu), else the server's
+  `DEFAULT_LOCALE` (`GET /api/locale-config`, asked once before React mounts), else `en`; the list
+  lives in `shared/locales.ts`. `tests/i18n.test.ts` checks every catalog against English. Screens
+  not yet converted still render English.
 - Home (`src/pages/Home.tsx`, `src/components/HomeHero.tsx`): a 12.5px rail (canvases, workspaces,
   explore, resources, agents, an Ask Doop pill bound to ⌘/), Import + New canvas in the top bar, and
   a hero over the brand's gradient wave: the hopping Disc-D, a greeting, a strip of suggestion chips

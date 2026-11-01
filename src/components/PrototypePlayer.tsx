@@ -14,6 +14,7 @@ import {
 import { prototypePath } from '../lib/prototype'
 import { IconButton } from './ui/icon-button'
 import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, XIcon } from './ui/icons'
+import { t as translate, useT } from '@/lib/i18n'
 
 /* One screen on the player's history stack: the frame it shows and how it
    arrived, so Back can play that transition in reverse. The key is unique per
@@ -67,6 +68,7 @@ export function PrototypePlayer({
   const frames = useStore((s) => s.canvas?.frames)
   const canvasId = useStore((s) => s.canvas?.id)
   const frameById = useCallback((id: string) => frames?.find((f) => f.id === id), [frames])
+  const t = useT()
 
   const seq = useRef(0)
   const nextKey = () => ++seq.current
@@ -137,7 +139,7 @@ export function PrototypePlayer({
   }
 
   function navigate(frameId: string, transition: ProtoTransition, duration: number) {
-    if (!frameById(frameId)) return flash('That screen is no longer on the canvas')
+    if (!frameById(frameId)) return flash(translate('panels.protoScreenGone'))
     settle()
     const current = stackRef.current
     const from = current.at(-1)!
@@ -151,7 +153,7 @@ export function PrototypePlayer({
   /* the browser's history moved somewhere other than one screen back: show
      that screen at that depth, keeping the screens before it */
   function jumpTo(frameId: string, depth: number) {
-    if (!frameById(frameId)) return flash('That screen is no longer on the canvas')
+    if (!frameById(frameId)) return flash(translate('panels.protoScreenGone'))
     settle()
     const kept = stackRef.current.filter((e) => e.depth < depth)
     setOverlays([])
@@ -173,7 +175,7 @@ export function PrototypePlayer({
     settle()
     const from = current.at(-1)!
     const prev = current.at(-2)!
-    if (!frameById(prev.frameId)) return flash('That screen is no longer on the canvas')
+    if (!frameById(prev.frameId)) return flash(translate('panels.protoScreenGone'))
     const to = { ...prev, key: nextKey() }
     setOverlays([])
     setStack([...current.slice(0, -2), to])
@@ -181,7 +183,7 @@ export function PrototypePlayer({
   }
 
   function openOverlay(frameId: string, transition: ProtoTransition, duration: number) {
-    if (!frameById(frameId)) return flash('That overlay is no longer on the canvas')
+    if (!frameById(frameId)) return flash(translate('panels.protoOverlayGone'))
     setOverlays([...overlaysRef.current, entryFor(frameId, nextKey(), transition, duration)])
   }
 
@@ -384,7 +386,7 @@ export function PrototypePlayer({
     <div
       className="fixed inset-0 z-[80] overflow-hidden bg-code"
       role="dialog"
-      aria-label={`Prototype: ${shownFrame?.name ?? 'missing screen'}`}
+      aria-label={t('panels.protoAria', { name: shownFrame?.name ?? t('panels.protoMissingLower') })}
       data-prototype-player=""
     >
       {base.map(({ entry, role }) => {
@@ -445,35 +447,41 @@ export function PrototypePlayer({
 
       <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-pill bg-black/55 p-1 text-code-ink opacity-70 backdrop-blur-[6px] transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100">
         <span className="max-w-[180px] truncate px-2 text-caption text-code-ink/80" data-proto-current="">
-          {shownFrame?.name ?? 'Missing screen'}
+          {shownFrame?.name ?? t('panels.protoMissing')}
         </span>
         <IconButton
           size="sm"
           className={playerBtn}
-          aria-label="Back"
+          aria-label={t('common.back')}
           disabled={stack.length < 2 && !overlays.length}
           onClick={() => back()}
         >
           <ArrowLeftIcon size="rail" />
         </IconButton>
-        <IconButton size="sm" className={playerBtn} aria-label="Restart prototype" onClick={restart}>
+        <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoRestart')} onClick={restart}>
           <HistoryIcon size="rail" />
         </IconButton>
-        <IconButton size="sm" className={playerBtn} aria-label="Show hotspots" onClick={flashHotspots}>
+        <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoHotspots')} onClick={flashHotspots}>
           <HotspotIcon size="rail" />
         </IconButton>
         {onClose && canvasId && (
           <IconButton
             size="sm"
             className={playerBtn}
-            aria-label="Open prototype in a new tab"
+            aria-label={t('panels.protoNewTab')}
             onClick={() => window.open(prototypePath(canvasId, current.frameId), '_blank', 'noopener')}
           >
             <ExportIcon size="rail" />
           </IconButton>
         )}
         {onClose && (
-          <IconButton size="sm" className={playerBtn} aria-label="Exit prototype" title="Exit (Esc)" onClick={onClose}>
+          <IconButton
+            size="sm"
+            className={playerBtn}
+            aria-label={t('panels.protoExit')}
+            title={t('panels.protoExitTitle')}
+            onClick={onClose}
+          >
             <XIcon size="rail" />
           </IconButton>
         )}
@@ -547,6 +555,7 @@ function ProtoScreen({
   const [booted, setBooted] = useState(false)
   const [shown, setShown] = useState(false)
   const latest = useRef({ onReady, onMessage, register, takeFocus })
+  const t = useT()
   useLayoutEffect(() => {
     latest.current = { onReady, onMessage, register, takeFocus }
   })
@@ -593,7 +602,7 @@ function ProtoScreen({
     if ((screenHasFocus() && focused !== iframe) || latest.current.takeFocus()) iframe.focus()
   }, [shown, interactive])
 
-  if (!frame) return <div className="text-body text-code-ink/70">This screen was deleted from the canvas.</div>
+  if (!frame) return <div className="text-body text-code-ink/70">{t('panels.protoDeleted')}</div>
 
   const box: CSSProperties = { width: Math.round(frame.width * scale), height: Math.round(frame.height * scale) }
   return (

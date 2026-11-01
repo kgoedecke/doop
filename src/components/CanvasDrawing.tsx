@@ -5,6 +5,7 @@ import { gesture } from '../lib/gesture'
 import { visibleGuides } from '../lib/guides'
 import { snapPointToGuides } from '../lib/snap'
 import { isTypingTarget } from '../lib/keys'
+import { useT } from '../lib/i18n'
 import {
   defaultDrawing,
   drawingBounds,
@@ -306,14 +307,15 @@ function DrawingPreview({
   onFinish: () => void
 }) {
   const zoom = useStore((s) => s.viewport.zoom)
+  const t = useT()
   const d = draft.drawing
   if (draft.typing)
     return (
       <textarea
         data-drawing-input
-        aria-label="Text to add to canvas"
+        aria-label={t('stage.textInputLabel')}
         autoFocus
-        placeholder="Type something…"
+        placeholder={t('stage.textPlaceholder')}
         value={d.text ?? ''}
         onChange={(e) => onText(e.target.value, Math.max(d.height, e.target.scrollHeight))}
         onBlur={onFinish}

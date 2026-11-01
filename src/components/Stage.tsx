@@ -46,6 +46,7 @@ import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } fro
 import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
 import { layoutZoomFor } from '../lib/layoutZoom'
+import { useT, type PlainMessageKey } from '../lib/i18n'
 
 const MIN_ZOOM = 0.08
 /* The settled world is laid out at up to this zoom too (layoutZoomFor), so
@@ -158,6 +159,7 @@ export function Stage({
   /* view links get Select and Hand, comment links add the Comment tool */
   const role = useStore(roleOf)
   const readOnly = !roleAllows(role, 'edit')
+  const t = useT()
   const setTool = useStore((s) => s.setTool)
   const [panning, setPanning] = useState(false)
   /* the selection rectangle being dragged out, in world coordinates */
@@ -982,12 +984,12 @@ export function Stage({
             >
               <span>
                 {tool === 'path'
-                  ? 'Click for corners · Drag for curves · Snap to points · Enter to finish'
+                  ? t('stage.hintPath')
                   : tool === 'text'
-                    ? `Click or drag, then type · ${MOD_KEY}Enter to save`
+                    ? t('stage.hintText', { mod: MOD_KEY })
                     : tool === 'circle'
-                      ? 'Drag to draw a circle · Esc to cancel'
-                      : 'Drag to draw · Shift for a square · Esc to cancel'}
+                      ? t('stage.hintCircle')
+                      : t('stage.hintShape')}
               </span>
               {drawing.pathActive && (
                 <>
@@ -997,28 +999,32 @@ export function Stage({
                     disabled={!drawing.canFinishPath}
                     onClick={drawing.finish}
                   >
-                    Finish path
+                    {t('stage.finishPath')}
                   </button>
                   <button type="button" onClick={drawing.cancel}>
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </>
               )}
             </div>
           )}
-          <Toolbar aria-label="Canvas tools" className="md:w-10 md:flex-col">
+          <Toolbar aria-label={t('stage.canvasTools')} className="md:w-10 md:flex-col">
             {/* one fill slides between tools; the buttons themselves stay
                 transparent so the pill is the only thing that moves */}
             <ToolbarHighlight activeKey={tool} />
-            {TOOLS.filter((t) => t.id !== 'comment' && toolAllowed(t.id, role)).map((t) => (
-              <Tooltip key={t.id} label={`${t.label} (${t.key})`} side="right">
+            {TOOLS.filter((entry) => entry.id !== 'comment' && toolAllowed(entry.id, role)).map((entry) => (
+              <Tooltip
+                key={entry.id}
+                label={t('stage.toolTooltip', { label: t(entry.label), key: entry.key })}
+                side="right"
+              >
                 <ToolbarButton
-                  aria-label={t.label}
-                  aria-pressed={tool === t.id}
+                  aria-label={t(entry.label)}
+                  aria-pressed={tool === entry.id}
                   className="relative z-[1] hover:bg-transparent aria-pressed:text-ink"
-                  onClick={() => setTool(t.id)}
+                  onClick={() => setTool(entry.id)}
                 >
-                  {TOOL_ICONS[t.id]}
+                  {TOOL_ICONS[entry.id]}
                 </ToolbarButton>
               </Tooltip>
             ))}
@@ -1043,10 +1049,10 @@ export function Stage({
               disabled={!hasFrameClip()}
               onSelect={() => pasteFrameAtScreen(canvas.id, bgAt.current.x, bgAt.current.y)}
             >
-              Paste
+              {t('stage.paste')}
               <MenuHint>{MOD_KEY}V</MenuHint>
             </ContextMenuItem>
-            <ContextMenuItem onSelect={onAddFrame}>New frame</ContextMenuItem>
+            <ContextMenuItem onSelect={onAddFrame}>{t('stage.newFrame')}</ContextMenuItem>
           </ContextMenuContent>
         )}
       </ContextMenu>
@@ -1056,10 +1062,10 @@ export function Stage({
 
 type Mode = 'edit' | 'prototype' | 'comment'
 
-const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
-  { id: 'edit', label: 'Edit mode', icon: <EditModeIcon /> },
-  { id: 'prototype', label: 'Prototype mode: wire up interactions', icon: <PrototypeModeIcon /> },
-  { id: 'comment', label: 'Comment mode (C)', icon: <CommentIcon /> },
+const MODES: { id: Mode; label: PlainMessageKey; icon: React.ReactNode }[] = [
+  { id: 'edit', label: 'stage.modeEdit', icon: <EditModeIcon /> },
+  { id: 'prototype', label: 'stage.modePrototype', icon: <PrototypeModeIcon /> },
+  { id: 'comment', label: 'stage.modeComment', icon: <CommentIcon /> },
 ]
 
 /** The rail's foot: Edit, Prototype or Comment mode. Comment mode is the
@@ -1071,6 +1077,7 @@ const MODES: { id: Mode; label: string; icon: React.ReactNode }[] = [
  *  strip has no room for all three at touch size, so it keeps Comment only
  *  (any tool leaves it; Prototype mode moves to the canvas actions sheet). */
 function ModeSwitch({ canComment }: { canComment: boolean }) {
+  const t = useT()
   const mode = useStore((s): Mode => (s.tool === 'comment' ? 'comment' : s.prototypeMode ? 'prototype' : 'edit'))
   const pick = (next: Mode) => {
     const s = useStore.getState()
@@ -1094,15 +1101,15 @@ function ModeSwitch({ canComment }: { canComment: boolean }) {
   return (
     <div
       role="radiogroup"
-      aria-label="Canvas mode"
+      aria-label={t('stage.canvasMode')}
       className="flex items-center gap-0.5 md:flex-col"
       onKeyDown={onKeyDown}
     >
       {modes.map((m) => (
-        <Tooltip key={m.id} label={m.label} side="right">
+        <Tooltip key={m.id} label={t(m.label)} side="right">
           <ToolbarButton
             role="radio"
-            aria-label={m.label}
+            aria-label={t(m.label)}
             aria-checked={mode === m.id}
             tabIndex={mode === m.id ? 0 : -1}
             className={cn(

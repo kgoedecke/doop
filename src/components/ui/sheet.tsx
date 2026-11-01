@@ -2,6 +2,7 @@ import * as React from 'react'
 import * as SheetPrimitive from '@radix-ui/react-dialog'
 
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n'
 import { Button } from '@/components/ui/button'
 import { XIcon } from './icons'
 
@@ -44,6 +45,7 @@ function SheetContent({
   side?: 'top' | 'right' | 'bottom' | 'left'
   showCloseButton?: boolean
 }) {
+  const t = useT()
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -61,7 +63,7 @@ function SheetContent({
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
             <Button variant="ghost" className="absolute top-3 right-3" size="icon-sm">
               <XIcon />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{t('common.close')}</span>
             </Button>
           </SheetPrimitive.Close>
         )}

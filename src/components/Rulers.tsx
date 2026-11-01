@@ -9,6 +9,7 @@ import { snapFrame } from '../lib/snap'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '../lib/utils'
+import { useT } from '../lib/i18n'
 
 /* The rulers' thickness, in screen px. */
 export const RULER_PX = 20
@@ -275,6 +276,7 @@ export function Rulers({ stage }: { stage: RefObject<HTMLDivElement> }) {
   const top = useRef<HTMLCanvasElement>(null)
   const left = useRef<HTMLCanvasElement>(null)
   const drag = useGuideDrag((s) => s.drag)
+  const t = useT()
 
   useEffect(() => {
     let raf = 0
@@ -365,7 +367,7 @@ export function Rulers({ stage }: { stage: RefObject<HTMLDivElement> }) {
         <canvas
           ref={top}
           data-ruler="top"
-          aria-label="Horizontal ruler: drag down to add a guide"
+          aria-label={t('stage.rulerHorizontal')}
           className="pointer-events-auto absolute top-0 block cursor-row-resize touch-none"
           /* a canvas keeps its intrinsic width between left and right offsets */
           style={{ left: RULER_PX, width: `calc(100% - ${RULER_PX}px)`, height: RULER_PX }}
@@ -374,7 +376,7 @@ export function Rulers({ stage }: { stage: RefObject<HTMLDivElement> }) {
         <canvas
           ref={left}
           data-ruler="left"
-          aria-label="Vertical ruler: drag right to add a guide"
+          aria-label={t('stage.rulerVertical')}
           className="pointer-events-auto absolute left-0 block cursor-col-resize touch-none"
           style={{ top: RULER_PX, width: RULER_PX, height: `calc(100% - ${RULER_PX}px)` }}
           onPointerDown={(e) => onRulerDown(e, 'v')}
@@ -394,7 +396,7 @@ export function Rulers({ stage }: { stage: RefObject<HTMLDivElement> }) {
           )}
           style={{ left: drag.x + 12, top: drag.y + 12 }}
         >
-          {drag.removing ? 'Remove' : `${drag.axis === 'v' ? 'X' : 'Y'} ${formatRulerValue(drag.value)}`}
+          {drag.removing ? t('stage.guideRemove') : `${drag.axis === 'v' ? 'X' : 'Y'} ${formatRulerValue(drag.value)}`}
         </div>
       )}
     </>
