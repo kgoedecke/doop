@@ -143,8 +143,15 @@ export function Stage({
   const ref = useRef<HTMLDivElement>(null)
   /* read by the fit callbacks, which outlive a render */
   const insetsRef = useRef(insets)
+  /* a fit that opens a panel (a frame link opens the Inspector) runs once
+     more when that panel's insets arrive, so the panel can't cover it */
+  const refitRef = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
+    const changed = (Object.keys(insets) as (keyof StageInsets)[]).some((k) => insets[k] !== insetsRef.current[k])
     insetsRef.current = insets
+    const refit = refitRef.current
+    refitRef.current = null
+    if (refit && changed) refit()
   })
   /* the camera that fits a world box into the open part of the stage */
   const fitView = useCallback(
@@ -399,7 +406,9 @@ export function Stage({
       if (!el) return
       select(f.id)
       focusedPage.current = useStore.getState().activePageId
-      setViewport(fitView(el, f, 1))
+      const fit = () => setViewport(fitView(el, f, 1))
+      fit()
+      refitRef.current = fit
       const s = useStore.getState()
       s.pickElement(null)
       if (selector) {

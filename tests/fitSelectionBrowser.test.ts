@@ -12,6 +12,9 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
   let server: Server
   let browser: TestBrowser
   let page: Page
+  let origin: string
+  let canvasId: string
+  let frameId: string
   beforeAll(async () => {
     const port = await freePort()
     vite = await createServer(
@@ -23,14 +26,14 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
       }),
     )
     await vite.listen()
-    const origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
+    origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
     server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
     browser = await openBrowser()
     page = await browser.newPage()
     page.setDefaultTimeout(10_000)
     await page.setViewport({ width: 1600, height: 1000 })
     await page.goto(origin)
-    const canvasId = await page.evaluate(async () => {
+    ;({ canvasId, frameId } = await page.evaluate(async () => {
       const signup = await fetch('/api/auth/sign-up/email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -44,13 +47,15 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
           body: JSON.stringify({ name: 'Fit selection' }),
         })
       ).json()
-      await fetch(`/api/canvases/${canvas.id}/frames`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Wide', x: 0, y: 0, width: 1440, height: 900, html: '<body></body>' }),
-      })
-      return canvas.id
-    })
+      const frame = await (
+        await fetch(`/api/canvases/${canvas.id}/frames`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Wide', x: 0, y: 0, width: 1440, height: 900, html: '<body></body>' }),
+        })
+      ).json()
+      return { canvasId: canvas.id as string, frameId: frame.id as string }
+    }))
     await page.goto(`${origin}/c/${canvasId}`)
     await page.waitForSelector('[data-frame-title]')
   }, 60_000)
@@ -87,5 +92,16 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
     expect(frame.left).toBeGreaterThan(area.left)
     expect(frame.right).toBeLessThan(area.right)
     expect(Math.abs((frame.left + frame.right) / 2 - (area.left + area.right) / 2)).toBeLessThan(40)
+  })
+
+  it('fits a linked frame beside the Inspector the link opens', async () => {
+    await page.goto(`${origin}/c/${canvasId}?frame=${frameId}`)
+    await page.waitForSelector('[aria-label="Account"]')
+    /* the link opens the Inspector, whose header offers to close it */
+    await page.waitForFunction(() => document.querySelectorAll('[data-slot="panel"]').length >= 2)
+    await new Promise((r) => setTimeout(r, 300))
+    const frame = await page.$eval('[data-frame-surface]', (el) => el.getBoundingClientRect().right)
+    const area = await openArea()
+    expect(frame).toBeLessThan(area.right)
   })
 })
