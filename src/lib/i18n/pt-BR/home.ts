@@ -65,7 +65,7 @@ export const home: Catalog['home'] = {
 
   /* tile meta */
   claimTitle: 'Este canvas é anterior às contas e fica visível para todos. Reivindique-o para torná-lo seu.',
-  claimBadge: 'sem dono · tornar meu',
+  claimBadge: 'Tornar meu',
   sharedByTitle: 'Você foi convidado para colaborar neste canvas',
   sharedBy: 'Compartilhado por {name}',
   edited: 'Editado {time}',

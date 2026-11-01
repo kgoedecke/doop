@@ -64,7 +64,7 @@ export const home = {
 
   /* tile meta */
   claimTitle: 'This canvas predates accounts and is visible to everyone. Claim it to make it yours.',
-  claimBadge: 'unclaimed · make mine',
+  claimBadge: 'Make it mine',
   sharedByTitle: 'You were invited to collaborate on this canvas',
   sharedBy: 'Shared by {name}',
   edited: 'Edited {time}',
