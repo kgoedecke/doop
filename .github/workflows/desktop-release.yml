@@ -230,6 +230,10 @@ jobs:
           version="${TAG#desktop-v}"
           base="https://github.com/$REPO/releases/download/$TAG"
           cd installers
+          # the Linux artifact keeps its bundle/ subfolders (appimage/, deb/,
+          # rpm/), since upload-artifact preserves paths below the common
+          # ancestor; lift them up so every installer sits at the top level
+          find . -mindepth 2 -type f -exec mv -t . {} +
           # every release has its own asset URLs, so give the macOS package a versioned name
           mv doop.app.tar.gz "doop_${version}_universal.app.tar.gz"
           mv doop.app.tar.gz.sig "doop_${version}_universal.app.tar.gz.sig"
@@ -238,6 +242,11 @@ jobs:
           appimage="doop_${version}_amd64.AppImage"
           deb="doop_${version}_amd64.deb"
           rpm="doop-${version}-1.x86_64.rpm"
+          # a missing signature would otherwise go into the feed as an empty
+          # string ($(cat …) failing inside an argument does not stop the step)
+          for f in "$mac" "$win" "$appimage" "$deb" "$rpm"; do
+            test -s "$f.sig" || { echo "::error::missing $f.sig"; exit 1; }
+          done
           jq -n \
             --arg version "$version" \
             --arg notes "https://github.com/$REPO/releases/tag/$TAG" \
