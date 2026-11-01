@@ -514,12 +514,16 @@ function dropCreated(created: Frame): Promise<void> {
   )
 }
 
-/* a transparent document the size of its one element: the markup fills the
-   frame, so resizing the frame resizes the element as it does a drawing */
-function standaloneDocument(markup: string): string {
+/** A transparent document the size of its one element: the markup fills the
+ *  frame, so resizing the frame resizes the element as it does a drawing.
+ *  Empty when the markup is not exactly one element. */
+export function standaloneDocument(markup: string): string {
   const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
   doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
   doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
+  /* a stylesheet stamped in later (the library's global one) may paint the
+     page; only the element itself shows on the canvas */
+  for (const root of [doc.documentElement, doc.body]) root.style.setProperty('background', 'transparent', 'important')
   doc.body.setAttribute('data-doop-canvas-element', 'true')
   doc.body.innerHTML = markup
   const el = doc.body.firstElementChild as HTMLElement | SVGElement | null

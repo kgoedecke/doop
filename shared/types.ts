@@ -555,6 +555,8 @@ export type ServerMessage =
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
+  /** the canvas's component library or global stylesheet changed */
+  | { type: 'library'; actor: Actor }
   /** a frame was pinned to (reference set) or unpinned from (null) Memory */
   | { type: 'reference'; id: string; reference: MemoryReference | null; actor: Actor }
   /** a design decision was captured into Memory */

@@ -9,6 +9,9 @@ lists every file in this folder.
 - [prototyping.md](prototyping.md) - Clickable prototypes: interaction data attributes in frame
   HTML (triggers, actions, transitions, canonical form), per-page flow start, the prototype player
   and `/c/<id>/proto`, the editor's Prototype mode and connectors, and the MCP tools.
+- [components.md](components.md) - Component library and global stylesheet per workspace (or
+  personal space): preset groups and ready-made starters, custom groups, stamping component CSS/JS
+  into frames, restamping on edits, REST, MCP tools and the resident agent's brief, and the UI.
 - [frame-approval.md](frame-approval.md) - Human sign-off for development, revision checks,
   automatic review invalidation, and approval metadata for MCP and resident agents.
 - [frame-versions.md](frame-versions.md) - Per-frame design history: burst-based snapshots of the

@@ -6,6 +6,7 @@ import { timeAgo } from '../lib/time'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { MemoryPanel } from './MemoryPanel'
+import { ComponentsPanel } from './library/ComponentsPanel'
 import {
   Panel,
   type PanelResize,
@@ -19,7 +20,7 @@ import {
   PanelTabsRoot,
 } from './ui/panel'
 import { Button } from './ui/button'
-import { BookOpenIcon, CheckIcon, ChevronDownIcon, CommentIcon, PulseIcon, SparkIcon } from './ui/icons'
+import { BookOpenIcon, CheckIcon, ChevronDownIcon, CommentIcon, ComponentIcon, PulseIcon, SparkIcon } from './ui/icons'
 import { DotMatrix } from './ui/dot-matrix'
 import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
@@ -125,6 +126,9 @@ export function ActivityPanel({
             <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
               {t('panels.activityMemory')}
             </PanelIconTab>
+            <PanelIconTab value="components" icon={<ComponentIcon />} title={t('library.tabTitle')}>
+              {t('library.tab')}
+            </PanelIconTab>
           </PanelTabs>
           <PanelClose label={t('panels.activityClosePanel')} onClick={onClose} />
         </PanelHeader>
@@ -145,6 +149,9 @@ export function ActivityPanel({
         </PanelTabPanel>
         <PanelTabPanel value="memory" className={tabEnter}>
           <MemoryPanel />
+        </PanelTabPanel>
+        <PanelTabPanel value="components" className={tabEnter}>
+          <ComponentsPanel canvasId={canvasId} />
         </PanelTabPanel>
       </PanelTabsRoot>
     </Panel>

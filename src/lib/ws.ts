@@ -172,6 +172,9 @@ function handle(msg: ServerMessage) {
     case 'reference':
       s.setReferenceLocal(msg.id, msg.reference)
       break
+    case 'library':
+      s.libraryChanged()
+      break
     case 'decision':
       s.pushDecision(msg.decision)
       break

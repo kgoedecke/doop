@@ -10,6 +10,8 @@ import { isElementId } from '../shared/elementId.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { emitCanvasEvent } from './events.ts'
+import * as library from './library.ts'
+import { renameInstances, stampLibrary, type LibraryScope, type StampSource } from '../shared/designSystem.ts'
 import type {
   Actor,
   CanvasGuide,
@@ -1415,7 +1417,8 @@ export async function restoreFrameVersion(
   broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
   logActivity(frame.canvasId, actor, `restored “${frame.name}” to an earlier version by ${version.savedBy}`, frame.id)
   touch(frame.canvasId, actor, frame.id)
-  return { frame, replaced }
+  applyPendingRestamp(frameId)
+  return { frame: store.getFrame(frameId) ?? frame, replaced }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1536,6 +1539,7 @@ setInterval(() => {
       /* fully revealed: emit the exact html and close */
       broadcast(frame.canvasId, { type: 'frame:updated', frame, actor: r.actor })
       finishReveal(frameId)
+      applyPendingRestamp(frameId)
       continue
     }
 
@@ -1546,7 +1550,10 @@ setInterval(() => {
     broadcast(frame.canvasId, { type: 'frame:updated', frame: { ...frame, html: partial }, actor: r.actor })
   }
   for (const [frameId, s] of streams) {
-    if (now - s.lastActivity > STREAM_IDLE_MS) finishStream(frameId, false) // agent died mid-stream
+    if (now - s.lastActivity > STREAM_IDLE_MS) {
+      finishStream(frameId, false) // agent died mid-stream
+      applyPendingRestamp(frameId)
+    }
   }
 }, TICK_MS)
 
@@ -1565,7 +1572,9 @@ export function appendFrameHtml(
      sample) and must never be sniffed on its own */
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
-  const html = opts.start ? piece : before.html + piece
+  const joined = opts.start ? piece : before.html + piece
+  /* the library stamps the finished document: mid-stream its head may not exist yet */
+  const html = opts.done ? withLibrary(before.canvasId, joined) : joined
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
@@ -1588,10 +1597,85 @@ export function appendFrameHtml(
     frame: opts.done ? frame : { ...frame, html: healPartialHtml(frame.html) },
     actor,
   })
-  if (opts.done) finishStream(frameId, true)
+  if (opts.done) {
+    finishStream(frameId, true)
+    applyPendingRestamp(frameId)
+  }
 
   touch(frame.canvasId, actor, frameId)
   return frame
+}
+
+/** Brings a frame document's component and token blocks in line with the
+ *  library of its canvas (shared/designSystem.ts). */
+function withLibrary(canvasId: string, html: string): string {
+  const scope = library.scopeOfCanvas(canvasId)
+  return scope ? stampLibrary(html, library.stampSource(scope)) : html
+}
+
+type SlugRename = { from: string; to: string }
+
+/* library changes that reached a frame while an agent was streaming it or
+   its one-shot playback ran: applied when that ends, renames in order */
+const pendingRestamps = new Map<string, { actor: Actor; renames: SlugRename[] }>()
+
+/** Points renamed instances at their new slugs and restamps one frame from
+ *  its canvas's library, filing the state it replaces in the frame history
+ *  like any other write. The updated frame, or null when nothing moved. */
+function restampFrame(frame: Frame, actor: Actor, renames: SlugRename[], source?: StampSource): Frame | null {
+  const scope = library.scopeOfCanvas(frame.canvasId)
+  if (!scope) return null
+  const current = renames.reduce((html, rename) => renameInstances(html, rename.from, rename.to), frame.html)
+  const html = stampLibrary(current, source ?? library.stampSource(scope))
+  if (html === frame.html) return null
+  const prior = priorState(frame)
+  const updated = store.updateFrame(frame.id, { html }, actor.name)
+  if (!updated) return null
+  /* a run of library edits by one person is one burst: the design the
+     first one replaced is what gets filed */
+  noteHtmlChange(prior, actor, true)
+  broadcast(frame.canvasId, { type: 'frame:updated', frame: updated, actor })
+  return updated
+}
+
+/** Catches a frame up on the library changes it sat out while streaming or
+ *  playing back, once neither is running any more. */
+function applyPendingRestamp(frameId: string) {
+  if (streams.has(frameId) || reveals.has(frameId)) return
+  const pending = pendingRestamps.get(frameId)
+  if (!pending) return
+  pendingRestamps.delete(frameId)
+  const frame = store.getFrame(frameId)
+  if (frame) restampFrame(frame, pending.actor, pending.renames)
+}
+
+/**
+ * Restamps every frame of a library scope after the library changed, then
+ * tells each room so open library panels refresh. `renamed` first points the
+ * instances of a component's old slug at its new one. A frame mid-stream or
+ * mid-playback keeps its document until that ends, then catches up (see
+ * applyPendingRestamp). Returns how many frames moved now.
+ */
+export function restampLibrary(scope: LibraryScope, actor: Actor, renamed?: SlugRename): number {
+  const source = library.stampSource(scope)
+  let total = 0
+  for (const canvas of library.canvasesInScope(scope)) {
+    let changed = 0
+    for (const frame of canvas.frames) {
+      if (streams.has(frame.id) || reveals.has(frame.id)) {
+        const pending = pendingRestamps.get(frame.id)
+        const renames = [...(pending?.renames ?? []), ...(renamed ? [renamed] : [])]
+        pendingRestamps.set(frame.id, { actor, renames })
+        continue
+      }
+      if (restampFrame(frame, actor, renamed ? [renamed] : [], source)) changed++
+    }
+    if (changed > 0)
+      logActivity(canvas.id, actor, `updated the design system (${changed} frame${changed === 1 ? '' : 's'})`)
+    broadcast(canvas.id, { type: 'library', actor })
+    total += changed
+  }
+  return total
 }
 
 /* ------------------------------------------------------------------ */
@@ -1655,7 +1739,7 @@ export function createFrame(
   },
   actor: Actor,
 ): Frame | undefined {
-  if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
+  if (input.html !== undefined) input = { ...input, html: withLibrary(canvasId, repairEscapedHtml(input.html)) }
   const frame = store.createFrame(canvasId, input, actor.name)
   if (!frame) return undefined
   bursts.set(frame.id, { actor, lastAt: frame.createdAt })
@@ -1685,7 +1769,7 @@ export function updateFrame(
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
-  if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
+  if (patch.html !== undefined) patch = { ...patch, html: withLibrary(before.canvasId, repairEscapedHtml(patch.html)) }
   const prevName = before.name
   const prevHtml = before.html
   const prevHidden = !!before.hidden
@@ -1726,6 +1810,7 @@ export function updateFrame(
       finishReveal(frameId)
     }
     broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+    if (htmlChanged) applyPendingRestamp(frameId)
     if (htmlChanged) {
       logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
     } else if (patch.name !== undefined && patch.name !== prevName) {
@@ -1785,6 +1870,7 @@ export function deleteFrame(frameId: string, actor: Actor): Frame | undefined {
   const frame = store.deleteFrame(frameId)
   if (!frame) return undefined
   unsavedStamps.delete(frameId)
+  pendingRestamps.delete(frameId)
   bursts.delete(frameId)
   thumbs.purge(frameId)
   broadcast(frame.canvasId, { type: 'frame:deleted', frameId, actor })
