@@ -35,6 +35,7 @@ export const canvas = {
 
   /* page toasts and notices */
   pasteImageFailed: 'Couldn’t paste image — {error}',
+  dropImageFailed: 'Couldn’t add the dropped image — {error}',
   uiHidden: 'UI hidden · {key}. to show',
   memorySuggestionReview: 'Memory suggestion — review',
   hideForNow: 'Hide for now',

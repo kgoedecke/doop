@@ -33,6 +33,7 @@ export const canvas: Catalog['canvas'] = {
   canvasActions: 'Ações do canvas',
 
   pasteImageFailed: 'Não foi possível colar a imagem — {error}',
+  dropImageFailed: 'Não foi possível adicionar a imagem solta — {error}',
   uiHidden: 'Interface oculta · {key}. para mostrar',
   memorySuggestionReview: 'Sugestão de memória — revisar',
   hideForNow: 'Ocultar por enquanto',
