@@ -6,7 +6,7 @@ export const agentKeys = {
 
   title: 'Agent keys',
   description:
-    'Bearer credentials for the MCP endpoint, for agents that cannot open a browser to sign in (a Mastra workflow, n8n, CI). A key acts as you: everything it designs is attributed to you, and it reaches exactly the canvases you can. Revoking cuts it off immediately.',
+    'Bearer credentials for the MCP endpoint, for agents that cannot open a browser to sign in, such as a Mastra workflow, n8n or CI. A key acts as you: everything it designs is attributed to you, and it reaches exactly the canvases you can. Revoking cuts it off immediately.',
   newKeyRow: 'New key',
   creating: 'Creating…',
   createKey: 'Create key',

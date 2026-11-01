@@ -17,7 +17,7 @@ export const account: Catalog['account'] = {
   displayNameAria: 'Nome de exibição',
   nameUnsaved: 'Alterado, ainda não salvo',
   emailRow: 'E-mail',
-  emailNotChangeable: 'Endereço de acesso (ainda não pode ser alterado)',
+  emailNotChangeable: 'Seu endereço de acesso, que ainda não pode ser alterado',
   resendVerification: 'Reenviar verificação',
   verified: 'verificado',
   unverified: 'não verificado',

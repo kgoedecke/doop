@@ -65,7 +65,7 @@ export const home: Catalog['home'] = {
 
   /* tile meta */
   claimTitle: 'Este canvas é anterior às contas e fica visível para todos. Reivindique-o para torná-lo seu.',
-  claimBadge: 'sem dono, tornar meu',
+  claimBadge: 'sem dono · tornar meu',
   sharedByTitle: 'Você foi convidado para colaborar neste canvas',
   sharedBy: 'Compartilhado por {name}',
   edited: 'Editado {time}',
@@ -155,12 +155,12 @@ export const home: Catalog['home'] = {
   seats: { one: '{count} assento × {price}', other: '{count} assentos × {price}' },
   totalPerMonth: '= {total} por mês',
   totalPerYear: '= {total} por ano',
-  alreadyOnTeam: ' (já está no Team; gerencie em Cobrança).',
+  alreadyOnTeam: ' (já está no Team, gerenciado em Cobrança).',
   countingSeats: 'Contando assentos…',
   stripeNote:
     'Você vai configurar o pagamento no checkout seguro do Stripe. Cancele quando quiser pelo portal de cobrança.',
   askOwnerBefore: 'Peça a',
-  askOwnerAfter: 'para escolher um plano. O dono cuida da cobrança.',
+  askOwnerAfter: 'para escolher um plano, já que é quem cuida da cobrança.',
   workspaceOwnerFallback: 'o dono do workspace',
   openingStripe: 'Abrindo o Stripe…',
   continueCheckout: 'Continuar para o checkout',

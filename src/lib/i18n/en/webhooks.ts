@@ -1,7 +1,7 @@
 /** The "Webhooks" pane of /settings: registering, testing and rotating hooks. */
 export const webhooks = {
-  healthOff: 'off (nothing is sent)',
-  healthNoDeliveries: 'no deliveries yet; send a test',
+  healthOff: 'off · nothing is sent',
+  healthNoDeliveries: 'no deliveries yet · send a test',
   healthFailing: {
     one: '{count} failed in a row · last {when}: {error}',
     other: '{count} failed in a row · last {when}: {error}',

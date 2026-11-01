@@ -109,7 +109,7 @@ export const stage = {
   retry: 'Retry',
   replyAskAgent: 'Reply… (@doop to ask the agent)',
   replyEllipsis: 'Reply…',
-  replyFailed: 'That reply did not go through; it may be resolved already. Try again.',
+  replyFailed: 'That reply did not go through, possibly because the thread is resolved. Try again.',
   resolve: 'Resolve',
   posting: 'Posting…',
   reply: 'Reply',

@@ -1,8 +1,8 @@
 import type { Catalog } from '..'
 
 export const webhooks: Catalog['webhooks'] = {
-  healthOff: 'desativado (nada é enviado)',
-  healthNoDeliveries: 'nenhuma entrega ainda; envie um teste',
+  healthOff: 'desativado · nada é enviado',
+  healthNoDeliveries: 'nenhuma entrega ainda · envie um teste',
   healthFailing: {
     one: '{count} falha seguida · última {when}: {error}',
     other: '{count} falhas seguidas · última {when}: {error}',

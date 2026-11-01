@@ -64,7 +64,7 @@ export const home = {
 
   /* tile meta */
   claimTitle: 'This canvas predates accounts and is visible to everyone. Claim it to make it yours.',
-  claimBadge: 'unclaimed, make mine',
+  claimBadge: 'unclaimed · make mine',
   sharedByTitle: 'You were invited to collaborate on this canvas',
   sharedBy: 'Shared by {name}',
   edited: 'Edited {time}',
@@ -153,11 +153,11 @@ export const home = {
   seats: { one: '{count} seat × {price}', other: '{count} seats × {price}' },
   totalPerMonth: '= {total} per month',
   totalPerYear: '= {total} per year',
-  alreadyOnTeam: ' (already on Team; manage it from Billing).',
+  alreadyOnTeam: ' (already on Team, managed from Billing).',
   countingSeats: 'Counting seats…',
   stripeNote: 'You’ll set up payment on Stripe’s secure checkout. Cancel any time from the billing portal.',
   askOwnerBefore: 'Ask',
-  askOwnerAfter: 'to choose a plan. The owner holds the billing.',
+  askOwnerAfter: 'to choose a plan, since they manage billing.',
   workspaceOwnerFallback: 'the workspace owner',
   openingStripe: 'Opening Stripe…',
   continueCheckout: 'Continue to checkout',

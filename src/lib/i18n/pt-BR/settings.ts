@@ -23,7 +23,7 @@ export const settings: Catalog['settings'] = {
   agentCardDescription:
     'Escolha como o Doop Agent roda nos seus canvases: uma conta de modelo conectada ou o Claude CLI no seu computador. Os limites de uso e as cobranças do seu provedor se aplicam.',
   freeTasksLeftLabel: 'Tarefas gratuitas restantes do Doop Agent',
-  meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado. Conexão gerenciada pelo seu operador.',
+  meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado. Seu operador gerencia a conexão.',
   meterClaudeLocal: 'Claude CLI selecionado. Roda no seu computador conectado.',
   meterChatgpt: 'Rodando na sua assinatura do ChatGPT.',
   meterProviderKey: 'Rodando na sua chave da {provider}.',

@@ -83,8 +83,8 @@ export const workspace = {
   perMonth: 'per month',
   perYear: 'per year',
   seatsCatchUp: {
-    one: '({count} person now; Stripe catches up on the next invoice)',
-    other: '({count} people now; Stripe catches up on the next invoice)',
+    one: '({count} person now, and Stripe catches up on the next invoice)',
+    other: '({count} people now, and Stripe catches up on the next invoice)',
   },
   ends: 'Ends',
   renews: 'Renews',
@@ -93,7 +93,7 @@ export const workspace = {
   opening: 'Opening…',
   manageOnStripe: 'Manage billing on Stripe',
   refresh: 'Refresh',
-  stripePortalNote: 'Cards, invoices, cancelling: all on Stripe’s portal.',
+  stripePortalNote: 'Cards, invoices and cancelling all live on Stripe’s portal.',
   ownerHoldsBilling: 'The owner holds the billing; only they can change the plan.',
 
   renamed: 'Renamed',

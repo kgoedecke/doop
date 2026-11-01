@@ -7,7 +7,7 @@ export const agentKeys: Catalog['agentKeys'] = {
 
   title: 'Chaves de agente',
   description:
-    'Credenciais bearer para o endpoint MCP, para agentes que não conseguem abrir um navegador para entrar (um workflow do Mastra, n8n, CI). Uma chave age como você: tudo o que ela desenha é atribuído a você, e ela alcança exatamente os canvases que você alcança. Revogar corta o acesso na hora.',
+    'Credenciais bearer para o endpoint MCP, para agentes que não conseguem abrir um navegador para entrar, como um workflow do Mastra, n8n ou CI. Uma chave age como você: tudo o que ela desenha é atribuído a você, e ela alcança exatamente os canvases que você alcança. Revogar corta o acesso na hora.',
   newKeyRow: 'Nova chave',
   creating: 'Criando…',
   createKey: 'Criar chave',

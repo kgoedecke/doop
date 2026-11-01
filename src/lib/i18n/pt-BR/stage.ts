@@ -109,7 +109,7 @@ export const stage: Catalog['stage'] = {
   retry: 'Tentar de novo',
   replyAskAgent: 'Responder… (@doop para chamar o agente)',
   replyEllipsis: 'Responder…',
-  replyFailed: 'Essa resposta não foi enviada; talvez a conversa já esteja resolvida. Tente de novo.',
+  replyFailed: 'Essa resposta não foi enviada, talvez porque a conversa já foi resolvida. Tente de novo.',
   resolve: 'Resolver',
   posting: 'Publicando…',
   reply: 'Responder',

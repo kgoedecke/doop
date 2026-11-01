@@ -16,7 +16,7 @@ export const account = {
   displayNameAria: 'Display name',
   nameUnsaved: 'Changed, not saved yet',
   emailRow: 'Email',
-  emailNotChangeable: 'Sign-in address (not changeable yet)',
+  emailNotChangeable: 'Your sign-in address, which can’t be changed yet',
   resendVerification: 'Resend verification',
   verified: 'verified',
   unverified: 'unverified',
