@@ -178,6 +178,44 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     expect(await home.$('#go[data-v-proto-flash]')).not.toBeNull()
   })
 
+  it('sits below the app inset and rescales from its scaling menu', async () => {
+    await page.evaluate(() => document.documentElement.style.setProperty('--app-inset', '40px'))
+    try {
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), CANVAS)
+      await page.evaluate(() => (window as unknown as Fixture).play('home'))
+      await screen('home')
+      expect(await page.$eval('[data-prototype-player]', (el) => el.getBoundingClientRect().top)).toBe(40)
+      const width = () => page.$eval('[data-proto-screen="home"] > div', (el) => el.getBoundingClientRect().width)
+      /* 1000 × 660 fits the 400 × 300 frame at 2.2× */
+      expect(await width()).toBe(880)
+
+      await page.click('[aria-label="Scaling"]')
+      await page.waitForSelector('[data-proto-menu]')
+      await page.keyboard.press('ArrowDown')
+      await page.keyboard.press('Enter')
+      await page.waitForFunction(() => !document.querySelector('[data-proto-menu]'))
+      /* the menu's keys stayed with the menu: the player is still up */
+      expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
+      await page.waitForFunction(
+        () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 400,
+      )
+
+      await page.click('[aria-label="Scaling"]')
+      await page.waitForSelector('[data-proto-menu]')
+      await page.$$eval('[data-proto-menu] [role="menuitemradio"]', (items) =>
+        (items.find((item) => item.textContent === 'Responsive') as HTMLElement | undefined)?.click(),
+      )
+      await page.waitForFunction(
+        () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 1000,
+      )
+    } finally {
+      await page.evaluate(() => {
+        localStorage.removeItem('doop:proto-scaling')
+        document.documentElement.style.removeProperty('--app-inset')
+      })
+    }
+  })
+
   it('closes on Escape when presenting over the editor', async () => {
     await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), CANVAS)
     await page.evaluate(() => (window as unknown as Fixture).play('home'))
