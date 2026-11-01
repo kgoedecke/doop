@@ -4,6 +4,7 @@ import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { useMe } from '../lib/me'
 import { isDesktopShell } from '../lib/shell'
+import { desktopDownloadUrl } from '../lib/desktopDownload'
 import { isTheme, useTheme } from '../lib/theme'
 import { LOCALES, LOCALE_NAMES, isLocale, useLocale, useT } from '../lib/i18n'
 import { colorFor } from '../../shared/types'
@@ -24,7 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
-import { GearIcon, HelpIcon, LogOutIcon, ShieldIcon } from './ui/icons'
+import { DownloadIcon, GearIcon, HelpIcon, LogOutIcon, ShieldIcon } from './ui/icons'
 
 /** The account menu the signed-in shell repeats on every page: in the rail
  *  and in the settings header. It lives here so they cannot drift apart. */
@@ -45,6 +46,7 @@ export function AccountMenu({
   const { locale, setLocale } = useLocale()
   const t = useT()
   const name = session?.user.name ?? ''
+  const downloadUrl = desktopDownloadUrl()
 
   return (
     <DropdownMenu>
@@ -92,6 +94,13 @@ export function AccountMenu({
           )}
         </div>
         <DropdownMenuSeparator />
+        {downloadUrl && (
+          <DropdownMenuItem asChild>
+            <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+              <DownloadIcon size="rail" /> {t('shell.getDesktopApp')}
+            </a>
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onSelect={() => navigate('/settings')}>
           <GearIcon size="rail" /> {t('shell.settings')}
         </DropdownMenuItem>
