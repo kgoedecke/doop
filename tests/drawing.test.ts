@@ -152,7 +152,7 @@ describe('saving and targeting drawings', () => {
     expect(rect.style.left).toBe('20px')
     expect(rect.style.top).toBe('30px')
     expect(buildLayerTree(useStore.getState().canvas!.frames[0]!.html).map(layerName)).toEqual([
-      'Collaborator edit',
+      'Heading · Collaborator edit',
       'Rectangle',
       'Circle',
     ])
