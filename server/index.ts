@@ -38,6 +38,7 @@ import { auth, initAuth, syncAdmins, getUserName, loginProvidersConfig } from '.
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
+import { startMcpTokenPrune } from './mcpTokens.ts'
 import { integrationsRouter, relayDesktopCallback } from './integrations.ts'
 import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
@@ -2499,5 +2500,6 @@ server.listen(PORT, () => {
   )
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()
+  startMcpTokenPrune()
   for (const extension of extensions) extension.startWorker?.()
 })
