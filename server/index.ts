@@ -44,6 +44,8 @@ import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
+import { resealSecrets } from './secretBackfill.ts'
+import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
@@ -2466,6 +2468,18 @@ server.listen(PORT, () => {
         ),
       )
       .catch((err) => console.error('[comments] element id backfill failed:', err))
+  }
+  /* credentials stored before encryption (or under a rotated-out key) are
+     sealed now; reads open either form, so serving need not wait for it */
+  if (encryptionConfigured()) {
+    resealSecrets(db)
+      .then(({ resealed, failed }) => {
+        if (resealed || failed)
+          console.log(`[secrets] ${resealed} credential(s) sealed, ${failed} left for the next boot`)
+      })
+      .catch((err) => console.error('[secrets] reseal failed:', err))
+  } else {
+    console.warn('⟡ secrets           SECRETS_ENCRYPTION_KEYS unset — user credentials are stored unencrypted')
   }
   console.log(`⟡ mcp endpoint      http://localhost:${PORT}/mcp`)
   console.log(`⟡ websocket         ws://localhost:${PORT}/ws`)
