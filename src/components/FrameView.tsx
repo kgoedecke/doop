@@ -17,6 +17,7 @@ import { throttle } from '../lib/throttle'
 import { getIdentity } from '../lib/identity'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
+import { frameImageUrl, type FrameLod } from '../lib/frameLod'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { visibleGuides } from '../lib/guides'
@@ -200,8 +201,17 @@ interface HoverHit {
 
 /* Counter-scaled overlays (labels, pins, popovers) get their scale from the
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
-   this component — memo holds as long as the frame and layout zoom are unchanged. */
-export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame: Frame; layoutZoom: number }) {
+   this component — memo holds as long as the frame, layout zoom and lod are unchanged. */
+export const FrameView = memo(function FrameView({
+  frame,
+  layoutZoom,
+  lod,
+}: {
+  frame: Frame
+  layoutZoom: number
+  /** how the Stage wants the frame drawn (frameLod.ts); an edit in progress keeps it live */
+  lod: FrameLod
+}) {
   const t = useT()
   const [menuTarget, setMenuTarget] = useState<
     'frame' | 'loading' | { selector: string | null; html: string; hit?: LiveHit }
@@ -254,6 +264,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   /* after exiting edit mode, hold renders until the final serialized HTML
      lands in the store — otherwise a stale post would morph the edit away */
   const [suspendPost, setSuspendPost] = useState(false)
+  /* an edit talks to the document, so it holds the frame live whatever the
+     Stage decided; otherwise the frame shows the server's image of it */
+  const live = lod === 'live' || editing || suspendPost || pathEdit !== null
 
   /* one throttle per frame, so a group drag broadcasts every member —
      a single throttle would keep only the last frame written each tick */
@@ -613,6 +626,19 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
      flipped or shifted it away from a viewport edge */
   const menuAt = useRef({ x: 0, y: 0 })
   const [runtimeReady, setRuntimeReady] = useState(false)
+  /* the iframe goes with the live document: a later one boots afresh and
+     must announce itself before anything is posted to it */
+  const [wasLive, setWasLive] = useState(live)
+  if (wasLive !== live) {
+    setWasLive(live)
+    if (!live) setRuntimeReady(false)
+  }
+  useEffect(() => {
+    if (live) return
+    /* nothing of the old document survives: the next one gets the full HTML */
+    localHtml.current = null
+    noteFrameDocument(frame.id, null)
+  }, [live, frame.id])
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
       if (ev.data?.type === 'doop:frame-ready' && ev.source === iframeRef.current?.contentWindow) {
@@ -1428,14 +1454,15 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             }}
             onPointerLeave={clearHover}
           >
-            <iframe
-              ref={iframeRef}
-              className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
-              title={frame.name}
-              data-doop-frame=""
-              sandbox="allow-scripts"
-              srcDoc={FRAME_BOOTSTRAP}
-              /* The world is laid out at CSS zoom k (Stage), which an iframe
+            {live ? (
+              <iframe
+                ref={iframeRef}
+                className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
+                title={frame.name}
+                data-doop-frame=""
+                sandbox="allow-scripts"
+                srcDoc={FRAME_BOOTSTRAP}
+                /* The world is laid out at CSS zoom k (Stage), which an iframe
                  passes into its document. Chromium takes it as pixel density:
                  the document keeps its design-px viewport and rasterizes at
                  k×, even out of process, where a transform on this element
@@ -1443,21 +1470,37 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                  document out at the zoomed width, so there the zoom is undone
                  here (keeping viewport, vh/vw, media queries and runtime rects
                  in design px) and the scale restores the box. */
-              style={{
-                width: frame.width,
-                height: frame.height,
-                ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
-                  ? null
-                  : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
-                transformOrigin: '0 0',
-                /* Chromium paints an opaque backdrop behind an iframe whose
+                style={{
+                  width: frame.width,
+                  height: frame.height,
+                  ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
+                    ? null
+                    : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
+                  transformOrigin: '0 0',
+                  /* Chromium paints an opaque backdrop behind an iframe whose
                    colour scheme differs from its document's; the page's dark
                    scheme reaches this element by inheritance while a
                    standalone element's document is light, so a shape on the
                    dark canvas sat on a white square */
-                ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
-              }}
-            />
+                  ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
+                }}
+              />
+            ) : (
+              lod === 'image' &&
+              frame.html && (
+                /* the server's render of the current design (frameImageUrl):
+                   one decoded bitmap instead of a whole document. The world's
+                   zoom scales it like any other box, so no counter-zoom. */
+                <img
+                  className={cn('block', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
+                  src={frameImageUrl(frame, isCanvasElement(frame.html))}
+                  alt=""
+                  draggable={false}
+                  decoding="async"
+                  style={{ width: frame.width, height: frame.height }}
+                />
+              )
+            )}
             {!frame.html && (
               <div className="absolute inset-0 grid place-items-center bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)] text-[13px] text-ink-faint">
                 empty frame — add HTML

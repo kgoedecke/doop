@@ -21,6 +21,7 @@ import { cameraOnCursor, cameraToFollow } from '../lib/follow'
 import { SnapGuides } from './SnapGuides'
 import { GuideLines, Rulers } from './Rulers'
 import { useIsMobile } from '../hooks/use-mobile'
+import { useFrameLods } from '../hooks/use-frame-lods'
 import { isTypingTarget, MOD_KEY } from '../lib/keys'
 import { cn } from '../lib/utils'
 import { gesture } from '../lib/gesture'
@@ -50,6 +51,7 @@ import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 
 const MIN_ZOOM = 0.08
+const NO_FRAMES: Frame[] = []
 /* The settled world is laid out at up to this zoom too (layoutZoomFor), so
    the desktop app stays sharp all the way in. That costs little: WebKit and
    Chromium both tile what is on screen, so backing memory follows the
@@ -185,6 +187,7 @@ export function Stage({
   const zoomLabelRef = useRef<HTMLSpanElement>(null)
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
+  const lods = useFrameLods(ref, canvas?.frames ?? NO_FRAMES)
   const activePageId = useStore((s) => s.activePageId)
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
@@ -948,7 +951,7 @@ export function Stage({
                   f.hidden ? (
                     <HiddenFrameView key={f.id} frame={f} />
                   ) : (
-                    <FrameView key={f.id} frame={f} layoutZoom={layoutZoom} />
+                    <FrameView key={f.id} frame={f} layoutZoom={layoutZoom} lod={lods.get(f.id) ?? 'none'} />
                   ),
                 )}
               </FrameLabelLayer.Provider>

@@ -60,7 +60,9 @@
                   React.createElement(
                     FrameLabelLayer.Provider,
                     { value: labelLayer },
-                    frames.map((frame) => React.createElement(FrameView, { key: frame.id, frame, layoutZoom: 1 })),
+                    frames.map((frame) =>
+                      React.createElement(FrameView, { key: frame.id, frame, layoutZoom: 1, lod: 'live' }),
+                    ),
                   ),
                 ),
               ),
