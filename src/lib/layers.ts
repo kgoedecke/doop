@@ -1,4 +1,5 @@
 import { ELEMENT_ID_ATTR } from '../../shared/elementId'
+import { inferredLabel, textLabel } from './layerLabels'
 
 /**
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
@@ -8,15 +9,21 @@ import { ELEMENT_ID_ATTR } from '../../shared/elementId'
  * panel and an outline in the frame refer to the same element.
  */
 
-export type LayerKind = 'box' | 'text' | 'image' | 'svg'
+export type LayerKind = 'box' | 'text' | 'image' | 'svg' | 'component'
 
 export interface LayerNode {
   selector: string
   tag: string
-  /** what the row shows: a text element shows its text, anything else its tag */
+  /** what the row shows: a name someone gave it, else what it is and holds
+   *  ("Card · Bancos", "Button · Save", its text) — never a bare tag */
   label: string
-  /** the first class (".hero") or id ("#nav") shown faint after the tag */
+  /** shown faint after the label: the id ("#nav"), the first class
+   *  (".hero") or else the tag, for whoever builds it; a component
+   *  instance shows its slug */
   detail: string
+  /** the label is a name someone gave it (`data-name`, a component) rather
+   *  than its tag or text */
+  named?: boolean
   kind: LayerKind
   /** switched off through the Layers panel's eye (see setElementHidden) */
   hidden: boolean
@@ -113,9 +120,15 @@ export function findLayer(nodes: LayerNode[], selector: string): LayerNode | nul
   return null
 }
 
-/** The name a node shows for itself: "aside.rail", "#nav", or its text. */
+/** The name a node shows for itself: what the Layers row says. */
 export function layerName(node: LayerNode): string {
-  return node.detail ? `${node.tag}${node.detail}` : node.label
+  return node.label
+}
+
+/** "card-pesquisa" -> "Card pesquisa": what an unnamed instance shows. */
+function slugTitle(slug: string): string {
+  const words = slug.replace(/-/g, ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 export function ancestorsOf(nodes: LayerNode[], selector: string): LayerNode[] | null {
@@ -138,28 +151,47 @@ function ownText(el: Element): string {
 function detailOf(el: Element): string {
   if (el.id) return '#' + el.id
   const cls = el.getAttribute('class')?.trim().split(/\s+/)[0]
-  return cls ? '.' + cls : ''
+  return cls ? '.' + cls : el.tagName.toLowerCase()
 }
 
 function toNode(el: Element): LayerNode {
   const tag = el.tagName.toLowerCase()
-  const drawingName = el.hasAttribute('data-doop-drawing') ? el.getAttribute('data-name') : null
+  /* a name someone gave the layer: drawings, components, and any element an
+     agent or person marked with data-name */
+  const givenName = el.getAttribute('data-name')?.trim() || null
+  const component = el.getAttribute('data-doop-component')?.trim() || null
   const base = {
     selector: elementPath(el),
     tag,
-    detail: drawingName ? '' : detailOf(el),
+    detail: givenName && el.hasAttribute('data-doop-drawing') ? '' : detailOf(el),
     hidden: el.hasAttribute(HIDDEN_ATTR),
     locked: el.hasAttribute(LOCK_ATTR),
+    ...(givenName || component ? { named: true } : {}),
+  }
+  if (component) {
+    return {
+      ...base,
+      label: givenName ?? slugTitle(component),
+      detail: component,
+      kind: 'component',
+      children: layerChildren(el),
+    }
   }
   if (el.namespaceURI === 'http://www.w3.org/2000/svg')
-    return { ...base, label: drawingName ?? 'svg', kind: 'svg', children: [] }
-  if (IMAGE_TAGS.has(el.tagName)) return { ...base, label: drawingName ?? tag, kind: 'image', children: [] }
+    return { ...base, label: givenName ?? inferredLabel(el), kind: 'svg', children: [] }
+  if (IMAGE_TAGS.has(el.tagName)) return { ...base, label: givenName ?? inferredLabel(el), kind: 'image', children: [] }
   const children = layerChildren(el)
   const text = ownText(el)
   if (children.length === 0 && text) {
-    return { ...base, label: text.length > 60 ? text.slice(0, 57) + '…' : text, detail: '', kind: 'text', children }
+    return {
+      ...base,
+      label: givenName ?? textLabel(el, text),
+      detail: el.tagName.toLowerCase(),
+      kind: 'text',
+      children,
+    }
   }
-  return { ...base, label: drawingName ?? tag, kind: 'box', children }
+  return { ...base, label: givenName ?? inferredLabel(el), kind: 'box', children }
 }
 
 function layerChildren(el: Element): LayerNode[] {

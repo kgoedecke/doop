@@ -20,6 +20,7 @@ import { community } from './community'
 import { admin } from './admin'
 import { ui } from './ui'
 import { library } from './library'
+import { layers } from './layers'
 
 export const ptBR: Catalog = {
   common,
@@ -43,4 +44,5 @@ export const ptBR: Catalog = {
   admin,
   ui,
   library,
+  layers,
 }

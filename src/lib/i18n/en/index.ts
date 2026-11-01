@@ -19,6 +19,7 @@ import { community } from './community'
 import { admin } from './admin'
 import { ui } from './ui'
 import { library } from './library'
+import { layers } from './layers'
 
 /** The source catalog, one namespace per area of the app. */
 export const en = {
@@ -43,4 +44,5 @@ export const en = {
   admin,
   ui,
   library,
+  layers,
 }
