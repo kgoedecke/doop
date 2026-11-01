@@ -55,6 +55,25 @@ the private development copy. Isolate the existing nested-overlay focus test
 from the delay fixture's 800ms navigation timer so slow CI cannot navigate away
 while it is checking focus. Delay suspension remains covered by its own test.
 
+## Pending Effect migration
+
+After CI and CodeRabbit review of the existing CLI are complete, migrate the CLI
+package to Effect. npm currently reports effect and @effect/platform-node 4.1.1.
+Pin and inspect those installed APIs before implementation.
+
+- Convert command and service implementation modules to typechecked TypeScript;
+  retain only minimal executable loaders needed by the npm bin entry points.
+- Use Effect services and Layers for configuration, persistent state, process
+  ownership, local control, HTTP requests, sessions, client configuration and updates.
+- Decode arguments and persisted/wire values with Schema, use typed tagged errors,
+  and keep credentials redacted outside the adapters that consume them.
+- Own child processes, sockets and locks with scopes/finalizers; use schedules and
+  streams for readiness, supervision and event handling instead of manual timers.
+- Keep the existing Doop application behind a server adapter rather than rewriting
+  unrelated upstream application modules.
+- Preserve command behavior and the installed-tarball E2E checks. Add Effect-aware
+  service tests for failure, interruption and cleanup, then rerun package/static CI.
+
 ## Verification completed
 
 - Windows, Node 24.22.1: production build and installed-tarball E2E passed,
