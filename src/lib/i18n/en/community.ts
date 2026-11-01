@@ -21,10 +21,10 @@ export const community = {
   categoryOther: 'Other',
   emptyTitle: 'Nothing on the shelves yet',
   emptyDescription:
-    'Anyone can list a canvas here from its Share menu — people preview it and copy it into their own account, and the original stays private. Be the first.',
+    'Anyone can list a canvas here from its Share menu. People preview it and copy it into their own account, and the original stays private. Be the first.',
   pickCanvas: 'Pick a canvas to publish',
   visibleOf: '{visible} of {total}',
-  noMatch: 'Nothing matches — try a different search or shelf.',
+  noMatch: 'Nothing matches. Try a different search or shelf.',
   noPreview: 'no preview',
   frames: '{count} frames',
   byAuthor: 'by {name}',
@@ -32,6 +32,6 @@ export const community = {
   copying: 'Copying…',
   useThis: 'Use this',
   published: 'by {name} · published {time} · {copies}',
-  copyNote: 'Copies land in your canvases as a private copy — edit freely, the original is untouched.',
+  copyNote: 'Copies land in your canvases as a private copy: edit freely, the original is untouched.',
   copyToMine: 'Copy to my canvases',
 } as const

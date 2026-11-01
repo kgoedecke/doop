@@ -3,7 +3,7 @@ import type { Catalog } from '..'
 export const inspector: Catalog['inspector'] = {
   // frame inspector
   frameName: 'Nome do frame',
-  lockedTitle: 'Bloqueado — não pode ser movido, redimensionado nem excluído no canvas',
+  lockedTitle: 'Bloqueado: não pode ser movido, redimensionado nem excluído no canvas',
   locked: 'Bloqueado',
   unlock: 'Desbloquear',
   groupDevelopment: 'Desenvolvimento',
@@ -14,9 +14,9 @@ export const inspector: Catalog['inspector'] = {
   copyPngTitle: 'Copiar a imagem (2×) para colar em qualquer lugar',
   copyPng: 'Copiar como PNG',
   copyImageUrlTitle:
-    'URL pública da imagem — sempre mostra o design atual; cole como og:image ou imagem de destaque de um blog',
+    'URL pública da imagem que sempre mostra o design atual; cole como og:image ou imagem de destaque de um blog',
   copyImageUrl: 'Copiar URL da imagem',
-  pinReferenceTitle: 'Adicionar à memória de design — será usado como referência',
+  pinReferenceTitle: 'Adicionar à memória de design (usado como referência)',
   pinReference: 'Fixar como referência',
   hideHtmlEditor: 'Ocultar o editor de HTML',
   editHtml: 'Editar o HTML',

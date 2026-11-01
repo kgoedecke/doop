@@ -66,7 +66,7 @@ export function setLocale(locale: Locale): void {
   try {
     localStorage.setItem(LOCALE_STORAGE_KEY, locale)
   } catch {
-    /* nowhere to keep it — the choice still holds until the tab closes */
+    /* nowhere to keep it; the choice still holds until the tab closes */
   }
   notify()
 }

@@ -1,7 +1,7 @@
 /** A workspace's settings page and the agents' one-click installs. */
 export const workspace = {
-  planActive: 'Team plan is active — welcome aboard',
-  checkoutCanceled: 'Checkout canceled — nothing was charged',
+  planActive: 'Team plan is active. Welcome aboard',
+  checkoutCanceled: 'Checkout canceled. Nothing was charged',
   needsPlan: '"{name}" needs a plan first.',
   thisWorkspace: 'This workspace',
   notFound: 'Workspace not found',
@@ -70,7 +70,7 @@ export const workspace = {
   upToDate: 'Up to date with Stripe',
   refreshFailed: 'Couldn’t refresh',
   billingDescription:
-    'Team is billed per seat: every person in the workspace, monthly or yearly. Seats follow the people list — add someone and the next invoice grows, remove them and it shrinks.',
+    'Team is billed per seat: every person in the workspace, monthly or yearly. Seats follow the people list: add someone and the next invoice grows, remove them and it shrinks.',
   billingDisabledDescription:
     'Billing isn’t configured on this server. Workspaces are included on self-hosted doop; there is nothing to pay for here.',
   plan: 'Plan',
@@ -83,8 +83,8 @@ export const workspace = {
   perMonth: 'per month',
   perYear: 'per year',
   seatsCatchUp: {
-    one: '({count} person now — Stripe catches up on the next invoice)',
-    other: '({count} people now — Stripe catches up on the next invoice)',
+    one: '({count} person now; Stripe catches up on the next invoice)',
+    other: '({count} people now; Stripe catches up on the next invoice)',
   },
   ends: 'Ends',
   renews: 'Renews',
@@ -93,7 +93,7 @@ export const workspace = {
   opening: 'Opening…',
   manageOnStripe: 'Manage billing on Stripe',
   refresh: 'Refresh',
-  stripePortalNote: 'Cards, invoices, cancelling — all on Stripe’s portal.',
+  stripePortalNote: 'Cards, invoices, cancelling: all on Stripe’s portal.',
   ownerHoldsBilling: 'The owner holds the billing; only they can change the plan.',
 
   renamed: 'Renamed',
@@ -105,7 +105,7 @@ export const workspace = {
   created: 'Created',
   deleteWorkspace: 'Delete workspace',
   deleteDescription:
-    'Every canvas goes back to the personal space of whoever owns it — nothing is deleted. People lose access to canvases that aren’t theirs.',
+    'Every canvas goes back to the personal space of whoever owns it. Nothing is deleted. People lose access to canvases that aren’t theirs.',
   deleteCancelsTeam: ' The Team subscription is canceled immediately.',
   deleteNamed: 'Delete “{name}”',
   deleteTitle: 'Delete “{name}”?',

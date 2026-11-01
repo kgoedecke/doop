@@ -10,7 +10,7 @@ export const home = {
   createCanvasFailed: 'Couldn’t create the canvas',
   startCanvasFailed: 'Couldn’t start the canvas',
   startImportFailed: 'Couldn’t start the import',
-  briefNotQueued: 'The brief didn’t queue — try sending it again',
+  briefNotQueued: 'The brief didn’t queue. Try sending it again',
   duplicateFailed: 'Couldn’t duplicate canvas',
   shareFailed: 'Couldn’t open sharing',
   linkCopied: 'Canvas link copied',
@@ -21,7 +21,7 @@ export const home = {
   /* upgrade reasons */
   reasonAddCanvas: 'Adding a canvas to a workspace needs a Team plan.',
   reasonMoveCanvas: 'Moving a canvas into a workspace needs a Team plan.',
-  reasonWorkspaceReady: '"{name}" is ready — pick a plan to start using it.',
+  reasonWorkspaceReady: '"{name}" is ready. Pick a plan to start using it.',
 
   /* scopes */
   ownedByMe: 'Owned by me',
@@ -30,7 +30,7 @@ export const home = {
 
   /* a workspace without a plan */
   noPlanTitle: '{name} has no plan yet.',
-  noPlanAskOwner: 'Ask the owner to choose one — until then no canvases can be added here.',
+  noPlanAskOwner: 'Ask the owner to choose one. Until then no canvases can be added here.',
   noPlanChoose: 'Choose a Team plan to add canvases and invite your team.',
   choosePlan: 'Choose a plan',
 
@@ -50,9 +50,9 @@ export const home = {
   /* list body */
   emptyTitle: 'Start your first canvas',
   emptyDescription:
-    'A canvas is a shared space of live HTML frames — you design in the browser, your AI agents design through MCP, and everyone watches everything happen in real time.',
+    'A canvas is a shared space of live HTML frames: you design in the browser, your AI agents design through MCP, and everyone watches everything happen in real time.',
   createCanvas: '+ Create a canvas',
-  nothingHere: 'Nothing here yet — try another scope.',
+  nothingHere: 'Nothing here yet. Try another scope.',
   createNewCanvasAria: 'Create a new canvas',
   frames: { one: '{count} frame', other: '{count} frames' },
 
@@ -64,7 +64,7 @@ export const home = {
 
   /* tile meta */
   claimTitle: 'This canvas predates accounts and is visible to everyone. Claim it to make it yours.',
-  claimBadge: 'unclaimed — make mine',
+  claimBadge: 'unclaimed, make mine',
   sharedByTitle: 'You were invited to collaborate on this canvas',
   sharedBy: 'Shared by {name}',
   edited: 'Edited {time}',
@@ -108,8 +108,8 @@ export const home = {
   meterChatgpt: 'Doop Agent on your ChatGPT',
   meterProviderKey: 'Doop Agent on your {provider} key',
   meterNoFreeTier: 'Connect a plan in Settings to use the Doop Agent',
-  meterUsedUp: 'Free Doop Agent tasks used up — connect ChatGPT to continue',
-  meterUsedUpLine: 'free Doop Agent tasks used up — connect ChatGPT to continue',
+  meterUsedUp: 'Free Doop Agent tasks used up. Connect ChatGPT to continue',
+  meterUsedUpLine: 'free Doop Agent tasks used up. Connect ChatGPT to continue',
   meterLeft: {
     one: '{left} of {count} free Doop Agent task left',
     other: '{left} of {count} free Doop Agent tasks left',
@@ -119,12 +119,12 @@ export const home = {
   wallUsedUpBefore: 'Those were on the house. Connect your',
   wallUsedUpBold: 'ChatGPT subscription',
   wallUsedUpAfter:
-    'and the Doop Agent keeps working exactly as it does now — same canvas, same agent, running on your plan instead of ours.',
+    'and the Doop Agent keeps working exactly as it does now: same canvas, same agent, running on your plan instead of ours.',
   wallConnectBefore: 'The Doop Agent designs on your canvases using a subscription you already have. Connect',
-  wallConnectAfter: 'once and every task runs on your plan — nothing metered, no separate bill.',
+  wallConnectAfter: 'once and every task runs on your plan: nothing metered, no separate bill.',
   wallConnectButton: 'Connect your plan',
   wallMcp:
-    'Prefer to drive the canvas yourself from Claude Code, Codex, or another MCP client? That agent designs as you prompt it — queued tasks stay with the Doop Agent.',
+    'Prefer to drive the canvas yourself from Claude Code, Codex, or another MCP client? That agent designs as you prompt it, while queued tasks stay with the Doop Agent.',
   wallMcpLink: 'See how to connect it',
 
   /* create a workspace */
@@ -144,8 +144,8 @@ export const home = {
   plans: 'Plans',
   upgradeDefaultReason: 'Shared workspaces are the paid part of doop.',
   upgradeLede:
-    'Everyone in a workspace opens every canvas in it — no per-canvas invites, no links to pass around. Seats are billed as people join and refunded as they leave.',
-  billingOff: 'Billing isn’t set up on this server, so workspaces are included. Nothing to buy — go make one.',
+    'Everyone in a workspace opens every canvas in it: no per-canvas invites, no links to pass around. Seats are billed as people join and refunded as they leave.',
+  billingOff: 'Billing isn’t set up on this server, so workspaces are included. Nothing to buy. Go make one.',
   monthly: 'Monthly',
   yearly: 'Yearly',
   yearlyPrice: '{perMonth} a seat a month, billed {perYear} a year',
@@ -153,11 +153,11 @@ export const home = {
   seats: { one: '{count} seat × {price}', other: '{count} seats × {price}' },
   totalPerMonth: '= {total} per month',
   totalPerYear: '= {total} per year',
-  alreadyOnTeam: ' — already on Team; manage it from Billing.',
+  alreadyOnTeam: ' (already on Team; manage it from Billing).',
   countingSeats: 'Counting seats…',
   stripeNote: 'You’ll set up payment on Stripe’s secure checkout. Cancel any time from the billing portal.',
   askOwnerBefore: 'Ask',
-  askOwnerAfter: 'to choose a plan — the owner holds the billing.',
+  askOwnerAfter: 'to choose a plan. The owner holds the billing.',
   workspaceOwnerFallback: 'the workspace owner',
   openingStripe: 'Opening Stripe…',
   continueCheckout: 'Continue to checkout',
@@ -177,9 +177,9 @@ export const home = {
   moveLede:
     'A canvas in a workspace is open to everyone in it. Move it back to Personal and only you and the people you invited keep access.',
   destinationAria: 'Destination',
-  personalOption: 'Personal — just you and invitees',
+  personalOption: 'Personal (just you and invitees)',
   needsPlanSuffix: ' (needs a plan)',
-  targetNoPlan: '{name} has no plan yet — you’ll be asked to choose one.',
+  targetNoPlan: '{name} has no plan yet, so you’ll be asked to choose one.',
   moving: 'Moving…',
   moveCanvas: 'Move canvas',
   moveFailed: 'Couldn’t move the canvas',

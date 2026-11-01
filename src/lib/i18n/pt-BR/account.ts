@@ -2,10 +2,10 @@ import type { Catalog } from '..'
 
 export const account: Catalog['account'] = {
   nameSaveFailed: 'Não foi possível salvar esse nome',
-  nameSaved: 'Salvo — os agentes passam a usá-lo em até um minuto',
+  nameSaved: 'Salvo. Os agentes passam a usá-lo em até um minuto',
   passwordChangeFailed: 'Não foi possível alterar essa senha',
-  passwordUpdated: 'Senha atualizada — todas as outras sessões foram encerradas',
-  notifySaveFailed: 'Não foi possível salvar — tente de novo',
+  passwordUpdated: 'Senha atualizada. Todas as outras sessões foram encerradas',
+  notifySaveFailed: 'Não foi possível salvar. Tente de novo',
   verificationSendFailed: 'Não foi possível enviar esse e-mail',
   verificationSent: 'E-mail de verificação enviado',
 
@@ -15,9 +15,9 @@ export const account: Catalog['account'] = {
   nameRow: 'Nome',
   saving: 'Salvando…',
   displayNameAria: 'Nome de exibição',
-  nameUnsaved: 'Alterado — ainda não salvo',
+  nameUnsaved: 'Alterado, ainda não salvo',
   emailRow: 'E-mail',
-  emailNotChangeable: 'Endereço de acesso — ainda não pode ser alterado',
+  emailNotChangeable: 'Endereço de acesso (ainda não pode ser alterado)',
   resendVerification: 'Reenviar verificação',
   verified: 'verificado',
   unverified: 'não verificado',
@@ -28,12 +28,12 @@ export const account: Catalog['account'] = {
   commentEmailsRow: 'E-mails de comentários',
   commentEmailsAria: 'Enviar e-mail sobre novos comentários e respostas',
   commentEmailsLabel:
-    'Novos comentários e respostas em canvases que são seus, para os quais você foi convidado ou em que você escreveu — reunidos em um e-mail por canvas a cada poucos minutos.',
+    'Novos comentários e respostas em canvases que são seus, para os quais você foi convidado ou em que você escreveu, reunidos em um e-mail por canvas a cada poucos minutos.',
   emailNotConfigured: 'Este doop não tem e-mail configurado (SMTP_HOST), então nada é enviado de qualquer forma.',
 
   passwordTitle: 'Senha',
   passwordDescription:
-    'Alterá-la encerra a sessão em todos os outros navegadores e dispositivos — este continua conectado.',
+    'Alterá-la encerra a sessão em todos os outros navegadores e dispositivos. Este continua conectado.',
   currentPassword: 'Senha atual',
   newPassword: 'Nova senha',
   updatingPassword: 'Atualizando…',

@@ -51,7 +51,7 @@ export const automations: Catalog['automations'] = {
   exampleNightlyPolishName: 'Acabamento noturno',
   exampleNightlyPolishBlurb: 'O Visual Polish arruma espaçamento e alinhamento toda noite.',
 
-  roleBlurbDoop: 'Designer generalista — faz a coisa acontecer',
+  roleBlurbDoop: 'Designer generalista que faz a coisa acontecer',
   roleBlurbUx: 'Fluxo, hierarquia, estados, affordances',
   roleBlurbCopy: 'Títulos, microtexto, rótulos, CTAs',
   roleBlurbBrand: 'Paleta, tipografia, logo, tom de voz',
@@ -194,8 +194,8 @@ export const automations: Catalog['automations'] = {
   notUsedYet: 'Ainda não usado por nenhuma automação',
   metaDisconnectCopy:
     'As automações que importam da Meta vão falhar até você conectar de novo. Os frames que já estão nos seus canvases continuam.',
-  metaExpiresSoon: 'O acesso à Meta expira em breve — reconecte para manter as importações rodando.',
-  metaNotConfigured: 'Não configurado neste servidor — defina META_APP_ID e META_APP_SECRET.',
+  metaExpiresSoon: 'O acesso à Meta expira em breve. Reconecte para manter as importações rodando.',
+  metaNotConfigured: 'Não configurado neste servidor. Defina META_APP_ID e META_APP_SECRET.',
   disconnectTitle: 'Desconectar {name}?',
 
   installFailed: 'Não foi possível instalar o Doop.',

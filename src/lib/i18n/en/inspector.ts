@@ -4,7 +4,7 @@
 export const inspector = {
   // frame inspector
   frameName: 'Frame name',
-  lockedTitle: 'Locked — can’t be moved, resized or deleted on the canvas',
+  lockedTitle: 'Locked: can’t be moved, resized or deleted on the canvas',
   locked: 'Locked',
   unlock: 'Unlock',
   groupDevelopment: 'Development',
@@ -15,9 +15,9 @@ export const inspector = {
   copyPngTitle: 'Copy the image (2×) to paste anywhere',
   copyPng: 'Copy as PNG',
   copyImageUrlTitle:
-    'Public image URL — always renders the current design; paste it as og:image or a blog featured image',
+    'Public image URL that always renders the current design; paste it as og:image or a blog featured image',
   copyImageUrl: 'Copy image URL',
-  pinReferenceTitle: 'Add to design memory — will be used as reference',
+  pinReferenceTitle: 'Add to design memory (used as a reference)',
   pinReference: 'Pin as reference',
   hideHtmlEditor: 'Hide the HTML editor',
   editHtml: 'Edit the HTML',

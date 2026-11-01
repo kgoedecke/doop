@@ -110,7 +110,7 @@ export const connect = {
   headlessAfter: '. The key acts as you, on the canvases you can reach.',
   done: 'Done',
 
-  arrived: '{name} is here — it worked',
+  arrived: '{name} is here. It worked',
   listening: 'listening for {name}…',
   yourAgent: 'your agent',
 
