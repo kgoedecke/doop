@@ -58,13 +58,14 @@ The installed-package upgrade check uses the same bounded npm-install timeout as
 initial installation; a cold Windows runner exceeded the old two-minute generic
 command timeout after the application and service checks had already passed.
 
-## Pending Effect migration
+## Effect migration
 
-After CI and CodeRabbit review of the existing CLI are complete, migrate the CLI
-package to Effect. npm reports effect and @effect/platform-node 4.1.1, but the
-environment's release-age policy currently excludes that release. Use matching
-4.1.0 packages, acquired successfully without overriding the policy, and inspect
-their APIs before implementation.
+The original CLI passed all 16 checks and its seven CodeRabbit findings were
+fixed. The CLI package is now migrated to Effect. npm reports effect and
+@effect/platform-node 4.1.1, but the
+environment's release-age policy currently excludes that release. Use matching 4.0.7 packages, including an exact node-shared dependency: the
+isolated npm install rejected the newer transitive range under the release-age
+policy. Inspect the pinned APIs before implementation.
 
 CodeRabbit review follow-up: restrict and pin CLI workflow actions; make logout
 remove local credentials even offline; detect signal-terminated children and
@@ -88,6 +89,14 @@ after lease expiry.
   unrelated upstream application modules.
 - Preserve command behavior and the installed-tarball E2E checks. Add Effect-aware
   service tests for failure, interruption and cleanup, then rerun package/static CI.
+
+Implemented typed services and Layers for configuration, processes, backend
+startup, service policy and HTTP/session handling. Filesystem, native service,
+pairing, skills and update operations compose Effect workflows. Only executable
+loaders remain JavaScript. The private control protocol uses scoped Effect
+sockets with bounded newline framing; the reader opens before writing, and stays
+alive until the response is flushed. Seven lifecycle regressions include scope
+interruption releasing a lease and concurrent process exclusion.
 
 ## Verification completed
 

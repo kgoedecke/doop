@@ -4,7 +4,7 @@ Requires Node.js 22.19 or newer and npm. This is a private development preview,
 not a published registry package. Install the generated tarball:
 
 ```sh
-npm install -g ./killzonegaming-doop-cli-0.12.0-cli.1.tgz
+npm install -g ./killzonegaming-doop-cli-0.12.0-cli.2.tgz
 doop start
 ```
 
@@ -12,6 +12,14 @@ Open the printed local URL after the server ready message and create a local
 account. Connect agents through the app's Connect AI flow or its `/mcp` endpoint.
 Authentication and MCP permissions remain enabled. Editing and connecting an
 existing MCP agent require no external model key.
+
+The CLI is implemented in TypeScript with Effect 4. Configuration, process
+execution, server startup, service management and authenticated HTTP access are
+explicit services composed through Layers. Schemas validate persisted settings
+and control messages; credentials remain redacted until an adapter needs them.
+Scopes own backend processes, control connections, log streams and heartbeat
+locks, including cleanup on interruption. The existing Doop web application runs
+behind the backend process adapter.
 
 `doop start --port 0` selects an available port; use a fixed port for saved MCP
 connections. `--port 4401` selects a specific port. The CLI always binds to

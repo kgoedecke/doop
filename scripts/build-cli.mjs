@@ -17,7 +17,7 @@ cpSync(path.join(root, 'LICENSE'), path.join(output, 'LICENSE'))
 cpSync(path.join(root, 'docs/cli.md'), path.join(output, 'README.md'))
 const source = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
 // Drizzle loads its optional pg peer only when DATABASE_URL selects Postgres.
-const runtimeImports = new Set(['pg'])
+const runtimeImports = new Set(['pg', '@effect/platform-node-shared'])
 function collectImports(directory) {
   for (const file of readdirSync(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, file.name)
@@ -47,7 +47,7 @@ writeFileSync(
   JSON.stringify(
     {
       name: '@killzonegaming/doop-cli',
-      version: `${source.version}-cli.1`,
+      version: `${source.version}-cli.2`,
       private: true,
       description: 'Private preview of the Doop local application CLI',
       type: 'module',
@@ -56,6 +56,7 @@ writeFileSync(
       bin: { doop: 'cli/doop.mjs' },
       files: ['cli', 'server', 'shared', 'dist', 'LICENSE', 'README.md'],
       dependencies,
+      overrides: source.overrides,
     },
     null,
     2,

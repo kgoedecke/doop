@@ -162,6 +162,9 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
       .finally(() => process.exit(0))
   })
 }
+/* The local CLI owns this process through IPC so Windows can request the same
+   graceful flush path before escalating a stuck process to forced termination. */
+if (process.connected) process.once('disconnect', () => process.emit('SIGTERM'))
 
 /* ------------------------------------------------- realtime rooms */
 

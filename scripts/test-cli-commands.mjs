@@ -22,7 +22,7 @@ export async function exerciseCommands(entry, install, work, env, archive) {
     })
   const json = (args) => JSON.parse(run(args))
   const version = run(['--version']).trim()
-  assert.match(version, /-cli\.1$/)
+  assert.match(version, /^\d+\.\d+\.\d+-cli\.\d+$/)
   assert.equal(json(['service']).running, false)
   assert.equal(json(['service', 'install', '--port', '0']).autostart, false)
   let running
@@ -41,7 +41,7 @@ export async function exerciseCommands(entry, install, work, env, archive) {
           text += chunk
         })
         socket.on('close', () => {
-          assert.equal(text, '{}')
+          assert.deepEqual(JSON.parse(text), {})
           resolve()
         })
       })

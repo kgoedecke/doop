@@ -91,7 +91,7 @@ try {
   writeFileSync(path.join(install, 'package.json'), '{"private":true}')
   npmRun(['install', '--prefer-offline', '--no-audit', '--no-fund', path.join(work, packed.filename)], install)
   entry = path.join(install, 'node_modules/@killzonegaming/doop-cli/cli/doop.mjs')
-  assert.match(npmRun(['exec', '--offline', '--', 'doop', '--help'], install), /Usage: doop start/)
+  assert.match(npmRun(['exec', '--offline', '--', 'doop', '--help'], install), /Usage: doop <command>/)
   assert.throws(
     () => execFileSync(process.execPath, [entry, 'start', '--port=-1'], { cwd: install, env, stdio: 'pipe' }),
     /--port must be/,

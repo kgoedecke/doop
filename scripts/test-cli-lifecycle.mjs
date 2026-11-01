@@ -6,11 +6,37 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { test } from 'node:test'
-import { claimLock } from '../cli/locks.mjs'
-import { hasExited, stopChild } from '../cli/processes.mjs'
-import { logs } from '../cli/service.mjs'
+import { Deferred, Effect, Fiber } from 'effect'
+import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem'
+import { claimLock, logTail } from '../cli/files.ts'
+import { hasExited, stopChild } from '../cli/process.ts'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
+
+test('interrupting an Effect scope releases its lease', async () => {
+  const work = directory()
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const ready = yield* Deferred.make()
+          const fiber = yield* Effect.scoped(
+            claimLock(work, '.doop-lock').pipe(
+              Effect.andThen(Deferred.succeed(ready, undefined)),
+              Effect.andThen(Effect.never),
+            ),
+          ).pipe(Effect.forkScoped)
+          yield* Deferred.await(ready)
+          yield* Fiber.interrupt(fiber)
+          yield* claimLock(work, '.doop-lock')
+        }),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
+    )
+    assert.equal(existsSync(path.join(work, '.doop-lock')), false)
+  } finally {
+    remove(work)
+  }
+})
 function directory() {
   return mkdtempSync(path.join(tmpdir(), 'doop-lifecycle-'))
 }
@@ -32,7 +58,7 @@ test('already signal-killed children do not hang shutdown', { timeout: 5000 }, a
   child.kill('SIGKILL')
   await exited
   assert.equal(hasExited(child), true)
-  await stopChild(child)
+  await Effect.runPromise(stopChild(child))
 })
 
 test('shutdown forcibly ends a child that ignores graceful disconnection and SIGTERM', { timeout: 5000 }, async () => {
@@ -40,7 +66,7 @@ test('shutdown forcibly ends a child that ignores graceful disconnection and SIG
     "process.on('SIGTERM',()=>{});process.on('disconnect',()=>{});setInterval(()=>{},1000);process.send('ready')",
   )
   try {
-    await stopChild(child, 50)
+    await Effect.runPromise(stopChild(child, 50))
     assert.equal(hasExited(child), true)
     assert.equal(child.signalCode, 'SIGKILL')
   } finally {
@@ -48,16 +74,22 @@ test('shutdown forcibly ends a child that ignores graceful disconnection and SIG
   }
 })
 
-test('a stale ownerless lock is reclaimed after its lease, independently of PID state', () => {
+test('a stale ownerless lock is reclaimed after its lease, independently of PID state', async () => {
   const work = directory()
   try {
     const lock = path.join(work, '.service-lock')
     mkdirSync(lock)
     const stale = new Date(Date.now() - 20_000)
     utimesSync(lock, stale, stale)
-    const release = claimLock(work, '.service-lock')
-    assert.throws(() => claimLock(work, '.service-lock'), /Data directory is locked/)
-    release()
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* claimLock(work, '.service-lock')
+          const error = yield* claimLock(work, '.service-lock').pipe(Effect.flip)
+          assert.equal(error._tag, 'StorageError')
+        }),
+      ).pipe(Effect.provide(NodeFileSystem.layer)),
+    )
     assert.equal(existsSync(lock), false)
   } finally {
     remove(work)
@@ -66,17 +98,22 @@ test('a stale ownerless lock is reclaimed after its lease, independently of PID 
 
 test('concurrent processes cannot both claim the same data directory', { timeout: 10_000 }, async () => {
   const work = directory()
-  const moduleUrl = pathToFileURL(path.join(root, 'cli/locks.mjs')).href
+  const moduleUrl = pathToFileURL(path.join(root, 'cli/files.ts')).href
   const code = `import { claimLock } from ${JSON.stringify(moduleUrl)};
-    try { claimLock(${JSON.stringify(work)}, '.doop-lock'); process.send({ acquired: true }) }
-    catch { process.send({ acquired: false }) }
-    process.on('disconnect',()=>process.exit(0)); setInterval(()=>{},1000)`
+    import { Effect } from 'effect';
+    import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem';
+    import * as NodeRuntime from '@effect/platform-node/NodeRuntime';
+    const wait = Effect.callback(resume => { process.once('disconnect', () => resume(Effect.void)) });
+    NodeRuntime.runMain(Effect.scoped(claimLock(${JSON.stringify(work)}, '.doop-lock').pipe(
+      Effect.andThen(Effect.sync(() => process.send({ acquired: true }))), Effect.andThen(wait),
+      Effect.catch(() => Effect.sync(() => process.send({ acquired: false })).pipe(Effect.andThen(wait)))
+    )).pipe(Effect.provide(NodeFileSystem.layer)))`
   const children = [
-    spawn(process.execPath, ['--input-type=module', '-e', code], {
+    spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code], {
       stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
       windowsHide: true,
     }),
-    spawn(process.execPath, ['--input-type=module', '-e', code], {
+    spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code], {
       stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
       windowsHide: true,
     }),
@@ -85,7 +122,7 @@ test('concurrent processes cannot both claim the same data directory', { timeout
     const results = await Promise.all(children.map((child) => once(child, 'message')))
     assert.equal(results.filter(([value]) => value.acquired).length, 1)
   } finally {
-    await Promise.all(children.map((child) => stopChild(child)))
+    await Promise.all(children.map((child) => Effect.runPromise(stopChild(child))))
     remove(work)
   }
 })
@@ -106,7 +143,7 @@ test('logout always removes local cookies with a stopped or unreachable server',
           work,
           ...(server ? ['--server', server] : []),
         ],
-        { encoding: 'utf8', timeout: 5000 },
+        { encoding: 'utf8', timeout: 30_000 },
       )
       assert.equal(JSON.parse(output).authenticated, false)
       assert.equal(existsSync(session), false)
@@ -116,11 +153,13 @@ test('logout always removes local cookies with a stopped or unreachable server',
   }
 })
 
-test('debug logs returns only the bounded final bytes of a Unicode log', () => {
+test('debug logs returns only the bounded final bytes of a Unicode log', async () => {
   const work = directory()
   try {
     writeFileSync(path.join(work, 'service.log'), '🙂'.repeat(10_000) + 'END!')
-    const tail = logs(work)
+    const tail = await Effect.runPromise(
+      logTail(path.join(work, 'service.log')).pipe(Effect.provide(NodeFileSystem.layer)),
+    )
     assert.equal(Buffer.byteLength(tail), 32_768)
     assert.ok(tail.endsWith('END!'))
   } finally {

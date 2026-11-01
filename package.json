@@ -4,10 +4,13 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.10",
+  "overrides": {
+    "@effect/platform-node-shared": "4.0.7"
+  },
   "scripts": {
     "build:cli": "node scripts/build-cli.mjs",
     "test:cli": "node scripts/test-cli.mjs",
-    "test:cli:lifecycle": "node --test scripts/test-cli-lifecycle.mjs",
+    "test:cli:lifecycle": "node --import tsx --test scripts/test-cli-lifecycle.mjs",
     "dev": "bun run build:claude-extension && concurrently -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
     "build": "bun run build:claude-extension && vite build",
     "build:claude-extension": "node scripts/build-claude-extension.mjs",
@@ -36,6 +39,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@aws-sdk/client-s3": "^3.1110.0",
+    "@effect/platform-node": "4.0.7",
+    "@effect/platform-node-shared": "4.0.7",
     "@electric-sql/pglite": "^0.5.4",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@radix-ui/react-alert-dialog": "^1.1.23",
@@ -55,6 +60,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
+    "effect": "4.0.7",
     "envalid": "8.2.0",
     "express": "^4.19.2",
     "jose": "6.2.10",
@@ -90,6 +96,7 @@
     "@types/node": "^20.14.10",
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.4",
+    "@types/proper-lockfile": "4.1.4",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/ws": "^8.5.10",
