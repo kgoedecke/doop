@@ -330,9 +330,12 @@ export function PrototypePlayer({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      /* the scaling menu takes its own keys (arrows, Escape); it stops them
-         short of the editor itself */
-      if (e.target instanceof Element && e.target.closest('[data-proto-menu]')) return
+      /* the scaling menu and its button take their own keys (arrows, Enter,
+         Escape in the menu) and stop them short of the editor themselves;
+         Escape on the button still leaves the player */
+      const target = e.target instanceof Element ? e.target : null
+      if (target?.closest('[data-proto-menu]')) return
+      if (target?.closest('[data-proto-menu-trigger]') && e.key !== 'Escape') return
       /* capture phase, and modal: no key reaches the editor underneath (an
          arrow would nudge the selected frame, Delete would remove it) */
       e.stopPropagation()
@@ -389,10 +392,11 @@ export function PrototypePlayer({
   const baseFrame = frameById(current.frameId)
   const baseScale = baseFrame ? screenLayout(baseFrame, viewport, scaling).scale : 1
   /* a screen larger than the player scrolls from its top-left corner, except
-     under Fill, which crops it around its centre */
+     under Fill, which crops it around its centre (clipped, so nothing
+     can scroll it, not even focus) */
   const screenPlacement =
     scaling === 'fill' || scaling === 'fit'
-      ? 'place-items-center overflow-hidden'
+      ? 'place-content-center overflow-clip'
       : 'place-items-center-safe overflow-auto'
 
   const screenProps = (entry: Entry) => ({
@@ -544,7 +548,7 @@ function ScalingMenu({ scaling, onChange }: { scaling: ProtoScaling; onChange: (
   const pick = (value: string) => isProtoScaling(value) && onChange(value)
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+      <DropdownMenuTrigger asChild data-proto-menu-trigger="" onKeyDown={(e) => e.stopPropagation()}>
         <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoScaling')}>
           <SlidersIcon size="rail" />
         </IconButton>
