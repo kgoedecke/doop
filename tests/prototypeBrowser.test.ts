@@ -178,6 +178,114 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     expect(await home.$('#go[data-v-proto-flash]')).not.toBeNull()
   })
 
+  it('sits below the app inset and rescales from its scaling menu', async () => {
+    await page.evaluate(() => document.documentElement.style.setProperty('--app-inset', '40px'))
+    try {
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), CANVAS)
+      await page.evaluate(() => (window as unknown as Fixture).play('home'))
+      await screen('home')
+      expect(await page.$eval('[data-prototype-player]', (el) => el.getBoundingClientRect().top)).toBe(40)
+      const width = () => page.$eval('[data-proto-screen="home"] > div', (el) => el.getBoundingClientRect().width)
+      /* 1000 × 660 fits the 400 × 300 frame at 2.2× */
+      expect(await width()).toBe(880)
+
+      await page.click('[aria-label="Scaling"]')
+      await page.waitForSelector('[data-proto-menu]')
+      await page.keyboard.press('ArrowDown')
+      await page.keyboard.press('Enter')
+      await page.waitForFunction(() => !document.querySelector('[data-proto-menu]'))
+      /* the menu's keys stayed with the menu: the player is still up */
+      expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
+      await page.waitForFunction(
+        () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 400,
+      )
+
+      await page.click('[aria-label="Scaling"]')
+      await page.waitForSelector('[data-proto-menu]')
+      await page.$$eval('[data-proto-menu] [role="menuitemradio"]', (items) =>
+        (items.find((item) => item.textContent === 'Responsive') as HTMLElement | undefined)?.click(),
+      )
+      await page.waitForFunction(
+        () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 1000,
+      )
+    } finally {
+      await page.evaluate(() => {
+        localStorage.removeItem('doop:proto-scaling')
+        document.documentElement.style.removeProperty('--app-inset')
+      })
+    }
+  })
+
+  it('opens the scaling menu from the keyboard without driving the screen', async () => {
+    const keyed: Canvas = {
+      ...CANVAS,
+      frames: CANVAS.frames.map((f) =>
+        f.id === 'home'
+          ? {
+              ...f,
+              html: f.html.replace(
+                '</body>',
+                '<div data-doop-on="key:ArrowDown" data-doop-action="navigate:detail"></div></body>',
+              ),
+            }
+          : f,
+      ),
+    }
+    await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), keyed)
+    await page.evaluate(() => (window as unknown as Fixture).play('home'))
+    await screen('home')
+    await page.focus('[aria-label="Scaling"]')
+    await page.keyboard.press('ArrowDown')
+    await page.waitForSelector('[data-proto-menu]')
+    await sleep(200)
+    expect(await current()).toBe('HOME')
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[data-proto-menu]'))
+    expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
+  })
+
+  it('scrolls an oversized screen to its far corner, and crops it centred under Fill', async () => {
+    const big: Canvas = {
+      ...CANVAS,
+      frames: [{ ...frame('big', '<button>Big</button>'), width: 2000, height: 1400 }],
+    }
+    /* the player's box, the screen's box, and how far its scroller can go */
+    const measure = () =>
+      page.$eval('[data-proto-screen="big"]', (scroller) => {
+        const player = scroller.closest('[data-prototype-player]')!.getBoundingClientRect()
+        scroller.scrollTo(scroller.scrollWidth, scroller.scrollHeight)
+        const box = scroller.firstElementChild!.getBoundingClientRect()
+        return {
+          scrolled: scroller.scrollLeft > 0 || scroller.scrollTop > 0,
+          right: box.right - player.right,
+          bottom: box.bottom - player.bottom,
+          left: box.left - player.left,
+          top: box.top - player.top,
+        }
+      })
+    const playAt = async (scaling: string) => {
+      await page.evaluate((s) => localStorage.setItem('doop:proto-scaling', s), scaling)
+      await page.evaluate(() => (window as unknown as Fixture).play('big'))
+      await screen('big')
+      return measure()
+    }
+    try {
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), big)
+      /* 2000 × 1400 at 1× in a 1000 × 700 player: scrolled to the far corner */
+      expect(await playAt('actual')).toMatchObject({ scrolled: true, right: 0, bottom: 0 })
+      /* at 0.5×: 1000 × 700 fills the width exactly, no room to scroll */
+      expect(await playAt('fit-width')).toMatchObject({ right: 0, bottom: 0, left: 0, top: 0 })
+      await page.setViewport({ width: 1000, height: 600 })
+      /* 1000 × 700 in 1000 × 600: scrolls down to the bottom edge */
+      expect(await playAt('fit-width')).toMatchObject({ scrolled: true, bottom: 0, left: 0 })
+      /* 0.5× covers 1000 × 600: 100px cropped, 50 each side, nothing to scroll */
+      expect(await playAt('fill')).toEqual({ scrolled: false, right: 0, bottom: 50, left: 0, top: -50 })
+    } finally {
+      await page.setViewport({ width: 1000, height: 700 })
+      await page.evaluate(() => localStorage.removeItem('doop:proto-scaling'))
+    }
+  })
+
   it('closes on Escape when presenting over the editor', async () => {
     await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), CANVAS)
     await page.evaluate(() => (window as unknown as Fixture).play('home'))

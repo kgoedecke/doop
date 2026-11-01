@@ -6,14 +6,29 @@ import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import {
   fitScale,
   historyStep,
+  isProtoScaling,
   protoHistoryState,
   readProtoHistory,
+  readProtoScaling,
   sanitizeInteraction,
+  saveProtoScaling,
+  screenLayout,
   transitionFrames,
+  type ProtoScaling,
+  type ScreenLayout,
 } from '../lib/prototypePlayer'
 import { prototypePath } from '../lib/prototype'
 import { IconButton } from './ui/icon-button'
-import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, XIcon } from './ui/icons'
+import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, SlidersIcon, XIcon } from './ui/icons'
+import {
+  DropdownMenu,
+  DropdownMenuCaption,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
 import { t as translate, useT } from '@/lib/i18n'
 
 /* One screen on the player's history stack: the frame it shows and how it
@@ -107,12 +122,25 @@ export function PrototypePlayer({
   const pressRevert = useRef<{ action: 'overlay' | 'navigate'; key: number } | null>(null)
   const noticeTimer = useRef<number | null>(null)
 
+  /* the player's own box, not the window: the desktop shell's tab strip
+     (and the impersonation banner) take the top of the window */
+  const rootRef = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
-  useEffect(() => {
-    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight })
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const measure = () => setViewport({ w: root.clientWidth, h: root.clientHeight })
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(root)
+    return () => observer.disconnect()
   }, [])
+
+  const [scaling, setScalingState] = useState(readProtoScaling)
+  const setScaling = (next: ProtoScaling) => {
+    saveProtoScaling(next)
+    setScalingState(next)
+  }
 
   function entryFor(
     frameId: string,
@@ -302,6 +330,12 @@ export function PrototypePlayer({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      /* the scaling menu and its button take their own keys (arrows, Enter,
+         Escape in the menu) and stop them short of the editor themselves;
+         Escape on the button still leaves the player */
+      const target = e.target instanceof Element ? e.target : null
+      if (target?.closest('[data-proto-menu]')) return
+      if (target?.closest('[data-proto-menu-trigger]') && e.key !== 'Escape') return
       /* capture phase, and modal: no key reaches the editor underneath (an
          arrow would nudge the selected frame, Delete would remove it) */
       e.stopPropagation()
@@ -356,7 +390,14 @@ export function PrototypePlayer({
   const outgoingOnTop = move ? transitionFrames(move.transition, move.back).outgoingOnTop : false
   const shownFrame = frameById((move?.to ?? current).frameId)
   const baseFrame = frameById(current.frameId)
-  const baseScale = baseFrame ? fitScale(baseFrame, viewport) : 1
+  const baseScale = baseFrame ? screenLayout(baseFrame, viewport, scaling).scale : 1
+  /* a screen larger than the player scrolls from its top-left corner, except
+     under Fill, which crops it around its centre (clipped, so nothing
+     can scroll it, not even focus) */
+  const screenPlacement =
+    scaling === 'fill' || scaling === 'fit'
+      ? 'place-content-center overflow-clip'
+      : 'place-items-center-safe overflow-auto'
 
   const screenProps = (entry: Entry) => ({
     entry,
@@ -384,7 +425,9 @@ export function PrototypePlayer({
 
   return (
     <div
-      className="fixed inset-0 z-[80] overflow-hidden bg-code"
+      ref={rootRef}
+      /* below the shell's tab strip, by the --app-inset contract (App.tsx) */
+      className="fixed inset-x-0 bottom-0 top-[var(--app-inset,0px)] z-[80] overflow-hidden bg-code"
       role="dialog"
       aria-label={t('panels.protoAria', { name: shownFrame?.name ?? t('panels.protoMissingLower') })}
       data-prototype-player=""
@@ -398,7 +441,7 @@ export function PrototypePlayer({
               if (el) wrappers.current.set(entry.key, el)
               else wrappers.current.delete(entry.key)
             }}
-            className="absolute inset-0 grid place-items-center"
+            className={`absolute inset-0 grid ${screenPlacement}`}
             data-proto-screen={entry.frameId}
             data-proto-role={role}
             style={{
@@ -409,7 +452,7 @@ export function PrototypePlayer({
           >
             <ProtoScreen
               {...screenProps(entry)}
-              scale={frame ? fitScale(frame, viewport) : 1}
+              layout={frame ? screenLayout(frame, viewport, scaling) : undefined}
               interactive={role !== 'from' && !overlays.length}
               onReady={onScreenReady}
             />
@@ -436,7 +479,7 @@ export function PrototypePlayer({
             >
               <ProtoScreen
                 {...screenProps(entry)}
-                scale={scale}
+                layout={frame ? { width: frame.width, height: frame.height, scale } : undefined}
                 interactive={index === overlays.length - 1}
                 onReady={() => onOverlayReady(entry)}
               />
@@ -464,6 +507,7 @@ export function PrototypePlayer({
         <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoHotspots')} onClick={flashHotspots}>
           <HotspotIcon size="rail" />
         </IconButton>
+        <ScalingMenu scaling={scaling} onChange={setScaling} />
         {onClose && canvasId && (
           <IconButton
             size="sm"
@@ -496,6 +540,41 @@ export function PrototypePlayer({
 }
 
 const playerBtn = 'text-code-ink/80 hover:bg-white/10 hover:text-code-ink'
+
+/** How the player scales its screens: the two recommended choices, then
+ *  the scaled ones. */
+function ScalingMenu({ scaling, onChange }: { scaling: ProtoScaling; onChange: (next: ProtoScaling) => void }) {
+  const t = useT()
+  const pick = (value: string) => isProtoScaling(value) && onChange(value)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild data-proto-menu-trigger="" onKeyDown={(e) => e.stopPropagation()}>
+        <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoScaling')}>
+          <SlidersIcon size="rail" />
+        </IconButton>
+      </DropdownMenuTrigger>
+      {/* above the player, which sits over every other layer of the editor */}
+      <DropdownMenuContent
+        width="md"
+        className="z-[90]"
+        data-proto-menu=""
+        onKeyDown={(e) => e.stopPropagation()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
+        <DropdownMenuRadioGroup value={scaling} onValueChange={pick}>
+          <DropdownMenuCaption>{t('panels.protoScalingRecommended')}</DropdownMenuCaption>
+          <DropdownMenuRadioItem value="actual">{t('panels.protoScaleActual')}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="responsive">{t('panels.protoScaleResponsive')}</DropdownMenuRadioItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuCaption>{t('panels.protoScalingOther')}</DropdownMenuCaption>
+          <DropdownMenuRadioItem value="fit-width">{t('panels.protoScaleFitWidth')}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="fit">{t('panels.protoScaleFit')}</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="fill">{t('panels.protoScaleFill')}</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 function readState(): Record<string, unknown> {
   const state: unknown = history.state
@@ -534,7 +613,7 @@ function askKey(win: Window, key: string): Promise<boolean> {
 function ProtoScreen({
   entry,
   frame,
-  scale,
+  layout,
   interactive,
   takeFocus,
   register,
@@ -543,7 +622,8 @@ function ProtoScreen({
 }: {
   entry: Entry
   frame: Frame | undefined
-  scale: number
+  /** the document's size and draw scale; undefined while the frame is gone */
+  layout: ScreenLayout | undefined
   interactive: boolean
   /** true once when the overlay closed over this screen held the focus */
   takeFocus: () => boolean
@@ -602,9 +682,10 @@ function ProtoScreen({
     if ((screenHasFocus() && focused !== iframe) || latest.current.takeFocus()) iframe.focus()
   }, [shown, interactive])
 
-  if (!frame) return <div className="text-body text-code-ink/70">{t('panels.protoDeleted')}</div>
+  if (!frame || !layout) return <div className="text-body text-code-ink/70">{t('panels.protoDeleted')}</div>
 
-  const box: CSSProperties = { width: Math.round(frame.width * scale), height: Math.round(frame.height * scale) }
+  const { width, height, scale } = layout
+  const box: CSSProperties = { width: Math.round(width * scale), height: Math.round(height * scale) }
   return (
     <div className="relative overflow-hidden bg-white" style={box}>
       <iframe
@@ -614,7 +695,7 @@ function ProtoScreen({
         data-doop-proto-frame={frame.id}
         sandbox="allow-scripts"
         srcDoc={FRAME_BOOTSTRAP}
-        style={{ width: frame.width, height: frame.height, transform: `scale(${scale})`, transformOrigin: '0 0' }}
+        style={{ width, height, transform: `scale(${scale})`, transformOrigin: '0 0' }}
       />
     </div>
   )
