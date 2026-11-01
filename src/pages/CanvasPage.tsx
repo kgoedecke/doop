@@ -121,6 +121,8 @@ const INSPECTOR_W = 244
 const BAR_H = 50
 /* how far what floats over the canvas keeps from a docked column */
 const FLOAT_GAP = 10
+/* the narrowest stage docked panels squeeze it to, while their minimums allow */
+const DOCKED_STAGE_MIN = 320
 const AGENTS_W = 280
 const PANEL_WIDTH_KEY = 'doop:canvas-panel-widths'
 
@@ -513,7 +515,8 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const panels = fitPanelWidths({
     saved: panelWidths,
     viewport: viewportWidth,
-    reserved: fixedChrome.left + fixedChrome.right + rulerInset,
+    /* docked, the panels squeeze the stage itself, so it keeps a usable width */
+    reserved: fixedChrome.left + fixedChrome.right + rulerInset + (docked ? DOCKED_STAGE_MIN : 0),
     layersOpen,
     agentsOpen: showActivity,
   })

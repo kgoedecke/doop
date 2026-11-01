@@ -127,7 +127,7 @@
   element panel and Agents flush columns (`Panel surface="docked"`), the bar a solid strip
   (`TopBar variant="docked"`), and the stage itself the gap between them (`Stage bounds`), so its
   rulers sit on its own edges and fits need no insets. Phones and ⌘. ignore it. `chromeLayout` in
-  `CanvasPage.tsx` holds both geometries. Tests: `panelLayout.test.ts`, the docked case in
+  `CanvasPage.tsx` holds both geometries; docked panels keep the stage at least 320px wide as far as their minimums allow, and ⌘V / image drops centre on the stage (`stageViewportSize`), not the window. Tests: `panelLayout.test.ts`, the docked case in
   `fitSelectionBrowser.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes

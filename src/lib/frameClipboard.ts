@@ -4,6 +4,7 @@ import { useStore } from './store'
 import { posthog } from './posthog'
 import { recordCreate, recordCreates } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
+import { stageViewportSize } from './framePlacement'
 
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
@@ -112,10 +113,12 @@ export function pasteFrameCentered(canvasId: string) {
   if (!frames.length) return
   const { width, height } = clipBounds(frames)
   const vp = useStore.getState().viewport
+  /* the stage, not the window: docked panels leave it only part of it */
+  const stage = stageViewportSize()
   createFromClip(
     canvasId,
-    (window.innerWidth / 2 - vp.x) / vp.zoom - width / 2,
-    (window.innerHeight / 2 - vp.y) / vp.zoom - height / 2,
+    (stage.width / 2 - vp.x) / vp.zoom - width / 2,
+    (stage.height / 2 - vp.y) / vp.zoom - height / 2,
   )
 }
 
@@ -174,8 +177,9 @@ export async function uploadImageFrames(
     return { width: Math.max(40, Math.round(d.width * scale)), height: Math.max(40, Math.round(d.height * scale)) }
   })
   const vp = useStore.getState().viewport
-  const cx = (window.innerWidth / 2 - vp.x) / vp.zoom
-  const cy = (window.innerHeight / 2 - vp.y) / vp.zoom
+  const stage = stageViewportSize()
+  const cx = (stage.width / 2 - vp.x) / vp.zoom
+  const cy = (stage.height / 2 - vp.y) / vp.zoom
   const totalW = scaled.reduce((sum, s) => sum + s.width, 0) + IMAGE_ROW_GAP * (scaled.length - 1)
   let x = cx - totalW / 2
   const placed = scaled.map((size) => {

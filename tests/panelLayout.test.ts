@@ -22,4 +22,11 @@ describe('panel layout preference', () => {
     const { getPanelLayout } = await import('../src/lib/panelLayout')
     expect(getPanelLayout()).toBe('floating')
   })
+
+  it('picks up a choice another tab stored while nothing here listened', async () => {
+    const { getPanelLayout } = await import('../src/lib/panelLayout')
+    expect(getPanelLayout()).toBe('floating')
+    localStorage.setItem('doop:panel-layout', 'docked')
+    expect(getPanelLayout()).toBe('docked')
+  })
 })

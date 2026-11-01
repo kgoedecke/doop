@@ -44,7 +44,7 @@ export const DEFAULT_FRAME_SIZE = { width: 640, height: 480 } as const
  * back to the window if the Stage isn't mounted, which should not happen
  * from the entry points that call this.
  */
-function stageViewportSize(): { width: number; height: number } {
+export function stageViewportSize(): { width: number; height: number } {
   const rect = document.querySelector('.stage')?.getBoundingClientRect()
   return rect ? { width: rect.width, height: rect.height } : { width: window.innerWidth, height: window.innerHeight }
 }
