@@ -153,7 +153,7 @@ function toNode(el: Element): LayerNode {
   }
   if (el.namespaceURI === 'http://www.w3.org/2000/svg')
     return { ...base, label: drawingName ?? 'svg', kind: 'svg', children: [] }
-  if (IMAGE_TAGS.has(el.tagName)) return { ...base, label: tag, kind: 'image', children: [] }
+  if (IMAGE_TAGS.has(el.tagName)) return { ...base, label: drawingName ?? tag, kind: 'image', children: [] }
   const children = layerChildren(el)
   const text = ownText(el)
   if (children.length === 0 && text) {
