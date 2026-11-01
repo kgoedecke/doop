@@ -881,7 +881,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `search_icons`           | 200,000+ open-source icons (Iconify) as hotlinkable SVGs                                                            |
 | `search_logos`           | Real company logos by brand name or domain (Brandfetch, vector marks)                                               |
 | `list_backgrounds`       | Curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly) as thumbnails                      |
-| `search_inspiration`     | Curated real landing pages with palette, fonts and a mood line (Refero Styles)                                      |
+| `search_inspiration`     | Curated live landing pages with style, colour, fonts and sections (One Page Love)                                   |
 | `generate_image`         | Generate an image with the model the user picked in Settings (GPT Image, Nano Banana or Seedream) → asset URL       |
 | `upload_asset`           | Store your own file — from a URL, a one-time local-file upload URL, or inline base64                                |
 | **Web**                  |                                                                                                                     |

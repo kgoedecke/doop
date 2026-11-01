@@ -213,6 +213,7 @@ const schema = {
   GITHUB_OAUTH_TOKEN_URL: str({ default: 'https://github.com/login/oauth/access_token' }),
   PEXELS_API_KEY: str({ default: undefined }),
   BRANDFETCH_CLIENT_ID: str({ default: undefined }),
+  ONEPAGELOVE_API_KEY: str({ default: undefined }),
   CONTEXT_DEV_API_KEY: str({ default: undefined }),
 
   /* ------------------------------------------------- object storage */

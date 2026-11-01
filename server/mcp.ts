@@ -30,7 +30,14 @@ import {
 } from './pdfExport.ts'
 import { primeImage } from './previews.ts'
 import { DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
-import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
+import {
+  describeInspiration,
+  INSPIRATION_NO_MATCH_NOTE,
+  INSPIRATION_UNAVAILABLE_NOTE,
+  INSPIRATION_USAGE_NOTE,
+  inspirationSearchEnabled,
+  searchInspiration,
+} from './inspiration.ts'
 import { ESCAPED_HTML_NOTE, looksEscapedHtml } from './escapedHtml.ts'
 import { describeSyncFlow, getSyncFlow } from './ingest.ts'
 import * as assets from './assets.ts'
@@ -371,18 +378,19 @@ export function buildMcpServer(
     {
       title: 'Search design inspiration',
       description:
-        'Search a curated gallery of real, well-designed live websites by category and SEE thumbnails of each, with pre-distilled style facts (one-line mood north star, named palette, fonts). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages: query the page archetype plus the register you want ("law firm landing page, editorial", "dark fintech dashboard"), not just the product noun. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
+        'Search One Page Love\'s hand-curated gallery of real, well-designed live websites and SEE thumbnails of each, with their tags (style, colour, fonts, genre, sections). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages. Query the genre plus the look you want in the words the catalog is tagged with ("saas landing page, dark minimal", "finance, editorial", "portfolio, typographic", "pricing, illustrative"), not the product noun alone. The catalog is landing pages and one-page sites, not app screens: for a dashboard or app UI, query the product\'s register ("saas, minimal") and take the type, colour and density from it. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
         query: z
           .string()
-          .describe('Page archetype + register, e.g. "grocery delivery landing page, warm", "dark fintech dashboard"'),
+          .describe('Genre + look, e.g. "saas landing page, dark minimal", "restaurant, retro", "finance, editorial"'),
         count: z.number().min(1).max(6).optional().describe('Exemplars to return, default 4'),
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
     },
     async ({ query, count, canvas_id, agent_name }) => {
+      if (!inspirationSearchEnabled()) return text({ ok: true, results: [], note: INSPIRATION_UNAVAILABLE_NOTE })
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
       const hits = (searchHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
@@ -392,7 +400,7 @@ export function buildMcpServer(
       try {
         const results = await searchInspiration(query, count ?? 4)
         if (results.length === 0)
-          return text({ ok: true, results: [], note: `No inspiration for "${query}" — try a broader category.` })
+          return text({ ok: true, results: [], note: `No inspiration for "${query}" — ${INSPIRATION_NO_MATCH_NOTE}.` })
         const thumbs = await Promise.all(results.map((r) => imageSearch.fetchThumb(r.thumb_url)))
         type ResultBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
         const content: ResultBlock[] = [
