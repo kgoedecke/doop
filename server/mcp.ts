@@ -11,6 +11,8 @@ import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
 import { store } from './store.ts'
+import { fontsForCanvas } from './fonts.ts'
+import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import * as actions from './actions.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
@@ -514,6 +516,7 @@ export function buildMcpServer(
       arrive(canvas_id, agent_name)
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
+      const library = fontsForCanvas(c)
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
@@ -528,6 +531,7 @@ export function buildMcpServer(
               'This canvas has style guides. Call get_guidelines for each relevant one BEFORE designing — every frame must follow them.',
             ]
           : []),
+        ...(library.length ? [libraryBrief(library)] : []),
         ...(refs.length
           ? [
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
@@ -559,6 +563,7 @@ export function buildMcpServer(
               htmlBytes: r.html.length,
               pinnedBy: r.pinnedBy,
             })),
+            ...(library.length ? { fonts: describeLibrary(library) } : {}),
             ...(flow.length ? { flow } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),

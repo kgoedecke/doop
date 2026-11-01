@@ -25,6 +25,7 @@ import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } fro
 import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
+import type { CustomFont } from '../../shared/fonts'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -287,6 +288,17 @@ export const api = {
   updateWebhook: (id: string, patch: { url?: string; events?: WebhookEventType[]; enabled?: boolean }) =>
     req<WebhookInfo>(`/api/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteWebhook: (id: string) => req<{ ok: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
+  /* font libraries: a workspace's with an id, the signed-in person's without */
+  listFonts: (workspaceId?: string) =>
+    req<CustomFont[]>(`/api/fonts${workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''}`),
+  uploadFont: (file: File, workspaceId?: string) =>
+    req<CustomFont>(`/api/fonts${workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
+      body: file,
+    }),
+  deleteFont: (id: string) => req<{ ok: boolean }>(`/api/fonts/${id}`, { method: 'DELETE' }),
+  canvasFonts: (canvasId: string) => req<CustomFont[]>(`/api/canvases/${canvasId}/fonts`),
   rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
   testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),

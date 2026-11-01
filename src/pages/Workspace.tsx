@@ -19,7 +19,8 @@ import { PersonRow } from '../components/ui/list'
 import { Skeleton } from '../components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Toast } from '../components/ui/toast'
-import { ChevronRightIcon, CreditCardIcon, GearIcon, UsersIcon } from '../components/ui/icons'
+import { ChevronRightIcon, CreditCardIcon, GearIcon, TextIcon, UsersIcon } from '../components/ui/icons'
+import { FontLibrary } from '../components/FontLibrary'
 import {
   DashContent,
   DashHeader,
@@ -33,7 +34,7 @@ import {
 import { timeAgo } from '../lib/time'
 import { getLocale, t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 
-type Pane = 'members' | 'billing' | 'general'
+type Pane = 'members' | 'fonts' | 'billing' | 'general'
 
 const STATUS_LABEL = {
   inactive: 'workspace.statusInactive',
@@ -161,6 +162,14 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           </DashNavItem>
           <DashNavItem
             density="rail"
+            icon={<TextIcon size="rail" />}
+            active={pane === 'fonts'}
+            onClick={() => setPane('fonts')}
+          >
+            {t('workspace.fonts')}
+          </DashNavItem>
+          <DashNavItem
+            density="rail"
             icon={<CreditCardIcon size="rail" />}
             active={pane === 'billing'}
             onClick={() => setPane('billing')}
@@ -211,6 +220,7 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
           <Tabs value={pane} onValueChange={(next) => setPane(next as Pane)} className="mt-4 flex md:hidden">
             <TabsList variant="card">
               <TabsTrigger value="members">{t('workspace.people')}</TabsTrigger>
+              <TabsTrigger value="fonts">{t('workspace.fonts')}</TabsTrigger>
               <TabsTrigger value="billing">{t('workspace.billing')}</TabsTrigger>
               <TabsTrigger value="general">{t('workspace.general')}</TabsTrigger>
             </TabsList>
@@ -239,6 +249,8 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
             <Skeleton shape="card" className="mt-5 max-w-[1000px]" />
           ) : pane === 'members' ? (
             <MembersPane ws={ws} meId={meId} admin={admin} onChange={reload} onError={handle} onToast={showToast} />
+          ) : pane === 'fonts' ? (
+            <FontLibrary workspaceId={ws.id} />
           ) : pane === 'billing' ? (
             <BillingPane
               ws={ws}

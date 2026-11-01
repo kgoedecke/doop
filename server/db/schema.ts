@@ -438,6 +438,33 @@ export const assetRefs = pgTable(
   (t) => [primaryKey({ columns: [t.assetId, t.frameId] }), index('asset_refs_frame_idx').on(t.frameId)],
 )
 
+/** Font libraries (shared/fonts.ts): one row per uploaded font file. A row
+ *  with a workspace_id is that workspace's; one without is owner_id's own,
+ *  used on their personal canvases. The bytes are an ordinary /a/ asset, so
+ *  deleting a row leaves every frame that already loads it rendering. */
+export const fonts = pgTable(
+  'fonts',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id'),
+    ownerId: text('owner_id'),
+    family: text('family').notNull(),
+    /** a CSS font-weight: '400', or '100 900' for a variable font */
+    weight: text('weight').notNull(),
+    /** 'normal' | 'italic' */
+    style: text('style').notNull(),
+    /** the @font-face format(): 'woff2' | 'woff' | 'truetype' | 'opentype' */
+    format: text('format').notNull(),
+    assetId: text('asset_id').notNull(),
+    ext: text('ext').notNull(),
+    fileName: text('file_name').notNull(),
+    size: integer('size').notNull(),
+    uploadedBy: text('uploaded_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('fonts_workspace_idx').on(t.workspaceId), index('fonts_owner_idx').on(t.ownerId)],
+)
+
 /** Named design docs per canvas (brand rules, style recipes) — markdown
  *  written mostly for agents. Small and cold-path; hydrated with the canvas. */
 export const guidelines = pgTable(

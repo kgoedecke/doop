@@ -258,11 +258,24 @@ export function SelectField<T extends string>({
   onChange,
 }: {
   value: T
-  options: { value: T; label: string }[]
+  /* consecutive options sharing a `group` render under one <optgroup> */
+  options: { value: T; label: string; group?: string }[]
   label?: string
   className?: string
   onChange: (v: T) => void
 }) {
+  const runs: { group?: string; options: typeof options }[] = []
+  for (const o of options) {
+    const last = runs.at(-1)
+    if (last && last.group === o.group) last.options.push(o)
+    else runs.push({ group: o.group, options: [o] })
+  }
+  const items = (list: typeof options) =>
+    list.map((o) => (
+      <option key={o.value} value={o.value}>
+        {o.label}
+      </option>
+    ))
   return (
     <span className={cn(fieldCls, 'relative font-sans text-[11.5px]', className)}>
       <select
@@ -272,11 +285,15 @@ export function SelectField<T extends string>({
         /* a native select only ever reports one of the options it was given */
         onChange={(e) => onChange(e.target.value as T)}
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
+        {runs.map((run, i) =>
+          run.group ? (
+            <optgroup key={`${run.group}-${i}`} label={run.group}>
+              {items(run.options)}
+            </optgroup>
+          ) : (
+            items(run.options)
+          ),
+        )}
       </select>
       <ChevronDownIcon width={10} height={10} className="pointer-events-none absolute right-[7px] text-ink-faint" />
     </span>

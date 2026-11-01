@@ -25,6 +25,8 @@ import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
+import { fontsRouter } from './fontRoutes.ts'
+import { fontsForCanvas, hydrateFonts } from './fonts.ts'
 import {
   canEditCanvas,
   canManageCanvas,
@@ -110,6 +112,7 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await webhooks.hydrateWebhooks()
+await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
 seed()
@@ -833,6 +836,13 @@ function requireFrame(
 app.use('/api/local-agent', localAgentRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
+app.use('/api/fonts', fontsRouter)
+
+/* the font library a canvas designs with: its workspace's, or its owner's */
+app.get('/api/canvases/:id/fonts', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (canvas) res.json(fontsForCanvas(canvas))
+})
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)

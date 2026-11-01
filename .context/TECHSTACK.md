@@ -91,6 +91,26 @@
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
+- Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
+  per workspace (used on its canvases) and one per person (used on their personal canvases),
+  managed in Settings → Fonts and Workspace → Fonts (`FontLibrary.tsx`, strings in the `fonts`
+  catalog) over `/api/fonts`
+  (`?workspace=` for a workspace's, members only); `GET /api/canvases/:id/fonts` is a canvas's.
+  Uploads are TTF/OTF/WOFF/WOFF2 up to 10 MB, one face per file; `fontFile.ts` reads format,
+  family (name id 16, else 1), weight (a variable font's `wght` range) and style from the bytes,
+  with no font library dependency (zlib for WOFF, brotli for WOFF2), every decompression bounded
+  before it starts (1 MB per metadata table, 48 MB for a WOFF2 stream). Bytes are an ordinary `/a/`
+  asset, so removing a font never breaks a frame that loads it; re-uploading a face replaces it
+  (writes queue per library, so racing uploads of one face leave one row).
+  A frame stays self-contained: `withFontFaces` adds the `@font-face` rules for the library
+  families its CSS names to one `<style data-doop-fonts>` block in its own HTML (only adds, never
+  removes). `actions.createFrame` / `updateFrame` / the final append chunk run it on every write,
+  and `FrameView`'s save path runs it too, so a family picked from the Design panel's "Custom
+  fonts" group renders at once. Every renderer that reads frame HTML (screenshots, PDF
+  export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
+  `get_canvas` and as a system block in the resident agent (`libraryBrief`): name the family,
+  never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
+  `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle).
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size, pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed

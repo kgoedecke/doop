@@ -5,7 +5,7 @@ import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
 
 /**
- * Uploaded image assets: bytes in object storage (server/storage.ts), one
+ * Uploaded assets (images, and the files of font libraries): bytes in object storage (server/storage.ts), one
  * metadata row per asset in the assets table (including the canvas it was
  * uploaded for). Frame HTML is the ground truth for which assets are still
  * in use, tracked as a projection in asset_refs: every durable frame write
@@ -107,7 +107,17 @@ export async function createAsset(
     throw new Error(`file is ${(buf.length / 1024 / 1024).toFixed(1)} MB — the limit is 5 MB`)
   const mime = sniffMime(buf)
   if (!mime) throw new Error('unsupported file type — png, jpg, webp, gif and svg are accepted')
-  const ext = MIME_EXT[mime]
+  return storeAsset(buf, { mime, ext: MIME_EXT[mime] }, meta)
+}
+
+/** Store bytes whose type the caller has already established (images via
+ *  createAsset, fonts via server/fonts.ts) under a fresh /a/ id. */
+export async function storeAsset(
+  buf: Buffer,
+  type: { mime: string; ext: string },
+  meta: { canvasId?: string; ownerId?: string; uploadedBy: string },
+): Promise<AssetMeta> {
+  const { mime, ext } = type
   const id = nanoid(10)
   /* object first, row second: an orphaned object is swept later, but a row
      without bytes would serve 404s forever */

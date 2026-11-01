@@ -43,6 +43,8 @@ import { Textarea } from './ui/textarea'
 import { ImageFill } from './ImageFill'
 import { InteractionsPanel } from './InteractionsPanel'
 import { Tooltip } from './ui/tooltip'
+import { familyWeights, fontStack, libraryFamilies } from '../../shared/fonts'
+import { useCanvasFonts } from '../lib/customFonts'
 import {
   AlignCenterIcon,
   AlignJustifyIcon,
@@ -388,15 +390,28 @@ function fontName(value: string) {
 }
 
 /** Keep the current stack intact, and offer fonts already supplied by the
- *  frame alongside system faces that need no additional font download. */
-function fontOptions(info: ElementInfo) {
+ *  frame alongside system faces that need no additional font download. The
+ *  canvas's custom fonts lead, in a group of their own; picking one is all it
+ *  takes, since the save adds its @font-face to the frame. */
+function fontOptions(
+  info: ElementInfo,
+  custom: readonly string[],
+  groups: { custom: string; frame: string; system: string },
+) {
+  const current = fontName(info.fontFamily).toLowerCase()
+  const library = custom.map((family) => ({
+    /* the computed stack, when it is this family, so the select shows it */
+    value: family.toLowerCase() === current ? info.fontFamily : fontStack(family),
+    label: family,
+    group: groups.custom,
+  }))
+  const frame = [info.fontFamily, ...info.fontFamilies].map((value) => ({ value, label: fontName(value) }))
+  const grouped = library.length > 0
   const seen = new Set<string>()
   return [
-    ...[info.fontFamily, ...info.fontFamilies].map((value) => ({
-      value,
-      label: fontName(value),
-    })),
-    ...SYSTEM_FONTS,
+    ...library,
+    ...frame.map((o) => ({ ...o, group: grouped ? groups.frame : undefined })),
+    ...SYSTEM_FONTS.map((o) => ({ ...o, group: grouped ? groups.system : undefined })),
   ].filter(({ value }) => {
     const family = fontName(value).toLowerCase()
     if (seen.has(family)) return false
@@ -436,6 +451,11 @@ function DesignTab({
   apply: (styles: StylePatch) => void
   editGeometry: (edit: GeometryEdit) => void
 }) {
+  const library = useCanvasFonts((state) => state.fonts)
+  const customFamilies = libraryFamilies(library)
+  /* a library family offers only the weights it was uploaded with; picking
+     one it lacks would just show the browser's faux bold */
+  const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
   const t = useT()
   const sizeModes = SIZE_MODES.map(({ value, label }) => ({ value, label: t(label) }))
   const ratio = aspectRatio(info.aspectRatio, info.naturalAspectRatio)
@@ -816,7 +836,11 @@ function DesignTab({
             <SelectField
               label={t('inspector.fontFamily')}
               value={info.fontFamily}
-              options={fontOptions(info)}
+              options={fontOptions(info, customFamilies, {
+                custom: t('inspector.fontGroupCustom'),
+                frame: t('inspector.fontGroupFrame'),
+                system: t('inspector.fontGroupSystem'),
+              })}
               onChange={(v) => apply({ 'font-family': v })}
             />
           </PropertyRow>
@@ -831,7 +855,7 @@ function DesignTab({
               className="flex-[0_0_66px]"
               label={t('inspector.fontWeight')}
               value={info.fontWeight}
-              options={[...new Set([...WEIGHTS, info.fontWeight])]
+              options={[...new Set([...weights, info.fontWeight])]
                 .sort((a, b) => Number(a) - Number(b))
                 .map((w) => ({ value: w, label: w }))}
               onChange={(v) => apply({ 'font-weight': v })}

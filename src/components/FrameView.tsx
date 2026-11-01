@@ -54,6 +54,8 @@ import { ElementResizeHandles } from './ElementResizeHandles'
 import { FrameResizeHandles } from './FrameResizeHandles'
 import { keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
+import { withFontFaces } from '../../shared/fonts'
+import { canvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 
 /** ?comment=<rootId> — the link in a comment email. The thread opens once
@@ -1135,11 +1137,14 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         localHtml.current = ev.data.html
         setRuntimeDocument({ html: ev.data.html, request: ++htmlRequest.current })
         noteFrameDocument(frame.id, ev.data.html)
+        /* a newly used library font brings its @font-face along; the saved
+           document then differs from the runtime's, so the post effect sends
+           it back in and the face loads at once */
+        const html = withFontFaces(ev.data.html, canvasFonts())
         const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
-        useStore.getState().patchFrameLocal(frame.id, { html: ev.data.html })
-        trackSave(api.updateFrame(frame.id, { html: ev.data.html }).catch(console.error))
-        if (before !== undefined)
-          recordUpdate(frame.id, { html: before }, { html: ev.data.html }, ev.data.discrete === true)
+        useStore.getState().patchFrameLocal(frame.id, { html })
+        trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
+        if (before !== undefined) recordUpdate(frame.id, { html: before }, { html }, ev.data.discrete === true)
       }
       if (ev.data?.type === 'doop:edit-esc') {
         setEditing(false)

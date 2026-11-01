@@ -9,6 +9,7 @@ export const workspace = {
   backToCanvases: 'Back to canvases',
   workspace: 'Workspace',
   people: 'People',
+  fonts: 'Fonts',
   planBilling: 'Plan & billing',
   billing: 'Billing',
   general: 'General',

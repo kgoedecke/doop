@@ -106,6 +106,7 @@ import { createCenteredFrame } from '../lib/framePlacement'
 import { RULER_PX } from '../components/Rulers'
 import { NO_CANVAS, onViewCommand, syncViewMenu } from '../lib/viewMenu'
 import { AGENTS_MIN, LAYERS_MIN, fitPanelWidths } from '../lib/panelWidths'
+import { loadCanvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 import { NO_INSETS, type StageInsets } from '../lib/viewFit'
 import { usePanelLayout } from '../lib/panelLayout'
@@ -315,6 +316,21 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       clearHistory()
     }
   }, [canvasId, select])
+
+  /* the font library, again when the canvas moves between workspaces (its
+     library is the workspace's) and on return to the tab, so a font
+     uploaded in Settings in another tab shows up without a reload */
+  const loadedCanvasId = canvas?.id === canvasId ? canvasId : null
+  const fontScope = canvas?.workspaceId ?? null
+  useEffect(() => {
+    if (!loadedCanvasId) return
+    loadCanvasFonts(loadedCanvasId)
+    const refresh = () => {
+      if (document.visibilityState === 'visible') loadCanvasFonts(loadedCanvasId)
+    }
+    document.addEventListener('visibilitychange', refresh)
+    return () => document.removeEventListener('visibilitychange', refresh)
+  }, [loadedCanvasId, fontScope])
 
   /* broadcast which frame I'm focused on */
   useEffect(() => {
