@@ -49,6 +49,7 @@ import { PresentMode } from '../components/PresentMode'
 import { getIdentity, setName } from '../lib/identity'
 import {
   copyFrames,
+  dropImages,
   duplicateFrames,
   hasFrameClip,
   pasteFrameCentered,
@@ -418,6 +419,63 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
+  }, [canvasId])
+
+  /* Image files dragged in from the desktop land as frames centered on the
+     drop point. Every file drag is claimed, so a drop the canvas cannot take
+     (a viewer, a PDF) is refused instead of the browser opening the file in
+     place of the canvas; a drop the composer already took is left to it.
+     While a file is over the page every frame keeps its shield up, or a
+     frame being edited would swallow the drop in its iframe. Enter and leave
+     fire for every element crossed, so a count tells when the drag is gone. */
+  useEffect(() => {
+    const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false
+    let depth = 0
+    const setDragging = useStore.getState().setFileDragging
+    function onDragEnter(e: DragEvent) {
+      if (!carriesFiles(e)) return
+      depth += 1
+      setDragging(true)
+    }
+    function onDragLeave(e: DragEvent) {
+      if (!carriesFiles(e)) return
+      depth = Math.max(0, depth - 1)
+      if (!depth) setDragging(false)
+    }
+    function endDrag() {
+      depth = 0
+      setDragging(false)
+    }
+    function onDragOver(e: DragEvent) {
+      if (!carriesFiles(e) || e.defaultPrevented) return
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = canEditOpenCanvas(useStore.getState()) ? 'copy' : 'none'
+    }
+    function onDrop(e: DragEvent) {
+      endDrag()
+      if (!carriesFiles(e) || e.defaultPrevented) return
+      e.preventDefault()
+      if (!canEditOpenCanvas(useStore.getState())) return
+      const images = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/'))
+      if (!images.length) return
+      dropImages(canvasId, images, { x: e.clientX, y: e.clientY }).catch((err: Error) => {
+        setToast(translate('canvas.dropImageFailed', { error: err.message }))
+        window.setTimeout(() => setToast(null), 4000)
+      })
+    }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('drop', onDrop)
+    window.addEventListener('dragend', endDrag)
+    return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('drop', onDrop)
+      window.removeEventListener('dragend', endDrag)
+      endDrag()
+    }
   }, [canvasId])
 
   function showToast(msg: string) {

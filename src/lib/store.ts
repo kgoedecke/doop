@@ -67,6 +67,9 @@ interface State {
   tool: Tool
   /** space bar held: the stage pans on drag instead of drawing a marquee */
   panMode: boolean
+  /** a file is being dragged over the page: every frame keeps its shield up,
+   *  so a drop over a frame being edited still reaches the canvas */
+  fileDragging: boolean
   /** the Inspector panel is showing — opened by clicking a frame's name, not
    *  by mere selection, so clicking around a frame doesn't slide the panel in */
   inspectorOpen: boolean
@@ -215,6 +218,7 @@ interface State {
   /** the share link changed under an open canvas: the caller's role now */
   setRole(role: CanvasRole): void
   setPanMode(v: boolean): void
+  setFileDragging(v: boolean): void
   setInspectorOpen(v: boolean): void
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
@@ -288,6 +292,7 @@ export const useStore = create<State>((set, get) => ({
   selectedId: null,
   tool: 'select',
   panMode: false,
+  fileDragging: false,
   inspectorOpen: false,
   ctxMenu: null,
   selectedElement: null,
@@ -607,6 +612,7 @@ export const useStore = create<State>((set, get) => ({
       }
     }),
   setPanMode: (panMode) => set({ panMode }),
+  setFileDragging: (fileDragging) => set({ fileDragging }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
   closeCtxMenu: () => set({ ctxMenu: null }),

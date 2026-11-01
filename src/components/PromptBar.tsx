@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useStore, type ComposerSend } from '../lib/store'
 import { api, type Allowance } from '../lib/api'
 import { posthog } from '../lib/posthog'
@@ -16,6 +16,7 @@ import { buildLayerTree, findLayer, layerName } from '../lib/layers'
 import type { CardScope } from '../../shared/types'
 import type { LayerKind } from '../lib/layers'
 import { t as translate, useT } from '@/lib/i18n'
+import { cn } from '@/lib/utils'
 
 /**
  * The canvas's front door to the resident team: the prompt composer
@@ -134,7 +135,7 @@ async function sendPrompt(args: {
        the card carries the frame ids so the agent views them before
        designing. Known-ids include them so the camera saves its flight for
        the agent's deliverable, not the user's own screenshots. */
-    const refFrames = await uploadImageFrames(canvasId, files, 'Attached image')
+    const refFrames = await uploadImageFrames(canvasId, files, { fallbackName: 'Attached image' })
     await api.addCard(
       canvasId,
       text,
@@ -225,6 +226,8 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   /* attachment slips (too big, too many) — local and brief, unlike a failed
      send, which the store keeps until the draft changes */
   const [attachError, setAttachError] = useState<string | null>(null)
+  /* an image file is being dragged over the composer */
+  const [dropping, setDropping] = useState(false)
   const error = attachError ?? sendError
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -299,8 +302,36 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
     }
   }
 
+  /* dropped images attach like pasted ones; claiming the drag keeps the
+     canvas, which listens on the window, from turning it into frames */
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = busy ? 'none' : 'copy'
+    setDropping(!busy)
+  }
+
+  function onDragLeave(e: DragEvent<HTMLDivElement>) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false)
+  }
+
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setDropping(false)
+    if (!busy) addFiles(e.dataTransfer.files)
+  }
+
   return (
-    <div className="flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2">
+    <div
+      className={cn(
+        'flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2',
+        dropping && 'bg-paper-deep',
+      )}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {attachments.map((a) => (

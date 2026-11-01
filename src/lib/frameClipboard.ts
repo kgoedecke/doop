@@ -170,13 +170,13 @@ function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
 const IMAGE_ROW_GAP = 40
 
 /** Upload images and place them as canvas elements laid out in a row,
- *  centered as a group in the current view (one image lands dead-center).
- *  Sizes are read first so differently-sized images sit side by side, never
- *  stacked. */
+ *  centered as a group on `at` (a screen point, the middle of the view when
+ *  left out; one image lands dead-center). Sizes are read first so
+ *  differently-sized images sit side by side, never stacked. */
 export async function uploadImageFrames(
   canvasId: string,
   files: File[],
-  fallbackName = 'Pasted image',
+  { fallbackName = 'Pasted image', at }: { fallbackName?: string; at?: { x: number; y: number } } = {},
 ): Promise<Frame[]> {
   const dims = await Promise.all(files.map((f) => imageSize(f)))
   const scaled = dims.map((d) => {
@@ -184,9 +184,13 @@ export async function uploadImageFrames(
     return { width: Math.max(40, Math.round(d.width * scale)), height: Math.max(40, Math.round(d.height * scale)) }
   })
   const vp = useStore.getState().viewport
-  const stage = stageViewportSize()
-  const cx = (stage.width / 2 - vp.x) / vp.zoom
-  const cy = (stage.height / 2 - vp.y) / vp.zoom
+  /* a drop point is in window coordinates, the viewport in the stage's (the
+     desktop shell's title bar sits above it); a paste centers in the stage */
+  const stage = document.querySelector('.stage')?.getBoundingClientRect()
+  const { width, height } = stageViewportSize()
+  const point = at ? { x: at.x - (stage?.left ?? 0), y: at.y - (stage?.top ?? 0) } : { x: width / 2, y: height / 2 }
+  const cx = (point.x - vp.x) / vp.zoom
+  const cy = (point.y - vp.y) / vp.zoom
   const totalW = scaled.reduce((sum, s) => sum + s.width, 0) + IMAGE_ROW_GAP * (scaled.length - 1)
   let x = cx - totalW / 2
   const placed = scaled.map((size) => {
@@ -215,6 +219,18 @@ export async function uploadImageFrames(
 export async function pasteImagesCentered(canvasId: string, files: File[]) {
   const frames = await uploadImageFrames(canvasId, files)
   posthog.capture('image_pasted', { count: frames.length })
+  adoptImageFrames(frames)
+}
+
+/** Images dragged in from the desktop land centered on the drop point. */
+export async function dropImages(canvasId: string, files: File[], at: { x: number; y: number }) {
+  const frames = await uploadImageFrames(canvasId, files, { fallbackName: 'Dropped image', at })
+  posthog.capture('image_dropped', { count: frames.length })
+  adoptImageFrames(frames)
+}
+
+/** New image frames are undoable and the last one becomes the selection. */
+function adoptImageFrames(frames: Frame[]) {
   frames.forEach(recordCreate)
   const last = frames[frames.length - 1]
   if (last) useStore.getState().select(last.id)
