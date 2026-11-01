@@ -47,19 +47,44 @@ fn write(applications: &Path, app_data: &Path, appimage: &Path) -> std::io::Resu
 }
 
 fn entry(appimage: &Path, icon: &Path) -> String {
-    // Exec quoting per the Desktop Entry spec: inside double quotes, `"`, `` ` ``,
-    // `$` and `\` take a backslash
-    let mut exec = String::new();
-    for c in appimage.to_string_lossy().chars() {
-        if matches!(c, '"' | '`' | '$' | '\\') {
-            exec.push('\\');
-        }
-        exec.push(c);
-    }
     format!(
-        "[Desktop Entry]\nType=Application\nName=doop\nExec=\"{exec}\"\nIcon={}\nStartupWMClass={WM_CLASS}\nTerminal=false\n",
-        icon.display()
+        "[Desktop Entry]\nType=Application\nName=doop\nExec={}\nIcon={}\nStartupWMClass={WM_CLASS}\nTerminal=false\n",
+        escape_value(&exec_arg(appimage)),
+        escape_value(&icon.to_string_lossy())
     )
+}
+
+/// One quoted Exec argument per the Desktop Entry spec: inside the quotes `"`,
+/// `` ` ``, `$` and `\` take a backslash, and a literal `%` is written `%%`
+/// so it is not read as a field code.
+fn exec_arg(path: &Path) -> String {
+    let mut arg = String::from('"');
+    for c in path.to_string_lossy().chars() {
+        match c {
+            '"' | '`' | '$' | '\\' => arg.push('\\'),
+            '%' => arg.push('%'),
+            _ => {}
+        }
+        arg.push(c);
+    }
+    arg.push('"');
+    arg
+}
+
+/// The string escapes every value goes through, applied after Exec quoting
+/// (so a quoted backslash ends up as four).
+fn escape_value(value: &str) -> String {
+    let mut escaped = String::new();
+    for c in value.chars() {
+        match c {
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\t' => escaped.push_str("\\t"),
+            '\r' => escaped.push_str("\\r"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]
@@ -69,10 +94,10 @@ mod tests {
     #[test]
     fn names_the_window_class_and_quotes_the_path() {
         let entry = entry(
-            Path::new("/home/a b/$x\"doop.AppImage"),
+            Path::new("/home/a b/$x\"100%\\doop.AppImage"),
             Path::new("/home/a b/.local/share/design.doop.desktop/icon.png"),
         );
-        assert!(entry.contains("Exec=\"/home/a b/\\$x\\\"doop.AppImage\"\n"));
+        assert!(entry.contains("Exec=\"/home/a b/\\\\$x\\\\\"100%%\\\\\\\\doop.AppImage\"\n"));
         assert!(entry.contains("StartupWMClass=doop-desktop\n"));
         assert!(entry.contains("Icon=/home/a b/.local/share/design.doop.desktop/icon.png\n"));
         assert!(!entry.contains("NoDisplay"));
