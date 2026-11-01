@@ -10,6 +10,8 @@ import { isElementId } from '../shared/elementId.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { emitCanvasEvent } from './events.ts'
+import * as library from './library.ts'
+import { renameInstances, stampLibrary, type LibraryScope } from '../shared/designSystem.ts'
 import type {
   Actor,
   CanvasGuide,
@@ -1565,7 +1567,9 @@ export function appendFrameHtml(
      sample) and must never be sniffed on its own */
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
-  const html = opts.start ? piece : before.html + piece
+  const joined = opts.start ? piece : before.html + piece
+  /* the library stamps the finished document: mid-stream its head may not exist yet */
+  const html = opts.done ? withLibrary(before.canvasId, joined) : joined
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
@@ -1592,6 +1596,42 @@ export function appendFrameHtml(
 
   touch(frame.canvasId, actor, frameId)
   return frame
+}
+
+/** Brings a frame document's component and token blocks in line with the
+ *  library of its canvas (shared/designSystem.ts). */
+function withLibrary(canvasId: string, html: string): string {
+  const scope = library.scopeOfCanvas(canvasId)
+  return scope ? stampLibrary(html, library.stampSource(scope)) : html
+}
+
+/**
+ * Restamps every frame of a library scope after the library changed, then
+ * tells each room so open library panels refresh. `renamed` first points the
+ * instances of a component's old slug at its new one. Frames mid-stream or
+ * mid-playback are left for their next write. Returns how many frames moved.
+ */
+export function restampLibrary(scope: LibraryScope, actor: Actor, renamed?: { from: string; to: string }): number {
+  const source = library.stampSource(scope)
+  let total = 0
+  for (const canvas of library.canvasesInScope(scope)) {
+    let changed = 0
+    for (const frame of canvas.frames) {
+      if (streams.has(frame.id) || reveals.has(frame.id)) continue
+      const current = renamed ? renameInstances(frame.html, renamed.from, renamed.to) : frame.html
+      const html = stampLibrary(current, source)
+      if (html === frame.html) continue
+      const updated = store.updateFrame(frame.id, { html }, actor.name)
+      if (!updated) continue
+      changed++
+      broadcast(canvas.id, { type: 'frame:updated', frame: updated, actor })
+    }
+    if (changed > 0)
+      logActivity(canvas.id, actor, `updated the design system (${changed} frame${changed === 1 ? '' : 's'})`)
+    broadcast(canvas.id, { type: 'library', actor })
+    total += changed
+  }
+  return total
 }
 
 /* ------------------------------------------------------------------ */
@@ -1655,7 +1695,7 @@ export function createFrame(
   },
   actor: Actor,
 ): Frame | undefined {
-  if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
+  if (input.html !== undefined) input = { ...input, html: withLibrary(canvasId, repairEscapedHtml(input.html)) }
   const frame = store.createFrame(canvasId, input, actor.name)
   if (!frame) return undefined
   bursts.set(frame.id, { actor, lastAt: frame.createdAt })
@@ -1685,7 +1725,7 @@ export function updateFrame(
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
-  if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
+  if (patch.html !== undefined) patch = { ...patch, html: withLibrary(before.canvasId, repairEscapedHtml(patch.html)) }
   const prevName = before.name
   const prevHtml = before.html
   const prevHidden = !!before.hidden

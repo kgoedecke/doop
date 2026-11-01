@@ -25,6 +25,8 @@ import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
+import { libraryRouter } from './libraryRoutes.ts'
+import { hydrateLibrary } from './library.ts'
 import {
   canEditCanvas,
   canManageCanvas,
@@ -107,6 +109,7 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await webhooks.hydrateWebhooks()
+await hydrateLibrary() // before the first request: every frame write stamps from it
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
 seed()
@@ -835,6 +838,7 @@ app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)
 app.use('/api/integrations', integrationsRouter)
 app.use('/api/workspaces', workspaces.workspacesRouter)
+app.use('/api/library', libraryRouter)
 app.use('/api/live-activities', liveActivitiesRouter)
 startLiveActivityDelivery()
 app.use('/api/billing', billing.billingRouter)
