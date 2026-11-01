@@ -12,38 +12,42 @@ export function isPanelLayout(value: unknown): value is PanelLayout {
   return value === 'floating' || value === 'docked'
 }
 
-/* The choice as set this session, for when storage is off limits (private
-   browsing, a locked down webview) and the switch must still work. Storage
-   itself is read every time, so a pick made in another tab while no page
-   here was listening is never shadowed by a stale copy. */
-let fallback: PanelLayout = 'floating'
+/* Storage is read every time, so a pick made in another tab while no page
+   here was listening is never shadowed by a stale copy. A pick storage
+   would not take (private browsing, a full or locked down store) holds for
+   this session instead, until another tab saves one. */
+let unsaved: PanelLayout | null = null
 const listeners = new Set<() => void>()
 
 export function getPanelLayout(): PanelLayout {
+  if (unsaved) return unsaved
   try {
     const stored = localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY)
     if (isPanelLayout(stored)) return stored
   } catch {
-    /* storage unavailable: this session's choice stands */
+    /* storage unavailable: the default stands */
   }
-  return fallback
+  return 'floating'
 }
 
 export function setPanelLayout(layout: PanelLayout): void {
-  fallback = layout
   try {
     localStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, layout)
+    unsaved = null
   } catch {
-    /* kept for this session only */
+    unsaved = layout
   }
   listeners.forEach((listener) => listener())
 }
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
-  /* another tab of this browser changed it */
+  /* another tab of this browser saved a pick, which outranks one this tab
+     could not save */
   const onStorage = (e: StorageEvent) => {
-    if (e.key === PANEL_LAYOUT_STORAGE_KEY) listener()
+    if (e.key !== PANEL_LAYOUT_STORAGE_KEY) return
+    unsaved = null
+    listener()
   }
   window.addEventListener('storage', onStorage)
   return () => {

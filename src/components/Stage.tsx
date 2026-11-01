@@ -151,11 +151,19 @@ export function Stage({
   /* read by the fit callbacks, which outlive a render */
   const insetsRef = useRef(insets)
   /* a fit that opens a panel (a frame link opens the Inspector) runs once
-     more when that panel's insets arrive, so the panel can't cover it */
+     more when that panel arrives, so the panel can't cover it: floating, it
+     changes the insets; docked, it narrows the stage itself */
   const refitRef = useRef<(() => void) | null>(null)
+  const stageSizeRef = useRef({ width: 0, height: 0 })
   useLayoutEffect(() => {
-    const changed = (Object.keys(insets) as (keyof StageInsets)[]).some((k) => insets[k] !== insetsRef.current[k])
+    const el = ref.current
+    const size = { width: el?.clientWidth ?? 0, height: el?.clientHeight ?? 0 }
+    const changed =
+      (Object.keys(insets) as (keyof StageInsets)[]).some((k) => insets[k] !== insetsRef.current[k]) ||
+      size.width !== stageSizeRef.current.width ||
+      size.height !== stageSizeRef.current.height
     insetsRef.current = insets
+    stageSizeRef.current = size
     const refit = refitRef.current
     refitRef.current = null
     if (refit && changed) refit()

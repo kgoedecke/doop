@@ -29,4 +29,20 @@ describe('panel layout preference', () => {
     localStorage.setItem('doop:panel-layout', 'docked')
     expect(getPanelLayout()).toBe('docked')
   })
+
+  it('keeps a pick storage would not take for this session', async () => {
+    localStorage.setItem('doop:panel-layout', 'docked')
+    const { getPanelLayout, setPanelLayout } = await import('../src/lib/panelLayout')
+    const setItem = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+    try {
+      setPanelLayout('floating')
+      /* the write really failed: storage still holds the old pick */
+      expect(localStorage.getItem('doop:panel-layout')).toBe('docked')
+      expect(getPanelLayout()).toBe('floating')
+    } finally {
+      setItem.mockRestore()
+    }
+  })
 })
