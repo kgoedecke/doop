@@ -1,7 +1,7 @@
 import type { Frame } from '../../shared/types'
 import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
-import { inspectElement, requestFrame } from './frameBridge'
+import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
 import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
 import {
@@ -155,6 +155,17 @@ export function deleteSelection(): boolean {
   const selected = frames.filter((f) => s.selectedIds.includes(f.id) && !f.locked)
   if (!selected.length) return false
   deleteFramesTracked(selected)
+  return true
+}
+
+export function nudgeSelection(dx: number, dy: number): boolean {
+  const s = useStore.getState()
+  const picked = s.selectedElement
+  if (!picked) return false
+  const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
+  if (!frame || isCanvasElement(frame.html)) return false
+  if (frame.locked) return true
+  void nudgeElements(frame.id, pickedSelectors(s), dx, dy)
   return true
 }
 

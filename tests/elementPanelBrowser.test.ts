@@ -17,6 +17,8 @@ declare global {
       selectFrame: () => void
       deselect: () => void
       picked: () => string[]
+      pickAlso: (selector: string) => void
+      nudge: (dx: number, dy: number) => boolean
       setTool: (tool: 'select' | 'hand') => void
       setZoom: (zoom: number) => void
       undo: () => Promise<void>
@@ -30,6 +32,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   let browser: TestBrowser
   let page: Page
   let saved: Frame
+  const framePatches: Partial<Frame>[] = []
   let seedId = 0
   let uploadStatus = 200
   let uploadGate: Promise<void> | null = null
@@ -65,7 +68,8 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
       // The delayed-font test releases this stylesheet after the panel's first read.
       if (new URL(request.url()).pathname === '/tests/fixtures/late-font.css') return
       if (new URL(request.url()).pathname === '/api/frames/f' && request.method() === 'PATCH') {
-        saved = { ...saved, ...JSON.parse(request.postData()!) }
+        framePatches.push(JSON.parse(request.postData()!))
+        saved = { ...saved, ...framePatches.at(-1) }
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
       } else await request.continue()
     })
@@ -1365,6 +1369,85 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     },
     15_000,
   )
+
+  it('adds up a fast run of nudges sent before any of them lands', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #nudged { position: absolute; left: 20px; top: 30px; width: 120px; height: 40px }
+    </style></head><body><div id="nudged"></div></body></html>`,
+      '#nudged',
+    )
+    await page.evaluate(() =>
+      Promise.all(
+        Array.from({ length: 5 }, () =>
+          window.elementPanelHarness.geometry('#nudged', { kind: 'nudge', dx: 1, dy: -10 }),
+        ),
+      ),
+    )
+    const position = () => frame.$eval('#nudged', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
+    expect(await position()).toEqual([25, -20])
+    await expect.poll(() => saved.html).toContain('translate: 5px -50px')
+    await page.evaluate(() => window.elementPanelHarness.undo())
+    await expect.poll(position).toEqual([20, 30])
+  })
+
+  it('nudges every picked element once, a picked child only with its parent, even one added by a script', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #a, #b, #inner { position: absolute; width: 120px; height: 40px }
+      #a { left: 20px; top: 30px }
+      #b { left: 200px; top: 30px }
+      #inner { left: 10px; top: 10px }
+    </style></head><body><div id="a"></div><div id="b"></div>
+    <script>document.getElementById('a').appendChild(Object.assign(document.createElement('div'), { id: 'inner' }))</script>
+    </body></html>`,
+      '#a',
+    )
+    await page.evaluate(() => {
+      window.elementPanelHarness.pickAlso('#inner')
+      window.elementPanelHarness.pickAlso('#b')
+      window.elementPanelHarness.nudge(3, 4)
+    })
+    const position = (selector: string) =>
+      frame.$eval(selector, (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
+    await expect.poll(() => position('#b')).toEqual([203, 34])
+    expect(await position('#a')).toEqual([23, 34])
+    expect(await position('#inner')).toEqual([33, 44])
+  })
+
+  it('undoes a nudge whose save is still pending', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #nudged { position: absolute; left: 20px; top: 30px; width: 120px; height: 40px }
+    </style></head><body><div id="nudged"></div></body></html>`,
+      '#nudged',
+    )
+    await page.evaluate(async () => {
+      window.elementPanelHarness.nudge(0, 7)
+      await window.elementPanelHarness.undo()
+    })
+    const position = () => frame.$eval('#nudged', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
+    await expect.poll(position).toEqual([20, 30])
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(await position()).toEqual([20, 30])
+    expect(saved.html).not.toContain('translate: 0px 7px')
+  })
+
+  it('leaves a standalone canvas element in place', async () => {
+    saved = { ...saved, html: '<body data-doop-canvas-element="rect"><div id="shape"></div></body>' }
+    framePatches.length = 0
+    const handled = await page.evaluate((frame) => {
+      window.elementPanelHarness.seed(frame)
+      window.elementPanelHarness.select('#shape')
+      return window.elementPanelHarness.nudge(-10, 1)
+    }, saved)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(handled).toBe(false)
+    expect(framePatches).toEqual([])
+  })
 
   it('preserves stylesheet-derived image dimensions when unlinking', async () => {
     const src = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>')}`

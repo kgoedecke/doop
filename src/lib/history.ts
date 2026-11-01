@@ -1,6 +1,7 @@
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
+import { settleFrames } from './frameBridge'
 import { useStore } from './store'
 import { posthog } from './posthog'
 
@@ -491,6 +492,7 @@ async function step(direction: 'undo' | 'redo') {
   busy = true
   let entry: Entry | undefined
   try {
+    await settleFrames()
     await inflight
     const from = direction === 'undo' ? undoStack : redoStack
     entry = from.pop()

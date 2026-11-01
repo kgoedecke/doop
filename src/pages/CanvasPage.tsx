@@ -56,7 +56,13 @@ import {
   pasteImagesCentered,
 } from '../lib/frameClipboard'
 import { clearHistory, redo, undo } from '../lib/history'
-import { deleteSelection, duplicateLayers, toggleLockSelection, toggleSelectionHidden } from '../lib/layerEdits'
+import {
+  deleteSelection,
+  duplicateLayers,
+  nudgeSelection,
+  toggleLockSelection,
+  toggleSelectionHidden,
+} from '../lib/layerEdits'
 import { copyLayers, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
@@ -116,6 +122,12 @@ import { usePanelLayout } from '../lib/panelLayout'
    columns flush with each other and the window's edges, and the stage
    itself fills the gap between them, rulers and all. */
 const EDGE = 14
+const ARROW_NUDGE: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+}
 const LAYERS_W = 264
 const RAIL_W = 40
 const INSPECTOR_W = 244
@@ -332,6 +344,12 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
          element and then, on the next repeat, the frame under it. */
       const canEdit = canEditOpenCanvas(useStore.getState())
       if (canEdit && (e.key === 'Delete' || e.key === 'Backspace') && !e.repeat && deleteSelection()) e.preventDefault()
+      const nudge = ARROW_NUDGE[e.key]
+      if (canEdit && nudge && t.tagName !== 'SELECT' && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const step = e.shiftKey ? 10 : 1
+        if (nudgeSelection(nudge[0] * step, nudge[1] * step)) e.preventDefault()
+        return
+      }
       if (e.key === 'Escape') {
         select(null)
         useStore.getState().setFollowing(null)
