@@ -16,10 +16,12 @@ import {
   XIcon,
   type IconProps,
 } from './ui/icons'
+import { t as translate, useT, type PlainMessageKey } from '@/lib/i18n'
 
 /** What a link without a connector says beside its hotspot: a glyph for the
- *  kind of jump and the place it lands. */
-type LinkLabel = { icon: ComponentType<IconProps>; text: string }
+ *  kind of jump and the place it lands — a name or URL from the design as
+ *  `text`, or a word of the editor's own as a `message` translated on render. */
+type LinkLabel = { icon: ComponentType<IconProps> } & ({ text: string } | { message: PlainMessageKey })
 
 type Rect = { x: number; y: number; width: number; height: number }
 
@@ -69,6 +71,7 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
   const zoom = useStore((s) => s.viewport.zoom)
   const picked = useStore((s) => s.selectedElement)
   const fullCanvas = useStore((s) => s.canvas)
+  const t = useT()
 
   /* the live documents report their hotspots (script-made ones included);
      each re-reads whenever its frame renders */
@@ -119,10 +122,9 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
               key,
               box,
               path: null,
-              label: {
-                icon: ArrowRightIcon,
-                text: elsewhere ? `${elsewhere.name}${page ? ` (${page.name})` : ''}` : 'missing frame',
-              },
+              label: elsewhere
+                ? { icon: ArrowRightIcon, text: `${elsewhere.name}${page ? ` (${page.name})` : ''}` }
+                : { icon: ArrowRightIcon, message: 'panels.protoMissingFrame' },
               picked: isPicked,
             })
           }
@@ -191,7 +193,7 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
                 strokeWidth={3 / zoom}
                 paintOrder="stroke"
               >
-                {link.label.text}
+                {'message' in link.label ? t(link.label.message) : link.label.text}
               </text>
             )}
           </g>
@@ -203,7 +205,7 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
           style={{ left: start.x, top: start.y, transform: `translateY(-100%) translateY(-6px) scale(${1 / zoom})` }}
           data-flow-start={start.id}
         >
-          <FlowStartIcon size={12} /> Start
+          <FlowStartIcon size={12} /> {t('panels.protoStart')}
         </div>
       )}
       {sourceFrame && picked && !isLayerLocked(sourceFrame, picked.selector) && (
@@ -221,9 +223,9 @@ function Connectors({ frames, startFrameId }: { frames: Frame[]; startFrameId?: 
 function describe(i: Interaction): LinkLabel | null {
   switch (i.action) {
     case 'back':
-      return { icon: ArrowLeftIcon, text: 'Back' }
+      return { icon: ArrowLeftIcon, message: 'common.back' }
     case 'close-overlay':
-      return { icon: XIcon, text: 'Close overlay' }
+      return { icon: XIcon, message: 'panels.protoCloseOverlay' }
     case 'scroll-to':
       return { icon: ArrowDownIcon, text: i.target ?? '' }
     case 'url':
@@ -239,6 +241,7 @@ function ConnectHandle({ frame, selector, frames }: { frame: Frame; selector: st
   const [rect, setRect] = useState<Rect | null>(null)
   const [drag, setDrag] = useState<{ x: number; y: number; over: Frame | null } | null>(null)
   const zoom = useStore((s) => s.viewport.zoom)
+  const t = useT()
 
   useEffect(() => {
     let live = true
@@ -287,7 +290,7 @@ function ConnectHandle({ frame, selector, frames }: { frame: Frame; selector: st
     if (!target) return
     const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id) ?? frame
     const list = elementInteractions(live.html, selector)
-    if (!list) return useStore.getState().pushNotice('A script creates this element — wire it in the HTML')
+    if (!list) return useStore.getState().pushNotice(translate('panels.protoScriptElement'))
     const next: Interaction = {
       trigger: 'click',
       action: 'navigate',
@@ -297,7 +300,7 @@ function ConnectHandle({ frame, selector, frames }: { frame: Frame; selector: st
     }
     const kept = list.filter((i) => !(i.trigger === 'click' && targetsFrame(i)))
     if (saveInteractions(live, selector, [...kept, next]))
-      useStore.getState().pushNotice(`Click now goes to “${target.name}”`)
+      useStore.getState().pushNotice(translate('panels.protoLinked', { name: target.name }))
   }
 
   const size = 14 / zoom
@@ -333,8 +336,8 @@ function ConnectHandle({ frame, selector, frames }: { frame: Frame; selector: st
       <div
         className="absolute z-[8] cursor-crosshair rounded-full border-2 border-white bg-brand shadow-pop"
         style={{ left: hx - size / 2, top: hy - size / 2, width: size, height: size, borderWidth: 2 / zoom }}
-        title="Drag onto a frame to link it"
-        aria-label="Drag onto a frame to link it"
+        title={t('panels.protoHandle')}
+        aria-label={t('panels.protoHandle')}
         data-proto-handle=""
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

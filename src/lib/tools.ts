@@ -2,6 +2,8 @@
    tool, on what it landed on, and on a few modifiers. Resolved here, in one
    place, so the Stage (background) and FrameView (frames) agree on it. */
 
+import type { PlainMessageKey } from './i18n'
+
 export type DrawingTool = 'rectangle' | 'circle' | 'path' | 'text' | 'frame'
 export type Tool = 'select' | 'hand' | 'comment' | DrawingTool
 
@@ -9,15 +11,16 @@ export function isDrawingTool(tool: Tool): tool is DrawingTool {
   return tool === 'rectangle' || tool === 'circle' || tool === 'path' || tool === 'text' || tool === 'frame'
 }
 
-export const TOOLS: { id: Tool; label: string; key: string }[] = [
-  { id: 'select', label: 'Select', key: 'V' },
-  { id: 'hand', label: 'Hand', key: 'H' },
-  { id: 'frame', label: 'Frame', key: 'F' },
-  { id: 'rectangle', label: 'Rectangle', key: 'R' },
-  { id: 'circle', label: 'Circle', key: 'O' },
-  { id: 'path', label: 'Vector path', key: 'P' },
-  { id: 'text', label: 'Text', key: 'T' },
-  { id: 'comment', label: 'Comment', key: 'C' },
+/** `label` is a message key: translate it where the tool is drawn. */
+export const TOOLS: { id: Tool; label: PlainMessageKey; key: string }[] = [
+  { id: 'select', label: 'canvas.toolSelect', key: 'V' },
+  { id: 'hand', label: 'canvas.toolHand', key: 'H' },
+  { id: 'frame', label: 'canvas.toolFrame', key: 'F' },
+  { id: 'rectangle', label: 'canvas.toolRectangle', key: 'R' },
+  { id: 'circle', label: 'canvas.toolCircle', key: 'O' },
+  { id: 'path', label: 'canvas.toolPath', key: 'P' },
+  { id: 'text', label: 'canvas.toolText', key: 'T' },
+  { id: 'comment', label: 'canvas.toolComment', key: 'C' },
 ]
 
 export type PointerAction =

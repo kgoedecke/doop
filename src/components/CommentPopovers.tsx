@@ -9,6 +9,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { CheckIcon, CommentIcon, SparkIcon, SyncIcon } from './ui/icons'
 import { RoleMark } from './RoleMark'
+import { useT, type Translate } from '../lib/i18n'
 
 /* The comment UI — pins, the composer, an open thread — is shared by the
    frames (element comments, FrameView) and the canvas itself (canvas
@@ -51,6 +52,7 @@ export function CommentPin({
   const dragged = useStore((s) => s.commentDrag?.id === root.id)
   /* the click after a drag's release must not toggle the thread */
   const suppressClick = useRef(false)
+  const t = useT()
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.stopPropagation()
@@ -131,7 +133,7 @@ export function CommentPin({
         }
         onToggle()
       }}
-      title={`${root.from}: ${root.text}${thread.length > 1 ? ` (${thread.length - 1} replies)` : ''}`}
+      title={`${root.from}: ${root.text}${thread.length > 1 ? t('stage.pinReplies', { count: thread.length - 1 }) : ''}`}
     >
       {agentItem?.failedAt ? '!' : working ? <SparkIcon size={14} /> : <CommentIcon size={14} />}
       {open && !dragged && children}
@@ -143,13 +145,14 @@ export function CommentComposer({
   onSubmit,
   onCancel,
   initialText = '',
-  placeholder = 'Leave a comment on this element…',
+  placeholder,
 }: {
   onSubmit: (text: string) => void
   onCancel: () => void
   initialText?: string
   placeholder?: string
 }) {
+  const t = useT()
   const [text, setText] = useState(initialText)
   const taRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => taRef.current?.focus(), [])
@@ -164,7 +167,7 @@ export function CommentComposer({
         variant="bare"
         className="min-h-[58px] md:text-[13px]"
         value={text}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('stage.commentOnElement')}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send()
@@ -180,7 +183,7 @@ export function CommentComposer({
               size="pill"
               className="border-dashed px-2 text-[11px] font-semibold text-ink-soft hover:border-brand hover:bg-transparent hover:text-brand"
               title={`${role.name} — ${role.blurb}`}
-              onClick={() => setText((t) => (t ? t.replace(/\s*$/, ' ') : '') + `@${role.id} `)}
+              onClick={() => setText((current) => (current ? current.replace(/\s*$/, ' ') : '') + `@${role.id} `)}
             >
               <RoleMark role={role} size={13} /> @{role.id}
             </Button>
@@ -191,11 +194,11 @@ export function CommentComposer({
         {mentioned && (
           <span className="mr-auto inline-flex items-center gap-1 text-[11px] font-semibold text-brand">
             <RoleMark role={mentioned} size={13} />
-            {mentioned.name} will pick this up
+            {t('stage.willPickUp', { name: mentioned.name })}
           </span>
         )}
         <Button variant="solid" size="pill" className="px-3.5 py-[5px] text-xs" disabled={!text.trim()} onClick={send}>
-          Post
+          {t('stage.post')}
         </Button>
       </div>
     </div>
@@ -203,9 +206,9 @@ export function CommentComposer({
 }
 
 /** Where an @agent request in the thread stands, or null for a human note. */
-function agentStatus(c: ElementComment): ReactNode {
+function agentStatus(c: ElementComment, t: Translate): ReactNode {
   const target = c.targetAgent ?? roleName(DEFAULT_ROLE_ID)
-  if (c.failedAt) return `${target} stopped`
+  if (c.failedAt) return t('stage.agentStopped', { name: target })
   if (c.resolvedAt)
     return c.forAgent ? (
       <>
@@ -217,13 +220,13 @@ function agentStatus(c: ElementComment): ReactNode {
     return (
       <>
         <SparkIcon size={12} />
-        {c.claimedBy} is on it
+        {t('stage.isOnIt', { name: c.claimedBy })}
       </>
     )
   return c.forAgent ? (
     <>
       <SparkIcon size={12} />
-      waiting for {target}
+      {t('stage.waitingFor', { name: target })}
     </>
   ) : null
 }
@@ -241,6 +244,7 @@ export function CommentThread({
   onResolve: () => void
   onRetry: (commentId: string) => void
 }) {
+  const t = useT()
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -273,7 +277,7 @@ export function CommentThread({
     >
       <div ref={listRef} className="-mx-1 max-h-[240px] overflow-y-auto px-1">
         {thread.map((c, i) => {
-          const status = agentStatus(c)
+          const status = agentStatus(c, t)
           return (
             <div key={c.id} className={cn(i > 0 && 'mt-2 border-t border-line-soft pt-2')}>
               <div className="flex items-center justify-between gap-2 text-[12px]">
@@ -287,7 +291,7 @@ export function CommentThread({
               <div className="mt-1 break-words text-[13px] leading-[1.45] text-ink">{c.text}</div>
               {c.failedAt ? (
                 <div className="mt-1 flex items-center gap-2 text-[11px] leading-[1.4] text-accent-ink">
-                  <span>{c.failureReason ?? 'The agent did not finish.'}</span>
+                  <span>{c.failureReason ?? t('stage.agentDidNotFinish')}</span>
                   {canEdit && (
                     <Button
                       variant="danger-solid"
@@ -296,7 +300,7 @@ export function CommentThread({
                       onClick={() => onRetry(c.id)}
                     >
                       <SyncIcon size={12} />
-                      Retry
+                      {t('stage.retry')}
                     </Button>
                   )}
                 </div>
@@ -308,7 +312,7 @@ export function CommentThread({
       {canComment && (
         <ThreadReply
           reply={reply}
-          placeholder={canEdit ? 'Reply… (@doop to ask the agent)' : 'Reply…'}
+          placeholder={canEdit ? t('stage.replyAskAgent') : t('stage.replyEllipsis')}
           failed={failed}
           sending={sending}
           mentioned={mentioned}
@@ -341,6 +345,7 @@ function ThreadReply({
   onSend: () => void
   onResolve: () => void
 }) {
+  const t = useT()
   return (
     <>
       <Textarea
@@ -353,11 +358,7 @@ function ThreadReply({
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onSend()
         }}
       />
-      {failed && (
-        <div className="mt-1 text-[11px] leading-[1.4] text-accent-ink">
-          That reply did not go through — it may be resolved already. Try again.
-        </div>
-      )}
+      {failed && <div className="mt-1 text-[11px] leading-[1.4] text-accent-ink">{t('stage.replyFailed')}</div>}
       <div className="mt-1.5 flex items-center gap-1.5">
         <Button
           variant="ghost"
@@ -366,12 +367,12 @@ function ThreadReply({
           onClick={onResolve}
         >
           <CheckIcon size={12} />
-          Resolve
+          {t('stage.resolve')}
         </Button>
         {mentioned && (
           <span
             className="ml-auto inline-flex min-w-0 items-center gap-1 truncate text-[11px] font-semibold text-brand"
-            title={`${mentioned.name} will pick this up`}
+            title={t('stage.willPickUp', { name: mentioned.name })}
           >
             <RoleMark role={mentioned} size={13} />
             <span className="truncate">{mentioned.name}</span>
@@ -384,7 +385,7 @@ function ThreadReply({
           disabled={!reply.trim() || sending}
           onClick={onSend}
         >
-          {sending ? 'Posting…' : 'Reply'}
+          {sending ? t('stage.posting') : t('stage.reply')}
         </Button>
       </div>
     </>

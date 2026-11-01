@@ -54,6 +54,7 @@ import {
 import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Toast } from '../components/ui/toast'
 import { DashContent, DashHeader, DashLayout, DashMain } from '../components/ui/dash'
+import { useT, type PlainMessageKey } from '../lib/i18n'
 import { cn } from '@/lib/utils'
 
 /** the three fixed views, or one workspace (`ws:<id>`) */
@@ -61,7 +62,11 @@ type Scope = 'all' | 'mine' | 'shared' | `ws:${string}`
 
 /** how the list is ordered; the default is what the server already sends */
 type Sort = 'updated' | 'name' | 'created'
-const SORT_LABELS: Record<Sort, string> = { updated: 'Last edited', name: 'Name', created: 'Newest' }
+const SORT_LABELS: Record<Sort, PlainMessageKey> = {
+  updated: 'home.sortUpdated',
+  name: 'home.sortName',
+  created: 'home.sortCreated',
+}
 const isSort = (value: string): value is Sort => Object.hasOwn(SORT_LABELS, value)
 
 function workspaceOf(scope: Scope): string | undefined {
@@ -94,6 +99,7 @@ export function Home() {
   /* the rail's "Ask Doop" and ⌘/ hand the keyboard to the composer */
   const [composerFocusAt, setComposerFocusAt] = useState(0)
   const { data: session } = authClient.useSession()
+  const t = useT()
 
   useEffect(() => {
     /* the rail on another page sends people here with a scope or a request
@@ -129,8 +135,8 @@ export function Home() {
       open(canvas.id, canvas.name)
     } catch (error) {
       const walled = paywalledWorkspace(error)
-      if (walled) setUpgrade({ workspaceId: walled, reason: 'Adding a canvas to a workspace needs a Team plan.' })
-      else showToast(errorMessage(error, 'Couldn’t create the canvas'))
+      if (walled) setUpgrade({ workspaceId: walled, reason: t('home.reasonAddCanvas') })
+      else showToast(errorMessage(error, t('home.createCanvasFailed')))
     }
   }
 
@@ -160,7 +166,7 @@ export function Home() {
           store.setComposerSend({
             canvasId: canvas.id,
             status: 'error',
-            message: errorMessage(error, 'The brief didn’t queue — try sending it again'),
+            message: errorMessage(error, t('home.briefNotQueued')),
             at: Date.now(),
           })
         }
@@ -168,8 +174,8 @@ export function Home() {
       open(canvas.id, canvas.name)
     } catch (error) {
       const walled = paywalledWorkspace(error)
-      if (walled) setUpgrade({ workspaceId: walled, reason: 'Adding a canvas to a workspace needs a Team plan.' })
-      else showToast(errorMessage(error, 'Couldn’t start the canvas'))
+      if (walled) setUpgrade({ workspaceId: walled, reason: t('home.reasonAddCanvas') })
+      else showToast(errorMessage(error, t('home.startCanvasFailed')))
     } finally {
       setStarting(false)
     }
@@ -188,8 +194,8 @@ export function Home() {
       navigate(`/c/${canvas.id}?import=${encodeURIComponent(source)}`)
     } catch (error) {
       const walled = paywalledWorkspace(error)
-      if (walled) setUpgrade({ workspaceId: walled, reason: 'Adding a canvas to a workspace needs a Team plan.' })
-      else showToast(errorMessage(error, 'Couldn’t start the import'))
+      if (walled) setUpgrade({ workspaceId: walled, reason: t('home.reasonAddCanvas') })
+      else showToast(errorMessage(error, t('home.startImportFailed')))
     } finally {
       setStarting(false)
     }
@@ -217,7 +223,7 @@ export function Home() {
       open(copy.id, copy.name)
     } catch (error) {
       console.error(error)
-      showToast('Couldn’t duplicate canvas')
+      showToast(t('home.duplicateFailed'))
     } finally {
       setDuplicatingId(null)
     }
@@ -228,7 +234,7 @@ export function Home() {
       setShareCanvas(await api.getCanvas(canvas.id))
     } catch (error) {
       console.error(error)
-      showToast('Couldn’t open sharing')
+      showToast(t('home.shareFailed'))
     }
   }
 
@@ -284,10 +290,10 @@ export function Home() {
   const listTitle = currentWorkspace
     ? currentWorkspace.name
     : scope === 'mine'
-      ? 'Owned by me'
+      ? t('home.ownedByMe')
       : scope === 'shared'
-        ? 'Shared with me'
-        : 'All canvases'
+        ? t('home.sharedWithMe')
+        : t('home.allCanvases')
 
   return (
     <DashLayout className={railLayout}>
@@ -307,16 +313,16 @@ export function Home() {
               className="min-h-10 max-md:hidden md:min-h-0"
               onClick={() => navigate(`/w/${currentWorkspace.id}`)}
             >
-              <BuildingIcon /> Manage
+              <BuildingIcon /> {t('home.manage')}
             </Button>
           )}
           <Button variant="default" size="bar" disabled={starting} onClick={() => setImporting(true)}>
-            <UploadIcon width={15} height={15} className="text-ink-soft" /> Import
+            <UploadIcon width={15} height={15} className="text-ink-soft" /> {t('home.import')}
           </Button>
           <Button variant="primary" size="bar" onClick={createCanvas}>
             <PlusIcon width={15} height={15} strokeWidth={1.75} />
-            <span className="max-md:hidden">New canvas</span>
-            <span className="hidden max-md:inline">New</span>
+            <span className="max-md:hidden">{t('home.newCanvas')}</span>
+            <span className="hidden max-md:inline">{t('home.newShort')}</span>
           </Button>
         </DashHeader>
 
@@ -338,14 +344,12 @@ export function Home() {
             {currentWorkspace && !currentWorkspace.active && (
               <Callout className="mb-5 flex max-w-[760px] flex-col gap-2 sm:flex-row sm:items-center">
                 <span className="flex-1">
-                  <b>{currentWorkspace.name} has no plan yet.</b>{' '}
-                  {currentWorkspace.role !== 'owner'
-                    ? 'Ask the owner to choose one — until then no canvases can be added here.'
-                    : 'Choose a Team plan to add canvases and invite your team.'}
+                  <b>{t('home.noPlanTitle', { name: currentWorkspace.name })}</b>{' '}
+                  {currentWorkspace.role !== 'owner' ? t('home.noPlanAskOwner') : t('home.noPlanChoose')}
                 </span>
                 {currentWorkspace.role === 'owner' && (
                   <Button variant="primary" size="sm" onClick={() => setUpgrade({ workspaceId: currentWorkspace.id })}>
-                    Choose a plan
+                    {t('home.choosePlan')}
                   </Button>
                 )}
               </Callout>
@@ -357,24 +361,26 @@ export function Home() {
                 {currentWorkspace && listTitle}
                 {currentWorkspace && (
                   <span className="ml-2 font-normal text-ink-faint">
-                    {currentWorkspace.memberCount} {currentWorkspace.memberCount === 1 ? 'person' : 'people'} ·{' '}
+                    {t('home.people', { count: currentWorkspace.memberCount })} ·{' '}
                     {currentWorkspace.plan === 'team' && currentWorkspace.active
-                      ? 'Team plan'
+                      ? t('home.teamPlan')
                       : currentWorkspace.active
-                        ? 'Shared workspace'
-                        : 'No plan yet'}
+                        ? t('home.sharedWorkspace')
+                        : t('home.noPlanYet')}
                   </span>
                 )}
               </h2>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <MenuButton aria-label={`Sort: ${SORT_LABELS[sort]}`}>{SORT_LABELS[sort]}</MenuButton>
+                  <MenuButton aria-label={t('home.sortAria', { label: t(SORT_LABELS[sort]) })}>
+                    {t(SORT_LABELS[sort])}
+                  </MenuButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" width="sm">
                   <DropdownMenuRadioGroup value={sort} onValueChange={(next) => isSort(next) && setSort(next)}>
                     {(Object.keys(SORT_LABELS) as Sort[]).map((key) => (
                       <DropdownMenuRadioItem key={key} value={key}>
-                        {SORT_LABELS[key]}
+                        {t(SORT_LABELS[key])}
                       </DropdownMenuRadioItem>
                     ))}
                   </DropdownMenuRadioGroup>
@@ -382,14 +388,14 @@ export function Home() {
               </DropdownMenu>
               <SegmentedIcons
                 className="flex-none"
-                aria-label="View"
+                aria-label={t('home.viewAria')}
                 value={view}
                 onValueChange={(next) => setView(next as 'grid' | 'list')}
               >
-                <SegmentedIconItem value="grid" aria-label="Grid view">
+                <SegmentedIconItem value="grid" aria-label={t('home.gridView')}>
                   <GridIcon width={14} height={14} />
                 </SegmentedIconItem>
-                <SegmentedIconItem value="list" aria-label="List view">
+                <SegmentedIconItem value="list" aria-label={t('home.listView')}>
                   <ListIcon width={14} height={14} />
                 </SegmentedIconItem>
               </SegmentedIcons>
@@ -398,16 +404,16 @@ export function Home() {
             {empty ? (
               <EmptyState
                 className="mt-5"
-                title="Start your first canvas"
-                description="A canvas is a shared space of live HTML frames — you design in the browser, your AI agents design through MCP, and everyone watches everything happen in real time."
+                title={t('home.emptyTitle')}
+                description={t('home.emptyDescription')}
                 action={
                   <Button variant="primary" onClick={createCanvas}>
-                    + Create a canvas
+                    {t('home.createCanvas')}
                   </Button>
                 }
               />
             ) : canvases !== null && visible.length === 0 ? (
-              <p className="mt-7 text-copy text-ink-soft">Nothing here yet — try another scope.</p>
+              <p className="mt-7 text-copy text-ink-soft">{t('home.nothingHere')}</p>
             ) : view === 'grid' ? (
               <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-3.5 xs:grid-cols-[repeat(auto-fill,minmax(230px,1fr))] md:gap-[18px]">
                 {canvases === null && [0, 1, 2, 3].map((i) => <Skeleton key={i} index={i} shape="tile" aspect="5/3" />)}
@@ -443,13 +449,13 @@ export function Home() {
                 {canvases !== null && (
                   <Pressable
                     className="grid min-h-[132px] place-items-center content-center gap-2.5 rounded-panel border border-dashed border-line p-6 text-body text-ink-faint transition-colors hover:border-ink-faint hover:text-ink xs:min-h-full"
-                    aria-label="Create a new canvas"
+                    aria-label={t('home.createNewCanvasAria')}
                     onClick={createCanvas}
                   >
                     <span className="grid size-7 place-items-center rounded-full bg-surface text-ink-soft shadow-ring">
                       <PlusIcon width={14} height={14} />
                     </span>
-                    New canvas
+                    {t('home.newCanvas')}
                   </Pressable>
                 )}
               </div>
@@ -467,7 +473,7 @@ export function Home() {
                       <FrameThumb frameId={c.previewFrameId} />
                       <span className="min-w-0 flex-1 truncate text-body font-medium">{c.name}</span>
                       <span className="hidden w-[82px] flex-none text-caption text-ink-faint sm:block">
-                        {c.frameCount} frame{c.frameCount === 1 ? '' : 's'}
+                        {t('home.frames', { count: c.frameCount })}
                       </span>
                       <span className="hidden w-[72px] flex-none xs:flex">
                         <PeopleStack canvas={c} />
@@ -513,7 +519,7 @@ export function Home() {
           onClose={() => setShareCanvas(null)}
           onCopied={() => {
             setShareCanvas(null)
-            showToast('Canvas link copied')
+            showToast(t('home.linkCopied'))
           }}
         />
       )}
@@ -526,7 +532,7 @@ export function Home() {
             setScope(`ws:${ws.id}`)
             /* a workspace that cannot grow yet goes straight to the plan picker */
             if (!ws.active)
-              setUpgrade({ workspaceId: ws.id, reason: `"${ws.name}" is ready — pick a plan to start using it.` })
+              setUpgrade({ workspaceId: ws.id, reason: t('home.reasonWorkspaceReady', { name: ws.name }) })
           }}
         />
       )}
@@ -547,21 +553,25 @@ export function Home() {
           onClose={() => setMoveCanvas(null)}
           onMoved={(workspaceId) => {
             setMoveCanvas(null)
-            showToast(workspaceId ? `Moved to ${workspaceName(workspaceId) ?? 'the workspace'}` : 'Moved to Personal')
+            showToast(
+              workspaceId
+                ? t('home.movedTo', { name: workspaceName(workspaceId) ?? t('home.movedToFallback') })
+                : t('home.movedToPersonal'),
+            )
             reload()
           }}
           onPaywall={(workspaceId) => {
             setMoveCanvas(null)
-            setUpgrade({ workspaceId, reason: 'Moving a canvas into a workspace needs a Team plan.' })
+            setUpgrade({ workspaceId, reason: t('home.reasonMoveCanvas') })
           }}
         />
       )}
       <ConfirmDialog
         open={!!deleteCanvas}
         onOpenChange={(open) => !open && setDeleteCanvas(null)}
-        title={`Delete “${deleteCanvas?.name ?? 'canvas'}”?`}
-        description="This permanently deletes the canvas and everything in it. This can’t be undone."
-        confirmLabel="Delete canvas"
+        title={t('home.deleteTitle', { name: deleteCanvas?.name ?? t('home.deleteFallbackName') })}
+        description={t('home.deleteDescription')}
+        confirmLabel={t('home.deleteConfirm')}
         destructive
         onConfirm={() => {
           if (deleteCanvas) remove(deleteCanvas.id, reload)
@@ -613,6 +623,7 @@ function PeopleStack({ canvas }: { canvas: CanvasMeta }) {
 
 function Meta({ canvas: c, onClaim, workspace }: { canvas: CanvasMeta; onClaim: () => void; workspace?: string }) {
   const owner = c.people?.[0]
+  const t = useT()
   return (
     <MetaLine
       className="mt-[3px]"
@@ -621,25 +632,25 @@ function Meta({ canvas: c, onClaim, workspace }: { canvas: CanvasMeta; onClaim: 
           <Badge
             tone="accent"
             interactive
-            title="This canvas predates accounts and is visible to everyone. Claim it to make it yours."
+            title={t('home.claimTitle')}
             onClick={async (e) => {
               e.stopPropagation()
               await api.claimCanvas(c.id).catch(console.error)
               onClaim()
             }}
           >
-            unclaimed — make mine
+            {t('home.claimBadge')}
           </Badge>
         )
       }
     >
       {c.shared && !workspace && !c.workspaceId && owner ? (
-        <span title="You were invited to collaborate on this canvas">Shared by {owner.name}</span>
+        <span title={t('home.sharedByTitle')}>{t('home.sharedBy', { name: owner.name })}</span>
       ) : (
-        <span>Edited {timeAgo(c.updatedAt)}</span>
+        <span>{t('home.edited', { time: timeAgo(c.updatedAt) })}</span>
       )}
       {workspace && (
-        <span className="inline-flex min-w-0 items-center gap-1 truncate" title={`In the ${workspace} workspace`}>
+        <span className="inline-flex min-w-0 items-center gap-1 truncate" title={t('home.inWorkspace', { workspace })}>
           <BuildingIcon width={11} height={11} aria-hidden /> {workspace}
         </span>
       )}
@@ -664,11 +675,12 @@ function CanvasActions({
   onMove?: () => void
   onDelete?: () => void
 }) {
+  const t = useT()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <IconButton
-          aria-label={`Actions for ${canvas.name}`}
+          aria-label={t('home.actionsFor', { name: canvas.name })}
           variant={compact ? 'quiet' : 'frosted'}
           shape={compact ? 'round' : 'square'}
           className={
@@ -683,21 +695,21 @@ function CanvasActions({
       </DropdownMenuTrigger>
       <DropdownMenuContent width="md">
         <DropdownMenuItem onSelect={onShare}>
-          <ShareIcon className="size-4" /> Share
+          <ShareIcon className="size-4" /> {t('home.share')}
         </DropdownMenuItem>
         <DropdownMenuItem disabled={duplicating} onSelect={onDuplicate}>
-          <CopyIcon className="size-4" /> {duplicating ? 'Duplicating…' : 'Duplicate'}
+          <CopyIcon className="size-4" /> {duplicating ? t('home.duplicating') : t('home.duplicate')}
         </DropdownMenuItem>
         {onMove && (
           <DropdownMenuItem onSelect={onMove}>
-            <BuildingIcon className="size-4" /> {canvas.workspaceId ? 'Move…' : 'Move to workspace…'}
+            <BuildingIcon className="size-4" /> {canvas.workspaceId ? t('home.move') : t('home.moveToWorkspace')}
           </DropdownMenuItem>
         )}
         {onDelete && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem tone="danger" onSelect={onDelete}>
-              <TrashIcon className="size-4" /> Delete
+              <TrashIcon className="size-4" /> {t('common.delete')}
             </DropdownMenuItem>
           </>
         )}

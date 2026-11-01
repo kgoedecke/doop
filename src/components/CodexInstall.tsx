@@ -5,8 +5,10 @@ import { posthog } from '../lib/posthog'
 import { Button } from './ui/button'
 import { CodeBlock } from './ui/code-block'
 import { InstallBlock } from './ui/install-block'
+import { useT } from '../lib/i18n'
 
 export function CodexInstall({ mcpUrl, canvasId }: { mcpUrl: string; canvasId?: string }) {
+  const t = useT()
   const [state, setState] = useState<'idle' | 'adding' | 'added'>('idle')
   const [error, setError] = useState('')
 
@@ -25,7 +27,7 @@ export function CodexInstall({ mcpUrl, canvasId }: { mcpUrl: string; canvasId?: 
 
   const manual = (
     <>
-      <p>Run this in a terminal with Codex CLI installed:</p>
+      <p>{t('workspace.codexManual')}</p>
       <CodeBlock text={`codex mcp add doop --url ${mcpUrl}`} className="mt-2" />
     </>
   )
@@ -35,22 +37,21 @@ export function CodexInstall({ mcpUrl, canvasId }: { mcpUrl: string; canvasId?: 
       <InstallBlock
         action={
           <Button variant="solid" disabled={state !== 'idle'} onClick={() => void connect()}>
-            {state === 'adding' ? 'Adding Doop…' : state === 'added' ? 'Added to Codex' : 'Add to Codex'}
+            {state === 'adding'
+              ? t('workspace.codexAdding')
+              : state === 'added'
+                ? t('workspace.codexAdded')
+                : t('workspace.codexAdd')}
           </Button>
         }
-        status={state === 'added' && 'Doop is configured. Open a new Codex chat, then sign in to Doop when prompted.'}
+        status={state === 'added' && t('workspace.codexConfigured')}
         error={error}
         manual={manual}
       />
     )
   }
   if (isDesktopShell()) {
-    return (
-      <InstallBlock
-        action={<p>Update Doop Desktop to add Codex directly, or use the manual setup below.</p>}
-        manual={manual}
-      />
-    )
+    return <InstallBlock action={<p>{t('workspace.codexUpdateDesktop')}</p>} manual={manual} />
   }
   return (
     <InstallBlock
@@ -60,11 +61,11 @@ export function CodexInstall({ mcpUrl, canvasId }: { mcpUrl: string; canvasId?: 
             href={codexDesktopLink(new URL(mcpUrl).origin, canvasId)}
             onClick={() => posthog.capture('codex_desktop_setup_opened')}
           >
-            Open Doop Desktop
+            {t('workspace.openDesktop')}
           </a>
         </Button>
       }
-      status="Requires the updated Doop desktop app. Click Add to Codex there to finish setup. If the app doesn’t open, use the manual setup below."
+      status={t('workspace.codexNeedsDesktop')}
       manual={manual}
     />
   )

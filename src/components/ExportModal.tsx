@@ -11,6 +11,7 @@ import { Checkbox } from './ui/checkbox'
 import { PdfIcon } from './ui/icons'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { SelectionBar, SelectionBarAction } from './ui/selection-bar'
+import { useT } from '@/lib/i18n'
 
 /**
  * The top bar's Export: the page's frames as a checklist (the canvas
@@ -40,6 +41,7 @@ export function ExportModal({
   /* the server refuses a longer PDF: keep the checklist open until it fits */
   const overPdfLimit = chosen.length > MAX_PDF_FRAMES
   const extra = chosen.length - MAX_PDF_FRAMES
+  const t = useT()
 
   function toggle(frameId: string) {
     setSelected((current) => {
@@ -61,11 +63,11 @@ export function ExportModal({
   if (!frames.length) {
     return (
       <Modal size="sm" onClose={onClose}>
-        <ModalTitle>Nothing to export yet</ModalTitle>
-        <ModalLede>Add a frame to this page first.</ModalLede>
+        <ModalTitle>{t('panels.exportNothing')}</ModalTitle>
+        <ModalLede>{t('panels.exportNothingLede')}</ModalLede>
         <ModalActions>
           <Button variant="ghost" onClick={onClose}>
-            Close
+            {t('common.close')}
           </Button>
         </ModalActions>
       </Modal>
@@ -74,11 +76,8 @@ export function ExportModal({
 
   return (
     <Modal size="xl" className="sm:max-w-[820px]" onClose={onClose}>
-      <ImportStepHeader icon={<PdfIcon size={22} />} title="Export as PDF" />
-      <ModalLede>
-        The frames you check become one PDF, a vector page per frame at its own size, in the order below: top to bottom,
-        then left to right on the canvas.
-      </ModalLede>
+      <ImportStepHeader icon={<PdfIcon size={22} />} title={t('panels.exportPdfTitle')} />
+      <ModalLede>{t('panels.exportPdfLede')}</ModalLede>
       <SelectionBar
         className="mt-5"
         count={chosen.length}
@@ -86,16 +85,16 @@ export function ExportModal({
         actions={
           <>
             <SelectionBarAction onClick={() => setSelected(new Set(frames.map((frame) => frame.id)))}>
-              Select all
+              {t('panels.exportSelectAll')}
             </SelectionBarAction>
-            <SelectionBarAction onClick={() => setSelected(new Set())}>Clear</SelectionBarAction>
+            <SelectionBarAction onClick={() => setSelected(new Set())}>{t('panels.exportClear')}</SelectionBarAction>
           </>
         }
       />
       <div
         className="max-h-[calc(100dvh-390px)] overflow-y-auto rounded-[11px] border border-line bg-paper sm:max-h-[min(350px,calc(100vh-390px))]"
         role="group"
-        aria-label="Frames to export"
+        aria-label={t('panels.exportFramesAria')}
       >
         {listed.map((frame, index) => (
           <label
@@ -107,7 +106,7 @@ export function ExportModal({
             <FrameThumb frameId={frame.id} />
             <span className="min-w-0">
               <b className="block overflow-hidden whitespace-nowrap text-ellipsis text-[12.5px] text-ink">
-                {frame.name || 'Untitled frame'}
+                {frame.name || t('panels.exportUntitled')}
               </b>
               <span className="mt-[3px] block font-mono text-[10px] text-ink-faint">
                 {Math.round(frame.width)} × {Math.round(frame.height)}
@@ -119,14 +118,16 @@ export function ExportModal({
       <div className="mt-6 flex items-center gap-2.5 border-t border-line-soft pt-[18px]">
         <span className="mr-auto min-w-0 text-label leading-[1.4] text-ink-faint">
           {overPdfLimit
-            ? `A PDF holds at most ${MAX_PDF_FRAMES} frames. Uncheck ${extra} ${extra === 1 ? 'frame' : 'frames'} to download.`
-            : 'Text stays selectable. A long document can take a few seconds per page.'}
+            ? `${t('panels.exportPdfMax', { count: MAX_PDF_FRAMES })} ${t('panels.exportUncheck', { count: extra })}`
+            : t('panels.exportPdfHint')}
         </span>
         <Button variant="ghost" className="flex-none" onClick={onClose}>
-          Cancel
+          {t('common.cancel')}
         </Button>
         <Button variant="primary" disabled={!chosen.length || overPdfLimit} onClick={run}>
-          {chosen.length > 1 ? `Download PDF (${chosen.length} pages)` : 'Download PDF'}
+          {chosen.length > 1
+            ? t('panels.exportDownloadPdfPages', { count: chosen.length })
+            : t('panels.exportDownloadPdf')}
         </Button>
       </div>
     </Modal>

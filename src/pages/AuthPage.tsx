@@ -15,6 +15,7 @@ import { ArrowRightIcon } from '../components/ui/icons'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
 import { Callout } from '../components/ui/callout'
+import { useT, type PlainMessageKey } from '../lib/i18n'
 
 /* If login interrupted an MCP OAuth authorize redirect, send the browser
    back into the flow so the agent connection completes. */
@@ -24,7 +25,7 @@ import { Callout } from '../components/ui/callout'
 /* A request that never reached the server (offline, a blocked request, a
    dropped connection) rejects instead of returning `res.error`; without a
    catch the form just stops spinning and says nothing. */
-const NETWORK_ERROR = 'Could not reach doop — check your connection and try again.'
+const NETWORK_ERROR = 'auth.networkError' satisfies PlainMessageKey
 
 async function accountExists(email: string): Promise<boolean> {
   try {
@@ -72,11 +73,11 @@ function resumeOAuthFlow(): boolean {
 type AuthMode = 'signin' | 'signup' | 'forgot' | 'reset'
 
 /** the card's title for each mode */
-const TITLES: Record<AuthMode, string> = {
-  signin: 'Welcome back.',
-  signup: 'Create your account.',
-  forgot: 'Reset your password.',
-  reset: 'Pick a new password.',
+const TITLES: Record<AuthMode, PlainMessageKey> = {
+  signin: 'auth.titleSignin',
+  signup: 'auth.titleSignup',
+  forgot: 'auth.titleForgot',
+  reset: 'auth.titleReset',
 }
 
 /** The redirect knobs shared by better-auth's social and oauth2 sign-ins. */
@@ -105,14 +106,13 @@ function GoogleMark() {
    (see linkVerifiedProviderEmail in server/auth.ts for why that should now be
    rare, not why it can still happen — a provider that never sends
    email_verified, for instance). */
-const SSO_ERROR_MESSAGES: Record<string, string> = {
-  account_not_linked:
-    'That email already has a doop account that could not be linked automatically — sign in with email/password instead.',
-  "email_doesn't_match": "The signed-in email doesn't match the account you started from — try again.",
-  email_is_missing: "Your identity provider didn't share an email address — doop needs one to sign you in.",
-  email_not_found: "Your identity provider didn't share an email address — doop needs one to sign you in.",
+const SSO_ERROR_MESSAGES: Record<string, PlainMessageKey> = {
+  account_not_linked: 'auth.ssoAccountNotLinked',
+  "email_doesn't_match": 'auth.ssoEmailMismatch',
+  email_is_missing: 'auth.ssoEmailMissing',
+  email_not_found: 'auth.ssoEmailMissing',
   /* the desktop shell's browser handoff (src/lib/desktopAuth.ts) came back with a spent or expired token */
-  desktop_handoff: 'That sign-in link has expired — start again and finish in your browser within a couple of minutes.',
+  desktop_handoff: 'auth.ssoDesktopHandoff',
 }
 
 /* A failure inside the IdP round trip (the browser has already left and
@@ -126,14 +126,18 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
    contain underscores, so flipping them back restores it verbatim. */
 const SIGNUP_RESTRICTED_PREFIX = 'Sign_up_is_restricted'
 
-function ssoErrorFromUrl(): string | null {
+/** What to show for a provider failure: the server's own words when it sent
+ *  any (`text`), else the message key for the code (`key`). */
+type SsoError = { text: string } | { key: PlainMessageKey }
+
+function ssoErrorFromUrl(): SsoError | null {
   const params = new URLSearchParams(location.search)
   const code = params.get('error')
   if (!code) return null
-  if (code.startsWith(SIGNUP_RESTRICTED_PREFIX)) return code.replaceAll('_', ' ')
+  if (code.startsWith(SIGNUP_RESTRICTED_PREFIX)) return { text: code.replaceAll('_', ' ') }
   const description = params.get('error_description')
-  if (description) return description
-  return SSO_ERROR_MESSAGES[code] ?? 'Sign-in failed — try again or use email/password.'
+  if (description) return { text: description }
+  return { key: (Object.hasOwn(SSO_ERROR_MESSAGES, code) && SSO_ERROR_MESSAGES[code]) || 'auth.ssoFailed' }
 }
 
 /* Where a provider sign-in should land, mirroring what the email form does
@@ -188,6 +192,7 @@ function useOidcConfig(): OidcClientConfig {
 let browserSignInNotice: string | null = null
 
 export function AuthPage() {
+  const t = useT()
   const oidc = useOidcConfig()
   /* better-auth lands password-reset links on /auth/reset?token=… */
   const resetToken = location.pathname === '/auth/reset' ? new URLSearchParams(location.search).get('token') : null
@@ -195,7 +200,11 @@ export function AuthPage() {
   const [name, setNameField] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(ssoErrorFromUrl)
+  const [error, setError] = useState<string | null>(() => {
+    const sso = ssoErrorFromUrl()
+    if (!sso) return null
+    return 'key' in sso ? t(sso.key) : sso.text
+  })
   /* informational state (not an error): "check your email" and friends */
   const [notice, setNotice] = useState<string | null>(browserSignInNotice)
   /* signin failed on an unverified email — offer a resend */
@@ -229,7 +238,7 @@ export function AuthPage() {
     setError(null)
     setNotice(null)
     setBusy(true)
-    const startFailed = 'Could not start sign-in — try again or use email/password.'
+    const startFailed = t('auth.startFailed')
     try {
       if (isDesktopShell() && supportsBrowserSignIn()) {
         /* Identity providers refuse embedded webviews, so the desktop shell
@@ -240,14 +249,14 @@ export function AuthPage() {
           setError(startFailed)
           return
         }
-        browserSignInNotice = 'Finish signing in in your browser — doop signs you in here the moment you come back.'
+        browserSignInNotice = t('auth.browserSignInNotice')
         setNotice(browserSignInNotice)
         return
       }
       const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
       if (res.error) setError(res.error.message ?? startFailed)
     } catch {
-      setError(NETWORK_ERROR)
+      setError(t(NETWORK_ERROR))
     } finally {
       setBusy(false)
     }
@@ -267,9 +276,9 @@ export function AuthPage() {
       await authClient.sendVerificationEmail({ email, callbackURL: verifiedLanding() })
       setError(null)
       setUnverified(false)
-      setNotice('Verification email sent — check your inbox.')
+      setNotice(t('auth.verificationSent'))
     } catch {
-      setError(NETWORK_ERROR)
+      setError(t(NETWORK_ERROR))
     } finally {
       setBusy(false)
     }
@@ -286,17 +295,17 @@ export function AuthPage() {
       if (mode === 'forgot') {
         await authClient.requestPasswordReset({ email, redirectTo: '/auth/reset' })
         /* same response either way — this must not confirm account existence */
-        setNotice('If an account exists for that email, a reset link is on its way.')
+        setNotice(t('auth.resetLinkSent'))
         return
       }
       if (mode === 'reset') {
         const res = await authClient.resetPassword({ newPassword: password, token: resetToken ?? '' })
         if (res.error) {
-          setError(res.error.message ?? 'This reset link is invalid or expired — request a new one.')
+          setError(res.error.message ?? t('auth.resetLinkInvalid'))
         } else {
           history.replaceState(null, '', '/auth')
           switchMode('signin')
-          setNotice('Password updated — sign in with your new password.')
+          setNotice(t('auth.passwordUpdated'))
         }
         return
       }
@@ -311,24 +320,24 @@ export function AuthPage() {
           : await authClient.signIn.email({ email, password })
       if (res.error) {
         if (mode === 'signin' && res.error.code === 'EMAIL_NOT_VERIFIED') {
-          setError('This email hasn’t been verified yet.')
+          setError(t('auth.emailNotVerified'))
           setUnverified(true)
         } else if (mode === 'signin' && !(await accountExists(email))) {
-          setError('No account found for this email.')
+          setError(t('auth.noAccountFound'))
           setSuggestMode('signup')
           posthog.capture('login_no_account_found')
         } else if (mode === 'signup' && isUserAlreadyExists(res.error.code)) {
-          setError('An account with this email already exists.')
+          setError(t('auth.accountExists'))
           setSuggestMode('signin')
         } else {
-          setError(res.error.message ?? 'Something went wrong')
+          setError(res.error.message ?? t('auth.somethingWentWrong'))
         }
       } else if (res.data?.user) {
         /* signup with verification required: the account exists but there is
            no session yet — better-auth returns a null token in that case */
         if (mode === 'signup' && !res.data.token) {
           posthog.capture('account_signed_up', { method: 'email' })
-          setNotice(`Almost there — we sent a verification link to ${email}. Open it to activate your account.`)
+          setNotice(t('auth.verifyEmailSent', { email }))
           return
         }
         if (mode === 'signup') posthog.capture('account_signed_up', { method: 'email' })
@@ -339,7 +348,7 @@ export function AuthPage() {
         if (!resumeOAuthFlow() && mode === 'signup') location.href = FIRST_CANVAS_PATH
       }
     } catch {
-      setError(NETWORK_ERROR)
+      setError(t(NETWORK_ERROR))
     } finally {
       setBusy(false)
     }
@@ -347,16 +356,16 @@ export function AuthPage() {
 
   return (
     <AuthScreen>
-      <AuthCard as="form" title={TITLES[mode]} onSubmit={submit}>
+      <AuthCard as="form" title={t(TITLES[mode])} onSubmit={submit}>
         <AuthCardText className="mb-2">
           {mode === 'forgot' ? (
-            <>Enter your account email and we&rsquo;ll send you a reset link.</>
+            t('auth.forgotBlurb')
           ) : mode === 'reset' ? (
-            <>Choose a new password for your account.</>
+            t('auth.resetBlurb')
           ) : (
             <>
-              A shared canvas for humans <em className="not-italic text-brand">&amp; agents</em>. Sign{' '}
-              {mode === 'signin' ? 'in to your canvases' : 'up to start designing'}.
+              {t('auth.taglineBefore')} <em className="not-italic text-brand">{t('auth.taglineEmphasis')}</em>
+              {t('auth.taglineAfter')} {mode === 'signin' ? t('auth.taglineSignin') : t('auth.taglineSignup')}
             </>
           )}
         </AuthCardText>
@@ -373,7 +382,7 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <GoogleMark />
-                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Google
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Google' })}
               </Button>
             )}
             {oidc.microsoft && (
@@ -387,7 +396,7 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <MicrosoftMark />
-                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Microsoft
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Microsoft' })}
               </Button>
             )}
             {oidc.apple && (
@@ -401,7 +410,7 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <AppleMark />
-                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Apple
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Apple' })}
               </Button>
             )}
             {oidc.enabled && (
@@ -414,18 +423,18 @@ export function AuthPage() {
                 onClick={ssoSignIn}
                 disabled={busy}
               >
-                {mode === 'signup' ? 'Sign up' : 'Sign in'} with {oidc.displayName}
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: oidc.displayName ?? '' })}
               </Button>
             )}
             <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-faint">
               <span className="h-px flex-1 bg-line" />
-              or
+              {t('auth.or')}
               <span className="h-px flex-1 bg-line" />
             </div>
           </>
         )}
         {mode === 'signup' && (
-          <Field label="Name" labelVariant="form">
+          <Field label={t('auth.nameLabel')} labelVariant="form">
             <Input
               variant="well"
               value={name}
@@ -436,20 +445,20 @@ export function AuthPage() {
           </Field>
         )}
         {mode !== 'reset' && (
-          <Field label="Email" labelVariant="form">
+          <Field label={t('auth.emailLabel')} labelVariant="form">
             <Input
               variant="well"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder={t('auth.emailPlaceholder')}
               autoComplete="email"
             />
           </Field>
         )}
         {mode !== 'forgot' && (
-          <Field label={mode === 'reset' ? 'New password' : 'Password'} labelVariant="form">
+          <Field label={t(mode === 'reset' ? 'auth.newPasswordLabel' : 'auth.passwordLabel')} labelVariant="form">
             <Input
               variant="well"
               type="password"
@@ -457,7 +466,7 @@ export function AuthPage() {
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === 'signin' ? '••••••••' : 'At least 8 characters'}
+              placeholder={mode === 'signin' ? '••••••••' : t('auth.passwordPlaceholder')}
               autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
             />
           </Field>
@@ -469,7 +478,7 @@ export function AuthPage() {
             className="-mt-1.5 self-end font-normal text-ink-faint hover:text-ink"
             onClick={() => switchMode('forgot')}
           >
-            Forgot password?
+            {t('auth.forgotPassword')}
           </Button>
         )}
         {notice && <Callout>{notice}</Callout>}
@@ -483,7 +492,7 @@ export function AuthPage() {
                 className="mt-1.5 flex text-accent-ink underline"
                 onClick={() => switchMode(suggestMode)}
               >
-                {suggestMode === 'signup' ? 'Create an account instead' : 'Sign in instead'}
+                {t(suggestMode === 'signup' ? 'auth.createAccountInstead' : 'auth.signInInstead')}
                 <ArrowRightIcon size={12} />
               </Button>
             )}
@@ -495,7 +504,7 @@ export function AuthPage() {
                 onClick={resendVerification}
                 disabled={busy}
               >
-                Resend verification email
+                {t('auth.resendVerification')}
                 <ArrowRightIcon size={12} />
               </Button>
             )}
@@ -505,12 +514,12 @@ export function AuthPage() {
           {busy
             ? '…'
             : mode === 'signin'
-              ? 'Sign in'
+              ? t('auth.signIn')
               : mode === 'signup'
-                ? 'Sign up'
+                ? t('auth.signUp')
                 : mode === 'forgot'
-                  ? 'Send reset link'
-                  : 'Set new password'}
+                  ? t('auth.sendResetLink')
+                  : t('auth.setNewPassword')}
         </Button>
         <Button
           variant="link"
@@ -518,7 +527,7 @@ export function AuthPage() {
           className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
           onClick={() => switchMode(mode === 'signin' ? 'signup' : 'signin')}
         >
-          {mode === 'signin' ? 'No account yet? Sign up' : 'Have an account? Sign in'}
+          {t(mode === 'signin' ? 'auth.noAccountSignUp' : 'auth.haveAccountSignIn')}
         </Button>
       </AuthCard>
     </AuthScreen>

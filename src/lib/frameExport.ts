@@ -2,6 +2,7 @@ import { pdfRenderBudgetMs } from '../../shared/pdfLimits'
 import type { Frame } from '../../shared/types'
 import { isDesktopShell } from './shell'
 import { useStore } from './store'
+import { t } from './i18n'
 
 export type FrameExportFormat = 'png' | 'jpg'
 
@@ -32,7 +33,7 @@ function fileNameOf(res: Response, fallback: string): string {
 async function failureOf(res: Response, label: string): Promise<string> {
   const body: unknown = await res.json().catch(() => null)
   const error = (body as { error?: unknown } | null)?.error
-  return typeof error === 'string' ? error : `Couldn’t export the ${label}`
+  return typeof error === 'string' ? error : t('panels.exportFailed', { label })
 }
 
 /* A `download` attribute is what makes this a download everywhere: the
@@ -74,7 +75,7 @@ let inFlight = 0
 function report(outcome: string | null) {
   const { notice, pushNotice } = useStore.getState()
   if (inFlight > 0) {
-    const more = `Exporting ${inFlight} more…`
+    const more = t('panels.exportingMore', { count: inFlight })
     pushNotice(outcome ? `${outcome} · ${more}` : more, { busy: true })
   } else if (outcome) {
     pushNotice(outcome)
@@ -102,8 +103,8 @@ async function fetchFile(
   } catch (err) {
     const message =
       err instanceof DOMException && err.name === 'TimeoutError'
-        ? `The ${label} export timed out — try again`
-        : `Couldn’t export the ${label}`
+        ? t('panels.exportTimedOut', { label })
+        : t('panels.exportFailed', { label })
     return { ok: false, message }
   }
 }
@@ -111,8 +112,8 @@ async function fetchFile(
 async function exportOutcome(fetched: Promise<Fetched>): Promise<string | null> {
   const result = await fetched
   if (!result.ok) return result.message
-  if (!trySave(result.blob, result.fileName)) return `Couldn’t save “${result.fileName}”`
-  return isDesktopShell() ? null : `“${result.fileName}” is ready`
+  if (!trySave(result.blob, result.fileName)) return t('panels.exportSaveFailed', { name: result.fileName })
+  return isDesktopShell() ? null : t('panels.exportReady', { name: result.fileName })
 }
 
 /** Save the frame's document as an .html file — the same text the raw editor
@@ -128,7 +129,7 @@ export function downloadFrameHtml(frame: Frame, html = frame.html): void {
  *  the store is the only place the result can land. */
 export async function downloadFrameExport(frame: Frame, format: FrameExportFormat): Promise<void> {
   inFlight += 1
-  useStore.getState().pushNotice(`Exporting ${FORMAT_LABEL[format]}…`, { busy: true })
+  useStore.getState().pushNotice(t('panels.exportingFormat', { label: FORMAT_LABEL[format] }), { busy: true })
   const outcome = await exportOutcome(fetchExport(frame, format))
   inFlight -= 1
   report(outcome)
@@ -142,8 +143,12 @@ export async function downloadFramesPdf(canvasId: string, frames: readonly Frame
   const [first] = frames
   if (!first) return
   inFlight += 1
-  const count = frames.length === 1 ? '' : ` of ${frames.length} frames`
-  useStore.getState().pushNotice(`Exporting PDF${count}…`, { busy: true })
+  useStore
+    .getState()
+    .pushNotice(
+      frames.length === 1 ? t('panels.exportingPdf') : t('panels.exportingPdfFrames', { count: frames.length }),
+      { busy: true },
+    )
   const fallback = `${(frames.length === 1 && first.name) || 'frames'}.pdf`
   const timeoutMs = Math.max(EXPORT_TIMEOUT_MS, pdfRenderBudgetMs(frames.length))
   const outcome = await exportOutcome(fetchFile(framesPdfUrl(canvasId, frames), 'PDF', fallback, timeoutMs))
@@ -159,21 +164,21 @@ export async function copyFramePng(frame: Frame): Promise<void> {
   /* no async clipboard outside a secure context (a self-hosted instance on
      plain http) or in older engines: say so before spending a render */
   if (!('clipboard' in navigator) || typeof ClipboardItem === 'undefined') {
-    useStore.getState().pushNotice('This browser can’t copy images')
+    useStore.getState().pushNotice(t('panels.copyPngUnsupported'))
     return
   }
   inFlight += 1
-  useStore.getState().pushNotice('Copying PNG…', { busy: true })
+  useStore.getState().pushNotice(t('panels.copyingPng'), { busy: true })
   /* engines differ in what the write rejects with when the blob fails, so
      the render's reason is kept here rather than read off the error */
-  let failure = 'Couldn’t copy the PNG'
+  let failure = t('panels.copyPngFailed')
   const png = (async () => {
     try {
       const res = await fetch(frameExportUrl(frame, 'png'), { signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS) })
       if (res.ok) return await res.blob()
       failure = await failureOf(res, 'png')
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'TimeoutError') failure = 'The PNG copy timed out — try again'
+      if (err instanceof DOMException && err.name === 'TimeoutError') failure = t('panels.copyPngTimedOut')
     }
     throw new Error(failure)
   })()
@@ -182,7 +187,7 @@ export async function copyFramePng(frame: Frame): Promise<void> {
   let outcome: string
   try {
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
-    outcome = 'PNG copied'
+    outcome = t('panels.copyPngDone')
   } catch {
     outcome = failure
   }

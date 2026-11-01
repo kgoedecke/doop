@@ -5,6 +5,7 @@ import { posthog } from '../lib/posthog'
 import { useMe } from '../lib/me'
 import { isDesktopShell } from '../lib/shell'
 import { isTheme, useTheme } from '../lib/theme'
+import { LOCALES, LOCALE_NAMES, isLocale, useLocale, useT } from '../lib/i18n'
 import { colorFor } from '../../shared/types'
 import { themeOptions } from './ThemePicker'
 import { Badge } from './ui/badge'
@@ -41,6 +42,8 @@ export function AccountMenu({
   const { data: session } = authClient.useSession()
   const me = useMe(session?.user.id)
   const { theme, setTheme } = useTheme()
+  const { locale, setLocale } = useLocale()
+  const t = useT()
   const name = session?.user.name ?? ''
 
   return (
@@ -48,7 +51,7 @@ export function AccountMenu({
       <DropdownMenuTrigger asChild>
         {face ? (
           <IconButton
-            aria-label="Account"
+            aria-label={t('shell.account')}
             title={name}
             shape="round"
             className="size-7 hover:bg-transparent focus-visible:ring-ink-faint data-[state=open]:ring-2 data-[state=open]:ring-ink-faint"
@@ -56,7 +59,13 @@ export function AccountMenu({
             <Avatar name={name} color={colorFor(session?.user.id ?? name)} size={28} className="shadow-none" />
           </IconButton>
         ) : (
-          <Pressable aria-label="Account" title={name} layout="inline" focus="ring" className="flex-none rounded-full">
+          <Pressable
+            aria-label={t('shell.account')}
+            title={name}
+            layout="inline"
+            focus="ring"
+            className="flex-none rounded-full"
+          >
             <Avatar tone="ink" name={name} size={34} />
           </Pressable>
         )}
@@ -74,36 +83,47 @@ export function AccountMenu({
         <div className="mx-2.5 mb-2 flex items-center gap-[7px] text-caption text-ink-soft">
           {me?.plan === 'team' ? (
             <>
-              <Badge tone="accent">team</Badge> Team plan
+              <Badge tone="accent">team</Badge> {t('shell.teamPlan')}
             </>
           ) : (
             <>
-              <Badge>free</Badge> Personal plan
+              <Badge>free</Badge> {t('shell.personalPlan')}
             </>
           )}
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate('/settings')}>
-          <GearIcon size="rail" /> Settings
+          <GearIcon size="rail" /> {t('shell.settings')}
         </DropdownMenuItem>
         {me?.admin && (
           <DropdownMenuItem onSelect={() => navigate('/admin')}>
-            <ShieldIcon size="rail" /> Admin
+            <ShieldIcon size="rail" /> {t('shell.admin')}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
           <a href="/docs" target="_blank" rel="noopener noreferrer">
-            <HelpIcon size="rail" /> Help &amp; docs
+            <HelpIcon size="rail" /> {t('shell.helpDocs')}
           </a>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* the theme is one click from every page; picking one keeps the menu
             open so the change can be seen, and judged, before it closes */}
-        <DropdownMenuCaption>Appearance</DropdownMenuCaption>
+        <DropdownMenuCaption>{t('shell.appearance')}</DropdownMenuCaption>
         <DropdownMenuRadioGroup value={theme} onValueChange={(next) => isTheme(next) && setTheme(next)}>
           {themeOptions.map(({ value, label, Icon }) => (
             <DropdownMenuRadioItem key={value} value={value} onSelect={(e) => e.preventDefault()}>
-              <Icon size="rail" /> {label}
+              <Icon size="rail" /> {t(label)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        {/* the language sits beside the theme for the same reason, each named
+            in itself so someone who cannot read the current one finds theirs */}
+        <DropdownMenuCaption>{t('shell.language')}</DropdownMenuCaption>
+        <DropdownMenuRadioGroup value={locale} onValueChange={(next) => isLocale(next) && setLocale(next)}>
+          {LOCALES.map((value) => (
+            <DropdownMenuRadioItem key={value} value={value} lang={value} onSelect={(e) => e.preventDefault()}>
+              {LOCALE_NAMES[value]}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
@@ -121,7 +141,7 @@ export function AccountMenu({
             })
           }
         >
-          <LogOutIcon size="rail" /> Log out
+          <LogOutIcon size="rail" /> {t('shell.logOut')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

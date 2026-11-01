@@ -3,6 +3,7 @@ import { authClient } from '../lib/auth'
 import { desktopHandoffURL, parseDesktopSignInQuery } from '../lib/desktopAuth'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
 import { Callout } from '../components/ui/callout'
+import { useT } from '../lib/i18n'
 
 /* Step 1 of the desktop sign-in (src/lib/desktopAuth.ts), in the system
    browser: begin the provider round trip here so better-auth's state cookie
@@ -10,10 +11,14 @@ import { Callout } from '../components/ui/callout'
    holds a doop session there is nothing to prove — go straight to the
    handoff. Renders only a holding card: the browser leaves within moments. */
 export function DesktopSignIn({ signedIn }: { signedIn: boolean }) {
+  const t = useT()
   /* read once: the query is fixed for the life of this page */
   const request = useMemo(() => parseDesktopSignInQuery(location.search), [])
-  const [startError, setStartError] = useState<string | null>(null)
-  const error = request ? startError : 'This sign-in link is incomplete — go back to the doop app and try again.'
+  /* the provider's own words when it gave any; otherwise ours, picked at render */
+  const [startError, setStartError] = useState<{ message?: string } | null>(null)
+  const error = request
+    ? startError && (startError.message ?? t('auth.desktopStartFailed'))
+    : t('auth.desktopLinkIncomplete')
 
   useEffect(() => {
     if (!request) return
@@ -29,26 +34,21 @@ export function DesktopSignIn({ signedIn }: { signedIn: boolean }) {
       newUserCallbackURL: desktopHandoffURL(request.challenge, request.newUserCallbackURL),
       errorCallbackURL: '/auth',
     }
-    const failed = 'Could not start sign-in — go back to the doop app and try again.'
     const start =
       request.provider === 'oidc'
         ? authClient.signIn.oauth2({ providerId: 'oidc', ...redirects })
         : authClient.signIn.social({ provider: request.provider, ...redirects })
     start
       .then((res) => {
-        if (res.error) setStartError(res.error.message ?? failed)
+        if (res.error) setStartError({ message: res.error.message })
       })
-      .catch(() => setStartError(failed))
+      .catch(() => setStartError({}))
   }, [request, signedIn])
 
   return (
     <AuthScreen>
-      <AuthCard title={error ? 'Something went wrong.' : 'Signing you in…'}>
-        {error ? (
-          <Callout tone="error">{error}</Callout>
-        ) : (
-          <AuthCardText>Taking you to your identity provider for the doop app.</AuthCardText>
-        )}
+      <AuthCard title={error ? t('auth.somethingWentWrongTitle') : t('auth.desktopSigningIn')}>
+        {error ? <Callout tone="error">{error}</Callout> : <AuthCardText>{t('auth.desktopToProvider')}</AuthCardText>}
       </AuthCard>
     </AuthScreen>
   )

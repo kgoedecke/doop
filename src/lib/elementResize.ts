@@ -112,12 +112,6 @@ export function handleCursor(handle: ResizeHandle): string {
   }
 }
 
-export function handleLabel(handle: ResizeHandle): string {
-  if (!movesHeight(handle)) return 'Resize width'
-  if (!movesWidth(handle)) return 'Resize height'
-  return 'Resize'
-}
-
 /** The size badge under a selected element: whole pixels of its box. */
 export function sizeLabel(size: Size): string {
   return `${Math.round(size.width)} × ${Math.round(size.height)}`

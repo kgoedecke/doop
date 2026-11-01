@@ -6,6 +6,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Tooltip } from './ui/tooltip'
 import { cn } from '@/lib/utils'
+import { useT } from '../lib/i18n'
 
 const topBarVariants = cva(
   'z-40 flex flex-none items-center max-xs:h-[100px] max-xs:flex-wrap max-xs:content-center max-xs:gap-y-2 max-xs:py-2',
@@ -67,7 +68,7 @@ const titleCls = 'min-w-0 max-w-[240px] sm:min-w-[60px] sm:max-w-[320px]'
 export function TopBarTitle({
   value,
   onCommit,
-  placeholder = 'Untitled',
+  placeholder,
   loading = false,
   pill = false,
   readOnly = false,
@@ -80,6 +81,8 @@ export function TopBarTitle({
   /** shows the name as text: the caller cannot rename it */
   readOnly?: boolean
 }) {
+  const t = useT()
+  const shownPlaceholder = placeholder ?? t('canvas.untitled')
   const [draft, setDraft] = useState<string | null>(null)
   const pillCls =
     'h-7 rounded-[6px] px-1.5 font-sans text-[12.5px] font-medium hover:border-transparent hover:bg-paper-deep focus:border-transparent focus:bg-surface focus:shadow-elevation-1-focus md:text-[12.5px]'
@@ -103,7 +106,7 @@ export function TopBarTitle({
           pill ? 'px-1.5 text-[12.5px] font-medium' : 'px-2 py-[5px] font-display text-[15px] font-semibold',
         )}
       >
-        {value || placeholder}
+        {value || shownPlaceholder}
       </span>
     )
   const shown = draft ?? value
@@ -115,14 +118,14 @@ export function TopBarTitle({
   return (
     <span className="grid min-w-0">
       <span aria-hidden className={cn(fieldCls, 'invisible col-start-1 row-start-1 whitespace-pre')}>
-        {shown || placeholder}
+        {shown || shownPlaceholder}
       </span>
       <Input
         variant="title"
         inputSize="sm"
         className={cn(fieldCls, 'col-start-1 row-start-1 truncate')}
         value={shown}
-        placeholder={placeholder}
+        placeholder={shownPlaceholder}
         onFocus={() => setDraft(value)}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {

@@ -1,6 +1,7 @@
 import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
+import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
 import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
@@ -601,6 +602,13 @@ app.post('/api/account-exists', async (req, res) => {
    see server/auth.ts loginProvidersConfig for what's safe to expose here. */
 app.get('/api/oidc-config', (req, res) => {
   res.json(loginProvidersConfig())
+})
+
+/* Public: the interface language for visitors who have not picked one. The
+   client asks before its first render, so sign-in already speaks it. */
+app.get('/api/locale-config', (_req, res) => {
+  const config: LocaleConfig = { defaultLocale: env.DEFAULT_LOCALE }
+  res.json(config)
 })
 
 /* ------------------------------------------------------------------ */

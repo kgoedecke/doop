@@ -4,6 +4,7 @@ import { copyLayer, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
 import { elementHtml, isElementHidden, isElementLocked } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
+import { useT } from '../lib/i18n'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 
@@ -30,27 +31,28 @@ function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: st
   const exists = hidden !== null
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
   const locked = !!frame.locked || (selector ? isElementLocked(frame.html, selector) : false)
+  const t = useT()
   return (
     <>
       <ContextMenuItem disabled={!exists} onSelect={() => selector && copyLayer(frame, selector)}>
-        Copy
+        {t('common.copy')}
         <MenuHint>{MOD_KEY}C</MenuHint>
       </ContextMenuItem>
       <ContextMenuItem
         disabled={locked || !hasElementClip() || (!!selector && !exists)}
         onSelect={() => pasteLayer(frame, selector)}
       >
-        Paste
+        {t('stage.paste')}
         <MenuHint>{MOD_KEY}V</MenuHint>
       </ContextMenuItem>
       {selector && exists && (
         <>
           <ContextMenuItem disabled={locked} onSelect={() => duplicateLayer(frame, selector)}>
-            Duplicate
+            {t('stage.duplicate')}
             <MenuHint>{MOD_KEY}D</MenuHint>
           </ContextMenuItem>
           <ContextMenuItem disabled={!!frame.locked} onSelect={() => setLayerHidden(frame, selector, !hidden)}>
-            {hidden ? 'Show' : 'Hide'}
+            {hidden ? t('stage.show') : t('stage.hide')}
             <MenuHint>{MOD_KEY}⇧H</MenuHint>
           </ContextMenuItem>
           <ContextMenuSeparator />
@@ -60,31 +62,31 @@ function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: st
               if (html) navigator.clipboard.writeText(html).catch(console.error)
             }}
           >
-            Copy HTML
+            {t('stage.copyHtml')}
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => navigator.clipboard.writeText(selector).catch(console.error)}>
-            Copy selector
+            {t('stage.copySelector')}
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => void copyElementLink(frame, { selector, ...hit })}>
-            Copy link to element
+            {t('stage.copyLinkToElement')}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={locked} onSelect={() => shiftLayer(frame, selector, -1)}>
-            Move up
+            {t('stage.moveUp')}
             <MenuHint>⌥↑</MenuHint>
           </ContextMenuItem>
           <ContextMenuItem disabled={locked} onSelect={() => shiftLayer(frame, selector, 1)}>
-            Move down
+            {t('stage.moveDown')}
             <MenuHint>⌥↓</MenuHint>
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={!!frame.locked} onSelect={() => setLayerLocked(frame, selector, !ownLock)}>
-            {ownLock ? 'Unlock' : 'Lock'}
+            {ownLock ? t('stage.unlock') : t('stage.lock')}
             <MenuHint>{MOD_KEY}⇧L</MenuHint>
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem tone="danger" disabled={locked} onSelect={() => deleteLayer(frame, selector)}>
-            Delete element
+            {t('stage.deleteElement')}
             <MenuHint>⌫</MenuHint>
           </ContextMenuItem>
         </>

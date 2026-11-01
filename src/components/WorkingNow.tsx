@@ -2,6 +2,7 @@ import { useMemo, type CSSProperties } from 'react'
 import { useStore } from '../lib/store'
 import { AgentIcon } from './AgentIcon'
 import { cn } from '@/lib/utils'
+import { useT } from '../lib/i18n'
 
 /** Floating stack of live "what I'm working on" statuses (agents post via
  *  set_status): one small white pill each, at the top-left of the open
@@ -9,6 +10,7 @@ import { cn } from '@/lib/utils'
 export function WorkingNow({ style, className }: { style?: CSSProperties; className?: string }) {
   /* select the stable records and derive here: a selector returning a fresh
      array would re-render this on every store tick, pans included */
+  const t = useT()
   const presences = useStore((s) => s.presences)
   const streams = useStore((s) => s.streams)
   const working = useMemo(() => Object.values(presences).filter((p) => p.status), [presences])
@@ -26,7 +28,7 @@ export function WorkingNow({ style, className }: { style?: CSSProperties; classN
         <div
           key={p.clientId}
           className="pointer-events-auto flex h-7 max-w-full min-w-0 animate-[chip-in_0.2s_ease] items-center gap-2 rounded-[8px] bg-surface pr-2.5 pl-2 text-[12px] text-ink-soft shadow-ring"
-          title={`${p.name}${p.owner ? ` (${p.owner}'s agent)` : ''}: ${p.status}`}
+          title={`${p.name}${p.owner ? ` (${t('canvas.agentOf', { owner: p.owner })})` : ''}: ${p.status}`}
         >
           {p.kind === 'agent' ? (
             <span className="grid size-[13px] flex-none place-items-center">

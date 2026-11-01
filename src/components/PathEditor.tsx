@@ -16,6 +16,7 @@ import {
   type PathMatrix,
 } from '../lib/pathEditing'
 import { useStore } from '../lib/store'
+import { useT } from '../lib/i18n'
 
 export function PathEditor({
   frame,
@@ -36,6 +37,7 @@ export function PathEditor({
   const cleanup = useRef<(() => void) | null>(null)
   const revision = useRef(0)
   const zoom = useStore((s) => s.viewport.zoom)
+  const t = useT()
   const stage = document.querySelector<HTMLElement>('.stage')
   const world = stage?.querySelector('.world')
   const border = isCanvasElement(frame.html) ? 0 : 1
@@ -302,7 +304,9 @@ export function PathEditor({
                       />
                       <circle
                         data-path-handle={`${index}-${handle}`}
-                        aria-label={`Point ${index + 1} ${handle === 'handleIn' ? 'incoming' : 'outgoing'} handle`}
+                        aria-label={t(handle === 'handleIn' ? 'stage.pathHandleIncoming' : 'stage.pathHandleOutgoing', {
+                          n: index + 1,
+                        })}
                         className="pointer-events-auto cursor-move"
                         cx={end.x}
                         cy={end.y}
@@ -323,7 +327,7 @@ export function PathEditor({
                 />
                 <circle
                   data-path-edit-anchor={index}
-                  aria-label={`Path point ${index + 1}`}
+                  aria-label={t('stage.pathPoint', { n: index + 1 })}
                   className="pointer-events-auto cursor-move"
                   cx={at.x}
                   cy={at.y}
@@ -358,7 +362,7 @@ export function PathEditor({
           className="absolute bottom-24 left-1/2 z-40 flex max-w-[90%] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink shadow-pop"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <span>{saving ? 'Saving path…' : 'Drag points or handles · Alt to release snapping'}</span>
+          <span>{saving ? t('stage.savingPath') : t('stage.pathHint')}</span>
           {selected !== null && (
             <>
               <button
@@ -367,7 +371,9 @@ export function PathEditor({
                 className="font-semibold text-brand disabled:opacity-40"
                 onClick={() => toggleCurve(selected)}
               >
-                {path.points[selected]?.handleIn || path.points[selected]?.handleOut ? 'Make corner' : 'Make curve'}
+                {path.points[selected]?.handleIn || path.points[selected]?.handleOut
+                  ? t('stage.makeCorner')
+                  : t('stage.makeCurve')}
               </button>
               <button
                 type="button"
@@ -375,12 +381,12 @@ export function PathEditor({
                 className="disabled:opacity-40"
                 onClick={removePoint}
               >
-                Delete point
+                {t('stage.deletePoint')}
               </button>
             </>
           )}
           <button type="button" className="font-semibold text-brand" onClick={onClose}>
-            Done
+            {t('stage.done')}
           </button>
         </div>,
         stage,

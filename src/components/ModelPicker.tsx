@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { DoopMark } from './Logo'
 import { useAgentModels, useModelAccount } from './ModelAccount'
-import { reasoningEffortOptions } from '../../shared/modelMenu'
+import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
+import { useT, type PlainMessageKey } from '@/lib/i18n'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -27,6 +28,14 @@ const PROVIDER_MARK: Partial<Record<ModelAccountKind, string>> = {
   'anthropic-key': 'claude',
 }
 
+/* the effort ids stay as sent to the server; only their names are translated */
+const EFFORT_LABELS: Record<ReasoningEffort, { name: PlainMessageKey; blurb: PlainMessageKey }> = {
+  low: { name: 'models.effortLow', blurb: 'models.effortLowBlurb' },
+  medium: { name: 'models.effortMedium', blurb: 'models.effortMediumBlurb' },
+  high: { name: 'models.effortHigh', blurb: 'models.effortHighBlurb' },
+  xhigh: { name: 'models.effortXhigh', blurb: 'models.effortXhighBlurb' },
+}
+
 /**
  * The model the Doop Agent runs on, as a quiet dropdown beside the
  * composer's send button. It is the same per-account choice Settings → Doop
@@ -39,11 +48,12 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const { account, set, refresh } = useModelAccount()
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
+  const t = useT()
   const catalog = useAgentModels(account, open)
   const kind = account?.connected ? account.kind : undefined
   const menu = (catalog?.live ? catalog.models : undefined) ?? (kind && account?.menus?.[kind]) ?? []
   const current = menu.find((m) => m.id === account?.model)
-  const label = current?.name ?? (account?.connected ? (account.model ?? 'Model') : 'Doop Agent')
+  const label = current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : 'Doop Agent')
   const mark = kind ? PROVIDER_MARK[kind] : undefined
 
   async function pick(model: string) {
@@ -80,7 +90,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
         <MenuButton
           variant="quiet"
           disabled={disabled || busy || !account}
-          aria-label={`Model: ${label}`}
+          aria-label={t('panels.modelAria', { label })}
           className={cn('min-w-0 gap-[5px]', busy && 'animate-[stream-pulse_1.2s_ease-in-out_infinite]')}
           icon={
             <span className="grid size-3 flex-none place-items-center">
@@ -99,7 +109,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
       <DropdownMenuContent side="top" align="end" width="lg">
         {menu.length > 0 ? (
           <>
-            <DropdownMenuCaption>Doop Agent model</DropdownMenuCaption>
+            <DropdownMenuCaption>{t('panels.modelCaption')}</DropdownMenuCaption>
             <DropdownMenuRadioGroup value={account?.model ?? ''} onValueChange={(model) => void pick(model)}>
               {menu.map((m) => (
                 <DropdownMenuRadioItem key={m.id} value={m.id} description={m.blurb}>
@@ -114,25 +124,31 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
             {account?.effort && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuCaption>Reasoning effort</DropdownMenuCaption>
+                <DropdownMenuCaption>{t('models.reasoningEffort')}</DropdownMenuCaption>
                 <DropdownMenuRadioGroup value={account.effort} onValueChange={(effort) => void pickEffort(effort)}>
-                  {reasoningEffortOptions(account.effort).map((e) => (
-                    <DropdownMenuRadioItem key={e.id} value={e.id} description={e.blurb}>
-                      {e.name}
-                    </DropdownMenuRadioItem>
-                  ))}
+                  {reasoningEffortOptions(account.effort).map((e) => {
+                    /* a server default outside the four keeps its raw id as its name */
+                    const labels = isReasoningEffort(e.id) ? EFFORT_LABELS[e.id] : undefined
+                    return (
+                      <DropdownMenuRadioItem
+                        key={e.id}
+                        value={e.id}
+                        description={labels ? t(labels.blurb) : t('models.effortServerDefault')}
+                      >
+                        {labels ? t(labels.name) : e.name}
+                      </DropdownMenuRadioItem>
+                    )
+                  })}
                 </DropdownMenuRadioGroup>
               </>
             )}
             <DropdownMenuSeparator />
           </>
         ) : (
-          <DropdownMenuCaption className="pb-2 text-ink-soft">
-            No model account connected — the Doop Agent runs on the server’s model when one is set up.
-          </DropdownMenuCaption>
+          <DropdownMenuCaption className="pb-2 text-ink-soft">{t('panels.modelNoAccount')}</DropdownMenuCaption>
         )}
         <DropdownMenuItem onSelect={() => navigate('/settings?pane=agent')}>
-          {account?.connected ? 'Model settings…' : 'Connect a model…'}
+          {account?.connected ? t('panels.modelSettings') : t('panels.modelConnect')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

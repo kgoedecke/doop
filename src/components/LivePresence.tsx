@@ -3,6 +3,7 @@ import type { Presence } from '../../shared/types'
 import { BarPill } from './TopBar'
 import { PeerAvatars, PresenceFace, isActiveAgent } from './PeerAvatars'
 import { DotMatrix } from './ui/dot-matrix'
+import { useT } from '../lib/i18n'
 
 /** How long each active agent's line holds before the next one slips in. */
 const ROTATE_MS = 4000
@@ -24,6 +25,7 @@ export function LivePresence({
   others: Presence[]
   onRenameSelf: () => void
 }) {
+  const t = useT()
   const active = others.filter(isActiveAgent)
   const [tick, setTick] = useState(0)
 
@@ -39,14 +41,14 @@ export function LivePresence({
   return (
     <BarPill
       className="gap-0 pr-3 pl-2"
-      title={others.map((p) => p.name).join(', ') || 'Just you here'}
+      title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
       aria-live="polite"
     >
       <span className="flex h-6 items-center">
         <button
           type="button"
           className="relative z-[1] rounded-full transition-transform hover:z-10 hover:-translate-y-px focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
-          title={`You are “${me.name}” — click to change your name`}
+          title={t('canvas.youAre', { name: me.name })}
           onClick={onRenameSelf}
         >
           <PresenceFace name={me.name} color={me.color} kind="user" />
@@ -68,7 +70,7 @@ export function LivePresence({
           </span>
         </>
       ) : (
-        <span className="ml-2.5 whitespace-nowrap leading-4">{online} online</span>
+        <span className="ml-2.5 whitespace-nowrap leading-4">{t('canvas.online', { online })}</span>
       )}
     </BarPill>
   )

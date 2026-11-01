@@ -54,6 +54,7 @@ import { ElementResizeHandles } from './ElementResizeHandles'
 import { FrameResizeHandles } from './FrameResizeHandles'
 import { keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
+import { t as translate, useT } from '../lib/i18n'
 
 /** ?comment=<rootId> — the link in a comment email. The thread opens once
  *  Stage has selected the linked frame (deselection closes popovers, and on
@@ -201,6 +202,7 @@ interface HoverHit {
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
    this component — memo holds as long as the frame and layout zoom are unchanged. */
 export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame: Frame; layoutZoom: number }) {
+  const t = useT()
   const [menuTarget, setMenuTarget] = useState<
     'frame' | 'loading' | { selector: string | null; html: string; hit?: LiveHit }
   >('frame')
@@ -555,7 +557,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             })
             .catch((err: unknown) => {
               useStore.getState().patchFrameLocal(frame.id, orig)
-              useStore.getState().pushNotice(err instanceof Error ? err.message : 'Couldn’t move the element')
+              useStore.getState().pushNotice(err instanceof Error ? err.message : translate('stage.moveElementFailed'))
             })
           closePopovers()
           return
@@ -962,7 +964,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           const s = useStore.getState()
           s.pickElement(null)
           s.setInspectorOpen(true)
-          s.pushNotice('This element no longer exists. Showing its frame instead.')
+          s.pushNotice(translate('stage.elementGone'))
         }
       }
       if (ev.data?.type === 'doop:hover-result' && ev.data.reqId === hoverReq.current) {
@@ -1299,14 +1301,14 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               onPointerDown={(e) => startDrag(e, 'move', false, true)}
             >
               {frame.locked && (
-                <Tooltip label="Locked — unlock it from the Layers panel or the Inspector" side="top" align="start">
+                <Tooltip label={t('stage.lockedTip')} side="top" align="start">
                   <span className="flex shrink-0 items-center text-ink-faint">
                     <LockIcon width={11} height={11} />
                   </span>
                 </Tooltip>
               )}
               {isSyncedFrame(frame.html) && (
-                <Tooltip label="Synced from a live app" side="top" align="start">
+                <Tooltip label={t('stage.syncedTip')} side="top" align="start">
                   <span className="flex shrink-0 items-center text-brand">
                     <SyncIcon width={11} height={11} />
                   </span>
@@ -1315,9 +1317,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               {isGithubFrame(frame.html) && (
                 <Tooltip
                   label={
-                    isGithubPlaceholder(frame.html)
-                      ? 'Found in the repo — awaiting capture'
-                      : 'Imported from a GitHub repo'
+                    isGithubPlaceholder(frame.html) ? t('stage.githubPlaceholderTip') : t('stage.githubImportedTip')
                   }
                   side="top"
                   align="start"
@@ -1339,11 +1339,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   <span
                     className={EDITOR_CHIP}
                     style={{ background: stream.color }}
-                    title={`${stream.name} is designing`}
+                    title={t('stage.isDesigning', { name: stream.name })}
                   >
                     <AgentIcon name={stream.name} size={9} color="#fff" />
                     <span className={EDITOR_CHIP_TEXT}>
-                      {stream.name} is designing
+                      {t('stage.isDesigning', { name: stream.name })}
                       <span className="after:content-['…'] after:[animation:ellipsis_1.2s_steps(4)_infinite]" />
                     </span>
                   </span>
@@ -1567,10 +1567,10 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 size="pill"
                 className="border-transparent px-2.5 shadow-none hover:translate-x-0 hover:translate-y-0 hover:brightness-110 hover:shadow-none"
                 onClick={exitEdit}
-                title="Save and finish editing (Esc)"
+                title={t('stage.saveAndFinish')}
               >
                 <CheckIcon size={12} />
-                Done
+                {t('stage.done')}
               </Button>
             </div>
           )}
@@ -1657,7 +1657,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                               setComposing(true)
                             }}
                           >
-                            <CommentIcon size="rail" /> Comment
+                            <CommentIcon size="rail" /> {t('stage.elementComment')}
                           </Button>
                           <Button
                             variant="inverse"
@@ -1669,22 +1669,22 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                               setComposing(true)
                             }}
                           >
-                            <SparkIcon size="rail" /> Ask AI
+                            <SparkIcon size="rail" /> {t('stage.askAi')}
                           </Button>
                           <Button
                             variant="inverse"
                             className={EL_TOOLBAR_BTN}
                             onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
                           >
-                            <CodeIcon size="button" /> Code
+                            <CodeIcon size="button" /> {t('stage.code')}
                           </Button>
                           <Button
                             variant="inverse"
                             className={EL_TOOLBAR_BTN}
-                            aria-label="Copy link to element"
+                            aria-label={t('stage.copyLinkToElement')}
                             onClick={() => void copyElementLink(frame, anchor)}
                           >
-                            Copy link
+                            {t('stage.copyLink')}
                           </Button>
                           {!editing && canEdit && anchor.text !== '' && (
                             <Button
@@ -1694,7 +1694,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                                 enterEdit()
                               }}
                             >
-                              <EditIcon size="rail" /> Edit text
+                              <EditIcon size="rail" /> {t('stage.editText')}
                             </Button>
                           )}
                         </div>
@@ -1703,9 +1703,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                     ) : (
                       <CommentComposer
                         initialText={composePrefill}
-                        placeholder={
-                          anchor.selector === FRAME_COMMENT_SELECTOR ? 'Leave a comment on this frame…' : undefined
-                        }
+                        placeholder={anchor.selector === FRAME_COMMENT_SELECTOR ? t('stage.commentOnFrame') : undefined}
                         onSubmit={(text) => {
                           /* the point rides along with an element too: should the
                              element not be found in the saved HTML (a script made
@@ -1758,11 +1756,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       ) : (menuProbe && menuProbe.html !== frame.html) ||
         (typeof menuTarget === 'object' && menuTarget.html !== frame.html) ? (
         <ContextMenuContent>
-          <ContextMenuItem disabled>Frame changed. Right-click again.</ContextMenuItem>
+          <ContextMenuItem disabled>{t('stage.frameChanged')}</ContextMenuItem>
         </ContextMenuContent>
       ) : menuTarget === 'loading' ? (
         <ContextMenuContent>
-          <ContextMenuItem disabled>Finding element…</ContextMenuItem>
+          <ContextMenuItem disabled>{t('stage.findingElement')}</ContextMenuItem>
         </ContextMenuContent>
       ) : (
         <ElementContextMenu frame={frame} selector={menuTarget.selector} hit={menuTarget.hit} />

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
 
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n'
 import { useValueScrub } from '@/hooks/use-value-scrub'
 import { ChevronDownIcon } from './icons'
 
@@ -14,7 +15,6 @@ const fieldCls =
 const unitCls = 'ml-auto flex-none font-sans text-[10.5px] text-ink-ghost'
 const scrubUnitCls =
   'self-stretch content-center -mr-2 pr-2 pl-1 cursor-ew-resize touch-none select-none hover:text-ink'
-const scrubTitle = 'Drag to adjust · Shift: ×10 · Alt/Option: ×0.1 · Esc: cancel'
 
 /** The panel owns CSS snapshots and persistence; fields only own the gesture. */
 export const PropertyScrubContext = createContext<{
@@ -83,6 +83,7 @@ export function NumberField({
   min?: number
   max?: number
 }) {
+  const t = useT()
   const shown = value === null ? '' : String(value)
   const [draft, setDraft] = useState(shown)
   const [seen, setSeen] = useState({ value: shown, scrubbing: false })
@@ -150,7 +151,7 @@ export function NumberField({
       </span>
       <span
         className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
-        title={scrub.canScrub ? scrubTitle : undefined}
+        title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
         onPointerDown={scrub.onPointerDown}
         onClick={(e) => scrub.canScrub && e.preventDefault()}
       >
@@ -179,6 +180,7 @@ export function TextField({
   scrub?: boolean
   min?: number
 }) {
+  const t = useT()
   const [draft, setDraft] = useState(value)
   const [seen, setSeen] = useState({ value, scrubbing: false })
   const scrubLifecycle = useContext(PropertyScrubContext)
@@ -210,7 +212,7 @@ export function TextField({
       {u && (
         <span
           className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
-          title={scrub.canScrub ? scrubTitle : undefined}
+          title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
           onPointerDown={scrub.onPointerDown}
           onClick={(e) => scrub.canScrub && e.preventDefault()}
         >
@@ -294,6 +296,7 @@ export function ColorField({
   className?: string
   onCommit: (v: string | null) => void
 }) {
+  const t = useT()
   const shown = value ?? ''
   const [draft, setDraft] = useState(shown)
   const [seen, setSeen] = useState(shown)
@@ -318,7 +321,7 @@ export function ColorField({
         <span className="absolute inset-0" style={{ background: value ?? 'transparent' }} />
         <input
           type="color"
-          aria-label={label ? `Pick ${label.toLowerCase()}` : 'Pick colour'}
+          aria-label={label ? t('inspector.pickLabel', { label: label.toLowerCase() }) : t('inspector.pickColour')}
           className="absolute -inset-1 cursor-pointer opacity-0"
           value={value ?? '#ffffff'}
           onChange={(e) => onCommit(e.target.value)}
@@ -328,7 +331,7 @@ export function ColorField({
         aria-label={label}
         className="w-full min-w-0 bg-transparent font-mono text-[11px] uppercase text-ink outline-none placeholder:normal-case placeholder:text-ink-faint"
         value={draft}
-        placeholder="none"
+        placeholder={t('inspector.colorNone')}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}

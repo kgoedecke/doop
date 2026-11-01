@@ -1,6 +1,7 @@
 import * as React from 'react'
 
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n'
 import { Button } from './button'
 
 export interface SelectionBarProps extends Omit<React.ComponentProps<'div'>, 'children'> {
@@ -17,6 +18,7 @@ export interface SelectionBarProps extends Omit<React.ComponentProps<'div'>, 'ch
 /** The "N of M selected" line over a checklist, with its Select all / Clear
  *  actions on the right. The import reviews and the export checklist share it. */
 function SelectionBar({ count, total, note, tone = 'default', actions, className, ...props }: SelectionBarProps) {
+  const t = useT()
   return (
     <div
       data-slot="selection-bar"
@@ -24,7 +26,7 @@ function SelectionBar({ count, total, note, tone = 'default', actions, className
       {...props}
     >
       <span className={cn('text-label font-medium', tone === 'error' ? 'text-accent-ink' : 'text-ink-soft')}>
-        {count} of {total} selected
+        {t('ui.selectedOf', { count, total })}
         {note}
       </span>
       {actions ? <span className="flex gap-3">{actions}</span> : null}

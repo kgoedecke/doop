@@ -17,37 +17,39 @@ import { IconButton } from './ui/icon-button'
 import { PlusIcon, TrashIcon } from './ui/icons'
 import { Switch } from './ui/switch'
 import { NumberField, PropertyRow, PropertySection, SelectField, TextField } from './ui/property-field'
+import { useT, type PlainMessageKey } from '../lib/i18n'
 
-const TRIGGERS: { value: ProtoTrigger; label: string }[] = [
-  { value: 'click', label: 'On click' },
-  { value: 'hover', label: 'On hover' },
-  { value: 'press', label: 'While pressing' },
-  { value: 'delay', label: 'After delay' },
-  { value: 'key', label: 'On key' },
+const TRIGGERS: { value: ProtoTrigger; label: PlainMessageKey }[] = [
+  { value: 'click', label: 'inspector.triggerClick' },
+  { value: 'hover', label: 'inspector.triggerHover' },
+  { value: 'press', label: 'inspector.triggerPress' },
+  { value: 'delay', label: 'inspector.triggerDelay' },
+  { value: 'key', label: 'inspector.triggerKey' },
 ]
-const ACTIONS: { value: ProtoAction; label: string }[] = [
-  { value: 'navigate', label: 'Navigate to' },
-  { value: 'overlay', label: 'Open overlay' },
-  { value: 'back', label: 'Back' },
-  { value: 'close-overlay', label: 'Close overlay' },
-  { value: 'scroll-to', label: 'Scroll to' },
-  { value: 'url', label: 'Open link' },
+const ACTIONS: { value: ProtoAction; label: PlainMessageKey }[] = [
+  { value: 'navigate', label: 'inspector.actionNavigate' },
+  { value: 'overlay', label: 'inspector.actionOverlay' },
+  { value: 'back', label: 'inspector.actionBack' },
+  { value: 'close-overlay', label: 'inspector.actionCloseOverlay' },
+  { value: 'scroll-to', label: 'inspector.actionScrollTo' },
+  { value: 'url', label: 'inspector.actionUrl' },
 ]
-const TRANSITIONS: { value: ProtoTransition; label: string }[] = [
-  { value: 'instant', label: 'Instant' },
-  { value: 'dissolve', label: 'Dissolve' },
-  { value: 'slide-left', label: 'Slide left' },
-  { value: 'slide-right', label: 'Slide right' },
-  { value: 'slide-up', label: 'Slide up' },
-  { value: 'slide-down', label: 'Slide down' },
-  { value: 'push-left', label: 'Push left' },
-  { value: 'push-right', label: 'Push right' },
+const TRANSITIONS: { value: ProtoTransition; label: PlainMessageKey }[] = [
+  { value: 'instant', label: 'inspector.transitionInstant' },
+  { value: 'dissolve', label: 'inspector.transitionDissolve' },
+  { value: 'slide-left', label: 'inspector.transitionSlideLeft' },
+  { value: 'slide-right', label: 'inspector.transitionSlideRight' },
+  { value: 'slide-up', label: 'inspector.transitionSlideUp' },
+  { value: 'slide-down', label: 'inspector.transitionSlideDown' },
+  { value: 'push-left', label: 'inspector.transitionPushLeft' },
+  { value: 'push-right', label: 'inspector.transitionPushRight' },
 ]
 
 /** The Prototype tab of the element panel: the element's interactions, and
  *  whether its frame starts the page's flow. Every change rewrites the
  *  element's attributes through the frame save path, one undo step each. */
 export function InteractionsPanel({ frame, selector }: { frame: Frame; selector: string }) {
+  const t = useT()
   const canvas = useStore((s) => s.canvas)
   const list = useMemo(() => elementInteractions(frame.html, selector), [frame.html, selector])
   const locked = isLayerLocked(frame, selector)
@@ -68,7 +70,7 @@ export function InteractionsPanel({ frame, selector }: { frame: Frame; selector:
 
   function save(next: Interaction[]) {
     const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id) ?? frame
-    if (!saveInteractions(live, selector, next)) useStore.getState().pushNotice('This layer can’t be edited right now')
+    if (!saveInteractions(live, selector, next)) useStore.getState().pushNotice(t('inspector.layerNotEditable'))
   }
 
   const firstTarget = targets[0]?.value
@@ -90,23 +92,21 @@ export function InteractionsPanel({ frame, selector }: { frame: Frame; selector:
   return (
     <>
       <PropertySection
-        title="Interactions"
+        title={t('inspector.interactions')}
         action={
           list &&
           !locked && (
-            <IconButton size="sm" aria-label="Add interaction" onClick={add}>
+            <IconButton size="sm" aria-label={t('inspector.addInteraction')} onClick={add}>
               <PlusIcon size="rail" />
             </IconButton>
           )
         }
       >
         {!list ? (
-          <p className="text-caption text-ink-faint">
-            A script creates this element, so it has no markup to hold interactions. Add them in the frame’s HTML.
-          </p>
+          <p className="text-caption text-ink-faint">{t('inspector.scriptMade')}</p>
         ) : list.length === 0 ? (
           <p className="text-caption text-ink-faint">
-            {locked ? 'Unlock the layer to add interactions.' : 'Nothing happens when this is clicked yet.'}
+            {locked ? t('inspector.unlockToAdd') : t('inspector.noInteractions')}
           </p>
         ) : (
           <div className="flex flex-col gap-2.5" data-interactions="">
@@ -125,13 +125,13 @@ export function InteractionsPanel({ frame, selector }: { frame: Frame; selector:
         )}
       </PropertySection>
       {canvas && page && (
-        <PropertySection title="Flow">
-          <PropertyRow label="Start">
+        <PropertySection title={t('inspector.flow')}>
+          <PropertyRow label={t('inspector.flowStartRow')}>
             <span className="flex flex-1 items-center justify-between gap-2 text-caption text-ink-soft">
-              {page.startFrameId === frame.id ? 'Starts here' : 'Start the flow on this frame'}
+              {page.startFrameId === frame.id ? t('inspector.startsHere') : t('inspector.startFlowHere')}
               <Switch
                 size="sm"
-                aria-label="Start the flow on this frame"
+                aria-label={t('inspector.startFlowHere')}
                 checked={page.startFrameId === frame.id}
                 onCheckedChange={(on) => setFlowStart(canvas.id, page.id, on ? frame.id : null)}
               />
@@ -158,8 +158,12 @@ function InteractionRow({
   onChange: (next: Interaction) => void
   onRemove: () => void
 }) {
+  const t = useT()
   const i = interaction
   const n = index + 1
+  const triggers = TRIGGERS.map(({ value, label }) => ({ value, label: t(label) }))
+  const actions = ACTIONS.map(({ value, label }) => ({ value, label: t(label) }))
+  const transitions = TRANSITIONS.map(({ value, label }) => ({ value, label: t(label) }))
   const firstTarget = targets[0]?.value
 
   function setTrigger(trigger: ProtoTrigger) {
@@ -190,26 +194,31 @@ function InteractionRow({
 
   const leavesFrame = i.action === 'navigate' || i.action === 'overlay'
   const targetOptions =
-    leavesFrame && i.target && !targets.some((t) => t.value === i.target)
-      ? [{ value: i.target, label: `Missing frame (${i.target})` }, ...targets]
+    leavesFrame && i.target && !targets.some((target) => target.value === i.target)
+      ? [{ value: i.target, label: t('inspector.missingFrame', { id: i.target }) }, ...targets]
       : targets
 
   return (
     <fieldset
       disabled={disabled}
       className="flex flex-col rounded-row bg-sub/60 px-2 pt-0.5 pb-2"
-      aria-label={`Interaction ${n}`}
+      aria-label={t('inspector.interactionN', { n })}
     >
-      <PropertyRow label="Trigger">
-        <SelectField label={`Trigger ${n}`} value={i.trigger} options={TRIGGERS} onChange={setTrigger} />
-        <IconButton size="sm" variant="danger" aria-label={`Remove interaction ${n}`} onClick={onRemove}>
+      <PropertyRow label={t('inspector.rowTrigger')}>
+        <SelectField
+          label={t('inspector.triggerN', { n })}
+          value={i.trigger}
+          options={triggers}
+          onChange={setTrigger}
+        />
+        <IconButton size="sm" variant="danger" aria-label={t('inspector.removeInteractionN', { n })} onClick={onRemove}>
           <TrashIcon size="rail" />
         </IconButton>
       </PropertyRow>
       {i.trigger === 'delay' && (
-        <PropertyRow label="After">
+        <PropertyRow label={t('inspector.rowAfter')}>
           <NumberField
-            label={`Delay ${n}`}
+            label={t('inspector.delayN', { n })}
             value={i.delay ?? 0}
             unit="ms"
             max={MAX_PROTO_DELAY}
@@ -218,36 +227,36 @@ function InteractionRow({
         </PropertyRow>
       )}
       {i.trigger === 'key' && (
-        <PropertyRow label="Key">
+        <PropertyRow label={t('inspector.rowKey')}>
           <TextField
-            label={`Key ${n}`}
+            label={t('inspector.keyN', { n })}
             value={i.key === ' ' ? 'Space' : (i.key ?? '')}
             placeholder="ArrowRight"
             onCommit={(key) => key.trim() && onChange({ ...i, key: key.trim() === 'Space' ? ' ' : key.trim() })}
           />
         </PropertyRow>
       )}
-      <PropertyRow label="Action">
-        <SelectField label={`Action ${n}`} value={i.action} options={ACTIONS} onChange={setAction} />
+      <PropertyRow label={t('inspector.rowAction')}>
+        <SelectField label={t('inspector.actionN', { n })} value={i.action} options={actions} onChange={setAction} />
       </PropertyRow>
       {leavesFrame && (
-        <PropertyRow label="Frame">
+        <PropertyRow label={t('inspector.rowFrame')}>
           {targetOptions.length ? (
             <SelectField
-              label={`Target frame ${n}`}
+              label={t('inspector.targetFrameN', { n })}
               value={i.target ?? ''}
               options={targetOptions}
               onChange={(target) => onChange({ ...i, target })}
             />
           ) : (
-            <span className="text-caption text-ink-faint">Add another frame first</span>
+            <span className="text-caption text-ink-faint">{t('inspector.addAnotherFrame')}</span>
           )}
         </PropertyRow>
       )}
       {i.action === 'scroll-to' && (
-        <PropertyRow label="Element">
+        <PropertyRow label={t('inspector.rowElement')}>
           <TextField
-            label={`Scroll target ${n}`}
+            label={t('inspector.scrollTargetN', { n })}
             value={i.target ?? ''}
             placeholder="#pricing"
             onCommit={(target) => target.trim() && onChange({ ...i, target: target.trim() })}
@@ -255,9 +264,9 @@ function InteractionRow({
         </PropertyRow>
       )}
       {i.action === 'url' && (
-        <PropertyRow label="URL">
+        <PropertyRow label={t('inspector.rowUrl')}>
           <TextField
-            label={`Link ${n}`}
+            label={t('inspector.linkN', { n })}
             value={i.target ?? ''}
             placeholder="https://"
             onCommit={(target) => /^https?:\/\/\S+$/i.test(target.trim()) && onChange({ ...i, target: target.trim() })}
@@ -265,16 +274,16 @@ function InteractionRow({
         </PropertyRow>
       )}
       {leavesFrame && (
-        <PropertyRow label="Motion">
+        <PropertyRow label={t('inspector.rowMotion')}>
           <SelectField
-            label={`Transition ${n}`}
+            label={t('inspector.transitionN', { n })}
             value={i.transition}
-            options={TRANSITIONS}
+            options={transitions}
             onChange={(transition) => onChange({ ...i, transition })}
           />
           {i.transition !== 'instant' && (
             <NumberField
-              label={`Duration ${n}`}
+              label={t('inspector.durationN', { n })}
               className="max-w-[72px]"
               value={i.duration}
               unit="ms"

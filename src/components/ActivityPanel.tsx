@@ -26,6 +26,7 @@ import { CommentsPanel } from './CommentsPanel'
 import { PromptBar } from './PromptBar'
 import { taskFrameId } from '../lib/taskFrame'
 import { useOpenThreadCount } from '../lib/comments'
+import { useT } from '@/lib/i18n'
 
 const emptyNote = 'px-4 py-6 text-center text-[12px] text-ink-faint'
 
@@ -72,11 +73,12 @@ export function ActivityPanel({
   const [, tick] = useState(0)
   const openThreads = useOpenThreadCount()
   const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
+  const t = useT()
 
   /* refresh relative timestamps and running durations */
   useEffect(() => {
-    const t = window.setInterval(() => tick((n) => n + 1), 5000)
-    return () => window.clearInterval(t)
+    const timer = window.setInterval(() => tick((n) => n + 1), 5000)
+    return () => window.clearInterval(timer)
   }, [])
 
   return (
@@ -91,15 +93,19 @@ export function ActivityPanel({
     >
       <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)}>
         <PanelHeader className="pl-2">
-          <PanelTabs aria-label="Agents panel">
-            <PanelIconTab value="tasks" icon={<SparkIcon />} title="Agents">
-              Agents
+          <PanelTabs aria-label={t('panels.activityPanelAria')}>
+            <PanelIconTab value="tasks" icon={<SparkIcon />} title={t('panels.activityAgents')}>
+              {t('panels.activityAgents')}
               {working > 0 && <em className="ml-[7px] text-[11px] font-normal not-italic text-ink-faint">{working}</em>}
             </PanelIconTab>
             <PanelIconTab
               value="comments"
               icon={<CommentIcon />}
-              title={openThreads ? `Comments · ${openThreads} open` : 'Comments — every thread pinned on this page'}
+              title={
+                openThreads
+                  ? t('panels.activityCommentsOpen', { count: openThreads })
+                  : t('panels.activityCommentsTitle')
+              }
               /* open threads on this page: a count on the tab itself */
               badge={
                 openThreads > 0 && (
@@ -109,20 +115,16 @@ export function ActivityPanel({
                 )
               }
             >
-              Comments
+              {t('panels.activityComments')}
             </PanelIconTab>
-            <PanelIconTab value="activity" icon={<PulseIcon />} title="Activity">
-              Activity
+            <PanelIconTab value="activity" icon={<PulseIcon />} title={t('panels.activityActivity')}>
+              {t('panels.activityActivity')}
             </PanelIconTab>
-            <PanelIconTab
-              value="memory"
-              icon={<BookOpenIcon />}
-              title="Design memory — references, rules and decisions every agent on this canvas designs with"
-            >
-              Memory
+            <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
+              {t('panels.activityMemory')}
             </PanelIconTab>
           </PanelTabs>
-          <PanelClose label="Close panel" onClick={onClose} />
+          <PanelClose label={t('panels.activityClosePanel')} onClick={onClose} />
         </PanelHeader>
         {/* the Agents tab is a column: what the agents are doing scrolls above,
             the prompt composer is docked underneath */}
@@ -160,21 +162,22 @@ function RecentTasks() {
   const claimed = useMemo(() => tasks.filter((t) => t.agentName), [tasks])
   const working = useMemo(() => claimed.filter((t) => !t.endedAt && !t.failedAt), [claimed])
   const finished = useMemo(() => claimed.filter((t) => t.endedAt || t.failedAt), [claimed])
+  const t = useT()
 
   return (
-    <section aria-label="Recent tasks" className="flex flex-none flex-col pt-1.5 pb-1">
-      <h3 className="flex h-7 flex-none items-center px-3 text-[11.5px] font-normal text-ink-faint">Recent tasks</h3>
+    <section aria-label={t('panels.activityRecentTasks')} className="flex flex-none flex-col pt-1.5 pb-1">
+      <h3 className="flex h-7 flex-none items-center px-3 text-[11.5px] font-normal text-ink-faint">
+        {t('panels.activityRecentTasks')}
+      </h3>
       {claimed.length === 0 ? (
-        <p className="px-3 pb-2 text-[12px] leading-[1.45] text-ink-faint">
-          No tasks yet. Ask the Doop Agent below, or connect your own — what agents work on shows up here.
-        </p>
+        <p className="px-3 pb-2 text-[12px] leading-[1.45] text-ink-faint">{t('panels.activityNoTasks')}</p>
       ) : all ? (
         <>
-          {working.length > 0 && <TaskGroup label="Working on" tasks={working} />}
-          {finished.length > 0 && <TaskGroup label="Worked on" tasks={finished} />}
+          {working.length > 0 && <TaskGroup label={t('panels.activityWorkingOn')} tasks={working} />}
+          {finished.length > 0 && <TaskGroup label={t('panels.activityWorkedOn')} tasks={finished} />}
         </>
       ) : (
-        claimed.slice(0, RECENT_SHOWN).map((t) => <RecentTaskRow key={t.id} task={t} />)
+        claimed.slice(0, RECENT_SHOWN).map((task) => <RecentTaskRow key={task.id} task={task} />)
       )}
       {claimed.length > RECENT_SHOWN && (
         <Button
@@ -183,7 +186,7 @@ function RecentTasks() {
           aria-expanded={all}
           onClick={() => setAll((v) => !v)}
         >
-          {all ? 'Show less' : 'Show all'}
+          {all ? t('panels.activityShowLess') : t('panels.activityShowAll')}
           <ChevronDownIcon className={cn('size-3 text-ink-faint transition-transform', all && 'rotate-180')} />
         </Button>
       )}
@@ -225,16 +228,17 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
     s.select(frameId)
     s.requestFlyTo(frameId)
   }
+  const t = useT()
   const running = !task.endedAt && !task.failedAt
   const failed = !!task.failedAt
-  const reason = task.failureReason ?? 'The agent did not finish this task.'
+  const reason = task.failureReason ?? t('panels.activityTaskUnfinished')
   /* a job's status already is its reason; a card's status is its brief */
   const separateReason = failed && reason !== task.status
   return (
     <div
       role={frameId ? 'button' : undefined}
       tabIndex={frameId ? 0 : undefined}
-      title={frameName ? `Go to “${frameName}”` : undefined}
+      title={frameName ? t('panels.activityGoTo', { name: frameName }) : undefined}
       onClick={goToFrame}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return
@@ -253,7 +257,9 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
           <AgentIcon name={task.agentName} size={14} />
         </span>
         <b className="truncate font-medium text-ink">{task.agentName}</b>
-        {task.owner && <em className="truncate not-italic text-ink-faint">for {task.owner}</em>}
+        {task.owner && (
+          <em className="truncate not-italic text-ink-faint">{t('panels.activityFor', { name: task.owner })}</em>
+        )}
       </span>
       <span className="text-[11px] text-ink-faint tabular-nums">{taskTime(task)}</span>
       <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-ink-soft">
@@ -271,13 +277,13 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
             variant="ghost"
             size="pill"
             className="ml-auto flex-none"
-            title="Stop this task"
+            title={t('panels.activityStopTitle')}
             onClick={(e) => {
               e.stopPropagation()
               api.stopCard(canvasId, task.id).catch(console.error)
             }}
           >
-            Stop
+            {t('panels.activityStop')}
           </Button>
         )}
       </span>
@@ -298,7 +304,7 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
                 api.retryCard(canvasId, task.id).catch(reportLimit)
               }}
             >
-              Retry
+              {t('panels.activityRetry')}
             </Button>
           )}
         </span>
@@ -329,9 +335,10 @@ function TaskMark({ task }: { task: AgentTask }) {
 
 function ActivityList() {
   const activity = useStore((s) => s.activity)
+  const t = useT()
   return (
     <PanelBody className="py-2">
-      {activity.length === 0 && <div className={emptyNote}>No activity yet. Add a frame, or connect an agent.</div>}
+      {activity.length === 0 && <div className={emptyNote}>{t('panels.activityEmpty')}</div>}
       {activity.map((a) => (
         <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-[12px] leading-[1.45]">
           <Dot className="mt-[5px]" style={{ background: a.actorColor }} />

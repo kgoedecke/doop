@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { closeAllTabs, closeOtherTabs, closeTab, ensureTab, openCanvasTab, openExternal, useTabs } from '../lib/desktop'
 import { hasInsetTrafficLights, isDesktopShell } from '../lib/shell'
 import type { CanvasTab } from '../lib/desktop'
+import { useT } from '../lib/i18n'
 
 /**
  * Figma-style tab strip, desktop shell only. It sits where the title bar
@@ -24,6 +25,7 @@ import type { CanvasTab } from '../lib/desktop'
  * element carrying the attribute, leaving the tabs themselves clickable.
  */
 export function DesktopTabs({ path }: { path: string }) {
+  const t = useT()
   const tabs = useTabs((s) => s.tabs)
   const activeId = path.match(/^\/c\/([^/]+)/)?.[1] ?? null
 
@@ -52,13 +54,13 @@ export function DesktopTabs({ path }: { path: string }) {
           !activeId && 'bg-ink/[0.08] text-ink',
         )}
         onClick={() => navigate('/')}
-        title="All canvases"
+        title={t('canvas.allCanvases')}
       >
         <Logo className="size-[18px]" />
       </button>
       <div
         role="tablist"
-        aria-label="Open canvases"
+        aria-label={t('canvas.openCanvases')}
         className="flex min-w-0 items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {tabs.map((tab) => {
@@ -88,7 +90,7 @@ export function DesktopTabs({ path }: { path: string }) {
                       e.stopPropagation()
                       closeTab(tab.id, path)
                     }}
-                    title="Close tab"
+                    title={t('canvas.closeTab')}
                   >
                     <XIcon className="size-3" />
                   </button>
@@ -102,7 +104,7 @@ export function DesktopTabs({ path }: { path: string }) {
       <button
         className="mb-[4px] grid size-[30px] flex-none place-items-center rounded-lg border-0 bg-transparent text-[16px] leading-none text-ink-soft transition-colors hover:bg-ink/[0.06] hover:text-ink"
         onClick={newCanvas}
-        title="New canvas"
+        title={t('canvas.newCanvas')}
       >
         +
       </button>
@@ -114,24 +116,27 @@ export function DesktopTabs({ path }: { path: string }) {
  *  set). Its content is portalled to the body, so it needs to clear the
  *  strip's own z-index to overlap it. */
 function TabContextMenu({ tab, path }: { tab: CanvasTab; path: string }) {
+  const t = useT()
   const url = `${location.origin}/c/${tab.id}`
   const on = path === `/c/${tab.id}`
   return (
     <ContextMenuContent className="z-[850]">
-      <ContextMenuItem onSelect={() => navigator.clipboard.writeText(url)}>Copy link</ContextMenuItem>
+      <ContextMenuItem onSelect={() => navigator.clipboard.writeText(url)}>{t('canvas.copyLink')}</ContextMenuItem>
       {/* a full load of that canvas: the tab's own page when it's current,
           otherwise a hard navigation there (tabs are in-page routes, so
           there is nothing else to refresh) */}
-      <ContextMenuItem onSelect={() => (on ? location.reload() : location.assign(url))}>Reload</ContextMenuItem>
+      <ContextMenuItem onSelect={() => (on ? location.reload() : location.assign(url))}>
+        {t('canvas.reload')}
+      </ContextMenuItem>
       {/* the shell's opener IPC hands the URL to the system browser; without
           it (a plain browser, or a pre-0.1.2 shell) a new tab is the closest thing */}
       <ContextMenuItem onSelect={() => openExternal(url) || window.open(url, '_blank', 'noopener')}>
-        Open in browser
+        {t('canvas.openInBrowser')}
       </ContextMenuItem>
       <ContextMenuSeparator />
-      <ContextMenuItem onSelect={() => closeTab(tab.id, path)}>Close</ContextMenuItem>
-      <ContextMenuItem onSelect={() => closeOtherTabs(tab.id, path)}>Close other tabs</ContextMenuItem>
-      <ContextMenuItem onSelect={closeAllTabs}>Close all tabs</ContextMenuItem>
+      <ContextMenuItem onSelect={() => closeTab(tab.id, path)}>{t('common.close')}</ContextMenuItem>
+      <ContextMenuItem onSelect={() => closeOtherTabs(tab.id, path)}>{t('canvas.closeOtherTabs')}</ContextMenuItem>
+      <ContextMenuItem onSelect={closeAllTabs}>{t('canvas.closeAllTabs')}</ContextMenuItem>
     </ContextMenuContent>
   )
 }

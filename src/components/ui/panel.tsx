@@ -2,6 +2,7 @@ import * as React from 'react'
 import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n'
 import * as TabsPrimitive from '@radix-ui/react-tabs'
 
 import { Button } from './button'
@@ -238,16 +239,18 @@ function PanelDisclosure({ className, ...props }: React.ComponentProps<typeof Co
  *  baseline and never centres in the button, the icon does. */
 function PanelClose({
   className,
-  label = 'Close',
+  label,
   children: _children,
   ...props
 }: React.ComponentProps<'button'> & { label?: string }) {
+  const t = useT()
+  const text = label ?? t('common.close')
   return (
-    <Tooltip label={label} side="bottom" align="end">
+    <Tooltip label={text} side="bottom" align="end">
       <Button
         variant="bare"
         size="icon-sm"
-        aria-label={label}
+        aria-label={text}
         className={cn('size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink', className)}
         {...props}
       >

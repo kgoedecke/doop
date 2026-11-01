@@ -9,14 +9,15 @@ import { ArrowRightIcon, UploadIcon, XIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from './ui/popover'
 import { PropertyRow, SelectField } from './ui/property-field'
+import { useT, type PlainMessageKey, type Translate } from '../lib/i18n'
 
 type ImageInfo = NonNullable<ElementInfo['image']>
 
-const SIZES = [
-  { value: 'cover', label: 'Fill' },
-  { value: 'contain', label: 'Fit' },
-  { value: 'fill', label: 'Stretch' },
-  { value: 'none', label: 'Original size' },
+const SIZES: { value: string; label: PlainMessageKey }[] = [
+  { value: 'cover', label: 'inspector.imageSizeFill' },
+  { value: 'contain', label: 'inspector.imageSizeFit' },
+  { value: 'fill', label: 'inspector.imageSizeStretch' },
+  { value: 'none', label: 'inspector.imageSizeOriginal' },
 ]
 
 function sizeMode(image: ImageInfo) {
@@ -29,15 +30,15 @@ function sizeMode(image: ImageInfo) {
 }
 
 /** Verify pasted URLs before replacing the current, working image. */
-async function checkImageUrl(value: string): Promise<string> {
+async function checkImageUrl(value: string, t: Translate): Promise<string> {
   let url: URL
   try {
     url = new URL(value, location.origin)
   } catch {
-    throw new Error('Enter a valid image URL.')
+    throw new Error(t('inspector.imageUrlInvalid'))
   }
   if (!['https:', 'http:'].includes(url.protocol) && !/^data:image\//i.test(url.href)) {
-    throw new Error('Use an http or https image URL.')
+    throw new Error(t('inspector.imageUrlProtocol'))
   }
   await new Promise<void>((resolve, reject) => {
     const preview = new Image()
@@ -48,9 +49,9 @@ async function checkImageUrl(value: string): Promise<string> {
       if (error) reject(error)
       else resolve()
     }
-    const timer = window.setTimeout(() => finish(new Error('Image took too long to load. Try another URL.')), 10000)
+    const timer = window.setTimeout(() => finish(new Error(t('inspector.imageUrlTimeout'))), 10000)
     preview.onload = () => finish()
-    preview.onerror = () => finish(new Error('Couldn’t load that image. Check the URL and try again.'))
+    preview.onerror = () => finish(new Error(t('inspector.imageUrlLoadFailed')))
     preview.src = url.href
   })
   return url.href
@@ -67,6 +68,7 @@ export function ImageFill({
   image: ImageInfo
   apply: (styles: StylePatch) => void
 }) {
+  const t = useT()
   const input = useRef<HTMLInputElement>(null)
   const urlId = useId()
   const [open, setOpen] = useState(false)
@@ -82,9 +84,11 @@ export function ImageFill({
   const mode = sizeMode(image)
   const sizes = [
     ...SIZES,
-    image.kind === 'img' ? { value: 'scale-down', label: 'Scale down' } : { value: 'tile', label: 'Tile' },
-    ...(mode === 'custom' ? [{ value: 'custom', label: 'Custom' }] : []),
-  ]
+    image.kind === 'img'
+      ? { value: 'scale-down', label: 'inspector.imageSizeScaleDown' as const }
+      : { value: 'tile', label: 'inspector.imageSizeTile' as const },
+    ...(mode === 'custom' ? [{ value: 'custom', label: 'inspector.imageSizeCustom' as const }] : []),
+  ].map(({ value, label }) => ({ value, label: t(label) }))
 
   async function replace(source: File | string) {
     if (busy) return
@@ -92,27 +96,26 @@ export function ImageFill({
     if (!original || isLayerLocked(original, selector)) return
     setError(null)
     if (typeof source !== 'string' && source.size > 5 * 1024 * 1024) {
-      setError('Choose an image smaller than 5 MB.')
+      setError(t('inspector.imageTooLarge'))
       return
     }
     setBusy(typeof source === 'string' ? 'url' : 'upload')
     try {
       const url =
-        typeof source === 'string' ? await checkImageUrl(source) : (await api.uploadAsset(frame.canvasId, source)).url
+        typeof source === 'string'
+          ? await checkImageUrl(source, t)
+          : (await api.uploadAsset(frame.canvasId, source)).url
       const current = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)
       // A path selector can point to a different layer after a remote edit.
       if (!current || current.html !== original.html || isLayerLocked(current, selector)) {
-        throw new Error('The design changed. Select the image and try again.')
+        throw new Error(t('inspector.imageDesignChanged'))
       }
       if (!(await replaceElementImage(frame.id, selector, image, url))) {
-        throw new Error('The image is no longer editable. Select it and try again.')
+        throw new Error(t('inspector.imageNotEditable'))
       }
       setDraft(url)
     } catch (err) {
-      const message = errorMessage(
-        err,
-        err instanceof Error ? err.message : 'Couldn’t replace the image. Please try again.',
-      )
+      const message = errorMessage(err, err instanceof Error ? err.message : t('inspector.imageReplaceFailed'))
       setError(message)
       useStore.getState().pushNotice(message)
     } finally {
@@ -137,7 +140,7 @@ export function ImageFill({
         ref={input}
         type="file"
         accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-        aria-label="Choose replacement image"
+        aria-label={t('inspector.chooseReplacementImage')}
         className="hidden"
         onChange={(event) => {
           const file = event.currentTarget.files?.[0]
@@ -150,27 +153,32 @@ export function ImageFill({
           <Button
             variant="bare"
             className="h-8 w-full justify-start gap-2 rounded-row bg-sub px-1.5 text-label font-normal text-ink hover:bg-paper-deep data-[state=open]:bg-paper-deep"
-            aria-label="Image fill"
-            title="Edit image fill"
+            aria-label={t('inspector.imageFill')}
+            title={t('inspector.editImageFill')}
             disabled={locked}
           >
             <span className="size-5 flex-none overflow-hidden rounded-tag bg-surface">
               {image.src && <img src={image.src} alt="" className="size-full object-cover" />}
             </span>
-            Image
+            {t('inspector.image')}
           </Button>
         </PopoverTrigger>
         <PopoverContent
           side="left"
           align="end"
           sideOffset={24}
-          aria-label="Image fill settings"
+          aria-label={t('inspector.imageFillSettings')}
           onEscapeKeyDown={(event) => event.stopPropagation()}
         >
           <div className="flex h-10 items-center justify-between border-b border-line-soft px-3">
-            <span className="text-body font-medium">Image</span>
+            <span className="text-body font-medium">{t('inspector.image')}</span>
             <PopoverClose asChild>
-              <Button variant="bare" size="icon-sm" className="size-6 text-ink-faint" aria-label="Close image settings">
+              <Button
+                variant="bare"
+                size="icon-sm"
+                className="size-6 text-ink-faint"
+                aria-label={t('inspector.closeImageSettings')}
+              >
                 <XIcon size="rail" />
               </Button>
             </PopoverClose>
@@ -183,13 +191,13 @@ export function ImageFill({
               }}
             >
               <label htmlFor={urlId} className="mb-1.5 block text-caption text-ink-soft">
-                Image URL
+                {t('inspector.imageUrl')}
               </label>
               <div className="flex items-center gap-1.5">
                 <Input
                   id={urlId}
                   inputSize="sm"
-                  aria-label="Image URL"
+                  aria-label={t('inspector.imageUrl')}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   disabled={!!busy || locked}
@@ -201,8 +209,8 @@ export function ImageFill({
                   variant="bare"
                   size="icon-sm"
                   className="size-8 flex-none rounded-row bg-sub"
-                  aria-label="Apply image URL"
-                  title="Apply image URL"
+                  aria-label={t('inspector.applyImageUrl')}
+                  title={t('inspector.applyImageUrl')}
                   disabled={!!busy || locked || !draft.trim() || draft.trim() === image.src}
                 >
                   <ArrowRightIcon size="rail" />
@@ -217,24 +225,30 @@ export function ImageFill({
                   'conic-gradient(var(--sub) 25%, var(--surface) 0 50%, var(--sub) 0 75%, var(--surface) 0)',
                 backgroundSize: '16px 16px',
               }}
-              aria-label="Upload image"
+              aria-label={t('inspector.uploadImage')}
               aria-busy={!!busy || undefined}
               disabled={!!busy || locked}
               onClick={() => input.current?.click()}
             >
-              {image.src && <img src={image.src} alt="Current image" className="size-full object-contain" />}
+              {image.src && (
+                <img src={image.src} alt={t('inspector.currentImage')} className="size-full object-contain" />
+              )}
               <span
                 className={`absolute inset-0 flex items-center justify-center bg-ink/15 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ${busy ? 'opacity-100' : 'opacity-0'}`}
               >
                 <span className="flex items-center gap-1.5 rounded-row bg-surface px-3 py-2 text-label font-medium text-ink shadow-pop">
                   <UploadIcon size="rail" />
-                  {busy === 'upload' ? 'Uploading…' : busy === 'url' ? 'Loading…' : 'Upload image'}
+                  {busy === 'upload'
+                    ? t('inspector.uploading')
+                    : busy === 'url'
+                      ? t('inspector.loading')
+                      : t('inspector.uploadImage')}
                 </span>
               </span>
             </Button>
             <fieldset disabled={!!busy || locked} className="disabled:opacity-50">
-              <PropertyRow label="Sizing">
-                <SelectField label="Image sizing" value={mode} options={sizes} onChange={setSize} />
+              <PropertyRow label={t('inspector.sizing')}>
+                <SelectField label={t('inspector.imageSizing')} value={mode} options={sizes} onChange={setSize} />
               </PropertyRow>
             </fieldset>
             {error && (

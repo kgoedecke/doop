@@ -1,10 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  COMMUNITY_CATEGORIES,
-  COMMUNITY_CATEGORY_LABELS,
-  type Canvas,
-  type CommunityCategory,
-} from '../../shared/types'
+import { COMMUNITY_CATEGORIES, type Canvas, type CommunityCategory } from '../../shared/types'
 import { toLinkAccess, type LinkAccess } from '../../shared/canvasRole'
 import { navigate } from '../App'
 import type { WorkspaceSummary } from '../../shared/types'
@@ -23,6 +18,7 @@ import { Modal, ModalTitle } from './ui/modal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Textarea } from './ui/textarea'
 import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
+import { useT, type PlainMessageKey } from '@/lib/i18n'
 
 type ShareableCanvas = Pick<
   Canvas,
@@ -33,18 +29,28 @@ type SharePatch = Partial<
 >
 
 /* What each share-link level grants, as the picker and the read-out say it. */
-const LINK_ACCESS_LABELS: Record<LinkAccess, string> = {
-  none: 'No access',
-  view: 'View',
-  comment: 'Comment',
-  edit: 'Edit',
+const LINK_ACCESS_LABELS: Record<LinkAccess, PlainMessageKey> = {
+  none: 'panels.shareAccessNone',
+  view: 'panels.shareAccessView',
+  comment: 'panels.shareAccessComment',
+  edit: 'panels.shareAccessEdit',
 }
 
-const LINK_ACCESS_SUMMARY: Record<LinkAccess, string> = {
-  none: 'Invite-only canvas',
-  view: 'Anyone with the link can view',
-  comment: 'Anyone with the link can comment',
-  edit: 'Anyone with the link can edit',
+const LINK_ACCESS_SUMMARY: Record<LinkAccess, PlainMessageKey> = {
+  none: 'panels.shareSummaryNone',
+  view: 'panels.shareSummaryView',
+  comment: 'panels.shareSummaryComment',
+  edit: 'panels.shareSummaryEdit',
+}
+
+/* the gallery shelves; the ids are what the server stores */
+const CATEGORY_LABELS: Record<CommunityCategory, PlainMessageKey> = {
+  website: 'panels.shareCategoryWebsite',
+  app: 'panels.shareCategoryApp',
+  dashboard: 'panels.shareCategoryDashboard',
+  mobile: 'panels.shareCategoryMobile',
+  marketing: 'panels.shareCategoryMarketing',
+  other: 'panels.shareCategoryOther',
 }
 
 const LINK_ACCESS_ORDER: readonly LinkAccess[] = ['none', 'view', 'comment', 'edit']
@@ -72,6 +78,7 @@ export function ShareModal({
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const t = useT()
 
   useEffect(() => {
     let active = true
@@ -102,7 +109,12 @@ export function ShareModal({
     } catch (caught) {
       const walled = paywalledWorkspace(caught)
       if (walled) setUpgrade(walled)
-      else setError(caught instanceof ApiError ? String(caught.body.error ?? 'move failed') : 'move failed')
+      else
+        setError(
+          caught instanceof ApiError
+            ? String(caught.body.error ?? t('panels.shareMoveFailed'))
+            : t('panels.shareMoveFailed'),
+        )
     } finally {
       setBusy(false)
     }
@@ -123,7 +135,11 @@ export function ShareModal({
       }
       setEmail('')
     } catch (caught) {
-      setError(caught instanceof ApiError ? String(caught.body.error ?? 'invite failed') : 'invite failed')
+      setError(
+        caught instanceof ApiError
+          ? String(caught.body.error ?? t('panels.shareInviteFailed'))
+          : t('panels.shareInviteFailed'),
+      )
     }
     setBusy(false)
   }
@@ -138,7 +154,11 @@ export function ShareModal({
       onChange({ memberIds: canvas.memberIds?.filter((id) => id !== userId) })
       if (userId === meId && !isOwner) navigate('/')
     } catch (caught) {
-      setError(caught instanceof ApiError ? String(caught.body.error ?? 'removal failed') : 'removal failed')
+      setError(
+        caught instanceof ApiError
+          ? String(caught.body.error ?? t('panels.shareRemoveFailed'))
+          : t('panels.shareRemoveFailed'),
+      )
     } finally {
       setBusy(false)
     }
@@ -153,7 +173,9 @@ export function ShareModal({
       onChange({ linkAccess: next === 'none' ? undefined : next })
     } catch (caught) {
       setError(
-        caught instanceof ApiError ? String(caught.body.error ?? 'access update failed') : 'access update failed',
+        caught instanceof ApiError
+          ? String(caught.body.error ?? t('panels.shareAccessFailed'))
+          : t('panels.shareAccessFailed'),
       )
     } finally {
       setBusy(false)
@@ -167,14 +189,14 @@ export function ShareModal({
       posthog.capture('canvas_link_shared')
       onCopied()
     } catch {
-      setError('Couldn’t copy the link. Copy the URL from your browser instead.')
+      setError(t('panels.shareCopyFailed'))
     }
   }
 
   return (
     <Modal size="sm" onClose={onClose}>
       <>
-        <ModalTitle className="min-w-0">Share “{canvas.name}”</ModalTitle>
+        <ModalTitle className="min-w-0">{t('panels.shareTitle', { name: canvas.name })}</ModalTitle>
         {isOwner && (
           <>
             <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row">
@@ -182,7 +204,7 @@ export function ShareModal({
                 variant="well"
                 className="flex-1"
                 autoFocus
-                placeholder="Invite by email (doop account)"
+                placeholder={t('panels.shareInvitePlaceholder')}
                 value={email}
                 disabled={busy}
                 onChange={(event) => setEmail(event.target.value)}
@@ -194,7 +216,7 @@ export function ShareModal({
                 disabled={busy || people === null || !email.trim()}
                 onClick={invite}
               >
-                Invite
+                {t('panels.shareInvite')}
               </Button>
             </div>
           </>
@@ -206,28 +228,30 @@ export function ShareModal({
               key={person.userId}
               className="px-[2px] py-1.5"
               avatar={<Avatar name={person.name} size={28} />}
-              name={`${person.name}${person.userId === meId ? ' (you)' : ''}`}
+              name={person.userId === meId ? t('panels.shareYou', { name: person.name }) : person.name}
               detail={person.email}
               trailing={
                 person.owner ? (
-                  <span className="text-label text-ink-faint">Owner</span>
+                  <span className="text-label text-ink-faint">{t('panels.shareOwner')}</span>
                 ) : isOwner || person.userId === meId ? (
                   <IconButton
                     variant="danger"
                     size="sm"
-                    aria-label={person.userId === meId ? 'Leave this canvas' : `Remove ${person.name}`}
+                    aria-label={
+                      person.userId === meId ? t('panels.shareLeave') : t('panels.shareRemove', { name: person.name })
+                    }
                     disabled={busy}
                     onClick={() => remove(person.userId)}
                   >
                     <XIcon width={14} height={14} />
                   </IconButton>
                 ) : (
-                  <span className="text-label text-ink-faint">Can edit</span>
+                  <span className="text-label text-ink-faint">{t('panels.shareCanEdit')}</span>
                 )
               }
             />
           ))}
-          {people === null && <p className="text-label text-ink-faint">Loading…</p>}
+          {people === null && <p className="text-label text-ink-faint">{t('common.loading')}</p>}
           {canvas.workspaceId && (
             <PersonRow
               className="px-[2px] py-1.5"
@@ -236,13 +260,15 @@ export function ShareModal({
                   <BuildingIcon width={14} height={14} aria-hidden />
                 </span>
               }
-              name={`Everyone in ${workspace?.name ?? 'the workspace'}`}
+              name={
+                workspace ? t('panels.shareEveryoneIn', { name: workspace.name }) : t('panels.shareEveryoneInWorkspace')
+              }
               detail={
                 workspace
-                  ? `${workspace.memberCount} ${workspace.memberCount === 1 ? 'person' : 'people'}`
-                  : 'workspace members'
+                  ? t('panels.sharePeople', { count: workspace.memberCount })
+                  : t('panels.shareWorkspaceMembers')
               }
-              trailing={<span className="text-label text-ink-faint">Can edit</span>}
+              trailing={<span className="text-label text-ink-faint">{t('panels.shareCanEdit')}</span>}
             />
           )}
         </div>
@@ -250,21 +276,21 @@ export function ShareModal({
             choice sits with the access controls rather than in a menu */}
         {isOwner && workspaces.length > 0 && (
           <div className="mt-2.5 flex flex-col gap-2 border-t border-line-soft pt-3.5 sm:flex-row sm:items-center">
-            <span className="text-body font-medium text-ink">Workspace</span>
+            <span className="text-body font-medium text-ink">{t('panels.shareWorkspace')}</span>
             <Select
               value={canvas.workspaceId ?? PERSONAL_WORKSPACE}
               disabled={busy}
               onValueChange={(value) => void move(value === PERSONAL_WORKSPACE ? '' : value)}
             >
-              <SelectTrigger className="sm:ml-auto sm:w-[240px]" aria-label="Workspace this canvas lives in">
+              <SelectTrigger className="sm:ml-auto sm:w-[240px]" aria-label={t('panels.shareWorkspaceAria')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={PERSONAL_WORKSPACE}>Personal — invite-only</SelectItem>
+                <SelectItem value={PERSONAL_WORKSPACE}>{t('panels.sharePersonal')}</SelectItem>
                 {workspaces.map((w) => (
                   <SelectItem key={w.id} value={w.id}>
                     {w.name}
-                    {w.active ? '' : ' (needs a plan)'}
+                    {w.active ? '' : ` ${t('panels.shareNeedsPlan')}`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -274,31 +300,31 @@ export function ShareModal({
         <div className="mt-2.5 flex flex-col items-stretch justify-between gap-2.5 border-t border-line-soft pt-3.5 sm:flex-row sm:items-center">
           {isOwner ? (
             <div className="flex items-center gap-2">
-              <span className="text-body font-medium text-ink">Anyone with the link can…</span>
+              <span className="text-body font-medium text-ink">{t('panels.shareAnyoneCan')}</span>
               <Select value={linkAccess} disabled={busy} onValueChange={(value) => void setLink(toLinkAccess(value))}>
                 <SelectTrigger
                   size="sm"
                   className="w-[132px]"
-                  aria-label="What anyone with the link can do"
-                  title="No access = only you, invited people and workspace members can open this canvas"
+                  aria-label={t('panels.shareLinkAria')}
+                  title={t('panels.shareLinkTitle')}
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {LINK_ACCESS_ORDER.map((level) => (
                     <SelectItem key={level} value={level}>
-                      {LINK_ACCESS_LABELS[level]}
+                      {t(LINK_ACCESS_LABELS[level])}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           ) : (
-            <span className="text-label text-ink-faint">{LINK_ACCESS_SUMMARY[linkAccess]}</span>
+            <span className="text-label text-ink-faint">{t(LINK_ACCESS_SUMMARY[linkAccess])}</span>
           )}
           <Button className="justify-center gap-2" onClick={copy}>
             <CopyIcon className="size-3.5" />
-            Copy link
+            {t('panels.shareCopyLink')}
           </Button>
         </div>
         {isOwner && (
@@ -307,7 +333,7 @@ export function ShareModal({
         {upgrade && (
           <UpgradeModal
             workspaceId={upgrade}
-            reason="Moving a canvas into a workspace needs a Team plan."
+            reason={t('panels.shareUpgradeReason')}
             onClose={() => setUpgrade(null)}
           />
         )}
@@ -336,6 +362,7 @@ function CommunityListing({
   const [description, setDescription] = useState(canvas.description ?? '')
   const [category, setCategory] = useState<CommunityCategory>(canvas.category ?? 'website')
   const dirty = published && (description.trim() !== (canvas.description ?? '') || category !== canvas.category)
+  const t = useT()
 
   async function save(next: boolean) {
     if (busy) return
@@ -352,7 +379,11 @@ function CommunityListing({
         onChange({ publishedAt: undefined, description: undefined, category: undefined })
       }
     } catch (caught) {
-      setError(caught instanceof ApiError ? String(caught.body.error ?? 'publish failed') : 'publish failed')
+      setError(
+        caught instanceof ApiError
+          ? String(caught.body.error ?? t('panels.sharePublishFailed'))
+          : t('panels.sharePublishFailed'),
+      )
     } finally {
       setBusy(false)
     }
@@ -362,40 +393,38 @@ function CommunityListing({
     <div className="mt-3.5 border-t border-line-soft pt-3.5">
       <label
         className="flex cursor-pointer items-center gap-2 text-body font-medium text-ink"
-        title="Anyone on doop can preview and copy a listed canvas. The canvas itself stays private."
+        title={t('panels.shareGalleryTitle')}
       >
         <Checkbox checked={published} disabled={busy} onChange={(event) => save(event.target.checked)} />
-        Show in the community gallery
+        {t('panels.shareGallery')}
       </label>
-      <p className="mt-1 pl-[26px] text-label leading-snug text-ink-faint">
-        People can preview it and copy it into their own account. Your canvas stays private.
-      </p>
+      <p className="mt-1 pl-[26px] text-label leading-snug text-ink-faint">{t('panels.shareGalleryBlurb')}</p>
       {published && (
         <div className="mt-3 flex flex-col gap-2.5 pl-[26px]">
           <Textarea
             rows={2}
             maxLength={280}
             variant="well"
-            placeholder="What is this design? One or two lines helps people find it."
+            placeholder={t('panels.shareDescriptionPlaceholder')}
             value={description}
             disabled={busy}
             onChange={(event) => setDescription(event.target.value)}
           />
           <ToggleChipGroup
-            aria-label="Gallery shelf"
+            aria-label={t('panels.shareShelf')}
             className="gap-1.5"
             value={category}
             onValueChange={(next) => setCategory(next as CommunityCategory)}
           >
             {COMMUNITY_CATEGORIES.map((value) => (
               <ToggleChipItem key={value} value={value} size="sm" disabled={busy}>
-                {COMMUNITY_CATEGORY_LABELS[value]}
+                {t(CATEGORY_LABELS[value])}
               </ToggleChipItem>
             ))}
           </ToggleChipGroup>
           {dirty && (
             <Button size="sm" className="self-start" disabled={busy} onClick={() => save(true)}>
-              Update listing
+              {t('panels.shareUpdateListing')}
             </Button>
           )}
         </div>

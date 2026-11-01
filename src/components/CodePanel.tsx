@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from './ui/button'
 import { CheckIcon, ClipboardIcon } from './ui/icons'
+import { useT } from '../lib/i18n'
 
 /** Source view for the element toolbar: the selected element's markup with a copy button. */
 export function CodePanel({ code }: { code: string }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -37,13 +39,13 @@ export function CodePanel({ code }: { code: string }) {
         variant="inverse"
         size="icon-sm"
         className="rounded-pill"
-        aria-label={copied ? 'Code copied' : 'Copy code'}
+        aria-label={copied ? t('inspector.codeCopied') : t('inspector.copyCode')}
         onClick={copy}
       >
         {copied ? <CheckIcon className="text-success-on-ink" /> : <ClipboardIcon />}
       </Button>
       <span role="status" className="sr-only">
-        {copied ? 'Code copied to clipboard' : ''}
+        {copied ? t('inspector.codeCopiedStatus') : ''}
       </span>
     </div>
   )
