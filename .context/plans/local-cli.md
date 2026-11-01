@@ -54,12 +54,17 @@ agreement and signature branch live; the workflow registration is disabled in
 the private development copy. Isolate the existing nested-overlay focus test
 from the delay fixture's 800ms navigation timer so slow CI cannot navigate away
 while it is checking focus. Delay suspension remains covered by its own test.
+The installed-package upgrade check uses the same bounded npm-install timeout as
+initial installation; a cold Windows runner exceeded the old two-minute generic
+command timeout after the application and service checks had already passed.
 
 ## Pending Effect migration
 
 After CI and CodeRabbit review of the existing CLI are complete, migrate the CLI
-package to Effect. npm currently reports effect and @effect/platform-node 4.1.1.
-Pin and inspect those installed APIs before implementation.
+package to Effect. npm reports effect and @effect/platform-node 4.1.1, but the
+environment's release-age policy currently excludes that release. Use matching
+4.1.0 packages, acquired successfully without overriding the policy, and inspect
+their APIs before implementation.
 
 - Convert command and service implementation modules to typechecked TypeScript;
   retain only minimal executable loaders needed by the npm bin entry points.

@@ -14,7 +14,9 @@ export async function exerciseCommands(entry, install, work, env, archive) {
       env,
       encoding: 'utf8',
       input,
-      timeout: 120_000,
+      // Upgrades perform a real npm install; cold Windows CI installs need the
+      // same allowance as the initial tarball installation in test-cli.mjs.
+      timeout: ['upgrade', 'update'].includes(args[0]) ? (env.CI ? 600_000 : 240_000) : 120_000,
       maxBuffer: 1024 * 1024,
     })
   const json = (args) => JSON.parse(run(args))
