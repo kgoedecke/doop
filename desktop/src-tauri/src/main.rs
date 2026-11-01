@@ -39,6 +39,8 @@
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+#[cfg(target_os = "linux")]
+mod appimage;
 mod claude;
 mod claude_extension;
 mod codex;
@@ -263,6 +265,8 @@ fn main() {
             // runtime, which also makes `tauri dev` receive links.
             #[cfg(any(windows, target_os = "linux"))]
             app.deep_link().register_all()?;
+            #[cfg(target_os = "linux")]
+            appimage::integrate(app.handle());
             let focus_handle = app.handle().clone();
             app.deep_link().on_open_url(move |_event| focus_main_window(&focus_handle));
             updates::start(app.handle());
