@@ -50,7 +50,7 @@ export const panels = {
   memoryDistilled: 'distilled',
   memoryReference: 'Reference',
   memoryReferenceGone: 'This reference is no longer pinned.',
-  memoryPinnedBy: 'pinned by {name} · {date}; agents copy this design’s colors, type and layout in new work',
+  memoryPinnedBy: 'pinned by {name} · {date}. Agents copy this design’s colors, type and layout in new work',
   memoryUnpin: 'Unpin',
   memorySaveFailed: 'save failed',
   memoryNewRule: 'New rule',

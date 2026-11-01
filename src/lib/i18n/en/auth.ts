@@ -50,7 +50,7 @@ export const auth = {
     'That sign-in link has expired. Start again and finish in your browser within a couple of minutes.',
   ssoFailed: 'Sign-in failed. Try again or use email/password.',
   startFailed: 'Could not start sign-in. Try again or use email/password.',
-  browserSignInNotice: 'Finish signing in in your browser, and doop signs you in here the moment you come back.',
+  browserSignInNotice: 'Finish in your browser, and doop signs you in here the moment you’re back.',
   verificationSent: 'Verification email sent. Check your inbox.',
   resetLinkSent: 'If an account exists for that email, a reset link is on its way.',
   resetLinkInvalid: 'This reset link is invalid or expired. Request a new one.',

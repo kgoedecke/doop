@@ -48,7 +48,7 @@ export const auth: Catalog['auth'] = {
   ssoDesktopHandoff: 'Esse link de acesso expirou. Comece de novo e conclua no navegador em poucos minutos.',
   ssoFailed: 'Não foi possível entrar. Tente de novo ou use e-mail e senha.',
   startFailed: 'Não foi possível iniciar o acesso. Tente de novo ou use e-mail e senha.',
-  browserSignInNotice: 'Conclua o acesso no navegador, e o doop conecta você aqui assim que você voltar.',
+  browserSignInNotice: 'Conclua no navegador, e o doop conecta você aqui assim que você voltar.',
   verificationSent: 'E-mail de verificação enviado. Confira sua caixa de entrada.',
   resetLinkSent: 'Se existir uma conta com esse e-mail, um link de redefinição já está a caminho.',
   resetLinkInvalid: 'Este link de redefinição é inválido ou expirou. Solicite um novo.',

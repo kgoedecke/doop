@@ -84,8 +84,8 @@ export const workspace: Catalog['workspace'] = {
   perMonth: 'por mês',
   perYear: 'por ano',
   seatsCatchUp: {
-    one: '({count} pessoa agora; o Stripe se ajusta na próxima fatura)',
-    other: '({count} pessoas agora; o Stripe se ajusta na próxima fatura)',
+    one: '({count} pessoa agora, e o Stripe se ajusta na próxima fatura)',
+    other: '({count} pessoas agora, e o Stripe se ajusta na próxima fatura)',
   },
   ends: 'Termina',
   renews: 'Renova',
@@ -94,7 +94,7 @@ export const workspace: Catalog['workspace'] = {
   opening: 'Abrindo…',
   manageOnStripe: 'Gerenciar cobrança no Stripe',
   refresh: 'Atualizar',
-  stripePortalNote: 'Cartões, faturas, cancelamento: tudo no portal do Stripe.',
+  stripePortalNote: 'Cartões, faturas e cancelamento ficam todos no portal do Stripe.',
   ownerHoldsBilling: 'O dono cuida da cobrança; só ele pode mudar o plano.',
 
   renamed: 'Renomeado',

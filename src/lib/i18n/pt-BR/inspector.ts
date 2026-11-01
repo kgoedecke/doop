@@ -16,7 +16,7 @@ export const inspector: Catalog['inspector'] = {
   copyImageUrlTitle:
     'URL pública da imagem que sempre mostra o design atual; cole como og:image ou imagem de destaque de um blog',
   copyImageUrl: 'Copiar URL da imagem',
-  pinReferenceTitle: 'Adicionar à memória de design (usado como referência)',
+  pinReferenceTitle: 'Adicionar à memória de design para os agentes usarem como referência',
   pinReference: 'Fixar como referência',
   hideHtmlEditor: 'Ocultar o editor de HTML',
   editHtml: 'Editar o HTML',

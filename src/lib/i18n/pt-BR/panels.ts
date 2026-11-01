@@ -51,7 +51,7 @@ export const panels: Catalog['panels'] = {
   memoryReference: 'Referência',
   memoryReferenceGone: 'Esta referência não está mais fixada.',
   memoryPinnedBy:
-    'fixada por {name} · {date}; os agentes copiam as cores, a tipografia e o layout deste design em novos trabalhos',
+    'fixada por {name} · {date}. Os agentes copiam as cores, a tipografia e o layout deste design em novos trabalhos',
   memoryUnpin: 'Desafixar',
   memorySaveFailed: 'falha ao salvar',
   memoryNewRule: 'Nova regra',

@@ -17,7 +17,7 @@ export const inspector = {
   copyImageUrlTitle:
     'Public image URL that always renders the current design; paste it as og:image or a blog featured image',
   copyImageUrl: 'Copy image URL',
-  pinReferenceTitle: 'Add to design memory (used as a reference)',
+  pinReferenceTitle: 'Add to design memory so agents use it as a reference',
   pinReference: 'Pin as reference',
   hideHtmlEditor: 'Hide the HTML editor',
   editHtml: 'Edit the HTML',

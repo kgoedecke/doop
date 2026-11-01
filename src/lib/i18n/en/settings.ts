@@ -22,7 +22,7 @@ export const settings = {
   agentCardDescription:
     'Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your desktop. Your provider’s usage limits and charges apply.',
   freeTasksLeftLabel: 'Free Doop Agent tasks left',
-  meterGeminiCloud: 'Gemini cloud pilot selected. Connection managed by your operator.',
+  meterGeminiCloud: 'Gemini cloud pilot selected. Your operator manages the connection.',
   meterClaudeLocal: 'Claude CLI selected. It runs on your connected desktop.',
   meterChatgpt: 'Running on your ChatGPT subscription.',
   meterProviderKey: 'Running on your {provider} key.',

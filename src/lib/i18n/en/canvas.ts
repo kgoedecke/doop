@@ -37,7 +37,7 @@ export const canvas = {
   pasteImageFailed: 'Couldn’t paste image: {error}',
   dropImageFailed: 'Couldn’t add the dropped image: {error}',
   uiHidden: 'UI hidden · {key}. to show',
-  memorySuggestionReview: 'Memory suggestion: review',
+  memorySuggestionReview: 'Review memory suggestion',
   hideForNow: 'Hide for now',
   openMemory: 'Open Memory',
   savedToMemory: 'Saved to Memory',
