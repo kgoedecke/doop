@@ -818,7 +818,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
     {
       title: 'Create or update a library component',
       description:
-        'Register a reusable component in the library a canvas draws from (canvas_id) or in a workspace\'s team library (workspace_id), or update one by slug. Write html as the default markup (its root gets data-doop-component="<slug>"), css with ONLY this component\'s rules reading shared values from the global tokens (var(--color-primary), var(--space-3)…), optional js that runs once per frame with `elements` = every instance, and variants as extra named markup. Every frame using the component is restamped at once. Pick group from get_design_system (a preset id such as "buttons", "forms", "navigation", or a custom group id) and kind from the preset kinds when it implements one.',
+        'Register a reusable component in the library a canvas draws from (canvas_id) or in a workspace\'s team library (workspace_id), or update one by slug. Write html as the default markup (its root gets data-doop-component="<slug>"), css with ONLY this component\'s rules reading shared values from the global tokens (var(--color-primary), var(--space-3)…), optional js that runs with `elements` = the instances in a frame, then again for each one added later (never twice for one element), and variants as extra named markup. Every frame using the component is restamped at once. Pick group from get_design_system (a preset id such as "buttons", "forms", "navigation", or a custom group id) and kind from the preset kinds when it implements one.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         ...libraryTarget,

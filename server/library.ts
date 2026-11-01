@@ -24,6 +24,7 @@ import {
   ensureInstanceName,
   isPresetGroup,
   libraryScopeOf,
+  renameInstances,
   slugify,
 } from '../shared/designSystem.ts'
 import type {
@@ -196,8 +197,15 @@ export function stampSource(scope: LibraryScope): StampSource {
   return { initialized: isInitialized(scope), globalCss: stylesOf(scope).globalCss, components: componentsOf(scope) }
 }
 
-/** The catalogue an agent designs from: tokens, rules and every component
- *  with the markup that places it. Empty when the scope has no library. */
+/* what the brief may spend on component markup and the token list; past
+   them the agent reads a component's markup with get_component */
+export const BRIEF_MARKUP_BUDGET = 16_000
+const BRIEF_MAX_TOKENS = 120
+const BRIEF_DESCRIPTION_CHARS = 240
+
+/** The catalogue an agent designs from: tokens, rules and every component,
+ *  with the markup that places it while BRIEF_MARKUP_BUDGET lasts (the rest
+ *  by name and description). Empty when the scope has no library. */
 export function designSystemBrief(scope: LibraryScope): string {
   if (!isInitialized(scope)) return ''
   const styles = stylesOf(scope)
@@ -207,19 +215,49 @@ export function designSystemBrief(scope: LibraryScope): string {
     '# Design system',
     'This canvas has a component library. Build screens from it: place a component by writing its markup, keeping `data-doop-component="<slug>"` and its `data-name` on its root — Doop stamps the component CSS/JS and the global stylesheet into the frame for you, so never copy their CSS. Style everything else with the tokens below (`var(--token)`), not literal values. When a tool to register components (save_component) is available, register a new reusable piece with it instead of repeating it.',
   ]
-  if (tokens.length) lines.push('', '## Tokens', ...tokens.map((token) => `- ${token.name}: ${token.value}`))
+  if (tokens.length) {
+    lines.push('', '## Tokens', ...tokens.slice(0, BRIEF_MAX_TOKENS).map((token) => `- ${token.name}: ${token.value}`))
+    if (tokens.length > BRIEF_MAX_TOKENS)
+      lines.push(`- …and ${tokens.length - BRIEF_MAX_TOKENS} more in the global stylesheet`)
+  }
   if (styles.notes.trim()) lines.push('', '## Usage rules', styles.notes.trim())
   const components = listComponents(scope)
   if (components.length) {
     lines.push('', '## Components')
+    let budget = BRIEF_MARKUP_BUDGET
+    let deferred = 0
     for (const component of components) {
       const where = groupName.get(component.groupId) ?? component.groupId
-      const about = component.description ? ` — ${component.description}` : ''
-      lines.push(`### ${component.name} (\`${component.slug}\`, ${where})${about}`, '```html', component.html, '```')
-      for (const variant of component.variants) lines.push(`${variant.name}:`, '```html', variant.html, '```')
+      const about = component.description ? ` — ${clipText(component.description, BRIEF_DESCRIPTION_CHARS)}` : ''
+      lines.push(`### ${component.name} (\`${component.slug}\`, ${where})${about}`)
+      const markup = [
+        '```html',
+        component.html,
+        '```',
+        ...component.variants.flatMap((variant) => [`${variant.name}:`, '```html', variant.html, '```']),
+      ]
+      const size = markup.reduce((sum, line) => sum + line.length + 1, 0)
+      if (size <= budget) {
+        lines.push(...markup)
+        budget -= size
+      } else {
+        deferred++
+        const variants = component.variants.length ? ` and its ${component.variants.length} variant(s)` : ''
+        lines.push(`Markup${variants}: call get_component with slug "${component.slug}".`)
+      }
     }
+    if (deferred)
+      lines.push(
+        '',
+        `${deferred} component(s) above are listed without markup to keep this brief short: read one with get_component before placing it.`,
+      )
   }
   return lines.join('\n')
+}
+
+function clipText(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
 /* ---- writes ---- */
@@ -405,6 +443,10 @@ export function saveComponent(
   if (!html) throw new LibraryError('a component needs markup')
   const pick = (value: unknown, fallback: string, field: string, max: number) =>
     value === undefined ? fallback : text(value ?? '', field, max)
+  /* a renamed component's own rules and script name it by its slug too
+     ([data-doop-component="button"]): they follow it, or they stop matching */
+  const renamedFrom = existing && existing.slug !== slug ? existing.slug : undefined
+  const follow = (code: string) => (renamedFrom ? renameInstances(code, renamedFrom, slug) : code)
 
   const now = Date.now()
   const component: LibraryComponent = {
@@ -414,11 +456,11 @@ export function saveComponent(
     groupId,
     ...(kind ? { kind } : {}),
     description: pick(input.description, existing?.description ?? '', 'description', MAX_DESCRIPTION_CHARS).trim(),
-    html: instanceMarkup(html, slug, name, existing?.name),
-    css: pick(input.css, existing?.css ?? '', 'css', MAX_COMPONENT_CSS_CHARS),
-    js: pick(input.js, existing?.js ?? '', 'js', MAX_COMPONENT_JS_CHARS),
+    html: instanceMarkup(follow(html), slug, name, existing?.name),
+    css: follow(pick(input.css, existing?.css ?? '', 'css', MAX_COMPONENT_CSS_CHARS)),
+    js: follow(pick(input.js, existing?.js ?? '', 'js', MAX_COMPONENT_JS_CHARS)),
     variants: (input.variants === undefined && existing ? existing.variants : variantsOf(input.variants, slug)).map(
-      (variant) => ({ ...variant, html: instanceMarkup(variant.html, slug, name, existing?.name) }),
+      (variant) => ({ ...variant, html: instanceMarkup(follow(variant.html), slug, name, existing?.name) }),
     ),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -426,20 +468,48 @@ export function saveComponent(
   }
 
   ensureInitialized(scope, by)
-  if (existing && existing.slug !== slug) map.delete(existing.slug)
+  if (renamedFrom) map.delete(renamedFrom)
   map.set(slug, component)
+  persistComponent(scope, component)
+  if (renamedFrom) followRename(scope, renamedFrom, slug, by)
+  return { component, ...(renamedFrom ? { renamedFrom } : {}) }
+}
+
+/* every other component of the scope that places or styles the renamed one
+   (an instance in its markup, a selector in its CSS or script) */
+function followRename(scope: LibraryScope, from: string, to: string, by: string) {
+  for (const other of componentsOf(scope).values()) {
+    if (other.slug === to) continue
+    const next = {
+      html: renameInstances(other.html, from, to),
+      css: renameInstances(other.css, from, to),
+      js: renameInstances(other.js, from, to),
+      variants: other.variants.map((variant) => ({ ...variant, html: renameInstances(variant.html, from, to) })),
+    }
+    const moved =
+      next.html !== other.html ||
+      next.css !== other.css ||
+      next.js !== other.js ||
+      next.variants.some((variant, i) => variant.html !== other.variants[i]?.html)
+    if (!moved) continue
+    Object.assign(other, next, { updatedAt: Date.now(), updatedBy: by })
+    persistComponent(scope, other)
+  }
+}
+
+function persistComponent(scope: LibraryScope, component: LibraryComponent) {
   const row = {
-    slug,
-    name,
-    groupId,
+    slug: component.slug,
+    name: component.name,
+    groupId: component.groupId,
     kind: component.kind ?? null,
     description: component.description,
     html: component.html,
     css: component.css,
     js: component.js,
     variants: component.variants,
-    updatedAt: now,
-    updatedBy: by,
+    updatedAt: component.updatedAt,
+    updatedBy: component.updatedBy,
   }
   swallow(
     db
@@ -447,7 +517,6 @@ export function saveComponent(
       .values({ id: component.id, scope, createdAt: component.createdAt, ...row })
       .onConflictDoUpdate({ target: t.libraryComponents.id, set: row }),
   )
-  return { component, ...(existing && existing.slug !== slug ? { renamedFrom: existing.slug } : {}) }
 }
 
 export function deleteComponent(scope: LibraryScope, idOrSlug: string): LibraryComponent {

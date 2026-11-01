@@ -1176,7 +1176,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'save_component',
     description:
-      'Register a reusable component in this canvas\'s design-system library, or update one by slug (the library and its tokens are in your system prompt). html is the default markup (its root gets data-doop-component="<slug>"), css holds ONLY this component\'s rules and reads shared values from the global tokens, js (optional) runs once per frame with `elements` = every instance, variants are extra named markup. Every frame using the component is restyled at once. Use it when you design a piece the library lacks and will reuse, then place it by its markup.',
+      'Register a reusable component in this canvas\'s design-system library, or update one by slug (the library and its tokens are in your system prompt). html is the default markup (its root gets data-doop-component="<slug>"), css holds ONLY this component\'s rules and reads shared values from the global tokens, js (optional) runs with `elements` = the instances in a frame, then again for each one added later, variants are extra named markup. Every frame using the component is restyled at once. Use it when you design a piece the library lacks and will reuse, then place it by its markup.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1204,6 +1204,16 @@ const TOOLS: Anthropic.Tool[] = [
           },
         },
       },
+      required: ['slug'],
+    },
+  },
+  {
+    name: 'get_component',
+    description:
+      "Read a library component's markup by slug: the default and every variant. The design-system section of your instructions lists every component, but shows markup only while it stays short; read the rest here before placing one, and keep data-doop-component and data-name on its root.",
+    input_schema: {
+      type: 'object',
+      properties: { slug: { type: 'string', description: 'The component slug, e.g. "pricing-card"' } },
       required: ['slug'],
     },
   },
@@ -1732,6 +1742,16 @@ async function execTool(
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid decision')
         }
+      }
+      case 'get_component': {
+        const scope = library.scopeOfCanvas(canvasId)
+        if (!scope) return fail('canvas not found')
+        const slug = (block.input as { slug?: unknown }).slug
+        if (typeof slug !== 'string' || !slug.trim()) return fail('slug must be a non-empty string')
+        const component = library.findComponent(scope, slug.trim().toLowerCase())
+        if (!component) return fail(`no component "${slug}" in this canvas's library`)
+        const variants = component.variants.map((variant) => `${variant.name}:\n${variant.html}`)
+        return ok([`${component.name} (${component.slug}):`, component.html, ...variants].join('\n\n'))
       }
       case 'save_component': {
         const scope = library.scopeOfCanvas(canvasId)

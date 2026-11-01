@@ -6,6 +6,8 @@ export const library: Catalog['library'] = {
   loadFailed: 'Não foi possível carregar os componentes.',
   addFailed: 'Não foi possível adicionar {name}.',
   addedTo: '{name} adicionado a “{frame}”',
+  insertConflict:
+    '“{frame}” mudou enquanto {name} era adicionado: ele agora mostra a versão mais recente. Adicione de novo.',
   search: 'Buscar componentes',
   summary: '{components} componentes · {tokens} tokens',
   openLibrary: 'Biblioteca',
@@ -72,7 +74,7 @@ export const library: Catalog['library'] = {
   slugTaken: 'Outro componente já usa este slug.',
   variantsTab: 'Variantes · {count}',
   resetStarter: 'Restaurar o modelo',
-  jsPlaceholder: '// roda uma vez por frame; `elements` tem todas as instâncias deste componente',
+  jsPlaceholder: '// `elements` tem as instâncias do frame e, depois, cada uma que for adicionada',
   variantName: 'Nome da variante',
   variantNumbered: 'Variante {n}',
   removeNamed: 'Remover {name}',

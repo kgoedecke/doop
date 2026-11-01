@@ -6,18 +6,25 @@ import {
   type LibraryComponent,
   type LibrarySnapshot,
 } from '../../shared/designSystem'
-import { api, errorMessage, type LibraryTarget } from './api'
+import { api, ApiError, errorMessage, type LibraryTarget } from './api'
 import { isCanvasElement } from './drawing'
+import type { Frame } from '../../shared/types'
 import { createCenteredFrame, DEFAULT_FRAME_SIZE } from './framePlacement'
 import { recordUpdates } from './history'
 import { standaloneDocument } from './layerEdits'
 import { useStore } from './store'
 import { t, type PlainMessageKey, type Translate } from './i18n'
 
+/* a workspace page joins no canvas room, so no message says another member
+   changed its library: it looks again when the tab comes back and every so
+   often while it is in view */
+const WORKSPACE_REFRESH_MS = 15_000
+
 /**
  * The component library a view shows (shared/designSystem.ts): fetched for
- * a canvas or a workspace, re-read whenever the room says it changed, and
- * replaced by the snapshot every write answers with.
+ * a canvas or a workspace, re-read whenever the room says it changed (a
+ * workspace: on focus and every WORKSPACE_REFRESH_MS), and replaced by the
+ * snapshot every write answers with.
  */
 export function useLibrary(canvasId?: string, workspaceId?: string) {
   const target = useMemo<LibraryTarget | null>(
@@ -25,8 +32,24 @@ export function useLibrary(canvasId?: string, workspaceId?: string) {
     [canvasId, workspaceId],
   )
   const version = useStore((s) => s.libraryVersion)
+  const [refresh, setRefresh] = useState(0)
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (canvasId || !workspaceId) return
+    const again = () => {
+      if (document.visibilityState === 'visible') setRefresh((n) => n + 1)
+    }
+    const timer = window.setInterval(again, WORKSPACE_REFRESH_MS)
+    document.addEventListener('visibilitychange', again)
+    window.addEventListener('focus', again)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', again)
+      window.removeEventListener('focus', again)
+    }
+  }, [canvasId, workspaceId])
 
   useEffect(() => {
     if (!target) return
@@ -35,7 +58,8 @@ export function useLibrary(canvasId?: string, workspaceId?: string) {
       .library(target)
       .then((next) => {
         if (!live) return
-        setSnapshot(next)
+        /* an unchanged library keeps its snapshot, so an open editor is not re-rendered by a quiet re-read */
+        setSnapshot((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
         setError(null)
       })
       .catch((caught: unknown) => {
@@ -44,7 +68,7 @@ export function useLibrary(canvasId?: string, workspaceId?: string) {
     return () => {
       live = false
     }
-  }, [target, version])
+  }, [target, version, refresh])
 
   /** Runs a write and adopts the snapshot it answers with; rethrows so a form can show the error. */
   const run = useCallback(
@@ -184,7 +208,19 @@ export async function insertComponent(
   template.innerHTML = markup
   doc.body.append(template.content)
   const html = '<!doctype html>\n' + doc.documentElement.outerHTML
-  const saved = await api.updateFrame(frame.id, { html })
+  let saved: Frame
+  try {
+    /* the document above is this client's copy: a newer save by someone
+       else (a person, an agent mid-edit) wins, and the insert is refused */
+    saved = await api.updateFrame(frame.id, { html }, frame.updatedAt)
+  } catch (error) {
+    const current =
+      error instanceof ApiError && error.status === 409 ? (error.body.frame as Frame | undefined) : undefined
+    if (!current) throw error
+    useStore.getState().upsertFrame(current)
+    useStore.getState().pushNotice(t('library.insertConflict', { name: component.name, frame: frame.name }))
+    return
+  }
   recordUpdates([{ frameId: frame.id, before: { html: frame.html }, after: { html: saved.html } }])
   useStore.getState().upsertFrame(saved)
   useStore.getState().pushNotice(t('library.addedTo', { name: component.name, frame: frame.name }))

@@ -129,7 +129,7 @@ export interface LibraryComponent {
   html: string
   /** rules for this component only: shared values come from the global stylesheet */
   css: string
-  /** optional behaviour; runs once per frame with `elements` = every instance */
+  /** optional behaviour: runs with `elements` = the instances in the frame, then again for each one added later */
   js: string
   variants: ComponentVariant[]
   createdAt: number
@@ -254,18 +254,43 @@ function styleBlock(key: string, css: string): string {
   return `<style data-doop-library="${key}">\n${css.replace(/<\/style/gi, '<\\/style')}\n</style>\n`
 }
 
+/** A short, stable fingerprint of a script, so the same code runs once per
+ *  document while an edited one starts over. */
+function scriptHash(text: string): string {
+  let hash = 5381
+  for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  return (hash >>> 0).toString(36)
+}
+
 /** Runs a component's script once the document is parsed, with `elements`
- *  bound to every instance in the frame. */
+ *  bound to the instances it has not set up yet, then again for every
+ *  instance added later: an insert morphed into a live frame does not rerun
+ *  its scripts. An element is handed to the script once, and the same script
+ *  executed twice in one document does nothing the second time. */
 export function componentScript(slug: string, js: string): string {
   const selector = JSON.stringify(`[data-doop-component="${slug}"]`)
+  const key = JSON.stringify(`${slug}:${scriptHash(js)}`)
   return [
     '(function () {',
+    '  var registry = (window.__doopComponents = window.__doopComponents || {})',
+    `  if (registry[${key}]) return`,
+    `  registry[${key}] = true`,
+    '  var seen = new WeakSet()',
     '  var run = function () {',
-    `    var elements = Array.prototype.slice.call(document.querySelectorAll(${selector}))`,
+    `    var elements = Array.prototype.slice.call(document.querySelectorAll(${selector})).filter(function (el) {`,
+    '      if (seen.has(el)) return false',
+    '      seen.add(el)',
+    '      return true',
+    '    })',
+    '    if (!elements.length) return',
     js,
     '  }',
-    "  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run)",
-    '  else run()',
+    '  var start = function () {',
+    '    run()',
+    '    new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true })',
+    '  }',
+    "  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start)",
+    '  else start()',
     '})()',
   ].join('\n')
 }

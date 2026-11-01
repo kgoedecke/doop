@@ -109,3 +109,59 @@ it('keeps a workspace library to its members and asks for exactly one target', a
   expect(both.isError).toBe(true)
   expect(both.body).toContain('not both')
 })
+
+async function frameHtml(canvasId: string, frameId: string): Promise<string> {
+  const canvas = await (await owner.get(`/api/canvases/${canvasId}`)).json()
+  return (canvas.frames as { id: string; html: string }[]).find((f) => f.id === frameId)!.html
+}
+
+async function eventually(check: () => Promise<boolean>, ms = 15_000) {
+  const until = Date.now() + ms
+  while (!(await check())) {
+    if (Date.now() > until) throw new Error('timed out waiting for the frame')
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+}
+
+it('restyles a frame that was playing back or streaming once it ends, renames included, and files what it replaced', async () => {
+  const canvas = await (await owner.post('/api/canvases', { name: 'Busy frames' })).json()
+  await ok('save_component', {
+    canvas_id: canvas.id,
+    slug: 'chip',
+    name: 'Chip',
+    group: 'data-display',
+    html: '<span>chip</span>',
+    css: '[data-doop-component="chip"] { color: red; }',
+    agent_name: 'Claude',
+  })
+  const page = '<!doctype html><html><head></head><body><span data-doop-component="chip">Novo</span></body></html>'
+  const { frame } = await ok('create_frame', { canvas_id: canvas.id, name: 'Chips', html: page, agent_name: 'Claude' })
+
+  /* edited while the new frame plays back: it catches up when playback ends */
+  await ok('save_component', {
+    canvas_id: canvas.id,
+    slug: 'chip',
+    css: '[data-doop-component="chip"] { color: blue; }',
+    agent_name: 'Librarian',
+  })
+  await eventually(async () => (await frameHtml(canvas.id, frame.id)).includes('color: blue'))
+  await eventually(async () => {
+    const versions = await (await owner.get(`/api/frames/${frame.id}/versions`)).json()
+    return Array.isArray(versions) && versions.length > 0
+  })
+
+  /* renamed while an agent streams the frame: the stream ends on the new slug */
+  await ok('append_frame_html', {
+    frame_id: frame.id,
+    html_chunk: '<!doctype html><html><head></head><body><span data-doop-component="chip">Ao vivo</span>',
+    start: true,
+    agent_name: 'Claude',
+  })
+  await ok('save_component', { canvas_id: canvas.id, slug: 'chip', new_slug: 'tag', agent_name: 'Librarian' })
+  expect(await frameHtml(canvas.id, frame.id)).toContain('data-doop-component="chip"')
+  await ok('append_frame_html', { frame_id: frame.id, html_chunk: '</body></html>', done: true, agent_name: 'Claude' })
+  const finished = await frameHtml(canvas.id, frame.id)
+  expect(finished).toContain('data-doop-component="tag"')
+  expect(finished).not.toContain('data-doop-component="chip"')
+  expect(finished).toContain('[data-doop-component="tag"] { color: blue; }')
+})
