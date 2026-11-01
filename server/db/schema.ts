@@ -830,3 +830,24 @@ export const slackSessions = pgTable(
     index('slack_sessions_thread_idx').on(t.teamId, t.channelId, t.threadTs),
   ],
 )
+
+/** Agents' own reports about Doop: problems (report_issue, kind 'issue') and
+ *  ideas or praise (share_feedback, kind 'feedback'). Read by instance admins,
+ *  not shown on any canvas. */
+export const agentFeedback = pgTable(
+  'agent_feedback',
+  {
+    id: text('id').primaryKey(),
+    at: bigint('at', { mode: 'number' }).notNull(),
+    kind: text('kind').notNull(),
+    source: text('source').notNull(),
+    category: text('category').notNull(),
+    message: text('message').notNull(),
+    tool: text('tool'),
+    agentName: text('agent_name'),
+    client: text('client'),
+    canvasId: text('canvas_id'),
+    userId: text('user_id'),
+  },
+  (t) => [index('agent_feedback_at_idx').on(t.at)],
+)

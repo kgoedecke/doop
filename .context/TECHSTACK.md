@@ -39,6 +39,19 @@
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
+- Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
+  team through two MCP tools, which the resident agent has under the same names. `report_issue`
+  (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
+  got in their way; `share_feedback` (kind `feedback`: `idea`, `improvement`, `praise`, `other`) is
+  for what would help or what worked. Each takes a message and optionally the tool and canvas
+  involved. Both land in `agent_feedback` with the account and the MCP client's name. `/mcp` is
+  stateless (a fresh server per request), so `handleMcpRequest` remembers the `initialize`
+  clientInfo name per credential (a hash of the bearer) and falls back to the OAuth application's
+  name. Reports go to PostHog as `agent_feedback_reported` with `kind` and share a cap of 20 an hour
+  per account. Instance admins read them at `GET /api/admin/agent-feedback` (Admin → Agent
+  feedback), 50 at a time with `kind`, `q` (searched on the server, account email included) and a
+  `before=<at>:<id>` cursor for older pages. They never reach the humans on a canvas. Tests:
+  `agentFeedback.test.ts`, `agentFeedbackHttp.test.ts` (separate HTTP requests).
 - Claude Code on the desktop (`shared/localAgent.ts`, `server/localAgent.ts`,
   `desktop/src-tauri/src/claude.rs`): the model menu is the CLI's aliases (`CLAUDE_MODEL_ALIASES`),
   which `claude --model` resolves to the newest model the installed CLI knows, plus a pinned

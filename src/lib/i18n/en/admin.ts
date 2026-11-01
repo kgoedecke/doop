@@ -1,5 +1,6 @@
 /** The instance admin index. */
 export const admin = {
+  searchFeedback: 'Search agent feedback',
   notFound: 'Not found',
   notFoundBody: 'This page does not exist for this account.',
   back: 'Back',
