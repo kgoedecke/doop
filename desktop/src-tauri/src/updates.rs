@@ -175,11 +175,7 @@ fn take_kept(app: &AppHandle, wanted: impl FnOnce(&Update) -> bool) -> Option<(U
 async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
     let state = app.state::<UpdateState>();
     if state.page_card.load(Ordering::Acquire) {
-        // what the card shows: the version on offer and the one running
-        let ready = serde_json::json!({
-            "version": update.version,
-            "current": app.package_info().version.to_string(),
-        });
+        let ready = card_offer(app, &update);
         if let Ok(mut kept) = state.ready.lock() {
             *kept = Some((update, bytes));
         }
@@ -212,7 +208,16 @@ async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
     let _ = install(app, update, bytes).await;
 }
 
-/// Installs and restarts into the update; returns only when that failed.
+/// What the card shows: the version on offer and the one running.
+fn card_offer(app: &AppHandle, update: &Update) -> serde_json::Value {
+    serde_json::json!({
+        "version": update.version,
+        "current": app.package_info().version.to_string(),
+    })
+}
+
+/// Installs and restarts into the update; returns only when that failed,
+/// keeping the download so the offer can be taken up again.
 async fn install(app: &AppHandle, update: Update, bytes: Vec<u8>) -> Result<(), String> {
     crate::claude::shutdown(&app.state::<crate::claude::ClaudeState>());
     // Windows does not return from a successful install: the plugin starts
@@ -229,6 +234,9 @@ async fn install(app: &AppHandle, update: Update, bytes: Vec<u8>) -> Result<(), 
             .set_level(MessageLevel::Error)
             .show()
             .await;
+            if let Ok(mut ready) = app.state::<UpdateState>().ready.lock() {
+                *ready = Some((update, bytes));
+            }
             Err(error.to_string())
         }
     }
@@ -241,12 +249,15 @@ pub fn page_loading(app: &AppHandle) {
     }
 }
 
-/// The page listens for `update-ready` and will draw the offer itself.
+/// The page listens for `update-ready` and will draw the offer itself. A
+/// download already waiting is handed straight back, so a reloaded page
+/// shows the card again instead of hiding the update until the next check.
 #[tauri::command]
-pub fn update_card_ready(app: AppHandle) {
-    app.state::<UpdateState>()
-        .page_card
-        .store(true, Ordering::Release);
+pub fn update_card_ready(app: AppHandle) -> Option<serde_json::Value> {
+    let state = app.state::<UpdateState>();
+    state.page_card.store(true, Ordering::Release);
+    let ready = state.ready.lock().ok()?;
+    ready.as_ref().map(|(update, _)| card_offer(&app, update))
 }
 
 /// Restart to update, from the page's card. Not now needs no call: the

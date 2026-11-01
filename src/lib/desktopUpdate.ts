@@ -1,7 +1,7 @@
 /* The desktop shell's update offer (desktop/src-tauri/src/updates.rs). Once
    the page listens for `update-ready` it tells the shell through
    `update_card_ready`, and from then on a downloaded update is offered here
-   instead of in a native dialog. Outside the shell, and in shells older than
+   instead of in a native dialog; one already waiting comes back as its answer. Outside the shell, and in shells older than
    the card (no __DOOP_UPDATE_CARD__), nothing is listened for or sent. */
 
 export const UPDATE_READY_EVENT = 'update-ready'
@@ -41,8 +41,12 @@ export function listenForUpdates(onOffer: (offer: UpdateOffer) => void): () => v
     .then((off) => {
       if (stopped) return off()
       unlisten = off
-      /* only once the listener is in place, so no offer falls between */
+      /* only once the listener is in place, so no offer falls between; a
+         download already waiting (this page is a reload) comes back */
       return tauri.core?.invoke?.('update_card_ready')
+    })
+    .then((waiting) => {
+      if (!stopped && isUpdateOffer(waiting)) onOffer(waiting)
     })
     .catch(console.error)
   return () => {

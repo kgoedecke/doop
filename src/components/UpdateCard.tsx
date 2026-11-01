@@ -10,12 +10,20 @@ import { cn } from '@/lib/utils'
  *  mounted once over every screen, empty until the shell offers an update. */
 export function UpdateCard() {
   const [offer, setOffer] = useState<UpdateOffer | null>(null)
-  const [restarting, setRestarting] = useState(false)
   useEffect(() => listenForUpdates(setOffer), [])
-  if (!offer) return null
+  /* the live region stays mounted so the card is announced when it appears,
+     without taking focus from whatever the person is doing */
+  return (
+    <div aria-live="polite" className="fixed bottom-4 left-4 z-[80]">
+      {offer && <UpdateCardControls offer={offer} onLater={() => setOffer(null)} />}
+    </div>
+  )
+}
+
+function UpdateCardControls({ offer, onLater }: { offer: UpdateOffer; onLater: () => void }) {
+  const [restarting, setRestarting] = useState(false)
   return (
     <UpdateCardView
-      className="fixed bottom-4 left-4 z-[80]"
       version={offer.version}
       restarting={restarting}
       onRestart={() => {
@@ -26,7 +34,7 @@ export function UpdateCard() {
       }}
       /* the download stays with the shell: offered again by the next check
          and, on macOS, installed on quit */
-      onLater={() => setOffer(null)}
+      onLater={onLater}
     />
   )
 }
@@ -43,7 +51,7 @@ export function UpdateCardView({ version, restarting = false, onRestart, onLater
   const t = useT()
   return (
     <Card
-      role="alertdialog"
+      role="region"
       aria-labelledby="update-card-title"
       aria-describedby="update-card-body"
       className={cn('w-[300px] rounded-panel p-4 shadow-pop animate-[chip-in_0.2s_ease]', className)}
@@ -57,6 +65,7 @@ export function UpdateCardView({ version, restarting = false, onRestart, onLater
       <p id="update-card-body" className="mt-1 text-pretty text-body text-ink-soft">
         {t('shell.updateBody', { version })}
       </p>
+      <p className="mt-1 text-pretty text-caption text-ink-faint">{t('shell.updateAgentNote')}</p>
       <div className="mt-4 flex gap-2">
         <Button variant="primary" className="flex-1" disabled={restarting} onClick={onRestart}>
           {restarting ? t('shell.updateRestarting') : t('shell.updateRestart')}

@@ -5,13 +5,13 @@ afterEach(() => vi.unstubAllGlobals())
 
 type Handler = (event: { payload: unknown }) => void
 
-function stubShell() {
+function stubShell(waiting: unknown = null) {
   const handlers = new Map<string, Handler>()
   const unlisten = vi.fn()
   const calls: string[] = []
   const invoke = vi.fn((command: string) => {
     calls.push(`invoke:${command}`)
-    return Promise.resolve()
+    return Promise.resolve(command === 'update_card_ready' ? waiting : undefined)
   })
   const listen = vi.fn((name: string, handler: Handler) => {
     calls.push(`listen:${name}`)
@@ -42,6 +42,14 @@ it('tells the shell it draws the card only once it is listening', async () => {
   expect(onOffer.mock.calls).toEqual([[{ version: '0.11.0', current: '0.10.0' }]])
   stop()
   expect(shell.unlisten).toHaveBeenCalled()
+})
+
+it('shows a download already waiting when a reloaded page claims the card', async () => {
+  stubShell({ version: '0.11.0', current: '0.10.0' })
+  const onOffer = vi.fn()
+  listenForUpdates(onOffer)
+  await flush()
+  expect(onOffer.mock.calls).toEqual([[{ version: '0.11.0', current: '0.10.0' }]])
 })
 
 it('does not claim the card when unsubscribed before the listener is in place', async () => {

@@ -11,6 +11,7 @@ export const shell = {
   logOut: 'Log out',
   updateTitle: 'Update available',
   updateBody: 'Doop {version} is ready. Restart to apply the update.',
+  updateAgentNote: 'Restarting stops an agent run in progress.',
   updateRestart: 'Restart to update',
   updateRestarting: 'Restarting…',
   updateLater: 'Not now',

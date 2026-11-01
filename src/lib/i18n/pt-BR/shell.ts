@@ -12,6 +12,7 @@ export const shell: Catalog['shell'] = {
   logOut: 'Sair',
   updateTitle: 'Atualização disponível',
   updateBody: 'O Doop {version} está pronto. Reinicie para aplicar a atualização.',
+  updateAgentNote: 'Reiniciar interrompe uma execução de agente em andamento.',
   updateRestart: 'Reiniciar e atualizar',
   updateRestarting: 'Reiniciando…',
   updateLater: 'Agora não',
