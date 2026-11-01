@@ -3,6 +3,7 @@ export const shell = {
   account: 'Account',
   teamPlan: 'Team plan',
   personalPlan: 'Personal plan',
+  getDesktopApp: 'Get desktop app',
   settings: 'Settings',
   admin: 'Admin',
   helpDocs: 'Help & docs',
