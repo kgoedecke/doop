@@ -266,28 +266,42 @@ function scriptHash(text: string): string {
  *  bound to the instances it has not set up yet, then again for every
  *  instance added later: an insert morphed into a live frame does not rerun
  *  its scripts. An element is handed to the script once, and the same script
- *  executed twice in one document does nothing the second time. */
+ *  executed twice in one document does nothing the second time. One version
+ *  of a component's script is live per document: an edited one takes over,
+ *  and the one it replaced stops watching for instances. */
 export function componentScript(slug: string, js: string): string {
   const selector = JSON.stringify(`[data-doop-component="${slug}"]`)
-  const key = JSON.stringify(`${slug}:${scriptHash(js)}`)
+  const name = JSON.stringify(slug)
+  const version = JSON.stringify(scriptHash(js))
   return [
     '(function () {',
     '  var registry = (window.__doopComponents = window.__doopComponents || {})',
-    `  if (registry[${key}]) return`,
-    `  registry[${key}] = true`,
+    `  if (registry[${name}] === ${version}) return`,
+    `  registry[${name}] = ${version}`,
+    `  var current = function () { return registry[${name}] === ${version} }`,
     '  var seen = new WeakSet()',
+    '  var observer = null',
+    /* the component's own code runs in a scope of its own, so its names never shadow these */
+    '  var setup = function (elements) {',
+    js,
+    '  }',
     '  var run = function () {',
+    '    if (!current()) {',
+    '      if (observer) observer.disconnect()',
+    '      return',
+    '    }',
     `    var elements = Array.prototype.slice.call(document.querySelectorAll(${selector})).filter(function (el) {`,
     '      if (seen.has(el)) return false',
     '      seen.add(el)',
     '      return true',
     '    })',
-    '    if (!elements.length) return',
-    js,
+    '    if (elements.length) setup(elements)',
     '  }',
     '  var start = function () {',
+    '    if (!current()) return',
     '    run()',
-    '    new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true })',
+    '    observer = new MutationObserver(run)',
+    '    observer.observe(document.documentElement, { childList: true, subtree: true })',
     '  }',
     "  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start)",
     '  else start()',

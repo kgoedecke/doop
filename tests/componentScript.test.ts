@@ -28,3 +28,23 @@ it('sets up instances added after the script ran, once each, and never twice for
   expect(first.dataset.runs).toBe('1')
   expect(second!.dataset.runs).toBe('1')
 })
+
+it('hands later instances only to the edited script, never to the one it replaced', async () => {
+  delete (window as { __doopComponents?: unknown }).__doopComponents
+  document.body.innerHTML = '<button data-doop-component="toggle">A</button>'
+  execute(componentScript('toggle', 'elements.forEach(function (el) { el.dataset.old = "1" })'))
+  execute(componentScript('toggle', 'elements.forEach(function (el) { el.dataset.edited = "1" })'))
+
+  document.body.insertAdjacentHTML('beforeend', '<button data-doop-component="toggle">B</button>')
+  await tick()
+  const [, added] = document.querySelectorAll<HTMLElement>('[data-doop-component="toggle"]')
+  expect(added!.dataset.edited).toBe('1')
+  expect(added!.dataset.old).toBeUndefined()
+})
+
+it('keeps the component code in a scope of its own', () => {
+  delete (window as { __doopComponents?: unknown }).__doopComponents
+  document.body.innerHTML = '<button data-doop-component="toggle">A</button>'
+  execute(componentScript('toggle', 'var observer = 1; var seen = 2; ' + SCRIPT))
+  expect(document.querySelector<HTMLElement>('[data-doop-component="toggle"]')!.dataset.runs).toBe('1')
+})

@@ -35,6 +35,12 @@ export function useLibrary(canvasId?: string, workspaceId?: string) {
   const [refresh, setRefresh] = useState(0)
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [seenTarget, setSeenTarget] = useState(target)
+  if (seenTarget !== target) {
+    setSeenTarget(target)
+    setSnapshot(null)
+    setError(null)
+  }
 
   useEffect(() => {
     if (canvasId || !workspaceId) return
@@ -81,7 +87,9 @@ export function useLibrary(canvasId?: string, workspaceId?: string) {
     [target],
   )
 
-  return { target, snapshot, error, run }
+  /* a failed re-read keeps the library already shown (and any editor open on it): the error only
+     stands in for a library that never loaded */
+  return { target, snapshot, error: snapshot ? null : error, run }
 }
 
 const PRESET_GROUP_LABELS: Record<string, PlainMessageKey> = {
