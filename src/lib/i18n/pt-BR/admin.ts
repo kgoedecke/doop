@@ -1,4 +1,5 @@
-import type { Catalog } from '..'
+import type {
+  searchFeedback: 'Buscar feedback dos agentes', Catalog } from '..'
 
 export const admin: Catalog['admin'] = {
   notFound: 'Não encontrado',

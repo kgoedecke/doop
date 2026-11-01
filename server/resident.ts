@@ -24,6 +24,8 @@ import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
 import { retryModelTurn } from './modelTurnRetry.ts'
+import { recordAgentFeedback } from './agentFeedback.ts'
+import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCategory } from '../shared/agentFeedback.ts'
 
 /**
  * The resident design team: a server-side Claude tool loop, run once per
@@ -1152,6 +1154,37 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'report_issue',
+    description:
+      'Tell the Doop team where Doop itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It never reaches the humans on the canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: [...AGENT_ISSUE_CATEGORIES] },
+        message: { type: 'string', description: 'What you tried, what happened, and what you expected or needed.' },
+        tool: { type: 'string', description: 'The tool involved, if any' },
+      },
+      required: ['category', 'message'],
+    },
+  },
+  {
+    name: 'share_feedback',
+    description:
+      'Tell the Doop team how Doop could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It never reaches the humans on the canvas. Never include secrets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: [...AGENT_IDEA_CATEGORIES] },
+        message: {
+          type: 'string',
+          description: 'What you were doing and what would have helped, or what worked well.',
+        },
+        tool: { type: 'string', description: 'The tool involved, if any' },
+      },
+      required: ['category', 'message'],
+    },
+  },
+  {
     name: 'set_guidelines',
     description:
       "Create, replace or delete a named style guide on this canvas (markdown, max 24,000 chars; empty string deletes). Write rules other designers and agents can execute directly: palette hexes, font families, spacing/radius/shadow conventions, layout recipes, do/don't lists. Also how you persist a redesign audit (binding Direction + descriptive source baseline) so every later job inherits it.",
@@ -1694,6 +1727,24 @@ async function execTool(
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid decision')
         }
+      }
+      case 'report_issue':
+      case 'share_feedback': {
+        const issue = block.name === 'report_issue'
+        const categories: readonly string[] = issue ? AGENT_ISSUE_CATEGORIES : AGENT_IDEA_CATEGORIES
+        const picked = String(input.category ?? '')
+        const category = categories.includes(picked) ? (picked as AgentFeedbackCategory) : 'other'
+        const saved = await recordAgentFeedback({
+          kind: issue ? 'issue' : 'feedback',
+          source: 'resident',
+          category,
+          message: String(input.message ?? ''),
+          tool: typeof input.tool === 'string' ? input.tool : undefined,
+          agentName: actor.name,
+          canvasId,
+          userId: runState.payerId ?? store.getCanvas(canvasId)?.ownerId,
+        })
+        return saved.ok ? ok('sent to the Doop team — carry on with the task') : fail(saved.error)
       }
       case 'set_guidelines': {
         const raw = block.input as { name?: string; markdown?: string; title?: string }
