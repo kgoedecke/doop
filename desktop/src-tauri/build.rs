@@ -12,6 +12,8 @@ fn main() {
             "claude_add_extension",
             "codex_add_mcp",
             "view_menu_state",
+            "update_card_ready",
+            "update_restart",
         ]),
     ))
     .expect("failed to build desktop permissions");

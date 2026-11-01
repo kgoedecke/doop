@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { AppRail, railLayout } from '@/components/AppRail'
 import { CanvasSearchModal } from '@/components/CanvasSearchModal'
+import { UpdateCardView } from '@/components/UpdateCard'
 import {
   DashContent,
   DashHeader,
@@ -119,4 +120,15 @@ export const RailWithGroup: Story = {
 export const SearchPalette: Story = {
   name: 'Search palette',
   render: () => <CanvasSearchModal canvases={canvases} onOpen={() => {}} onClose={() => {}} />,
+}
+
+/** The desktop app's offer once a new version has downloaded. */
+export const UpdateAvailable: Story = {
+  name: 'Update available',
+  render: () => (
+    <div className="flex gap-6 p-6">
+      <UpdateCardView version="0.11.0" onRestart={() => {}} onLater={() => {}} />
+      <UpdateCardView version="0.11.0" restarting onRestart={() => {}} onLater={() => {}} />
+    </div>
+  ),
 }

@@ -47,7 +47,12 @@ in `.github/actions/setup-desktop`:
   emit signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
   it onto the fixed `desktop-updates` prerelease, which `doop.design/desktop/latest.json`
   redirects to (served by the hosted deployment). A tag fails without the key. Installed official
-  shells check at launch and daily, download in the background and offer a restart. The key
+  shells check at launch and daily, download in the background and offer a restart: in the
+  page's "Update available" card (`src/components/UpdateCard.tsx`, `src/lib/desktopUpdate.ts`),
+  which claims the offer through `update_card_ready` once it listens for `update-ready` and answers
+  with `update_restart`, or in a native dialog while no page has claimed it (each page load resets
+  the claim, so an older web build still gets the dialog). Not now keeps the download for the
+  next check and, on macOS, installs it on quit. The key
   pair lives in the signing backup; its public half is `plugins.updater.pubkey`.
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
   workflow artifacts instead (keeps the pipeline validated without cutting a release).
