@@ -943,105 +943,92 @@ body:has([data-panel-resizing]) * {
 }
 
 /* Rail icons move once when their row is hovered or focused, each glyph in
-   its own small way (drawn here in CSS over the Lucide markup). AppRail marks its two layouts with `data-icon-motion`; the
-   selectors key on Lucide's per-glyph class and child order, so swapping a
-   glyph in icons.tsx means revisiting its rule here. */
-[data-icon-motion] svg.lucide * {
+   its own small way (drawn here in CSS over the Hugeicons markup). AppRail marks its two layouts
+   with `data-icon-motion`; icons.tsx names each rail glyph with `data-icon`, and the selectors key
+   on that glyph's child order, so swapping a glyph in icons.tsx means revisiting its rule here. */
+[data-icon-motion] svg[data-icon] * {
   transform-box: fill-box;
   transform-origin: center;
 }
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg.lucide {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg[data-icon] {
   --icon-motion: 0.5s var(--ease-out-cubic);
 }
 
 /* all canvases: the four tiles dip in turn */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='grid'] path {
   animation: icon-dip var(--icon-motion);
 }
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect:nth-child(2) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='grid'] path:nth-child(2) {
   animation-delay: 0.06s;
 }
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect:nth-child(3) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='grid'] path:nth-child(3) {
   animation-delay: 0.12s;
 }
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-layout-grid rect:nth-child(4) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='grid'] path:nth-child(4) {
   animation-delay: 0.18s;
 }
 
 /* owned by me: the head nods */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-user circle,
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-users circle {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='user'] circle,
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='users'] circle {
   animation: icon-nod var(--icon-motion);
 }
 /* shared with me: the second person steps in behind */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-users path:is(:nth-child(2), :nth-child(3)) {
+[data-icon-motion]
+  :is(button, a):is(:hover, :focus-visible)
+  > [data-icon='users']
+  path:is(:nth-child(3), :nth-child(4)) {
   animation: icon-step-in var(--icon-motion);
 }
 
 /* a workspace: the windows flick on, the door opens upward */
-[data-icon-motion]
-  :is(button, a):is(:hover, :focus-visible)
-  > .lucide-building-2
-  path:is(:nth-child(1), :nth-child(2)) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='building'] path:nth-child(3) {
   animation: icon-blink var(--icon-motion);
 }
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-building-2 path:nth-child(2) {
-  animation-delay: 0.08s;
-}
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-building-2 path:nth-child(3) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='building'] path:nth-child(4) {
   transform-origin: bottom;
   animation: icon-rise var(--icon-motion);
 }
 
 /* new workspace and connect an agent: the plus turns a quarter */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-folder-plus,
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-circle-plus {
-  --plus-x: 12px;
-  --plus-y: 13px;
-}
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-circle-plus {
-  --plus-y: 12px;
-}
-[data-icon-motion]
-  :is(button, a):is(:hover, :focus-visible)
-  > .lucide-folder-plus
-  path:is(:nth-child(1), :nth-child(2)),
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-circle-plus path {
-  transform-box: view-box;
-  transform-origin: var(--plus-x) var(--plus-y);
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='folder-plus'] path:nth-child(2),
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='circle-plus'] path {
   animation: icon-quarter-turn var(--icon-motion);
 }
 
 /* community: the meridian swings round the globe */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-globe path:nth-child(2) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='globe'] path:nth-child(2) {
   animation: icon-spin-y 0.6s var(--ease-in-out-cubic);
 }
 
-/* automations: the link draws from one step to the next, which answers */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-workflow path {
-  /* the connector is ~11 units long: one dash covers it */
-  stroke-dasharray: 12;
+/* automations: the links draw from one step to the next, and the cue between them answers */
+[data-icon-motion]
+  :is(button, a):is(:hover, :focus-visible)
+  > [data-icon='workflow']
+  path:is(:nth-child(3), :nth-child(4)) {
+  /* each connector is ~17 units long: one dash covers it */
+  stroke-dasharray: 18;
   animation: icon-draw var(--icon-motion);
 }
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-workflow rect:nth-child(3) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='workflow'] path:nth-child(5) {
   animation: icon-dip var(--icon-motion) 0.22s;
 }
 
-/* integrations: the loose block lifts off and settles back in */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-blocks rect {
+/* integrations: the loose block on top lifts off and settles back in */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='blocks'] path:nth-child(3) {
   animation: icon-lift var(--icon-motion);
 }
 
 /* search: the lens takes a look around */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg.lucide-search {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg[data-icon='search'] {
   animation: icon-look var(--icon-motion);
 }
 
 /* hide and show the sidebar: the chevron points the way */
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-panel-left-close path:nth-child(3) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='panel-close'] path:nth-child(3) {
   animation: icon-nudge-left var(--icon-motion);
 }
-[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-panel-left-open path:nth-child(3) {
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > [data-icon='panel-open'] path:nth-child(3) {
   animation: icon-nudge-right var(--icon-motion);
 }
 
@@ -1087,7 +1074,7 @@ body:has([data-panel-resizing]) * {
 }
 @keyframes icon-draw {
   from {
-    stroke-dashoffset: 12;
+    stroke-dashoffset: 18;
   }
 }
 @keyframes icon-lift {
@@ -1115,8 +1102,8 @@ body:has([data-panel-resizing]) * {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-icon-motion] svg.lucide,
-  [data-icon-motion] svg.lucide * {
+  [data-icon-motion] svg[data-icon],
+  [data-icon-motion] svg[data-icon] * {
     animation: none !important;
   }
 }

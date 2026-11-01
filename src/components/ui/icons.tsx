@@ -1,6 +1,7 @@
-/** Doop's UI icon set: Lucide (ISC), drawn on a 24 grid with round caps and
- *  joins at a 1.15 stroke — the hairline weight of the white system, so a
- *  glyph sits as quietly as the 1px rings around it.
+/** Doop's UI icon set: Hugeicons' free stroke set (MIT), drawn on a 24 grid
+ *  with round caps and joins and soft, squircle-cornered shapes, at the
+ *  ICON_STROKE weight of the white system, so a glyph sits as quietly as the
+ *  1px rings around it.
  *
  *  Every icon is re-exported under the name the app already uses, wrapped to
  *  default to 16px, the size inside a button. `size` picks a named step from
@@ -10,116 +11,118 @@
  *  or a `size-*` class override the default; a caller's own `strokeWidth`
  *  always wins. */
 
-import type { ComponentType, SVGProps } from 'react'
+import type { SVGProps } from 'react'
 import {
-  Activity,
-  AlignStartVertical,
-  AlignCenterVertical,
-  AlignEndVertical,
-  AlignStartHorizontal,
-  AlignCenterHorizontal,
-  AlignEndHorizontal,
-  FlipHorizontal2,
-  FlipVertical2,
-  CircleDashed,
-  Droplet,
-  Radius,
-  AlignCenter,
-  AlignJustify,
-  AlignLeft,
-  AlignRight,
-  ArrowLeft,
-  ArrowDown,
-  ArrowRight,
-  ArrowUp,
-  Bell,
-  Blocks,
-  Calendar,
-  BookOpen,
-  Brain,
-  Building2,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsDownUp,
-  Circle,
-  CircleHelp,
-  CirclePlus,
-  Clipboard,
-  CodeXml,
-  Clock,
-  Copy,
-  CreditCard,
-  Download,
-  Ellipsis,
-  Eye,
-  EyeOff,
-  ExternalLink,
-  Folder,
-  FolderPlus,
-  File,
-  FileText,
-  Frame,
-  Globe,
-  Hand,
-  Image,
-  Key,
-  Layers,
-  LayoutGrid,
-  LayoutTemplate,
-  Link2,
-  Lock,
-  LogOut,
-  Menu,
-  Minus,
-  MousePointer2,
-  MessageCircle,
-  MessageSquare,
-  Monitor,
-  Moon,
-  PanelLeft,
-  PanelsLeftRight,
-  PictureInPicture2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  Paperclip,
-  Pencil,
-  PencilRuler,
-  PenTool,
-  Play,
-  Plus,
-  Puzzle,
-  RadioTower,
-  RefreshCw,
-  RotateCcw,
-  Route,
-  Search,
-  Settings,
-  Share,
-  Share2,
-  SlidersHorizontal,
-  AlignHorizontalSpaceAround,
-  AlignVerticalSpaceAround,
-  WrapText,
-  SquareDashed,
-  Shield,
-  Sparkles,
-  Square,
-  Sun,
-  Trash2,
-  Type,
-  Upload,
-  Unlink2,
-  User,
-  Users,
-  Workflow,
-  Flag,
-  MousePointerClick,
-  SquareMousePointer,
-  X,
-} from 'lucide-react'
+  Activity01Icon as Activity01,
+  AlignEndHorizontalIcon as AlignEndHorizontal,
+  AlignEndVerticalIcon as AlignEndVertical,
+  AlignHorizontalCenterIcon as AlignHorizontalCenter,
+  AlignHorizontalSpaceAroundIcon as AlignHorizontalSpaceAround,
+  AlignStartHorizontalIcon as AlignStartHorizontal,
+  AlignStartVerticalIcon as AlignStartVertical,
+  AlignVerticalCenterIcon as AlignVerticalCenter,
+  AlignVerticalSpaceAroundIcon as AlignVerticalSpaceAround,
+  ArrowDown02Icon as ArrowDown02,
+  ArrowLeft02Icon as ArrowLeft02,
+  ArrowRight02Icon as ArrowRight02,
+  ArrowUp02Icon as ArrowUp02,
+  BellIcon as Bell,
+  BlocksIcon as Blocks,
+  BookOpen01Icon as BookOpen01,
+  BrainIcon as Brain,
+  Building06Icon as Building06,
+  Calendar03Icon as Calendar03,
+  CheckIcon as Check,
+  ChevronDownIcon as ChevronDown,
+  ChevronLeftIcon as ChevronLeft,
+  ChevronRightIcon as ChevronRight,
+  ChevronsDownUpIcon as ChevronsDownUp,
+  CircleIcon as Circle,
+  CircleDashedIcon as CircleDashed,
+  CirclePlusIcon as CirclePlus,
+  ClipboardIcon as Clipboard,
+  Clock01Icon as Clock01,
+  CodeXmlIcon as CodeXml,
+  CopyIcon as Copy,
+  CreditCardIcon as CreditCard,
+  Cursor02Icon as Cursor02,
+  Delete02Icon as Delete02,
+  Download01Icon as Download01,
+  DropletIcon as Droplet,
+  EllipsisIcon as Ellipsis,
+  ExternalLinkIcon as ExternalLink,
+  EyeIcon as Eye,
+  EyeOffIcon as EyeOff,
+  FileEmpty02Icon as FileEmpty02,
+  FileTextIcon as FileText,
+  Flag02Icon as Flag02,
+  FlipHorizontalIcon as FlipHorizontal,
+  FlipVerticalIcon as FlipVertical,
+  Folder01Icon as Folder01,
+  FolderPlusIcon as FolderPlus,
+  FrameIcon as Frame,
+  GithubIcon as Github,
+  Globe02Icon as Globe02,
+  GridViewIcon as GridView,
+  HandIcon as Hand,
+  HelpCircleIcon as HelpCircle,
+  HistoryIcon as History,
+  Image01Icon as Image01,
+  Key01Icon as Key01,
+  Layers01Icon as Layers01,
+  Layout3ColumnIcon as Layout3Column,
+  LayoutTemplateIcon as LayoutTemplate,
+  Link02Icon as Link02,
+  LogOutIcon as LogOut,
+  MenuIcon as Menu,
+  MessageCircleIcon as MessageCircle,
+  MessageSquareIcon as MessageSquare,
+  MinusIcon as Minus,
+  MonitorIcon as Monitor,
+  Moon02Icon as Moon02,
+  MousePointerClickIcon as MousePointerClick,
+  PanelLeftIcon as PanelLeft,
+  PanelLeftCloseIcon as PanelLeftClose,
+  PanelLeftOpenIcon as PanelLeftOpen,
+  PanelRightCloseIcon as PanelRightClose,
+  PaperclipIcon as Paperclip,
+  PenTool03Icon as PenTool03,
+  PencilEdit01Icon as PencilEdit01,
+  PencilRulerIcon as PencilRuler,
+  PictureInPicture01Icon as PictureInPicture01,
+  PlayIcon as Play,
+  PlusIcon as Plus,
+  PuzzleIcon as Puzzle,
+  RadioTowerIcon as RadioTower,
+  RadiusIcon as Radius,
+  RefreshCwIcon as RefreshCw,
+  Route01Icon as Route01,
+  Search01Icon as Search01,
+  Settings02Icon as Settings02,
+  Share03Icon as Share03,
+  Share08Icon as Share08,
+  Shield01Icon as Shield01,
+  SlidersHorizontalIcon as SlidersHorizontal,
+  SparklesIcon as Sparkles,
+  SquareIcon as Square,
+  SquareDashedIcon as SquareDashed,
+  SquareLock02Icon as SquareLock02,
+  SquareMousePointerIcon as SquareMousePointer,
+  Sun03Icon as Sun03,
+  TextAlignCenterIcon as TextAlignCenter,
+  TextAlignJustifyIcon as TextAlignJustify,
+  TextAlignLeftIcon as TextAlignLeft,
+  TextAlignRightIcon as TextAlignRight,
+  TextWrapIcon as TextWrap,
+  TypeIcon as Type,
+  Unlink02Icon as Unlink02,
+  Upload01Icon as Upload01,
+  UserIcon as User,
+  UsersIcon as Users,
+  WorkflowIcon as Workflow,
+  XIcon as X,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
 
@@ -143,7 +146,7 @@ function px(size: IconSize = 'button') {
    TabsTrigger size any descendant svg without a `size-*` class to 16px, and
    a stylesheet rule beats an attribute but not an inline style. Unasked, the
    attributes alone keep the 16px default overridable by those parents. */
-function sized({ size, style, ...props }: IconProps): SvgProps {
+function sized({ size, style, ...props }: Omit<IconProps, 'strokeWidth'>) {
   const side = px(size)
   return {
     width: side,
@@ -153,164 +156,152 @@ function sized({ size, style, ...props }: IconProps): SvgProps {
   }
 }
 
-function icon(Base: ComponentType<SvgProps>) {
-  return function Icon(props: IconProps) {
-    return <Base strokeWidth={ICON_STROKE} aria-hidden {...sized(props)} />
+/** `motion` names a rail glyph whose hover motion styles.css draws
+ *  (`[data-icon-motion] svg[data-icon="…"]`), keyed on the glyph's child order,
+ *  so swapping that glyph means revisiting its rule there. */
+function icon(glyph: IconSvgElement, motion?: string) {
+  return function Icon({ strokeWidth = ICON_STROKE, ...props }: IconProps) {
+    return (
+      <HugeiconsIcon icon={glyph} strokeWidth={Number(strokeWidth)} data-icon={motion} aria-hidden {...sized(props)} />
+    )
   }
 }
 
 export const XIcon = icon(X)
-export const ArrowDownIcon = icon(ArrowDown)
+export const ArrowDownIcon = icon(ArrowDown02)
 export const HorizontalPaddingIcon = icon(AlignHorizontalSpaceAround)
 export const VerticalPaddingIcon = icon(AlignVerticalSpaceAround)
-export const WrapTextIcon = icon(WrapText)
+export const WrapTextIcon = icon(TextWrap)
 export const SquareDashedIcon = icon(SquareDashed)
 export const MoreHorizontalIcon = icon(Ellipsis)
-export const ShareIcon = icon(Share2)
+export const ShareIcon = icon(Share08)
 export const CopyIcon = icon(Copy)
 export const ClipboardIcon = icon(Clipboard)
-export const TrashIcon = icon(Trash2)
+export const TrashIcon = icon(Delete02)
 export const CheckIcon = icon(Check)
 export const ChevronRightIcon = icon(ChevronRight)
 export const ChevronDownIcon = icon(ChevronDown)
 export const AlignStartVerticalIcon = icon(AlignStartVertical)
-export const AlignCenterVerticalIcon = icon(AlignCenterVertical)
+export const AlignCenterVerticalIcon = icon(AlignHorizontalCenter)
 export const AlignEndVerticalIcon = icon(AlignEndVertical)
 export const AlignStartHorizontalIcon = icon(AlignStartHorizontal)
-export const AlignCenterHorizontalIcon = icon(AlignCenterHorizontal)
+export const AlignCenterHorizontalIcon = icon(AlignVerticalCenter)
 export const AlignEndHorizontalIcon = icon(AlignEndHorizontal)
-export const FlipHorizontal2Icon = icon(FlipHorizontal2)
-export const FlipVertical2Icon = icon(FlipVertical2)
+export const FlipHorizontal2Icon = icon(FlipHorizontal)
+export const FlipVertical2Icon = icon(FlipVertical)
 export const CircleDashedIcon = icon(CircleDashed)
 export const DropletIcon = icon(Droplet)
 export const RadiusIcon = icon(Radius)
-export const AlignLeftIcon = icon(AlignLeft)
-export const AlignCenterIcon = icon(AlignCenter)
-export const AlignRightIcon = icon(AlignRight)
-export const AlignJustifyIcon = icon(AlignJustify)
-export const LinkIcon = icon(Link2)
-export const UnlinkIcon = icon(Unlink2)
-/** Lucide dropped its brand marks; this is its last GitHub outline, kept on
- *  the same grid and stroke as the rest of the set. */
-export function GithubIcon(props: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={ICON_STROKE}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      {...sized(props)}
-    >
-      <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
-      <path d="M9 18c-4.51 2-5-2-7-2" />
-    </svg>
-  )
-}
+export const AlignLeftIcon = icon(TextAlignLeft)
+export const AlignCenterIcon = icon(TextAlignCenter)
+export const AlignRightIcon = icon(TextAlignRight)
+export const AlignJustifyIcon = icon(TextAlignJustify)
+export const LinkIcon = icon(Link02)
+export const UnlinkIcon = icon(Unlink02)
+export const GithubIcon = icon(Github)
 export const SyncIcon = icon(RefreshCw)
-export const ImportIcon = icon(Download)
+export const ImportIcon = icon(Download01)
 /** Import's counterpart: the arrow leaving the box. */
 export const ExportIcon = icon(ExternalLink)
-export const PulseIcon = icon(Activity)
+export const PulseIcon = icon(Activity01)
 export const BellIcon = icon(Bell)
 export const SparkIcon = icon(Sparkles)
-export const SearchIcon = icon(Search)
+export const SearchIcon = icon(Search01, 'search')
 export const PlusIcon = icon(Plus)
 export const CollapseAllIcon = icon(ChevronsDownUp)
 export const PanelLeftIcon = icon(PanelLeft)
-export const PanelCollapseIcon = icon(PanelLeftClose)
-export const PanelExpandIcon = icon(PanelLeftOpen)
+/* Hugeicons draws its left-panel chevrons the other way round from their
+   names: PanelLeftOpen's points left, the way collapsing goes. */
+export const PanelCollapseIcon = icon(PanelLeftOpen, 'panel-close')
+export const PanelExpandIcon = icon(PanelLeftClose, 'panel-open')
 export const PanelCollapseRightIcon = icon(PanelRightClose)
 /** the canvas panels' two layouts (Settings → Appearance) */
-export const PanelsFloatingIcon = icon(PictureInPicture2)
-export const PanelsDockedIcon = icon(PanelsLeftRight)
-export const LayersIcon = icon(Layers)
+export const PanelsFloatingIcon = icon(PictureInPicture01)
+export const PanelsDockedIcon = icon(Layout3Column)
+export const LayersIcon = icon(Layers01)
 export const FrameIcon = icon(Frame)
 /** a page of the canvas, in the Layers panel's Pages list */
-export const PageIcon = icon(File)
+export const PageIcon = icon(FileEmpty02)
 /** a PDF document, the Export modal's PDF destination */
 export const PdfIcon = icon(FileText)
 export const BoxIcon = icon(Square)
 export const TextIcon = icon(Type)
-export const ImageIcon = icon(Image)
-export const VectorIcon = icon(PenTool)
+export const ImageIcon = icon(Image01)
+export const VectorIcon = icon(PenTool03)
 export const PlayIcon = icon(Play)
-export const ArrowUpIcon = icon(ArrowUp)
-export const ArrowLeftIcon = icon(ArrowLeft)
-export const ArrowRightIcon = icon(ArrowRight)
+export const ArrowUpIcon = icon(ArrowUp02)
+export const ArrowLeftIcon = icon(ArrowLeft02)
+export const ArrowRightIcon = icon(ArrowRight02)
 export const ChevronLeftIcon = icon(ChevronLeft)
-export const GridIcon = icon(LayoutGrid)
+export const GridIcon = icon(GridView, 'grid')
 export const ListIcon = icon(Menu)
-export const UserIcon = icon(User)
-export const UsersIcon = icon(Users)
-export const ClockIcon = icon(Clock)
-export const GearIcon = icon(Settings)
-export const ShieldIcon = icon(Shield)
-export const HelpIcon = icon(CircleHelp)
-export const KeyIcon = icon(Key)
+export const UserIcon = icon(User, 'user')
+export const UsersIcon = icon(Users, 'users')
+export const ClockIcon = icon(Clock01)
+export const GearIcon = icon(Settings02)
+export const ShieldIcon = icon(Shield01)
+export const HelpIcon = icon(HelpCircle)
+export const KeyIcon = icon(Key01)
 export const LogOutIcon = icon(LogOut)
 export const AttachmentIcon = icon(Paperclip)
 export const BrainIcon = icon(Brain)
 /** a shared workspace — the org's building */
-export const BuildingIcon = icon(Building2)
+export const BuildingIcon = icon(Building06, 'building')
 export const CreditCardIcon = icon(CreditCard)
-export const LockIcon = icon(Lock)
+export const LockIcon = icon(SquareLock02)
 export const DesktopIcon = icon(Monitor)
-export const DownloadIcon = icon(Download)
+export const DownloadIcon = icon(Download01)
 export const PuzzleIcon = icon(Puzzle)
 /* the theme switch: sun for light, moon for dark */
-export const SunIcon = icon(Sun)
-export const MoonIcon = icon(Moon)
+export const SunIcon = icon(Sun03)
+export const MoonIcon = icon(Moon02)
 
 /* the editor chrome's own glyphs */
-export const FolderIcon = icon(Folder)
-export const BookOpenIcon = icon(BookOpen)
+export const FolderIcon = icon(Folder01)
+export const BookOpenIcon = icon(BookOpen01)
 export const SlidersIcon = icon(SlidersHorizontal)
-export const PointerIcon = icon(MousePointer2)
+export const PointerIcon = icon(Cursor02)
 export const HandIcon = icon(Hand)
 /** the select tool's arrow — the same glyph as PointerIcon */
-export const CursorIcon = icon(MousePointer2)
+export const CursorIcon = icon(Cursor02)
 /** comments: the round bubble, as on the side panel's Comments tab in the design */
 export const CommentIcon = icon(MessageCircle)
 export const CodeIcon = icon(CodeXml)
-export const EditIcon = icon(Pencil)
+export const EditIcon = icon(PencilEdit01)
 export const EyeIcon = icon(Eye)
 export const EyeClosedIcon = icon(EyeOff)
 export const CircleIcon = icon(Circle)
 /** a web page — the import-a-site tool, and the community gallery */
-export const WebIcon = icon(Globe)
+export const WebIcon = icon(Globe02, 'globe')
 /** a live app broadcasting its screens — the design-sync import */
 export const RadioTowerIcon = icon(RadioTower)
 export const MinusIcon = icon(Minus)
 /** zoom to fit: the four corners of the viewport */
 /** sharing a canvas: the box with the arrow leaving it upward */
-export const ShareUpIcon = icon(Share)
+export const ShareUpIcon = icon(Share03)
 
 /* the signed-in home: its rail, suggestion chips and composer */
 /** a new workspace — a folder with a plus */
-export const FolderPlusIcon = icon(FolderPlus)
+export const FolderPlusIcon = icon(FolderPlus, 'folder-plus')
 /** automations: two linked steps */
-export const WorkflowIcon = icon(Workflow)
+export const WorkflowIcon = icon(Workflow, 'workflow')
 /** integrations: building blocks */
-export const BlocksIcon = icon(Blocks)
+export const BlocksIcon = icon(Blocks, 'blocks')
 /** connect an agent: a plus in a ring */
-export const CirclePlusIcon = icon(CirclePlus)
+export const CirclePlusIcon = icon(CirclePlus, 'circle-plus')
 /** import: the arrow entering from above */
-export const UploadIcon = icon(Upload)
-export const CalendarIcon = icon(Calendar)
+export const UploadIcon = icon(Upload01)
+export const CalendarIcon = icon(Calendar03)
 /** what changed: the clock turned back */
-export const HistoryIcon = icon(RotateCcw)
+export const HistoryIcon = icon(History)
 /* prototypes: the editor's Prototype mode, a flow's start, the player's hotspot hint */
 export const PrototypeIcon = icon(MousePointerClick)
 /** the tool rail's mode switch: drawing and editing, or wiring up the flow */
 export const EditModeIcon = icon(PencilRuler)
-export const PrototypeModeIcon = icon(Route)
-export const FlowStartIcon = icon(Flag)
+export const PrototypeModeIcon = icon(Route01)
+export const FlowStartIcon = icon(Flag02)
 export const HotspotIcon = icon(SquareMousePointer)
 /** review comments: the square bubble */
 export const MessageSquareIcon = icon(MessageSquare)
 /** draft a page: a page skeleton */
 export const LayoutTemplateIcon = icon(LayoutTemplate)
-/** the ⌘ key, in shortcut hints */

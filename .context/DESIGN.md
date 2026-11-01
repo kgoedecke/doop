@@ -2,8 +2,9 @@
 
 Design tokens live in `src/styles.css` as CSS custom properties, mapped into Tailwind 4 via
 `@theme`. shadcn is configured with style `radix-nova`, base color `neutral`, CSS variables on,
-icon library `lucide` (`components.json`). Generate new shadcn components with the shadcn CLI
+icon library `hugeicons` (`components.json`). Generate new shadcn components with the shadcn CLI
 rather than hand-rolling primitives; it writes into `src/components/ui` per the aliases below.
+A generated component's icon import is then pointed at `src/components/ui/icons.tsx`.
 
 ## Palette
 
@@ -51,8 +52,11 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
 
 - **Weights**: 400 for text, 500 for labels, buttons and emphasis. 600 is for card and modal
   headings only; nothing in the chrome goes heavier.
-- Icons: Lucide via `src/components/ui/icons.tsx`, 1.15 stroke (`ICON_STROKE`), and nowhere else:
-  screens import the glyph from there rather than wrapping or inlining one. Sizes come from
+- Icons: Hugeicons' free stroke set (`@hugeicons/core-free-icons`, rendered by `@hugeicons/react`)
+  via `src/components/ui/icons.tsx`, 1.15 stroke (`ICON_STROKE`), and nowhere else: screens import
+  the glyph from there rather than wrapping or inlining one. Its soft, squircle-cornered shapes
+  replaced Lucide, the default set of nearly every generated app. Rail glyphs carry a `data-icon`
+  name that their hover motion in `src/styles.css` keys on. Sizes come from
   `ICON_SIZE` through the `size` prop: `size="rail"` (14px) beside rail rows, menu items, tabs and
   the editor chrome, the 16px default (`button`) inside buttons; a pixel count for a one-off. One
   glyph per destination: Community is `WebIcon`, Automations `WorkflowIcon`, Integrations
