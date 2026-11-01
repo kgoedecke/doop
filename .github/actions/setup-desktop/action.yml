@@ -1,6 +1,7 @@
-# Toolchain for building the Tauri desktop shell: bun (for @tauri-apps/cli),
-# a stable Rust with the requested targets, a Rust build cache shared across
-# workflows and jobs on the same OS, and the desktop/ node_modules.
+# Toolchain for building the Tauri desktop shell: the WebKitGTK build deps on
+# Linux, bun (for @tauri-apps/cli), a stable Rust with the requested targets,
+# a Rust build cache shared across workflows and jobs on the same OS, and the
+# desktop/ node_modules.
 name: Set up desktop toolchain
 description: Bun, Rust (+targets), cargo cache and desktop/ dependencies for tauri build
 
@@ -13,6 +14,15 @@ inputs:
 runs:
   using: composite
   steps:
+    # WebKitGTK and friends for the Linux webview, plus what the AppImage
+    # bundler shells out to (patchelf, file)
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+          libssl-dev libxdo-dev patchelf file
     - uses: oven-sh/setup-bun@4bc047ad259df6fc24a6c9b0f9a0cb08cf17fbe5 # v2.0.1
     # pinned by commit like every other action; the toolchain to install
     # is then passed explicitly (the @stable ref only selected it by name)

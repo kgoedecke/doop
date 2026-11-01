@@ -278,8 +278,9 @@
     `main` as a squash, so the PR title becomes the commit subject).
   - `.github/workflows/cla.yml` - CLA check (this is an AGPL-3.0 project with CLA-based
     contribution).
-  - `.github/workflows/desktop.yml` / `desktop-release.yml` - Tauri desktop app CI and DMG
-    release (tag `desktop-v*`, universal macOS build, optional Apple signing/notarization).
+  - `.github/workflows/desktop.yml` / `desktop-release.yml` - Tauri desktop app CI and installer
+    release (tag `desktop-v*`, universal macOS DMG, Windows NSIS, Linux AppImage/.deb/.rpm,
+    optional Apple signing/notarization).
 
 ## 9. Infrastructure and Deployment
 

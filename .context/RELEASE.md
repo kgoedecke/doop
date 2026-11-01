@@ -32,19 +32,25 @@ The CI build uses `bun run --bun build` to match the `oven/bun` Docker build sta
 where `node` commands run with Bun. Extension tests also build with both runtimes
 and run the Bun-built archive under Node, including its nested runtime dependencies.
 
-## Desktop app (Tauri: macOS DMG + Windows NSIS installer)
+## Desktop app (Tauri: macOS DMG + Windows NSIS installer + Linux AppImage/.deb/.rpm)
 
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup
 in `.github/actions/setup-desktop`:
 
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
   with `bunx tauri build --target universal-apple-darwin --bundles app,dmg`, `nsis-windows` builds
-  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, and a final `release`
-  job (`needs` both) attaches the two to one GitHub Release - so a tag is never published with
-  only one installer.
+  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
+  x64 AppImage, .deb and .rpm on `ubuntu-22.04` (the oldest runner, for a low glibc floor) with
+  `bunx tauri build --bundles deb,rpm,appimage`, and a final `release` job (`needs` all three)
+  attaches them to one GitHub Release - so a tag is never published with an installer missing.
+- The AppImage is repacked after the build by `desktop/scripts/appimage-drop-wayland.sh` (pinned
+  `appimagetool`), which drops the bundled `libwayland-*`: copies from the 22.04 runner are older
+  than current distros' Mesa and make WebKitGTK abort with `EGL_BAD_PARAMETER`. Tauri passes
+  linuxdeploy no extra flags, so `--exclude-library` cannot do it. The script re-signs the
+  updater `.sig` when the key is set.
 - Self-update (`tauri-plugin-updater`, `desktop/src-tauri/src/updates.rs`): with the
-  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets set, both builds also
-  emit signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets set, every build also
+  emits signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
   it onto the fixed `desktop-updates` prerelease, which `doop.design/desktop/latest.json`
   redirects to (served by the hosted deployment). A tag fails without the key. Installed official
   shells check at launch and daily, download in the background and offer a restart. The key
@@ -106,7 +112,7 @@ link; the app opens a review screen and writes only after the user clicks Add to
 The native capability marker gates older shells. Release the updated desktop binary
 and frontend together; no downloadable integration bundle is built. Codex still owns
 the separate OAuth approval. Config preservation, conflict handling and handoff checks
-are covered by Rust/frontend tests; desktop CI now runs the Rust tests on both platforms.
+are covered by Rust/frontend tests; desktop CI now runs the Rust tests on macOS, Windows and Linux.
 See [`desktop/README.md`](../desktop/README.md#add-to-codex) for release smoke checks.
 
 ## Cursor marketplace plugin

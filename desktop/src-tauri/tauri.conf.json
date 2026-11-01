@@ -37,7 +37,10 @@
     "targets": [
       "app",
       "dmg",
-      "nsis"
+      "nsis",
+      "deb",
+      "rpm",
+      "appimage"
     ],
     "category": "Productivity",
     "icon": [
