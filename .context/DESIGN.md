@@ -182,7 +182,9 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   wears it), `icons.tsx` - identity. Feature tiles (`FigmaTile`, `MetaTile`, the integrations'
   `Tile`s, `AgentIcon`) compose a `BrandMark`; nothing else inlines a logo path.
 - Editor chrome (`PropertyField`, `Toolbar`, `Panel`, `Menu`) - the canvas page's own set, still on
-  exact pixel sizes until its pass.
+  exact pixel sizes until its pass. `Panel` has three surfaces: `floating` (an island over the
+  board), `docked` (a flush column with a hairline on its canvas side, the Appearance setting's
+  docked layout) and `inline` (filling a phone sheet).
 - Sizing a primitive: a named step (`text-body`) where the box height is fixed or a `leading-*` sits
   beside it; a step with a leading modifier (`text-body/4`) where the box came from padding plus the
   browser's default leading, so putting it on the scale did not grow it.

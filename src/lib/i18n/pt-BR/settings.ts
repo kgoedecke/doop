@@ -17,7 +17,8 @@ export const settings: Catalog['settings'] = {
   accountTab: 'Conta',
   accountBlurb: 'Quem você é em cada canvas — e como voltar a entrar neste.',
   appearanceTitle: 'Aparência',
-  appearanceBlurb: 'Como o Doop aparece neste navegador: claro ou escuro, e o idioma em que ele fala.',
+  appearanceBlurb:
+    'Como o Doop aparece neste navegador: claro ou escuro, o idioma em que ele fala e como o editor do canvas organiza seus painéis.',
 
   agentCardDescription:
     'Escolha como o Doop Agent roda nos seus canvases: uma conta de modelo conectada ou o Claude CLI no seu computador. Os limites de uso e as cobranças do seu provedor se aplicam.',
@@ -53,4 +54,14 @@ export const settings: Catalog['settings'] = {
   languageAria: 'Idioma',
   languagePicked: 'Escolhido neste navegador.',
   languageServerDefault: 'Padrão do servidor — escolha um para mantê-lo neste navegador.',
+
+  panelsTitle: 'Painéis do canvas',
+  panelsDescription:
+    'Como o editor do canvas organiza Camadas, o inspetor e Agentes neste navegador. Painéis flutuantes ficam sobre o canvas; painéis fixos encostam nas bordas da janela, com o canvas entre eles.',
+  panelsRow: 'Layout',
+  panelsAria: 'Painéis do canvas',
+  panelsFloating: 'Flutuantes',
+  panelsDocked: 'Fixos',
+  panelsFloatingNote: 'Os painéis flutuam sobre o canvas.',
+  panelsDockedNote: 'Os painéis estão fixos nas bordas.',
 }

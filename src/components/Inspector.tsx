@@ -9,7 +9,7 @@ import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
 import { cn } from '@/lib/utils'
-import { Panel, PanelClose, PanelHeader } from './ui/panel'
+import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
 import { CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
 import { Button } from './ui/button'
@@ -31,7 +31,7 @@ export function Inspector({
 }: {
   frame: Frame
   /* 'inline' when the inspector is filling a mobile Sheet */
-  surface?: 'floating' | 'inline'
+  surface?: PanelSurface
   className?: string
   style?: CSSProperties
 }) {
@@ -129,6 +129,7 @@ export function Inspector({
       surface={surface}
       className={cn(
         surface === 'floating' && 'top-2.5 bottom-3.5 w-[244px] transition-[right] duration-150',
+        surface === 'docked' && 'w-[244px] border-l',
         'max-md:overflow-y-auto max-md:overscroll-contain',
         className,
       )}

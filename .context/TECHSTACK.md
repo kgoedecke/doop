@@ -121,6 +121,14 @@
   fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
   `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
   Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
+- Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
+  browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
+  full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
+  element panel and Agents flush columns (`Panel surface="docked"`), the bar a solid strip
+  (`TopBar variant="docked"`), and the stage itself the gap between them (`Stage bounds`), so its
+  rulers sit on its own edges and fits need no insets. Phones and ⌘. ignore it. `chromeLayout` in
+  `CanvasPage.tsx` holds both geometries; docked panels keep the stage at least 320px wide as far as their minimums allow, and ⌘V / image drops centre on the stage (`stageViewportSize`), not the window. Tests: `panelLayout.test.ts`, the docked case in
+  `fitSelectionBrowser.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.

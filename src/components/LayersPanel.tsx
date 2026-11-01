@@ -42,7 +42,7 @@ import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
-import { Panel, PanelBody, PanelClose, PanelHeader, type PanelResize } from './ui/panel'
+import { Panel, PanelBody, PanelClose, PanelHeader, type PanelResize, type PanelSurface } from './ui/panel'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Tooltip } from './ui/tooltip'
@@ -194,7 +194,7 @@ export function LayersPanel({
 }: {
   onAddFrame: () => void
   /* 'inline' when the panel is filling a mobile Sheet rather than floating */
-  surface?: 'floating' | 'inline'
+  surface?: PanelSurface
   /** inline only: the sheet's close, in the collapse control's place */
   onClose?: () => void
   resize?: PanelResize
@@ -428,7 +428,10 @@ export function LayersPanel({
     <Panel
       surface={surface}
       resize={resize}
-      className={cn(surface === 'floating' && 'top-2.5 bottom-3.5 left-3.5 w-[264px]')}
+      className={cn(
+        surface === 'floating' && 'top-2.5 bottom-3.5 left-3.5 w-[264px]',
+        surface === 'docked' && 'left-0 w-[264px] border-r',
+      )}
     >
       {/* the panel's name with its icon, the collapse control at the far end */}
       <PanelHeader className="h-10 pl-3.5">
@@ -552,7 +555,7 @@ export function LayersPanel({
 
 /** The collapsed rail: a narrow column at the panel's spot with the expand
  *  control and the Layers mark. The frame count lives in the tooltip only. */
-export function LayersRailToggle() {
+export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
   const setLayersOpen = useStore((s) => s.setLayersOpen)
   const count = usePageCanvas()?.frames.length ?? 0
   const t = useT()
@@ -560,7 +563,12 @@ export function LayersRailToggle() {
     <Toolbar
       aria-label={t('panels.layersRailAria')}
       orientation="vertical"
-      className="pointer-events-auto absolute top-2.5 left-3.5 z-[35]"
+      className={cn(
+        'pointer-events-auto absolute z-[35]',
+        docked
+          ? 'inset-y-0 left-0 w-10 items-center rounded-none border-r border-line-soft shadow-none'
+          : 'top-2.5 left-3.5',
+      )}
     >
       <ToolbarControl label={t('panels.layersExpandPanel')} side="right" onClick={() => setLayersOpen(true)}>
         <PanelExpandIcon />

@@ -16,7 +16,8 @@ export const settings = {
   accountTab: 'Account',
   accountBlurb: 'Who you are on every canvas — and how you get back into this one.',
   appearanceTitle: 'Appearance',
-  appearanceBlurb: 'How Doop looks in this browser: light or dark, and the language it speaks.',
+  appearanceBlurb:
+    'How Doop looks in this browser: light or dark, the language it speaks, and how the canvas editor lays out its panels.',
 
   agentCardDescription:
     'Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your desktop. Your provider’s usage limits and charges apply.',
@@ -49,4 +50,14 @@ export const settings = {
   languageAria: 'Language',
   languagePicked: 'Picked in this browser.',
   languageServerDefault: 'The server’s default — pick one to keep it in this browser.',
+
+  panelsTitle: 'Canvas panels',
+  panelsDescription:
+    'How the canvas editor lays out Layers, the inspector and Agents in this browser. Floating panels hover over the canvas; docked panels sit flush against the window’s edges, with the canvas between them.',
+  panelsRow: 'Layout',
+  panelsAria: 'Canvas panels',
+  panelsFloating: 'Floating',
+  panelsDocked: 'Docked',
+  panelsFloatingNote: 'Panels float over the canvas.',
+  panelsDockedNote: 'Panels are docked to the edges.',
 } as const

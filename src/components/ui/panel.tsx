@@ -18,12 +18,20 @@ const panelVariants = cva('flex min-w-0 flex-col overflow-hidden bg-surface', {
   variants: {
     surface: {
       floating: 'pointer-events-auto absolute z-[35] rounded-[14px] shadow-float',
+      /* a column flush with the window's edge and the bar above it, the
+         canvas beside it (Settings → Appearance → Canvas panels); the
+         caller says which side takes the hairline */
+      docked: 'pointer-events-auto absolute inset-y-0 z-[35] rounded-none border-line-soft shadow-none',
       /* filling a Sheet: no chrome of its own, the sheet provides it */
       inline: 'h-full w-full rounded-none border-0 shadow-none',
     },
   },
   defaultVariants: { surface: 'floating' },
 })
+
+/** where a canvas panel lives: over the board, docked to its edge, or
+ *  filling a phone's sheet */
+export type PanelSurface = NonNullable<VariantProps<typeof panelVariants>['surface']>
 
 export interface PanelResize {
   label: string

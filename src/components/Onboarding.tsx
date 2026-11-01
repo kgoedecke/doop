@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../lib/store'
 import { roleByAgentName } from '../../shared/agents'
 import { useIsMobile } from '../hooks/use-mobile'
+import { usePanelLayout } from '../lib/panelLayout'
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from './ui/sheet'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
@@ -46,6 +47,7 @@ function save(p: Progress) {
 export function Onboarding({ canvasId }: { canvasId: string }) {
   const t = useT()
   const isMobile = useIsMobile()
+  const docked = usePanelLayout() === 'docked'
   const tasks = useStore((s) => s.tasks)
   const presences = useStore((s) => s.presences)
   const [progress, setProgress] = useState<Progress>(load)
@@ -184,8 +186,16 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
        the panel. A window too short to stack them (the rail ends ~308px down,
        the card is up to ~250px tall) moves the card past the rail
        (--chrome-left) so it can't cover the tools. Clear of the zoom control
-       on the right */
-    <div className="pointer-events-auto absolute bottom-3.5 left-[var(--rail-left,14px)] md:[@media(max-height:599px)]:left-[var(--chrome-left,14px)] z-40 flex w-[340px] flex-col gap-3 rounded-panel bg-surface px-5 pt-4 pb-5 shadow-pop transition-[left] duration-150 max-md:right-4 max-md:bottom-4 max-md:left-auto">
+       on the right. Docked panels make the rail a full-height column, so the
+       card always sits past it */
+    <div
+      className={cn(
+        'pointer-events-auto absolute bottom-3.5 z-40 flex w-[340px] flex-col gap-3 rounded-panel bg-surface px-5 pt-4 pb-5 shadow-pop transition-[left] duration-150 max-md:right-4 max-md:bottom-4 max-md:left-auto',
+        docked
+          ? 'left-[var(--chrome-left,14px)]'
+          : 'left-[var(--rail-left,14px)] md:[@media(max-height:599px)]:left-[var(--chrome-left,14px)]',
+      )}
+    >
       <header className="flex items-center justify-between">
         <span className="text-lead font-semibold">{t('canvas.gettingStarted')}</span>
         <IconButton size="sm" className="-mr-1" aria-label={t('canvas.dismiss')} onClick={dismiss}>
