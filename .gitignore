@@ -2,6 +2,7 @@ node_modules
 dist
 public/claude-extension
 data
+data.*/
 desktop/src-tauri/target
 desktop/src-tauri/gen
 .DS_Store

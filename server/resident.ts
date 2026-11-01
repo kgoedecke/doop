@@ -1,6 +1,8 @@
 import { env } from './env.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
+import { fontsForCanvas } from './fonts.ts'
+import { libraryBrief } from '../shared/fonts.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
@@ -592,6 +594,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             },
           ]
         : []
+      /* the canvas's custom fonts: which families exist, and that naming one
+         is enough (the server adds the @font-face) */
+      const canvas = store.getCanvas(canvasId)
+      const fontsText = canvas ? libraryBrief(fontsForCanvas(canvas)) : ''
+      const fontsBlock = fontsText ? [{ text: `# Custom fonts\n${fontsText}` }] : []
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       const noVisionBlock = runState.vision
@@ -606,7 +613,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         const result = await model.runHarness({
           canvasId,
           prompt: kickoff,
-          system: [systemFor(role), ...guidelinesBlock.map((b) => b.text)].join('\n\n'),
+          system: [systemFor(role), ...guidelinesBlock.map((b) => b.text), ...fontsBlock.map((b) => b.text)].join(
+            '\n\n',
+          ),
           // Image generation uses a separate paid model account; the local CLI
           // connection must never imply that the user's subscription covers it.
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
@@ -646,7 +655,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             () =>
               model.run({
                 maxTokens: 16000,
-                system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
+                system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...fontsBlock, ...noVisionBlock],
                 tools: TOOLS,
                 messages,
                 signal: abort.signal,

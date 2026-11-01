@@ -224,6 +224,9 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   assign an implementation job — follow the human's request.
 - A frame renders a complete HTML document in a sandboxed iframe. Inline <style> and
   <script> work; Google Fonts via <link> work.
+- Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
+  family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
+  rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
 - Always reset: * { margin: 0; box-sizing: border-box; } and design to the exact frame size.
 - Size frames to their content: mobile screen 390×844, desktop page 1280×800, card or
   component 480×360, square social post 640×640. Set width/height on create_frame, or

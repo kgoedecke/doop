@@ -9,6 +9,8 @@ import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment, type CommentAn
 import { isElementId } from '../shared/elementId.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
+import { fontsForCanvas } from './fonts.ts'
+import { withFontFaces } from '../shared/fonts.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
@@ -1514,8 +1516,14 @@ function finishStream(frameId: string, logDone: boolean) {
   const s = streams.get(frameId)
   if (!s) return
   streams.delete(frameId)
-  const frame = store.getFrame(frameId)
-  if (!frame) return
+  const current = store.getFrame(frameId)
+  if (!current) return
+  /* a stream that ends without its done chunk (the agent went idle, or a
+     replace cut it off) still gets the faces of the library fonts it uses;
+     a finished one already has them, and this is then a no-op */
+  const html = withLibraryFaces(current.canvasId, current.html)
+  const frame = html === current.html ? current : store.updateFrame(frameId, { html }, s.actor.name)!
+  if (frame !== current) broadcast(frame.canvasId, { type: 'frame:updated', frame, actor: s.actor })
   broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: false, actor: s.actor })
   if (logDone) logActivity(frame.canvasId, s.actor, `finished designing “${frame.name}”`, frameId)
   endAutoTask(frame.canvasId, s.actor)
@@ -1550,6 +1558,13 @@ setInterval(() => {
   }
 }, TICK_MS)
 
+/** A finished document with the @font-face rules for the canvas's library
+ *  fonts it uses (shared/fonts.ts), so naming a family is all it takes. */
+function withLibraryFaces(canvasId: string, html: string): string {
+  const canvas = store.getCanvas(canvasId)
+  return canvas ? withFontFaces(html, fontsForCanvas(canvas)) : html
+}
+
 export function appendFrameHtml(
   frameId: string,
   chunk: string,
@@ -1565,7 +1580,9 @@ export function appendFrameHtml(
      sample) and must never be sniffed on its own */
   const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
   const piece = escaped ? decodeEscapedHtml(chunk) : chunk
-  const html = opts.start ? piece : before.html + piece
+  const joined = opts.start ? piece : before.html + piece
+  /* faces join once the document is whole; mid-stream it is still arriving */
+  const html = opts.done ? withLibraryFaces(before.canvasId, joined) : joined
   const prior = priorState(before)
   const frame = store.updateFrame(frameId, { html }, actor.name)!
   /* the opening chunk replaces the design; every later one extends this burst */
@@ -1655,7 +1672,7 @@ export function createFrame(
   },
   actor: Actor,
 ): Frame | undefined {
-  if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
+  if (input.html !== undefined) input = { ...input, html: withLibraryFaces(canvasId, repairEscapedHtml(input.html)) }
   const frame = store.createFrame(canvasId, input, actor.name)
   if (!frame) return undefined
   bursts.set(frame.id, { actor, lastAt: frame.createdAt })
@@ -1685,7 +1702,8 @@ export function updateFrame(
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
-  if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
+  if (patch.html !== undefined)
+    patch = { ...patch, html: withLibraryFaces(before.canvasId, repairEscapedHtml(patch.html)) }
   const prevName = before.name
   const prevHtml = before.html
   const prevHidden = !!before.hidden
