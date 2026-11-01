@@ -1417,6 +1417,24 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     expect(await position('#inner')).toEqual([33, 44])
   })
 
+  it('nudges a picked child whose picked parent cannot move', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #wrap { display: contents }
+      #inner { position: absolute; left: 20px; top: 30px; width: 120px; height: 40px }
+    </style></head><body><div id="wrap"><div id="inner"></div></div></body></html>`,
+      '#inner',
+    )
+    await page.evaluate(() => {
+      window.elementPanelHarness.pickAlso('#wrap')
+      window.elementPanelHarness.nudge(3, 4)
+    })
+    await expect
+      .poll(() => frame.$eval('#inner', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y]))
+      .toEqual([23, 34])
+  })
+
   it('undoes a nudge whose save is still pending', async () => {
     const frame = await seedPanel(
       `<!doctype html><html><head><style>
