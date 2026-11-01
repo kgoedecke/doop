@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/kgoedecke/doop/compare/desktop-v0.10.0...desktop-v0.11.0) (2026-11-01)
+
+
+### Features
+
+* **desktop:** build and release the app for Linux ([#295](https://github.com/kgoedecke/doop/issues/295)) ([56d1174](https://github.com/kgoedecke/doop/commit/56d1174ca3214dcb263c2a0cb7fa76a961fa3331))
+
 ## [0.10.0](https://github.com/kgoedecke/doop/compare/desktop-v0.9.0...desktop-v0.10.0) (2026-10-31)
 
 
