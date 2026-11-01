@@ -117,7 +117,10 @@
   names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every
   zoom and stack with their own frame (a later frame covers an earlier frame's name, never the
   reverse). The selected frame's size badge lives in a screen-space layer (`FrameLabelLayer`),
-  placed from `--vx`/`--vy`/`--zoom`.
+  placed from `--vx`/`--vy`/`--zoom`. ⇧1 / ⇧2 (fit all / fit selection), frame deep links and
+  fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
+  `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
+  Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
