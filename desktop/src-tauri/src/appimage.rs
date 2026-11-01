@@ -6,7 +6,10 @@
 //! deep-link plugin's `doop-desktop-handler.desktop` does not match either.
 //!
 //! So an AppImage writes an entry of its own, rewritten when the AppImage
-//! moved. It cannot be NoDisplay: GNOME does not match windows to hidden
+//! moved. It is named apart from the packages' `doop-desktop.desktop`, which a
+//! user entry of the same name would shadow, and the packaged app removes it:
+//! after switching from the AppImage to the .deb or .rpm, the menu must not
+//! keep launching a deleted AppImage. It cannot be NoDisplay: GNOME does not match windows to hidden
 //! entries, so doop also appears among the installed apps, as it does after an
 //! AppImage manager integrates it. Its icon is a file in the app's data dir
 //! named by absolute path: an icon placed in the user's hicolor theme stays
@@ -16,17 +19,31 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 const WM_CLASS: &str = "doop-desktop";
+const ENTRY: &str = "doop-desktop-appimage.desktop";
 const ICON: &[u8] = include_bytes!("../icons/128x128@2x.png");
 
 pub fn integrate(app: &AppHandle) {
-    let Some(appimage) = std::env::var_os("APPIMAGE").map(PathBuf::from) else {
-        return;
-    };
     let (Ok(data), Ok(app_data)) = (app.path().data_dir(), app.path().app_data_dir()) else {
         return;
     };
-    if let Err(error) = write(&data.join("applications"), &app_data, &appimage) {
+    let applications = data.join("applications");
+    let Some(appimage) = std::env::var_os("APPIMAGE").map(PathBuf::from) else {
+        remove(&applications);
+        return;
+    };
+    if let Err(error) = write(&applications, &app_data, &appimage) {
         eprintln!("Registering the AppImage with the desktop failed: {error}");
+    }
+}
+
+/// Drops the AppImage's entry from a packaged (or dev) run; the icon in the
+/// app's data dir is left, it is all the entry pointed at.
+fn remove(applications: &Path) {
+    let path = applications.join(ENTRY);
+    match fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => eprintln!("Removing the AppImage's desktop entry failed: {error}"),
     }
 }
 
@@ -38,7 +55,7 @@ fn write(applications: &Path, app_data: &Path, appimage: &Path) -> std::io::Resu
     }
 
     fs::create_dir_all(applications)?;
-    let path = applications.join(format!("{WM_CLASS}.desktop"));
+    let path = applications.join(ENTRY);
     let entry = entry(appimage, &icon);
     if fs::read_to_string(&path).ok().as_deref() != Some(entry.as_str()) {
         fs::write(&path, entry)?;
@@ -110,7 +127,7 @@ mod tests {
         let app_data = data.path().join("design.doop.desktop");
         let appimage = Path::new("/opt/doop.AppImage");
         write(&applications, &app_data, appimage).unwrap();
-        let desktop = applications.join("doop-desktop.desktop");
+        let desktop = applications.join(ENTRY);
         let icon = app_data.join("icon.png");
         assert_eq!(
             fs::read_to_string(&desktop).unwrap(),
@@ -121,5 +138,25 @@ mod tests {
         let moved = Path::new("/home/me/doop.AppImage");
         write(&applications, &app_data, moved).unwrap();
         assert_eq!(fs::read_to_string(&desktop).unwrap(), entry(moved, &icon));
+    }
+
+    #[test]
+    fn a_packaged_run_removes_the_appimage_entry_and_never_the_packages() {
+        let data = tempfile::tempdir().unwrap();
+        let applications = data.path().join("applications");
+        write(
+            &applications,
+            &data.path().join("app"),
+            Path::new("/opt/doop.AppImage"),
+        )
+        .unwrap();
+        let packaged = applications.join("doop-desktop.desktop");
+        fs::write(&packaged, "[Desktop Entry]\n").unwrap();
+
+        remove(&applications);
+        assert!(!applications.join(ENTRY).exists());
+        assert!(packaged.exists());
+        // nothing to remove is not an error
+        remove(&applications);
     }
 }

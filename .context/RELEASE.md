@@ -44,7 +44,7 @@ in `.github/actions/setup-desktop`:
   `bunx tauri build --bundles deb,rpm,appimage`, and a final `release` job (`needs` all three)
   attaches them to one GitHub Release - so a tag is never published with an installer missing.
 - The AppImage is repacked after the build by `desktop/scripts/appimage-drop-wayland.sh` (pinned
-  `appimagetool`), which drops the bundled `libwayland-*`: copies from the 22.04 runner are older
+  `appimagetool` and type2 runtime, both checksummed), which drops the bundled `libwayland-*`: copies from the 22.04 runner are older
   than current distros' Mesa and make WebKitGTK abort with `EGL_BAD_PARAMETER`. Tauri passes
   linuxdeploy no extra flags, so `--exclude-library` cannot do it. The script re-signs the
   updater `.sig` when the key is set.

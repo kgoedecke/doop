@@ -216,9 +216,10 @@ with `EGL_BAD_PARAMETER` (an empty window).
 
 An AppImage started from a download folder has no installed `.desktop` file, so
 GNOME and KDE would show its window as "doop-desktop" with a generic icon. On
-launch it writes `~/.local/share/applications/doop-desktop.desktop` (pointing at
-the AppImage, rewritten when it moves) and the icon into the app's data dir
-(`src-tauri/src/appimage.rs`); the .deb and .rpm install their own entry.
+launch it writes `~/.local/share/applications/doop-desktop-appimage.desktop`
+(pointing at the AppImage, rewritten when it moves) and the icon into the app's
+data dir (`src-tauri/src/appimage.rs`); the .deb and .rpm install their own
+`doop-desktop.desktop` and remove the AppImage's entry when they launch.
 
 CI (`.github/workflows/desktop.yml`) builds an unsigned macOS .app, a Windows
 NSIS installer and the Linux packages on every PR that touches `desktop/`, on pushes to `main` (to
