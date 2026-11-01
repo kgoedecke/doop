@@ -260,6 +260,16 @@
   (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, provider client IDs/secrets) come from the
   environment (`.env`, documented in `.env.example`); never committed.
 
+- Credentials kept for users are encrypted at rest (`server/secretBox.ts`): `sealedText` columns
+  in `server/db/schema.ts` (model-account keys and tokens, integration and GitHub tokens,
+  Linear/Slack installs, webhook secrets) are AES-256-GCM sealed on write and opened on read, so
+  call sites see plaintext. Keys come from `SECRETS_ENCRYPTION_KEYS` (`id:base64`, first one
+  active; dev and tests use a built-in key, unset in production stores plaintext and warns). After
+  boot `resealSecrets` (`server/secretBackfill.ts`) seals legacy plaintext and re-seals rows under
+  a rotated-out key. Never filter on a sealed column; each write uses a fresh IV. better-auth seals
+  social sign-in tokens itself (`account.encryptOAuthTokens`). Sync-key secrets, APNs tokens and
+  MCP OAuth tokens stay plaintext (looked up by value). Tests: `secretBox.test.ts`.
+
 - Reading a failed auth call (`src/lib/authError.ts`): only our own API sends a string
   `error.code`, so `authErrorCode` is what `AuthPage.tsx` matches on and `authErrorMessage`
   is what it shows. Railway's edge answers in its own shape whenever it cannot reach the

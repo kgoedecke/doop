@@ -349,6 +349,9 @@ function buildAuth() {
        it, so in dev it must be the web port that proxies /api and /mcp */
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
+    /* the provider tokens a social or SSO sign-in leaves on its account row,
+       sealed with the auth secret; doop never reads them back */
+    account: { encryptOAuthTokens: true },
     /* prod: the public origin, plus any extras from env, plus Apple when its
        web flow is on: Apple returns the authorization code by POSTing a form
        from appleid.apple.com to /api/auth/callback/apple, and better-auth's
