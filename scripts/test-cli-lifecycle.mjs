@@ -1,17 +1,103 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { test } from 'node:test'
-import { Deferred, Effect, Fiber } from 'effect'
+import { Deferred, Effect, Fiber, Layer, References } from 'effect'
+import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem'
+import * as NodePath from '@effect/platform-node/NodePath'
+import { Configuration } from '../cli/config.ts'
+import { npmCli } from '../cli/update.ts'
 import { claimLock, logTail } from '../cli/files.ts'
-import { hasExited, stopChild } from '../cli/process.ts'
+import { hasExited, stopChild, Processes, processesLayer } from '../cli/process.ts'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
+
+test('detached startup observes events under frequent Effect scheduler yields', { timeout: 15_000 }, async () => {
+  const config = Configuration.of({
+    directory: root,
+    root,
+    entry: '',
+    executable: process.execPath,
+    platform: process.platform,
+    environment: { ...process.env },
+    version: 'test',
+    packageName: 'test',
+  })
+  const layer = processesLayer.pipe(
+    Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.succeed(Configuration, config)),
+  )
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const processes = yield* Processes
+      const child = yield* processes.detach(['-e', ''])
+      assert.ok(child.pid > 0)
+    }).pipe(Effect.provide(layer), Effect.provideService(References.MaxOpsBeforeYield, 16), Effect.timeout(10_000)),
+  )
+})
+
+test('npm resolution ignores pnpm and Yarn entry points', async () => {
+  const work = directory()
+  try {
+    const npm = path.join(work, 'bin/node_modules/npm/bin/npm-cli.js')
+    mkdirSync(path.dirname(npm), { recursive: true })
+    writeFileSync(npm, '')
+    for (const name of ['pnpm.cjs', 'yarn.js', 'npm-cli.cjs']) {
+      const supplied = path.join(work, name)
+      writeFileSync(supplied, '')
+      const selected = await Effect.runPromise(
+        npmCli().pipe(
+          Effect.provideService(
+            Configuration,
+            Configuration.of({
+              directory: work,
+              root,
+              entry: '',
+              executable: path.join(work, 'bin/node'),
+              platform: process.platform,
+              environment: { npm_execpath: supplied },
+              version: 'test',
+              packageName: 'test',
+            }),
+          ),
+          Effect.provide(NodeFileSystem.layer),
+          Effect.provide(NodePath.layer),
+        ),
+      )
+      assert.equal(selected, name === 'npm-cli.cjs' ? supplied : npm)
+    }
+  } finally {
+    remove(work)
+  }
+})
+
+test('daemon logs the safe reason for a startup failure', { timeout: 30_000 }, async () => {
+  const work = directory()
+  const listener = createServer()
+  await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve))
+  try {
+    writeFileSync(
+      path.join(work, 'service.json'),
+      JSON.stringify({ port: listener.address().port, installed: true, autostart: false }),
+    )
+    const child = spawn(process.execPath, [path.join(root, 'cli/service-runner.mjs'), work], {
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    const [code] = await once(child, 'exit')
+    assert.equal(code, 1)
+    assert.match(readFileSync(path.join(work, 'service.log'), 'utf8'), /Service startup failed: Cannot bind local port/)
+  } finally {
+    listener.close()
+    remove(work)
+  }
+})
 
 test('interrupting an Effect scope releases its lease', async () => {
   const work = directory()

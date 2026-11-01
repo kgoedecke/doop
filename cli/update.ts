@@ -5,12 +5,14 @@ import { Processes } from './process.ts'
 import { ServiceManager } from './service.ts'
 
 /** Resolve npm from the active runtime, including version-manager layouts. */
-const npmCli = Effect.fn('Updater.npmCli')(function* () {
+export const npmCli = Effect.fn('Updater.npmCli')(function* () {
   const config = yield* Configuration
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const candidates = [
-    config.environment.npm_execpath,
+    /(^|[\\/])npm-cli\.(?:js|cjs)$/.test(config.environment.npm_execpath ?? '')
+      ? config.environment.npm_execpath
+      : undefined,
     path.resolve(path.dirname(config.executable), '../lib/node_modules/npm/bin/npm-cli.js'),
   ]
   for (let directory = path.dirname(config.executable); ; directory = path.dirname(directory)) {

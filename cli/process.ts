@@ -82,15 +82,29 @@ export const processesLayer = Layer.effect(
         catch: () =>
           new ProcessError({ operation: 'resolveLoader', message: 'The installed TypeScript loader is missing.' }),
       })
+      const exit = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void, ProcessError>()
+      const onExit = () => Deferred.doneUnsafe(exit, Effect.void)
+      const onError = () =>
+        Deferred.doneUnsafe(
+          started,
+          Effect.fail(new ProcessError({ operation: 'spawnBackend', message: 'Cannot launch the local backend.' })),
+        )
+      const onSpawn = () => Deferred.doneUnsafe(started, Effect.void)
       const child = yield* Effect.acquireRelease(
         Effect.try({
-          try: () =>
-            spawn(config.executable, ['--import', loader, `${config.root}/server/index.ts`], {
+          try: () => {
+            const spawned = spawn(config.executable, ['--import', loader, `${config.root}/server/index.ts`], {
               cwd: directory,
               env: environment,
               windowsHide: true,
               stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-            }),
+            })
+            spawned.once('exit', onExit)
+            spawned.once('error', onError)
+            spawned.once('spawn', onSpawn)
+            return spawned
+          },
           catch: () => new ProcessError({ operation: 'spawnBackend', message: 'Cannot launch the local backend.' }),
         }),
         (child) =>
@@ -104,18 +118,6 @@ export const processesLayer = Layer.effect(
             Effect.catch((error) => Effect.logError(error.message)),
           ),
       )
-      const exit = yield* Deferred.make<void>()
-      const started = yield* Deferred.make<void, ProcessError>()
-      const onExit = () => Deferred.doneUnsafe(exit, Effect.void)
-      const onError = () =>
-        Deferred.doneUnsafe(
-          started,
-          Effect.fail(new ProcessError({ operation: 'spawnBackend', message: 'Cannot launch the local backend.' })),
-        )
-      const onSpawn = () => Deferred.doneUnsafe(started, Effect.void)
-      child.once('exit', onExit)
-      child.once('error', onError)
-      child.once('spawn', onSpawn)
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           child.off('exit', onExit)
@@ -145,29 +147,35 @@ export const processesLayer = Layer.effect(
       }
     })
     const detach = Effect.fn('Processes.detach')(function* (args: ReadonlyArray<string>) {
+      const started = yield* Deferred.make<void, ProcessError>()
+      const onSpawn = () => Deferred.doneUnsafe(started, Effect.void)
+      const onError = () =>
+        Deferred.doneUnsafe(
+          started,
+          Effect.fail(new ProcessError({ operation: 'detach', message: 'Cannot launch the background service.' })),
+        )
       const child = yield* Effect.try({
-        try: () =>
-          spawn(config.executable, [...args], {
+        try: () => {
+          const spawned = spawn(config.executable, [...args], {
             detached: true,
             windowsHide: true,
             stdio: 'ignore',
             env: config.environment,
-          }),
+          })
+          spawned.once('spawn', onSpawn)
+          spawned.once('error', onError)
+          return spawned
+        },
         catch: () => new ProcessError({ operation: 'detach', message: 'Cannot launch the background service.' }),
       })
-      yield* Effect.callback<void, ProcessError>((resume) => {
-        const started = () => resume(Effect.void)
-        const failed = () =>
-          resume(
-            Effect.fail(new ProcessError({ operation: 'detach', message: 'Cannot launch the background service.' })),
-          )
-        child.once('spawn', started)
-        child.once('error', failed)
-        return Effect.sync(() => {
-          child.off('spawn', started)
-          child.off('error', failed)
-        })
-      })
+      yield* Deferred.await(started).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            child.off('spawn', onSpawn)
+            child.off('error', onError)
+          }),
+        ),
+      )
       child.unref()
       if (!child.pid)
         return yield* new ProcessError({

@@ -300,7 +300,7 @@ export function runDaemon(directory: string | undefined): void {
         yield* fs
           .writeFileString(
             `${config.directory}/service.log`,
-            'Service startup failed. Check backend messages and data directory permissions.\n',
+            `Service startup failed: ${safeMessage(Cause.fail(error))}\n`,
             { flag: 'a', mode: 0o600 },
           )
           .pipe(Effect.ignore)
