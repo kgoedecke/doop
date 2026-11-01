@@ -384,7 +384,21 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     })
 
     it('hands the focus back to the uncovered screen as nested overlays close', async () => {
-      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
+      // Focus restoration must not race the separate delay-suspension fixture's
+      // 800ms navigation timer on a busy runner. Delay behavior is tested above.
+      const focusOnly: Canvas = {
+        ...COVERED,
+        frames: COVERED.frames.map((screen) =>
+          screen.id === 'home'
+            ? frame(
+                'home',
+                `<button id="help" data-doop-on="click" data-doop-action="overlay:menu">Help</button>
+            <div data-doop-on="key:k" data-doop-action="navigate:detail"></div>`,
+              )
+            : screen,
+        ),
+      }
+      await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), focusOnly)
       await page.evaluate(() => (window as unknown as Fixture).play('home'))
       const home = await screen('home')
       await home.$eval('#help', (el) => (el as HTMLElement).focus())

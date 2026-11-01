@@ -172,8 +172,8 @@ describe('connecting from the desktop app', () => {
     otherAccount = await new Client(server).signUp('desktop-browser@test.dev', 'Browser')
   }, 60_000)
 
-  afterAll(() => {
-    server?.stop()
+  afterAll(async () => {
+    await server?.stop()
     slack?.close()
   })
 

@@ -143,7 +143,7 @@ describe('admin surface', () => {
       expect(me.admin).toBe(false)
       expect((await impostor.get('/api/admin/canvases')).status).toBe(404)
     } finally {
-      prod.stop()
+      await prod.stop()
     }
   }, 70_000)
 
@@ -169,14 +169,14 @@ describe('admin surface', () => {
       expect(me.admin).toBe(false)
       expect((await eager.get('/api/admin/canvases')).status).toBe(404)
     } finally {
-      open.stop()
+      await open.stop()
     }
   }, 70_000)
 
   it('promotes accounts that already existed when ADMIN_EMAILS gained them', async () => {
     /* the real-world order: someone signs up first, and is named an admin
        later. Reboot the same database with a wider ADMIN_EMAILS. */
-    server.stop({ keepData: true })
+    await server.stop({ keepData: true })
     const rebooted = await startServer({ ADMIN_EMAILS: 'boss@test.dev,alice@test.dev' }, server.dataDir)
     try {
       const promoted = new Client(rebooted)
@@ -185,7 +185,7 @@ describe('admin surface', () => {
       expect(me.email).toBe('alice@test.dev')
       expect(me.admin).toBe(true)
     } finally {
-      rebooted.stop()
+      await rebooted.stop()
     }
   }, 70_000)
 })

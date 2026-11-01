@@ -44,7 +44,7 @@ it('persists a complete canvas duplicate across a server restart', async () => {
     expect(duplicateResponse.status, JSON.stringify(duplicate)).toBe(200)
 
     const dataDir = server.dataDir
-    server.stop({ keepData: true })
+    await server.stop({ keepData: true })
     await server.stopped
     server = await startServer({}, dataDir)
 
@@ -74,6 +74,6 @@ it('persists a complete canvas duplicate across a server restart', async () => {
     expect(copiedAsset.status).toBe(200)
     expect(copiedAsset.headers.get('content-type')).toBe('image/png')
   } finally {
-    server.stop()
+    await server.stop()
   }
 }, 70_000)

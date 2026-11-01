@@ -56,7 +56,7 @@ describe.skipIf(!findBrowserPath())('page list controls and keyboard history', (
     await page?.close()
     await browser?.close()
     await vite?.close()
-    server?.stop()
+    await server?.stop()
   })
 
   async function shortcut(redo = false) {

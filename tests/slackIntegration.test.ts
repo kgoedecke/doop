@@ -45,8 +45,8 @@ beforeAll(async () => {
   stranger = await new Client(server).signUp('slack-stranger@test.dev', 'Stranger')
 }, 60_000)
 
-afterAll(() => {
-  server?.stop()
+afterAll(async () => {
+  await server?.stop()
   slack?.close()
 })
 
