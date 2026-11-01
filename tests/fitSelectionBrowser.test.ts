@@ -75,19 +75,25 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
     }))
   }
 
-  it('keeps the fitted frame clear of the side panels and centred between them', async () => {
+  /** select the frame with the Inspector and Agents open, press ⇧2 and
+   *  return where the frame landed */
+  async function fitWithPanelsOpen() {
     /* a title click selects the frame and opens the Inspector */
     await page.click('[data-frame-title]')
-    await page.click('[aria-label^="Agents"]')
+    if (await page.$('[aria-label^="Agents"]')) await page.click('[aria-label^="Agents"]')
     await page.waitForFunction(() => document.querySelectorAll('[aria-label^="Resize"]').length >= 2)
     await page.keyboard.down('Shift')
     await page.keyboard.press('Digit2')
     await page.keyboard.up('Shift')
     await new Promise((r) => setTimeout(r, 300))
-    const frame = await page.$eval('[data-frame-surface]', (el) => {
+    return page.$eval('[data-frame-surface]', (el) => {
       const r = el.getBoundingClientRect()
       return { left: r.left, right: r.right }
     })
+  }
+
+  it('keeps the fitted frame clear of the side panels and centred between them', async () => {
+    const frame = await fitWithPanelsOpen()
     const area = await openArea()
     expect(frame.left).toBeGreaterThan(area.left)
     expect(frame.right).toBeLessThan(area.right)
@@ -103,5 +109,24 @@ describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', ()
     const frame = await page.$eval('[data-frame-surface]', (el) => el.getBoundingClientRect().right)
     const area = await openArea()
     expect(frame).toBeLessThan(area.right)
+  })
+
+  it('docked: the stage fills the gap between the columns and fits there', async () => {
+    await page.evaluate(() => localStorage.setItem('doop:panel-layout', 'docked'))
+    await page.reload()
+    await page.waitForSelector('[data-frame-title]')
+    const frame = await fitWithPanelsOpen()
+    const area = await openArea()
+    const stage = await page.$eval('.stage', (el) => {
+      const r = el.getBoundingClientRect()
+      return { left: r.left, right: r.right, top: r.top }
+    })
+    /* the columns butt against the stage on both sides, under the bar */
+    expect(Math.abs(stage.left - area.left)).toBeLessThanOrEqual(1)
+    expect(Math.abs(stage.right - area.right)).toBeLessThanOrEqual(1)
+    expect(stage.top).toBe(50)
+    expect(frame.left).toBeGreaterThan(stage.left)
+    expect(frame.right).toBeLessThan(stage.right)
+    expect(Math.abs((frame.left + frame.right) / 2 - (stage.left + stage.right) / 2)).toBeLessThan(2)
   })
 })

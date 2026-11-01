@@ -133,12 +133,19 @@ const sendViewport = throttle(
 export function Stage({
   onAddFrame,
   insets = NO_INSETS,
+  bounds,
+  docked = false,
 }: {
   onAddFrame: () => void
   /** px the top bar, floating panels and islands cover at each of the
    *  stage's edges — fits centre in what is left, and there is no room
    *  under them for a comment composer */
   insets?: StageInsets
+  /** where the stage sits inside the page when it is not the whole of it:
+   *  docked panels leave it the gap between their columns */
+  bounds?: StageInsets
+  /** the panels are docked, so the tool rail is a full-height column too */
+  docked?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   /* read by the fit callbacks, which outlive a render */
@@ -895,6 +902,7 @@ export function Stage({
                         : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
                       : 'cursor-default',
             )}
+            style={bounds}
             onPointerDownCapture={drawing.onPointerDown}
             onDoubleClickCapture={drawing.onDoubleClick}
             onTouchStartCapture={drawing.onTouchStart}
@@ -970,6 +978,7 @@ export function Stage({
           className={cn(
             'absolute bottom-[calc(8px+env(safe-area-inset-bottom))] left-1/2 z-[35] -translate-x-1/2 sm:bottom-4',
             'md:top-[calc(var(--chrome-top,0px)+10px)] md:bottom-auto md:left-[var(--rail-left,14px)] md:translate-x-0 md:transition-[left] md:duration-150',
+            docked && 'md:top-[var(--chrome-top,0px)] md:bottom-0',
             uiHidden && 'hidden',
           )}
         >
@@ -1004,7 +1013,13 @@ export function Stage({
               )}
             </div>
           )}
-          <Toolbar aria-label={t('stage.canvasTools')} className="md:w-10 md:flex-col">
+          <Toolbar
+            aria-label={t('stage.canvasTools')}
+            className={cn(
+              'md:w-10 md:flex-col',
+              docked && 'md:h-full md:rounded-none md:border-r md:border-line-soft md:shadow-none',
+            )}
+          >
             {/* one fill slides between tools; the buttons themselves stay
                 transparent so the pill is the only thing that moves */}
             <ToolbarHighlight activeKey={tool} />

@@ -22,6 +22,10 @@ const topBarVariants = cva(
            select as canvas. */
         canvas:
           'pointer-events-none absolute inset-x-0 top-0 h-[50px] items-start gap-2.5 bg-transparent px-3.5 pt-3.5 max-md:h-14 max-md:items-center max-md:gap-2 max-md:px-3 max-md:pt-0 [&>*]:pointer-events-auto',
+        /* the canvas editor with docked panels: a solid strip over the
+           columns, the pills flat inside it */
+        docked:
+          'absolute inset-x-0 top-0 h-[50px] items-center gap-2.5 border-b border-line-soft bg-surface px-3.5 [&_[data-slot=bar-pill]]:shadow-none',
       },
     },
     defaultVariants: { variant: 'solid' },

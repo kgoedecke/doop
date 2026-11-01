@@ -12,13 +12,16 @@ import { PresenceFace } from './PeerAvatars'
 import { useT } from '../lib/i18n'
 
 const island = 'pointer-events-auto absolute z-[38]'
+/* docked, both islands share one full-height column instead */
+const dockedIsland = 'rounded-none bg-transparent shadow-none'
 
 /** The right-hand icon islands, sitting just left of the open panels. The top
  *  island offers what is hidden: the Inspector for a selected frame, and one
  *  button per tab of the Agents panel (agents, comments, activity, memory),
  *  each opening the panel on that tab, with a live dot while an agent works or
  *  a message waits. Open panels close from their own header. The bottom
- *  island holds Settings, Help (docs, support chat) and you. */
+ *  island holds Settings, Help (docs, support chat) and you. Docked, the two
+ *  share one column at full height, the second at its foot. */
 export function SideRail({
   style,
   agentsOpen,
@@ -28,9 +31,11 @@ export function SideRail({
   onToggleInspector,
   me,
   onRenameSelf,
+  docked = false,
 }: {
   /** carries `right`, so the islands follow the panels as they open */
   style: CSSProperties
+  docked?: boolean
   agentsOpen: boolean
   onToggleAgents: () => void
   inspectorOpen: boolean
@@ -48,14 +53,15 @@ export function SideRail({
   }
   const showInspector = inspectorAvailable && !inspectorOpen
 
-  return (
+  const islandStyle = docked ? undefined : style
+  const islands = (
     <>
       {(showInspector || !agentsOpen) && (
         <Toolbar
           aria-label={t('canvas.canvasPanels')}
           orientation="vertical"
-          className={cn(island, 'top-2.5')}
-          style={style}
+          className={docked ? dockedIsland : cn(island, 'top-2.5')}
+          style={islandStyle}
         >
           {showInspector && (
             <ToolbarControl label={t('canvas.inspectFrame')} onClick={onToggleInspector}>
@@ -68,8 +74,8 @@ export function SideRail({
       <Toolbar
         aria-label={t('shell.account')}
         orientation="vertical"
-        className={cn(island, 'bottom-3.5 gap-1.5')}
-        style={style}
+        className={cn(docked ? cn(dockedIsland, 'mt-auto') : cn(island, 'bottom-3.5'), 'gap-1.5')}
+        style={islandStyle}
       >
         <ToolbarControl label={t('shell.settings')} onClick={() => navigate('/settings')}>
           <GearIcon />
@@ -108,6 +114,15 @@ export function SideRail({
         </Tooltip>
       </Toolbar>
     </>
+  )
+  if (!docked) return islands
+  return (
+    <div
+      className="pointer-events-auto absolute inset-y-0 z-[38] flex w-10 flex-col items-center border-l border-line-soft bg-surface"
+      style={style}
+    >
+      {islands}
+    </div>
   )
 }
 

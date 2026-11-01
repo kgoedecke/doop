@@ -36,6 +36,7 @@ import {
   PanelTabPanel,
   PanelTabs,
   PanelTabsRoot,
+  type PanelSurface,
 } from './ui/panel'
 import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
@@ -101,11 +102,13 @@ function readTab(): Tab {
 export function ElementPanel({
   frame,
   selector,
+  surface = 'floating',
   className,
   style,
 }: {
   frame: Frame
   selector: string
+  surface?: Exclude<PanelSurface, 'inline'>
   className?: string
   /** carries `right`, so it opens beside the Agents panel at the edge */
   style?: CSSProperties
@@ -209,7 +212,12 @@ export function ElementPanel({
 
   return (
     <Panel
-      className={cn('top-2.5 max-h-[calc(100%-24px)] w-[244px] transition-[right] duration-150', className)}
+      surface={surface}
+      className={cn(
+        'w-[244px]',
+        surface === 'floating' ? 'top-2.5 max-h-[calc(100%-24px)] transition-[right] duration-150' : 'border-l',
+        className,
+      )}
       style={style}
     >
       <PanelTabsRoot
