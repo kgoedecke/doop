@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.13.0](https://github.com/kgoedecke/doop/compare/v0.12.0...v0.13.0) (2026-11-01)
+
+
+### Features
+
+* **canvas:** drop images onto the canvas and the composer ([#293](https://github.com/kgoedecke/doop/issues/293)) ([a521453](https://github.com/kgoedecke/doop/commit/a521453cd0f9d1edf4ebd3d2921dd24b5ab6a3a7))
+* **canvas:** nudge the picked element with the arrow keys ([#282](https://github.com/kgoedecke/doop/issues/282)) ([7fbf2f8](https://github.com/kgoedecke/doop/commit/7fbf2f8e1917f6707212a95ffe5b2f9752b8ef1a))
+* **canvas:** offer docked side panels as an Appearance setting ([#290](https://github.com/kgoedecke/doop/issues/290)) ([1ed9894](https://github.com/kgoedecke/doop/commit/1ed989488e5977b6f607cabad810f6439c6e93ea))
+* **canvas:** paste images as top-level canvas elements, not frames ([#294](https://github.com/kgoedecke/doop/issues/294)) ([27b6f9e](https://github.com/kgoedecke/doop/commit/27b6f9e161bc26e9dacc1c8c14202ef48e5e321b))
+* **desktop:** build and release the app for Linux ([#295](https://github.com/kgoedecke/doop/issues/295)) ([56d1174](https://github.com/kgoedecke/doop/commit/56d1174ca3214dcb263c2a0cb7fa76a961fa3331))
+* **desktop:** update the app automatically from a signed feed ([#285](https://github.com/kgoedecke/doop/issues/285)) ([3298742](https://github.com/kgoedecke/doop/commit/329874207677d7cf4790b3231aab46fc7f9462e7))
+* **i18n:** add Brazilian Portuguese alongside English ([#291](https://github.com/kgoedecke/doop/issues/291)) ([9e4248b](https://github.com/kgoedecke/doop/commit/9e4248b70fc49e13eb555581226dc84dbf421e50))
+* **prototype:** add scaling options and clear the desktop tab strip ([#310](https://github.com/kgoedecke/doop/issues/310)) ([984883c](https://github.com/kgoedecke/doop/commit/984883c56b6b3e4a86a138291cce174067ddbf85))
+
+
+### Bug Fixes
+
+* **canvas:** fit the selection into the area the panels leave open ([#289](https://github.com/kgoedecke/doop/issues/289)) ([ce5a9ab](https://github.com/kgoedecke/doop/commit/ce5a9ab1529a43b8b5627a33dddd4efdd061fba6))
+* **canvas:** fix two arrow-nudge bugs from [#282](https://github.com/kgoedecke/doop/issues/282) ([#305](https://github.com/kgoedecke/doop/issues/305)) ([53698d9](https://github.com/kgoedecke/doop/commit/53698d901f14e297c085c535d1e0a7b2db17e3b7))
+* **desktop:** find the Linux packages when cutting a release ([#317](https://github.com/kgoedecke/doop/issues/317)) ([eca5a23](https://github.com/kgoedecke/doop/commit/eca5a232f13cb9c506481a80131bc6182d78ea47))
+* detect browsers on Windows ([#284](https://github.com/kgoedecke/doop/issues/284)) ([9136997](https://github.com/kgoedecke/doop/commit/91369978260bb9fae46ffa6b3f02410dca4406eb))
+
 ## [0.12.0](https://github.com/kgoedecke/doop/compare/v0.11.0...v0.12.0) (2026-10-31)
 
 
