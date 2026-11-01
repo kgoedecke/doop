@@ -125,20 +125,26 @@ export function pasteFrameCentered(canvasId: string) {
  *  would otherwise land enormous); the asset keeps its full resolution. */
 const MAX_PASTE_DIM = 900
 
-function imageFrameHtml(url: string, alt: string): string {
-  return `<!doctype html>
-<html>
-<head>
-<style>
-  * { margin: 0; }
-  html, body { height: 100%; }
-  img { display: block; width: 100%; height: 100%; object-fit: contain; }
-</style>
-</head>
-<body>
-  <img src="${url}" alt="${alt.replace(/"/g, '&quot;')}">
-</body>
-</html>`
+/** A pasted or dropped image is a top-level canvas element, the way a drawn
+ *  shape is: a transparent shell the size of its one image, which the Layers
+ *  panel lists at the root under its name, moves into frames and back out of,
+ *  and scales with when resized. */
+function imageElementHtml(url: string, name: string): string {
+  const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
+  doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
+  doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
+  doc.body.setAttribute('data-doop-canvas-element', 'true')
+  const img = doc.createElement('img')
+  img.setAttribute('data-doop-drawing', 'image')
+  img.setAttribute('data-name', name)
+  img.src = url
+  img.alt = name
+  img.setAttribute(
+    'style',
+    'position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;margin:0;display:block;object-fit:contain;',
+  )
+  doc.body.append(img)
+  return '<!doctype html>\n' + doc.documentElement.outerHTML
 }
 
 function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
@@ -160,9 +166,10 @@ function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
 /** Horizontal breathing room between images dropped together. */
 const IMAGE_ROW_GAP = 40
 
-/** Upload images and drop them as frames laid out in a row, centered as a
- *  group in the current view (one image lands dead-center). Sizes are read
- *  first so differently-sized images sit side by side, never stacked. */
+/** Upload images and place them as canvas elements laid out in a row,
+ *  centered as a group in the current view (one image lands dead-center).
+ *  Sizes are read first so differently-sized images sit side by side, never
+ *  stacked. */
 export async function uploadImageFrames(
   canvasId: string,
   files: File[],
@@ -191,7 +198,7 @@ export async function uploadImageFrames(
       const name = file.name.replace(/\.[a-z0-9]+$/i, '').trim() || fallbackName
       return api.createFrame(canvasId, {
         name,
-        html: imageFrameHtml(url, name),
+        html: imageElementHtml(url, name),
         width: slot.width,
         height: slot.height,
         x: Math.round(slot.x),

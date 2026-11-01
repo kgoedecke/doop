@@ -127,7 +127,9 @@
 - `src/lib/drawing.ts` creates rectangles, circles, straight and cubic Bézier SVG paths, text and empty
   frames through the existing frame API. Drawing inside a frame appends a positioned HTML/SVG
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker
-  for transparent canvas chrome; no separate shape schema or protocol is required. The Layers
+  for transparent canvas chrome; no separate shape schema or protocol is required. Pasted and
+  dropped images (`src/lib/frameClipboard.ts`) are standalone elements too: one
+  `<img data-doop-drawing="image">` named after its file. The Layers
   panel shows one as a single layer at the root (no frame row, no name label on the canvas) and
   its rows drag between frames and the root: a drop on another frame's row moves the element
   there (`transferLayer` in `src/lib/layerEdits.ts`, removing a standalone's shell), a drop on
