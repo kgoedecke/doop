@@ -1,4 +1,5 @@
 import { PREVIEW_MAX_HEIGHT, type Frame } from '../shared/types.ts'
+import { withRenderSlot } from './renderLimit.ts'
 import * as storage from './storage.ts'
 
 /**
@@ -28,14 +29,6 @@ const dead = new Set<string>()
 
 const keyFor = (frameId: string) => `thumb/${frameId}.jpg`
 
-/* Global bound on concurrent preview renders. Per-frame dedupe caps repeat
-   requests but not breadth: a post-restart dashboard of 50 stale canvases
-   (or an anonymous crawler walking known frame URLs) would otherwise launch
-   50 Chromium pages at once. Excess renders queue, they are not dropped. */
-const MAX_CONCURRENT_RENDERS = 3
-let active = 0
-const waiting: Array<() => void> = []
-
 /* lazy like every other screenshot.ts consumer (dev never pays for
    puppeteer-core until the first render), but single-flight */
 let screenshot: Promise<typeof import('./screenshot.ts')> | undefined
@@ -43,20 +36,15 @@ const loadScreenshot = () => (screenshot ??= import('./screenshot.ts'))
 
 /** The preview render: card-sized, clipped, cheap — matches what /i/?preview
  *  serves, because this IS what /i/?preview serves. */
-async function render(frame: Frame): Promise<Buffer> {
-  if (active >= MAX_CONCURRENT_RENDERS) await new Promise<void>((r) => waiting.push(r))
-  active++
-  try {
+function render(frame: Frame): Promise<Buffer> {
+  return withRenderSlot(async () => {
     const { renderFrame } = await loadScreenshot()
-    return await renderFrame(frame, Math.min(1, 640 / frame.width), {
+    return renderFrame(frame, Math.min(1, 640 / frame.width), {
       type: 'jpeg',
       quality: 70,
       maxHeight: PREVIEW_MAX_HEIGHT,
     })
-  } finally {
-    active--
-    waiting.shift()?.()
-  }
+  })
 }
 
 /** Render now, persist, and return the bytes. Deduped per frame; rejects on

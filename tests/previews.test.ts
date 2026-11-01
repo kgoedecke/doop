@@ -127,4 +127,22 @@ describe('getImage', () => {
     /* the prime is per frame version: an edit needs a real render again */
     expect((await getImage({ ...f, updatedAt: 2 }, png)).status).toBe('rate-limited')
   })
+
+  it('full renders and previews share one bound on concurrent renders', async () => {
+    const resolvers: ((buf: Buffer) => void)[] = []
+    mocks.renderFrame.mockImplementation(() => new Promise<Buffer>((r) => resolvers.push(r)))
+    const tick = () => new Promise((r) => setTimeout(r, 10))
+    const all = [
+      getImage(frame(), req({ preview: true })),
+      ...Array.from({ length: 4 }, () => getImage(frame(), req())),
+    ]
+    await tick()
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(3)
+    for (let i = 0; i < all.length; i++) {
+      resolvers[i]?.(Buffer.from('x'))
+      await tick()
+    }
+    await Promise.all(all)
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(5)
+  })
 })
