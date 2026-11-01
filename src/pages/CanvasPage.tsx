@@ -99,6 +99,7 @@ import { RULER_PX } from '../components/Rulers'
 import { NO_CANVAS, onViewCommand, syncViewMenu } from '../lib/viewMenu'
 import { AGENTS_MIN, LAYERS_MIN, fitPanelWidths } from '../lib/panelWidths'
 import { t as translate, useT } from '../lib/i18n'
+import { NO_INSETS, type StageInsets } from '../lib/viewFit'
 
 /* The floating chrome's geometry, in px from the canvas area's edges. The
    panels sit 14px in from the edge; on the right the resizable Agents panel
@@ -529,6 +530,12 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     '--chrome-left': `${chrome.left}px`,
     '--chrome-right': `${chrome.right}px`,
   } as CSSProperties
+  /* what the bar and the floating chrome cover of the stage, which spans the
+     whole window; phones open their panels as sheets over everything */
+  const stageInsets: StageInsets =
+    isMobile || uiHidden
+      ? NO_INSETS
+      : { top: 50 + rulerInset, right: chrome.right, bottom: 0, left: chrome.left + rulerInset }
   const meFace = { name: me.name, color: presences[me.clientId]?.color ?? 'var(--brand)' }
 
   function openConnect() {
@@ -703,7 +710,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           edge; the floating chrome gets its own layer that starts below the
           bar, so every panel offset stays measured from there */}
       <div className="absolute inset-0 overflow-hidden" style={chromeVars}>
-        <Stage onAddFrame={addFrame} rightInset={isMobile ? 0 : chrome.right} />
+        <Stage onAddFrame={addFrame} insets={stageInsets} />
         <div
           className={cn(
             'pointer-events-none absolute inset-x-0 bottom-0 top-[50px] max-md:top-14 max-xs:top-[100px]',

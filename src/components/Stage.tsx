@@ -47,6 +47,7 @@ import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
 import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
+import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 
 const MIN_ZOOM = 0.08
 /* The settled world is laid out at up to this zoom too (layoutZoomFor), so
@@ -131,14 +132,29 @@ const sendViewport = throttle(
 
 export function Stage({
   onAddFrame,
-  rightInset,
+  insets = NO_INSETS,
 }: {
   onAddFrame: () => void
-  /** px the floating panels and islands cover at the stage's right edge —
-   *  no room there for a comment composer */
-  rightInset: number
+  /** px the top bar, floating panels and islands cover at each of the
+   *  stage's edges — fits centre in what is left, and there is no room
+   *  under them for a comment composer */
+  insets?: StageInsets
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  /* read by the fit callbacks, which outlive a render */
+  const insetsRef = useRef(insets)
+  useLayoutEffect(() => {
+    insetsRef.current = insets
+  })
+  /* the camera that fits a world box into the open part of the stage */
+  const fitView = useCallback(
+    (el: HTMLElement, box: { x: number; y: number; width: number; height: number }, maxZoom: number) =>
+      fitBox(box, { width: el.clientWidth, height: el.clientHeight }, insetsRef.current, {
+        min: MIN_ZOOM,
+        max: Math.min(MAX_ZOOM, maxZoom),
+      }),
+    [],
+  )
   const drawing = useCanvasDrawing(ref)
   const worldRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<HTMLDivElement>(null)
@@ -347,16 +363,7 @@ export function Stage({
     }
     const f = currentPageCanvas()?.frames.find((x) => x.id === req.frameId)
     if (!f) return undefined
-    const pad = 80
-    const zoom = Math.min(
-      MAX_ZOOM,
-      Math.max(MIN_ZOOM, Math.min((el.clientWidth - pad * 2) / f.width, (el.clientHeight - pad * 2) / f.height, 1)),
-    )
-    return {
-      x: (el.clientWidth - f.width * zoom) / 2 - f.x * zoom,
-      y: (el.clientHeight - f.height * zoom) / 2 - f.y * zoom,
-      zoom,
-    }
+    return fitView(el, f, 1)
   }
 
   /* a fly-to request (prompt bar): glide the camera to the frame instead of
@@ -392,16 +399,7 @@ export function Stage({
       if (!el) return
       select(f.id)
       focusedPage.current = useStore.getState().activePageId
-      const pad = 80
-      const zoom = Math.min(
-        MAX_ZOOM,
-        Math.max(MIN_ZOOM, Math.min((el.clientWidth - pad * 2) / f.width, (el.clientHeight - pad * 2) / f.height, 1)),
-      )
-      setViewport({
-        x: (el.clientWidth - f.width * zoom) / 2 - f.x * zoom,
-        y: (el.clientHeight - f.height * zoom) / 2 - f.y * zoom,
-        zoom,
-      })
+      setViewport(fitView(el, f, 1))
       const s = useStore.getState()
       s.pickElement(null)
       if (selector) {
@@ -414,7 +412,7 @@ export function Stage({
         s.setInspectorOpen(true)
       }
     },
-    [setViewport, select],
+    [setViewport, select, fitView],
   )
 
   /* centre a canvas comment's pin at 100% on its page and open its thread
@@ -432,35 +430,24 @@ export function Stage({
     [setViewport],
   )
 
-  /* fit a set of frames (with their name labels above) into the view; an
-     empty set resets to the origin at 100% */
+  /* fit a set of frames (with their name labels above) into the open part
+     of the view; an empty set resets to the origin at 100% */
   const fitFrames = useCallback(
     (frames: { x: number; y: number; width: number; height: number }[]) => {
       const el = ref.current
       if (!el) return
-      const boxes = frames.map((f) => ({ x: f.x, y: f.y - 30, w: f.width, h: f.height + 30 }))
-      if (!boxes.length) {
-        setViewport({ x: 80, y: 80, zoom: 1 })
+      if (!frames.length) {
+        const { left, top } = insetsRef.current
+        setViewport({ x: left + 80, y: top + 80, zoom: 1 })
         return
       }
-      const minX = Math.min(...boxes.map((b) => b.x))
-      const minY = Math.min(...boxes.map((b) => b.y))
-      const maxX = Math.max(...boxes.map((b) => b.x + b.w))
-      const maxY = Math.max(...boxes.map((b) => b.y + b.h))
-      const pad = 80
-      const w = el.clientWidth
-      const h = el.clientHeight
-      const zoom = Math.min(
-        MAX_ZOOM,
-        Math.max(MIN_ZOOM, Math.min((w - pad * 2) / (maxX - minX), (h - pad * 2) / (maxY - minY), 1.25)),
-      )
-      setViewport({
-        x: (w - (maxX - minX) * zoom) / 2 - minX * zoom,
-        y: (h - (maxY - minY) * zoom) / 2 - minY * zoom,
-        zoom,
-      })
+      const minX = Math.min(...frames.map((f) => f.x))
+      const minY = Math.min(...frames.map((f) => f.y - 30))
+      const maxX = Math.max(...frames.map((f) => f.x + f.width))
+      const maxY = Math.max(...frames.map((f) => f.y + f.height))
+      setViewport(fitView(el, { x: minX, y: minY, width: maxX - minX, height: maxY - minY }, 1.25))
     },
-    [setViewport],
+    [setViewport, fitView],
   )
 
   const fit = useCallback(() => {
@@ -786,7 +773,7 @@ export function Stage({
     /* the composer hangs beside the pin on whichever side keeps it on the
        visible stage (the side panel overlays the stage's right edge) */
     const rect = e.currentTarget.getBoundingClientRect()
-    const placement = placeComposer(e.clientX, rect.left, rect.right - rightInset)
+    const placement = placeComposer(e.clientX, rect.left, rect.right - insets.right)
     function onUp(ev: PointerEvent) {
       window.removeEventListener('pointerup', onUp)
       if (Math.abs(ev.clientX - origin.x) + Math.abs(ev.clientY - origin.y) > 3) return

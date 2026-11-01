@@ -1,0 +1,91 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createServer, type ViteDevServer } from 'vite'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureServerConfig, openBrowser, type TestBrowser } from './browser'
+import { freePort, startServer, type Server } from './harness'
+
+/* ⇧2 fits the selection into the part of the stage the panels leave open,
+   not the whole window under them */
+describe.skipIf(!findBrowserPath())('zoom to selection with the panels open', () => {
+  let vite: ViteDevServer
+  let server: Server
+  let browser: TestBrowser
+  let page: Page
+  beforeAll(async () => {
+    const port = await freePort()
+    vite = await createServer(
+      fixtureServerConfig({
+        proxy: {
+          '/api': { target: `http://localhost:${port}` },
+          '/ws': { target: `ws://localhost:${port}`, ws: true },
+        },
+      }),
+    )
+    await vite.listen()
+    const origin = vite.resolvedUrls!.local[0]!.replace(/\/$/, '')
+    server = await startServer({ PORT: String(port), BETTER_AUTH_URL: origin })
+    browser = await openBrowser()
+    page = await browser.newPage()
+    page.setDefaultTimeout(10_000)
+    await page.setViewport({ width: 1600, height: 1000 })
+    await page.goto(origin)
+    const canvasId = await page.evaluate(async () => {
+      const signup = await fetch('/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Fit Tester', email: 'fit-selection@test.dev', password: 'password12345' }),
+      })
+      if (!signup.ok) throw new Error(await signup.text())
+      const canvas = await (
+        await fetch('/api/canvases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Fit selection' }),
+        })
+      ).json()
+      await fetch(`/api/canvases/${canvas.id}/frames`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Wide', x: 0, y: 0, width: 1440, height: 900, html: '<body></body>' }),
+      })
+      return canvas.id
+    })
+    await page.goto(`${origin}/c/${canvasId}`)
+    await page.waitForSelector('[data-frame-title]')
+  }, 60_000)
+  afterAll(async () => {
+    await page?.close()
+    await browser?.close()
+    await vite?.close()
+    server?.stop()
+  })
+
+  /** the open stage: right of the tool rail (which follows the Layers
+   *  panel), left of the islands (which follow the Inspector and Agents) */
+  async function openArea() {
+    return page.evaluate(() => ({
+      left: document.querySelector('[aria-label="Canvas tools"]')!.getBoundingClientRect().right,
+      right: document.querySelector('[aria-label="Account"]')!.getBoundingClientRect().left,
+    }))
+  }
+
+  it('keeps the fitted frame clear of the side panels and centred between them', async () => {
+    /* a title click selects the frame and opens the Inspector */
+    await page.click('[data-frame-title]')
+    await page.click('[aria-label^="Agents"]')
+    await page.waitForFunction(() => document.querySelectorAll('[aria-label^="Resize"]').length >= 2)
+    await page.keyboard.down('Shift')
+    await page.keyboard.press('Digit2')
+    await page.keyboard.up('Shift')
+    await new Promise((r) => setTimeout(r, 300))
+    const frame = await page.$eval('[data-frame-surface]', (el) => {
+      const r = el.getBoundingClientRect()
+      return { left: r.left, right: r.right }
+    })
+    const area = await openArea()
+    expect(frame.left).toBeGreaterThan(area.left)
+    expect(frame.right).toBeLessThan(area.right)
+    expect(Math.abs((frame.left + frame.right) / 2 - (area.left + area.right) / 2)).toBeLessThan(40)
+  })
+})
