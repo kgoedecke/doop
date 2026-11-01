@@ -293,6 +293,11 @@
   plain try-again rather than being shown. Tests: `authError.test.ts`,
   `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
 
+- MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
+  (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; the plugin neither rotates nor revokes
+  them). A daily prune deletes expired token rows but keeps the newest per user and client,
+  since `allowance.ts` reads any row as proof an agent once connected.
+
 ## 6. Build and Dependency Management
 
 - Canvas access: `canvasRole` in `server/access.ts` gives owners, members and workspace members
