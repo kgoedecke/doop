@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, closeSync, fstatSync, readSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { alive, CliError, entry, readJson, writeJson } from './runtime.mjs'
+import { CliError, entry, readJson, writeJson } from './runtime.mjs'
+import { claimLock } from './locks.mjs'
 
 /** Service registration contains a private control capability; never print it. */
 export function registration(directory) {
@@ -17,7 +18,7 @@ export function settings(directory) {
 /** Send an authenticated command over the local service control channel. */
 export function control(directory, command) {
   const state = registration(directory)
-  if (!state || !alive(state.pid)) return Promise.resolve(null)
+  if (!state) return Promise.resolve(null)
   return new Promise((resolve) => {
     const socket = createConnection(state.socket)
     let result = ''
@@ -48,11 +49,6 @@ export async function serviceStatus(directory) {
 export async function startService(directory, port) {
   const existing = await control(directory, 'status')
   if (existing?.running) return existing
-  const prior = registration(directory)
-  if (prior && alive(prior.pid))
-    throw new CliError(
-      'A service process exists but its control channel is unavailable. Inspect doop doctor and service.log.',
-    )
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   const config = settings(directory)
   if (port !== undefined) {
@@ -75,7 +71,7 @@ export async function startService(directory, port) {
   while (Date.now() < deadline) {
     const status = await control(directory, 'status')
     if (status?.running) return status
-    if (launchError || child.exitCode !== null) break
+    if (launchError || child.exitCode !== null || child.signalCode !== null) break
     await delay(150)
   }
   // The runner owns a startup timeout and cleans up its child on failure.
@@ -84,11 +80,8 @@ export async function startService(directory, port) {
 
 /** Gracefully stop the supervisor and backend; never signal a PID from a stale file. */
 export async function stopService(directory) {
-  const state = registration(directory)
   const response = await control(directory, 'stop')
   if (!response) {
-    if (state && alive(state.pid))
-      throw new CliError('Service control is unavailable; refusing to terminate an unverified process.')
     return { running: false }
   }
   if (!response.stopping) throw new CliError('Service is busy. Retry stop after the current operation completes.')
@@ -129,15 +122,20 @@ export async function endpoint(directory, explicit) {
 /** Read only the last bounded portion of server logs. */
 export function logs(directory) {
   const file = path.join(directory, 'service.log')
-  return existsSync(file) ? readFileSync(file, 'utf8').slice(-32_768) : 'No service logs yet.'
+  if (!existsSync(file)) return 'No service logs yet.'
+  const fd = openSync(file, 'r')
+  try {
+    const size = fstatSync(fd).size
+    const length = Math.min(size, 32_768)
+    const buffer = Buffer.alloc(length)
+    const count = readSync(fd, buffer, 0, length, size - length)
+    return buffer.subarray(0, count).toString('utf8')
+  } finally {
+    closeSync(fd)
+  }
 }
 
-/** Remove stale supervisor locking only after confirming its owner is gone. */
+/** Claim a supervisor heartbeat lease, independent of PID reuse. */
 export function claimSupervisor(directory) {
-  const lock = path.join(directory, '.service-lock')
-  if (existsSync(path.join(lock, 'owner.json')) && !alive(readJson(path.join(lock, 'owner.json'))?.pid))
-    rmSync(lock, { recursive: true })
-  mkdirSync(lock)
-  writeJson(path.join(lock, 'owner.json'), { pid: process.pid })
-  return lock
+  return claimLock(directory, '.service-lock')
 }

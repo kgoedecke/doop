@@ -35,7 +35,7 @@ export interface Server {
   dataDir: string
   /** Resolves after the child process exits; useful before reopening its data directory. */
   stopped: Promise<void>
-  stop(opts?: { keepData?: boolean }): void
+  stop(opts?: { keepData?: boolean }): Promise<void>
 }
 
 /** An OS-assigned port, released again so a child can bind it. */
@@ -132,11 +132,8 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
       stopped,
       stop({ keepData }: { keepData?: boolean } = {}) {
         proc.kill()
-        if (!keepData) {
-          void stopped
-            .then(() => rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
-            .catch((error) => console.error('test data cleanup failed', error))
-        }
+        if (keepData) return stopped
+        return stopped.then(() => rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
       },
     }
   }
@@ -166,7 +163,7 @@ function waitForBind(proc: ChildProcess, port: number): Promise<boolean> {
  *  applies the migration journal, and keep the resulting data directory. */
 export async function buildTemplate(dir: string): Promise<void> {
   const server = await boot({}, undefined)
-  server.stop({ keepData: true })
+  await server.stop({ keepData: true })
   await server.stopped
   cpSync(server.dataDir, dir, { recursive: true })
   rmSync(server.dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })

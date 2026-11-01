@@ -31,7 +31,7 @@ beforeAll(async () => {
 }, 70_000)
 
 afterAll(async () => {
-  server?.stop()
+  await server?.stop()
   if (directory) await rm(directory, { recursive: true, force: true })
 })
 

@@ -91,10 +91,18 @@ export async function authCommand(action, directory, base, values) {
     return { authenticated: true, origin: base }
   }
   if (action === 'logout') {
-    if (readJson(sessionFile, null)?.origin === base)
-      await apiRequest(directory, base, '/api/auth/sign-out', 'POST', {})
-    rmSync(sessionFile, { force: true })
-    return { authenticated: false }
+    let revoked = false
+    try {
+      if (base && readJson(sessionFile, null)?.origin === base) {
+        await apiRequest(directory, base, '/api/auth/sign-out', 'POST', {})
+        revoked = true
+      }
+    } catch {
+      /* Remote revocation is best-effort; local cleanup is mandatory. */
+    } finally {
+      rmSync(sessionFile, { force: true })
+    }
+    return { authenticated: false, revoked }
   }
   if (['status', 'list', 'whoami'].includes(action)) return (await apiRequest(directory, base, '/api/me')).json()
   throw new CliError('Unknown auth command. Use login, logout or status.')

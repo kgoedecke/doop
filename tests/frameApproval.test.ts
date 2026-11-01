@@ -25,7 +25,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await agent?.close()
-  server?.stop()
+  await server?.stop()
 })
 
 async function create() {
@@ -213,7 +213,7 @@ it('persists current approvals and stale approvals through a server restart', as
   await owner.patch(`/api/frames/${stale.id}`, { height: 900 })
   const dataDir = server.dataDir
   await agent.close()
-  server.stop({ keepData: true })
+  await server.stop({ keepData: true })
   await server.stopped
   server = await startServer({}, dataDir)
   owner = new Client(server)

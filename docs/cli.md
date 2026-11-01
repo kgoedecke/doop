@@ -29,9 +29,12 @@ including the key, and restore as a unit. Upgrades apply existing migrations at
 startup; back up before upgrading. Install the next tarball and restart with the
 same data directory.
 
-Only one instance may use a data directory. After forced termination, check the
-`pid` file in `.doop-lock` and ensure no instance is running before manually
-removing that stale lock directory. Do not remove a live lock.
+Only one instance may use a data directory. The backend and supervisor use
+heartbeat locks, which expire after ten seconds without a heartbeat following a
+forced termination. Retry startup after that grace period; PID reuse does not
+establish ownership. Do not manually remove a live lock. Legacy preview locks
+containing `pid` or `owner.json` metadata require stopping the old CLI first;
+remove a stale legacy directory only after verifying the old process has stopped.
 
 Existing server environment variables configure external integrations. The CLI
 sets production mode, loopback host, port, authentication origin and key itself.

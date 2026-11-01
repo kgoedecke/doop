@@ -7,6 +7,7 @@
   "scripts": {
     "build:cli": "node scripts/build-cli.mjs",
     "test:cli": "node scripts/test-cli.mjs",
+    "test:cli:lifecycle": "node --test scripts/test-cli-lifecycle.mjs",
     "dev": "bun run build:claude-extension && concurrently -n server,web -c yellow,cyan \"tsx watch --env-file-if-exists=.env server/index.ts\" \"vite\"",
     "build": "bun run build:claude-extension && vite build",
     "build:claude-extension": "node scripts/build-claude-extension.mjs",
@@ -65,6 +66,7 @@
     "pdf-lib": "1.17.1",
     "pg": "^8.22.0",
     "posthog-js": "^1.415.6",
+    "proper-lockfile": "4.1.2",
     "puppeteer-core": "^25.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

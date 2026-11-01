@@ -4,10 +4,10 @@ import { appendFileSync, chmodSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { entry, writeJson } from './runtime.mjs'
 import { claimSupervisor, settings } from './service.mjs'
+import { hasExited, stopChild as stopProcess } from './processes.mjs'
 
 const directory = process.argv[2]
 const token = randomBytes(32).toString('hex')
@@ -24,19 +24,7 @@ let currentUrl
 let busy = false
 let stopping = false
 let shutdownPromise
-
-async function stopChild() {
-  if (!child || child.exitCode !== null) return
-  const closing = child
-  const exited = once(closing, 'exit')
-  if (closing.connected) closing.disconnect()
-  const timer = setTimeout(() => closing.kill(), 8_000)
-  try {
-    await exited
-  } finally {
-    clearTimeout(timer)
-  }
-}
+const stopChild = () => stopProcess(child)
 
 async function startChild() {
   let output = ''
@@ -57,7 +45,7 @@ async function startChild() {
   const deadline = Date.now() + 75_000
   while (Date.now() < deadline) {
     if (stopping) throw new Error('Startup cancelled by shutdown.')
-    if (launched.exitCode !== null) throw new Error('Backend exited during startup.')
+    if (hasExited(launched)) throw new Error('Backend exited during startup.')
     const url = output.match(/Doop local: (http:\/\/127\.0\.0\.1:\d+)/)?.[1]
     if (url && output.includes('doop server')) {
       currentUrl = url
@@ -76,7 +64,7 @@ function shutdown() {
     await stopChild()
     server?.close()
     rmSync(path.join(directory, 'service-state.json'), { force: true })
-    if (lock) rmSync(lock, { recursive: true, force: true })
+    lock?.()
     if (process.platform !== 'win32') rmSync(socketPath, { force: true })
     process.exit(0)
   })()
@@ -114,8 +102,9 @@ async function main() {
         if (request.command === 'status') {
           socket.end(
             JSON.stringify({
-              running: child?.exitCode === null && !busy && !stopping,
+              running: !!child && !hasExited(child) && !busy && !stopping,
               pid: process.pid,
+              backendPid: child?.pid,
               url: currentUrl,
               installed: settings(directory).installed,
             }),
@@ -154,7 +143,7 @@ async function main() {
     token,
   })
   const monitor = setInterval(() => {
-    if (child?.exitCode !== null && !busy) void shutdown()
+    if (child && hasExited(child) && !busy) void shutdown()
   }, 1000)
   monitor.unref()
   process.once('SIGINT', () => {

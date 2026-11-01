@@ -1,25 +1,15 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
 import { register } from 'tsx/esm/api'
-import { alive, CliError, readJson, writeJson } from './runtime.mjs'
+import { CliError, readJson, writeJson } from './runtime.mjs'
+import { claimLock } from './locks.mjs'
 
 /** Run the existing production server in this process. */
 export async function foreground(directory, requestedPort) {
-  mkdirSync(directory, { recursive: true, mode: 0o700 })
-  const lock = path.join(directory, '.doop-lock')
-  if (existsSync(path.join(lock, 'pid'))) {
-    const pid = Number(readFileSync(path.join(lock, 'pid'), 'utf8'))
-    if (!alive(pid)) rmSync(lock, { recursive: true })
-  }
-  try {
-    mkdirSync(lock)
-  } catch (cause) {
-    throw new CliError('Data directory is locked. Stop the other instance before starting another server.', { cause })
-  }
-  process.once('exit', () => rmSync(lock, { recursive: true, force: true }))
-  writeFileSync(path.join(lock, 'pid'), String(process.pid))
+  // The lock library releases on normal exit and expires a crash's heartbeat.
+  claimLock(directory, '.doop-lock')
   const configPath = path.join(directory, 'local-auth.json')
   if (!existsSync(configPath)) writeJson(configPath, { secret: randomBytes(32).toString('hex') })
   const config = readJson(configPath)

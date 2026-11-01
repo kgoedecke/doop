@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 /** Exercise command groups against a real installed package and detached service. */
 export async function exerciseCommands(entry, install, work, env, archive) {
@@ -87,6 +88,27 @@ export async function exerciseCommands(entry, install, work, env, archive) {
     assert.equal(json(['service', 'stop']).running, false)
     const restarted = json(['service', 'start'])
     assert.equal(restarted.running, true)
+    assert.equal(
+      JSON.parse(run(['auth', 'login', '--email', 'commands@test.dev', '--password-stdin'], password)).authenticated,
+      true,
+    )
+    assert.equal(json(['api', `/api/canvases/${canvas.id}`]).name, 'Managed CLI canvas')
+    const crashTarget = json(['service', 'status'])
+    process.kill(crashTarget.backendPid, 'SIGKILL')
+    const crashDeadline = Date.now() + 10_000
+    while (existsSync(path.join(directory, 'service-state.json')) && Date.now() < crashDeadline) await delay(50)
+    assert.equal(
+      existsSync(path.join(directory, 'service-state.json')),
+      false,
+      'Supervisor must clean up after signal termination',
+    )
+    assert.equal(json(['service', 'status']).running, false)
+    // A forced kill cannot run exit handlers: exercise the documented 10-second
+    // heartbeat expiry before opening the same embedded database again.
+    await delay(10_100)
+    assert.equal(json(['service', 'start']).running, true)
+    // Port 0 may select a new origin; log in again instead of forwarding the
+    // old origin's cookie to a different endpoint.
     assert.equal(
       JSON.parse(run(['auth', 'login', '--email', 'commands@test.dev', '--password-stdin'], password)).authenticated,
       true,

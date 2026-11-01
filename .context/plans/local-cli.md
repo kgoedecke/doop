@@ -66,6 +66,16 @@ environment's release-age policy currently excludes that release. Use matching
 4.1.0 packages, acquired successfully without overriding the policy, and inspect
 their APIs before implementation.
 
+CodeRabbit review follow-up: restrict and pin CLI workflow actions; make logout
+remove local credentials even offline; detect signal-terminated children and
+force-kill after the shutdown grace budget; replace PID ownership with maintained
+heartbeat leases for both locks; read log tails with bounded byte I/O; and return
+the server teardown promise, awaiting it at block-bodied test call sites. Six
+focused lifecycle regressions exercise real processes, concurrent locking,
+ownerless stale locks, offline logout and Unicode log tails. Installed-package
+E2E additionally kills the backend and verifies supervisor cleanup and restart
+after lease expiry.
+
 - Convert command and service implementation modules to typechecked TypeScript;
   retain only minimal executable loaders needed by the npm bin entry points.
 - Use Effect services and Layers for configuration, persistent state, process

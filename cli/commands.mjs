@@ -78,7 +78,16 @@ export async function dispatch(command, args, values, directory) {
   }
   if (command === 'auth') {
     arity(args, 1)
-    return print(await authCommand(args[0] || 'status', directory, await endpoint(directory, values.server), values))
+    const action = args[0] || 'status'
+    let base
+    if (action === 'logout') {
+      try {
+        base = await endpoint(directory, values.server)
+      } catch {
+        /* Logout still removes the local cookie offline. */
+      }
+    } else base = await endpoint(directory, values.server)
+    return print(await authCommand(action, directory, base, values))
   }
   if (command === 'pair') {
     arity(args, 0)
