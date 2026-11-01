@@ -234,8 +234,10 @@ async fn install(app: &AppHandle, update: Update, bytes: Vec<u8>) -> Result<(), 
             .set_level(MessageLevel::Error)
             .show()
             .await;
+            // a check that ran while the dialog was open may have kept a
+            // newer download; that one stays
             if let Ok(mut ready) = app.state::<UpdateState>().ready.lock() {
-                *ready = Some((update, bytes));
+                ready.get_or_insert((update, bytes));
             }
             Err(error.to_string())
         }
