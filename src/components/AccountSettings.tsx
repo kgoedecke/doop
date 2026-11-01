@@ -3,7 +3,7 @@ import { authClient } from '../lib/auth'
 import { api } from '../lib/api'
 import type { NotificationSettings } from '../../shared/notifications'
 import { posthog } from '../lib/posthog'
-import { useT } from '../lib/i18n'
+import { useT, type PlainMessageKey, type Translate } from '../lib/i18n'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
@@ -12,6 +12,19 @@ import { Checkbox } from './ui/checkbox'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
 
 /* settings fields are a fixed column on desktop and full width on a phone */
+
+/* A message kept in state: our own as a key, translated where it renders so a
+   language switch reaches it too; the server's as the text it sent. */
+type Notice = { key: PlainMessageKey } | { text: string }
+
+function noticeText(t: Translate, notice: Notice): string {
+  return 'key' in notice ? t(notice.key) : notice.text
+}
+
+/** The server's message when it sent one, else our own fallback. */
+function errorNotice(message: string | undefined, fallback: PlainMessageKey): Notice {
+  return message ? { text: message } : { key: fallback }
+}
 
 /** The "Your account" pane of /settings: who you are on a canvas, and how you
  *  get back into one. Everything here is better-auth's own account surface —
@@ -27,20 +40,20 @@ export function AccountSettings() {
   const dirty = name.trim().length > 0 && name.trim() !== (user?.name ?? '')
 
   const [savingName, setSavingName] = useState(false)
-  const [nameNote, setNameNote] = useState('')
-  const [nameError, setNameError] = useState('')
+  const [nameNote, setNameNote] = useState<Notice | null>(null)
+  const [nameError, setNameError] = useState<Notice | null>(null)
 
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [savingPw, setSavingPw] = useState(false)
-  const [pwNote, setPwNote] = useState('')
-  const [pwError, setPwError] = useState('')
+  const [pwNote, setPwNote] = useState<Notice | null>(null)
+  const [pwError, setPwError] = useState<Notice | null>(null)
 
-  const [verifyNote, setVerifyNote] = useState('')
+  const [verifyNote, setVerifyNote] = useState<Notice | null>(null)
 
   /* null until the server has answered — the switch renders inert meanwhile */
   const [notify, setNotify] = useState<NotificationSettings | null>(null)
-  const [notifyError, setNotifyError] = useState('')
+  const [notifyError, setNotifyError] = useState<Notice | null>(null)
   /* one save at a time: two in flight could land out of order and show the older choice */
   const [savingNotify, setSavingNotify] = useState(false)
   const refreshNotify = useCallback(() => {
@@ -50,20 +63,20 @@ export function AccountSettings() {
 
   async function saveName() {
     setSavingName(true)
-    setNameNote('')
-    setNameError('')
+    setNameNote(null)
+    setNameError(null)
     const { error } = await authClient.updateUser({ name: name.trim() })
     setSavingName(false)
-    if (error) return setNameError(error.message || t('account.nameSaveFailed'))
+    if (error) return setNameError(errorNotice(error.message, 'account.nameSaveFailed'))
     posthog.capture('account_name_changed')
     setDraft(null)
-    setNameNote(t('account.nameSaved'))
+    setNameNote({ key: 'account.nameSaved' })
   }
 
   async function savePassword() {
     setSavingPw(true)
-    setPwNote('')
-    setPwError('')
+    setPwNote(null)
+    setPwError(null)
     /* revoking is the point: a password change you make because you fear a
        device is compromised is useless if that device stays signed in */
     const { error } = await authClient.changePassword({
@@ -72,23 +85,23 @@ export function AccountSettings() {
       revokeOtherSessions: true,
     })
     setSavingPw(false)
-    if (error) return setPwError(error.message || t('account.passwordChangeFailed'))
+    if (error) return setPwError(errorNotice(error.message, 'account.passwordChangeFailed'))
     posthog.capture('account_password_changed')
     setCurrent('')
     setNext('')
-    setPwNote(t('account.passwordUpdated'))
+    setPwNote({ key: 'account.passwordUpdated' })
   }
 
   async function setCommentEmails(on: boolean) {
     if (!notify || savingNotify) return
     setSavingNotify(true)
     setNotify({ ...notify, commentEmails: on })
-    setNotifyError('')
+    setNotifyError(null)
     try {
       setNotify(await api.setNotificationPrefs({ commentEmails: on }))
       posthog.capture('comment_emails_toggled', { on })
     } catch {
-      setNotifyError(t('account.notifySaveFailed'))
+      setNotifyError({ key: 'account.notifySaveFailed' })
       refreshNotify()
     } finally {
       setSavingNotify(false)
@@ -97,9 +110,11 @@ export function AccountSettings() {
 
   async function resendVerification() {
     if (!user?.email) return
-    setVerifyNote('')
+    setVerifyNote(null)
     const { error } = await authClient.sendVerificationEmail({ email: user.email })
-    setVerifyNote(error ? error.message || t('account.verificationSendFailed') : t('account.verificationSent'))
+    setVerifyNote(
+      error ? errorNotice(error.message, 'account.verificationSendFailed') : { key: 'account.verificationSent' },
+    )
   }
 
   return (
@@ -122,8 +137,8 @@ export function AccountSettings() {
               value={name}
               onChange={(e) => {
                 setDraft(e.target.value)
-                setNameNote('')
-                setNameError('')
+                setNameNote(null)
+                setNameError(null)
               }}
               maxLength={60}
               aria-label={t('account.displayNameAria')}
@@ -131,9 +146,9 @@ export function AccountSettings() {
           }
         >
           {nameError ? (
-            <Note tone="error">{nameError}</Note>
+            <Note tone="error">{noticeText(t, nameError)}</Note>
           ) : nameNote ? (
-            <Note tone="success">{nameNote}</Note>
+            <Note tone="success">{noticeText(t, nameNote)}</Note>
           ) : dirty ? (
             <Note>{t('account.nameUnsaved')}</Note>
           ) : null}
@@ -157,7 +172,7 @@ export function AccountSettings() {
           ) : (
             <Badge>{t('account.unverified')}</Badge>
           )}
-          {verifyNote && <Note tone="success">{verifyNote}</Note>}
+          {verifyNote && <Note tone="success">{noticeText(t, verifyNote)}</Note>}
         </CardRow>
       </SettingsCard>
 
@@ -179,7 +194,7 @@ export function AccountSettings() {
           {notify && !notify.emailConfigured ? (
             <Note>{t('account.emailNotConfigured')}</Note>
           ) : notifyError ? (
-            <Note tone="error">{notifyError}</Note>
+            <Note tone="error">{noticeText(t, notifyError)}</Note>
           ) : null}
         </CardRow>
       </SettingsCard>
@@ -197,7 +212,7 @@ export function AccountSettings() {
               value={current}
               onChange={(e) => {
                 setCurrent(e.target.value)
-                setPwError('')
+                setPwError(null)
               }}
               autoComplete="current-password"
               aria-label={t('account.currentPassword')}
@@ -217,7 +232,7 @@ export function AccountSettings() {
               value={next}
               onChange={(e) => {
                 setNext(e.target.value)
-                setPwError('')
+                setPwError(null)
               }}
               autoComplete="new-password"
               aria-label={t('account.newPassword')}
@@ -225,9 +240,9 @@ export function AccountSettings() {
           }
         >
           {pwError ? (
-            <Note tone="error">{pwError}</Note>
+            <Note tone="error">{noticeText(t, pwError)}</Note>
           ) : pwNote ? (
-            <Note tone="success">{pwNote}</Note>
+            <Note tone="success">{noticeText(t, pwNote)}</Note>
           ) : (
             <Note>{t('account.passwordMinLength')}</Note>
           )}
