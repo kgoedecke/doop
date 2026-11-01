@@ -223,6 +223,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   /* space held: the shield stays up even in edit mode, so the press reaches
      the Stage and pans instead of vanishing into the editable iframe */
   const panMode = useStore((s) => s.panMode)
+  const fileDragging = useStore((s) => s.fileDragging)
   /* the canvas tool: Hand lets presses fall through to the Stage, Comment
      turns a click on the surface into a comment on the element under it */
   const tool = useStore((s) => s.tool)
@@ -1463,8 +1464,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               </div>
             )}
             {/* shield keeps pointer events on the canvas, not the iframe;
-            lifted while editing so clicks land in the editable document */}
-            {(!editing || panMode || tool !== 'select') && <div className="absolute inset-0" />}
+            lifted while editing so clicks land in the editable document,
+            but not under a file drag, whose drop belongs to the canvas */}
+            {(!editing || panMode || fileDragging || tool !== 'select') && <div className="absolute inset-0" />}
             {/* above the selection outline (z-[3]), or that outline covers the
             hovered element's tag */}
             {hover && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
