@@ -10,7 +10,8 @@ interface SettledView {
 }
 
 /** How each frame on the page is drawn (see frameLod.ts), from the settled
- *  camera, the stage size, the selection and the running agent streams. */
+ *  camera, the stage size, the selection, prototype mode and the running
+ *  agent streams. */
 export function useFrameLods(
   stageRef: RefObject<HTMLDivElement | null>,
   frames: readonly LodRect[],
@@ -20,6 +21,9 @@ export function useFrameLods(
      so a heavy canvas never mounts every document for one first paint */
   const [view, setView] = useState<SettledView>(() => ({ camera: useStore.getState().viewport, width: 0, height: 0 }))
   const selectedIds = useStore((s) => s.selectedIds)
+  /* prototype connectors start at hotspots only a live document can report
+     (PrototypeOverlay), so prototype mode keeps every frame live */
+  const prototypeMode = useStore((s) => s.prototypeMode)
   /* a joined string, so a new stream chunk with the same streams re-renders nothing */
   const streamIds = useStore((s) => Object.keys(s.streams).join('\n'))
 
@@ -47,9 +51,9 @@ export function useFrameLods(
     () =>
       frameLods(frames, view.camera, view, {
         budget,
-        pinned: new Set(selectedIds),
+        pinned: new Set(prototypeMode ? frames.map((f) => f.id) : selectedIds),
         preferred: new Set(streamIds ? streamIds.split('\n') : []),
       }),
-    [frames, view, budget, selectedIds, streamIds],
+    [frames, view, budget, selectedIds, prototypeMode, streamIds],
   )
 }

@@ -33,6 +33,7 @@
         selection: () => useStore.getState().selectedElement,
         updateHtml: (html) => useStore.getState().patchFrameLocal('f', { html }),
         selectMany: (ids) => useStore.getState().selectMany(ids),
+        selectedIds: () => useStore.getState().selectedIds,
         undo,
       }
 
@@ -41,6 +42,13 @@
         const zoom = useStore((s) => s.viewport.zoom)
         /* frame names render into a screen-space layer, as the Stage provides */
         const [labelLayer, setLabelLayer] = React.useState(null)
+        /* drawAsImage(true): frames outside the selection draw as images, as
+           the Stage's level of detail draws them */
+        const selectedIds = useStore((s) => s.selectedIds)
+        const [asImage, setAsImage] = React.useState(false)
+        React.useEffect(() => {
+          window.contextMenuHarness.drawAsImage = setAsImage
+        }, [])
         return React.createElement(
           TooltipProvider,
           null,
@@ -56,12 +64,17 @@
                 React.createElement('div', { style: { position: 'absolute', inset: 0 }, ref: setLabelLayer }),
                 React.createElement(
                   'div',
-                  { style: { transform: `scale(${zoom})`, transformOrigin: '0 0' } },
+                  { className: 'world', style: { transform: `scale(${zoom})`, transformOrigin: '0 0' } },
                   React.createElement(
                     FrameLabelLayer.Provider,
                     { value: labelLayer },
                     frames.map((frame) =>
-                      React.createElement(FrameView, { key: frame.id, frame, layoutZoom: 1, lod: 'live' }),
+                      React.createElement(FrameView, {
+                        key: frame.id,
+                        frame,
+                        layoutZoom: 1,
+                        lod: asImage && !selectedIds.includes(frame.id) ? 'image' : 'live',
+                      }),
                     ),
                   ),
                 ),

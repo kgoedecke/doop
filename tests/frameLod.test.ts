@@ -79,6 +79,13 @@ describe('frameLods', () => {
     expect(lods.has('gone')).toBe(false)
   })
 
+  it('gives hidden frames no slot, even when selected', () => {
+    const frames = [{ ...frame('hidden', 0, 0, 900, 700), hidden: true }, frame('shown', 0, 0, 200, 200)]
+    const lods = frameLods(frames, atRest, screen, options({ budget: 1, pinned: new Set(['hidden']) }))
+    expect(lods.has('hidden')).toBe(false)
+    expect(lods.get('shown')).toBe('live')
+  })
+
   it('draws nothing live with a zero budget', () => {
     const lods = frameLods([frame('a', 0, 0)], atRest, screen, options({ budget: 0 }))
     expect(lods.get('a')).toBe('image')

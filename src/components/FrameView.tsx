@@ -330,6 +330,9 @@ export const FrameView = memo(function FrameView({
       mode === 'move' &&
       probeOnClick &&
       !skipElement &&
+      /* an image has no document to hit-test: the press selects the frame,
+         which brings its document in, as a frame drag */
+      live &&
       elementMove.start(
         e,
         (press, move, released) => {

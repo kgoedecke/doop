@@ -13,12 +13,13 @@ import type { Viewport } from './store'
 /** How a frame is drawn on the stage. */
 export type FrameLod = 'live' | 'image' | 'none'
 
-export type LodRect = Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height'>
+export type LodRect = Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height' | 'hidden'>
 
 export interface LodOptions {
   /** live documents allowed besides the pinned frames */
   budget: number
-  /** live wherever they are: the selection, which edits talk to */
+  /** live wherever they are: the selection, which edits talk to, or every
+   *  frame in prototype mode */
   pinned: ReadonlySet<string>
   /** live ahead of larger frames while on screen: agent streams, so the
    *  design builds up in view instead of in a stale image */
@@ -44,6 +45,8 @@ export function frameLods(
   const marginX = screen.width * MARGIN
   const marginY = screen.height * MARGIN
   for (const frame of frames) {
+    /* the Stage draws hidden frames without a document */
+    if (frame.hidden) continue
     if (options.pinned.has(frame.id)) {
       lods.set(frame.id, 'live')
       continue

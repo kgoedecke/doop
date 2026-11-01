@@ -13,6 +13,9 @@ declare global {
       selection: () => { frameId: string; selector: string } | null
       updateHtml: (html: string) => void
       selectMany: (ids: string[]) => void
+      selectedIds: () => string[]
+      /** frames outside the selection draw as images (FrameView's `lod`) */
+      drawAsImage: (on: boolean) => void
       undo: () => Promise<void>
     }
   }
