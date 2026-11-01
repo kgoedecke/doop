@@ -5,7 +5,16 @@ import { navigate } from '../App'
 import { cn } from '@/lib/utils'
 import { Tooltip } from './ui/tooltip'
 import { Toolbar, ToolbarButton, ToolbarControl, ToolbarDot } from './ui/toolbar'
-import { BookOpenIcon, CommentIcon, GearIcon, HelpIcon, PulseIcon, SlidersIcon, SparkIcon } from './ui/icons'
+import {
+  BookOpenIcon,
+  CommentIcon,
+  ComponentIcon,
+  GearIcon,
+  HelpIcon,
+  PulseIcon,
+  SlidersIcon,
+  SparkIcon,
+} from './ui/icons'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { openSupportChat } from '../lib/posthog'
 import { PresenceFace } from './PeerAvatars'
@@ -127,7 +136,7 @@ export function SideRail({
 }
 
 /** One button per tab of the Agents panel — agents, comments, activity,
- *  memory — each opening the panel on that tab, with a live dot while an
+ *  memory, components — each opening the panel on that tab, with a live dot while an
  *  agent works or a message waits. The desktop island stacks them; on phones
  *  they run along the top-right corner as their own island. */
 export function PanelTabButtons({
@@ -169,6 +178,9 @@ export function PanelTabButtons({
       >
         <BookOpenIcon />
         {proposalPending && <ToolbarDot className="bg-brand" />}
+      </ToolbarControl>
+      <ToolbarControl side={tooltipSide} label={t('library.tab')} onClick={() => onOpen('components')}>
+        <ComponentIcon />
       </ToolbarControl>
     </>
   )

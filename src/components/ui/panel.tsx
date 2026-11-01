@@ -166,6 +166,33 @@ function PanelTabs({ className, ...props }: React.ComponentProps<typeof TabsPrim
   return <TabsPrimitive.List data-slot="panel-tabs" className={cn('flex min-w-0 gap-0.5', className)} {...props} />
 }
 
+/* the fade at the clip's right edge; the label travels past it so its last
+   letter rests fully in view */
+const MARQUEE_FADE = 8
+/* px per second a cut-off label drifts */
+const MARQUEE_SPEED = 12
+/* the share of each leg spent resting at its end (the marquee keyframes) */
+const MARQUEE_TRAVEL = 0.7
+
+/** How many px of the label its clip cuts off (re-measured as either resizes),
+ *  0 when it fits. */
+function useLabelOverflow(clip: React.RefObject<HTMLElement | null>, label: React.RefObject<HTMLElement | null>) {
+  const [overflow, setOverflow] = React.useState(0)
+  React.useLayoutEffect(() => {
+    const clipEl = clip.current
+    const labelEl = label.current
+    if (!clipEl || !labelEl) return
+    const observer = new ResizeObserver(() => {
+      const cut = labelEl.offsetWidth - clipEl.clientWidth
+      setOverflow(cut > 0.5 ? Math.ceil(cut) : 0)
+    })
+    observer.observe(clipEl)
+    observer.observe(labelEl)
+    return () => observer.disconnect()
+  }, [clip, label])
+  return overflow
+}
+
 /* forwards its ref so a Tooltip can anchor on an icon-only tab */
 const PanelTab = React.forwardRef<
   React.ComponentRef<typeof TabsPrimitive.Trigger>,
@@ -195,12 +222,25 @@ const PanelIconTab = React.forwardRef<
     badge?: React.ReactNode
   }
 >(function PanelIconTab({ className, icon, badge, children, ...props }, ref) {
+  const clip = React.useRef<HTMLSpanElement>(null)
+  const label = React.useRef<HTMLSpanElement>(null)
+  /* the active tab gives way when the strip runs out of room; a label it then
+     cuts off drifts slowly to its end and back, so all of it reads */
+  const overflow = useLabelOverflow(clip, label)
+  const shift = overflow + MARQUEE_FADE
+  const drift =
+    overflow > 0
+      ? ({
+          '--marquee-shift': `-${shift}px`,
+          animationDuration: `${shift / MARQUEE_SPEED / MARQUEE_TRAVEL}s`,
+        } as React.CSSProperties)
+      : undefined
   return (
     <TabsPrimitive.Trigger
       ref={ref}
       data-slot="panel-icon-tab"
       className={cn(
-        'group relative inline-flex h-[26px] shrink-0 items-center rounded-[8px] px-2 font-sans text-[12px] font-normal normal-case tracking-normal text-ink-soft transition-[background-color,color] duration-200 hover:bg-paper-deep/60 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=active]:bg-paper-deep data-[state=active]:font-medium data-[state=active]:text-ink motion-reduce:transition-none',
+        'group relative inline-flex h-[26px] min-w-0 shrink-0 items-center rounded-[8px] px-2 font-sans text-[12px] font-normal normal-case tracking-normal text-ink-soft transition-[background-color,color] duration-200 hover:bg-paper-deep/60 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=active]:shrink data-[state=active]:bg-paper-deep data-[state=active]:font-medium data-[state=active]:text-ink motion-reduce:transition-none',
         className,
       )}
       {...props}
@@ -208,9 +248,24 @@ const PanelIconTab = React.forwardRef<
       <span className="grid size-3.5 shrink-0 place-items-center [&>svg]:size-3.5">{icon}</span>
       {/* a 0fr → 1fr grid track is the one width animation CSS can run without
           knowing the label's width */}
-      <span className="grid grid-cols-[0fr] opacity-0 transition-[grid-template-columns,opacity] duration-200 ease-out group-data-[state=active]:grid-cols-[1fr] group-data-[state=active]:opacity-100 motion-reduce:transition-none">
-        <span className="min-w-0 overflow-hidden">
-          <span className="block whitespace-nowrap pl-[7px]">{children}</span>
+      <span className="grid min-w-0 grid-cols-[0fr] opacity-0 transition-[grid-template-columns,opacity] duration-200 ease-out group-data-[state=active]:grid-cols-[1fr] group-data-[state=active]:opacity-100 motion-reduce:transition-none">
+        <span
+          ref={clip}
+          className={cn(
+            'min-w-0 overflow-hidden',
+            drift && '[mask-image:linear-gradient(to_right,transparent,black_7px,black_calc(100%-8px),transparent)]',
+          )}
+        >
+          <span
+            ref={label}
+            style={drift}
+            className={cn(
+              'block w-max whitespace-nowrap pl-[7px]',
+              drift && 'motion-safe:group-data-[state=active]:animate-[marquee_ease-in-out_infinite_alternate]',
+            )}
+          >
+            {children}
+          </span>
         </span>
       </span>
       {badge}
