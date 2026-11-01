@@ -1,4 +1,6 @@
 node_modules
+cli-package/
+*.tgz
 dist
 public/claude-extension
 data

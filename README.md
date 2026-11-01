@@ -81,6 +81,10 @@ DeepSeek, Kimi, Qwen, GLM and MiniMax ([details](#past-the-free-tasks-connect-yo
 
 ## Quickstart
 
+For the private npm CLI preview, including local installation and E2E verification,
+see [the CLI guide](docs/cli.md). It runs the existing production app without a
+repository checkout on the user's machine.
+
 ```bash
 git clone https://github.com/kgoedecke/doop && cd doop
 bun install

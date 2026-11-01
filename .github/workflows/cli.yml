@@ -1,0 +1,21 @@
+name: CLI package
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  installed-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: npm run build:cli
+      - run: npm run test:cli

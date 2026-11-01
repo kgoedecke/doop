@@ -10,6 +10,7 @@ import http from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
@@ -79,6 +80,7 @@ import { isPeerViewport } from '../shared/viewport.ts'
 import type { Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = env.PORT
+const DIST = fileURLToPath(new URL('../dist/', import.meta.url))
 
 /* Identifies the client bundle this process serves. Hashing dist/index.html
    works because Vite writes hashed asset names into it — any frontend change
@@ -87,7 +89,7 @@ const PORT = env.PORT
 const BUILD_ID = (() => {
   try {
     return createHash('sha1')
-      .update(readFileSync(path.join(process.cwd(), 'dist', 'index.html')))
+      .update(readFileSync(path.join(DIST, 'index.html')))
       .digest('hex')
       .slice(0, 12)
   } catch {
@@ -2277,7 +2279,7 @@ app.get('/sitemap.xml', (_req, res) => {
 
 /* production: serve the built client */
 if (env.isProduction) {
-  const dist = path.join(process.cwd(), 'dist')
+  const dist = DIST
   app.use(express.static(dist))
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
@@ -2425,7 +2427,11 @@ wss.on('connection', (ws, upgradeReq) => {
   })
 })
 
-server.listen(PORT, () => {
+server.on('error', (error: NodeJS.ErrnoException) => {
+  console.error(`Server listener failed (${error.code ?? 'unknown'}). Check HOST/PORT or try a different port.`)
+  process.exit(1)
+})
+server.listen(PORT, env.HOST, () => {
   console.log(`⟡ doop server     http://localhost:${PORT}`)
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */

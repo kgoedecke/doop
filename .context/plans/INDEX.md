@@ -6,4 +6,4 @@ lists every file in this folder.
 
 ## Active
 
-(none yet)
+- [Local CLI](local-cli.md) — private npm packaging and installed-artifact E2E verification.

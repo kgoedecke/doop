@@ -3,6 +3,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { inject } from 'vitest'
 import WebSocket from 'ws'
 
@@ -79,8 +80,12 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
     const port = fixed ? Number(fixed) : await freePort()
     const base = `http://localhost:${port}`
     const proc: ChildProcess = spawn(
-      path.join(ROOT, 'node_modules', '.bin', 'tsx'),
-      [path.join(ROOT, 'server', 'index.ts')],
+      process.execPath,
+      [
+        '--import',
+        pathToFileURL(path.join(ROOT, 'node_modules/tsx/dist/loader.mjs')).href,
+        path.join(ROOT, 'server', 'index.ts'),
+      ],
       {
         cwd: dataDir, // PGlite persists to <cwd>/data — isolated per run
         env: {
@@ -127,7 +132,11 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
       stopped,
       stop({ keepData }: { keepData?: boolean } = {}) {
         proc.kill()
-        if (!keepData) rmSync(dataDir, { recursive: true, force: true })
+        if (!keepData) {
+          void stopped
+            .then(() => rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
+            .catch((error) => console.error('test data cleanup failed', error))
+        }
       },
     }
   }
@@ -160,7 +169,7 @@ export async function buildTemplate(dir: string): Promise<void> {
   server.stop({ keepData: true })
   await server.stopped
   cpSync(server.dataDir, dir, { recursive: true })
-  rmSync(server.dataDir, { recursive: true, force: true })
+  rmSync(server.dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }
 
 /** Minimal cookie-jar client: better-auth drives everything through cookies. */
