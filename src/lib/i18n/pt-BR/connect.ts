@@ -117,7 +117,7 @@ export const connect: Catalog['connect'] = {
   headlessAfter: '. A chave age em seu nome, nos canvases a que você tem acesso.',
   done: 'Concluído',
 
-  arrived: '{name} chegou — funcionou',
+  arrived: '{name} chegou. Funcionou',
   listening: 'aguardando {name}…',
   yourAgent: 'seu agente',
 

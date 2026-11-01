@@ -1,8 +1,8 @@
 import type { Catalog } from '..'
 
 export const workspace: Catalog['workspace'] = {
-  planActive: 'O plano Team está ativo — boas-vindas',
-  checkoutCanceled: 'Checkout cancelado — nada foi cobrado',
+  planActive: 'O plano Team está ativo. Boas-vindas',
+  checkoutCanceled: 'Checkout cancelado. Nada foi cobrado',
   needsPlan: '"{name}" precisa de um plano primeiro.',
   thisWorkspace: 'Este workspace',
   notFound: 'Workspace não encontrado',
@@ -71,7 +71,7 @@ export const workspace: Catalog['workspace'] = {
   upToDate: 'Sincronizado com o Stripe',
   refreshFailed: 'Não foi possível atualizar',
   billingDescription:
-    'O Team é cobrado por assento: cada pessoa no workspace, mensal ou anualmente. Os assentos acompanham a lista de pessoas — adicione alguém e a próxima fatura aumenta, remova e ela diminui.',
+    'O Team é cobrado por assento: cada pessoa no workspace, mensal ou anualmente. Os assentos acompanham a lista de pessoas: adicione alguém e a próxima fatura aumenta, remova e ela diminui.',
   billingDisabledDescription:
     'A cobrança não está configurada neste servidor. Workspaces estão incluídos no doop auto-hospedado; não há nada a pagar aqui.',
   plan: 'Plano',
@@ -84,8 +84,8 @@ export const workspace: Catalog['workspace'] = {
   perMonth: 'por mês',
   perYear: 'por ano',
   seatsCatchUp: {
-    one: '({count} pessoa agora — o Stripe se ajusta na próxima fatura)',
-    other: '({count} pessoas agora — o Stripe se ajusta na próxima fatura)',
+    one: '({count} pessoa agora, e o Stripe se ajusta na próxima fatura)',
+    other: '({count} pessoas agora, e o Stripe se ajusta na próxima fatura)',
   },
   ends: 'Termina',
   renews: 'Renova',
@@ -94,7 +94,7 @@ export const workspace: Catalog['workspace'] = {
   opening: 'Abrindo…',
   manageOnStripe: 'Gerenciar cobrança no Stripe',
   refresh: 'Atualizar',
-  stripePortalNote: 'Cartões, faturas, cancelamento — tudo no portal do Stripe.',
+  stripePortalNote: 'Cartões, faturas e cancelamento ficam todos no portal do Stripe.',
   ownerHoldsBilling: 'O dono cuida da cobrança; só ele pode mudar o plano.',
 
   renamed: 'Renomeado',
@@ -106,7 +106,7 @@ export const workspace: Catalog['workspace'] = {
   created: 'Criado',
   deleteWorkspace: 'Excluir workspace',
   deleteDescription:
-    'Cada canvas volta para o espaço pessoal de quem é dono dele — nada é excluído. As pessoas perdem o acesso aos canvases que não são delas.',
+    'Cada canvas volta para o espaço pessoal de quem é dono dele. Nada é excluído. As pessoas perdem o acesso aos canvases que não são delas.',
   deleteCancelsTeam: ' A assinatura do Team é cancelada imediatamente.',
   deleteNamed: 'Excluir “{name}”',
   deleteTitle: 'Excluir “{name}”?',

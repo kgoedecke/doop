@@ -1,8 +1,8 @@
 import type { Catalog } from '..'
 
 export const webhooks: Catalog['webhooks'] = {
-  healthOff: 'desativado — nada é enviado',
-  healthNoDeliveries: 'nenhuma entrega ainda — envie um teste',
+  healthOff: 'desativado, então nada é enviado',
+  healthNoDeliveries: 'nenhuma entrega ainda',
   healthFailing: {
     one: '{count} falha seguida · última {when}: {error}',
     other: '{count} falhas seguidas · última {when}: {error}',
@@ -29,7 +29,7 @@ export const webhooks: Catalog['webhooks'] = {
 
   title: 'Webhooks',
   descriptionBefore:
-    'O doop envia um POST com um evento JSON assinado para cada URL abaixo quando algo acontece em um canvas que é seu, para o qual você foi convidado ou que está em um dos seus workspaces — encaminhe para o Slack, n8n, um rastreador de issues, qualquer coisa com um endpoint HTTP. Cada entrega leva um cabeçalho ',
+    'O doop envia um POST com um evento JSON assinado para cada URL abaixo quando algo acontece em um canvas que é seu, para o qual você foi convidado ou que está em um dos seus workspaces. Encaminhe para o Slack, n8n, um rastreador de issues, qualquer coisa com um endpoint HTTP. Cada entrega leva um cabeçalho ',
   descriptionAfter:
     ' (HMAC-SHA256 com o segredo do webhook) para que o destinatário possa confiar nela. Entregas que falham são tentadas de novo três vezes; um webhook que continua falhando se pausa sozinho.',
   newWebhookRow: 'Novo webhook',
@@ -38,7 +38,7 @@ export const webhooks: Catalog['webhooks'] = {
   urlAria: 'URL do webhook',
 
   signingSecretRow: 'Segredo de assinatura',
-  copyNow: 'Copie agora — ele é mostrado uma única vez. Use-o para verificar as entregas do seu lado.',
+  copyNow: 'Copie agora: ele é mostrado uma única vez. Use-o para verificar as entregas do seu lado.',
   signatureFormula:
     'signature = “sha256=” + HMAC-SHA256(secret, X-Doop-Timestamp + “.” + raw body). A documentação tem uma verificação pronta.',
 
@@ -49,7 +49,7 @@ export const webhooks: Catalog['webhooks'] = {
   removeAria: 'Remover webhook de {host}',
   remove: 'Remover',
   noWebhooksRow: 'Nenhum webhook ainda',
-  noWebhooksNote: 'Adicione um acima — um jeito rápido de testar é um nó Webhook do n8n ou um request bin.',
+  noWebhooksNote: 'Adicione um acima. Um jeito rápido de testar é um nó Webhook do n8n ou um request bin.',
 
   rotateConfirmTitle: 'Trocar o segredo de {host}?',
   removeConfirmTitle: 'Remover o webhook de {host}?',

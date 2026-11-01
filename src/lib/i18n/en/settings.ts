@@ -14,7 +14,7 @@ export const settings = {
   webhooksBlurb: 'HTTP calls to your systems when something happens on a canvas you can open.',
   accountTitle: 'Your account',
   accountTab: 'Account',
-  accountBlurb: 'Who you are on every canvas — and how you get back into this one.',
+  accountBlurb: 'Who you are on every canvas, and how you get back into this one.',
   appearanceTitle: 'Appearance',
   appearanceBlurb:
     'How Doop looks in this browser: light or dark, the language it speaks, and how the canvas editor lays out its panels.',
@@ -22,11 +22,11 @@ export const settings = {
   agentCardDescription:
     'Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your desktop. Your provider’s usage limits and charges apply.',
   freeTasksLeftLabel: 'Free Doop Agent tasks left',
-  meterGeminiCloud: 'Gemini cloud pilot selected — connection managed by your operator.',
-  meterClaudeLocal: 'Claude CLI selected — runs on your connected desktop.',
+  meterGeminiCloud: 'Gemini cloud pilot selected. Your operator manages the connection.',
+  meterClaudeLocal: 'Claude CLI selected. It runs on your connected desktop.',
   meterChatgpt: 'Running on your ChatGPT subscription.',
   meterProviderKey: 'Running on your {provider} key.',
-  meterNoFreeTasks: 'No free tasks on this server — connect an account to use the Doop Agent.',
+  meterNoFreeTasks: 'No free tasks on this server. Connect an account to use the Doop Agent.',
   meterUsedUp: 'Your free tasks are used up.',
   meterLeft: { one: '{left} of {count} free task left.', other: '{left} of {count} free tasks left.' },
 
@@ -38,10 +38,10 @@ export const settings = {
   themeSystem: 'System',
   themeLight: 'Light',
   themeDark: 'Dark',
-  themeFollowingSystem: 'Following your system — {resolved} right now.',
+  themeFollowingSystem: 'Following your system ({resolved} right now).',
   themeResolvedLight: 'light',
   themeResolvedDark: 'dark',
-  themeSetByHand: 'Set by hand — your system setting is ignored.',
+  themeSetByHand: 'Set by hand, so your system setting is ignored.',
 
   languageTitle: 'Language',
   languageDescription:
@@ -49,7 +49,7 @@ export const settings = {
   languageRow: 'Language',
   languageAria: 'Language',
   languagePicked: 'Picked in this browser.',
-  languageServerDefault: 'The server’s default — pick one to keep it in this browser.',
+  languageServerDefault: 'The server’s default. Pick one to keep it in this browser.',
 
   panelsTitle: 'Canvas panels',
   panelsDescription:

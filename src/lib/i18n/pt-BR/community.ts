@@ -22,10 +22,10 @@ export const community: Catalog['community'] = {
   categoryOther: 'Outros',
   emptyTitle: 'Nada nas prateleiras ainda',
   emptyDescription:
-    'Qualquer pessoa pode listar um canvas aqui pelo menu Compartilhar — as pessoas o pré-visualizam e copiam para a própria conta, e o original continua privado. Seja a primeira.',
+    'Qualquer pessoa pode listar um canvas aqui pelo menu Compartilhar. As pessoas o pré-visualizam e copiam para a própria conta, e o original continua privado. Seja a primeira.',
   pickCanvas: 'Escolha um canvas para publicar',
   visibleOf: '{visible} de {total}',
-  noMatch: 'Nada encontrado — tente outra busca ou prateleira.',
+  noMatch: 'Nada encontrado. Tente outra busca ou prateleira.',
   noPreview: 'sem prévia',
   frames: '{count} frames',
   byAuthor: 'por {name}',
@@ -33,6 +33,6 @@ export const community: Catalog['community'] = {
   copying: 'Copiando…',
   useThis: 'Usar este',
   published: 'por {name} · publicado {time} · {copies}',
-  copyNote: 'As cópias chegam aos seus canvases como uma cópia privada — edite à vontade, o original fica intacto.',
+  copyNote: 'As cópias chegam aos seus canvases como uma cópia privada: edite à vontade, o original fica intacto.',
   copyToMine: 'Copiar para meus canvases',
 }

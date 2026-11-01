@@ -58,7 +58,7 @@ const clickable =
 
 function presenceLabel(p: Presence, t: Translate) {
   const agent = p.owner ? t('canvas.agentOf', { owner: p.owner }) : t('canvas.agent')
-  return `${p.name}${p.kind === 'agent' ? ` (${agent})` : ''}${p.status ? ` — ${p.status}` : ''}`
+  return `${p.name}${p.kind === 'agent' ? ` (${agent})` : ''}${p.status ? `: ${p.status}` : ''}`
 }
 
 function FollowAvatar({ presence: p }: { presence: Presence }) {

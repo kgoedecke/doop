@@ -15,7 +15,7 @@ export const settings: Catalog['settings'] = {
   webhooksBlurb: 'Chamadas HTTP para os seus sistemas quando algo acontece em um canvas que você pode abrir.',
   accountTitle: 'Sua conta',
   accountTab: 'Conta',
-  accountBlurb: 'Quem você é em cada canvas — e como voltar a entrar neste.',
+  accountBlurb: 'Quem você é em cada canvas, e como voltar a entrar neste.',
   appearanceTitle: 'Aparência',
   appearanceBlurb:
     'Como o Doop aparece neste navegador: claro ou escuro, o idioma em que ele fala e como o editor do canvas organiza seus painéis.',
@@ -23,11 +23,11 @@ export const settings: Catalog['settings'] = {
   agentCardDescription:
     'Escolha como o Doop Agent roda nos seus canvases: uma conta de modelo conectada ou o Claude CLI no seu computador. Os limites de uso e as cobranças do seu provedor se aplicam.',
   freeTasksLeftLabel: 'Tarefas gratuitas restantes do Doop Agent',
-  meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado — conexão gerenciada pelo seu operador.',
-  meterClaudeLocal: 'Claude CLI selecionado — roda no seu computador conectado.',
+  meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado. Seu operador gerencia a conexão.',
+  meterClaudeLocal: 'Claude CLI selecionado. Roda no seu computador conectado.',
   meterChatgpt: 'Rodando na sua assinatura do ChatGPT.',
   meterProviderKey: 'Rodando na sua chave da {provider}.',
-  meterNoFreeTasks: 'Este servidor não oferece tarefas gratuitas — conecte uma conta para usar o Doop Agent.',
+  meterNoFreeTasks: 'Este servidor não oferece tarefas gratuitas. Conecte uma conta para usar o Doop Agent.',
   meterUsedUp: 'Suas tarefas gratuitas acabaram.',
   meterLeft: {
     one: '{left} de {count} tarefa gratuita restante.',
@@ -42,10 +42,10 @@ export const settings: Catalog['settings'] = {
   themeSystem: 'Sistema',
   themeLight: 'Claro',
   themeDark: 'Escuro',
-  themeFollowingSystem: 'Seguindo o sistema — {resolved} agora.',
+  themeFollowingSystem: 'Seguindo o sistema ({resolved} agora).',
   themeResolvedLight: 'claro',
   themeResolvedDark: 'escuro',
-  themeSetByHand: 'Definido manualmente — a configuração do sistema é ignorada.',
+  themeSetByHand: 'Definido manualmente, então a configuração do sistema é ignorada.',
 
   languageTitle: 'Idioma',
   languageDescription:
@@ -53,7 +53,7 @@ export const settings: Catalog['settings'] = {
   languageRow: 'Idioma',
   languageAria: 'Idioma',
   languagePicked: 'Escolhido neste navegador.',
-  languageServerDefault: 'Padrão do servidor — escolha um para mantê-lo neste navegador.',
+  languageServerDefault: 'Padrão do servidor. Escolha um para mantê-lo neste navegador.',
 
   panelsTitle: 'Painéis do canvas',
   panelsDescription:
