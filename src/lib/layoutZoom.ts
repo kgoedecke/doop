@@ -34,6 +34,11 @@ function exactInverse(k: number): number | null {
   return null
 }
 
+/** How long the camera rests before the stage catches up with it: the world's
+ *  layout zoom (Stage) and which frames get a live document (useFrameLods).
+ *  Neither changes mid-gesture, where it would relayout or swap documents. */
+export const CAMERA_SETTLE_MS = 250
+
 /* zooms this close below a whole number count as that number, so float noise
    in a camera zoom of exactly 2 never lays the world out at 3 */
 const WHOLE_ZOOM_SLACK = 1e-3

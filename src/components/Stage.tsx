@@ -46,7 +46,7 @@ import {
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
-import { layoutZoomFor } from '../lib/layoutZoom'
+import { CAMERA_SETTLE_MS, layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 
@@ -278,7 +278,7 @@ export function Stage({
       window.clearTimeout(settle)
       settle = window.setTimeout(() => {
         setLayoutZoom(layoutZoomFor(useStore.getState().viewport.zoom, MAX_ZOOM))
-      }, 250)
+      }, CAMERA_SETTLE_MS)
     })
     return () => {
       unsub()

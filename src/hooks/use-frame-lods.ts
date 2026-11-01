@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react'
 import { useStore, type Viewport } from '../lib/store'
 import { frameLods, liveFrameBudget, type FrameLod, type LodRect } from '../lib/frameLod'
-
-/* the camera is re-read once it rests: a pan or pinch never swaps documents
-   mid-gesture, the same settle the Stage waits for its layout zoom */
-const SETTLE_MS = 250
+import { CAMERA_SETTLE_MS } from '../lib/layoutZoom'
 
 interface SettledView {
   camera: Viewport
@@ -35,7 +32,7 @@ export function useFrameLods(
     const unsubscribe = useStore.subscribe((s, prev) => {
       if (s.viewport === prev.viewport) return
       window.clearTimeout(settle)
-      settle = window.setTimeout(measure, SETTLE_MS)
+      settle = window.setTimeout(measure, CAMERA_SETTLE_MS)
     })
     const resize = new ResizeObserver(measure)
     resize.observe(stage)
