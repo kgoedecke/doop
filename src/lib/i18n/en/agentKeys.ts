@@ -6,7 +6,7 @@ export const agentKeys = {
 
   title: 'Agent keys',
   description:
-    'Bearer credentials for the MCP endpoint, for agents that cannot open a browser to sign in — a Mastra workflow, n8n, CI. A key acts as you: everything it designs is attributed to you, and it reaches exactly the canvases you can. Revoking cuts it off immediately.',
+    'Bearer credentials for the MCP endpoint, for agents that cannot open a browser to sign in (a Mastra workflow, n8n, CI). A key acts as you: everything it designs is attributed to you, and it reaches exactly the canvases you can. Revoking cuts it off immediately.',
   newKeyRow: 'New key',
   creating: 'Creating…',
   createKey: 'Create key',
@@ -14,7 +14,7 @@ export const agentKeys = {
   nameAria: 'Agent key name',
 
   yourNewKey: 'Your new key',
-  copyNow: 'Copy it now — it is shown once and stored hashed.',
+  copyNow: 'Copy it now: it is shown once and stored hashed.',
   headlessConfigLabel: 'MCP config for a headless client',
 
   revokeAria: 'Revoke {name}',
@@ -22,7 +22,7 @@ export const agentKeys = {
   createdLastUsed: 'created {created} · last used {used}',
   createdNeverUsed: 'created {created} · never used',
   noKeysRow: 'No keys yet',
-  noKeysNote: 'Interactive clients (Claude Code, Codex) don’t need one — they sign in with OAuth.',
+  noKeysNote: 'Interactive clients (Claude Code, Codex) don’t need one. They sign in with OAuth.',
 
   revokeConfirmTitle: 'Revoke “{name}”?',
   revokeConfirmDescription: 'Agents using it lose access immediately.',

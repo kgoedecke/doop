@@ -1460,7 +1460,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             />
             {!frame.html && (
               <div className="absolute inset-0 grid place-items-center bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)] text-[13px] text-ink-faint">
-                empty frame — add HTML
+                empty frame: add HTML
               </div>
             )}
             {/* shield keeps pointer events on the canvas, not the iframe;

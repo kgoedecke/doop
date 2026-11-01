@@ -200,7 +200,7 @@ const STARTER_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-  <p>Design me — edit the HTML, or ask an agent.</p>
+  <p>Design me. Edit the HTML, or ask an agent.</p>
 </body>
 </html>`
 

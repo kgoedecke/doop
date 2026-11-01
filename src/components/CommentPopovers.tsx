@@ -182,7 +182,7 @@ export function CommentComposer({
               variant="ghost"
               size="pill"
               className="border-dashed px-2 text-[11px] font-semibold text-ink-soft hover:border-brand hover:bg-transparent hover:text-brand"
-              title={`${role.name} — ${role.blurb}`}
+              title={`${role.name}: ${role.blurb}`}
               onClick={() => setText((current) => (current ? current.replace(/\s*$/, ' ') : '') + `@${role.id} `)}
             >
               <RoleMark role={role} size={13} /> @{role.id}

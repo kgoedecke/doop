@@ -11,7 +11,7 @@ export const home: Catalog['home'] = {
   createCanvasFailed: 'Não foi possível criar o canvas',
   startCanvasFailed: 'Não foi possível iniciar o canvas',
   startImportFailed: 'Não foi possível iniciar a importação',
-  briefNotQueued: 'O briefing não entrou na fila — tente enviá-lo de novo',
+  briefNotQueued: 'O briefing não entrou na fila. Tente enviá-lo de novo',
   duplicateFailed: 'Não foi possível duplicar o canvas',
   shareFailed: 'Não foi possível abrir o compartilhamento',
   linkCopied: 'Link do canvas copiado',
@@ -22,7 +22,7 @@ export const home: Catalog['home'] = {
   /* upgrade reasons */
   reasonAddCanvas: 'Adicionar um canvas a um workspace exige um plano Team.',
   reasonMoveCanvas: 'Mover um canvas para um workspace exige um plano Team.',
-  reasonWorkspaceReady: '"{name}" está pronto — escolha um plano para começar a usá-lo.',
+  reasonWorkspaceReady: '"{name}" está pronto. Escolha um plano para começar a usá-lo.',
 
   /* scopes */
   ownedByMe: 'Meus canvases',
@@ -31,7 +31,7 @@ export const home: Catalog['home'] = {
 
   /* a workspace without a plan */
   noPlanTitle: '{name} ainda não tem plano.',
-  noPlanAskOwner: 'Peça ao dono para escolher um — até lá, nenhum canvas pode ser adicionado aqui.',
+  noPlanAskOwner: 'Peça ao dono para escolher um. Até lá, nenhum canvas pode ser adicionado aqui.',
   noPlanChoose: 'Escolha um plano Team para adicionar canvases e convidar sua equipe.',
   choosePlan: 'Escolher um plano',
 
@@ -51,9 +51,9 @@ export const home: Catalog['home'] = {
   /* list body */
   emptyTitle: 'Comece seu primeiro canvas',
   emptyDescription:
-    'Um canvas é um espaço compartilhado de frames HTML ao vivo — você desenha no navegador, seus agentes de IA desenham via MCP e todos acompanham tudo acontecer em tempo real.',
+    'Um canvas é um espaço compartilhado de frames HTML ao vivo: você desenha no navegador, seus agentes de IA desenham via MCP e todos acompanham tudo acontecer em tempo real.',
   createCanvas: '+ Criar um canvas',
-  nothingHere: 'Nada aqui ainda — tente outro filtro.',
+  nothingHere: 'Nada aqui ainda. Tente outro filtro.',
   createNewCanvasAria: 'Criar um novo canvas',
   frames: { one: '{count} frame', other: '{count} frames' },
 
@@ -65,7 +65,7 @@ export const home: Catalog['home'] = {
 
   /* tile meta */
   claimTitle: 'Este canvas é anterior às contas e fica visível para todos. Reivindique-o para torná-lo seu.',
-  claimBadge: 'sem dono — tornar meu',
+  claimBadge: 'sem dono, tornar meu',
   sharedByTitle: 'Você foi convidado para colaborar neste canvas',
   sharedBy: 'Compartilhado por {name}',
   edited: 'Editado {time}',
@@ -109,8 +109,8 @@ export const home: Catalog['home'] = {
   meterChatgpt: 'Doop Agent no seu ChatGPT',
   meterProviderKey: 'Doop Agent na sua chave da {provider}',
   meterNoFreeTier: 'Conecte um plano em Configurações para usar o Doop Agent',
-  meterUsedUp: 'Tarefas gratuitas do Doop Agent esgotadas — conecte o ChatGPT para continuar',
-  meterUsedUpLine: 'tarefas gratuitas do Doop Agent esgotadas — conecte o ChatGPT para continuar',
+  meterUsedUp: 'Tarefas gratuitas do Doop Agent esgotadas. Conecte o ChatGPT para continuar',
+  meterUsedUpLine: 'tarefas gratuitas do Doop Agent esgotadas. Conecte o ChatGPT para continuar',
   meterLeft: {
     one: '{left} de {count} tarefa gratuita do Doop Agent restante',
     other: '{left} de {count} tarefas gratuitas do Doop Agent restantes',
@@ -120,12 +120,12 @@ export const home: Catalog['home'] = {
   wallUsedUpBefore: 'Essas foram por nossa conta. Conecte sua',
   wallUsedUpBold: 'assinatura do ChatGPT',
   wallUsedUpAfter:
-    'e o Doop Agent continua trabalhando exatamente como agora — mesmo canvas, mesmo agente, rodando no seu plano em vez do nosso.',
+    'e o Doop Agent continua trabalhando exatamente como agora: mesmo canvas, mesmo agente, rodando no seu plano em vez do nosso.',
   wallConnectBefore: 'O Doop Agent desenha nos seus canvases usando uma assinatura que você já tem. Conecte o',
-  wallConnectAfter: 'uma vez e cada tarefa roda no seu plano — nada medido, nenhuma cobrança à parte.',
+  wallConnectAfter: 'uma vez e cada tarefa roda no seu plano: nada medido, nenhuma cobrança à parte.',
   wallConnectButton: 'Conectar seu plano',
   wallMcp:
-    'Prefere conduzir o canvas você mesmo pelo Claude Code, Codex ou outro cliente MCP? Esse agente desenha conforme você o instrui — as tarefas na fila ficam com o Doop Agent.',
+    'Prefere conduzir o canvas você mesmo pelo Claude Code, Codex ou outro cliente MCP? Esse agente desenha conforme você o instrui, enquanto as tarefas na fila ficam com o Doop Agent.',
   wallMcpLink: 'Veja como conectá-lo',
 
   /* create a workspace */
@@ -145,9 +145,9 @@ export const home: Catalog['home'] = {
   plans: 'Planos',
   upgradeDefaultReason: 'Workspaces compartilhados são a parte paga do doop.',
   upgradeLede:
-    'Todos em um workspace abrem qualquer canvas dele — sem convites por canvas, sem links para repassar. Os assentos são cobrados conforme as pessoas entram e reembolsados conforme saem.',
+    'Todos em um workspace abrem qualquer canvas dele: sem convites por canvas, sem links para repassar. Os assentos são cobrados conforme as pessoas entram e reembolsados conforme saem.',
   billingOff:
-    'A cobrança não está configurada neste servidor, então os workspaces estão incluídos. Nada para comprar — vá criar um.',
+    'A cobrança não está configurada neste servidor, então os workspaces estão incluídos. Nada para comprar. Vá criar um.',
   monthly: 'Mensal',
   yearly: 'Anual',
   yearlyPrice: '{perMonth} por assento por mês, cobrado {perYear} por ano',
@@ -155,12 +155,12 @@ export const home: Catalog['home'] = {
   seats: { one: '{count} assento × {price}', other: '{count} assentos × {price}' },
   totalPerMonth: '= {total} por mês',
   totalPerYear: '= {total} por ano',
-  alreadyOnTeam: ' — já está no Team; gerencie em Cobrança.',
+  alreadyOnTeam: ' (já está no Team; gerencie em Cobrança).',
   countingSeats: 'Contando assentos…',
   stripeNote:
     'Você vai configurar o pagamento no checkout seguro do Stripe. Cancele quando quiser pelo portal de cobrança.',
   askOwnerBefore: 'Peça a',
-  askOwnerAfter: 'para escolher um plano — o dono cuida da cobrança.',
+  askOwnerAfter: 'para escolher um plano. O dono cuida da cobrança.',
   workspaceOwnerFallback: 'o dono do workspace',
   openingStripe: 'Abrindo o Stripe…',
   continueCheckout: 'Continuar para o checkout',
@@ -180,9 +180,9 @@ export const home: Catalog['home'] = {
   moveLede:
     'Um canvas em um workspace fica aberto para todos nele. Mova-o de volta para Pessoal e só você e as pessoas que você convidou mantêm o acesso.',
   destinationAria: 'Destino',
-  personalOption: 'Pessoal — só você e convidados',
+  personalOption: 'Pessoal (só você e convidados)',
   needsPlanSuffix: ' (precisa de um plano)',
-  targetNoPlan: '{name} ainda não tem plano — você vai precisar escolher um.',
+  targetNoPlan: '{name} ainda não tem plano, então você vai precisar escolher um.',
   moving: 'Movendo…',
   moveCanvas: 'Mover canvas',
   moveFailed: 'Não foi possível mover o canvas',

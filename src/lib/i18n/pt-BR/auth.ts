@@ -1,7 +1,7 @@
 import type { Catalog } from '..'
 
 export const auth: Catalog['auth'] = {
-  networkError: 'Não foi possível acessar o doop — verifique sua conexão e tente de novo.',
+  networkError: 'Não foi possível acessar o doop. Verifique sua conexão e tente de novo.',
   somethingWentWrong: 'Algo deu errado',
   somethingWentWrongTitle: 'Algo deu errado.',
 
@@ -41,22 +41,22 @@ export const auth: Catalog['auth'] = {
   resendVerification: 'Reenviar e-mail de verificação',
 
   ssoAccountNotLinked:
-    'Esse e-mail já tem uma conta no doop que não pôde ser vinculada automaticamente — entre com e-mail e senha.',
-  ssoEmailMismatch: 'O e-mail com que você entrou não corresponde à conta de onde você começou — tente de novo.',
+    'Esse e-mail já tem uma conta no doop que não pôde ser vinculada automaticamente. Entre com e-mail e senha.',
+  ssoEmailMismatch: 'O e-mail com que você entrou não corresponde à conta de onde você começou. Tente de novo.',
   ssoEmailMissing:
-    'Seu provedor de identidade não compartilhou um endereço de e-mail — o doop precisa de um para você entrar.',
-  ssoDesktopHandoff: 'Esse link de acesso expirou — comece de novo e conclua no navegador em poucos minutos.',
-  ssoFailed: 'Não foi possível entrar — tente de novo ou use e-mail e senha.',
-  startFailed: 'Não foi possível iniciar o acesso — tente de novo ou use e-mail e senha.',
-  browserSignInNotice: 'Conclua o acesso no navegador — o doop conecta você aqui assim que você voltar.',
-  verificationSent: 'E-mail de verificação enviado — confira sua caixa de entrada.',
+    'Seu provedor de identidade não compartilhou um endereço de e-mail, e o doop precisa de um para você entrar.',
+  ssoDesktopHandoff: 'Esse link de acesso expirou. Comece de novo e conclua no navegador em poucos minutos.',
+  ssoFailed: 'Não foi possível entrar. Tente de novo ou use e-mail e senha.',
+  startFailed: 'Não foi possível iniciar o acesso. Tente de novo ou use e-mail e senha.',
+  browserSignInNotice: 'Conclua o acesso no navegador, e o doop conecta você aqui assim que você voltar.',
+  verificationSent: 'E-mail de verificação enviado. Confira sua caixa de entrada.',
   resetLinkSent: 'Se existir uma conta com esse e-mail, um link de redefinição já está a caminho.',
-  resetLinkInvalid: 'Este link de redefinição é inválido ou expirou — solicite um novo.',
-  passwordUpdated: 'Senha atualizada — entre com a sua nova senha.',
+  resetLinkInvalid: 'Este link de redefinição é inválido ou expirou. Solicite um novo.',
+  passwordUpdated: 'Senha atualizada. Entre com a sua nova senha.',
   emailNotVerified: 'Este e-mail ainda não foi verificado.',
   noAccountFound: 'Nenhuma conta encontrada com este e-mail.',
   accountExists: 'Já existe uma conta com este e-mail.',
-  verifyEmailSent: 'Quase lá — enviamos um link de verificação para {email}. Abra-o para ativar sua conta.',
+  verifyEmailSent: 'Quase lá: enviamos um link de verificação para {email}. Abra-o para ativar sua conta.',
 
   consentTitle: 'Conectar {name}?',
   consentTitleGeneric: 'Conecte seu agente',
@@ -70,8 +70,8 @@ export const auth: Catalog['auth'] = {
   connecting: 'Conectando…',
   connect: 'Conectar',
 
-  desktopLinkIncomplete: 'Este link de acesso está incompleto — volte ao app do doop e tente de novo.',
-  desktopStartFailed: 'Não foi possível iniciar o acesso — volte ao app do doop e tente de novo.',
+  desktopLinkIncomplete: 'Este link de acesso está incompleto. Volte ao app do doop e tente de novo.',
+  desktopStartFailed: 'Não foi possível iniciar o acesso. Volte ao app do doop e tente de novo.',
   desktopSigningIn: 'Entrando…',
   desktopToProvider: 'Levando você ao seu provedor de identidade para o app do doop.',
   desktopSignedIn: 'Você entrou.',
@@ -83,7 +83,7 @@ export const auth: Catalog['auth'] = {
   desktopConnectFailed: 'Não foi possível passar a conexão para o app do doop. Volte ao app e tente de novo.',
 
   viewingAsBefore: 'Visualizando como',
-  viewingAsAfter: '— somente leitura, expira em 15 minutos.',
+  viewingAsAfter: '(somente leitura, expira em 15 minutos).',
   stopViewing: 'Parar de visualizar',
   leaving: 'Saindo…',
 }

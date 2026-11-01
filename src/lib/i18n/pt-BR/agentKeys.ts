@@ -7,7 +7,7 @@ export const agentKeys: Catalog['agentKeys'] = {
 
   title: 'Chaves de agente',
   description:
-    'Credenciais bearer para o endpoint MCP, para agentes que não conseguem abrir um navegador para entrar — um workflow do Mastra, n8n, CI. Uma chave age como você: tudo o que ela desenha é atribuído a você, e ela alcança exatamente os canvases que você alcança. Revogar corta o acesso na hora.',
+    'Credenciais bearer para o endpoint MCP, para agentes que não conseguem abrir um navegador para entrar (um workflow do Mastra, n8n, CI). Uma chave age como você: tudo o que ela desenha é atribuído a você, e ela alcança exatamente os canvases que você alcança. Revogar corta o acesso na hora.',
   newKeyRow: 'Nova chave',
   creating: 'Criando…',
   createKey: 'Criar chave',
@@ -15,7 +15,7 @@ export const agentKeys: Catalog['agentKeys'] = {
   nameAria: 'Nome da chave de agente',
 
   yourNewKey: 'Sua nova chave',
-  copyNow: 'Copie agora — ela é mostrada uma única vez e guardada como hash.',
+  copyNow: 'Copie agora: ela é mostrada uma única vez e guardada como hash.',
   headlessConfigLabel: 'Configuração MCP para um cliente sem interface',
 
   revokeAria: 'Revogar {name}',
@@ -23,7 +23,7 @@ export const agentKeys: Catalog['agentKeys'] = {
   createdLastUsed: 'criada {created} · usada por último {used}',
   createdNeverUsed: 'criada {created} · nunca usada',
   noKeysRow: 'Nenhuma chave ainda',
-  noKeysNote: 'Clientes interativos (Claude Code, Codex) não precisam de uma — eles entram com OAuth.',
+  noKeysNote: 'Clientes interativos (Claude Code, Codex) não precisam de uma. Eles entram com OAuth.',
 
   revokeConfirmTitle: 'Revogar “{name}”?',
   revokeConfirmDescription: 'Os agentes que a usam perdem o acesso na hora.',

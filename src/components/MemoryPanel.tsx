@@ -71,13 +71,16 @@ export function MemoryPanel() {
           <p className="text-[12.5px] leading-[1.5] font-semibold text-ink">{t('panels.memoryIntro')}</p>
           <ul className="mt-2.5 flex flex-col gap-2 pl-4">
             <li className="text-[12px] leading-[1.5] text-ink-soft">
-              <b>{t('panels.memoryReferences')}</b> {t('panels.memoryIntroReferences')}
+              <b>{t('panels.memoryReferences')}</b>
+              {t('panels.memoryIntroReferences')}
             </li>
             <li className="text-[12px] leading-[1.5] text-ink-soft">
-              <b>{t('panels.memoryRules')}</b> {t('panels.memoryIntroRules')}
+              <b>{t('panels.memoryRules')}</b>
+              {t('panels.memoryIntroRules')}
             </li>
             <li className="text-[12px] leading-[1.5] text-ink-soft">
-              <b>{t('panels.memoryDecisions')}</b> {t('panels.memoryIntroDecisions')}
+              <b>{t('panels.memoryDecisions')}</b>
+              {t('panels.memoryIntroDecisions')}
             </li>
           </ul>
         </div>
