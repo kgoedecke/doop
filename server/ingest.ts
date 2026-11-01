@@ -138,7 +138,7 @@ export function wrapSnapshotHtml(html: string, marker: string, baseUrl: string |
     `<meta http-equiv="Content-Security-Policy" content="${SNAPSHOT_CSP}">` +
     (baseUrl ? `<base href="${escapeAttr(baseUrl)}">` : '')
   const headMatch = out.match(/<head[^>]*>/i)
-  if (headMatch) out = out.replace(headMatch[0], headMatch[0] + inject)
+  if (headMatch) out = out.replace(headMatch[0], (head) => head + inject)
   else out = inject + out
   if (!/^\s*<!doctype/i.test(out)) out = '<!doctype html>\n' + out
   return out
