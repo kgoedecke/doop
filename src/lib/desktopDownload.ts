@@ -1,13 +1,12 @@
 import { isDesktopShell, type DesktopPlatform } from './shell'
 
-/* Where a browser on each desktop OS gets the app. The doop.design links
-   redirect to the newest release's installer (the universal DMG, the NSIS
-   setup.exe); no Linux build is published yet, so Linux gets the releases
-   page. */
+/* Where a browser on each desktop OS gets the app. The doop.design routes
+   (doop-marketing, src/pages/download/) redirect to the newest desktop-v*
+   release's installer: the universal DMG, the NSIS setup.exe, the AppImage. */
 const DOWNLOAD_URLS: Record<DesktopPlatform, string> = {
   macos: 'https://doop.design/download/mac',
   windows: 'https://doop.design/download/windows',
-  linux: 'https://github.com/kgoedecke/doop/releases',
+  linux: 'https://doop.design/download/linux',
 }
 
 type Navigator = { userAgent: string; userAgentData?: { platform?: string; mobile?: boolean } }
