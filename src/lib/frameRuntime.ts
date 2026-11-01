@@ -939,11 +939,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       parent.postMessage({ type: 'doop:replace-image-result', reqId: d.reqId, info: replaced ? inspect(d.selector) : null }, '*')
     }
     if (d.type === 'doop:nudge' && Array.isArray(d.selectors)) {
-      var picked = d.selectors.map(function (selector) {
+      var movable = d.selectors.map(function (selector) {
         try { return { selector: selector, el: document.querySelector(selector) } } catch (e) { return { selector: selector, el: null } }
-      })
-      var moved = picked.filter(function (p) {
-        return p.el && !picked.some(function (other) { return other.el && other.el !== p.el && other.el.contains(p.el) })
+      }).filter(function (p) { return p.el && elementGeometry(p.el).enabled })
+      var moved = movable.filter(function (p) {
+        return !movable.some(function (other) { return other.el !== p.el && other.el.contains(p.el) })
       }).map(function (p) { return editGeometry(p.selector, { kind: 'nudge', dx: d.dx, dy: d.dy }) })
       parent.postMessage({ type: 'doop:nudge-result', reqId: d.reqId, ok: moved.indexOf(true) !== -1 }, '*')
     }
