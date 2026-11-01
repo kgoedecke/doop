@@ -27,7 +27,10 @@ const BY_CONTEXT = [
   'get_comments',
   'list_canvases', // a resident run is scoped to its canvas
   'create_canvas',
+  'list_workspaces', // workspaces are account-level, above the one canvas a run lives on
+  'create_workspace',
   'get_profile',
+  'get_design_system', // the design-system brief rides as a system block
 ]
 
 /** Real gaps: MCP agents can do these and resident agents cannot yet. */
@@ -42,6 +45,9 @@ const MISSING = [
   'resolve_comment',
   'export_frame',
   'upload_asset',
+  'delete_component', // library curation beyond registering stays with people and MCP agents
+  'set_design_system',
+  'create_component_group',
   'list_linear_issues', // integration tools, registered by their connections
   'get_linear_issue',
 ]

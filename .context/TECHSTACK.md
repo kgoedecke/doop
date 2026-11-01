@@ -243,6 +243,14 @@
   re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
   sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
   `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingBrowser.test.ts`.
+- Component library (`.context/specs/components.md`, `shared/designSystem.ts`, `server/library.ts`):
+  a global stylesheet and components grouped by preset (73 ready-made starters in
+  `shared/componentPresets.ts`) or custom groups, one library per workspace or personal space.
+  Frames name a component by `data-doop-component="<slug>"`; every durable frame write stamps its
+  CSS/JS and the tokens in as `data-doop-library` blocks, and library edits restamp the scope.
+  MCP `get_design_system` / `save_component` / `set_design_system` take `canvas_id` or
+  `workspace_id` (a team library before the workspace holds a canvas; `list_workspaces` /
+  `create_workspace` find or make one); the resident agent gets the catalogue in its system prompt. UI: the canvas Components tab and the workspace Components pane.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`

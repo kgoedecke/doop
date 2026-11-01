@@ -42,6 +42,8 @@ import { mentionedRole } from '../shared/agents.ts'
 import * as allowance from './allowance.ts'
 import { previewOf, previewToolMeta, registerFramePreview, type CanvasPreview } from './chatgptApp.ts'
 import * as persist from './db/persist.ts'
+import * as library from './library.ts'
+import { cssTokens, PRESET_GROUPS, type LibraryScope } from '../shared/designSystem.ts'
 import type { FrameApproval } from '../shared/types.ts'
 
 const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases contain frames — artboards that render complete HTML documents live for everyone viewing.
@@ -64,7 +66,21 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 ${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
 - Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
+- Design system: a canvas can draw from a component library — a global stylesheet of tokens plus reusable components (buttons, inputs, cards, tabs…). get_canvas says so under designSystem; then call get_design_system BEFORE designing and build screens from it: write a component's markup keeping data-doop-component="<slug>" on its root and Doop stamps its CSS/JS and the global tokens into the frame, so never copy that CSS. Style the rest with the tokens (var(--token)). When you design a reusable piece, register it with save_component so later screens reuse it.
+- Layer names: give every meaningful block you write a data-name in the human's language (data-name="Filtros", "Tabela de títulos", "Rodapé") — the Layers panel shows it instead of a bare "div". Component instances already carry theirs; keep it.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.`
+
+/** What get_canvas says about the canvas's design system; undefined when it has none. */
+function designSystemSummary(canvasId: string) {
+  const scope = library.scopeOfCanvas(canvasId)
+  if (!scope || !library.isInitialized(scope)) return undefined
+  const components = library.listComponents(scope)
+  return {
+    components: components.length,
+    tokens: cssTokens(library.stylesOf(scope).globalCss).length,
+    slugs: components.slice(0, 40).map((component) => component.slug),
+  }
+}
 
 function extensionGuideLines(): string {
   const lines = extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
@@ -420,6 +436,46 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       ),
   )
 
+  server.registerTool(
+    'list_workspaces',
+    {
+      title: 'List workspaces',
+      description:
+        "List the shared workspaces the connected user belongs to, with their ids, the user's role, member and canvas counts, and whether the plan lets canvases be added. A workspace's id names its team component library (get_design_system, save_component… take workspace_id) and places new canvases in it (create_canvas).",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {},
+    },
+    async () =>
+      text(
+        workspaces.listFor(ownerId ?? '').map((ws) => ({
+          id: ws.id,
+          name: ws.name,
+          role: ws.role,
+          active: ws.active,
+          memberCount: ws.memberCount,
+          canvasCount: ws.canvasCount,
+        })),
+      ),
+  )
+
+  server.registerTool(
+    'create_workspace',
+    {
+      title: 'Create a workspace',
+      description:
+        'Create a shared workspace owned by the connected user (they can invite their team from the app). Returns its id, for create_canvas and for the workspace component library tools. Check list_workspaces first: a workspace with that name may already exist.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: { name: z.string().describe('Workspace name, e.g. the team or client') },
+    },
+    async ({ name }) => {
+      if (!ownerId) return err('this connection is not signed in to a Doop account')
+      const trimmed = name.trim().slice(0, 80)
+      if (!trimmed) return err('name required')
+      const ws = workspaces.summaryFor(workspaces.createWorkspace(trimmed, ownerId), ownerId)
+      return text({ id: ws.id, name: ws.name, role: ws.role, active: ws.active })
+    },
+  )
+
   /* ChatGPT shows this when several Doop accounts are connected — the
      `openai/profile` flag marks it as the one that tells them apart. */
   server.registerTool(
@@ -445,7 +501,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
     {
       title: 'Create a canvas',
       description:
-        'Create a new design canvas. Returns the canvas id, which is part of the shareable URL (/c/<id>). Pass workspace_id (from list_canvases) to create it inside a shared workspace so every member can open it.',
+        'Create a new design canvas. Returns the canvas id, which is part of the shareable URL (/c/<id>). Pass workspace_id (from list_workspaces) to create it inside a shared workspace so every member can open it.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         name: z.string().describe('Canvas name'),
@@ -487,6 +543,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       arrive(canvas_id, agent_name)
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
+      const designSystem = designSystemSummary(canvas_id)
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
@@ -499,6 +556,11 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         ...(docs.length
           ? [
               'This canvas has style guides. Call get_guidelines for each relevant one BEFORE designing — every frame must follow them.',
+            ]
+          : []),
+        ...(designSystem
+          ? [
+              'This canvas draws from a design system. Call get_design_system BEFORE designing and build from its components and tokens.',
             ]
           : []),
         ...(refs.length
@@ -532,6 +594,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
               htmlBytes: r.html.length,
               pinnedBy: r.pinnedBy,
             })),
+            ...(designSystem ? { designSystem } : {}),
             ...(flow.length ? { flow } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),
@@ -647,6 +710,267 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         )
       } catch (e) {
         return err(e instanceof Error ? e.message : 'invalid guideline doc')
+      }
+    },
+  )
+
+  /* ---- design system: the canvas's component library (server/library.ts) ---- */
+
+  /** The library of a canvas the caller may read, and whether it may change it. */
+  const libraryFor = (canvasId: string, need: CanvasRole) => {
+    const canvas = canvasFor(canvasId, need)
+    const scope = canvas ? library.scopeOfCanvas(canvas.id) : undefined
+    return scope ? { scope, canEdit: library.canEditLibrary(ownerId, scope) } : undefined
+  }
+  /* a library tool names its library by a canvas (the scope that canvas
+     draws from) or straight by a workspace, so a team library can be set up
+     before the workspace holds a single canvas */
+  const libraryTarget = {
+    canvas_id: z.string().optional().describe('Use the library this canvas draws from'),
+    workspace_id: z
+      .string()
+      .optional()
+      .describe("Use this workspace's team library (from list_workspaces) — no canvas needed"),
+  }
+  const libraryOf = (
+    target: { canvas_id?: string; workspace_id?: string },
+    need: CanvasRole,
+  ): { scope: LibraryScope; canEdit: boolean; canvasId?: string } | { error: ReturnType<typeof err> } => {
+    if (target.canvas_id && target.workspace_id) return { error: err('pass canvas_id or workspace_id, not both') }
+    if (target.workspace_id) {
+      const ws = workspaces.getWorkspace(target.workspace_id)
+      if (!ws || !workspaces.isWorkspaceMember(ws.id, ownerId))
+        return { error: err(`no workspace with id ${target.workspace_id}`) }
+      const scope: LibraryScope = `workspace:${ws.id}`
+      return { scope, canEdit: library.canEditLibrary(ownerId, scope) }
+    }
+    if (!target.canvas_id) return { error: err('pass canvas_id or workspace_id (from list_workspaces)') }
+    const lib = libraryFor(target.canvas_id, need)
+    return lib ? { ...lib, canvasId: target.canvas_id } : { error: noCanvas(target.canvas_id) }
+  }
+  /* feedback waiting on a canvas rides along only when the call named one */
+  const libraryReply = <T extends ToolContent>(result: T, canvasId: string | undefined, actor?: Actor): T =>
+    canvasId ? withFeedback(result, canvasId, actor) : result
+  const noLibraryEdit = () =>
+    err(
+      'this account cannot change that component library — a team library belongs to its workspace members, a personal one to its owner',
+    )
+  const libraryAnswer = (e: unknown) => err(e instanceof library.LibraryError ? e.message : String(e))
+
+  server.registerTool(
+    'get_design_system',
+    {
+      title: 'Read the design system',
+      description:
+        "Read the design system a canvas draws from (canvas_id), or a workspace's team library (workspace_id): the global stylesheet's tokens, usage rules, the component groups and every component with the markup that places it (default plus variants). Call it BEFORE designing on a canvas whose get_canvas lists a designSystem. To use a component, write its markup keeping data-doop-component=\"<slug>\" on its root — Doop stamps the component's CSS/JS and the global stylesheet into the frame. Never copy component CSS into a frame; style the rest with var(--token).",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        ...libraryTarget,
+        include_css: z
+          .boolean()
+          .optional()
+          .describe('Also return each component CSS/JS and the full global stylesheet'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ canvas_id, workspace_id, include_css, agent_name }) => {
+      const lib = libraryOf({ canvas_id, workspace_id }, 'view')
+      if ('error' in lib) return lib.error
+      if (lib.canvasId) arrive(lib.canvasId, agent_name)
+      const snap = library.snapshot(lib.scope, lib.canEdit)
+      const used = new Set(snap.components.map((component) => component.groupId))
+      const result = text({
+        initialized: snap.initialized,
+        canEdit: snap.canEdit,
+        tokens: cssTokens(snap.styles.globalCss),
+        notes: snap.styles.notes || undefined,
+        ...(include_css || !snap.initialized ? { globalCss: snap.styles.globalCss } : {}),
+        groups: snap.groups
+          .filter((group) => !group.preset || used.has(group.id))
+          .map((group) => ({
+            id: group.id,
+            name: group.name,
+            ...(group.description ? { description: group.description } : {}),
+          })),
+        presetGroups: PRESET_GROUPS.map((group) => ({ id: group.id, name: group.name, kinds: group.kinds })),
+        components: snap.components.map((component) => ({
+          slug: component.slug,
+          name: component.name,
+          group: component.groupId,
+          ...(component.kind ? { kind: component.kind } : {}),
+          description: component.description,
+          html: component.html,
+          variants: component.variants,
+          ...(include_css ? { css: component.css, js: component.js } : {}),
+        })),
+        note: snap.initialized
+          ? 'Place components by their markup (keep data-doop-component). Use the tokens for everything else.'
+          : 'No design system yet: globalCss is the suggested starting stylesheet. save_component or set_design_system creates it.',
+      })
+      return lib.canvasId
+        ? withFeedbackNotice(result, lib.canvasId, agent_name ? actorFrom(agent_name) : undefined)
+        : result
+    },
+  )
+
+  server.registerTool(
+    'save_component',
+    {
+      title: 'Create or update a library component',
+      description:
+        'Register a reusable component in the library a canvas draws from (canvas_id) or in a workspace\'s team library (workspace_id), or update one by slug. Write html as the default markup (its root gets data-doop-component="<slug>"), css with ONLY this component\'s rules reading shared values from the global tokens (var(--color-primary), var(--space-3)…), optional js that runs once per frame with `elements` = every instance, and variants as extra named markup. Every frame using the component is restamped at once. Pick group from get_design_system (a preset id such as "buttons", "forms", "navigation", or a custom group id) and kind from the preset kinds when it implements one.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        ...libraryTarget,
+        slug: z
+          .string()
+          .describe(
+            'Stable id, a-z 0-9 and hyphens, e.g. "button" or "pricing-card". An existing slug updates that component.',
+          ),
+        name: z.string().optional().describe('Display name, e.g. "Pricing card"; required for a new component'),
+        group: z.string().optional().describe('Group id; required for a new component'),
+        kind: z.string().optional().describe('Preset kind it implements, e.g. "Button", "Tabs"'),
+        description: z.string().optional().describe('When to use it, written for designers and agents'),
+        html: z.string().optional().describe('Default markup; required for a new component'),
+        css: z.string().optional(),
+        js: z.string().optional(),
+        variants: z.array(z.object({ name: z.string(), html: z.string() })).optional(),
+        new_slug: z.string().optional().describe('Rename the component; instances in frames follow'),
+        agent_name: agentName,
+      },
+    },
+    async ({
+      canvas_id,
+      workspace_id,
+      slug,
+      name,
+      group,
+      kind,
+      description,
+      html,
+      css,
+      js,
+      variants,
+      new_slug,
+      agent_name,
+    }) => {
+      const lib = libraryOf({ canvas_id, workspace_id }, 'edit')
+      if ('error' in lib) return lib.error
+      if (!lib.canEdit) return noLibraryEdit()
+      const actor = actorFrom(agent_name)
+      const existing = library.findComponent(lib.scope, slug)
+      try {
+        const { component, renamedFrom } = library.saveComponent(
+          lib.scope,
+          { name, slug: existing ? new_slug : slug, groupId: group, kind, description, html, css, js, variants },
+          actor.name,
+          existing?.id,
+        )
+        const restamped = actions.restampLibrary(
+          lib.scope,
+          actor,
+          renamedFrom ? { from: renamedFrom, to: component.slug } : undefined,
+        )
+        return libraryReply(
+          text({
+            ok: true,
+            created: !existing,
+            slug: component.slug,
+            usage: component.html,
+            framesRestamped: restamped,
+          }),
+          lib.canvasId,
+          actor,
+        )
+      } catch (e) {
+        return libraryAnswer(e)
+      }
+    },
+  )
+
+  server.registerTool(
+    'delete_component',
+    {
+      title: 'Delete a library component',
+      description:
+        "Remove a component from the library a canvas draws from (canvas_id) or a workspace's team library (workspace_id). Frames that use it keep their current look (the CSS already stamped into them stays) but no longer follow edits.",
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      inputSchema: { ...libraryTarget, slug: z.string(), agent_name: agentName },
+    },
+    async ({ canvas_id, workspace_id, slug, agent_name }) => {
+      const lib = libraryOf({ canvas_id, workspace_id }, 'edit')
+      if ('error' in lib) return lib.error
+      if (!lib.canEdit) return noLibraryEdit()
+      const actor = actorFrom(agent_name)
+      try {
+        library.deleteComponent(lib.scope, slug)
+        actions.restampLibrary(lib.scope, actor)
+        return libraryReply(text({ ok: true, deleted: slug }), lib.canvasId, actor)
+      } catch (e) {
+        return libraryAnswer(e)
+      }
+    },
+  )
+
+  server.registerTool(
+    'set_design_system',
+    {
+      title: 'Set the global stylesheet and usage rules',
+      description:
+        "Replace the global stylesheet of the library a canvas draws from (canvas_id) or of a workspace's team library (workspace_id) (tokens as :root custom properties, @font-face/@import fonts, base rules every component builds on) and/or its usage rules (markdown for designers and agents: spacing rhythm, tone, do / don't). Components read these tokens, so changing a value restyles every frame that uses the library. Read get_design_system first and keep the token names components already use.",
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        ...libraryTarget,
+        global_css: z.string().optional(),
+        notes: z.string().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, workspace_id, global_css, notes, agent_name }) => {
+      const lib = libraryOf({ canvas_id, workspace_id }, 'edit')
+      if ('error' in lib) return lib.error
+      if (!lib.canEdit) return noLibraryEdit()
+      if (global_css === undefined && notes === undefined) return err('pass global_css, notes or both')
+      const actor = actorFrom(agent_name)
+      try {
+        const styles = library.saveStyles(lib.scope, { globalCss: global_css, notes }, actor.name)
+        const restamped = actions.restampLibrary(lib.scope, actor)
+        return libraryReply(
+          text({ ok: true, tokens: cssTokens(styles.globalCss).length, framesRestamped: restamped }),
+          lib.canvasId,
+          actor,
+        )
+      } catch (e) {
+        return libraryAnswer(e)
+      }
+    },
+  )
+
+  server.registerTool(
+    'create_component_group',
+    {
+      title: 'Add a component group',
+      description:
+        'Add a custom group to the library a canvas draws from (canvas_id) or a workspace\'s team library (workspace_id), next to the presets (Buttons, Forms, Navigation…), e.g. "Marketing sections" or "Charts". Returns its id for save_component.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        ...libraryTarget,
+        name: z.string(),
+        description: z.string().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, workspace_id, name, description, agent_name }) => {
+      const lib = libraryOf({ canvas_id, workspace_id }, 'edit')
+      if ('error' in lib) return lib.error
+      if (!lib.canEdit) return noLibraryEdit()
+      const actor = actorFrom(agent_name)
+      try {
+        const group = library.createGroup(lib.scope, { name, description })
+        actions.restampLibrary(lib.scope, actor)
+        return libraryReply(text({ ok: true, id: group.id, name: group.name }), lib.canvasId, actor)
+      } catch (e) {
+        return libraryAnswer(e)
       }
     },
   )

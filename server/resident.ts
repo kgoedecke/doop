@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import type Anthropic from '@anthropic-ai/sdk'
+import * as library from './library.ts'
 import { store } from './store.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
@@ -116,6 +117,7 @@ Rules:
 - Each frame includes human approval metadata. Only ready_for_dev means the current design is approved for implementation; draft and needs_review are not approved. Content or size edits invalidate sign-off. Approval is context, not a new assignment: do only the requested work, and re-read the frame's approval before using it for implementation.
 - Choose a size-aware strategy. For documents over 60,000 characters, call inspect_frame before reading HTML. Use get_frame_html with a query or bounded range only when markup is needed.
 - For requests to copy, match, or borrow another frame's design: screenshot and inspect BOTH the target and reference before editing. Use the reference screenshot and computed design tokens as the source of visual truth. Read target HTML only when you need to preserve its content; do not load a large reference document just to learn its style. For a full redesign, use begin_frame_rewrite, append_frame_rewrite in chunks under 12,000 characters, and commit_frame_rewrite; then screenshot the changed frame.
+- Name the meaningful blocks you write with data-name, in the human's language (data-name="Filtros", "Tabela de títulos", "Rodapé"): the Layers panel shows that name instead of a bare "div". Keep the data-name a component instance or an earlier edit gave an element.
 - Element comments are pinned to ONE element (you get its data-doop-id and an HTML excerpt at comment time). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
 - Canvas comments are pinned to a point on the page, not to an element (you get the point and the frames nearest to it). The request is about what sits around that point: edit those frames in place, or add a new frame near the point when the comment asks for something new — never rework the whole page because of a canvas comment.
 - Frames are complete HTML documents with inline CSS. Keep each frame's existing style and structure; change what the feedback requires.
@@ -573,16 +575,18 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
          breakpoint: the role prefix stays cacheable across canvases, and the
          (rarely-changing) docs cache across the turns of a run */
       const guidelineDocs = store.getGuidelines(canvasId)
-      const guidelinesBlock = guidelineDocs.length
-        ? [
-            {
-              text:
-                `# Canvas design guidelines\nEvery frame on this canvas must follow these docs — they outrank your own aesthetic preferences:\n\n` +
+      const libraryScope = library.scopeOfCanvas(canvasId)
+      const designSystem = libraryScope ? library.designSystemBrief(libraryScope) : ''
+      const guidelinesBlock = [
+        ...(guidelineDocs.length
+          ? [
+              `# Canvas design guidelines\nEvery frame on this canvas must follow these docs — they outrank your own aesthetic preferences:\n\n` +
                 guidelineDocs.map((d) => `## ${d.name}\n\n${d.markdown}`).join('\n\n'),
-              cache: true,
-            },
-          ]
-        : []
+            ]
+          : []),
+        ...(designSystem ? [designSystem] : []),
+        /* one breakpoint after the last doc caches them all, as the single doc block did */
+      ].map((text, i, all) => ({ text, cache: i === all.length - 1 }))
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       const noVisionBlock = runState.vision
@@ -1170,6 +1174,40 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'save_component',
+    description:
+      'Register a reusable component in this canvas\'s design-system library, or update one by slug (the library and its tokens are in your system prompt). html is the default markup (its root gets data-doop-component="<slug>"), css holds ONLY this component\'s rules and reads shared values from the global tokens, js (optional) runs once per frame with `elements` = every instance, variants are extra named markup. Every frame using the component is restyled at once. Use it when you design a piece the library lacks and will reuse, then place it by its markup.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        slug: {
+          type: 'string',
+          description: 'Stable id, a-z 0-9 and hyphens, e.g. "pricing-card"; an existing slug updates it',
+        },
+        name: { type: 'string', description: 'Display name; required for a new component' },
+        group: {
+          type: 'string',
+          description:
+            'Group id: buttons, collections, colors, controls, data-display, date-time, feedback, forms, layout, media, navigation, overlays, pickers, typography, utilities, or a custom group id; required for a new component',
+        },
+        kind: { type: 'string', description: 'Preset kind it implements, e.g. "Button", "Tabs"' },
+        description: { type: 'string', description: 'When to use it' },
+        html: { type: 'string', description: 'Default markup; required for a new component' },
+        css: { type: 'string' },
+        js: { type: 'string' },
+        variants: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { name: { type: 'string' }, html: { type: 'string' } },
+            required: ['name', 'html'],
+          },
+        },
+      },
+      required: ['slug'],
+    },
+  },
+  {
     name: 'get_prototype',
     description:
       'List the clickable-prototype wiring of this canvas: each page with its flow start frame, and every interaction (data-doop-on / data-doop-action attributes in frame HTML) with its trigger, action and target. Interactions whose target frame does not exist carry a problem; fix them with edit_frame_html. Call it after wiring a flow.',
@@ -1693,6 +1731,51 @@ async function execTool(
           )
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid decision')
+        }
+      }
+      case 'save_component': {
+        const scope = library.scopeOfCanvas(canvasId)
+        if (!scope) return fail('canvas not found')
+        /* a team or personal library changes only for whom it belongs to:
+           the person this run works for */
+        if (!library.canEditLibrary(runState.payerId, scope))
+          return fail("the person you are working for cannot change this canvas's component library")
+        const raw = block.input as {
+          slug?: string
+          name?: string
+          group?: string
+          kind?: string
+          description?: string
+          html?: string
+          css?: string
+          js?: string
+          variants?: unknown
+        }
+        if (typeof raw.slug !== 'string' || !raw.slug.trim()) return fail('slug must be a non-empty string')
+        const existing = library.findComponent(scope, raw.slug.trim().toLowerCase())
+        try {
+          const { component } = library.saveComponent(
+            scope,
+            {
+              slug: raw.slug,
+              name: raw.name,
+              groupId: raw.group,
+              kind: raw.kind,
+              description: raw.description,
+              html: raw.html,
+              css: raw.css,
+              js: raw.js,
+              variants: raw.variants,
+            },
+            actor.name,
+            existing?.id,
+          )
+          const restamped = actions.restampLibrary(scope, actor)
+          return ok(
+            `${existing ? 'updated' : 'registered'} component "${component.name}" (${component.slug}); ${restamped} frame(s) restyled. Place it with:\n${component.html}`,
+          )
+        } catch (e) {
+          return fail(e instanceof library.LibraryError ? e.message : String(e))
         }
       }
       case 'set_guidelines': {
