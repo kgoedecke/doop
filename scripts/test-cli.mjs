@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 import WebSocket from 'ws'
 import puppeteer from 'puppeteer-core'
+import { exerciseCommands } from './test-cli-commands.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const work = mkdtempSync(path.join(tmpdir(), 'doop-cli-e2e-'))
@@ -32,7 +33,7 @@ function npmRun(args, cwd) {
     cwd,
     env,
     encoding: 'utf8',
-    timeout: 240_000,
+    timeout: process.env.CI ? 600_000 : 240_000,
     maxBuffer: 10 * 1024 * 1024,
   })
 }
@@ -249,8 +250,9 @@ try {
   }
   console.log('PASS: graceful shutdown, restart, session/key stability, persisted canvas/frame and MCP canvas read')
   await stop(running.child)
+  await exerciseCommands(entry, install, work, env, path.join(work, packed.filename))
   console.log('All installed-package CLI E2E checks passed.')
 } finally {
   for (const child of children) await stop(child)
-  rmSync(work, { recursive: true, force: true })
+  rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }
