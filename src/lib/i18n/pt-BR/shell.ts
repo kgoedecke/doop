@@ -10,4 +10,9 @@ export const shell: Catalog['shell'] = {
   appearance: 'Aparência',
   language: 'Idioma',
   logOut: 'Sair',
+  updateTitle: 'Atualização disponível',
+  updateBody: 'O Doop {version} está pronto. Reinicie para aplicar a atualização.',
+  updateRestart: 'Reiniciar e atualizar',
+  updateRestarting: 'Reiniciando…',
+  updateLater: 'Agora não',
 }

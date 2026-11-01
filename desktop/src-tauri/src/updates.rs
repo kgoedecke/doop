@@ -5,6 +5,12 @@
 //! the same check on demand and reports every outcome; background checks
 //! stay silent unless an update is ready.
 //!
+//! A page that draws its own update card (src/components/UpdateCard.tsx)
+//! says so through `update_card_ready` once it listens for `update-ready`;
+//! the offer then goes to it and comes back as `update_restart`. Every page
+//! load forgets that, so a page that never says so (an older web build, the
+//! seconds before the app has loaded) gets the native dialog instead.
+//!
 //! The feed (latest.json, written by desktop-release.yml) and every package
 //! it names are signed with the key whose public half is in tauri.conf.json;
 //! the plugin refuses a package whose signature does not verify.
@@ -13,13 +19,14 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use rfd::{AsyncMessageDialog, MessageButtons, MessageDialogResult, MessageLevel};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 const FIRST_CHECK: Duration = Duration::from_secs(15);
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 const RESTART: &str = "Restart Now";
 const LATER: &str = "Later";
+pub const READY_EVENT: &str = "update-ready";
 
 #[derive(Default)]
 pub struct UpdateState {
@@ -28,6 +35,8 @@ pub struct UpdateState {
     /// A verified download the person put off. A later check offers it again
     /// without downloading, and on macOS it is installed on quit.
     ready: Mutex<Option<(Update, Vec<u8>)>>,
+    /// The loaded page listens for `update-ready` and draws the offer itself.
+    page_card: AtomicBool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -164,6 +173,19 @@ fn take_kept(app: &AppHandle, wanted: impl FnOnce(&Update) -> bool) -> Option<(U
 }
 
 async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
+    let state = app.state::<UpdateState>();
+    if state.page_card.load(Ordering::Acquire) {
+        // what the card shows: the version on offer and the one running
+        let ready = serde_json::json!({
+            "version": update.version,
+            "current": app.package_info().version.to_string(),
+        });
+        if let Ok(mut kept) = state.ready.lock() {
+            *kept = Some((update, bytes));
+        }
+        let _ = app.emit(READY_EVENT, ready);
+        return;
+    }
     let later = if cfg!(target_os = "macos") {
         "\n\nChoose Later to install it when you quit doop."
     } else {
@@ -182,11 +204,16 @@ async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
     .show()
     .await;
     if !accepted(&choice) {
-        if let Ok(mut ready) = app.state::<UpdateState>().ready.lock() {
+        if let Ok(mut ready) = state.ready.lock() {
             *ready = Some((update, bytes));
         }
         return;
     }
+    let _ = install(app, update, bytes).await;
+}
+
+/// Installs and restarts into the update; returns only when that failed.
+async fn install(app: &AppHandle, update: Update, bytes: Vec<u8>) -> Result<(), String> {
     crate::claude::shutdown(&app.state::<crate::claude::ClaudeState>());
     // Windows does not return from a successful install: the plugin starts
     // the installer, which relaunches the app, and exits.
@@ -202,8 +229,33 @@ async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
             .set_level(MessageLevel::Error)
             .show()
             .await;
+            Err(error.to_string())
         }
     }
+}
+
+/// A page load starts out without the card until the new page says otherwise.
+pub fn page_loading(app: &AppHandle) {
+    if let Some(state) = app.try_state::<UpdateState>() {
+        state.page_card.store(false, Ordering::Release);
+    }
+}
+
+/// The page listens for `update-ready` and will draw the offer itself.
+#[tauri::command]
+pub fn update_card_ready(app: AppHandle) {
+    app.state::<UpdateState>()
+        .page_card
+        .store(true, Ordering::Release);
+}
+
+/// Restart to update, from the page's card. Not now needs no call: the
+/// download stays kept, offered again by the next check and, on macOS,
+/// installed on quit.
+#[tauri::command]
+pub async fn update_restart(app: AppHandle) -> Result<(), String> {
+    let kept = take_kept(&app, |_| true).ok_or("No update is ready")?;
+    install(&app, kept.0, kept.1).await
 }
 
 /// Windows shows custom labels only with comctl v6 and otherwise answers
