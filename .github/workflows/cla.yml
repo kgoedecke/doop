@@ -14,6 +14,8 @@ permissions:
 
 jobs:
   cla-assistant:
+    # The signature branch and agreement belong to the upstream project.
+    if: github.repository == 'kgoedecke/doop'
     runs-on: ubuntu-latest
     steps:
       - name: CLA assistant

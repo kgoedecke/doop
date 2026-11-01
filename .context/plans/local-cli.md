@@ -49,6 +49,12 @@ and removal were also exercised with an isolated test task; no login task was
 left installed. Typecheck, lint, formatting and doc-lint passed. Cross-platform CI
 is configured; the new service adapters were exercised locally on Windows only.
 
+PR check follow-up: scope the inherited CLA workflow to kgoedecke/doop, where its
+agreement and signature branch live; the workflow registration is disabled in
+the private development copy. Isolate the existing nested-overlay focus test
+from the delay fixture's 800ms navigation timer so slow CI cannot navigate away
+while it is checking focus. Delay suspension remains covered by its own test.
+
 ## Verification completed
 
 - Windows, Node 24.22.1: production build and installed-tarball E2E passed,
