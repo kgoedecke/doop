@@ -124,7 +124,7 @@ export const dispatch = Effect.fn('Cli.dispatch')(function* (
         autostart: options.autostart || previous.autostart,
       }
       yield* manager.save(next)
-      if (options.autostart && !previous.autostart)
+      if (options.autostart)
         yield* autostart(true).pipe(Effect.onError(() => manager.save(previous).pipe(Effect.ignore)))
       return yield* print(next)
     }

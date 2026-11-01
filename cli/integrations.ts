@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Path, Schema } from 'effect'
 import { homedir } from 'node:os'
+import { parse as parseToml } from 'smol-toml'
 import { Configuration } from './config.ts'
 import { readJson, writeJson } from './files.ts'
 import { ConfigurationError, JsonObject, type Options, StorageError } from './model.ts'
@@ -42,12 +43,17 @@ export const pair = Effect.fn('Integrations.pair')(
     yield* fs.makeDirectory(path.dirname(file), { recursive: true })
     if (client === 'codex') {
       const existing = (yield* fs.exists(file)) ? yield* fs.readFileString(file) : ''
-      if (/^\[mcp_servers\.doop\]/m.test(existing))
-        return yield* new ConfigurationError({
-          operation: 'pair',
-          message: 'A Codex doop entry already exists. Edit it explicitly to preserve other settings.',
-        })
-      yield* fs.writeFileString(file, `${existing}\n[mcp_servers.doop]\nurl = ${JSON.stringify(url)}\n`, {
+      const next = `${existing}\n[mcp_servers.doop]\nurl = ${JSON.stringify(url)}\n`
+      yield* Effect.try({
+        try: () => parseToml(next),
+        catch: () =>
+          new ConfigurationError({
+            operation: 'pair',
+            message:
+              'Cannot safely append a Codex doop entry. Edit config.toml explicitly to preserve existing settings.',
+          }),
+      })
+      yield* fs.writeFileString(file, next, {
         mode: 0o600,
       })
     } else {
