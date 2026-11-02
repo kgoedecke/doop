@@ -6,6 +6,7 @@ import type { Canvas, Frame } from '../shared/types'
 
 declare global {
   interface Window {
+    clearPickOnLayout?: boolean
     seedPages: (canvas: Canvas) => void
     pickElement: (frameId: string, selector: string) => void
     frameHtml: (frameId: string) => string | undefined
@@ -247,6 +248,23 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     })
     await page.waitForFunction(() => window.pageState().inspectorOpen && !window.pageState().selectedElement)
     await page.waitForSelector('button[aria-label="Copy link to element"]', { hidden: true })
+  })
+
+  it('keeps a cleared pick when an earlier probe effect is still pending', async () => {
+    const target = { ...frame('target', 'first', 0), html: '<h1 id="one" data-doop-id="one000">One</h1>' }
+    await load(canvas([target]), '?frame=target')
+    const doc = (await (await page.$('iframe[data-doop-frame]'))!.contentFrame())!
+    await doc.waitForSelector('#one')
+    await page.evaluate(() => {
+      window.clearPickOnLayout = true
+      window.pickElement('target', '[data-doop-id="one000"]')
+    })
+    await page.waitForFunction(() => window.clearPickOnLayout === false)
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+    )
+    expect(await page.evaluate(() => window.pageState().selectedElement)).toBeNull()
+    expect(await page.$('button[aria-label="Copy link to element"]')).toBeNull()
   })
 
   it('does not snap a drag to the invisible frame on another page', async () => {

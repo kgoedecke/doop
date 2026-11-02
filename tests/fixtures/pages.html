@@ -53,9 +53,20 @@
         inspectorOpen: useStore.getState().inspectorOpen,
         notice: useStore.getState().notice?.text,
       })
+      function Fixture() {
+        const picked = useStore((s) => s.selectedElement)
+        /* Clear after commit, before FrameView's pending passive effects run. */
+        React.useLayoutEffect(() => {
+          if (window.clearPickOnLayout && picked?.selector === '#one') {
+            window.clearPickOnLayout = false
+            useStore.getState().pickElement(null)
+          }
+        }, [picked])
+        return React.createElement(Stage, { onAddFrame: () => {} })
+      }
       /* mounted as main.tsx mounts it: the toolbar's tooltips need the provider */
       createRoot(document.getElementById('root')).render(
-        React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })),
+        React.createElement(TooltipProvider, null, React.createElement(Fixture)),
       )
     </script>
   </body>

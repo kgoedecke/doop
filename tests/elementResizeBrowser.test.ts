@@ -580,6 +580,26 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     expect(await page.$('[data-resize-handles]')).toBeNull()
   }, 20_000)
 
+  it('dismisses the remaining layer on Escape after removing a secondary pick', async () => {
+    await reset()
+    await select('#box')
+    const boxWidth = await (await frameDoc())!.$eval('#box', (el) => `${el.getBoundingClientRect().width}px`)
+    await page.evaluate(() => window.elementPanelHarness.pickAlso('#pad'))
+    await page.waitForFunction(
+      (width) => document.querySelector<HTMLElement>('[data-picked-element]')?.style.width === width,
+      {},
+      boxWidth,
+    )
+    await page.evaluate(() => window.elementPanelHarness.pickAlso('#box'))
+    await page.waitForSelector('[data-resize-handles]')
+    expect(await page.evaluate(() => window.elementPanelHarness.picked())).toEqual(['#pad'])
+
+    await page.keyboard.press('Escape')
+    await expect.poll(() => page.evaluate(() => window.elementPanelHarness.picked())).toEqual([])
+    expect(await page.$('button[aria-label="Copy link to element"]')).toBeNull()
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+  })
+
   it('⇧-click picks several elements in the frame, outlining each, and a plain click narrows back to one', async () => {
     await reset()
     async function click(selector: string, { shift = false } = {}) {

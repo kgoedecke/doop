@@ -651,6 +651,18 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   /* only thread roots get a pin; replies live inside the root's popover */
   const comments = frameComments.filter((c) => !c.parentId && !c.resolvedAt)
   const [probe, setProbe] = useState<ProbeHit | null>(null)
+  const pickProbe = useCallback(
+    (hit: ProbeHit | null, only = false) => {
+      const store = useStore.getState()
+      // A frame comment must not select body: element commands would edit the whole document.
+      const element =
+        hit && hit.selector !== FRAME_COMMENT_SELECTOR ? { frameId: frame.id, selector: hit.selector } : null
+      if (store.tool === 'comment') store.setSelectedElement(element)
+      else store.pickElement(element, only)
+      setProbe(hit)
+    },
+    [frame.id],
+  )
   useEffect(() => {
     // The request also distinguishes a return to previously rendered HTML
     // while a newer document is still being delivered.
@@ -673,13 +685,12 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         ...(hit ? { hit: { snippet: hit.snippet, ...(hit.elementId ? { elementId: hit.elementId } : {}) } } : {}),
       })
       setMenuProbe(null)
-      setProbe(hit ?? null)
-      store.setSelectedElement(hit ? { frameId: frame.id, selector: hit.selector } : null)
+      pickProbe(hit ?? null)
     })
     return () => {
       cancelled = true
     }
-  }, [menuProbe, runtimeDocument, frame.html, frame.id])
+  }, [menuProbe, runtimeDocument, frame.html, frame.id, pickProbe])
   /* element selected for text editing inside the iframe (edit mode only) */
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
   const [composing, setComposing] = useState(false)
@@ -843,40 +854,23 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     if (requestedThread) useStore.getState().clearThreadRequest()
   }, [requestedThread])
 
-  /* the outlined element is shared with the Layers panel through the store:
-     what is probed here is picked (which also opens its properties panel,
-     the same as a click on its Layers row), and a row picked there is
-     resolved into a probe by asking the runtime for the element behind the
-     selector */
-  const previousProbe = useRef<string | null>(null)
+  /* Input handlers publish new picks. Removing a local probe only clears
+     its pick while that element is still selected. */
+  const wantedPick = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement : null))
+  const previousProbePick = useRef<{ frameId: string; selector: string } | null>(null)
   useEffect(() => {
-    const previous = previousProbe.current
-    previousProbe.current = probeSel
+    const previous = previousProbePick.current
     const cur = useStore.getState().selectedElement
-    if (probeSel === FRAME_COMMENT_SELECTOR) {
-      /* a comment on the whole frame is no element pick: `body` in the
-         selection would hand Delete, Duplicate and the Design panel the
-         frame's entire document */
-      if (cur?.frameId === frame.id) useStore.getState().setSelectedElement(null)
-    } else if (probeSel) {
-      const el = { frameId: frame.id, selector: probeSel }
-      /* the Comment tool outlines the element without sliding its properties panel in */
-      if (useStore.getState().tool === 'comment') useStore.getState().setSelectedElement(el)
-      else useStore.getState().pickElement(el)
-    } else if (previous && cur?.frameId === frame.id && cur.selector === previous) {
+    previousProbePick.current = probeSel && wantedPick?.selector === probeSel ? wantedPick : null
+    if (!probeSel && previous && cur === previous) {
       /* Only clear a probe we actually removed. A link or Layers pick can
          select an element before this frame has mounted its runtime. */
       useStore.getState().pickElement(null)
     }
-  }, [probeSel, frame.id])
-  const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
-  const [seenWantedSel, setSeenWantedSel] = useState(wantedSel)
-  if (seenWantedSel !== wantedSel) {
-    setSeenWantedSel(wantedSel)
-    /* Returning to a frame-only link (or closing the element panel) also
-       removes the previous element's toolbar and outline. */
-    if (!wantedSel) setProbe((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
-  }
+  }, [probeSel, wantedPick])
+  const wantedSel = wantedPick?.selector ?? null
+  /* A late probe render must not outlive the selection it describes. */
+  if (probe && probeSel !== FRAME_COMMENT_SELECTOR && probeSel !== wantedSel) setProbe(null)
   /* the rest of a multi-element pick: each is outlined like the primary,
      re-located whenever the document changes. A string key keeps the
      selection identity-stable, so memo holds. */
@@ -936,9 +930,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           return
         }
         /* a plain click on one of several picked elements leaves it alone picked */
-        if (hit && probeIntent.current === 'toolbar')
-          useStore.getState().pickElement({ frameId: frame.id, selector: hit.selector }, true)
-        setProbe(hit)
+        pickProbe(hit, probeIntent.current === 'toolbar')
         /* the Comment tool skips the element toolbar: the composer opens on
            the hit, the same one the toolbar's own Comment button opens */
         if (hit && probeIntent.current === 'comment') {
@@ -954,11 +946,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         closePopovers()
         if (hit) {
-          setProbe(hit)
           /* an element link names the element by id; from here on the
              selection speaks the positional path the Layers panel knows */
-          if (hit.selector !== live.selector)
-            useStore.getState().pickElement({ frameId: frame.id, selector: hit.selector })
+          pickProbe(hit)
         } else {
           /* The live document is authoritative for linked elements and
              Layers picks, including nodes created or removed by scripts. */
@@ -990,7 +980,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
            leaving edit mode keeps the last element selected. A refresh for
            the same element (a save while editing) only updates its outline,
            so it can't take back a pick made in Layers meanwhile. */
-        if (hit) setProbe((p) => (moved || p?.selector === hit.selector ? hit : p))
+        if (hit && moved) pickProbe(hit)
+        else if (hit) setProbe((p) => (p?.selector === hit.selector ? hit : p))
       }
       if (ev.data?.type === 'doop:code-result' && ev.data.reqId === codeReq.current) {
         setCodeView(typeof ev.data.html === 'string' ? ev.data.html : null)
@@ -1030,7 +1021,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [frame.id])
+  }, [frame.id, pickProbe])
 
   /* Esc dismisses popovers (edit mode has its own Esc path inside the iframe) */
   useEffect(() => {
