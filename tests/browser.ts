@@ -39,6 +39,13 @@ const COLD_START_MS = 180_000
  *  apply to navigation; loads get their own, roomier bound. */
 const NAVIGATION_TIMEOUT_MS = 30_000
 
+/** The bound on one UI wait (waitForSelector, waitForFunction, a locator
+ *  click) when a file sets none of its own: shorter than the 30s test
+ *  timeout, so a wait that never comes true fails on its own line with the
+ *  condition it was waiting for, instead of the whole test timing out with
+ *  nothing but its title. */
+const STEP_TIMEOUT_MS = 15_000
+
 /**
  * The Vite config every fixture server uses. One `optimizeDeps` for all of
  * them: the dependency hash covers `include`, and a server whose hash differs
@@ -132,6 +139,7 @@ export async function openBrowser(): Promise<TestBrowser> {
   return {
     async newPage() {
       const page = await context.newPage()
+      page.setDefaultTimeout(STEP_TIMEOUT_MS)
       page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS)
       /* files running side by side each have a window in the one browser, and
          only one window holds the focus at a time: a page that lost it stops
@@ -139,6 +147,10 @@ export async function openBrowser(): Promise<TestBrowser> {
          focused, as it was alone in its own browser. */
       const session = await page.createCDPSession()
       await session.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+      /* DOOP_TEST_CPU_THROTTLE=6 slows the page's main thread the way a busy
+         CI runner does, for chasing a race locally */
+      const rate = Number(process.env.DOOP_TEST_CPU_THROTTLE ?? '0')
+      if (rate > 1) await session.send('Emulation.setCPUThrottlingRate', { rate })
       return page
     },
     grantPermissions: (permissions) => context.overridePermissions(fixtureOrigin, permissions),
