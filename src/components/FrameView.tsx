@@ -856,18 +856,19 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
 
   /* Input handlers publish new picks. Removing a local probe only clears
      its pick while that element is still selected. */
+  const wantedPick = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement : null))
   const previousProbePick = useRef<{ frameId: string; selector: string } | null>(null)
   useEffect(() => {
     const previous = previousProbePick.current
     const cur = useStore.getState().selectedElement
-    previousProbePick.current = probeSel && cur?.frameId === frame.id && cur.selector === probeSel ? cur : null
+    previousProbePick.current = probeSel && wantedPick?.selector === probeSel ? wantedPick : null
     if (!probeSel && previous && cur === previous) {
       /* Only clear a probe we actually removed. A link or Layers pick can
          select an element before this frame has mounted its runtime. */
       useStore.getState().pickElement(null)
     }
-  }, [probeSel, frame.id])
-  const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
+  }, [probeSel, wantedPick])
+  const wantedSel = wantedPick?.selector ?? null
   /* A late probe render must not outlive the selection it describes. */
   if (probe && probeSel !== FRAME_COMMENT_SELECTOR && probeSel !== wantedSel) setProbe(null)
   /* the rest of a multi-element pick: each is outlined like the primary,
