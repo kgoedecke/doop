@@ -8,12 +8,12 @@ https://github.com/kgoedecke/doop
 Doop is the open-source alternative to Paper.design: a multiplayer design canvas for humans and AI
 agents. Every design lives on a shareable Canvas (`/c/<id>`) holding Frames - artboards that
 render real HTML in sandboxed iframes. People edit in the browser; AI agents edit through the
-built-in MCP server, streaming designs in live. Browsers subscribe directly to actors for frame
-membership and edits; per-canvas WebSocket rooms carry cursors, presence, and collaboration events.
+built-in MCP server, streaming designs in live. Browsers subscribe directly to one actor per canvas
+for pages and frames; per-canvas WebSocket rooms carry cursors, presence, and collaboration events.
 
 ## Tech stack
 
-TypeScript/React/Express/Postgres (drizzle), durable actors for frames, `ws` for collaboration, MCP for agent access, Tauri
+TypeScript/React/Express/Postgres (drizzle), a Terse actor per canvas (SQLite via drizzle), `ws` for collaboration, MCP for agent access, Tauri
 desktop shell. Full details in `.context/TECHSTACK.md`, which `.context/INDEX.md` links.
 
 Always use the `clean-code:typescript` skill when writing or reviewing TypeScript code in this
@@ -33,7 +33,8 @@ API with a public WebSocket endpoint, then `docker compose up` (real Postgres, p
 
 ```
 src/               - React frontend (Vite entry: index.html)
-src/actor.ts       - CanvasIndex and FrameActor definitions
+src/actor.ts       - CanvasActor: one canvas's pages, frames and history
+src/actor-db/      - the canvas actor's drizzle schema and migrations
 src/components/ui/ - shadcn-generated UI primitives
 src/pages/         - route-level pages
 src/hooks/         - React hooks

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
-import { canvasIndex } from '../server/frame-sync.ts'
+import { canvasActor } from '../server/frame-sync.ts'
 import { store } from '../server/store.ts'
 
-it('counts canvas membership without fetching frame payloads', async () => {
+it('counts frames without fetching frame payloads', async () => {
   const canvases = [randomUUID(), randomUUID()].map((id) => ({
     id,
     name: 'Stats',
@@ -11,11 +11,26 @@ it('counts canvas membership without fetching frame payloads', async () => {
     updatedAt: 1,
     frames: [],
   }))
-  // Only indexes exist: fetching a frame payload would fail this read.
-  await canvasIndex(canvases[0]!.id).initializePages([{ id: 'main', name: 'Main' }])
-  await canvasIndex(canvases[1]!.id).initializePages([{ id: 'main', name: 'Main' }])
-  await canvasIndex(canvases[0]!.id).initialize(['frame-a', 'frame-b'])
-  await canvasIndex(canvases[1]!.id).initialize()
+  // Frames exist only as actor rows: reading their HTML would not be needed for a count.
+  const pages = [{ id: 'main', name: 'Main' }]
+  const frame = (canvasId: string, id: string) => ({
+    id: `${canvasId}.${id}`,
+    canvasId,
+    pageId: 'main',
+    name: id,
+    html: '<p>Frame</p>',
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    createdAt: 1,
+    updatedAt: 1,
+    updatedBy: 'test',
+  })
+  const [first, second] = canvases.map((canvas) => canvas.id) as [string, string]
+  await canvasActor(first).importFrames([frame(first, 'a'), frame(first, 'b')])
+  await canvasActor(first).initialize(pages)
+  await canvasActor(second).initialize(pages)
   store.init(canvases)
 
   expect(await store.getCanvasStats()).toEqual({ canvases: 2, frames: 2 })

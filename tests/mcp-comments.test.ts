@@ -99,7 +99,7 @@ function stubStore(canvases: Canvas[], frames: Frame[]) {
   vi.spyOn(store, 'syncCanvas').mockImplementation(async (id: string) => store.getCanvasMetadata(id))
   vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id: string) => {
     const f = frames.find((frame) => frame.id === id)
-    return f ? { id, canvasId: f.canvasId } : undefined
+    return f ? { id, canvasId: f.canvasId, pageId: `${f.canvasId}:page1` } : undefined
   })
 }
 

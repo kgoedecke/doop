@@ -11,7 +11,7 @@ struct ServerAddressChecks {
         checks.testSelfHostedPortIsPreserved()
         try checks.testExportDestinations()
         try checks.testServerResponseContracts()
-        try checks.testFrameActorEvents()
+        try checks.testActorEvents()
         checks.testCardScopeBody()
         checks.testCardAgentAssignmentBody()
         checks.testPromptContext()
@@ -91,12 +91,15 @@ struct ServerAddressChecks {
         checkEqual(deletion.frameId, "f")
     }
 
-    func testFrameActorEvents() throws {
-        func event(_ json: String) throws -> FrameActorEvent {
-            try JSONDecoder().decode(FrameActorEvent.self, from: Data(json.utf8))
+    func testActorEvents() throws {
+        func event(_ json: String) throws -> ActorEvent {
+            try JSONDecoder().decode(ActorEvent.self, from: Data(json.utf8))
         }
-        let index = try event(#"{"type":"index-snapshot","revision":1,"frameIds":["f"],"deleted":false}"#)
-        checkEqual(index.frameIds, ["f"])
+        let snapshot = try event(#"{"type":"canvas-snapshot","revision":1,"initialized":true,"deleted":false,"pages":[{"id":"c:page1","name":"Page 1"}],"frames":[{"id":"f","canvasId":"c","pageId":"c:page1","name":"Frame","x":0,"y":0,"width":390,"height":844,"html":"<p>Draft</p>","updatedAt":99}],"activity":[]}"#)
+        checkEqual(snapshot.frames?.map(\.id), ["f"])
+        checkEqual(snapshot.frames?.map(\.html), ["<p>Draft</p>"])
+        checkEqual(snapshot.pages?.map(\.id), ["c:page1"])
+        checkEqual(snapshot.deleted, false)
         let update = try event(#"{"type":"state_update","changes":{"committed":{"type":"frame-change","revision":2,"frame":{"id":"f","canvasId":"c","name":"Frame","x":10,"y":20,"width":390,"height":844,"html":"<p>Saved</p>","updatedAt":100}}}}"#)
         checkEqual(update.type, "frame-change")
         checkEqual(update.revision, 2)
@@ -110,9 +113,10 @@ struct ServerAddressChecks {
         checkEqual(preview.updatedAt, saved.updatedAt)
         saved.updatedAt = 101
         checkNil(drag.drag!.applying(to: saved), "A newer save invalidates the drag preview")
-        let deletion = try event(#"{"type":"state_update","changes":{"committed":{"type":"frame-snapshot","revision":3,"frame":null,"deleted":true}}}"#)
-        checkEqual(deletion.deleted, true)
-        checkNil(deletion.frame, "Deleted frames have no content")
+        let removal = try event(#"{"type":"state_update","changes":{"committed":{"type":"frame-removal","revision":3,"frameId":"f"}}}"#)
+        checkEqual(removal.type, "frame-removal")
+        checkEqual(removal.frameId, "f")
+        checkNil(removal.frame, "A removal carries no content")
         checkNil(try event(#"{"type":"state_update","changes":{"committed":null}}"#).revision, "Ignore empty runtime state")
     }
 

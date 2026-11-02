@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
-/* Frames live in durable actors. One pass over the REST surface that main
+/* Frames live in canvas actors. One pass over the REST surface that main
    grew around frames (optimistic saves, sign-off, hide/lock, design history,
    element ids, page copies, flow starts, actor tickets, share-link roles),
    against a real server and the isolated local actor runtime. */
@@ -76,8 +76,8 @@ it('keeps sign-off, history, locks, pages and access working with frames in acto
   const flow = await alice.put(`/api/canvases/${canvas.id}/pages/${page}/flow-start`, { frameId: frame.id })
   expect((await flow.json()).find((p: { id: string }) => p.id === page).startFrameId).toBe(frame.id)
 
-  // the actor ticket
-  const grant = await (await alice.get(`/api/frames/${frame.id}/actor?clientId=actor-features`)).json()
+  // the canvas actor ticket
+  const grant = await (await alice.get(`/api/canvases/${canvas.id}/actor?clientId=actor-features`)).json()
   expect(typeof grant.websocketUrl).toBe('string')
 
   // a view-only link visitor gets a read-only canvas and no writes

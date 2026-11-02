@@ -16,7 +16,7 @@ import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { FrameConflictError, GuideLimitError, PageLimitError, store } from './store.ts'
-import { canvasIndex, frameActor, prepareCanvasSocket, prepareFrameSocket } from './frame-sync.ts'
+import { canvasActor, prepareCanvasSocket } from './frame-sync.ts'
 import { actorRoute as frameRoute } from './actor-route.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
@@ -673,7 +673,7 @@ app.use('/api/canvases/:canvasId', (req, res, next) => {
   )
 })
 app.use('/api/frames/:frameId', (req, res, next) => {
-  void (req.path === '/actor' ? store.getFrameMembership(req.params.frameId) : store.getFrame(req.params.frameId)).then(
+  void store.getFrame(req.params.frameId).then(
     (frame) => {
       res.locals.frame = frame
       next()
@@ -1157,40 +1157,20 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
   }
 })
 
-/* Short-lived actor tickets: the browser subscribes to the canvas index (pages
-   and membership, always read only: page and membership changes go through
-   these routes) and to each frame. A frame ticket is read only unless the
-   person may edit; an access change bumps the actor's access version, which
-   closes open sockets and voids tickets issued before it. */
+/* Short-lived actor tickets: the browser subscribes to the canvas actor, which
+   holds the pages and every frame. A ticket is read only unless the person may
+   edit; an access change bumps the actor's access version, which closes open
+   sockets and voids tickets issued before it. */
 app.get(
   '/api/canvases/:id/actor',
   frameRoute(async (req, res) => {
     if (!requireCanvas(req, res, req.params.id, 'view')) return
-    const accessVersion = await canvasIndex(req.params.id).accessVersion()
+    const accessVersion = await canvasActor(req.params.id).accessVersion()
     /* access may have changed while the version was read */
-    if (!requireCanvas(req, res, req.params.id, 'view')) return
-    const grant = await prepareCanvasSocket({
-      actorId: req.params.id,
-      metadata: {
-        actor: { name: req.user!.name, kind: 'user', color: colorFor(req.user!.name) },
-        readOnly: true,
-        accessVersion,
-      },
-    })
-    res.set('Cache-Control', 'no-store').json(grant)
-  }),
-)
-
-app.get(
-  '/api/frames/:id/actor',
-  frameRoute(async (req, res) => {
-    if (!requireFrame(req, res, req.params.id, 'view')) return
-    const accessVersion = await frameActor(req.params.id).accessVersion()
-    const frame = requireFrame(req, res, req.params.id, 'view')
-    if (!frame) return
-    const canvas = store.getCanvasMetadata(frame.canvasId)!
+    const canvas = requireCanvas(req, res, req.params.id, 'view')
+    if (!canvas) return
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 128) : undefined
-    const grant = await prepareFrameSocket({
+    const grant = await prepareCanvasSocket({
       actorId: req.params.id,
       metadata: {
         actor: {

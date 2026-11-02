@@ -17,6 +17,7 @@
     "public/figma-plugin/",
     "storybook-static/",
     "generated/",
+    "src/actor-db/migrations/",
     "data/"
   ],
   "rules": {

@@ -21,7 +21,8 @@
     "prepare": "husky || true",
     "deploy:actors": "node scripts/deploy-actors.mjs",
     "actors:generate": "node scripts/generate-actors.mjs",
-    "actors:check": "node scripts/generate-actors.mjs --check"
+    "actors:check": "node scripts/generate-actors.mjs --check",
+    "actors:migrations": "drizzle-kit generate --config drizzle.actor.config.ts"
   },
   "lint-staged": {
     "*.{ts,tsx,js}": [
@@ -55,7 +56,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
-    "durable-actors": "0.14.6",
     "envalid": "8.2.0",
     "express": "^4.19.2",
     "jose": "6.2.10",
@@ -73,6 +73,7 @@
     "sharp": "0.34.3",
     "stripe": "21.0.1",
     "tailwind-merge": "^3.6.0",
+    "terse-sdk": "0.14.9",
     "tsx": "^4.23.9",
     "undici": "^8.10.2",
     "ws": "^8.18.0",

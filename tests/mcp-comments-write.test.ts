@@ -456,7 +456,7 @@ describe('MCP comment write tools over real action state', () => {
     })
     vi.spyOn(store, 'getFrame').mockImplementation(async (id: string) => (id === FRAME.id ? FRAME : undefined))
     vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id) =>
-      id === FRAME.id ? { id, canvasId: FRAME.canvasId } : undefined,
+      id === FRAME.id ? { id, canvasId: FRAME.canvasId, pageId: `${FRAME.canvasId}:page1` } : undefined,
     )
     /* a comment stamps its element's id into the frame: apply it to the fixture */
     vi.spyOn(store, 'updateFrame').mockImplementation(async (id, patch) => {

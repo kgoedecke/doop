@@ -64,7 +64,7 @@ beforeEach(() => {
   vi.spyOn(store, 'getFrame').mockImplementation(async (id: string) => CANVAS.frames.find((f) => f.id === id))
   vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id: string) => {
     const f = CANVAS.frames.find((frame) => frame.id === id)
-    return f ? { id, canvasId: f.canvasId, pageId: f.pageId } : undefined
+    return f ? { id, canvasId: f.canvasId, pageId: f.pageId ?? `${f.canvasId}:page1` } : undefined
   })
 })
 

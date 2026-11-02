@@ -25,53 +25,49 @@ async function sourceCanvas() {
   return id
 }
 
-it('publishes a canvas copy only after every frame actor is ready', async () => {
+it('publishes a canvas copy only after its canvas actor holds every frame', async () => {
   const source = await sourceCanvas()
   vi.mocked(persist.saveCanvasCopy).mockImplementationOnce(async (canvas: Canvas) => {
     expect(store.getCanvasMetadata(canvas.id)).toBeUndefined()
-    const index = await sync.canvasIndex(canvas.id).snapshot()
-    expect(index.frameIds).toHaveLength(2)
-    const frames = await Promise.all(index.frameIds.map(async (id) => (await sync.frameActor(id).snapshot()).frame))
-    expect(frames.map((frame) => frame?.html)).toEqual(['<p>First</p>', '<p>Second</p>'])
+    const snapshot = await sync.canvasActor(canvas.id).snapshot()
+    expect(snapshot.initialized).toBe(true)
+    expect(snapshot.frames.map((frame) => frame.html)).toEqual(['<p>First</p>', '<p>Second</p>'])
   })
   const copy = (await store.duplicateCanvas(source, 'bob', 'Bob'))!
   expect(persist.saveCanvasCopy).toHaveBeenCalledOnce()
   expect((await store.syncCanvas(copy.id))?.frames).toHaveLength(2)
 })
 
-it('does not publish a partial copy when a frame actor fails to initialize', async () => {
+it('does not publish a partial copy when the canvas actor fails to take the frames', async () => {
   const source = await sourceCanvas()
-  const getFrameActor = sync.frameActor
-  let copied = 0
+  const getCanvasActor = sync.canvasActor
   let copyId = ''
-  vi.spyOn(sync, 'frameActor').mockImplementation((id) => {
-    const actor = getFrameActor(id)
-    if (id.startsWith(`${source}.`)) return actor
+  vi.spyOn(sync, 'canvasActor').mockImplementation((canvasId) => {
+    const actor = getCanvasActor(canvasId)
+    if (canvasId === source) return actor
+    copyId = canvasId
     return {
       ...actor,
-      initialize: async (frame) => {
-        copyId = frame.canvasId
-        if (++copied === 2) throw new Error('Actor unavailable')
-        return actor.initialize(frame)
+      importFrames: async () => {
+        throw new Error('Actor unavailable')
       },
     }
   })
   await expect(store.duplicateCanvas(source, 'bob', 'Bob')).rejects.toThrow('Actor unavailable')
-  expect(copied).toBe(2)
   expect(persist.saveCanvasCopy).not.toHaveBeenCalled()
   expect(store.getCanvasMetadata(copyId)).toBeUndefined()
-  expect(await sync.canvasIndex(copyId).snapshot()).toMatchObject({ deleted: true, frameIds: [] })
+  expect(await getCanvasActor(copyId).summary()).toMatchObject({ deleted: true, frames: [] })
 })
 
-it('releases a failed creation so its empty page can still be deleted', async () => {
+it('leaves nothing behind when a create fails, so its empty page can still be deleted', async () => {
   const id = await sourceCanvas()
   const canvas = (await store.syncCanvas(id))!
   const pages = [...canvas.pages!, { id: 'empty', name: 'Empty' }]
   await store.setPages(id, pages, canvas.pages!)
-  const getFrameActor = sync.frameActor
-  vi.spyOn(sync, 'frameActor').mockImplementation((frameId) => ({
-    ...getFrameActor(frameId),
-    initialize: async () => {
+  const getCanvasActor = sync.canvasActor
+  vi.spyOn(sync, 'canvasActor').mockImplementation((canvasId) => ({
+    ...getCanvasActor(canvasId),
+    createFrame: async () => {
       throw new Error('Actor unavailable')
     },
   }))

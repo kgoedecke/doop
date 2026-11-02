@@ -9,6 +9,8 @@ desktop/CHANGELOG.md
 
 # Reproduced byte-for-byte by the actor generator.
 generated/
+# Written by drizzle-kit (bun run actors:migrations).
+src/actor-db/migrations/
 # Real frames captured verbatim as Blitz bridge test fixtures
 ios/BlitzKit/rust/tests/*.html
 

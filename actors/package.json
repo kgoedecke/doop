@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "durable-actors": "0.14.6"
+    "drizzle-orm": "^0.45.2",
+    "terse-sdk": "0.14.9"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

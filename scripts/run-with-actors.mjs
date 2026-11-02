@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
-import { startLocalActors } from 'durable-actors/dev'
+import { startLocalActors } from 'terse-sdk/dev'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const entrypoint = 'src/actor.ts'

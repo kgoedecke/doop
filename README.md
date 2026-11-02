@@ -47,7 +47,7 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   ([the editor](#the-canvas-editor)).
 - **True multiplayer** — live cursors, presence, follow mode, per-frame editing indicators,
   undo/redo, threaded comments on elements or the canvas, and an activity feed. Frames sync through
-  durable actors (one per frame); everything else rides one WebSocket room per canvas.
+  a Terse actor per canvas; everything else rides one WebSocket room per canvas.
 - **Design memory** — pin exemplar frames, capture decisions, and let the distiller propose durable
   style rules that every agent follows.
 - **Private by default** — invite collaborators by email or share a link that can view, comment
@@ -99,7 +99,7 @@ lockfile; the local actor runtime runs on it); the server itself runs on Node 22
 so Node must be on your `PATH` as well.
 
 Everything works with no configuration: canvas metadata persists to embedded Postgres (PGlite) in `data/pg`,
-with frame actors in `data/actors`,
+with canvas actors in `data/actors`,
 and every optional integration (SMTP, stock photos, object storage, analytics) degrades gracefully
 until its variable in [.env.example](.env.example) is set ([the ones that matter](#environment-variables)).
 The built-in [Doop Agent](#the-doop-agent) runs once a user connects a model account in Settings
@@ -819,7 +819,7 @@ app off instantly. Endpoint: `POST /ingest/<key>` (CORS-open, no cookies).
 
 ### How streaming looks
 
-Frame actors persist agent HTML and send it to subscribed browsers. Appended chunks render as they
+Canvas actors persist agent HTML and send it to subscribed browsers. Appended chunks render as they
 arrive; large agent updates get a browser-side **typewriter reveal**. Partial HTML is _healed_ before
 rendering: a trailing half-written tag is dropped, an unclosed `<script>` is cut (never run
 half-written JS), and an unclosed `<style>` is closed so content paints instead of blanking. Human
@@ -1070,7 +1070,7 @@ shared/            Types and logic shared by server and client (ws protocol, pro
 src/               React + Vite + zustand client on :4300
   pages/           Route-level screens (Home, CanvasPage, Settings, Automations…)
   components/      Canvas editor and app UI; components/ui/ holds every styled primitive
-  actor.ts         CanvasIndex membership and FrameActor state, persisted in actor SQLite
+  actor.ts         CanvasActor: a canvas's pages, frames and history in actor SQLite (actor-db/)
   lib/canvas-actor.ts  Browser subscriptions and edits over actor WebSockets
   styles.css       Design tokens, the base reset, and keyframes. Nothing else.
 desktop/           Tauri desktop app (macOS, Windows)
@@ -1097,23 +1097,20 @@ Frame HTML renders in `<iframe sandbox="allow-scripts">` — scripts run, but no
 no reach into the app. Each iframe loads a small bootstrap once; new HTML is `postMessage`d in and
 **DOM-morphed in place** (`src/lib/frameRuntime.ts`), so updates and streaming ticks never white-flash
 the frame with a full document reload. Changed `<script>`s re-execute; unchanged styles/fonts are
-untouched. Each canvas has a small `CanvasIndex` actor holding pages, frame-to-page assignments, ordered
-frame IDs, and creation/deletion bookkeeping. Page deletion and frame placement are serialized there;
-an occupied page cannot be deleted, and a deleted page cannot receive frames.
-Browsers subscribe directly to this index and to one `FrameActor` per frame; reconnecting
-loads a fresh snapshot. Browser edits go directly to frame actors, while REST/MCP edits reach the same
-actors through the server. The `/ws` room carries cursors, presence, comments, tasks and other
-collaboration events.
-PostgreSQL stores canvas metadata and collaboration records, including a mirror of the page list;
-actors own frames, pages, and their membership. Copies become visible in PostgreSQL after all copied
-frame actors are ready.
+untouched. Each canvas is one `CanvasActor` holding its pages, its frames and their design history in
+the actor's SQLite (drizzle; schema in `src/actor-db/`). Every write is one call in the actor's queue and
+one transaction: frame placement, page moves, page copies and the rule that an occupied page cannot be
+deleted all happen inside it. Browsers hold one socket to the canvas actor; reconnecting loads a fresh
+snapshot. Browser edits go directly to the actor, while REST/MCP edits reach it through the server. The
+`/ws` room carries cursors, presence, comments, tasks and other collaboration events.
+PostgreSQL stores canvas metadata and collaboration records, including a mirror of the page list.
+A canvas copy becomes visible in PostgreSQL after its canvas actor holds every copied frame.
 
-On first canvas access, existing SQL frames are automatically copied into frame actors before the index
-is initialized. IDs and references stay unchanged. Imports can be retried after a crash and never overwrite
-initialized actors. Stop old app instances before deploying this version so they cannot keep writing to
-SQL after a canvas moves to actors. No separate frame backfill is needed; retain legacy SQL rows for now.
-Interrupted creates with saved payloads and pending deletions finish on the next canvas access.
-Deletion tombstones prevent stale SQL data or retried requests from bringing frames back.
+On first canvas access, existing SQL frames are copied into the canvas actor before it opens. IDs and
+references stay unchanged, and frame history filed in SQL stays readable and restorable. Imports skip
+frames already copied, so an import a crash interrupted runs again safely. Stop old app instances before
+deploying this version so they cannot keep writing to SQL after a canvas moves to its actor. No separate
+frame backfill is needed; retain legacy SQL rows for now.
 
 ## Contributing
 

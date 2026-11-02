@@ -18,7 +18,7 @@ type FrameChange = { type: 'frame-change'; frame: Frame; actor: { name: string; 
 /* A REST write carries the browser tab's presence token, so the tab can
    tell its own saves from everyone else's: the client only flashes a frame
    for an actor whose clientId is not its own. The name still comes from the
-   account, never from the body. Frame changes reach browsers from the frame
+   account, never from the body. Frame changes reach browsers from the canvas
    actor, so this subscribes the way a browser does: an actor ticket from the
    app, then the actor's own WebSocket. */
 it('keeps the tab client id on a REST write and takes the name from the account', async () => {
@@ -26,7 +26,7 @@ it('keeps the tab client id on a REST write and takes the name from the account'
   const frame: Frame = await (
     await owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Card', html: '<p>Card</p>' })
   ).json()
-  const grant = (await (await owner.get(`/api/frames/${frame.id}/actor?clientId=tab-a`)).json()) as {
+  const grant = (await (await owner.get(`/api/canvases/${canvas.id}/actor?clientId=tab-a`)).json()) as {
     websocketUrl: string
   }
   const ws = new WebSocket(grant.websocketUrl)

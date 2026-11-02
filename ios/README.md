@@ -13,7 +13,7 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   account/server settings, frame list and properties, HTML editing, frame and
   element comments, agent tasks, sharing, and PNG/HTML export.
 - **Swift networking**: `DoopClient` talks to the existing REST API using session
-  cookies. `CanvasModel` subscribes directly to canvas and frame actors for frame
+  cookies. `CanvasModel` subscribes directly to the canvas actor for frame
   updates, with fresh snapshots on reconnect. Its authenticated WebSocket room
   handles agent tasks, comments and presence.
   The page picker keeps each page's frames, comments, and collaborator cursors

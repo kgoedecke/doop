@@ -8,12 +8,10 @@ if (env.NODE_ENV === 'production' && !env.TERSE_ACTOR_URL) {
   )
 }
 
-export const canvasIndex = actors.CanvasIndex.get
-export const prepareCanvasSocket = actors.CanvasIndex.prepareWebsocket
-export const frameActor = actors.FrameActor.get
-export const prepareFrameSocket = actors.FrameActor.prepareWebsocket
+export const canvasActor = actors.CanvasActor.get
+export const prepareCanvasSocket = actors.CanvasActor.prepareWebsocket
 
-/** Bound activation and payload pressure when loading a canvas. */
+/** Bound activation and payload pressure when reading many canvases. */
 export async function mapFrames<T, R>(items: readonly T[], read: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length)
   let next = 0

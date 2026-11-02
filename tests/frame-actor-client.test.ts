@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types'
-import type { FrameCommand } from '../src/actor'
+import type { CanvasCommand, CanvasEvent } from '../src/actor'
 
 vi.mock('../src/lib/identity', () => ({ getIdentity: () => ({ clientId: 'me', name: 'Me' }) }))
 class Socket {
   static OPEN = 1
   static instances: Socket[] = []
   readyState = 1
-  sent: FrameCommand[] = []
+  sent: CanvasCommand[] = []
   onmessage?: (event: { data: string }) => void
   onclose?: () => void
   onerror?: () => void
@@ -15,10 +15,14 @@ class Socket {
     Socket.instances.push(this)
   }
   send(data: string) {
-    this.sent.push(JSON.parse(data) as FrameCommand)
+    this.sent.push(JSON.parse(data) as CanvasCommand)
   }
   receive(event: unknown) {
     this.onmessage?.({ data: JSON.stringify(event) })
+  }
+  /** A committed change arrives the way the runtime emits it. */
+  commit(change: CanvasEvent) {
+    this.receive({ type: 'state_update', changes: { committed: change } })
   }
   close() {
     if (this.readyState !== 1) return
@@ -31,9 +35,10 @@ vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
 vi.stubGlobal('window', { innerWidth: 1000, innerHeight: 800 })
 const { useStore } = await import('../src/lib/store')
 const sync = await import('../src/lib/canvas-actor')
-const frame = (id: string): Frame => ({
+const frame = (id: string, pageId = 'p1'): Frame => ({
   id,
   canvasId: 'c',
+  pageId,
   name: id,
   html: '<p>original</p>',
   x: 120,
@@ -44,23 +49,24 @@ const frame = (id: string): Frame => ({
   updatedAt: 1,
   updatedBy: 'Me',
 })
+const someone = { name: 'Someone', kind: 'user' as const, color: '#000' }
+const pages = [
+  { id: 'p1', name: 'Page 1' },
+  { id: 'p2', name: 'Page 2' },
+]
 const flush = async () => {
   for (let n = 0; n < 15; n++) await Promise.resolve()
 }
-const socket = (path: string) => Socket.instances.find((candidate) => candidate.url.includes(path))!
-const snapshot = (entry: Frame) => ({
-  type: 'frame-snapshot',
-  revision: 0,
-  frame: entry,
-  deleted: false,
-  activity: [],
-})
-const indexSnapshot = (entries: Frame[], revision = 0) => ({
-  type: 'index-snapshot',
+const socket = () => Socket.instances.at(-1)!
+const frames = () => useStore.getState().canvas?.frames ?? []
+const snapshot = (entries: Frame[], revision = 0) => ({
+  type: 'canvas-snapshot',
   revision,
-  frameIds: entries.map((entry) => entry.id),
   initialized: true,
   deleted: false,
+  pages,
+  frames: entries,
+  activity: [],
 })
 
 beforeEach(() => {
@@ -79,12 +85,17 @@ afterEach(() => {
 async function connect(entries: Frame[]) {
   const ready = sync.connectFrames('c')
   await flush()
-  socket('/canvases/c/').receive(indexSnapshot(entries))
+  socket().receive(snapshot(entries))
   await ready
   await flush()
-  for (const entry of entries) socket(`/frames/${entry.id}/`).receive(snapshot(entry))
-  await flush()
 }
+
+it('opens one socket for the whole canvas', async () => {
+  await connect([frame('a'), frame('b'), frame('d', 'p2')])
+  expect(Socket.instances.map((entry) => new URL(entry.url).pathname)).toEqual(['/api/canvases/c/actor'])
+  expect(frames().map((entry) => entry.id)).toEqual(['a', 'b', 'd'])
+  expect(useStore.getState().frameIndex).toEqual(['a', 'b', 'd'])
+})
 
 it('reconnects and catches up on frames created, edited, and deleted while offline', async () => {
   vi.useFakeTimers()
@@ -92,38 +103,61 @@ it('reconnects and catches up on frames created, edited, and deleted while offli
     b = frame('b'),
     kept = frame('kept')
   await connect([a, kept])
-  const oldIndex = socket('/canvases/c/')
-  oldIndex.close()
-  socket('/frames/a/').close()
-  socket('/frames/kept/').close()
+  const old = socket()
+  old.close()
   const ready = sync.connectFrames('c')
   await vi.advanceTimersByTimeAsync(1000)
   await flush()
-  const replacement = Socket.instances.filter((candidate) => candidate.url.includes('/canvases/c/')).at(-1)!
-  expect(replacement).not.toBe(oldIndex)
-  replacement.receive(indexSnapshot([b, kept], 2))
-  await ready
-  await flush()
-  socket('/frames/b/').receive(snapshot(b))
+  expect(socket()).not.toBe(old)
   const edited = { ...kept, html: '<p>Edited while offline</p>', updatedAt: 2 }
-  const reconnectedFrame = Socket.instances.filter((candidate) => candidate.url.includes('/frames/kept/')).at(-1)!
-  expect(reconnectedFrame).not.toBe(socket('/frames/kept/'))
-  reconnectedFrame.receive({ ...snapshot(edited), revision: 1 })
-  oldIndex.receive(indexSnapshot([a], 99)) // late messages from the abandoned connection are ignored
-  expect(useStore.getState().canvas?.frames).toEqual(expect.arrayContaining([b, edited]))
-  expect(useStore.getState().canvas?.frames).toHaveLength(2)
-  expect(socket('/frames/a/').readyState).toBe(3)
+  socket().receive(snapshot([b, edited], 3))
+  await ready
+  // late messages from the abandoned connection are ignored
+  old.receive(snapshot([a], 99))
+  expect(frames()).toEqual(expect.arrayContaining([b, edited]))
+  expect(frames()).toHaveLength(2)
 })
 
-it('keeps the index page assignment when an older frame snapshot arrives', async () => {
-  const entry = { ...frame('a'), pageId: 'old' }
+it('adds, moves, and removes frames from committed changes', async () => {
+  const entry = frame('a')
   await connect([entry])
-  socket('/canvases/c/').receive({
-    ...indexSnapshot([entry], 1),
-    pages: [{ id: 'current', name: 'Current' }],
-    framePages: { a: 'current' },
+  socket().commit({ type: 'frame-change', revision: 1, frame: frame('b'), operation: 'insert', actor: someone })
+  expect(useStore.getState().frameIndex).toEqual(['a', 'b'])
+  socket().commit({
+    type: 'frame-change',
+    revision: 2,
+    frame: { ...entry, pageId: 'p2', updatedAt: 2 },
+    operation: 'update',
+    actor: someone,
   })
-  expect(useStore.getState().canvas?.frames[0]?.pageId).toBe('current')
-  socket('/frames/a/').receive({ ...snapshot({ ...entry, html: '<p>Edited</p>' }), revision: 1 })
-  expect(useStore.getState().canvas?.frames[0]).toMatchObject({ pageId: 'current', html: '<p>Edited</p>' })
+  expect(frames().find((candidate) => candidate.id === 'a')?.pageId).toBe('p2')
+  socket().commit({ type: 'frame-removal', revision: 3, frameId: 'a' })
+  expect(frames().map((candidate) => candidate.id)).toEqual(['b'])
+  socket().commit({ type: 'pages-change', revision: 4, pages: [pages[1]!] })
+  expect(useStore.getState().canvas?.pages).toEqual([pages[1]])
+})
+
+it('asks for a snapshot when it misses a change', async () => {
+  await connect([frame('a')])
+  socket().commit({ type: 'frame-removal', revision: 5, frameId: 'a' })
+  expect(frames()).toHaveLength(1)
+  expect(socket().sent).toEqual([{ type: 'snapshot' }])
+})
+
+it('sends edits over the canvas socket and resolves on the acknowledgement', async () => {
+  const entry = frame('a', 'p2')
+  await connect([entry])
+  const saved = sync.writeFrame({ type: 'update', id: 'a', patch: { name: 'Renamed' } })
+  await flush()
+  const [command] = socket().sent
+  expect(command).toMatchObject({ type: 'write', frameId: 'a', write: { type: 'update', patch: { name: 'Renamed' } } })
+  socket().commit({
+    type: 'frame-change',
+    revision: 1,
+    frame: { ...entry, name: 'Renamed' },
+    operation: 'update',
+    actor: { ...someone, clientId: 'me' },
+    requestId: command?.type === 'write' ? command.requestId : '',
+  })
+  await expect(saved).resolves.toMatchObject({ name: 'Renamed', pageId: 'p2' })
 })

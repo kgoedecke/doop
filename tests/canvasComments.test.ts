@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.spyOn(store, 'getFrame').mockImplementation(async (id) => CANVAS.frames.find((f) => f.id === id))
   vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id) => {
     const f = CANVAS.frames.find((frame) => frame.id === id)
-    return f ? { id, canvasId: f.canvasId, pageId: f.pageId } : undefined
+    return f ? { id, canvasId: f.canvasId, pageId: f.pageId ?? `${f.canvasId}:page1` } : undefined
   })
   /* a comment stamps its element's id into the frame: apply it to the fixture */
   vi.spyOn(store, 'updateFrame').mockImplementation(async (id, patch) => {

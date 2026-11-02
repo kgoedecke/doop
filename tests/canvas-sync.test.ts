@@ -5,12 +5,12 @@ import path from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { randomUUID } from 'node:crypto'
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite'
-import { startLocalActors } from 'durable-actors/dev'
+import { startLocalActors } from 'terse-sdk/dev'
 import WebSocket from 'ws'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
-import type { Canvas, Frame } from '../shared/types.ts'
-import type { FrameChange, FrameSnapshot, FrameEdit, IndexSnapshot } from '../src/actor.ts'
+import type { Canvas, CanvasPageInfo, Frame, FrameVersionInfo } from '../shared/types.ts'
+import type { CanvasEvent, FrameEdit } from '../src/actor.ts'
 import * as schema from '../server/db/schema.ts'
 
 async function port() {
@@ -70,11 +70,12 @@ async function restartServer(env: Record<string, string> = {}, whileStopped = as
 const createFrame = (name = 'Frame') =>
   json<Frame>(owner.post(`/api/canvases/${canvas.id}/frames`, { name, html: '<main>Original</main>' }))
 const readCanvas = () => json<Canvas>(owner.get(`/api/canvases/${canvas.id}`))
+const actorRoute = () => `/api/canvases/${canvas.id}/actor`
 
-type SyncEvent = IndexSnapshot | FrameSnapshot | FrameChange | { type: 'error'; requestId: string; message: string }
+type SyncEvent = CanvasEvent | { type: 'error'; requestId: string; message: string }
 
-async function joinActor(route: string, client = owner) {
-  const { websocketUrl } = await json<{ websocketUrl: string }>(client.get(route))
+async function joinActor(client = owner) {
+  const { websocketUrl } = await json<{ websocketUrl: string }>(client.get(actorRoute()))
   const socket = new WebSocket(websocketUrl)
   sockets.push(socket)
   const events: SyncEvent[] = []
@@ -83,18 +84,25 @@ async function joinActor(route: string, client = owner) {
     const event = JSON.parse(String(data)) as SyncEvent | { type: 'state_update'; changes: { committed?: SyncEvent } }
     if (event.type === 'state_update') {
       if (event.changes.committed) events.push(event.changes.committed)
-    } else if (['index-snapshot', 'frame-snapshot', 'error'].includes(event.type)) events.push(event)
+    } else if (['canvas-snapshot', 'error'].includes(event.type)) events.push(event)
   })
-  await until(() => events.some((event) => event.type === 'frame-snapshot' || event.type === 'index-snapshot'))
-  async function write(write: FrameEdit) {
+  await until(() => events.some((event) => event.type === 'canvas-snapshot'))
+  async function write(frameId: string, write: FrameEdit) {
     const requestId = randomUUID()
-    socket.send(JSON.stringify({ type: 'write', write, requestId }))
+    socket.send(JSON.stringify({ type: 'write', frameId, write, requestId }))
     await until(() => events.some((event) => 'requestId' in event && event.requestId === requestId))
     const event = events.find((event) => 'requestId' in event && event.requestId === requestId)!
     if (event.type === 'error') throw new Error(event.message)
     return event
   }
   return { events, write }
+}
+
+/** The frames the canvas actor holds right now, read over a fresh socket. */
+async function actorFrames(client = owner) {
+  const { events } = await joinActor(client)
+  const snapshot = events.find((event) => event.type === 'canvas-snapshot')!
+  return snapshot.frames
 }
 
 it('creates, reads, edits, and deletes a frame through the app', async () => {
@@ -105,24 +113,17 @@ it('creates, reads, edits, and deletes a frame through the app', async () => {
   expect((await readCanvas()).frames).toEqual([edited])
   await json(owner.delete(`/api/frames/${frame.id}`))
   expect((await readCanvas()).frames).toEqual([])
-  expect((await owner.get(`/api/frames/${frame.id}/actor`)).status).toBe(404)
+  expect(await actorFrames()).toEqual([])
 })
 
 it('syncs frame creation, edits, and deletion to two connected clients', async () => {
-  const indexes = await Promise.all([
-    joinActor(`/api/canvases/${canvas.id}/actor`),
-    joinActor(`/api/canvases/${canvas.id}/actor`),
-  ])
+  const clients = await Promise.all([joinActor(), joinActor()])
   const frame = await createFrame()
   await until(() =>
-    indexes.every(({ events }) => events.some((e) => e.type === 'index-snapshot' && e.frameIds.includes(frame.id))),
+    clients.every(({ events }) => events.some((e) => e.type === 'frame-change' && e.operation === 'insert')),
   )
-  const clients = await Promise.all([
-    joinActor(`/api/frames/${frame.id}/actor`),
-    joinActor(`/api/frames/${frame.id}/actor`),
-  ])
-  await clients[0]!.write({ type: 'update', patch: { html: '<p>From first client</p>' } })
-  await clients[1]!.write({ type: 'update', patch: { name: 'From second client' } })
+  await clients[0]!.write(frame.id, { type: 'update', patch: { html: '<p>From first client</p>' } })
+  await clients[1]!.write(frame.id, { type: 'update', patch: { name: 'From second client' } })
   await until(() =>
     clients.every(({ events }) =>
       events.some(
@@ -135,21 +136,17 @@ it('syncs frame creation, edits, and deletion to two connected clients', async (
   )
   await json(owner.delete(`/api/frames/${frame.id}`))
   await until(() =>
-    indexes.every(({ events }) => {
-      const latest = events.at(-1)
-      return latest?.type === 'index-snapshot' && latest.frameIds.length === 0
-    }),
+    clients.every(({ events }) => events.some((e) => e.type === 'frame-removal' && e.frameId === frame.id)),
   )
-  await until(() => clients.every(({ events }) => events.some((e) => e.type === 'frame-snapshot' && e.deleted)))
 })
 
 it('preserves both simultaneous edits to the same frame', async () => {
   const frame = await createFrame()
-  const first = await joinActor(`/api/frames/${frame.id}/actor`)
-  const second = await joinActor(`/api/frames/${frame.id}/actor`)
+  const first = await joinActor()
+  const second = await joinActor()
   await Promise.all([
-    first.write({ type: 'replace', find: 'Original', replacement: 'Updated' }),
-    second.write({ type: 'replace', find: '<main>', replacement: '<main class="edited">' }),
+    first.write(frame.id, { type: 'replace', find: 'Original', replacement: 'Updated' }),
+    second.write(frame.id, { type: 'replace', find: '<main>', replacement: '<main class="edited">' }),
   ])
   expect((await readCanvas()).frames[0]?.html).toBe('<main class="edited">Updated</main>')
 })
@@ -192,7 +189,7 @@ it('keeps saved edits and deletions after the actor runtime restarts', async () 
     })
     expect(runtime.connection.pid).not.toBe(previousPid)
     expect((await readCanvas()).frames).toEqual([edited])
-    expect((await owner.get(`/api/frames/${removed.id}/actor`)).status).toBe(404)
+    expect((await actorFrames()).map((entry) => entry.id)).toEqual([frame.id])
   } finally {
     await runtime?.stop()
     await rm(dataDir, { recursive: true, force: true })
@@ -202,19 +199,17 @@ it('keeps saved edits and deletions after the actor runtime restarts', async () 
 it('allows owner edits and rejects unauthorized and read-only writes', async () => {
   const frame = await createFrame()
   const stranger = await new Client(server).signUp('stranger@frame-actors.test', 'Stranger')
-  for (const route of [`/api/canvases/${canvas.id}/actor`, `/api/frames/${frame.id}/actor`]) {
-    expect((await new Client(server).get(route)).status).toBe(401)
-    expect((await stranger.get(route)).status).toBe(403)
-  }
+  expect((await new Client(server).get(actorRoute())).status).toBe(401)
+  expect((await stranger.get(actorRoute())).status).toBe(403)
   expect((await stranger.patch(`/api/frames/${frame.id}`, { name: 'Denied' })).status).toBe(403)
-  const allowed = await joinActor(`/api/frames/${frame.id}/actor`)
-  await allowed.write({ type: 'update', patch: { name: 'Owner edit' } })
+  const allowed = await joinActor()
+  await allowed.write(frame.id, { type: 'update', patch: { name: 'Owner edit' } })
   const admin = await new Client(server).signUp('admin@frame-actors.test', 'Admin')
   const { id: userId } = await json<{ id: string }>(owner.get('/api/me'))
   await json(admin.post('/api/auth/admin/impersonate-user', { userId }))
-  const readOnly = await joinActor(`/api/frames/${frame.id}/actor`, admin)
-  expect(readOnly.events[0]).toMatchObject({ type: 'frame-snapshot', frame: { name: 'Owner edit' } })
-  await expect(readOnly.write({ type: 'update', patch: { name: 'Denied' } })).rejects.toThrow(
+  const readOnly = await joinActor(admin)
+  expect(readOnly.events[0]).toMatchObject({ type: 'canvas-snapshot', frames: [{ name: 'Owner edit' }] })
+  await expect(readOnly.write(frame.id, { type: 'update', patch: { name: 'Denied' } })).rejects.toThrow(
     'This connection is read only',
   )
   expect((await admin.patch(`/api/frames/${frame.id}`, { name: 'Denied' })).status).toBe(403)
@@ -264,5 +259,33 @@ it('imports legacy SQL frames and references once without restoring deleted fram
   await json(owner.delete(`/api/frames/${frame.id}`))
   await restartServer()
   expect((await readCanvas()).frames).toEqual([])
-  expect((await owner.get(`/api/frames/${frame.id}/actor`)).status).toBe(404)
+  expect(await actorFrames()).toEqual([])
 }, 120_000)
+
+it('moves a frame to another page in one write, keeping its history', async () => {
+  const frame = await createFrame()
+  /* a rewrite opens a new burst, which files the original design */
+  await json(owner.patch(`/api/frames/${frame.id}`, { html: '<section>A different design entirely</section>' }))
+  const history = await json<FrameVersionInfo[]>(owner.get(`/api/frames/${frame.id}/versions`))
+  expect(history).toHaveLength(1)
+  const first = canvas.pages![0]!
+  const second: CanvasPageInfo = { id: 'second-page', name: 'Second' }
+  await json(owner.put(`/api/canvases/${canvas.id}/pages`, { pages: [first, second], expectedPages: [first] }))
+  const watcher = await joinActor()
+
+  const moved = await json<Frame>(owner.patch(`/api/frames/${frame.id}`, { pageId: second.id, x: 300 }))
+  expect(moved).toMatchObject({ pageId: second.id, x: 300, html: '<section>A different design entirely</section>' })
+  expect((await readCanvas()).frames).toEqual([moved])
+  expect(await json<FrameVersionInfo[]>(owner.get(`/api/frames/${frame.id}/versions`))).toEqual(history)
+  await until(() =>
+    watcher.events.some((e) => e.type === 'frame-change' && e.frame.id === frame.id && e.frame.pageId === second.id),
+  )
+
+  await watcher.write(frame.id, { type: 'update', patch: { name: 'Edited on its new page' } })
+  expect((await readCanvas()).frames[0]).toMatchObject({ name: 'Edited on its new page', pageId: second.id })
+  /* the first page is empty now, so it can go; the second still holds the frame */
+  await json(owner.put(`/api/canvases/${canvas.id}/pages`, { pages: [second], expectedPages: [first, second] }))
+  expect(
+    (await owner.put(`/api/canvases/${canvas.id}/pages`, { pages: [first], expectedPages: [second] })).status,
+  ).toBe(400)
+})

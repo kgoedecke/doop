@@ -23,31 +23,16 @@ export type {
 /**
  * Types for actor state and socket messages.
  * @example
- * type State = actors.CanvasIndex.State
+ * type State = actors.CanvasActor.State
  */
 export declare namespace actors {
-    namespace CanvasIndex {
-        type Metadata = $ActorTypes["CanvasIndex"]["Metadata"]
-        type Incoming = $ActorTypes["CanvasIndex"]["Incoming"]
-        type Outgoing = $ActorTypes["CanvasIndex"]["Outgoing"]
-        type State = $ActorTypes["CanvasIndex"]["State"]
+    namespace CanvasActor {
+        type Metadata = $ActorTypes["CanvasActor"]["Metadata"]
+        type Incoming = $ActorTypes["CanvasActor"]["Incoming"]
+        type Outgoing = $ActorTypes["CanvasActor"]["Outgoing"]
+        type State = $ActorTypes["CanvasActor"]["State"]
         interface Authorization {
-            actorName: "CanvasIndex"
-            actorId: string
-            metadata: Metadata
-            clientLocation?: {
-                latitude: number
-                longitude: number
-            }
-        }
-    }
-    namespace FrameActor {
-        type Metadata = $ActorTypes["FrameActor"]["Metadata"]
-        type Incoming = $ActorTypes["FrameActor"]["Incoming"]
-        type Outgoing = $ActorTypes["FrameActor"]["Outgoing"]
-        type State = $ActorTypes["FrameActor"]["State"]
-        interface Authorization {
-            actorName: "FrameActor"
+            actorName: "CanvasActor"
             actorId: string
             metadata: Metadata
             clientLocation?: {
@@ -60,63 +45,55 @@ export declare namespace actors {
 /**
  * Types for actor state and methods.
  * @example
- * type State = actors.CanvasIndex.State
+ * type State = actors.CanvasActor.State
  */
 export declare namespace actors {
-    namespace CanvasIndex {
-        type Stub = $ActorTypes["CanvasIndex"]["Methods"]
+    namespace CanvasActor {
+        type Stub = $ActorTypes["CanvasActor"]["Methods"]
         interface $MethodTypes {
             ["accessVersion"]: {
                 Args: Parameters<Stub["accessVersion"]>
                 Result: Awaited<ReturnType<Stub["accessVersion"]>>
             }
-            ["activate"]: {
-                Args: Parameters<Stub["activate"]>
-                Result: Awaited<ReturnType<Stub["activate"]>>
+            ["addPage"]: {
+                Args: Parameters<Stub["addPage"]>
+                Result: Awaited<ReturnType<Stub["addPage"]>>
             }
-            ["confirmDelete"]: {
-                Args: Parameters<Stub["confirmDelete"]>
-                Result: Awaited<ReturnType<Stub["confirmDelete"]>>
+            ["createFrame"]: {
+                Args: Parameters<Stub["createFrame"]>
+                Result: Awaited<ReturnType<Stub["createFrame"]>>
+            }
+            ["deleteFrame"]: {
+                Args: Parameters<Stub["deleteFrame"]>
+                Result: Awaited<ReturnType<Stub["deleteFrame"]>>
             }
             ["destroy"]: {
                 Args: Parameters<Stub["destroy"]>
                 Result: Awaited<ReturnType<Stub["destroy"]>>
             }
-            ["has"]: {
-                Args: Parameters<Stub["has"]>
-                Result: Awaited<ReturnType<Stub["has"]>>
+            ["frame"]: {
+                Args: Parameters<Stub["frame"]>
+                Result: Awaited<ReturnType<Stub["frame"]>>
+            }
+            ["getVersion"]: {
+                Args: Parameters<Stub["getVersion"]>
+                Result: Awaited<ReturnType<Stub["getVersion"]>>
+            }
+            ["importFrames"]: {
+                Args: Parameters<Stub["importFrames"]>
+                Result: Awaited<ReturnType<Stub["importFrames"]>>
             }
             ["initialize"]: {
                 Args: Parameters<Stub["initialize"]>
                 Result: Awaited<ReturnType<Stub["initialize"]>>
             }
-            ["initializePages"]: {
-                Args: Parameters<Stub["initializePages"]>
-                Result: Awaited<ReturnType<Stub["initializePages"]>>
+            ["listVersions"]: {
+                Args: Parameters<Stub["listVersions"]>
+                Result: Awaited<ReturnType<Stub["listVersions"]>>
             }
-            ["insertPage"]: {
-                Args: Parameters<Stub["insertPage"]>
-                Result: Awaited<ReturnType<Stub["insertPage"]>>
-            }
-            ["moveFrame"]: {
-                Args: Parameters<Stub["moveFrame"]>
-                Result: Awaited<ReturnType<Stub["moveFrame"]>>
-            }
-            ["pending"]: {
-                Args: Parameters<Stub["pending"]>
-                Result: Awaited<ReturnType<Stub["pending"]>>
-            }
-            ["remove"]: {
-                Args: Parameters<Stub["remove"]>
-                Result: Awaited<ReturnType<Stub["remove"]>>
-            }
-            ["reserve"]: {
-                Args: Parameters<Stub["reserve"]>
-                Result: Awaited<ReturnType<Stub["reserve"]>>
-            }
-            ["reserveFrame"]: {
-                Args: Parameters<Stub["reserveFrame"]>
-                Result: Awaited<ReturnType<Stub["reserveFrame"]>>
+            ["pageOf"]: {
+                Args: Parameters<Stub["pageOf"]>
+                Result: Awaited<ReturnType<Stub["pageOf"]>>
             }
             ["revokeAccess"]: {
                 Args: Parameters<Stub["revokeAccess"]>
@@ -129,116 +106,6 @@ export declare namespace actors {
             ["setPages"]: {
                 Args: Parameters<Stub["setPages"]>
                 Result: Awaited<ReturnType<Stub["setPages"]>>
-            }
-            ["snapshot"]: {
-                Args: Parameters<Stub["snapshot"]>
-                Result: Awaited<ReturnType<Stub["snapshot"]>>
-            }
-        }
-        interface Methods extends $MethodTypes {}
-        /**
-         * Types for a method's arguments and return value.
-         * @example
-         * type Args = actors.CanvasIndex.Methods["accessVersion"]["Args"]
-         * type Result = actors.CanvasIndex.Methods["accessVersion"]["Result"]
-         */
-        namespace Methods {
-            namespace accessVersion {
-                type Args = $MethodTypes["accessVersion"]["Args"]
-                type Result = $MethodTypes["accessVersion"]["Result"]
-            }
-            namespace activate {
-                type Args = $MethodTypes["activate"]["Args"]
-                type Result = $MethodTypes["activate"]["Result"]
-            }
-            namespace confirmDelete {
-                type Args = $MethodTypes["confirmDelete"]["Args"]
-                type Result = $MethodTypes["confirmDelete"]["Result"]
-            }
-            namespace destroy {
-                type Args = $MethodTypes["destroy"]["Args"]
-                type Result = $MethodTypes["destroy"]["Result"]
-            }
-            namespace has {
-                type Args = $MethodTypes["has"]["Args"]
-                type Result = $MethodTypes["has"]["Result"]
-            }
-            namespace initialize {
-                type Args = $MethodTypes["initialize"]["Args"]
-                type Result = $MethodTypes["initialize"]["Result"]
-            }
-            namespace initializePages {
-                type Args = $MethodTypes["initializePages"]["Args"]
-                type Result = $MethodTypes["initializePages"]["Result"]
-            }
-            namespace insertPage {
-                type Args = $MethodTypes["insertPage"]["Args"]
-                type Result = $MethodTypes["insertPage"]["Result"]
-            }
-            namespace moveFrame {
-                type Args = $MethodTypes["moveFrame"]["Args"]
-                type Result = $MethodTypes["moveFrame"]["Result"]
-            }
-            namespace pending {
-                type Args = $MethodTypes["pending"]["Args"]
-                type Result = $MethodTypes["pending"]["Result"]
-            }
-            namespace remove {
-                type Args = $MethodTypes["remove"]["Args"]
-                type Result = $MethodTypes["remove"]["Result"]
-            }
-            namespace reserve {
-                type Args = $MethodTypes["reserve"]["Args"]
-                type Result = $MethodTypes["reserve"]["Result"]
-            }
-            namespace reserveFrame {
-                type Args = $MethodTypes["reserveFrame"]["Args"]
-                type Result = $MethodTypes["reserveFrame"]["Result"]
-            }
-            namespace revokeAccess {
-                type Args = $MethodTypes["revokeAccess"]["Args"]
-                type Result = $MethodTypes["revokeAccess"]["Result"]
-            }
-            namespace setFlowStart {
-                type Args = $MethodTypes["setFlowStart"]["Args"]
-                type Result = $MethodTypes["setFlowStart"]["Result"]
-            }
-            namespace setPages {
-                type Args = $MethodTypes["setPages"]["Args"]
-                type Result = $MethodTypes["setPages"]["Result"]
-            }
-            namespace snapshot {
-                type Args = $MethodTypes["snapshot"]["Args"]
-                type Result = $MethodTypes["snapshot"]["Result"]
-            }
-        }
-    }
-    namespace FrameActor {
-        type Stub = $ActorTypes["FrameActor"]["Methods"]
-        interface $MethodTypes {
-            ["accessVersion"]: {
-                Args: Parameters<Stub["accessVersion"]>
-                Result: Awaited<ReturnType<Stub["accessVersion"]>>
-            }
-            ["destroy"]: {
-                Args: Parameters<Stub["destroy"]>
-                Result: Awaited<ReturnType<Stub["destroy"]>>
-            }
-            ["getVersion"]: {
-                Args: Parameters<Stub["getVersion"]>
-                Result: Awaited<ReturnType<Stub["getVersion"]>>
-            }
-            ["initialize"]: {
-                Args: Parameters<Stub["initialize"]>
-                Result: Awaited<ReturnType<Stub["initialize"]>>
-            }
-            ["listVersions"]: {
-                Args: Parameters<Stub["listVersions"]>
-                Result: Awaited<ReturnType<Stub["listVersions"]>>
-            }
-            ["revokeAccess"]: {
-                Args: Parameters<Stub["revokeAccess"]>
-                Result: Awaited<ReturnType<Stub["revokeAccess"]>>
             }
             ["snapshot"]: {
                 Args: Parameters<Stub["snapshot"]>
@@ -257,21 +124,41 @@ export declare namespace actors {
         /**
          * Types for a method's arguments and return value.
          * @example
-         * type Args = actors.FrameActor.Methods["accessVersion"]["Args"]
-         * type Result = actors.FrameActor.Methods["accessVersion"]["Result"]
+         * type Args = actors.CanvasActor.Methods["accessVersion"]["Args"]
+         * type Result = actors.CanvasActor.Methods["accessVersion"]["Result"]
          */
         namespace Methods {
             namespace accessVersion {
                 type Args = $MethodTypes["accessVersion"]["Args"]
                 type Result = $MethodTypes["accessVersion"]["Result"]
             }
+            namespace addPage {
+                type Args = $MethodTypes["addPage"]["Args"]
+                type Result = $MethodTypes["addPage"]["Result"]
+            }
+            namespace createFrame {
+                type Args = $MethodTypes["createFrame"]["Args"]
+                type Result = $MethodTypes["createFrame"]["Result"]
+            }
+            namespace deleteFrame {
+                type Args = $MethodTypes["deleteFrame"]["Args"]
+                type Result = $MethodTypes["deleteFrame"]["Result"]
+            }
             namespace destroy {
                 type Args = $MethodTypes["destroy"]["Args"]
                 type Result = $MethodTypes["destroy"]["Result"]
             }
+            namespace frame {
+                type Args = $MethodTypes["frame"]["Args"]
+                type Result = $MethodTypes["frame"]["Result"]
+            }
             namespace getVersion {
                 type Args = $MethodTypes["getVersion"]["Args"]
                 type Result = $MethodTypes["getVersion"]["Result"]
+            }
+            namespace importFrames {
+                type Args = $MethodTypes["importFrames"]["Args"]
+                type Result = $MethodTypes["importFrames"]["Result"]
             }
             namespace initialize {
                 type Args = $MethodTypes["initialize"]["Args"]
@@ -281,9 +168,21 @@ export declare namespace actors {
                 type Args = $MethodTypes["listVersions"]["Args"]
                 type Result = $MethodTypes["listVersions"]["Result"]
             }
+            namespace pageOf {
+                type Args = $MethodTypes["pageOf"]["Args"]
+                type Result = $MethodTypes["pageOf"]["Result"]
+            }
             namespace revokeAccess {
                 type Args = $MethodTypes["revokeAccess"]["Args"]
                 type Result = $MethodTypes["revokeAccess"]["Result"]
+            }
+            namespace setFlowStart {
+                type Args = $MethodTypes["setFlowStart"]["Args"]
+                type Result = $MethodTypes["setFlowStart"]["Result"]
+            }
+            namespace setPages {
+                type Args = $MethodTypes["setPages"]["Args"]
+                type Result = $MethodTypes["setPages"]["Result"]
             }
             namespace snapshot {
                 type Args = $MethodTypes["snapshot"]["Args"]
@@ -303,31 +202,18 @@ export declare namespace actors {
 /**
  * Call actor methods from your backend.
  * @example
- * const actor = actors.CanvasIndex.get("actor-id")
+ * const actor = actors.CanvasActor.get("actor-id")
  */
 export declare const actors: {
-    CanvasIndex: {
-        get(actorId: string, transport?: import("./terse-transport.js").ActorRpcTransport): actors.CanvasIndex.Stub
+    CanvasActor: {
+        get(actorId: string, transport?: import("./terse-transport.js").ActorRpcTransport): actors.CanvasActor.Stub
         /**
          * Allow a frontend connection after your backend checks the user's access.
          * @example
-         * const grant = await actors.CanvasIndex.prepareWebsocket({ actorId: "actor-id", metadata })
+         * const grant = await actors.CanvasActor.prepareWebsocket({ actorId: "actor-id", metadata })
          */
         prepareWebsocket(
-            authorization: Omit<actors.CanvasIndex.Authorization, "actorName">,
-            options?: import("./terse-transport.js").SocketProxyOptions,
-            dependencies?: import("./terse-transport.js").SocketProxyDependencies
-        ): Promise<import("./terse-transport.js").SocketGrant>
-    }
-    FrameActor: {
-        get(actorId: string, transport?: import("./terse-transport.js").ActorRpcTransport): actors.FrameActor.Stub
-        /**
-         * Allow a frontend connection after your backend checks the user's access.
-         * @example
-         * const grant = await actors.FrameActor.prepareWebsocket({ actorId: "actor-id", metadata })
-         */
-        prepareWebsocket(
-            authorization: Omit<actors.FrameActor.Authorization, "actorName">,
+            authorization: Omit<actors.CanvasActor.Authorization, "actorName">,
             options?: import("./terse-transport.js").SocketProxyOptions,
             dependencies?: import("./terse-transport.js").SocketProxyDependencies
         ): Promise<import("./terse-transport.js").SocketGrant>
@@ -336,17 +222,16 @@ export declare const actors: {
 /**
  * The actor and connection details approved by your backend.
  * @example
- * const authorization: ActorAuthorization = { actorName: "CanvasIndex", actorId: "actor-id", metadata }
+ * const authorization: ActorAuthorization = { actorName: "CanvasActor", actorId: "actor-id", metadata }
  */
-export type ActorAuthorization = actors.CanvasIndex.Authorization | actors.FrameActor.Authorization
+export type ActorAuthorization = actors.CanvasActor.Authorization
 /**
  * Allow a frontend connection after your backend checks the user's access.
  * @example
- * const grant = await ActorProxy.handle({ actorName: "CanvasIndex", actorId: "actor-id", metadata })
+ * const grant = await ActorProxy.handle({ actorName: "CanvasActor", actorId: "actor-id", metadata })
  */
 export declare class ActorProxy extends $SocketProxy<{
-    ["CanvasIndex"]: import("./terse-transport.js").ProxyActor<actors.CanvasIndex.Metadata>
-    ["FrameActor"]: import("./terse-transport.js").ProxyActor<actors.FrameActor.Metadata>
+    ["CanvasActor"]: import("./terse-transport.js").ProxyActor<actors.CanvasActor.Metadata>
 }> {
     constructor(
         options?: import("./terse-transport.js").SocketProxyOptions,

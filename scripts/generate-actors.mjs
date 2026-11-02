@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ActorCompiler } from 'durable-actors/compiler'
+import { ActorCompiler } from 'terse-sdk/dev'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const output = path.join(root, 'generated/actors')

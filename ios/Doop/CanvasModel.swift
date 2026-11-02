@@ -43,8 +43,8 @@ final class CanvasModel: ObservableObject {
     private var connection: Task<Void, Never>?
     private var connectionID: UUID?
     private var socket: URLSessionWebSocketTask?
-    private var actorTasks: [String: Task<Void, Never>] = [:]
-    private var actorSockets: [String: URLSessionWebSocketTask] = [:]
+    private var actorTask: Task<Void, Never>?
+    private var actorSocket: URLSessionWebSocketTask?
     private var frameIDs: [String] = []
     private let clientID = "ios-" + UUID().uuidString
     private var pendingMoves = PendingFrameMoves()
@@ -162,24 +162,24 @@ final class CanvasModel: ObservableObject {
     }
 
     private func stopActors() {
-        for task in actorTasks.values { task.cancel() }
-        for socket in actorSockets.values { socket.cancel(with: .goingAway, reason: nil) }
-        actorTasks.removeAll()
-        actorSockets.removeAll()
+        actorTask?.cancel()
+        actorSocket?.cancel(with: .goingAway, reason: nil)
+        actorTask = nil
+        actorSocket = nil
         frameIDs = []
     }
 
-    /// The room carries collaboration; frame content comes directly from actors.
-    private func subscribeActor(_ key: String, path: String) {
-        guard actorTasks[key] == nil else { return }
-        actorTasks[key] = Task {
+    /// The room carries collaboration; frame content comes directly from the canvas actor.
+    private func subscribeActor() {
+        guard actorTask == nil else { return }
+        actorTask = Task {
             while !Task.isCancelled {
                 do {
                     struct Grant: Decodable { let websocketUrl: URL }
-                    let grant: Grant = try await client.get(path)
+                    let grant: Grant = try await client.get("/api/canvases/\(id)/actor")
                     guard !Task.isCancelled else { return }
                     let ws = client.session.webSocketTask(with: grant.websocketUrl)
-                    actorSockets[key] = ws
+                    actorSocket = ws
                     ws.resume()
                     var revision = -1
                     while !Task.isCancelled {
@@ -191,10 +191,10 @@ final class CanvasModel: ObservableObject {
                         case .string(let value): data = Data(value.utf8)
                         @unknown default: continue
                         }
-                        let event = try JSONDecoder().decode(FrameActorEvent.self, from: data)
+                        let event = try JSONDecoder().decode(ActorEvent.self, from: data)
                         if let drag = event.drag {
-                            if frameIDs.contains(key),
-                               let index = canvas?.frames.firstIndex(where: { $0.id == key }),
+                            if frameIDs.contains(drag.frameId),
+                               let index = canvas?.frames.firstIndex(where: { $0.id == drag.frameId }),
                                let frame = canvas?.frames[index],
                                let preview = drag.applying(to: frame) {
                                 canvas?.frames[index] = preview
@@ -202,37 +202,41 @@ final class CanvasModel: ObservableObject {
                             continue
                         }
                         guard let next = event.revision, next >= revision else { continue }
+                        if event.type != "canvas-snapshot", next > revision + 1 {
+                            // A change was missed; ask for the whole canvas again.
+                            try await ws.send(.string(#"{"type":"snapshot"}"#))
+                            continue
+                        }
                         revision = next
-                        if key.isEmpty {
-                            guard event.type == "index-snapshot" else { continue }
+                        switch event.type {
+                        case "canvas-snapshot":
                             if event.deleted == true {
                                 deleted = true
                                 stop()
                                 Task { await AgentLiveActivities.shared.endCanvas(id: id, client: client) }
                                 return
                             }
-                            frameIDs = event.frameIds ?? []
-                            for id in Array(actorTasks.keys) where !id.isEmpty && !frameIDs.contains(id) {
-                                actorTasks.removeValue(forKey: id)?.cancel()
-                                actorSockets.removeValue(forKey: id)?.cancel(with: .goingAway, reason: nil)
-                            }
-                            canvas?.frames.removeAll { !frameIDs.contains($0.id) }
-                            for id in frameIDs { subscribeActor(id, path: "/api/frames/\(id)/actor") }
-                        } else if frameIDs.contains(key) {
-                            if event.deleted == true { canvas?.frames.removeAll { $0.id == key } }
-                            else if let frame = event.frame, canvas != nil {
+                            frameIDs = (event.frames ?? []).map(\.id)
+                            if canvas != nil { canvas!.frames = event.frames ?? [] }
+                        case "frame-change":
+                            if let frame = event.frame, canvas != nil {
+                                if !frameIDs.contains(frame.id) { frameIDs.append(frame.id) }
                                 upsert(frame, into: &canvas!.frames)
                             }
-                        }
-                        if let frames = canvas?.frames {
-                            let byID = Dictionary(uniqueKeysWithValues: frames.map { ($0.id, $0) })
-                            canvas?.frames = frameIDs.compactMap { byID[$0] }
+                        case "frame-removal":
+                            if let frameID = event.frameId {
+                                frameIDs.removeAll { $0 == frameID }
+                                canvas?.frames.removeAll { $0.id == frameID }
+                            }
+                        default:
+                            break
                         }
                         if let selectedID, !frameIDs.contains(selectedID) { self.selectedID = nil }
                     }
                 } catch {
                     guard !Task.isCancelled else { return }
-                    actorSockets.removeValue(forKey: key)?.cancel(with: .goingAway, reason: nil)
+                    actorSocket?.cancel(with: .goingAway, reason: nil)
+                    actorSocket = nil
                     if let apiError = error as? APIError, [401, 403, 404].contains(apiError.status) {
                         self.error = apiError.localizedDescription
                         return
@@ -275,7 +279,7 @@ final class CanvasModel: ObservableObject {
         case "init":
             canvas = event.canvas
             stopActors()
-            subscribeActor("", path: "/api/canvases/\(id)/actor")
+            subscribeActor()
             tasks = event.tasks ?? []
             comments = event.comments ?? []
             presences = event.presences ?? []

@@ -14,57 +14,29 @@ export {
 /**
  * Call actor methods from your backend.
  * @example
- * const actor = actors.CanvasIndex.get("actor-id")
+ * const actor = actors.CanvasActor.get("actor-id")
  */
 export const actors = {
-    ["CanvasIndex"]: {
+    ["CanvasActor"]: {
         get(actorId, transport) {
             return $createActorStub(
-                "CanvasIndex",
+                "CanvasActor",
                 actorId,
                 [
                     { name: "accessVersion", result: "value" },
-                    { name: "activate", result: "value" },
-                    { name: "confirmDelete", result: "void" },
+                    { name: "addPage", result: "value" },
+                    { name: "createFrame", result: "value" },
+                    { name: "deleteFrame", result: "value" },
                     { name: "destroy", result: "void" },
-                    { name: "has", result: "value" },
+                    { name: "frame", result: "value" },
+                    { name: "getVersion", result: "value" },
+                    { name: "importFrames", result: "void" },
                     { name: "initialize", result: "value" },
-                    { name: "initializePages", result: "value" },
-                    { name: "insertPage", result: "value" },
-                    { name: "moveFrame", result: "value" },
-                    { name: "pending", result: "value" },
-                    { name: "remove", result: "value" },
-                    { name: "reserve", result: "value" },
-                    { name: "reserveFrame", result: "value" },
+                    { name: "listVersions", result: "value" },
+                    { name: "pageOf", result: "value" },
                     { name: "revokeAccess", result: "void" },
                     { name: "setFlowStart", result: "value" },
                     { name: "setPages", result: "value" },
-                    { name: "snapshot", result: "value" }
-                ],
-                transport
-            )
-        },
-        /**
-         * Allow a frontend connection after your backend checks the user's access.
-         * @example
-         * const grant = await actors.CanvasIndex.prepareWebsocket({ actorId: "actor-id", metadata })
-         */
-        prepareWebsocket(authorization, options = {}, dependencies = {}) {
-            return new ActorProxy(options, dependencies).handle({ ...authorization, actorName: "CanvasIndex" })
-        }
-    },
-    ["FrameActor"]: {
-        get(actorId, transport) {
-            return $createActorStub(
-                "FrameActor",
-                actorId,
-                [
-                    { name: "accessVersion", result: "value" },
-                    { name: "destroy", result: "void" },
-                    { name: "getVersion", result: "value" },
-                    { name: "initialize", result: "value" },
-                    { name: "listVersions", result: "value" },
-                    { name: "revokeAccess", result: "void" },
                     { name: "snapshot", result: "value" },
                     { name: "summary", result: "value" },
                     { name: "write", result: "value" }
@@ -75,21 +47,21 @@ export const actors = {
         /**
          * Allow a frontend connection after your backend checks the user's access.
          * @example
-         * const grant = await actors.FrameActor.prepareWebsocket({ actorId: "actor-id", metadata })
+         * const grant = await actors.CanvasActor.prepareWebsocket({ actorId: "actor-id", metadata })
          */
         prepareWebsocket(authorization, options = {}, dependencies = {}) {
-            return new ActorProxy(options, dependencies).handle({ ...authorization, actorName: "FrameActor" })
+            return new ActorProxy(options, dependencies).handle({ ...authorization, actorName: "CanvasActor" })
         }
     }
 }
 /**
  * Allow a frontend connection after your backend checks the user's access.
  * @example
- * const grant = await ActorProxy.handle({ actorName: "CanvasIndex", actorId: "actor-id", metadata })
+ * const grant = await ActorProxy.handle({ actorName: "CanvasActor", actorId: "actor-id", metadata })
  */
 export class ActorProxy extends $SocketProxy {
     constructor(options = {}, dependencies = {}) {
-        super({ ["CanvasIndex"]: {}, ["FrameActor"]: {} }, options, dependencies)
+        super({ ["CanvasActor"]: {} }, options, dependencies)
     }
     handle(authorization) {
         return super.handle(authorization)

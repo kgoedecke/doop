@@ -356,17 +356,22 @@ public struct FrameDrag: Decodable {
     }
 }
 
-/// Actor snapshots arrive directly; committed changes are wrapped by the runtime.
-public struct FrameActorEvent: Decodable {
+/// Canvas actor events. Snapshots arrive directly; committed changes are wrapped by the runtime.
+public struct ActorEvent: Decodable {
     public var type: String
     public var revision: Int?
+    /// A snapshot's frames, in canvas order.
+    public var frames: [DesignFrame]?
+    /// The frame a `frame-change` carries.
     public var frame: DesignFrame?
-    public var frameIds: [String]?
+    /// The frame a `frame-removal` takes off the canvas.
+    public var frameId: String?
+    public var pages: [CanvasPage]?
     public var deleted: Bool?
     public var drag: FrameDrag?
 
     private enum CodingKeys: String, CodingKey {
-        case type, revision, frame, frameIds, deleted, changes, committed
+        case type, revision, frames, frame, frameId, pages, deleted, changes, committed
     }
 
     public init(from decoder: Decoder) throws {
@@ -379,8 +384,10 @@ public struct FrameActorEvent: Decodable {
             drag = try FrameDrag(from: decoder)
         } else {
             revision = try values.decodeIfPresent(Int.self, forKey: .revision)
+            frames = try values.decodeIfPresent([DesignFrame].self, forKey: .frames)
             frame = try values.decodeIfPresent(DesignFrame.self, forKey: .frame)
-            frameIds = try values.decodeIfPresent([String].self, forKey: .frameIds)
+            frameId = try values.decodeIfPresent(String.self, forKey: .frameId)
+            pages = try values.decodeIfPresent([CanvasPage].self, forKey: .pages)
             deleted = try values.decodeIfPresent(Bool.self, forKey: .deleted)
         }
     }

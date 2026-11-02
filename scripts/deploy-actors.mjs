@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +14,7 @@ try {
   // Explicit deployment inputs keep app data and local secrets out of the archive.
   for (const file of [
     'src/actor.ts',
+    'src/actor-db/schema.ts',
     'server/escapedHtml.ts',
     'server/limits.ts',
     'shared/types.ts',
@@ -26,6 +27,10 @@ try {
     await mkdir(path.dirname(target), { recursive: true })
     await copyFile(path.join(root, file), target)
   }
+  // The actor applies these itself when it wakes.
+  await cp(path.join(root, 'src/actor-db/migrations'), path.join(staging, 'src/actor-db/migrations'), {
+    recursive: true,
+  })
   for (const file of ['package.json', 'tsconfig.json'])
     await copyFile(path.join(root, 'actors', file), path.join(staging, file))
   await copyFile(config, path.join(staging, 'terse.config.json'))

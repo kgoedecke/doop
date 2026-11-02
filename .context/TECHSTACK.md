@@ -75,8 +75,12 @@
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
 - `ws` 8.18.0 - WebSocket server for cursors, presence, and collaboration (activity feed,
   comments, tasks) over one room per canvas; frame edits use separate actor subscriptions.
-- `durable-actors` 0.14.6 (with `terse-sdk` / `terse-cli` 0.14.9) - the actor runtime and client
-  generator for `CanvasIndex` and `FrameActor` (`src/actor.ts`, client in `generated/actors/`).
+- `terse-sdk` / `terse-cli` 0.14.9 - the actor SDK (`terse-sdk/actor` in `src/actor.ts`; the local runtime and
+  compiler from `terse-sdk/dev`) and the client generator for `CanvasActor` (client in `generated/actors/`).
+  `durable-actors` arrives only as `terse-sdk`'s own dependency; nothing imports it directly. The actor's
+  SQLite goes through drizzle-orm (`terse-sdk/drizzle`): schema in `src/actor-db/schema.ts`, migrations from
+  `bun run actors:migrations` (drizzle-kit, `durable-sqlite` driver, `drizzle.actor.config.ts`) in
+  `src/actor-db/migrations/`, applied by the actor's constructor when it wakes.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size, pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
@@ -87,9 +91,11 @@
 
 - PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - existing application records.
   Legacy frame rows are imported automatically on first canvas access, preserving IDs and references.
-- `durable-actors` - `CanvasIndex` owns pages, frame-to-page assignments, ordered frame IDs, and lifecycle bookkeeping;
-  `FrameActor` owns frame content and geometry. Each uses 1 CPU and 256 MiB. Browser and iOS subscriptions go directly
-  to both actor types, with fresh snapshots on reconnect.
+- Terse actors - one `CanvasActor` per canvas owns its pages, its frames (content, geometry, page and
+  canvas order), their design history and frame activity. Each write is one call in the actor's queue and
+  one SQLite transaction, so creates, page moves, page copies and deletes land whole or not at all. It
+  takes the deployment's default CPU and memory. Browser and iOS clients hold one socket to it, with a
+  fresh snapshot on reconnect and whenever they notice a missed change.
   Local actors start automatically in development/tests;
   production requires a separate actor API, with client WebSockets connecting directly to it.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and

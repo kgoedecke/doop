@@ -78,7 +78,7 @@ beforeEach(() => {
   vi.spyOn(store, 'syncCanvas').mockImplementation(async (id: string) => (id === CANVAS.id ? CANVAS : undefined))
   vi.spyOn(store, 'getFrame').mockImplementation(async (id: string) => (id === FRAME.id ? FRAME : undefined))
   vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id: string) =>
-    id === FRAME.id ? { id, canvasId: FRAME.canvasId } : undefined,
+    id === FRAME.id ? { id, canvasId: FRAME.canvasId, pageId: `${FRAME.canvasId}:page1` } : undefined,
   )
   vi.spyOn(actions, 'heartbeatAgent').mockImplementation(() => {})
   vi.spyOn(actions, 'getTasks').mockReturnValue([])

@@ -34,7 +34,7 @@ beforeEach(() => {
   vi.spyOn(store, 'syncCanvas').mockImplementation(async (id) => (id === canvasId ? canvas : undefined))
   vi.spyOn(store, 'getFrame').mockImplementation(async (id) => (id === frame.id ? frame : undefined))
   vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id) =>
-    id === frame.id ? { id, canvasId } : undefined,
+    id === frame.id ? { id, canvasId, pageId: `${canvasId}:page1` } : undefined,
   )
   mocks.renderFrame.mockReset()
 })

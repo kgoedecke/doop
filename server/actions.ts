@@ -1,4 +1,3 @@
-import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
 import { nanoid } from 'nanoid'
 import { FrameConflictError, store } from './store.ts'
 import * as persist from './db/persist.ts'
@@ -117,9 +116,8 @@ function failInterruptedWork() {
 }
 
 export async function getActivity(canvasId: string, includeFrames = true): Promise<ActivityItem[]> {
-  const { frameIds } = includeFrames ? await canvasIndex(canvasId).snapshot() : { frameIds: [] }
-  const summaries = includeFrames ? await mapFrames(frameIds, (id) => frameActor(id).summary()) : []
-  const items = [...(activityLog.get(canvasId) ?? []), ...summaries.flatMap((summary) => summary.activity)]
+  const frameItems = includeFrames ? await store.frameActivity(canvasId) : []
+  const items = [...(activityLog.get(canvasId) ?? []), ...frameItems]
   return [...new Map(items.map((item) => [item.id, item])).values()].sort((a, b) => b.at - a.at).slice(0, 100)
 }
 
@@ -1296,19 +1294,19 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
 }
 
 /* ------------------------------------------------------------------ */
-/* Design history lives in each frame actor (bursts of edits, filed    */
-/* there because browser edits reach the actor directly). Versions     */
-/* filed in SQL before actors stay readable and restorable.            */
+/* Design history lives with each frame in its page actor (bursts of  */
+/* edits, filed there because browser edits reach the actor directly). */
+/* Versions filed in SQL before actors stay readable and restorable.   */
 /* ------------------------------------------------------------------ */
 
 /** Newest first, actor history and any legacy SQL history together. */
 export async function listFrameVersions(frameId: string): Promise<FrameVersionInfo[]> {
-  const [current, legacy] = await Promise.all([frameActor(frameId).listVersions(), persist.listFrameVersions(frameId)])
+  const [current, legacy] = await Promise.all([store.listFrameVersions(frameId), persist.listFrameVersions(frameId)])
   return [...current, ...legacy].sort((a, b) => b.savedAt - a.savedAt)
 }
 
 export async function getFrameVersion(frameId: string, versionId: string): Promise<FrameVersion | undefined> {
-  return (await frameActor(frameId).getVersion(versionId)) ?? (await persist.getFrameVersion(frameId, versionId))
+  return (await store.getFrameVersion(frameId, versionId)) ?? (await persist.getFrameVersion(frameId, versionId))
 }
 
 export type RestoredFrame = {
