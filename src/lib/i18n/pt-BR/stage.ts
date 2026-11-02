@@ -54,6 +54,7 @@ export const stage: Catalog['stage'] = {
 
   /* the frame and element menus */
   paste: 'Colar',
+  copyClipboardFailed: 'Não foi possível copiar para a área de transferência. Tente novamente.',
   duplicate: 'Duplicar',
   show: 'Mostrar',
   hide: 'Ocultar',

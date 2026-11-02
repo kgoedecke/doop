@@ -1106,14 +1106,19 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     setEditing(true)
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: true }, '*')
   }
-  function exitEdit() {
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: false }, '*')
+  function finishEdit() {
+    // Keyboard events inside the sandbox never reach the canvas shortcuts.
+    if (document.activeElement === iframeRef.current) iframeRef.current?.blur()
     setEditing(false)
     setActiveHit(null)
     setComposing(false)
     activeSelRef.current = null
     setSuspendPost(true)
     window.setTimeout(() => setSuspendPost(false), 500)
+  }
+  function exitEdit() {
+    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: false }, '*')
+    finishEdit()
   }
 
   /* switching to Hand or Comment ends a text-edit session: both put the
@@ -1142,9 +1147,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           recordUpdate(frame.id, { html: before }, { html: ev.data.html }, ev.data.discrete === true)
       }
       if (ev.data?.type === 'doop:edit-esc') {
-        setEditing(false)
-        setSuspendPost(true)
-        window.setTimeout(() => setSuspendPost(false), 500)
+        finishEdit()
       }
       if (ev.data?.type === 'doop:context-menu') {
         const { x, y } = ev.data as { x: number; y: number }

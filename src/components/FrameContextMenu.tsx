@@ -2,6 +2,7 @@ import { useState, type MutableRefObject } from 'react'
 import type { Frame } from '../../shared/types'
 import { errorMessage } from '../lib/api'
 import { copyFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
+import { writeCanvasClipboard } from '../lib/canvasClipboard'
 import { copyFramePng } from '../lib/frameExport'
 import { deleteFramesTracked } from '../lib/history'
 import { setFramesHidden, setFramesLocked } from '../lib/layerEdits'
@@ -83,7 +84,12 @@ export function FrameContextMenu({ frame, at }: { frame: Frame; at: MutableRefOb
           if (exportFrames || historyOpen) event.preventDefault()
         }}
       >
-        <ContextMenuItem onSelect={() => copyFrames(groupFrames())}>
+        <ContextMenuItem
+          onSelect={() => {
+            const frames = groupFrames()
+            if (frames.length) writeCanvasClipboard(() => copyFrames(frames))
+          }}
+        >
           {groupSize > 1 ? t('stage.copyFrames', { count: groupSize }) : t('common.copy')}
           <MenuHint>{MOD_KEY}C</MenuHint>
         </ContextMenuItem>
