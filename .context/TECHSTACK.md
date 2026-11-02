@@ -110,7 +110,8 @@
   export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
   `get_canvas` and as a system block in the resident agent (`libraryBrief`): name the family,
   never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
-  `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle).
+  `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
+  healed document, so a cut-off script never runs).
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size, pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
