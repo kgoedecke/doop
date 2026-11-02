@@ -44,6 +44,30 @@
           headers: { 'content-type': 'application/json' },
         })
       }
+      /* every selection / panel transition, popstate and runtime reply, so a
+         wait that never comes true can say what the page did instead */
+      window.trace = []
+      const mark = (entry) => window.trace.push({ t: Math.round(performance.now()), ...entry })
+      useStore.subscribe((s, p) => {
+        if (
+          s.selectedElement !== p.selectedElement ||
+          s.inspectorOpen !== p.inspectorOpen ||
+          s.elementPanelOpen !== p.elementPanelOpen ||
+          s.selectedId !== p.selectedId
+        )
+          mark({
+            selectedElement: s.selectedElement?.selector ?? null,
+            inspectorOpen: s.inspectorOpen,
+            elementPanelOpen: s.elementPanelOpen,
+            selectedId: s.selectedId,
+          })
+      })
+      window.addEventListener('popstate', () => mark({ popstate: location.search }))
+      window.addEventListener('message', (ev) => {
+        const d = ev.data
+        if (d && typeof d.type === 'string')
+          mark({ msg: d.type, reqId: d.reqId, selector: d.selector ?? d.hit?.selector ?? null })
+      })
       window.pageState = () => ({
         activePageId: useStore.getState().activePageId,
         viewport: useStore.getState().viewport,

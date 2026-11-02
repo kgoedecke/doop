@@ -1,4 +1,4 @@
-import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
@@ -814,13 +814,24 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     )
   }, [runtimeReady, html, layerHover])
 
+  /* Resets of the probe are queued from layout effects, not made during
+     render as other derived state is: the runtime's replies refresh the
+     probe through updater functions, and when React has skipped a queued
+     updater for a lower-priority lane it later replays it from the state
+     before it. A reset made during render is not in that queue, so the
+     replay brought the stale probe back and the effect below re-picked the
+     element a link or a deselect had just cleared (pageCanvasBrowser). An
+     update queued from an effect is replayed in order, after the refresh. */
   /* deselecting the frame drops its element selection too, so a stale
      outline never reappears when the frame is picked again */
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
+    if (!selected) setProbe(null)
+  }, [selected])
   const [wasSelected, setWasSelected] = useState(selected)
   if (wasSelected !== selected) {
     setWasSelected(selected)
-    if (!selected) setProbe(null)
-    else if (linkedThread) {
+    if (selected && linkedThread) {
       /* the emailed thread, now that selection will not close it again */
       setOpenThread(linkedThread)
       setLinkedThread(null)
@@ -872,13 +883,12 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     }
   }, [probeSel, frame.id])
   const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
-  const [seenWantedSel, setSeenWantedSel] = useState(wantedSel)
-  if (seenWantedSel !== wantedSel) {
-    setSeenWantedSel(wantedSel)
-    /* Returning to a frame-only link (or closing the element panel) also
-       removes the previous element's toolbar and outline. */
+  /* Returning to a frame-only link (or closing the element panel) also
+     removes the previous element's toolbar and outline. */
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
     if (!wantedSel) setProbe((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
-  }
+  }, [wantedSel])
   /* the rest of a multi-element pick: each is outlined like the primary,
      re-located whenever the document changes. A string key keeps the
      selection identity-stable, so memo holds. */
@@ -1179,13 +1189,13 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
      store and the iframe has to be told, so this is a sync with an external
      system rather than derived state. */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+    // eslint-disable-next-line react/set-state-in-effect -- exitEdit syncs the iframe's edit mode
     if (!selected && editing) exitEdit()
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
   /* so does a lock arriving from a collaborator (or an agent) mid-session:
      what was typed so far is flushed by the exit, nothing more lands */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- external-system sync, as above
+    // eslint-disable-next-line react/set-state-in-effect -- exitEdit syncs the iframe's edit mode
     if ((frame.locked || readOnly) && editing) exitEdit()
   }, [frame.locked, readOnly]) // eslint-disable-line react-hooks/exhaustive-deps
 

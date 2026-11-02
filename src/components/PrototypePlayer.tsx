@@ -590,6 +590,8 @@ const KEY_REPLY_MS = 400
 let keyRequests = 0
 
 /** Offer a key to the screen's own key interactions; true when one took it. */
+let switchRequests = 0
+
 function askKey(win: Window, key: string): Promise<boolean> {
   const reqId = `proto-key-${++keyRequests}`
   return new Promise((resolve) => {
@@ -640,13 +642,16 @@ function ProtoScreen({
     latest.current = { onReady, onMessage, register, takeFocus }
   })
 
+  /* the `doop:proto` switch this screen is waiting on, when its reply is
+     also the moment the screen should take the focus */
+  const focusOnSwitch = useRef<string | null>(null)
   useEffect(() => {
     const key = entry.key
     let first = true
     function onMsg(ev: MessageEvent) {
       const win = iframeRef.current?.contentWindow
       if (!win || ev.source !== win) return
-      const data = ev.data as { type?: string } | null
+      const data = ev.data as { type?: string; reqId?: string } | null
       if (!data?.type) return
       if (data.type === 'doop:frame-ready') {
         latest.current.register(key, win)
@@ -656,6 +661,11 @@ function ProtoScreen({
         first = false
         setShown(true)
         latest.current.onReady(key)
+      } else if (data.type === 'doop:proto-result') {
+        if (data.reqId === focusOnSwitch.current) {
+          focusOnSwitch.current = null
+          iframeRef.current?.focus()
+        }
       } else latest.current.onMessage(data)
     }
     window.addEventListener('message', onMsg)
@@ -673,13 +683,17 @@ function ProtoScreen({
   useEffect(() => {
     const iframe = iframeRef.current
     if (!shown || !iframe) return
-    iframe.contentWindow?.postMessage({ type: 'doop:proto', on: interactive }, '*')
+    const reqId = `proto-switch-${++switchRequests}`
     /* keys go to the focused document: take the focus over from the screen
        this one now covers, or back from the overlay that closed over it, so
-       its key interactions and controls answer instead of that screen's */
-    if (!interactive) return
+       its key interactions and controls answer instead of that screen's.
+       The focus moves on the runtime's reply, not now: the switch travels
+       as a message, and a key pressed into a focused screen whose runtime
+       had not yet heard it was dropped. */
     const focused = document.activeElement
-    if ((screenHasFocus() && focused !== iframe) || latest.current.takeFocus()) iframe.focus()
+    const takesFocus = interactive && ((screenHasFocus() && focused !== iframe) || latest.current.takeFocus())
+    focusOnSwitch.current = takesFocus ? reqId : null
+    iframe.contentWindow?.postMessage({ type: 'doop:proto', on: interactive, reqId }, '*')
   }, [shown, interactive])
 
   if (!frame || !layout) return <div className="text-body text-code-ink/70">{t('panels.protoDeleted')}</div>
