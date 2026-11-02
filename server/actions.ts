@@ -1634,7 +1634,7 @@ export async function deleteFrame(frameId: string, actor: Actor): Promise<Frame 
     /* close any live stream while the frame still exists, so its auto
        “Designing…” task ends with it */
     finishStream(frameId, false)
-    const frame = await store.deleteFrame(frameId)
+    const frame = await store.deleteFrame(frameId, actor)
     if (!frame) return undefined
     persist.deleteFrameHistory(frameId)
     thumbs.purge(frameId)

@@ -108,7 +108,8 @@ final class CanvasModel: ObservableObject {
                     attempt = ws
                     socket = ws
                     ws.resume()
-                    let join: [String: Any] = ["type": "join", "canvasId": id, "clientId": clientID, "name": "iOS", "kind": "user"]
+                    // Frames come from the canvas actor, not the room.
+                    let join: [String: Any] = ["type": "join", "canvasId": id, "clientId": clientID, "name": "iOS", "kind": "user", "frames": "actor"]
                     let joinData = try JSONSerialization.data(withJSONObject: join)
                     try await ws.send(.string(String(decoding: joinData, as: UTF8.self)))
                     while connectionID == generation && !Task.isCancelled {

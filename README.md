@@ -1102,7 +1102,9 @@ the actor's SQLite (drizzle; schema in `src/actor-db/`). Every write is one call
 one transaction: frame placement, page moves, page copies and the rule that an occupied page cannot be
 deleted all happen inside it. Browsers hold one socket to the canvas actor; reconnecting loads a fresh
 snapshot. Browser edits go directly to the actor, while REST/MCP edits reach it through the server. The
-`/ws` room carries cursors, presence, comments, tasks and other collaboration events.
+`/ws` room carries cursors, presence, comments, tasks and other collaboration events. Clients built before
+canvas actors, such as installed iOS apps, still get frames from the room as before: while one is in a
+canvas's room, the server follows that canvas actor and relays its changes (`server/roomFrames.ts`).
 PostgreSQL stores canvas metadata and collaboration records, including a mirror of the page list.
 A canvas copy becomes visible in PostgreSQL after its canvas actor holds every copied frame.
 

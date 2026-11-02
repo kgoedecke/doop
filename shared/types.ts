@@ -512,10 +512,21 @@ export interface PeerViewport {
 /* ---- websocket protocol ---- */
 
 export type ClientMessage =
-  | { type: 'join'; canvasId: string; clientId: string; name: string; kind: ActorKind }
+  | {
+      type: 'join'
+      canvasId: string
+      clientId: string
+      name: string
+      kind: ActorKind
+      /** 'actor': this client reads frames from the canvas actor. Clients
+       *  built before canvas actors leave it out and get frames from the room. */
+      frames?: 'actor'
+    }
   | { type: 'cursor'; x: number; y: number }
   | { type: 'viewport'; viewport: PeerViewport }
   | { type: 'editing'; frameId: string | null }
+  /** room frames only: a frame being dragged, before the drop is saved */
+  | { type: 'frame:drag'; frameId: string; x: number; y: number; width: number; height: number }
 
 export type ServerMessage =
   | {
@@ -544,6 +555,12 @@ export type ServerMessage =
   | { type: 'feedback'; feedback: TaskFeedback }
   | { type: 'comment'; comment: ElementComment }
   | { type: 'frame:streaming'; frameId: string; active: boolean; actor: Actor }
+  /* Room frames: the frame feed of clients built before canvas actors
+     (installed iOS apps, tabs left open across a deploy). Only they get these. */
+  | { type: 'frame:drag'; clientId: string; frameId: string; x: number; y: number; width: number; height: number }
+  | { type: 'frame:created'; frame: Frame; actor: Actor }
+  | { type: 'frame:updated'; frame: Frame; actor: Actor }
+  | { type: 'frame:deleted'; frameId: string; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
   | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }
   /** a ruler guide was added or moved (guide set) or removed (null) */

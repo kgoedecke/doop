@@ -131,7 +131,7 @@ it('adds, moves, and removes frames from committed changes', async () => {
     actor: someone,
   })
   expect(frames().find((candidate) => candidate.id === 'a')?.pageId).toBe('p2')
-  socket().commit({ type: 'frame-removal', revision: 3, frameId: 'a' })
+  socket().commit({ type: 'frame-removal', revision: 3, frameId: 'a', actor: someone })
   expect(frames().map((candidate) => candidate.id)).toEqual(['b'])
   socket().commit({ type: 'pages-change', revision: 4, pages: [pages[1]!] })
   expect(useStore.getState().canvas?.pages).toEqual([pages[1]])
@@ -139,7 +139,7 @@ it('adds, moves, and removes frames from committed changes', async () => {
 
 it('asks for a snapshot when it misses a change', async () => {
   await connect([frame('a')])
-  socket().commit({ type: 'frame-removal', revision: 5, frameId: 'a' })
+  socket().commit({ type: 'frame-removal', revision: 5, frameId: 'a', actor: someone })
   expect(frames()).toHaveLength(1)
   expect(socket().sent).toEqual([{ type: 'snapshot' }])
 })

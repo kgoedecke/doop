@@ -42,7 +42,8 @@ function open() {
     const { clientId, name } = getIdentity()
     /* join first: flipping `connected` makes the Stage announce its camera,
        and the server drops anything sent before the socket has a canvas */
-    sendWs({ type: 'join', canvasId, clientId, name, kind: 'user' })
+    // Frames come from the canvas actor (canvas-actor.ts), not this room.
+    sendWs({ type: 'join', canvasId, clientId, name, kind: 'user', frames: 'actor' })
     useStore.getState().setConnected(true)
   }
 

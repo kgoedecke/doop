@@ -64,7 +64,7 @@ export type FrameChange = {
   activity?: ActivityItem
   streaming?: boolean
 }
-export type FrameRemoval = { type: 'frame-removal'; revision: number; frameId: string }
+export type FrameRemoval = { type: 'frame-removal'; revision: number; frameId: string; actor: Attribution }
 export type PagesChange = { type: 'pages-change'; revision: number; pages: CanvasPageInfo[] }
 export type CanvasEvent = CanvasSnapshot | FrameChange | FrameRemoval | PagesChange
 export type FrameDrag = { type: 'drag'; frameId: string } & Pick<Frame, 'x' | 'y' | 'width' | 'height' | 'updatedAt'>
@@ -486,7 +486,7 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
   }
 
   /** Remove a frame and its history; returns what was removed. */
-  async deleteFrame(frameId: string): Promise<Frame | null> {
+  async deleteFrame(frameId: string, by: Attribution): Promise<Frame | null> {
     if (this.deleted) return null
     return this.db.transaction(async () => {
       const frame = await readFrame(this.orm, frameId)
@@ -497,7 +497,7 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
         const { [frameId]: _gone, ...bursts } = this.bursts
         this.bursts = bursts
       }
-      this.committed = { type: 'frame-removal', revision: ++this.revision, frameId }
+      this.committed = { type: 'frame-removal', revision: ++this.revision, frameId, actor: by }
       return frame
     })
   }

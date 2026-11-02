@@ -74,7 +74,11 @@
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
 - `ws` 8.18.0 - WebSocket server for cursors, presence, and collaboration (activity feed,
-  comments, tasks) over one room per canvas; frame edits use separate actor subscriptions.
+  comments, tasks) over one room per canvas; frame edits use separate actor subscriptions. Clients built
+  before canvas actors (installed iOS apps, tabs left open across a deploy) join without `frames: 'actor'`
+  and still read frames from the room: every frame in `init`, then `frame:created` / `frame:updated` /
+  `frame:deleted` / `frame:drag`. While one is in a canvas's room, `server/roomFrames.ts` holds a socket to
+  that canvas actor and relays its changes, including edits newer clients write to it directly.
 - `terse-sdk` / `terse-cli` 0.14.9 - the actor SDK (`terse-sdk/actor` in `src/actor.ts`; the local runtime and
   compiler from `terse-sdk/dev`) and the client generator for `CanvasActor` (client in `generated/actors/`).
   `durable-actors` arrives only as `terse-sdk`'s own dependency; nothing imports it directly. The actor's

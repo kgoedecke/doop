@@ -83,6 +83,7 @@ export function roomMessageNeeds(msg: ClientMessage): CanvasRole {
     case 'viewport':
       return 'view'
     case 'editing':
+    case 'frame:drag':
       return 'edit'
     default:
       return 'edit'

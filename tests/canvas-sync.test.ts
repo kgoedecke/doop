@@ -10,7 +10,8 @@ import WebSocket from 'ws'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 import type { Canvas, CanvasPageInfo, Frame, FrameVersionInfo } from '../shared/types.ts'
-import type { CanvasEvent, FrameEdit } from '../src/actor.ts'
+import type { CanvasEvent, FrameDrag, FrameEdit } from '../src/actor.ts'
+import type { ServerMessage } from '../shared/types.ts'
 import * as schema from '../server/db/schema.ts'
 
 async function port() {
@@ -72,7 +73,7 @@ const createFrame = (name = 'Frame') =>
 const readCanvas = () => json<Canvas>(owner.get(`/api/canvases/${canvas.id}`))
 const actorRoute = () => `/api/canvases/${canvas.id}/actor`
 
-type SyncEvent = CanvasEvent | { type: 'error'; requestId: string; message: string }
+type SyncEvent = CanvasEvent | FrameDrag | { type: 'error'; requestId: string; message: string }
 
 async function joinActor(client = owner) {
   const { websocketUrl } = await json<{ websocketUrl: string }>(client.get(actorRoute()))
@@ -84,7 +85,7 @@ async function joinActor(client = owner) {
     const event = JSON.parse(String(data)) as SyncEvent | { type: 'state_update'; changes: { committed?: SyncEvent } }
     if (event.type === 'state_update') {
       if (event.changes.committed) events.push(event.changes.committed)
-    } else if (['canvas-snapshot', 'error'].includes(event.type)) events.push(event)
+    } else if (['canvas-snapshot', 'drag', 'error'].includes(event.type)) events.push(event)
   })
   await until(() => events.some((event) => event.type === 'canvas-snapshot'))
   async function write(frameId: string, write: FrameEdit) {
@@ -95,7 +96,23 @@ async function joinActor(client = owner) {
     if (event.type === 'error') throw new Error(event.message)
     return event
   }
-  return { events, write }
+  return { events, write, send: (command: FrameDrag) => socket.send(JSON.stringify(command)) }
+}
+
+/** A /ws room client. Without `frames: 'actor'` it joins the way clients built
+ *  before canvas actors do (installed iOS apps), reading frames from the room. */
+async function joinRoom(frames?: 'actor') {
+  const socket = new WebSocket(`ws://localhost:${server.port}/ws`, { headers: { Cookie: owner.header() } })
+  sockets.push(socket)
+  const messages: ServerMessage[] = []
+  socket.on('error', () => {})
+  socket.on('message', (data) => messages.push(JSON.parse(String(data)) as ServerMessage))
+  await new Promise<void>((resolve) => socket.once('open', () => resolve()))
+  socket.send(
+    JSON.stringify({ type: 'join', canvasId: canvas.id, clientId: randomUUID(), name: 'Room', kind: 'user', frames }),
+  )
+  await until(() => messages.some((message) => message.type === 'init'))
+  return { messages, send: (message: unknown) => socket.send(JSON.stringify(message)) }
 }
 
 /** The frames the canvas actor holds right now, read over a fresh socket. */
@@ -288,4 +305,35 @@ it('moves a frame to another page in one write, keeping its history', async () =
   expect(
     (await owner.put(`/api/canvases/${canvas.id}/pages`, { pages: [first], expectedPages: [second] })).status,
   ).toBe(400)
+})
+
+it('keeps clients built before canvas actors in sync over the room', async () => {
+  const frame = await createFrame('Shared')
+  const older = await joinRoom()
+  const newer = await joinRoom('actor')
+  const init = (room: { messages: ServerMessage[] }) =>
+    room.messages.find((message): message is Extract<ServerMessage, { type: 'init' }> => message.type === 'init')!
+  expect(init(older).canvas.frames).toEqual([frame])
+  expect(init(newer).canvas.frames).toEqual([])
+  const editor = await joinActor()
+
+  /* an edit written straight to the actor reaches the older client */
+  await editor.write(frame.id, { type: 'update', patch: { html: '<p>Written to the actor</p>' } })
+  await until(() =>
+    older.messages.some((m) => m.type === 'frame:updated' && m.frame.html === '<p>Written to the actor</p>'),
+  )
+  const created = await createFrame('Added later')
+  await until(() => older.messages.some((m) => m.type === 'frame:created' && m.frame.id === created.id))
+
+  /* drags cross in both directions */
+  const saved = (await readCanvas()).frames.find((entry) => entry.id === frame.id)!
+  editor.send({ type: 'drag', frameId: frame.id, x: 400, y: 10, width: 640, height: 480, updatedAt: saved.updatedAt })
+  await until(() => older.messages.some((m) => m.type === 'frame:drag' && m.x === 400))
+  older.send({ type: 'frame:drag', frameId: frame.id, x: 500, y: 10, width: 640, height: 480 })
+  await until(() => editor.events.some((e) => e.type === 'drag' && e.x === 500))
+
+  await json(owner.delete(`/api/frames/${created.id}`))
+  await until(() => older.messages.some((m) => m.type === 'frame:deleted' && m.frameId === created.id))
+  /* the newer room client gets none of the room frame messages */
+  expect(newer.messages.filter((m) => m.type.startsWith('frame:') && m.type !== 'frame:streaming')).toEqual([])
 })

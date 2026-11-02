@@ -18,7 +18,7 @@ interface $CanvasActorContract {
          *  create returns the frame it already made. */
         createFrame(input: Frame, by: Actor, automatic: boolean): Promise<Frame | null>
         /** Remove a frame and its history; returns what was removed. */
-        deleteFrame(frameId: string): Promise<Frame | null>
+        deleteFrame(frameId: string, by: Actor): Promise<Frame | null>
         /** Delete the canvas and everything in it. */
         destroy(): Promise<void>
         frame(id: string): Promise<Frame | null>
@@ -196,6 +196,7 @@ type FrameRemoval = {
     type: "frame-removal"
     revision: number
     frameId: string
+    actor: Actor
 }
 type FrameWriteConflict = {
     type: "conflict"

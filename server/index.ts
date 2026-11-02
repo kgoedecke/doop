@@ -17,6 +17,7 @@ import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { FrameConflictError, GuideLimitError, PageLimitError, store } from './store.ts'
 import { canvasActor, prepareCanvasSocket } from './frame-sync.ts'
+import { followRoomFrames, forwardRoomDrag } from './roomFrames.ts'
 import { actorRoute as frameRoute } from './actor-route.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
@@ -155,6 +156,9 @@ interface Conn {
    *  Showing their borrowed identity as a live cursor would tell the room
    *  the owner is here when they aren't. */
   silent?: boolean
+  /** a client built before canvas actors, which reads frames from this room;
+   *  stops its feed when it leaves (server/roomFrames.ts) */
+  unfollowFrames?: () => void
 }
 
 const conns = new Map<WebSocket, Conn>()
@@ -2460,17 +2464,47 @@ wss.on('connection', (ws, upgradeReq) => {
         activeFrameId: null,
       }
       const silent = !!(session.session as { impersonatedBy?: string | null }).impersonatedBy
-      conns.set(ws, { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent })
+      conns.get(ws)?.unfollowFrames?.()
+      const joined: Conn = { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent }
+      conns.set(ws, joined)
+      /* Clients built before canvas actors get their frames here, as on main:
+         every frame in init, then room frame messages. Messages that arrive
+         before init is sent wait for it. */
+      let frames: Frame[] = []
+      let flushFrames = () => {}
+      if (msg.frames !== 'actor') {
+        const early: ServerMessage[] = []
+        let initSent = false
+        joined.unfollowFrames = await followRoomFrames(msg.canvasId, (message) =>
+          initSent ? send(ws, message) : early.push(message),
+        )
+        // The client left (or joined again) while the feed was starting.
+        if (conns.get(ws) !== joined) {
+          joined.unfollowFrames()
+          return
+        }
+        flushFrames = () => {
+          initSent = true
+          for (const message of early.splice(0)) send(ws, message)
+        }
+        try {
+          frames = (await store.syncCanvas(msg.canvasId, 'full'))?.frames ?? []
+        } catch {
+          joined.unfollowFrames()
+          ws.close(1013, 'canvas service unavailable')
+          return
+        }
+      }
       const others = room(msg.canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
         .map((c) => c.presence)
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
       send(ws, {
         type: 'init',
-        canvas: { ...canvas, frames: [], role },
+        canvas: { ...canvas, frames, role },
         presences: [...others, ...agents],
-        // Per-frame activity arrives with each frame's initial actor subscription.
-        activity: await actions.getActivity(msg.canvasId, false),
+        // Newer clients get frame activity from the canvas actor with its frames.
+        activity: await actions.getActivity(msg.canvasId, msg.frames !== 'actor'),
         tasks: actions.getTasks(msg.canvasId),
         feedback: actions.getFeedback(msg.canvasId),
         comments: actions.getComments(msg.canvasId),
@@ -2479,6 +2513,7 @@ wss.on('connection', (ws, upgradeReq) => {
         selfColor: presence.color,
         serverBuild: BUILD_ID,
       })
+      flushFrames()
       /* An admin looking at a canvas must not act on it. Announcing presence
          would impersonate the owner in the room; maybePlay would have the
          demo agent perform on an untouched signup canvas; the card kick would
@@ -2527,6 +2562,17 @@ wss.on('connection', (ws, upgradeReq) => {
         presence.activeFrameId = msg.frameId
         broadcast(canvasId, { type: 'editing', clientId: presence.clientId, frameId: msg.frameId }, presence.clientId)
         break
+      case 'frame:drag': {
+        /* an older client dragging: its room-frame peers see it as on main,
+           and the canvas actor passes it to newer clients */
+        const { frameId, x, y, width, height } = msg
+        if (![x, y, width, height].every(Number.isFinite)) break
+        for (const peer of room(canvasId))
+          if (peer.unfollowFrames && peer.presence.clientId !== presence.clientId)
+            send(peer.ws, { type: 'frame:drag', clientId: presence.clientId, frameId, x, y, width, height })
+        forwardRoomDrag(canvasId, { frameId, x, y, width, height })
+        break
+      }
     }
   })
 
@@ -2534,6 +2580,7 @@ wss.on('connection', (ws, upgradeReq) => {
     const conn = conns.get(ws)
     if (!conn) return
     conns.delete(ws)
+    conn.unfollowFrames?.()
     if (conn.silent) return // never announced a join, so nothing to leave
     broadcast(conn.canvasId, { type: 'presence:leave', clientId: conn.presence.clientId })
   })

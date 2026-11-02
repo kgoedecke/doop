@@ -822,10 +822,10 @@ class Store {
     return isConflict(change) ? undefined : change?.frame
   }
 
-  async deleteFrame(frameId: string): Promise<Frame | undefined> {
+  async deleteFrame(frameId: string, by: Actor): Promise<Frame | undefined> {
     const membership = await this.getFrameMembership(frameId)
     if (!membership) return undefined
-    return (await canvasActor(membership.canvasId).deleteFrame(frameId)) ?? undefined
+    return (await canvasActor(membership.canvasId).deleteFrame(frameId, by)) ?? undefined
   }
 }
 
