@@ -1,6 +1,6 @@
 import * as React from 'react'
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
-import type { VariantProps } from 'class-variance-authority'
+import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 import { CheckIcon } from './icons'
@@ -15,12 +15,35 @@ import { menuItemVariants } from './menu'
 const DropdownMenu = DropdownMenuPrimitive.Root
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger
 
+/* Three menu widths: sm for a short list of verbs (sort, row actions), md for
+   rows with a hint or a sub-line, lg for rows carrying a name and an email or
+   a model blurb. Left unset, the menu sizes to the 340px reading width. Each
+   still gives way to a phone's width. */
+const dropdownMenuContentVariants = cva(
+  /* never taller than the room Radix measured beside the trigger: a long menu
+     (the model list, with its wrapping blurbs) scrolls instead of running off a
+     short window */
+  'z-[70] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto rounded-[12px] bg-surface p-1.5 shadow-pop animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
+  {
+    variants: {
+      width: {
+        auto: 'w-[min(340px,calc(100vw-24px))]',
+        sm: 'w-[min(160px,calc(100vw-24px))]',
+        md: 'w-[min(220px,calc(100vw-24px))]',
+        lg: 'w-[min(260px,calc(100vw-24px))]',
+      },
+    },
+    defaultVariants: { width: 'auto' },
+  },
+)
+
 function DropdownMenuContent({
   className,
   sideOffset = 8,
   align = 'end',
+  width,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & VariantProps<typeof dropdownMenuContentVariants>) {
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
@@ -28,11 +51,7 @@ function DropdownMenuContent({
         sideOffset={sideOffset}
         align={align}
         collisionPadding={12}
-        className={cn(
-          'z-[70] w-[min(340px,calc(100vw-24px))] rounded-[14px] border border-line bg-surface p-1.5 shadow-pop',
-          'animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
-          className,
-        )}
+        className={cn(dropdownMenuContentVariants({ width }), className)}
         {...props}
       />
     </DropdownMenuPrimitive.Portal>
@@ -41,13 +60,32 @@ function DropdownMenuContent({
 
 /* what every row in the menu shares, whichever primitive renders it */
 const itemClass =
-  'cursor-pointer gap-[11px] rounded-[9px] px-2.5 py-[9px] text-[13.5px] outline-none data-[highlighted]:bg-paper-deep data-[disabled]:pointer-events-none data-[disabled]:text-ink-faint'
+  'cursor-pointer gap-2.5 rounded-[8px] px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-sub data-[disabled]:pointer-events-none data-[disabled]:text-ink-faint'
+
+/** The line under a row's label ("2 takes, side by side"). Children become the label. */
+type ItemDescription = {
+  /** a sub-line under the label, in caption type; it wraps rather than hiding words */
+  description?: React.ReactNode
+}
+
+function ItemText({ children, description }: { children: React.ReactNode; description: React.ReactNode }) {
+  return (
+    <span data-slot="dropdown-menu-item-text" className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate">{children}</span>
+      <span data-slot="dropdown-menu-item-description" className="text-caption text-ink-faint">
+        {description}
+      </span>
+    </span>
+  )
+}
 
 function DropdownMenuItem({
   className,
   tone,
+  description,
+  children,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & VariantProps<typeof menuItemVariants>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & VariantProps<typeof menuItemVariants> & ItemDescription) {
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
@@ -58,7 +96,9 @@ function DropdownMenuItem({
         className,
       )}
       {...props}
-    />
+    >
+      {description === undefined ? children : <ItemText description={description}>{children}</ItemText>}
+    </DropdownMenuPrimitive.Item>
   )
 }
 
@@ -68,16 +108,17 @@ const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
 function DropdownMenuRadioItem({
   className,
   children,
+  description,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem> & ItemDescription) {
   return (
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(menuItemVariants(), itemClass, className)}
       {...props}
     >
-      {children}
-      <DropdownMenuPrimitive.ItemIndicator className="ml-auto flex text-ink">
+      {description === undefined ? children : <ItemText description={description}>{children}</ItemText>}
+      <DropdownMenuPrimitive.ItemIndicator className="ml-auto flex flex-none text-ink">
         <CheckIcon width={14} height={14} aria-hidden />
       </DropdownMenuPrimitive.ItemIndicator>
     </DropdownMenuPrimitive.RadioItem>
@@ -99,12 +140,12 @@ function DropdownMenuLabel({ className, ...props }: React.ComponentProps<typeof 
   return <DropdownMenuPrimitive.Label data-slot="dropdown-menu-label" className={cn(className)} {...props} />
 }
 
-/** Uppercase caption over a group of rows further down the menu. */
+/** Caption over a group of rows further down the menu. */
 function DropdownMenuCaption({ className, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Label>) {
   return (
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-caption"
-      className={cn('px-2.5 pb-1 pt-[7px] text-[10px] font-bold uppercase tracking-[0.12em] text-ink-faint', className)}
+      className={cn('px-2.5 pb-1 pt-[7px] text-caption text-ink-faint', className)}
       {...props}
     />
   )

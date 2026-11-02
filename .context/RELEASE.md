@@ -10,8 +10,13 @@ per package, driven by conventional commits (`release-please-config.json`,
   merging it creates the `vX.Y.Z` tag and a GitHub Release. Tag + notes only - nothing is built
   or deployed from it.
 - `desktop/` -> "chore(desktop): release x.y.z" bumps `desktop/package.json`,
-  `src-tauri/tauri.conf.json`, `Cargo.toml`, `Cargo.lock` + `desktop/CHANGELOG.md`. It does NOT
-  tag: the `desktop-v*` tag is pushed by hand after merging (next section).
+  `src-tauri/tauri.conf.json`, `Cargo.toml` + `desktop/CHANGELOG.md`. It cannot bump
+  `Cargo.lock`, so `desktop.yml` copies the shell's version line from `Cargo.toml` into the
+  lock ahead of `cargo test --locked`; the lock catches up in the next commit that builds the shell. It does NOT
+  tag: the `desktop-v*` tag is pushed by hand after merging (next section). Since no GitHub
+  Release is cut, the workflow's last step flips the merged desktop PR's label from
+  `autorelease: pending` to `autorelease: tagged` itself; a merged PR left `pending` makes every
+  later run abort with "untagged, merged release PRs outstanding".
 
 Both packages are 0.x, so breaking changes bump the minor, not the major. With the default
 `GITHUB_TOKEN` the release PR gets no CI run; a `RELEASE_PLEASE_TOKEN` PAT secret fixes that.
@@ -25,29 +30,109 @@ on port 4400 alongside a `postgres:16-alpine` container, and applies DB migratio
 WebSocket endpoint browsers can reach. The app image does not start or bundle the native actor runtime.
 CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
 format:check, build, test) but does not build or push a container image.
+The CI build uses `bun run --bun build` to match the `oven/bun` Docker build stage,
+where `node` commands run with Bun. Extension tests also build with both runtimes
+and run the Bun-built archive under Node, including its nested runtime dependencies.
 
-## Desktop app (Tauri: macOS DMG + Windows NSIS installer)
+## Desktop app (Tauri: macOS DMG + Windows NSIS installer + Linux AppImage/.deb/.rpm)
 
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup
 in `.github/actions/setup-desktop`:
 
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
-  with `bunx tauri build --target universal-apple-darwin --bundles dmg`, `nsis-windows` builds
-  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, and a final `release`
-  job (`needs` both) attaches the two to one GitHub Release - so a tag is never published with
-  only one installer.
+  with `bunx tauri build --target universal-apple-darwin --bundles app,dmg`, `nsis-windows` builds
+  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
+  x64 AppImage, .deb and .rpm on `ubuntu-22.04` (the oldest runner, for a low glibc floor) with
+  `bunx tauri build --bundles deb,rpm,appimage`, and a final `release` job (`needs` all three)
+  attaches them to one GitHub Release - so a tag is never published with an installer missing.
+- The AppImage is repacked after the build by `desktop/scripts/appimage-drop-wayland.sh` (pinned
+  `appimagetool` and type2 runtime, both checksummed), which drops the bundled `libwayland-*`: copies from the 22.04 runner are older
+  than current distros' Mesa and make WebKitGTK abort with `EGL_BAD_PARAMETER`. Tauri passes
+  linuxdeploy no extra flags, so `--exclude-library` cannot do it. The script re-signs the
+  updater `.sig` when the key is set.
+- Self-update (`tauri-plugin-updater`, `desktop/src-tauri/src/updates.rs`): with the
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets set, every build also
+  emits signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
+  it onto the fixed `desktop-updates` prerelease, which `doop.design/desktop/latest.json`
+  redirects to (served by the hosted deployment). A tag fails without the key. Installed official
+  shells check at launch and daily, download in the background and offer a restart. The key
+  pair lives in the signing backup; its public half is `plugins.updater.pubkey`.
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
   workflow artifacts instead (keeps the pipeline validated without cutting a release).
 - macOS signing/notarization: automatic once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` repo secrets exist (see
   `desktop/README.md`). Without them the DMG is unsigned - it still works, but downloaders must
   approve it via System Settings -> Privacy & Security.
-- The Windows installer is unsigned (no Authenticode certificate configured): SmartScreen warns on
-  first run and users click "More info" -> "Run anyway".
+- Windows signing: Azure Artifact Signing (account `Doop`, East US, profile `doop-public`). The
+  `nsis-windows` job runs in the `desktop-release` environment, logs in through OIDC (app
+  registration `doop-desktop-signing`, federated on that environment; `AZURE_CLIENT_ID` /
+  `AZURE_TENANT_ID` repo variables, no secret) and passes a CI-only `signCommand` to Tauri
+  (`desktop/scripts/sign-windows.ps1`: signtool + the pinned `Microsoft.ArtifactSigning.Client`
+  dlib), so the app exe, installer and uninstaller are signed; `signtool verify` gates the job. PR
+  builds and repos without the variables stay unsigned. Setup: `desktop/README.md`.
+- Connecting an OAuth integration (Meta, Linear, Slack) from the app opens the
+  provider in the system browser and returns over a `doop://integration/<id>` link; the app
+  finishes it under its own session (`shared/desktopConnect.ts`). This is web-only: shells from
+  0.2.1 already deliver any `doop://` link, and older shells open Integrations in the browser.
+- The macOS View menu (`desktop/src-tauri/src/view_menu.rs`) holds the canvas toggles (Rulers,
+  Show/Hide UI, Layers and Agents panels) and zoom. Items reach the page as `view-command`
+  events; the page mirrors its state back through `view_menu_state` (`src/lib/viewMenu.ts`,
+  gated on `window.__DOOP_VIEW_MENU__`), so checkmarks follow it and canvas items are disabled
+  off a canvas. Only ⌘ shortcuts are bound in the menu; ⇧R / ⇧1 / ⇧2 stay with the page.
 - The shell tells the page its platform via `window.__DOOP_DESKTOP_PLATFORM__` (read in
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
+
+## Claude Desktop extension
+
+`bun run build:claude-extension` packages `claude-extension/manifest.json`, the Doop logo,
+license and pinned `mcp-remote` runtime into `public/claude-extension/doop.mcpb`. Both `dev`
+and `build` run it automatically; Vite copies the download into the production `dist/`.
+Connect AI → Claude offers a prefilled **Add to Claude** link for public HTTPS servers.
+The shared endpoint check filters common local addresses while allowing public IPv6
+and numeric-prefixed DNS names; the connecting client checks actual reachability.
+In updated desktop shells it prepares the extension, prefills the current `/mcp` URL,
+and invokes `claude_add_extension` to open Claude's installer. Native installation
+requires a desktop release; the online link ships with the web app. Manual downloads
+remain a collapsed fallback for older shells and local browser sessions.
+OAuth requests for consent open `/oauth/consent`. The approval screen resolves the client
+from a code bound to the signed-in account; `/api/mcp-consent/:code` handles approval and
+denial through better-auth. This also supports other MCP clients that request consent.
+
+`tests/claudeExtension.test.ts` extracts the actual archive outside the repository and checks
+tools, resources, OAuth and reconnecting against a fresh Doop server. Before releasing,
+also install it in Claude Desktop on macOS and Windows. Installation, build and release
+notes live in [`claude-extension/README.md`](../claude-extension/README.md). No directory
+submission or publication is performed by the build.
+
+## Codex desktop setup
+
+Connect AI → Codex can register Doop directly in the shared Codex config through
+`codex_add_mcp`. Browser sessions hand off to the installed app with a `doop://connect/codex`
+link; the app opens a review screen and writes only after the user clicks Add to Codex.
+The native capability marker gates older shells. Release the updated desktop binary
+and frontend together; no downloadable integration bundle is built. Codex still owns
+the separate OAuth approval. Config preservation, conflict handling and handoff checks
+are covered by Rust/frontend tests; desktop CI now runs the Rust tests on macOS, Windows and Linux.
+See [`desktop/README.md`](../desktop/README.md#add-to-codex) for release smoke checks.
+
+## Cursor marketplace plugin
+
+`cursor-plugin/` is a standalone Cursor plugin directory; `.cursor-plugin/marketplace.json` at
+repo root indexes it. It contains the hosted MCP connection, the scoped `doop-design` skill,
+metadata, logo, and license. It needs no build artifact or release download. The app's
+**Connect AI → Cursor → Add to Cursor** uses Cursor's MCP install link for the current Doop
+instance and is available independently of marketplace publication.
+
+After local Cursor smoke testing, sync the plugin commit to public `kgoedecke/doop` through the
+existing cherry-pick workflow. Confirm the root marketplace manifest and `cursor-plugin/` are
+present at the same paths. The OSS export script was removed; do not recreate a wipe-and-export
+step. This development repository is private and cannot serve as a public listing source. A maintainer submits the public repository
+at `https://cursor.com/marketplace/publish`. Cursor must approve the plugin before it appears in
+the public marketplace. No workflow submits or publishes it automatically. Bump the version
+in `cursor-plugin/.cursor-plugin/plugin.json` for plugin updates; full setup and reviewer steps
+live in `cursor-plugin/README.md`.
 
 ## Other workflows
 

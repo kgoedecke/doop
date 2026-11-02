@@ -3,7 +3,9 @@
  * same way CLAUDE_MODELS is (shared/localAgent.ts). Hand-picked rather than
  * fetched from provider catalogs: every entry here has been judged fit for
  * design work, and the `vision` flag is what gates degraded no-screenshot
- * runs, so it must be deliberate, not scraped.
+ * runs, so it must be deliberate, not scraped. Where a provider publishes a
+ * catalog (server/modelCatalog.ts) these entries become the recommendations
+ * at the top of it rather than the whole menu.
  */
 
 export interface ModelOption {
@@ -12,6 +14,8 @@ export interface ModelOption {
   blurb: string
   /** false = the model cannot see images: runs skip visual review entirely */
   vision: boolean
+  /** true on a curated entry the provider's live catalog confirmed */
+  recommended?: boolean
 }
 
 /**
@@ -133,6 +137,60 @@ export const IMAGE_MODELS: ImageModelOption[] = [
 ]
 
 /** One place for "what do we call this account kind" — Settings, meter lines. */
+/** Claude API (a user's Anthropic key): full ids, which the Messages API
+ *  wants; the aliases in shared/localAgent.ts are Claude Code's, not the
+ *  API's. The live catalog (server/modelCatalog.ts) adds newer ones. */
+export const ANTHROPIC_MODELS: ModelOption[] = [
+  {
+    id: 'claude-fable-5-1',
+    name: 'Fable 5.1',
+    blurb: 'For the hardest problems and longer, multi-step design tasks.',
+    vision: true,
+  },
+  {
+    id: 'claude-opus-5',
+    name: 'Opus 5',
+    blurb: 'For complex layouts and demanding design or coding work.',
+    vision: true,
+  },
+  { id: 'claude-sonnet-5', name: 'Sonnet 5', blurb: 'A balanced default for everyday design work.', vision: true },
+  {
+    id: 'claude-haiku-4-5-20251001',
+    name: 'Haiku 4.5',
+    blurb: 'For quick edits and straightforward tasks.',
+    vision: true,
+  },
+]
+
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5'
+
+/**
+ * How hard an OpenAI model thinks per turn, on a ChatGPT subscription or an
+ * OpenAI key: the user's pick rides the account (`PATCH /api/model-account`),
+ * and the server's `DOOP_AGENT_OPENAI_EFFORT` is what runs until they pick.
+ * The picker offers these four; the env var also admits `none` and `max`.
+ */
+export const REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+
+export const REASONING_EFFORT_OPTIONS: { id: ReasoningEffort; name: string; blurb: string }[] = [
+  { id: 'low', name: 'Low', blurb: 'Fastest and cheapest — fine for small, mechanical edits' },
+  { id: 'medium', name: 'Medium', blurb: 'The everyday setting. A good default for design work' },
+  { id: 'high', name: 'High', blurb: 'More thinking per turn — for layouts that have to be right' },
+  { id: 'xhigh', name: 'Extra high', blurb: 'The most thinking, and the slowest and priciest turns' },
+]
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return REASONING_EFFORTS.some((effort) => effort === value)
+}
+
+/** The four to offer, plus the effort in effect when it is not one of them
+ *  (a server default of `none` or `max`): a picker must show what is active. */
+export function reasoningEffortOptions(active: string): { id: string; name: string; blurb: string }[] {
+  if (REASONING_EFFORT_OPTIONS.some((option) => option.id === active)) return REASONING_EFFORT_OPTIONS
+  return [...REASONING_EFFORT_OPTIONS, { id: active, name: active, blurb: 'The server’s default' }]
+}
+
 export const ACCOUNT_KIND_LABELS = {
   chatgpt: 'ChatGPT',
   'openai-key': 'OpenAI',

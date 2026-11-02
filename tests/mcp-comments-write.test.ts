@@ -53,7 +53,7 @@ function comment(overrides: Partial<ElementComment> & { id: string }): ElementCo
   return {
     canvasId: CANVAS.id,
     frameId: FRAME.id,
-    selector: '.hero h1',
+    elementId: 'hero01',
     snippet: '<h1>Hi</h1>',
     from: 'alice',
     text: 'note',
@@ -119,11 +119,7 @@ function gate(overrides: Record<string, unknown> = {}): Awaited<ReturnType<typeo
 }
 
 async function seedRoot(text: string) {
-  const root = await actions.addElementComment(
-    FRAME.id,
-    { selector: '.hero h1', snippet: '<h1>Hi</h1>', text },
-    'alice',
-  )
+  const root = await actions.addElementComment(FRAME.id, { selector: 'h1', snippet: '<h1>Hi</h1>', text }, 'alice')
   if (!root) throw new Error('failed to seed a root comment')
   return root
 }
@@ -459,6 +455,14 @@ describe('MCP comment write tools over real action state', () => {
       proposals: new Map(),
     })
     vi.spyOn(store, 'getFrame').mockImplementation(async (id: string) => (id === FRAME.id ? FRAME : undefined))
+    vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id) =>
+      id === FRAME.id ? { id, canvasId: FRAME.canvasId } : undefined,
+    )
+    /* a comment stamps its element's id into the frame: apply it to the fixture */
+    vi.spyOn(store, 'updateFrame').mockImplementation(async (id, patch) => {
+      const f = await store.getFrame(id)
+      return f ? Object.assign(f, patch) : undefined
+    })
   })
 
   it('stores an agent reply and logs it as an agent action', async () => {

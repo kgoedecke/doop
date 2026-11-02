@@ -11,7 +11,7 @@ vi.mock('../src/lib/api', () => ({
 }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 
-const { useStore } = await import('../src/lib/store')
+const { pickedSelectors, useStore } = await import('../src/lib/store')
 const { LayersPanel } = await import('../src/components/LayersPanel')
 const { TooltipProvider } = await import('../src/components/ui/tooltip')
 
@@ -87,5 +87,37 @@ describe('LayersPanel ⌫', () => {
     pressDelete()
     expect(deleteFrame).toHaveBeenCalledTimes(1)
     expect(reachedWindow).not.toHaveBeenCalled()
+  })
+
+  it('leaves ↵ on a focused lock button to the button, not to the tree', () => {
+    const lock = container.querySelector<HTMLButtonElement>('button[aria-label="Lock"]')
+    if (!lock) throw new Error('lock button not rendered')
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    act(() => {
+      lock.dispatchEvent(enter)
+    })
+    /* the tree's ↵ flies to the frame and prevents the default — which would
+       have been the button's click */
+    expect(enter.defaultPrevented).toBe(false)
+    expect(useStore.getState().flyTo).toBeNull()
+    act(() => lock.click())
+    expect(updateFrame).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().canvas?.frames[0]?.locked).toBe(true)
+  })
+
+  it('highlights every picked row, toggles with ⇧, and narrows to the row on a plain click', () => {
+    const P = `${DIV} > p:nth-of-type(1)`
+    const row = (selector: string) => container.querySelector<HTMLElement>(`[data-row-key="f1|${selector}"]`)!
+    const picked = () => pickedSelectors(useStore.getState())
+    /* picking the paragraph opens its parent's row */
+    act(() => useStore.getState().pickElement({ frameId: 'f1', selector: P }))
+    act(() => row(DIV).dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })))
+    expect(picked()).toEqual([P, DIV])
+    expect(row(DIV).getAttribute('aria-selected')).toBe('true')
+    expect(row(P).getAttribute('aria-selected')).toBe('true')
+    /* a plain click on the primary row narrows too, not just one on another row */
+    act(() => row(DIV).click())
+    expect(picked()).toEqual([DIV])
+    expect(row(P).getAttribute('aria-selected')).toBe('false')
   })
 })

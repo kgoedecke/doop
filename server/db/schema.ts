@@ -10,8 +10,8 @@ import {
   primaryKey,
   jsonb,
 } from 'drizzle-orm/pg-core'
-import type { CanvasPageInfo } from '../../shared/types.ts'
-import type { Schedule, Step } from '../../shared/automations.ts'
+import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
+import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
 
 /** ActivityKit tokens are delivery secrets: never return them through read APIs. */
 export const liveActivities = pgTable('live_activities', {
@@ -47,6 +47,8 @@ export const liveActivityStarters = pgTable('live_activity_starters', {
 
 export const canvases = pgTable('canvases', {
   pages: jsonb('pages').$type<CanvasPageInfo[]>(),
+  /** ruler guides of every page; null = none */
+  guides: jsonb('guides').$type<CanvasGuide[]>(),
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerId: text('owner_id'),
@@ -164,8 +166,36 @@ export const frames = pgTable(
     updatedBy: text('updated_by').notNull(),
     /** product-made onboarding/example content; null = a real user frame */
     demo: boolean('demo'),
+    /** hidden from the stage via the Layers panel; null = shown */
+    hidden: boolean('hidden'),
+    /** Figma-style lock; null = unlocked */
+    locked: boolean('locked'),
+    approval: jsonb('approval').$type<FrameApproval>(),
   },
   (t) => [index('frames_canvas_idx').on(t.canvasId)],
+)
+
+/** Frame design history: the HTML (and size) a frame had before a burst of
+ *  edits replaced it, so an agent's one-shot redesign or stream is never the
+ *  only copy left. Append-only, pruned to the newest MAX_FRAME_VERSIONS per
+ *  frame; `saved_by`/`saved_at` name who authored that state and when. Cold
+ *  path: written on each burst boundary, read only by the history UI. */
+export const frameVersions = pgTable(
+  'frame_versions',
+  {
+    id: text('id').primaryKey(),
+    frameId: text('frame_id').notNull(),
+    canvasId: text('canvas_id').notNull(),
+    html: text('html').notNull(),
+    width: doublePrecision('width').notNull(),
+    height: doublePrecision('height').notNull(),
+    savedAt: bigint('saved_at', { mode: 'number' }).notNull(),
+    savedBy: text('saved_by').notNull(),
+    /** 'user' | 'agent'; null when the author's kind was not known (a state
+     *  authored before the server last booted) */
+    savedByKind: text('saved_by_kind'),
+  },
+  (t) => [index('frame_versions_frame_idx').on(t.frameId), index('frame_versions_canvas_idx').on(t.canvasId)],
 )
 
 /** Design-sync keys: the write-only capability behind the /ingest endpoint.
@@ -335,9 +365,18 @@ export const comments = pgTable(
   {
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
-    frameId: text('frame_id').notNull(),
-    selector: text('selector').notNull(),
+    /* element comment: the frame + the element's data-doop-id + snippet;
+       frame comment: the frame and a design point; canvas comment: no frame,
+       a page and a world point instead. `selector` is the positional CSS path
+       comments were anchored by before element ids: read once at boot to
+       stamp the element and fill `element_id`, never written again. */
+    frameId: text('frame_id'),
+    elementId: text('element_id'),
+    selector: text('selector'),
     snippet: text('snippet').notNull(),
+    pageId: text('page_id'),
+    x: doublePrecision('x'),
+    y: doublePrecision('y'),
     fromName: text('from_name').notNull(),
     fromUserId: text('from_user_id'),
     text: text('text').notNull(),
@@ -353,27 +392,6 @@ export const comments = pgTable(
     parentId: text('parent_id'),
   },
   (t) => [index('comments_canvas_idx').on(t.canvasId)],
-)
-
-/** The canvas chat. Rows are immutable: a message that queued a card points
- *  at it through task_id, an agent's answer points back through reply_to_id. */
-export const chatMessages = pgTable(
-  'chat_messages',
-  {
-    id: text('id').primaryKey(),
-    canvasId: text('canvas_id').notNull(),
-    fromName: text('from_name').notNull(),
-    fromKind: text('from_kind').notNull(),
-    fromUserId: text('from_user_id'),
-    color: text('color').notNull(),
-    text: text('text').notNull(),
-    at: bigint('at', { mode: 'number' }).notNull(),
-    /** comma-joined agent-role ids the text @mentions, in order */
-    mentions: text('mentions'),
-    taskId: text('task_id'),
-    replyToId: text('reply_to_id'),
-  },
-  (t) => [index('chat_messages_canvas_idx').on(t.canvasId)],
 )
 
 /** Uploaded image assets: metadata only — bytes live in object storage (or
@@ -540,6 +558,8 @@ export const modelAccounts = pgTable('model_accounts', {
   apiKey: text('api_key'),
   /** the model tier this user picked; null = the server default */
   model: text('model'),
+  /** OpenAI reasoning effort this user picked; null = the server default */
+  reasoningEffort: text('reasoning_effort'),
   connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
@@ -603,6 +623,8 @@ export const automations = pgTable(
     name: text('name').notNull(),
     enabled: boolean('enabled').notNull().default(true),
     schedule: jsonb('schedule').$type<Schedule>().notNull(),
+    trigger: jsonb('trigger').$type<AutomationTrigger>().notNull().default({ type: 'schedule' }),
+    approvalSince: bigint('approval_since', { mode: 'number' }).notNull().default(0),
     steps: jsonb('steps').$type<Step[]>().notNull(),
     /** when the scheduler fires it next; null while disabled or incomplete */
     nextRunAt: bigint('next_run_at', { mode: 'number' }),
@@ -627,8 +649,21 @@ export const automationRuns = pgTable(
     canvasId: text('canvas_id'),
     /** 'reconnect' when the fix is re-authorising an integration */
     failure: text('failure'),
+    state: jsonb('state').$type<AutomationRunState>(),
+    leaseUntil: bigint('lease_until', { mode: 'number' }).notNull().default(0),
   },
   (t) => [index('automation_runs_automation_idx').on(t.automationId)],
+)
+
+/** Approval receipts outlive the run log so pruning cannot dispatch a design twice. */
+export const automationApprovals = pgTable(
+  'automation_approvals',
+  {
+    automationId: text('automation_id').notNull(),
+    frameId: text('frame_id').notNull(),
+    approvedAt: bigint('approved_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('automation_approvals_event_idx').on(t.automationId, t.frameId, t.approvedAt)],
 )
 
 /** Local execution preference; Claude credentials never leave the desktop. */
@@ -636,6 +671,8 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
   userId: text('user_id').primaryKey(),
   enabled: boolean('enabled').notNull().default(false),
   model: text('model').notNull().default('default'),
+  /** `claude --effort`; null = the CLI's own setting */
+  effort: text('effort'),
 })
 
 /** Per-user notification switches. No row means everything is on: comment
@@ -723,4 +760,58 @@ export const linearSessions = pgTable(
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('linear_sessions_status_idx').on(t.status)],
+)
+
+/** One bot installation per Slack workspace, billed to its Doop installer. */
+export const slackInstallations = pgTable('slack_installations', {
+  teamId: text('team_id').primaryKey(),
+  userId: text('user_id').notNull().unique(),
+  botUserId: text('bot_user_id').notNull(),
+  name: text('name').notNull(),
+  botToken: text('bot_token').notNull(),
+  connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+})
+
+export const slackOAuthStates = pgTable('slack_oauth_states', {
+  hash: text('hash').primaryKey(),
+  userId: text('user_id').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+})
+
+/** A durable inbox and result outbox, one row per Slack mention or slash
+ *  command. Slack's event_id / trigger_id is the row id, so a redelivery
+ *  never starts a second run. */
+export const slackSessions = pgTable(
+  'slack_sessions',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id').notNull(),
+    userId: text('user_id').notNull(),
+    channelId: text('channel_id').notNull(),
+    /** the thread Doop answers in; a slash command has none until Doop posts */
+    threadTs: text('thread_ts'),
+    requesterId: text('requester_id').notNull(),
+    /** slash commands only: Slack's response_url fallback when the bot is not in the channel */
+    responseUrl: text('response_url'),
+    title: text('title').notNull(),
+    prompt: text('prompt').notNull(),
+    status: text('status').notNull().default('pending'),
+    canvasId: text('canvas_id'),
+    taskId: text('task_id'),
+    /** a follow-up mention in a thread Doop already designed for: reuse that canvas */
+    followUp: boolean('follow_up').notNull().default(false),
+    error: text('error'),
+    /** ts of the "Doop is on it" message, updated in place with the canvas link */
+    ackTs: text('ack_ts'),
+    nextAttemptAt: bigint('next_attempt_at', { mode: 'number' }).notNull().default(0),
+    acknowledged: boolean('acknowledged').notNull().default(false),
+    linked: boolean('linked').notNull().default(false),
+    reported: boolean('reported').notNull().default(false),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('slack_sessions_status_idx').on(t.status),
+    index('slack_sessions_thread_idx').on(t.teamId, t.channelId, t.threadTs),
+  ],
 )

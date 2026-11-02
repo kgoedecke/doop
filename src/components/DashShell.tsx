@@ -1,16 +1,18 @@
-import { useState } from 'react'
+import * as React from 'react'
 import { authClient } from '../lib/auth'
 import { navigate } from '../App'
 import { posthog } from '../lib/posthog'
 import { useMe } from '../lib/me'
 import { isDesktopShell } from '../lib/shell'
 import { isTheme, useTheme } from '../lib/theme'
-import { AgentIcon } from './AgentIcon'
-import { ConnectModal } from './ConnectModal'
+import { LOCALES, LOCALE_NAMES, isLocale, useLocale, useT } from '../lib/i18n'
+import { colorFor } from '../../shared/types'
 import { themeOptions } from './ThemePicker'
-import { CodeBlock } from './ui/code-block'
 import { Badge } from './ui/badge'
-import { Button } from './ui/button'
+import { Avatar } from './ui/avatar'
+import { IconButton } from './ui/icon-button'
+import { Pressable } from './ui/pressable'
+import { PersonRow } from './ui/list'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -22,104 +24,106 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
-import {
-  BuildingIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  ClockIcon,
-  CreditCardIcon,
-  LockIcon,
-  CompassIcon,
-  GearIcon,
-  GridIcon,
-  HelpIcon,
-  KeyIcon,
-  ListIcon,
-  LogOutIcon,
-  MoonIcon,
-  PulseIcon,
-  ShieldIcon,
-  SparkIcon,
-  UserIcon,
-  UsersIcon,
-  BellIcon,
-} from './ui/icons'
+import { GearIcon, HelpIcon, LogOutIcon, ShieldIcon } from './ui/icons'
 
-/** Pieces the signed-in shell repeats on every page: the account menu in the
- *  top bar and the connect card pinned to the bottom of the rail. They live
- *  here so Home and Settings cannot drift apart. */
+/** The account menu the signed-in shell repeats on every page: in the rail
+ *  and in the settings header. It lives here so they cannot drift apart. */
 
-export function initials(name?: string): string {
-  const [first, ...rest] = (name ?? '').trim().split(/\s+/).filter(Boolean)
-  if (!first) return '·'
-  const last = rest[rest.length - 1]
-  const letters = last ? first.slice(0, 1) + last.slice(0, 1) : first.slice(0, 2)
-  return letters.toUpperCase()
-}
-
-export function AccountMenu() {
+export function AccountMenu({
+  face = false,
+  side,
+  align,
+}: {
+  /** the round presence face the editor's rail wears, instead of the ink square */
+  face?: boolean
+  side?: React.ComponentProps<typeof DropdownMenuContent>['side']
+  align?: React.ComponentProps<typeof DropdownMenuContent>['align']
+} = {}) {
   const { data: session } = authClient.useSession()
   const me = useMe(session?.user.id)
   const { theme, setTheme } = useTheme()
+  const { locale, setLocale } = useLocale()
+  const t = useT()
+  const name = session?.user.name ?? ''
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="bare"
-          className="grid size-10 flex-none place-items-center rounded-[10px] bg-ink font-display text-[12.5px] font-bold text-paper hover:bg-ink hover:text-paper hover:opacity-90 sm:size-[34px]"
-          aria-label="Account"
-        >
-          {initials(session?.user.name)}
-        </Button>
+        {face ? (
+          <IconButton
+            aria-label={t('shell.account')}
+            title={name}
+            shape="round"
+            className="size-7 hover:bg-transparent focus-visible:ring-ink-faint data-[state=open]:ring-2 data-[state=open]:ring-ink-faint"
+          >
+            <Avatar name={name} color={colorFor(session?.user.id ?? name)} size={28} className="shadow-none" />
+          </IconButton>
+        ) : (
+          <Pressable
+            aria-label={t('shell.account')}
+            title={name}
+            layout="inline"
+            focus="ring"
+            className="flex-none rounded-full"
+          >
+            <Avatar tone="ink" name={name} size={34} />
+          </Pressable>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent>
-        <DropdownMenuLabel className="flex items-center gap-[11px] px-2.5 pb-3 pt-[11px]">
-          <span className="grid size-[42px] flex-none place-items-center rounded-[12px] border border-line bg-paper-deep font-display text-[14px] font-extrabold">
-            {initials(session?.user.name)}
-          </span>
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate font-display text-[14px] font-bold">{session?.user.name}</span>
-            <span className="mt-px truncate text-[12px] font-normal text-ink-faint">
-              {me?.email ?? session?.user.email}
-            </span>
-          </span>
+      <DropdownMenuContent side={side} align={align} width="lg">
+        <DropdownMenuLabel className="px-2.5 pb-2.5 pt-2">
+          <PersonRow
+            avatar={<Avatar name={name} color={colorFor(session?.user.id ?? name)} size={32} className="shadow-none" />}
+            name={name}
+            detail={me?.email ?? session?.user.email}
+          />
         </DropdownMenuLabel>
         {/* the plan is a workspace thing; this line says which side of it the
             account is on — a member of a live paid workspace is on Team */}
-        <div className="mx-2.5 mb-2 flex items-center gap-[7px] text-[11.5px] text-ink-soft">
+        <div className="mx-2.5 mb-2 flex items-center gap-[7px] text-caption text-ink-soft">
           {me?.plan === 'team' ? (
             <>
-              <Badge tone="accent">team</Badge> Team plan
+              <Badge tone="accent">team</Badge> {t('shell.teamPlan')}
             </>
           ) : (
             <>
-              <Badge>free</Badge> Personal plan
+              <Badge>free</Badge> {t('shell.personalPlan')}
             </>
           )}
         </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate('/settings')}>
-          <IconGear /> Settings
+          <GearIcon size="rail" /> {t('shell.settings')}
         </DropdownMenuItem>
         {me?.admin && (
           <DropdownMenuItem onSelect={() => navigate('/admin')}>
-            <IconShield /> Admin
+            <ShieldIcon size="rail" /> {t('shell.admin')}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
-          <a href="https://doop.design/docs" target="_blank" rel="noopener noreferrer">
-            <IconHelp /> Help &amp; docs
+          <a href="/docs" target="_blank" rel="noopener noreferrer">
+            <HelpIcon size="rail" /> {t('shell.helpDocs')}
           </a>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/* the theme is one click from every page; picking one keeps the menu
             open so the change can be seen, and judged, before it closes */}
-        <DropdownMenuCaption>Appearance</DropdownMenuCaption>
+        <DropdownMenuCaption>{t('shell.appearance')}</DropdownMenuCaption>
         <DropdownMenuRadioGroup value={theme} onValueChange={(next) => isTheme(next) && setTheme(next)}>
           {themeOptions.map(({ value, label, Icon }) => (
             <DropdownMenuRadioItem key={value} value={value} onSelect={(e) => e.preventDefault()}>
-              <Icon {...rail} /> {label}
+              <Icon size="rail" /> {t(label)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        {/* the language sits beside the theme for the same reason, each named
+            in itself so someone who cannot read the current one finds theirs */}
+        <DropdownMenuCaption>{t('shell.language')}</DropdownMenuCaption>
+        <DropdownMenuRadioGroup value={locale} onValueChange={(next) => isLocale(next) && setLocale(next)}>
+          {LOCALES.map((value) => (
+            <DropdownMenuRadioItem key={value} value={value} lang={value} onSelect={(e) => e.preventDefault()}>
+              {LOCALE_NAMES[value]}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
@@ -137,75 +141,9 @@ export function AccountMenu() {
             })
           }
         >
-          <IconOut /> Log out
+          <LogOutIcon size="rail" /> {t('shell.logOut')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
 }
-
-/** The rail's bottom slot. Same card on every page — the quick command for the
- *  common case, and the full per-client instructions a click away. */
-export function ConnectCard() {
-  const [showConnect, setShowConnect] = useState(false)
-  return (
-    <>
-      <div className="rounded-[12px] border border-dashed border-line px-[13px] py-3">
-        <b className="block font-display text-[12.5px]">Connect an agent</b>
-        <p className="mt-[3px] text-[11.5px] leading-[1.45] text-ink-faint">
-          Any MCP client — one command, one browser approval.
-        </p>
-        <span className="mt-[9px] flex items-center gap-2">
-          <AgentIcon name="claude" size={14} />
-          <AgentIcon name="codex" size={14} color="var(--ink)" />
-          <em className="text-[10.5px] not-italic text-ink-faint">+ any MCP</em>
-        </span>
-        <CodeBlock
-          density="rail"
-          className="mt-2"
-          text={`claude mcp add --transport http doop "${location.origin}/mcp"`}
-        />
-        <Button
-          variant="link"
-          size="sm"
-          className="mt-[9px] px-0 py-0 text-[11.5px] text-accent-ink underline-offset-[3px]"
-          onClick={() => setShowConnect(true)}
-        >
-          Codex &amp; other clients →
-        </Button>
-      </div>
-      {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
-    </>
-  )
-}
-
-/* ---- icons ----
-   The shell's nav glyphs, at the rail's 15px, drawn from the shared set. */
-
-const rail = { width: 15, height: 15, 'aria-hidden': true } as const
-
-export const IconGrid = () => <GridIcon {...rail} />
-export const IconList = () => <ListIcon {...rail} />
-export const IconUser = () => <UserIcon {...rail} />
-export const IconKey = () => <KeyIcon {...rail} />
-export const IconWebhooks = () => <BellIcon {...rail} />
-export const IconShare = () => <UsersIcon {...rail} />
-/** the gallery: a compass — designs to steer by */
-export const IconCommunity = () => <CompassIcon {...rail} />
-/** a clock — things that happen on a schedule */
-export const IconAutomations = () => <ClockIcon {...rail} />
-/** a pulse line — a live connection */
-export const IconIntegrations = () => <PulseIcon {...rail} />
-export const IconSpark = () => <SparkIcon {...rail} />
-/** a shared workspace — the org's building */
-export const IconWorkspace = () => <BuildingIcon {...rail} />
-export const IconBilling = () => <CreditCardIcon {...rail} />
-export const IconLock = () => <LockIcon width={12} height={12} aria-hidden />
-export const IconGear = () => <GearIcon {...rail} />
-export const IconShield = () => <ShieldIcon {...rail} />
-export const IconHelp = () => <HelpIcon {...rail} />
-export const IconOut = () => <LogOutIcon {...rail} />
-/** the appearance pane: a half moon, the theme switch's own glyph */
-export const IconTheme = () => <MoonIcon {...rail} />
-export const IconBack = () => <ChevronLeftIcon width={14} height={14} aria-hidden />
-export const IconChevron = () => <ChevronRightIcon width={12} height={12} aria-hidden />

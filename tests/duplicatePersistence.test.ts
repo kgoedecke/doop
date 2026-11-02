@@ -1,10 +1,8 @@
 import { expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
-const PORT = 4981
-
 it('persists a complete canvas duplicate across a server restart', async () => {
-  let server: Server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  let server: Server = await startServer()
   try {
     const owner = new Client(server)
     await owner.signUp('duplicate@test.dev', 'Duplicate Owner')
@@ -48,7 +46,7 @@ it('persists a complete canvas duplicate across a server restart', async () => {
     const dataDir = server.dataDir
     server.stop({ keepData: true })
     await server.stopped
-    server = await startServer(PORT + 1, { BETTER_AUTH_URL: `http://localhost:${PORT + 1}` }, dataDir)
+    server = await startServer({}, dataDir)
 
     const signedIn = new Client(server)
     expect(

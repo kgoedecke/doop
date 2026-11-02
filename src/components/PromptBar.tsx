@@ -1,32 +1,41 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useStore } from '../lib/store'
-import { api } from '../lib/api'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useStore, type ComposerSend } from '../lib/store'
+import { api, type Allowance } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { uploadImageFrames } from '../lib/frameClipboard'
-import { MeterLine, isResidentLimit, useAllowance } from './TeamAllowance'
+import { isResidentLimit, meterText, useAllowance } from './TeamAllowance'
 import { Button } from './ui/button'
-import { Input } from './ui/input'
+import { Textarea } from './ui/textarea'
 import { Note } from './ui/note'
+import { Tooltip } from './ui/tooltip'
 import { DoopMark } from './Logo'
-import { AttachmentIcon, XIcon } from './ui/icons'
+import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
+import { ModelPicker } from './ModelPicker'
 import { LayerKindIcon } from './LayerKindIcon'
 import { buildLayerTree, findLayer, layerName } from '../lib/layers'
 import type { CardScope } from '../../shared/types'
 import type { LayerKind } from '../lib/layers'
-import { cn } from '../lib/utils'
+import { t as translate, useT } from '@/lib/i18n'
+import { cn } from '@/lib/utils'
 
 /**
- * The canvas's front door to the resident team: a prompt bar that queues a
- * board card without anyone having to discover the board first.
+ * The canvas's front door to the resident team: the prompt composer
+ * docked to the bottom of the Agents tab. It queues a board card without
+ * anyone having to discover the board first; the tasks it starts show up in
+ * the list above it.
  *
  * Screenshots and images attach via the paperclip (or a paste into the
- * input); on send they land on the canvas as reference frames and the card
+ * field); on send they land on the canvas as reference frames and the card
  * carries their ids so the agent looks at them before designing.
  */
 
 const MAX_ATTACHMENTS = 4
-/** the scope chip's label is cut here so a long text node never eats the input */
+/** the scope chip's label is cut here so a long text node never eats the row */
 const MAX_SCOPE_LABEL = 24
+/** the field grows with the draft up to this many lines, then scrolls */
+const MAX_COMPOSER_LINES = 6
+/** a ⌘K older than this is ignored by a composer that mounts later */
+const FOCUS_REQUEST_TTL_MS = 2000
 
 interface ScopeChip {
   scope: CardScope
@@ -49,11 +58,130 @@ const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024 // mirrors the server's asset cap
 /** How long after a submit a newly created frame still gets the camera. */
 const FLY_WINDOW_MS = 3 * 60_000
 
-function openFlyWindow(extraKnown: string[] = []): { known: Set<string>; until: number } {
-  return {
-    known: new Set([...(useStore.getState().canvas?.frames ?? []).map((f) => f.id), ...extraKnown]),
-    until: Date.now() + FLY_WINDOW_MS,
+let cancelPendingFlight: (() => void) | null = null
+
+/**
+ * After a submit, the first frame that wasn't on the canvas before gets a
+ * camera flight — the deliverable must stream in on-screen, never somewhere
+ * off-canvas the user has to go find. A store subscription rather than an
+ * effect: the composer lives in a panel tab, and switching tabs (or closing
+ * the panel) while the agent works must not cancel the flight. Leaving the
+ * canvas does: another canvas's frames are all "new" to this watch, and a
+ * flight there would land on something unrelated. A newer submit replaces
+ * an older watch.
+ */
+function flyToNextFrame(canvasId: string, extraKnown: string[]) {
+  cancelPendingFlight?.()
+  const known = new Set([...(useStore.getState().canvas?.frames ?? []).map((f) => f.id), ...extraKnown])
+  const unsubscribe = useStore.subscribe((s) => {
+    /* null while a canvas loads — only a different canvas ends the watch */
+    if (!s.canvas) return
+    if (s.canvas.id !== canvasId) return stop()
+    const arrived = s.canvas.frames.find((f) => !known.has(f.id))
+    if (!arrived) return
+    stop()
+    s.requestFlyTo(arrived.id)
+  })
+  const timer = window.setTimeout(stop, FLY_WINDOW_MS)
+  function stop() {
+    unsubscribe()
+    window.clearTimeout(timer)
+    if (cancelPendingFlight === stop) cancelPendingFlight = null
   }
+  cancelPendingFlight = stop
+}
+
+/** How long the "on it" confirmation stays up after a send. */
+const SENT_NOTE_MS = 5000
+
+function setSend(send: ComposerSend | null) {
+  useStore.getState().setComposerSend(send)
+}
+
+/**
+ * The send itself, detached from the component: the composer unmounts with
+ * its tab, and a send that fails after the user switched away must still
+ * report back when the tab returns. Progress and outcome go to the store;
+ * the draft is cleared only once the card is queued, so a failure leaves
+ * the text in place for a retry.
+ */
+async function sendPrompt(args: {
+  canvasId: string
+  text: string
+  files: File[]
+  scope: CardScope | undefined
+  allowance: Allowance | null
+}): Promise<void> {
+  const { canvasId, text, files, scope, allowance } = args
+  const store = useStore.getState()
+  if (store.composerSend?.status === 'busy') return
+  /* known-doomed send: no free tasks and no model account. Open the wall
+     up front instead of uploading attachments only to 403 — but confirm
+     against the server first, since the cached allowance can be stale
+     (an account connected in another tab). The server enforces either
+     way, so an unreachable check just falls through. Text stays in place. */
+  if (allowance && !allowance.byoModel && allowance.used >= allowance.limit) {
+    setSend({ canvasId, status: 'busy' })
+    const fresh = await api.agentAllowance().catch(() => null)
+    setSend(null)
+    if (fresh && !fresh.byoModel && fresh.used >= fresh.limit) {
+      store.setLimitWall(true)
+      return
+    }
+  }
+  setSend({ canvasId, status: 'busy' })
+  try {
+    /* attachments first: each becomes a reference frame on the canvas, and
+       the card carries the frame ids so the agent views them before
+       designing. Known-ids include them so the camera saves its flight for
+       the agent's deliverable, not the user's own screenshots. */
+    const refFrames = await uploadImageFrames(canvasId, files, { fallbackName: 'Attached image' })
+    await api.addCard(
+      canvasId,
+      text,
+      ['doop'],
+      refFrames.map((f) => f.id),
+      scope,
+    )
+    posthog.capture('prompt_bar_submitted', {
+      attachments: refFrames.length,
+      scope: scope ? (scope.selector ? 'element' : 'frame') : 'none',
+    })
+    flyToNextFrame(
+      canvasId,
+      refFrames.map((f) => f.id),
+    )
+    store.setComposerDraft(canvasId, '')
+    const sent: ComposerSend = { canvasId, status: 'sent', at: Date.now() }
+    setSend(sent)
+    window.setTimeout(() => {
+      if (useStore.getState().composerSend === sent) setSend(null)
+    }, SENT_NOTE_MS)
+  } catch (err) {
+    if (isResidentLimit(err)) {
+      store.setLimitWall(true)
+      setSend(null)
+    } else {
+      console.error(err)
+      setSend({
+        canvasId,
+        status: 'error',
+        message: err instanceof Error ? err.message : translate('panels.promptSendFailed'),
+        at: Date.now(),
+      })
+    }
+  } finally {
+    /* every meter on screen re-reads the allowance, mounted or not */
+    useStore.getState().allowanceChanged()
+  }
+}
+
+/** Size the field to its draft, up to MAX_COMPOSER_LINES. */
+function autosize(ta: HTMLTextAreaElement) {
+  ta.style.height = 'auto'
+  if (!ta.scrollHeight) return // not laid out (hidden, or a DOM without layout)
+  const line = parseFloat(getComputedStyle(ta).lineHeight) || 20
+  ta.style.height = `${Math.min(ta.scrollHeight, Math.round(line * MAX_COMPOSER_LINES))}px`
 }
 
 interface Attachment {
@@ -66,7 +194,15 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const frames = useStore((s) => s.canvas?.frames)
   const selectedId = useStore((s) => s.selectedId)
   const selectedElement = useStore((s) => s.selectedElement)
-  const { allowance, refresh } = useAllowance()
+  const focusAt = useStore((s) => s.composerFocusAt)
+  const text = useStore((s) => s.composerDrafts[canvasId] ?? '')
+  const setDraft = useStore((s) => s.setComposerDraft)
+  /* this canvas's send only: another canvas's outcome is not ours to show */
+  const send = useStore((s) => (s.composerSend?.canvasId === canvasId ? s.composerSend : null))
+  const busy = send?.status === 'busy'
+  const sent = send?.status === 'sent'
+  const sendError = send?.status === 'error' ? send.message : null
+  const { allowance } = useAllowance()
   /* the selection is the prompt's scope until the chip is dismissed — × or
      Esc drops it entirely, no stepping up to the frame. Keyed on the scope
      so a new selection brings the chip back. */
@@ -82,35 +218,31 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
     const node = findLayer(buildLayerTree(frame.html), selectedElement.selector)
     return {
       scope,
-      label: node ? layerName(node) : (selectedElement.selector.split(' > ').at(-1) ?? 'element'),
+      label: node ? layerName(node) : (selectedElement.selector.split(' > ').at(-1) ?? ''),
       kind: node?.kind ?? 'box',
     }
   }, [frames, selectedId, selectedElement, dismissed])
-  const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [busy, setBusy] = useState(false)
-  const [sent, setSent] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  /* attachment slips (too big, too many) — local and brief, unlike a failed
+     send, which the store keeps until the draft changes */
+  const [attachError, setAttachError] = useState<string | null>(null)
+  /* an image file is being dragged over the composer */
+  const [dropping, setDropping] = useState(false)
+  const error = attachError ?? sendError
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const t = useT()
 
-  /* after a submit, the first frame that wasn't on the canvas before gets a
-     camera flight — the deliverable must stream in on-screen, never somewhere
-     off-canvas the user has to go find */
-  const awaiting = useRef<{ known: Set<string>; until: number } | null>(null)
+  useLayoutEffect(() => {
+    if (inputRef.current) autosize(inputRef.current)
+  }, [text])
+
+  /* ⌘K: the page has opened the panel on this tab — take the keyboard. The
+     request is a timestamp so a composer mounted later (a tab switch some
+     minutes on) does not re-run an old one. */
   useEffect(() => {
-    const a = awaiting.current
-    if (!a || !frames) return
-    if (Date.now() > a.until) {
-      awaiting.current = null
-      return
-    }
-    const arrived = frames.find((f) => !a.known.has(f.id))
-    if (arrived) {
-      awaiting.current = null
-      useStore.getState().requestFlyTo(arrived.id)
-    }
-  }, [frames])
+    if (focusAt && Date.now() - focusAt < FOCUS_REQUEST_TTL_MS) inputRef.current?.focus()
+  }, [focusAt])
 
   /* previews are object URLs — release whatever is still held on unmount
      (via a ref: an empty-deps cleanup would close over the first render) */
@@ -121,8 +253,8 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   useEffect(() => () => attachmentsRef.current.forEach((a) => URL.revokeObjectURL(a.preview)), [])
 
   function showError(msg: string) {
-    setError(msg)
-    window.setTimeout(() => setError(null), 5000)
+    setAttachError(msg)
+    window.setTimeout(() => setAttachError(null), 5000)
   }
 
   function addFiles(list: Iterable<File>) {
@@ -131,8 +263,8 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
     const oversize = images.find((f) => f.size > MAX_ATTACHMENT_BYTES)
     const fitting = images.filter((f) => f.size <= MAX_ATTACHMENT_BYTES)
     const room = MAX_ATTACHMENTS - attachments.length
-    if (oversize) showError(`“${oversize.name}” exceeds the 5 MB limit`)
-    else if (fitting.length > room) showError(`Up to ${MAX_ATTACHMENTS} images per request`)
+    if (oversize) showError(t('panels.promptTooBig', { name: oversize.name }))
+    else if (fitting.length > room) showError(t('panels.promptTooMany', { count: MAX_ATTACHMENTS }))
     const ok = fitting.slice(0, Math.max(0, room))
     if (ok.length)
       setAttachments((cur) => [...cur, ...ok.map((file) => ({ file, preview: URL.createObjectURL(file) }))])
@@ -146,86 +278,80 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   async function submit(prompt: string) {
     const clean = prompt.trim()
     if (!clean || busy) return
-    /* known-doomed send: no free tasks and no model account. Open the wall
-       up front instead of uploading attachments only to 403 — but confirm
-       against the server first, since the cached allowance can be stale
-       (an account connected in another tab). The server enforces either
-       way, so an unreachable check just falls through. Text stays in place. */
-    if (allowance && !allowance.byoModel && allowance.used >= allowance.limit) {
-      setBusy(true)
-      const fresh = await api.agentAllowance().catch(() => null)
-      setBusy(false)
-      if (fresh && !fresh.byoModel && fresh.used >= fresh.limit) {
-        useStore.getState().setLimitWall(true)
-        return
-      }
-      refresh()
-    }
-    setBusy(true)
-    try {
-      /* attachments first: each becomes a reference frame on the canvas, and
-         the card carries the frame ids so the agent views them before
-         designing. Known-ids include them so the camera saves its flight for
-         the agent's deliverable, not the user's own screenshots. */
-      const refFrames = await uploadImageFrames(
-        canvasId,
-        attachments.map((a) => a.file),
-        'Attached image',
-      )
-      await api.addCard(
-        canvasId,
-        clean,
-        ['doop'],
-        refFrames.map((f) => f.id),
-        chip?.scope,
-      )
-      posthog.capture('prompt_bar_submitted', {
-        attachments: refFrames.length,
-        scope: chip ? (chip.scope.selector ? 'element' : 'frame') : 'none',
-      })
-      awaiting.current = openFlyWindow(refFrames.map((f) => f.id))
+    const files = attachments.map((a) => a.file)
+    await sendPrompt({ canvasId, text: clean, files, scope: chip?.scope, allowance })
+    /* the thumbnails go once the card is queued: the files were handed to
+       the upload, and a failure keeps the text and the previews for a retry */
+    if (useStore.getState().composerDrafts[canvasId] === '') {
       attachments.forEach((a) => URL.revokeObjectURL(a.preview))
       setAttachments([])
-      setText('')
-      setSent(true)
-      window.setTimeout(() => setSent(false), 5000)
-    } catch (err) {
-      if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
-      else {
-        console.error(err)
-        showError(err instanceof Error ? err.message : 'Something went wrong — try again')
-      }
-    } finally {
-      setBusy(false)
-      refresh()
     }
   }
 
+  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Escape' && chip) {
+      e.preventDefault()
+      setDismissed(scopeKey(chip.scope))
+      return
+    }
+    /* Enter sends, ⇧Enter breaks the line; an Enter that commits an IME
+       composition is neither */
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      void submit(text)
+    }
+  }
+
+  /* dropped images attach like pasted ones; claiming the drag keeps the
+     canvas, which listens on the window, from turning it into frames */
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = busy ? 'none' : 'copy'
+    setDropping(!busy)
+  }
+
+  function onDragLeave(e: DragEvent<HTMLDivElement>) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false)
+  }
+
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setDropping(false)
+    if (!busy) addFiles(e.dataTransfer.files)
+  }
+
   return (
-    <div className="absolute bottom-[68px] left-1/2 z-30 flex w-[min(560px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-2 max-md:bottom-[calc(76px+env(safe-area-inset-bottom))] max-md:w-[calc(100vw-16px)] max-md:gap-1.5">
+    <div
+      className={cn(
+        'flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2',
+        dropping && 'bg-paper-deep',
+      )}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {attachments.length > 0 && (
-        <div className="flex gap-2 px-0.5">
+        <div className="flex flex-wrap gap-1.5">
           {attachments.map((a) => (
-            <div
-              key={a.preview}
-              className="relative h-[52px] w-[52px] overflow-hidden rounded-[8px] border border-line bg-surface shadow-card"
-            >
+            <div key={a.preview} className="relative h-11 w-11 overflow-hidden rounded-[7px] bg-paper shadow-ring">
               <img src={a.preview} alt={a.file.name} className="block h-full w-full object-cover" />
               <Button
                 variant="bare"
                 className="absolute right-0.5 top-0.5 size-4 justify-center rounded-full bg-black/55 p-0 text-xs leading-none text-white hover:bg-black/70 hover:text-white"
-                aria-label={`Remove ${a.file.name}`}
+                aria-label={t('panels.promptRemoveAttachment', { name: a.file.name })}
                 disabled={busy}
                 onClick={() => removeAttachment(a.preview)}
               >
-                ×
+                <XIcon size={10} />
               </Button>
             </div>
           ))}
         </div>
       )}
       <form
-        className="flex items-center gap-2 rounded-[12px] border border-line bg-surface p-1.5 shadow-pop max-md:gap-[3px] max-md:p-[5px]"
+        className="rounded-[10px]"
         onSubmit={(e) => {
           e.preventDefault()
           void submit(text)
@@ -242,62 +368,51 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             e.target.value = '' // same file can be re-picked after removal
           }}
         />
-        <Button
-          variant="bare"
-          className="ml-0 size-10 justify-center p-2 text-ink-faint hover:bg-paper hover:text-ink-soft sm:ml-0.5 sm:size-auto sm:p-1.5"
-          aria-label="Attach images"
-          title="Attach screenshots or images"
-          disabled={busy}
-          onClick={() => fileRef.current?.click()}
-        >
-          <AttachmentIcon aria-hidden />
-        </Button>
         {chip && (
-          <span
-            className="group/scope flex max-w-[40%] flex-none items-center gap-1 rounded-[7px] bg-brand/10 py-1 pl-2 pr-1 font-mono text-[12.5px] text-accent-ink"
-            title={
-              chip.kind === 'frame' ? `Scoped to the frame “${chip.label}”` : `Scoped to ${chip.label} in this frame`
-            }
-          >
-            <span className="flex-none opacity-70">
-              {chip.kind === 'frame' ? <FrameGlyph /> : <LayerKindIcon kind={chip.kind} />}
-            </span>
-            <span className="min-w-0 truncate">{clip(chip.label)}</span>
-            <Button
-              variant="bare"
-              className={cn(
-                'size-4 flex-none justify-center rounded-full p-0 text-accent-ink/70 hover:bg-brand/15 hover:text-accent-ink',
-                'opacity-0 transition-opacity focus-visible:opacity-100 group-hover/scope:opacity-100',
-              )}
-              aria-label={chip.kind === 'frame' ? 'Remove frame scope' : 'Remove element scope'}
-              disabled={busy}
-              onClick={() => setDismissed(scopeKey(chip.scope))}
+          <div className="mb-2 flex">
+            <span
+              className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-[6px] pr-1 pl-2 text-[12px] text-ink-soft shadow-ring"
+              title={
+                chip.kind === 'frame'
+                  ? t('panels.promptScopedFrame', { name: chip.label })
+                  : t('panels.promptScopedElement', { name: chip.label || t('panels.promptElement') })
+              }
             >
-              <XIcon className="size-3" aria-hidden />
-            </Button>
-          </span>
+              <span className="flex-none text-ink-faint">
+                {chip.kind === 'frame' ? <FrameIcon className="size-3.5" /> : <LayerKindIcon kind={chip.kind} />}
+              </span>
+              <span className="min-w-0 truncate">{clip(chip.label || t('panels.promptElement'))}</span>
+              <Button
+                variant="bare"
+                className="size-4 flex-none justify-center rounded-full p-0 text-ink-faint hover:bg-paper-deep hover:text-ink"
+                aria-label={
+                  chip.kind === 'frame' ? t('panels.promptRemoveFrameScope') : t('panels.promptRemoveElementScope')
+                }
+                disabled={busy}
+                onClick={() => setDismissed(scopeKey(chip.scope))}
+              >
+                <XIcon className="size-3" aria-hidden />
+              </Button>
+            </span>
+          </div>
         )}
-        <Input
+        <Textarea
           ref={inputRef}
           variant="bare"
-          inputSize="auto"
-          className="min-w-0 flex-1 px-1 py-1.5 md:px-2 md:text-sm"
+          rows={1}
+          aria-label={t('panels.promptAria')}
+          className="block overflow-y-auto px-0.5 text-[12.5px] leading-[1.45] placeholder:text-ink-ghost md:text-[12.5px]"
           value={text}
           disabled={busy}
           placeholder={
             chip
               ? chip.kind === 'frame'
-                ? 'Ask the Doop Agent to change this frame…'
-                : 'Ask the Doop Agent to change this element…'
-              : 'Ask the Doop Agent to design something…'
+                ? t('panels.promptPlaceholderFrame')
+                : t('panels.promptPlaceholderElement')
+              : t('panels.promptPlaceholder')
           }
-          onKeyDown={(e) => {
-            if (e.key === 'Escape' && chip) {
-              e.preventDefault()
-              setDismissed(scopeKey(chip.scope))
-            }
-          }}
-          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          onChange={(e) => setDraft(canvasId, e.target.value)}
           onPaste={(e) => {
             const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
             if (images.length) {
@@ -306,43 +421,57 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             }
           }}
         />
-        <Button
-          variant="primary"
-          className="min-h-10 flex-none rounded-lg border-transparent px-2.5 py-2 shadow-none hover:translate-x-0 hover:translate-y-0 hover:shadow-none sm:min-h-0 sm:px-3.5 sm:py-[7px]"
-          type="submit"
-          disabled={busy || !text.trim()}
-        >
-          {busy ? '…' : 'Design it'}
-        </Button>
+        <div className="mt-2 flex items-center gap-1">
+          <Button
+            variant="bare"
+            size="icon-sm"
+            className="size-7 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+            aria-label={t('panels.promptAttach')}
+            title={t('panels.promptAttachTitle')}
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            <AttachmentIcon className="size-3.5" />
+          </Button>
+          <span className="flex-1" />
+          <ModelPicker disabled={busy} />
+          {/* the meter rides on the send button; a disabled button takes no
+              pointer events, so the span under it is what the tooltip hangs on */}
+          <Tooltip label={meterText(allowance, t) ?? t('panels.promptSendTooltip')} side="top" align="end">
+            <span
+              className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
+              /* while the button is disabled the wrapper takes its tab stop,
+                 so the meter can be reached and read without a pointer */
+              tabIndex={busy || !text.trim() ? 0 : -1}
+              aria-label={meterText(allowance, t) ?? undefined}
+            >
+              <Button
+                variant="primary"
+                size="icon-sm"
+                className="size-7 rounded-full"
+                type="submit"
+                aria-label={t('panels.promptSend')}
+                disabled={busy || !text.trim()}
+              >
+                {busy ? <span aria-hidden>…</span> : <ArrowUpIcon className="size-3.5" strokeWidth={1.6} />}
+              </Button>
+            </span>
+          </Tooltip>
+        </div>
       </form>
-      <div className="flex min-h-4 justify-center">
-        {error ? (
-          <Note tone="error" size="sm" className="text-xs">
-            {error}
-          </Note>
-        ) : sent ? (
-          <Note size="sm" className="text-xs text-ink-soft">
-            <DoopMark size={11} /> The Doop Agent is on it — watch the canvas
-          </Note>
-        ) : chip ? (
-          <Note size="sm" className="text-xs text-ink-soft">
-            <span className="text-accent-ink">✦</span>{' '}
-            {chip.kind === 'frame'
-              ? 'Scoped to this frame — press Esc to ask about the whole canvas'
-              : 'Scoped to the selection — press Esc to ask without it'}
-          </Note>
-        ) : (
-          <MeterLine allowance={allowance} />
-        )}
-      </div>
+      {(error || sent) && (
+        <div className="text-[11px] leading-[1.4]">
+          {error ? (
+            <Note tone="error" size="sm" className="text-[11px]">
+              {error}
+            </Note>
+          ) : (
+            <Note size="sm" className="text-[11px] text-ink-soft">
+              <DoopMark size={11} /> {t('panels.promptSent')}
+            </Note>
+          )}
+        </div>
+      )}
     </div>
-  )
-}
-
-function FrameGlyph() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
-      <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" />
-    </svg>
   )
 }

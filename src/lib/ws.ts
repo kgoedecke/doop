@@ -100,6 +100,9 @@ function handle(msg: ServerMessage) {
         else if (loadedBuild !== msg.serverBuild) s.setUpdateReady(true)
       }
       s.setCanvas(msg.canvas)
+      /* drops a tool the role does not allow, e.g. on a rejoin after the
+         owner turned the link to view-only */
+      s.setRole(msg.canvas.role ?? 'edit')
       void connectFrames(msg.canvas.id)
         .then(refreshFrames)
         .catch((error) => console.error('[canvas]', error))
@@ -108,9 +111,11 @@ function handle(msg: ServerMessage) {
       s.setTasks(msg.tasks)
       s.setFeedback(msg.feedback)
       s.setComments(msg.comments)
-      s.setChat(msg.chat)
       s.setDecisions(msg.decisions)
       s.setProposals(msg.proposals)
+      break
+    case 'role':
+      s.setRole(msg.role)
       break
     case 'presence:join':
       if (msg.presence.clientId !== me) s.upsertPresence(msg.presence)
@@ -142,6 +147,9 @@ function handle(msg: ServerMessage) {
     case 'frame:streaming':
       s.setStream(msg.frameId, msg.active ? { name: msg.actor.name, color: msg.actor.color } : null)
       break
+    case 'guide':
+      s.setGuideLocal(msg.id, msg.guide)
+      break
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
       break
@@ -163,9 +171,6 @@ function handle(msg: ServerMessage) {
       break
     case 'activity':
       s.pushActivity(msg.item)
-      break
-    case 'chat':
-      s.pushChat(msg.message)
       break
   }
 }

@@ -1,5 +1,6 @@
 import { randomUUID, createHmac } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import { eq } from 'drizzle-orm'
 import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
 import express from 'express'
@@ -20,6 +21,7 @@ import * as actions from '../server/actions.ts'
 import { onFeedback } from '../server/resident.ts'
 import { pickModel } from '../server/agentModel.ts'
 import { consumeResidentTask } from '../server/allowance.ts'
+import { isBanned } from '../server/auth.ts'
 import type { z } from 'zod'
 
 vi.mock('../server/db/index.ts', async () => {
@@ -29,6 +31,7 @@ vi.mock('../server/db/index.ts', async () => {
   return { db: drizzle(new PGlite(), { schema }) }
 })
 vi.mock('../server/resident.ts', () => ({ onFeedback: vi.fn() }))
+vi.mock('../server/auth.ts', () => ({ isBanned: vi.fn().mockResolvedValue(false) }))
 vi.mock('../server/agentModel.ts', () => ({ pickModel: vi.fn().mockResolvedValue({ userId: 'owner' }) }))
 vi.mock('../server/allowance.ts', () => ({
   consumeResidentTask: vi.fn().mockResolvedValue({ ok: true, byoModel: true }),
@@ -86,10 +89,10 @@ beforeAll(async () => {
 }, 30_000)
 
 beforeEach(async () => {
-  vi.stubEnv('LINEAR_CLIENT_ID', 'linear-client')
-  vi.stubEnv('LINEAR_CLIENT_SECRET', 'linear-secret')
-  vi.stubEnv('LINEAR_WEBHOOK_SECRET', 'webhook-secret')
-  vi.stubEnv('BETTER_AUTH_URL', 'https://doop.example')
+  stubEnv('LINEAR_CLIENT_ID', 'linear-client')
+  stubEnv('LINEAR_CLIENT_SECRET', 'linear-secret')
+  stubEnv('LINEAR_WEBHOOK_SECRET', 'webhook-secret')
+  stubEnv('BETTER_AUTH_URL', 'https://doop.example')
   await db.delete(linearSessions)
   await db.delete(linearInstallations)
   await db.delete(linearOAuthStates)
@@ -99,6 +102,7 @@ beforeEach(async () => {
   sessionId = randomUUID()
   sent.length = 0
   vi.clearAllMocks()
+  vi.mocked(isBanned).mockResolvedValue(false)
   vi.mocked(pickModel).mockResolvedValue({ userId } as Awaited<ReturnType<typeof pickModel>>)
   vi.mocked(consumeResidentTask).mockResolvedValue({ ok: true, byoModel: true } as Awaited<
     ReturnType<typeof consumeResidentTask>
@@ -123,7 +127,11 @@ beforeEach(async () => {
           expires_in: 86_400,
         })
       const { query, variables } = JSON.parse(String(options?.body))
-      sent.push({ query, variables, authorization: (options?.headers as Record<string, string>).Authorization ?? '' })
+      sent.push({
+        query,
+        variables,
+        authorization: (options?.headers as Record<string, string> | undefined)?.Authorization ?? '',
+      })
       if (query.includes('DoopAgentIdentity'))
         return Response.json({
           data: {
@@ -140,7 +148,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   vi.unstubAllGlobals()
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   await new Promise<void>((resolve) => webhookServer.close(() => resolve()))
 })
 
@@ -235,6 +243,39 @@ describe('delegation jobs', () => {
     await tickLinear()
     expect((await session()).status).toBe('failed')
     expect(onFeedback).not.toHaveBeenCalled()
+  })
+
+  it('stops a suspended installer’s work and refuses new sessions', async () => {
+    await receiveSession(event())
+    await tickLinear()
+    const row = await session()
+    expect(row.status).toBe('running')
+    vi.mocked(isBanned).mockResolvedValue(true)
+    await tickLinear()
+    expect((await session()).status).toBe('canceled')
+    expect((await session()).reported).toBe(true)
+    expect(actions.getTasks(row.canvasId!).find((task) => task.id === row.taskId)?.failedAt).toBeTruthy()
+    expect(JSON.stringify(sent.at(-1))).toContain('suspended')
+    sessionId = randomUUID()
+    await receiveSession(event())
+    await tickLinear()
+    expect((await session()).status).toBe('canceled')
+    expect(consumeResidentTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('times a run out an hour after it starts, not an hour after the delegation arrived', async () => {
+    const twoHoursAgo = Date.now() - 2 * 60 * 60_000
+    await receiveSession(event())
+    await db.update(linearSessions).set({ createdAt: twoHoursAgo }).where(eq(linearSessions.id, sessionId))
+    await tickLinear()
+    await tickLinear()
+    const row = await session()
+    expect(row.status).toBe('running')
+    const card = actions.getTasks(row.canvasId!).find((task) => task.id === row.taskId)!
+    card.startedAt = twoHoursAgo
+    await tickLinear()
+    expect((await session()).status).toBe('failed')
+    expect(card.failedAt).toBeTruthy()
   })
 
   it('rejects mismatched workspace, app user and OAuth client', async () => {

@@ -1,6 +1,8 @@
 import type { ComponentType, ReactNode } from 'react'
 import type { IntegrationsStatus } from '../lib/api'
+import type { PlainMessageKey } from '../lib/i18n'
 import { linearIntegration } from './linear'
+import { slackIntegration } from './slack'
 
 /**
  * Client extensions, the mirror of `server/extensions.ts`: each integration
@@ -37,8 +39,8 @@ interface ClientIntegrationBase {
   Tile?: ComponentType<{ size?: number; className?: string }>
   /** its card in the import modal's source picker (with `ImportSection`) */
   importSource?: { title: string; blurb: string; icon: ReactNode }
-  /** body copy of the shared disconnect confirm dialog */
-  disconnectCopy: string
+  /** body copy of the shared disconnect confirm dialog, translated where it shows */
+  disconnectCopy: PlainMessageKey
   isConnected(status: IntegrationsStatus): boolean
   disconnect(): Promise<IntegrationsStatus>
   SettingsCard: ComponentType<SettingsCardProps>
@@ -62,4 +64,4 @@ export type ClientIntegration =
       }
     })
 
-export const clientIntegrations: ClientIntegration[] = [linearIntegration]
+export const clientIntegrations: ClientIntegration[] = [linearIntegration, slackIntegration]

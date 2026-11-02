@@ -5,6 +5,9 @@ import type { AgentTask, Frame } from '../shared/types.ts'
    that every mutation that should be an event is one, after the room has
    been told, and that one bad listener never reaches the mutation. */
 vi.mock('../server/db/persist.ts', () => ({
+  saveFrame: () => {},
+  saveFrameNow: async () => {},
+  saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
   saveComment: () => {},
@@ -24,7 +27,7 @@ const FRAME: Frame = {
   id: 'f1',
   canvasId: CANVAS,
   name: 'Hero',
-  html: '<p/>',
+  html: '<h1>Hi</h1><p/>',
   x: 0,
   y: 0,
   width: 10,
@@ -61,6 +64,14 @@ beforeEach(() => {
     proposals: new Map(),
   })
   vi.spyOn(store, 'getFrame').mockImplementation(async (id) => (id === FRAME.id ? FRAME : undefined))
+  vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id) =>
+    id === FRAME.id ? { id, canvasId: FRAME.canvasId } : undefined,
+  )
+  /* a comment stamps its element's id into the frame: apply it to the fixture */
+  vi.spyOn(store, 'updateFrame').mockImplementation(async (id, patch) => {
+    const f = await store.getFrame(id)
+    return f ? Object.assign(f, patch) : undefined
+  })
   vi.spyOn(store, 'createFrame').mockResolvedValue(FRAME)
   return events.onCanvasEvent((canvasId, event) => void seen.push({ canvasId, event }))
 })

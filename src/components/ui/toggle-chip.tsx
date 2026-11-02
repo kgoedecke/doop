@@ -6,9 +6,10 @@ import { cn } from '@/lib/utils'
 
 /* The plan/model pickers: a row of soft pills where the chosen one snaps to
    the ink hairline instead of the soft one. `idle` is the read-only form used on rows that
-   only list what a connection can do. */
+   only list what a connection can do. `sm` is the compact row: the gallery's
+   shelf filter, the publish shelf picker. */
 const toggleChipVariants = cva(
-  'inline-flex items-center gap-[7px] rounded-md border px-3 py-2 text-[13px] font-medium transition-[background-color,color,box-shadow,border-color]',
+  'inline-flex items-center gap-1.75 rounded-row border font-medium transition-[background-color,color,box-shadow,border-color]',
   {
     variants: {
       state: {
@@ -16,8 +17,12 @@ const toggleChipVariants = cva(
         on: 'border-ink bg-surface font-semibold text-ink',
         idle: 'cursor-default border-transparent bg-paper-deep text-ink-soft opacity-75',
       },
+      size: {
+        md: 'px-3 py-2 text-body/4',
+        sm: 'px-2.5 py-1 text-label',
+      },
     },
-    defaultVariants: { state: 'off' },
+    defaultVariants: { state: 'off', size: 'md' },
   },
 )
 
@@ -44,13 +49,17 @@ function ToggleChipGroup({
 }
 
 /** One chip inside a ToggleChipGroup. */
-function ToggleChipItem({ className, ...props }: React.ComponentProps<typeof ToggleGroupPrimitive.Item>) {
+function ToggleChipItem({
+  className,
+  size,
+  ...props
+}: React.ComponentProps<typeof ToggleGroupPrimitive.Item> & Pick<VariantProps<typeof toggleChipVariants>, 'size'>) {
   return (
     <ToggleGroupPrimitive.Item
       data-slot="toggle-chip"
       className={cn(
-        toggleChipVariants({ state: 'off' }),
-        'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=on]:border-ink data-[state=on]:bg-surface data-[state=on]:font-semibold data-[state=on]:text-ink ',
+        toggleChipVariants({ state: 'off', size }),
+        'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=on]:border-ink data-[state=on]:bg-surface data-[state=on]:font-semibold data-[state=on]:text-ink',
         className,
       )}
       {...props}

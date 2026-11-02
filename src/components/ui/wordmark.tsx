@@ -15,7 +15,7 @@ function Wordmark({
       data-slot="wordmark"
       className={cn(
         'flex items-center gap-3 font-display font-extrabold tracking-[-0.01em]',
-        size === 'sm' ? 'gap-2 text-[15px]' : 'text-[18px]',
+        size === 'sm' ? 'gap-2 text-lead/4.5' : 'text-heading/5.5',
         className,
       )}
       {...props}

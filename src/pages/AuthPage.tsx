@@ -1,26 +1,32 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
+import { BrandMark } from '../components/ui/brand-mark'
 import { setName } from '../lib/identity'
 import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
-import type { DesktopSignInProvider } from '../lib/desktopAuth'
+import type { DesktopSignInProvider, ProviderRedirects } from '../lib/desktopAuth'
 import { safeRelativeTarget } from '../lib/safeTarget'
+import { CODEX_SETUP_PATH } from '../lib/codexConnection'
+import { FIRST_CANVAS_PATH, firstCanvasPathAfterSignup } from '../../shared/firstCanvas'
 import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
-import { AuthScreen } from '../components/ui/screen'
-import { Wordmark } from '../components/ui/wordmark'
+import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
 import { Button } from '../components/ui/button'
+import { ArrowRightIcon } from '../components/ui/icons'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
 import { Callout } from '../components/ui/callout'
-
-/* the auth form's fields sit on paper and soften their focus ring */
-const authInput = 'rounded-lg bg-paper focus:border-ink-soft focus:ring-0 md:text-sm'
+import { useT, type PlainMessageKey } from '../lib/i18n'
 
 /* If login interrupted an MCP OAuth authorize redirect, send the browser
    back into the flow so the agent connection completes. */
 /* better-auth deliberately returns the same "invalid email or password" for
    unknown emails and wrong passwords; this tells the two apart so the login
    page can route would-be signups to the right form. */
+/* A request that never reached the server (offline, a blocked request, a
+   dropped connection) rejects instead of returning `res.error`; without a
+   catch the form just stops spinning and says nothing. */
+const NETWORK_ERROR = 'auth.networkError' satisfies PlainMessageKey
+
 async function accountExists(email: string): Promise<boolean> {
   try {
     const res = await fetch('/api/account-exists', {
@@ -35,62 +41,61 @@ async function accountExists(email: string): Promise<boolean> {
   }
 }
 
-function resumeOAuthFlow(): boolean {
+/* better-auth types the error code as a string, but what arrives is whatever
+   the response carried, and a non-string code crashed the signup form */
+function isUserAlreadyExists(code: unknown): boolean {
+  return typeof code === 'string' && code.startsWith('USER_ALREADY_EXISTS')
+}
+
+function interruptedTarget(): string | null {
+  if (location.pathname === '/oauth/consent' || location.pathname === CODEX_SETUP_PATH)
+    return location.pathname + location.search
   const params = new URLSearchParams(location.search)
   const target = safeRelativeTarget(params.get('redirect_to') || params.get('redirect_uri'))
-  if (target) {
-    location.href = target
-    return true
-  }
-  if (params.has('client_id') && params.has('response_type')) {
-    location.href = `/api/auth/mcp/authorize${location.search}`
-    return true
-  }
-  return false
+  if (target) return target
+  if (params.has('client_id') && params.has('response_type')) return `/api/auth/mcp/authorize${location.search}`
+  return null
+}
+
+/* Where the verification link lands a signup that had to confirm its email
+   first (SMTP on): the interrupted flow if there was one, else the first
+   canvas — the same landing an instantly signed-in signup gets below. */
+function verifiedLanding(): string {
+  return interruptedTarget() ?? FIRST_CANVAS_PATH
+}
+
+function resumeOAuthFlow(): boolean {
+  const target = interruptedTarget()
+  if (target) location.href = target
+  return target !== null
 }
 
 type AuthMode = 'signin' | 'signup' | 'forgot' | 'reset'
 
+/** the card's title for each mode */
+const TITLES: Record<AuthMode, PlainMessageKey> = {
+  signin: 'auth.titleSignin',
+  signup: 'auth.titleSignup',
+  forgot: 'auth.titleForgot',
+  reset: 'auth.titleReset',
+}
+
 /** The redirect knobs shared by better-auth's social and oauth2 sign-ins. */
-interface ProviderStart {
-  callbackURL: string
+interface ProviderStart extends ProviderRedirects {
   errorCallbackURL: string
 }
 
-/** Microsoft's four-square logo, per its sign-in branding guidelines (inline for the same reason). */
+/* The providers' marks at the 18px their sign-in guidelines draw them, from the registry. */
 function MicrosoftMark() {
-  return (
-    <svg viewBox="0 0 21 21" width="18" height="18" aria-hidden="true" className="shrink-0">
-      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-    </svg>
-  )
+  return <BrandMark brand="microsoft" size={18} className="shrink-0" />
 }
 
-/** Google's four-colour "G", per its sign-in branding guidelines (kept inline: no icon set ships it). */
+function AppleMark() {
+  return <BrandMark brand="apple" size={18} className="shrink-0" />
+}
+
 function GoogleMark() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" className="shrink-0">
-      <path
-        fill="#4285F4"
-        d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.64h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.58-5.17 3.58-8.81Z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.88-3c-1.07.72-2.45 1.15-4.06 1.15-3.13 0-5.77-2.11-6.72-4.95H1.28v3.09A12 12 0 0 0 12 24Z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.28 14.29A7.2 7.2 0 0 1 4.9 12c0-.8.14-1.57.38-2.29V6.62H1.28a12 12 0 0 0 0 10.76l4-3.09Z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 4.77c1.76 0 3.34.61 4.59 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.28 6.62l4 3.09C6.23 6.88 8.87 4.77 12 4.77Z"
-      />
-    </svg>
-  )
+  return <BrandMark brand="google" size={18} className="shrink-0" />
 }
 
 /* Human copy for the OAuth error codes better-auth's callback can redirect
@@ -101,14 +106,13 @@ function GoogleMark() {
    (see linkVerifiedProviderEmail in server/auth.ts for why that should now be
    rare, not why it can still happen — a provider that never sends
    email_verified, for instance). */
-const SSO_ERROR_MESSAGES: Record<string, string> = {
-  account_not_linked:
-    'That email already has a doop account that could not be linked automatically — sign in with email/password instead.',
-  "email_doesn't_match": "The signed-in email doesn't match the account you started from — try again.",
-  email_is_missing: "Your identity provider didn't share an email address — doop needs one to sign you in.",
-  email_not_found: "Your identity provider didn't share an email address — doop needs one to sign you in.",
+const SSO_ERROR_MESSAGES: Record<string, PlainMessageKey> = {
+  account_not_linked: 'auth.ssoAccountNotLinked',
+  "email_doesn't_match": 'auth.ssoEmailMismatch',
+  email_is_missing: 'auth.ssoEmailMissing',
+  email_not_found: 'auth.ssoEmailMissing',
   /* the desktop shell's browser handoff (src/lib/desktopAuth.ts) came back with a spent or expired token */
-  desktop_handoff: 'That sign-in link has expired — start again and finish in your browser within a couple of minutes.',
+  desktop_handoff: 'auth.ssoDesktopHandoff',
 }
 
 /* A failure inside the IdP round trip (the browser has already left and
@@ -122,27 +126,33 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
    contain underscores, so flipping them back restores it verbatim. */
 const SIGNUP_RESTRICTED_PREFIX = 'Sign_up_is_restricted'
 
-function ssoErrorFromUrl(): string | null {
+/** What to show for a provider failure: the server's own words when it sent
+ *  any (`text`), else the message key for the code (`key`). */
+type SsoError = { text: string } | { key: PlainMessageKey }
+
+function ssoErrorFromUrl(): SsoError | null {
   const params = new URLSearchParams(location.search)
   const code = params.get('error')
   if (!code) return null
-  if (code.startsWith(SIGNUP_RESTRICTED_PREFIX)) return code.replaceAll('_', ' ')
+  if (code.startsWith(SIGNUP_RESTRICTED_PREFIX)) return { text: code.replaceAll('_', ' ') }
   const description = params.get('error_description')
-  if (description) return description
-  return SSO_ERROR_MESSAGES[code] ?? 'Sign-in failed — try again or use email/password.'
+  if (description) return { text: description }
+  return { key: (Object.hasOwn(SSO_ERROR_MESSAGES, code) && SSO_ERROR_MESSAGES[code]) || 'auth.ssoFailed' }
 }
 
-/* Where the SSO redirect should land, mirroring resumeOAuthFlow() below —
-   but handed to the server as callbackURL rather than navigated to
-   directly. The browser leaves for the IdP and returns already carrying a
-   session, so this component's own resumeOAuthFlow() never gets to run for
-   this path; the equivalent logic has to travel with the request instead. */
-function ssoCallbackURL(): string {
-  const params = new URLSearchParams(location.search)
-  const target = safeRelativeTarget(params.get('redirect_to') || params.get('redirect_uri'))
-  if (target) return target
-  if (params.has('client_id') && params.has('response_type')) return `/api/auth/mcp/authorize${location.search}`
-  return location.pathname + location.search
+/* Where a provider sign-in should land, mirroring what the email form does
+   after submit — but handed to the server as redirect URLs rather than
+   navigated to directly. The browser leaves for the IdP and returns already
+   carrying a session, so this component's own resumeOAuthFlow() never gets
+   to run for this path; the equivalent logic has to travel with the
+   request instead. An interrupted flow wins for everyone; otherwise a
+   returning user comes back to this page and a new account lands on its
+   first canvas, the same place the email signup goes, tagged with the
+   provider so the app can report the signup once it lands (App.tsx). */
+function ssoRedirects(provider: DesktopSignInProvider): ProviderRedirects {
+  const target = interruptedTarget()
+  if (target) return { callbackURL: target, newUserCallbackURL: target }
+  return { callbackURL: location.pathname + location.search, newUserCallbackURL: firstCanvasPathAfterSignup(provider) }
 }
 
 /** Matches server/auth.ts loginProvidersConfig's response shape. */
@@ -151,16 +161,23 @@ interface OidcClientConfig {
   displayName?: string
   google: boolean
   microsoft: boolean
+  /** the browser "Sign in with Apple" (the iOS app's native one is appleNative, not shown here) */
+  apple: boolean
 }
 
 /* The client bundle is static and shared across self-hosted deploys — it
    can't know at build time whether the operator configured SSO, so it asks
    the server. See server/auth.ts loginProvidersConfig. */
 function useOidcConfig(): OidcClientConfig {
-  const [config, setConfig] = useState<OidcClientConfig>({ enabled: false, google: false, microsoft: false })
+  const [config, setConfig] = useState<OidcClientConfig>({
+    enabled: false,
+    google: false,
+    microsoft: false,
+    apple: false,
+  })
   useEffect(() => {
     fetch('/api/oidc-config')
-      .then((res) => (res.ok ? res.json() : { enabled: false, google: false, microsoft: false }))
+      .then((res) => (res.ok ? res.json() : { enabled: false, google: false, microsoft: false, apple: false }))
       .then(setConfig)
       .catch(() => {}) // SSO button just doesn't appear — email/password still works
   }, [])
@@ -175,6 +192,7 @@ function useOidcConfig(): OidcClientConfig {
 let browserSignInNotice: string | null = null
 
 export function AuthPage() {
+  const t = useT()
   const oidc = useOidcConfig()
   /* better-auth lands password-reset links on /auth/reset?token=… */
   const resetToken = location.pathname === '/auth/reset' ? new URLSearchParams(location.search).get('token') : null
@@ -182,7 +200,11 @@ export function AuthPage() {
   const [name, setNameField] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(ssoErrorFromUrl)
+  const [error, setError] = useState<string | null>(() => {
+    const sso = ssoErrorFromUrl()
+    if (!sso) return null
+    return 'key' in sso ? t(sso.key) : sso.text
+  })
   /* informational state (not an error): "check your email" and friends */
   const [notice, setNotice] = useState<string | null>(browserSignInNotice)
   /* signin failed on an unverified email — offer a resend */
@@ -216,23 +238,25 @@ export function AuthPage() {
     setError(null)
     setNotice(null)
     setBusy(true)
-    const startFailed = 'Could not start sign-in — try again or use email/password.'
+    const startFailed = t('auth.startFailed')
     try {
       if (isDesktopShell() && supportsBrowserSignIn()) {
         /* Identity providers refuse embedded webviews, so the desktop shell
            signs in through the system browser and gets the session handed
            back over a doop:// link (src/lib/desktopAuth.ts). The browser
            starts the provider round trip itself, from a doop page. */
-        if (!(await beginBrowserSignIn(provider, ssoCallbackURL()))) {
+        if (!(await beginBrowserSignIn(provider, ssoRedirects(provider)))) {
           setError(startFailed)
           return
         }
-        browserSignInNotice = 'Finish signing in in your browser — doop signs you in here the moment you come back.'
+        browserSignInNotice = t('auth.browserSignInNotice')
         setNotice(browserSignInNotice)
         return
       }
-      const res = await start({ callbackURL: ssoCallbackURL(), errorCallbackURL: '/auth' })
+      const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
       if (res.error) setError(res.error.message ?? startFailed)
+    } catch {
+      setError(t(NETWORK_ERROR))
     } finally {
       setBusy(false)
     }
@@ -242,17 +266,19 @@ export function AuthPage() {
     return providerSignIn('oidc', (opts) => authClient.signIn.oauth2({ providerId: 'oidc', ...opts }))
   }
 
-  function socialSignIn(provider: 'google' | 'microsoft') {
+  function socialSignIn(provider: 'google' | 'microsoft' | 'apple') {
     return providerSignIn(provider, (opts) => authClient.signIn.social({ provider, ...opts }))
   }
 
   async function resendVerification() {
     setBusy(true)
     try {
-      await authClient.sendVerificationEmail({ email, callbackURL: '/' })
+      await authClient.sendVerificationEmail({ email, callbackURL: verifiedLanding() })
       setError(null)
       setUnverified(false)
-      setNotice('Verification email sent — check your inbox.')
+      setNotice(t('auth.verificationSent'))
+    } catch {
+      setError(t(NETWORK_ERROR))
     } finally {
       setBusy(false)
     }
@@ -269,60 +295,60 @@ export function AuthPage() {
       if (mode === 'forgot') {
         await authClient.requestPasswordReset({ email, redirectTo: '/auth/reset' })
         /* same response either way — this must not confirm account existence */
-        setNotice('If an account exists for that email, a reset link is on its way.')
+        setNotice(t('auth.resetLinkSent'))
         return
       }
       if (mode === 'reset') {
         const res = await authClient.resetPassword({ newPassword: password, token: resetToken ?? '' })
         if (res.error) {
-          setError(res.error.message ?? 'This reset link is invalid or expired — request a new one.')
+          setError(res.error.message ?? t('auth.resetLinkInvalid'))
         } else {
           history.replaceState(null, '', '/auth')
           switchMode('signin')
-          setNotice('Password updated — sign in with your new password.')
+          setNotice(t('auth.passwordUpdated'))
         }
         return
       }
       const res =
         mode === 'signup'
-          ? await authClient.signUp.email({ name: name.trim() || email.split('@')[0] || email, email, password })
+          ? await authClient.signUp.email({
+              name: name.trim() || email.split('@')[0] || email,
+              email,
+              password,
+              callbackURL: verifiedLanding(),
+            })
           : await authClient.signIn.email({ email, password })
       if (res.error) {
         if (mode === 'signin' && res.error.code === 'EMAIL_NOT_VERIFIED') {
-          setError('This email hasn’t been verified yet.')
+          setError(t('auth.emailNotVerified'))
           setUnverified(true)
         } else if (mode === 'signin' && !(await accountExists(email))) {
-          setError('No account found for this email.')
+          setError(t('auth.noAccountFound'))
           setSuggestMode('signup')
           posthog.capture('login_no_account_found')
-        } else if (mode === 'signup' && res.error.code?.startsWith('USER_ALREADY_EXISTS')) {
-          setError('An account with this email already exists.')
+        } else if (mode === 'signup' && isUserAlreadyExists(res.error.code)) {
+          setError(t('auth.accountExists'))
           setSuggestMode('signin')
         } else {
-          setError(res.error.message ?? 'Something went wrong')
+          setError(res.error.message ?? t('auth.somethingWentWrong'))
         }
       } else if (res.data?.user) {
         /* signup with verification required: the account exists but there is
            no session yet — better-auth returns a null token in that case */
         if (mode === 'signup' && !res.data.token) {
-          posthog.capture('account_signed_up')
-          setNotice(`Almost there — we sent a verification link to ${email}. Open it to activate your account.`)
+          posthog.capture('account_signed_up', { method: 'email' })
+          setNotice(t('auth.verifyEmailSent', { email }))
           return
         }
-        posthog.capture(mode === 'signup' ? 'account_signed_up' : 'account_signed_in')
+        if (mode === 'signup') posthog.capture('account_signed_up', { method: 'email' })
+        else posthog.capture('account_signed_in')
         setName(res.data.user.name) // keep cursor/feed identity in sync with the account
-        if (!resumeOAuthFlow() && mode === 'signup') {
-          /* land new users on their auto-created first canvas, where the
-             demo agent is waiting to perform */
-          try {
-            const canvases: { id: string; ownerId?: string }[] = await (await fetch('/api/canvases')).json()
-            const own = canvases.find((c) => c.ownerId)
-            if (own) location.href = `/c/${own.id}`
-          } catch {
-            /* fall through to the session-gated re-render */
-          }
-        }
+        /* land new users on their auto-created first canvas, where the
+           demo agent is waiting to perform */
+        if (!resumeOAuthFlow() && mode === 'signup') location.href = FIRST_CANVAS_PATH
       }
+    } catch {
+      setError(t(NETWORK_ERROR))
     } finally {
       setBusy(false)
     }
@@ -330,30 +356,20 @@ export function AuthPage() {
 
   return (
     <AuthScreen>
-      <form
-        className="flex w-[min(400px,100%)] flex-col gap-3.5 rounded-[12px] border border-line bg-surface p-6 pt-[30px] shadow-pop sm:p-9 sm:pb-7"
-        onSubmit={submit}
-      >
-        <Wordmark className="mb-1.5" />
-        <h1 className="font-serif text-[34px] font-normal leading-[1.05] tracking-[-0.015em]">
-          {mode === 'signin' && 'Welcome back.'}
-          {mode === 'signup' && 'Create your account.'}
-          {mode === 'forgot' && 'Reset your password.'}
-          {mode === 'reset' && 'Pick a new password.'}
-        </h1>
-        <p className="mb-2 text-[14px] leading-[1.5] text-ink-soft">
+      <AuthCard as="form" title={t(TITLES[mode])} onSubmit={submit}>
+        <AuthCardText className="mb-2">
           {mode === 'forgot' ? (
-            <>Enter your account email and we&rsquo;ll send you a reset link.</>
+            t('auth.forgotBlurb')
           ) : mode === 'reset' ? (
-            <>Choose a new password for your account.</>
+            t('auth.resetBlurb')
           ) : (
             <>
-              A shared canvas for humans <em className="not-italic text-brand">&amp; agents</em>. Sign{' '}
-              {mode === 'signin' ? 'in to your canvases' : 'up to start designing'}.
+              {t('auth.taglineBefore')} <em className="not-italic text-brand">{t('auth.taglineEmphasis')}</em>
+              {t('auth.taglineAfter')} {mode === 'signin' ? t('auth.taglineSignin') : t('auth.taglineSignup')}
             </>
           )}
-        </p>
-        {(oidc.enabled || oidc.google || oidc.microsoft) && (mode === 'signin' || mode === 'signup') && (
+        </AuthCardText>
+        {(oidc.enabled || oidc.google || oidc.microsoft || oidc.apple) && (mode === 'signin' || mode === 'signup') && (
           <>
             {oidc.google && (
               <Button
@@ -366,7 +382,7 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <GoogleMark />
-                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Google
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Google' })}
               </Button>
             )}
             {oidc.microsoft && (
@@ -380,7 +396,21 @@ export function AuthPage() {
                 disabled={busy}
               >
                 <MicrosoftMark />
-                {mode === 'signup' ? 'Sign up' : 'Sign in'} with Microsoft
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Microsoft' })}
+              </Button>
+            )}
+            {oidc.apple && (
+              <Button
+                variant="default"
+                size="lg"
+                block
+                className="border-line"
+                type="button"
+                onClick={() => socialSignIn('apple')}
+                disabled={busy}
+              >
+                <AppleMark />
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: 'Apple' })}
               </Button>
             )}
             {oidc.enabled && (
@@ -393,20 +423,20 @@ export function AuthPage() {
                 onClick={ssoSignIn}
                 disabled={busy}
               >
-                {mode === 'signup' ? 'Sign up' : 'Sign in'} with {oidc.displayName}
+                {t(mode === 'signup' ? 'auth.signUpWith' : 'auth.signInWith', { provider: oidc.displayName ?? '' })}
               </Button>
             )}
             <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-ink-faint">
               <span className="h-px flex-1 bg-line" />
-              or
+              {t('auth.or')}
               <span className="h-px flex-1 bg-line" />
             </div>
           </>
         )}
         {mode === 'signup' && (
-          <Field label="Name" labelVariant="form">
+          <Field label={t('auth.nameLabel')} labelVariant="form">
             <Input
-              className={authInput}
+              variant="well"
               value={name}
               onChange={(e) => setNameField(e.target.value)}
               placeholder="Kevin"
@@ -415,28 +445,28 @@ export function AuthPage() {
           </Field>
         )}
         {mode !== 'reset' && (
-          <Field label="Email" labelVariant="form">
+          <Field label={t('auth.emailLabel')} labelVariant="form">
             <Input
-              className={authInput}
+              variant="well"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder={t('auth.emailPlaceholder')}
               autoComplete="email"
             />
           </Field>
         )}
         {mode !== 'forgot' && (
-          <Field label={mode === 'reset' ? 'New password' : 'Password'} labelVariant="form">
+          <Field label={t(mode === 'reset' ? 'auth.newPasswordLabel' : 'auth.passwordLabel')} labelVariant="form">
             <Input
-              className={authInput}
+              variant="well"
               type="password"
               required
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === 'signin' ? '••••••••' : 'At least 8 characters'}
+              placeholder={mode === 'signin' ? '••••••••' : t('auth.passwordPlaceholder')}
               autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
             />
           </Field>
@@ -444,11 +474,11 @@ export function AuthPage() {
         {mode === 'signin' && (
           <Button
             variant="link"
-            size="sm"
-            className="-mt-1.5 self-end px-0 py-0 text-xs font-normal text-ink-faint hover:text-ink"
+            size="inline"
+            className="-mt-1.5 self-end font-normal text-ink-faint hover:text-ink"
             onClick={() => switchMode('forgot')}
           >
-            Forgot password?
+            {t('auth.forgotPassword')}
           </Button>
         )}
         {notice && <Callout>{notice}</Callout>}
@@ -458,22 +488,24 @@ export function AuthPage() {
             {suggestMode && (
               <Button
                 variant="link"
-                size="sm"
-                className="mt-1.5 block px-0 py-0 text-accent-ink underline underline-offset-[3px]"
+                size="inline"
+                className="mt-1.5 flex text-accent-ink underline"
                 onClick={() => switchMode(suggestMode)}
               >
-                {suggestMode === 'signup' ? 'Create an account instead →' : 'Sign in instead →'}
+                {t(suggestMode === 'signup' ? 'auth.createAccountInstead' : 'auth.signInInstead')}
+                <ArrowRightIcon size={12} />
               </Button>
             )}
             {unverified && (
               <Button
                 variant="link"
-                size="sm"
-                className="mt-1.5 block px-0 py-0 text-accent-ink underline underline-offset-[3px]"
+                size="inline"
+                className="mt-1.5 flex text-accent-ink underline"
                 onClick={resendVerification}
                 disabled={busy}
               >
-                Resend verification email →
+                {t('auth.resendVerification')}
+                <ArrowRightIcon size={12} />
               </Button>
             )}
           </Callout>
@@ -482,12 +514,12 @@ export function AuthPage() {
           {busy
             ? '…'
             : mode === 'signin'
-              ? 'Sign in'
+              ? t('auth.signIn')
               : mode === 'signup'
-                ? 'Sign up'
+                ? t('auth.signUp')
                 : mode === 'forgot'
-                  ? 'Send reset link'
-                  : 'Set new password'}
+                  ? t('auth.sendResetLink')
+                  : t('auth.setNewPassword')}
         </Button>
         <Button
           variant="link"
@@ -495,9 +527,9 @@ export function AuthPage() {
           className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
           onClick={() => switchMode(mode === 'signin' ? 'signup' : 'signin')}
         >
-          {mode === 'signin' ? 'No account yet? Sign up' : 'Have an account? Sign in'}
+          {t(mode === 'signin' ? 'auth.noAccountSignUp' : 'auth.haveAccountSignIn')}
         </Button>
-      </form>
+      </AuthCard>
     </AuthScreen>
   )
 }

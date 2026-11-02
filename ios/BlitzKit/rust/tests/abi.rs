@@ -295,6 +295,64 @@ fn borders_on_half_pixels_stay_symmetric_at_high_scale() {
     }
 }
 
+/// Dark run lengths down one bitmap column, with the number of partially
+/// covered (grey) rows met along the way.
+fn vertical_dark_runs(pixels: &[u8], width: usize, height: usize, x: usize) -> (Vec<usize>, usize) {
+    let red = |y: usize| pixels[(y * width + x) * 4];
+    let mut runs = Vec::new();
+    let mut soft = 0;
+    let mut y = 0;
+    while y < height {
+        if red(y) < 128 {
+            let start = y;
+            while y < height && red(y) < 128 {
+                y += 1;
+            }
+            runs.push(y - start);
+        } else {
+            if red(y) < 225 {
+                soft += 1;
+            }
+            y += 1;
+        }
+    }
+    (runs, soft)
+}
+
+/// Stylo snaps a 1px border to one device pixel at every scale. The layout has
+/// to be snapped on the same grid, or at scales below 1 (a fitted board on a
+/// phone) a border came out one or two CSS pixels wide depending on where its
+/// box sat: the frame's top edge and a button's top edge looked different.
+#[test]
+fn hairline_borders_match_at_every_scale() {
+    let html = CString::new(
+        "<!doctype html><html><body style='margin:0;background:#fff'>\
+        <div style='position:absolute;left:0;top:0;width:300px;height:30px;border-top:1px solid #000'></div>\
+        <div style='position:absolute;left:20px;top:37px;width:200px;height:40px;border:1px solid #000;background:#fff'></div>\
+        <div style='position:absolute;left:20px;top:93.5px;width:200px;height:40px;border:1px solid #000;background:#fff'></div>\
+        </body></html>",
+    )
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    for scale in [0.61f32, 0.84, 1.0, 1.37, 2.3] {
+        unsafe {
+            let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 300, 160, scale);
+            let (mut w, mut h, mut len) = (0u32, 0u32, 0usize);
+            let px = doopblitz_doc_render(doc, &mut w, &mut h, &mut len);
+            let pixels = std::slice::from_raw_parts(px, len);
+            let x = (100.0 * scale).round() as usize;
+            let (runs, soft) = vertical_dark_runs(pixels, w as usize, h as usize, x);
+            eprintln!("scale {scale}: border runs {runs:?}, soft rows {soft}");
+            assert_eq!(runs.len(), 5, "scale {scale}: expected five borders down the column, got {runs:?}");
+            let expected = (1.0f32).max((scale).floor()) as usize;
+            assert!(runs.iter().all(|&r| r == expected), "scale {scale}: borders are not all {expected} device px: {runs:?}");
+            assert_eq!(soft, 0, "scale {scale}: {soft} rows are only partly covered, borders sit off the pixel grid");
+            doopblitz_buffer_free(px, len);
+            doopblitz_doc_free(doc);
+        }
+    }
+}
+
 /// An element id with CSS-special characters must come back as a selector that
 /// matches that element, as `CSS.escape()` would build it.
 #[test]
@@ -350,6 +408,69 @@ fn tiles_keep_fixed_backgrounds_sized_to_the_frame() {
         }
         assert_eq!(mismatches, 0, "tile of a fixed gradient differs from the full render in {mismatches} pixels");
         doopblitz_buffer_free(tile, tlen);
+        doopblitz_doc_free(doc);
+    }
+}
+
+/// `clip-path` clips the whole element, its outer box-shadow included. The
+/// marketing site paints full-bleed section bands with a 100vmax spread shadow
+/// clipped by `clip-path: inset(0 -100vmax)`; with the shadow drawn outside the
+/// clip it flooded the frame and covered every section before the band.
+#[test]
+fn clip_path_clips_the_outer_box_shadow() {
+    let html = CString::new(
+        "<!doctype html><html><body style='margin:0;background:#fff'>\
+         <section style='height:100px'></section>\
+         <section style='height:100px;background:#ddd;box-shadow:0 0 0 100vmax #ddd;clip-path:inset(0 -100vmax)'></section>\
+         <section style='height:100px'></section>\
+         </body></html>",
+    )
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    unsafe {
+        let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 200, 300, 1.0);
+        let (mut w, mut h, mut len) = (0u32, 0u32, 0usize);
+        let buf = doopblitz_doc_render(doc, &mut w, &mut h, &mut len);
+        let px = std::slice::from_raw_parts(buf, len);
+        let at = |x: usize, y: usize| px[(y * w as usize + x) * 4];
+        assert_eq!(at(100, 50), 0xff, "the shadow painted over the section above the band");
+        assert_eq!(at(100, 150), 0xdd, "the band itself lost its background");
+        assert_eq!(at(100, 250), 0xff, "the shadow painted over the section below the band");
+        doopblitz_buffer_free(buf, len);
+        // a tile across the band agrees with the full render
+        let (mut tw, mut th, mut tlen) = (0u32, 0u32, 0usize);
+        let tile = doopblitz_doc_render_region(doc, 1.0, 0.0, 60.0, 200.0, 80.0, &mut tw, &mut th, &mut tlen);
+        let tpx = std::slice::from_raw_parts(tile, tlen);
+        assert_eq!(tpx[(20 * tw as usize + 100) * 4], 0xff);
+        assert_eq!(tpx[(60 * tw as usize + 100) * 4], 0xdd);
+        doopblitz_buffer_free(tile, tlen);
+        doopblitz_doc_free(doc);
+    }
+}
+
+/// The outline is part of the element too: `clip-path: inset(0)` clips it to
+/// the border box, so nothing of a 20px outline shows outside the box.
+#[test]
+fn clip_path_clips_the_outline() {
+    let html = CString::new(
+        "<!doctype html><html><body style='margin:0;background:#fff'>\
+         <div style='position:absolute;left:50px;top:50px;width:100px;height:100px;background:#ddd;\
+         outline:20px solid #000;clip-path:inset(0)'></div>\
+         </body></html>",
+    )
+    .unwrap();
+    let base = CString::new("https://doop.design/").unwrap();
+    unsafe {
+        let doc = doopblitz_doc_new(html.as_ptr(), base.as_ptr(), 200, 200, 1.0);
+        let (mut w, mut h, mut len) = (0u32, 0u32, 0usize);
+        let buf = doopblitz_doc_render(doc, &mut w, &mut h, &mut len);
+        let px = std::slice::from_raw_parts(buf, len);
+        let at = |x: usize, y: usize| px[(y * w as usize + x) * 4];
+        assert_eq!(at(100, 100), 0xdd, "the box itself lost its background");
+        for (x, y) in [(40, 100), (160, 100), (100, 40), (100, 160)] {
+            assert_eq!(at(x, y), 0xff, "the outline painted outside the clip at ({x}, {y})");
+        }
+        doopblitz_buffer_free(buf, len);
         doopblitz_doc_free(doc);
     }
 }

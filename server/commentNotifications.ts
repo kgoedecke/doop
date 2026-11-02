@@ -32,7 +32,8 @@ export const COALESCE_MS = 2 * 60_000
 
 export interface PendingComment {
   comment: ElementComment
-  frameName: string
+  /** the frame an element comment is on; a canvas comment has none */
+  frameName?: string
   actorKind: ActorKind
 }
 
@@ -63,7 +64,11 @@ export function onCanvasEvent(canvasId: string, event: CanvasEvent): void {
   if (!mailerConfigured) return
   const canvas = store.getCanvasMetadata(canvasId)
   if (!canvas) return
-  const item: PendingComment = { comment: event.comment, frameName: event.frame.name, actorKind: event.actorKind }
+  const item: PendingComment = {
+    comment: event.comment,
+    ...(event.frame ? { frameName: event.frame.name } : {}),
+    actorKind: event.actorKind,
+  }
   for (const userId of recipientsFor(canvas, event.comment, event.actorKind)) queue(userId, canvasId, item)
 }
 
@@ -120,8 +125,9 @@ export function digest(
   const body = items
     .map(({ comment, frameName }) => {
       const verb = comment.parentId ? 'replied in' : 'commented on'
+      const where = frameName ? quote(frameName) : 'the canvas'
       const text = comment.text.length > 600 ? `${comment.text.slice(0, 597)}…` : comment.text
-      return `${comment.from} ${verb} ${quote(frameName)}:\n\n  ${quote(text.replace(/\n/g, '\n  '))}\n  ${commentLink(comment)}`
+      return `${comment.from} ${verb} ${where}:\n\n  ${quote(text.replace(/\n/g, '\n  '))}\n  ${commentLink(comment)}`
     })
     .join('\n\n')
   const text = `Hi ${person.name || 'there'},\n\n${body}\n\n—\nYou get this because you collaborate on ${quote(canvas.name)}. Turn comment emails off under Settings → Your account: ${settingsLink('account')}\n`

@@ -2,16 +2,16 @@ import { useEffect, useState } from 'react'
 import { api, errorMessage, type AgentKeyInfo } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { timeAgo } from '../lib/time'
+import { t as translate, useT } from '../lib/i18n'
+import { ConfirmDialog } from './ui/alert-dialog'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Note } from './ui/note'
 import { CodeBlock } from './ui/code-block'
-import { Card, CardDescription, CardHeader, CardRow, CardTitle } from './ui/card'
+import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
 import { TrashIcon } from './ui/icons'
 
 /* same fixed-column-on-desktop rhythm as the other settings cards */
-const settingsCard = 'mt-4 max-w-[1000px] overflow-hidden sm:mt-5'
-const settingsInput = 'w-full sm:w-[280px]'
 
 /** The MCP config a headless client needs, with the key in place. Shown once,
  *  right after minting — the moment the person actually has the secret. */
@@ -32,12 +32,16 @@ function headlessConfig(secret: string): string {
  *  secret appears exactly once, in the mint response — after that the list
  *  knows only each key's first characters. */
 export function AgentKeys() {
+  const t = useT()
   const [keys, setKeys] = useState<AgentKeyInfo[] | null>(null)
   const [name, setName] = useState('')
   const [minting, setMinting] = useState(false)
   const [error, setError] = useState('')
   /* the one moment the full secret exists client-side */
   const [minted, setMinted] = useState<{ id: string; secret: string } | null>(null)
+  /* the key awaiting "are you sure" — an in-app dialog, since window.confirm
+     is a silent "cancel" in the desktop shell's webview */
+  const [confirmRevoke, setConfirmRevoke] = useState<AgentKeyInfo | null>(null)
 
   /* `keys === null` is "still loading", and minting stays disabled until it
      resolves: a list request in flight would otherwise land after the key it
@@ -47,7 +51,8 @@ export function AgentKeys() {
     api.listAgentKeys().then(setKeys, (e: unknown) => {
       console.error(e)
       setKeys([])
-      setError(errorMessage(e, 'Your keys could not be loaded'))
+      /* the free translator: the effect runs once, and useT's `t` is new every render */
+      setError(errorMessage(e, translate('agentKeys.loadFailed')))
     })
   }, [])
 
@@ -61,65 +66,59 @@ export function AgentKeys() {
       setMinted({ id: info.id, secret })
       setKeys((current) => [info, ...(current ?? [])])
     } catch (e) {
-      setError(errorMessage(e, 'That key could not be created'))
+      setError(errorMessage(e, t('agentKeys.createFailed')))
     } finally {
       setMinting(false)
     }
   }
 
   async function revoke(key: AgentKeyInfo) {
-    if (!window.confirm(`Revoke "${key.name}"? Agents using it lose access immediately.`)) return
     try {
       await api.deleteAgentKey(key.id)
       posthog.capture('agent_key_revoked')
       setKeys((current) => current?.filter((k) => k.id !== key.id) ?? null)
       if (minted?.id === key.id) setMinted(null)
     } catch (e) {
-      setError(errorMessage(e, 'That key could not be revoked'))
+      setError(errorMessage(e, t('agentKeys.revokeFailed')))
     }
   }
 
   return (
-    <Card className={settingsCard}>
+    <SettingsCard>
       <CardHeader>
-        <CardTitle>Agent keys</CardTitle>
-        <CardDescription>
-          Bearer credentials for the MCP endpoint, for agents that cannot open a browser to sign in — a Mastra workflow,
-          n8n, CI. A key acts as you: everything it designs is attributed to you, and it reaches exactly the canvases
-          you can. Revoking cuts it off immediately.
-        </CardDescription>
+        <CardTitle>{t('agentKeys.title')}</CardTitle>
+        <CardDescription>{t('agentKeys.description')}</CardDescription>
       </CardHeader>
 
       <CardRow
-        label="New key"
+        label={t('agentKeys.newKeyRow')}
         action={
           <Button size="sm" disabled={minting || keys === null} onClick={mint}>
-            {minting ? 'Creating…' : 'Create key'}
+            {minting ? t('agentKeys.creating') : t('agentKeys.createKey')}
           </Button>
         }
+        control={
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value)
+              setError('')
+            }}
+            placeholder={t('agentKeys.namePlaceholder')}
+            maxLength={60}
+            aria-label={t('agentKeys.nameAria')}
+          />
+        }
       >
-        <Input
-          className={settingsInput}
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value)
-            setError('')
-          }}
-          placeholder="What will use it, e.g. mastra-prod"
-          maxLength={60}
-          aria-label="Agent key name"
-        />
         {error && <Note tone="error">{error}</Note>}
       </CardRow>
 
       {minted && (
-        <CardRow label="Your new key">
+        <CardRow label={t('agentKeys.yourNewKey')}>
           <div className="min-w-0 flex-1">
-            <Note tone="success">Copy it now — it is shown once and stored hashed.</Note>
+            <Note tone="success">{t('agentKeys.copyNow')}</Note>
             <CodeBlock className="mt-2" text={minted.secret} />
-            <p className="mb-1.5 mt-3 text-[11px] font-bold uppercase tracking-[0.14em] text-ink-faint">
-              MCP config for a headless client
-            </p>
+            <p className="mb-1.5 mt-3 text-caption font-medium text-ink-faint">{t('agentKeys.headlessConfigLabel')}</p>
             <CodeBlock text={headlessConfig(minted.secret)} />
           </div>
         </CardRow>
@@ -130,23 +129,42 @@ export function AgentKeys() {
           key={key.id}
           label={key.name}
           action={
-            <Button size="sm" variant="ghost" aria-label={`Revoke ${key.name}`} onClick={() => void revoke(key)}>
-              <TrashIcon /> Revoke
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={t('agentKeys.revokeAria', { name: key.name })}
+              onClick={() => setConfirmRevoke(key)}
+            >
+              <TrashIcon /> {t('agentKeys.revoke')}
             </Button>
           }
         >
-          <span className="font-mono text-[13px] text-ink-soft">{key.start}…</span>
+          <span className="font-mono text-body text-ink-soft">{key.start}…</span>
           <Note>
-            created {timeAgo(key.createdAt)}
-            {key.lastUsedAt ? ` · last used ${timeAgo(key.lastUsedAt)}` : ' · never used'}
+            {key.lastUsedAt
+              ? t('agentKeys.createdLastUsed', { created: timeAgo(key.createdAt), used: timeAgo(key.lastUsedAt) })
+              : t('agentKeys.createdNeverUsed', { created: timeAgo(key.createdAt) })}
           </Note>
         </CardRow>
       ))}
       {keys && keys.length === 0 && !minted && (
-        <CardRow label="No keys yet">
-          <Note>Interactive clients (Claude Code, Codex) don’t need one — they sign in with OAuth.</Note>
+        <CardRow label={t('agentKeys.noKeysRow')}>
+          <Note>{t('agentKeys.noKeysNote')}</Note>
         </CardRow>
       )}
-    </Card>
+      <ConfirmDialog
+        open={!!confirmRevoke}
+        onOpenChange={(open) => !open && setConfirmRevoke(null)}
+        title={t('agentKeys.revokeConfirmTitle', { name: confirmRevoke?.name ?? '' })}
+        description={t('agentKeys.revokeConfirmDescription')}
+        confirmLabel={t('agentKeys.revokeConfirm')}
+        destructive
+        onConfirm={() => {
+          const target = confirmRevoke
+          setConfirmRevoke(null)
+          if (target) void revoke(target)
+        }}
+      />
+    </SettingsCard>
   )
 }

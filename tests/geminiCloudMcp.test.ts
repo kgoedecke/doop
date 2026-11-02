@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import express from 'express'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -8,14 +9,14 @@ import type { GeminiCloudJob } from '../shared/geminiCloud.ts'
 
 const state = vi.hoisted(() => ({ allowed: true, banned: false }))
 vi.mock('../server/auth.ts', () => ({ isBanned: async () => state.banned }))
-vi.mock('../server/access.ts', () => ({ canAccessCanvas: (user: string) => user === 'alice' && state.allowed }))
+vi.mock('../server/access.ts', () => ({ canEditCanvas: (user: string) => user === 'alice' && state.allowed }))
 vi.mock('../server/store.ts', () => ({ store: { getCanvasMetadata: (id: string) => ({ id }) } }))
 import { handleGeminiCloudMcp } from '../server/geminiCloudMcp.ts'
 import { geminiCloudRuns } from '../server/geminiCloudRuns.ts'
 
 const servers: Server[] = []
 afterEach(async () => {
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   state.allowed = true
   state.banned = false
   await Promise.all(
@@ -106,7 +107,7 @@ describe('Gemini cloud dispatch and run-scoped MCP', () => {
     })
     const workerUrl = await listen(worker)
     const config = { url: workerUrl, token: 'w'.repeat(32) }
-    vi.stubEnv('DOOP_GEMINI_CLOUD_WORKERS', JSON.stringify({ alice: config }))
+    stubEnv('DOOP_GEMINI_CLOUD_WORKERS', JSON.stringify({ alice: config }))
     const result = await geminiCloudRuns.start('alice', config, {
       canvasId: 'canvas-a',
       prompt: 'Verify',

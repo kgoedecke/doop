@@ -1,5 +1,6 @@
 import { generateKeyPairSync, createVerify } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import {
   appEnabled,
   appJwt,
@@ -51,7 +52,7 @@ describe('install handoff signatures', () => {
   })
 
   it('builds the authorize bounce URL from the app client id', () => {
-    process.env.GITHUB_APP_CLIENT_ID = 'Iv1.test'
+    stubEnv('GITHUB_APP_CLIENT_ID', 'Iv1.test')
     try {
       const url = new URL(oauthBounceUrl('s1'))
       expect(url.origin + url.pathname).toBe('https://github.com/login/oauth/authorize')
@@ -59,7 +60,7 @@ describe('install handoff signatures', () => {
       expect(url.searchParams.get('state')).toBe('s1')
       expect(url.searchParams.get('redirect_uri')).toContain('/api/github/app/setup')
     } finally {
-      delete process.env.GITHUB_APP_CLIENT_ID
+      unstubAllEnvs()
     }
   })
 })
@@ -73,18 +74,18 @@ describe('app jwt', () => {
   })
 
   it('signs a verifiable RS256 token when configured', () => {
-    process.env.GITHUB_APP_ID = '123'
-    process.env.GITHUB_APP_SLUG = 'doop-import'
-    process.env.GITHUB_APP_PRIVATE_KEY = Buffer.from(
-      privateKey.export({ type: 'pkcs8', format: 'pem' }) as string,
-    ).toString('base64')
+    stubEnv('GITHUB_APP_ID', '123')
+    stubEnv('GITHUB_APP_SLUG', 'doop-import')
+    stubEnv(
+      'GITHUB_APP_PRIVATE_KEY',
+      Buffer.from(privateKey.export({ type: 'pkcs8', format: 'pem' }) as string).toString('base64'),
+    )
     try {
-      /* key alone is not enough: the OAuth creds prove install ownership and
-         the auth secret keeps passes unforgeable — no partial enablement */
+      /* key alone is not enough: the OAuth creds prove install ownership —
+         no partial enablement */
       expect(appEnabled()).toBe(false)
-      process.env.GITHUB_APP_CLIENT_ID = 'Iv1.abc'
-      process.env.GITHUB_APP_CLIENT_SECRET = 'shh'
-      process.env.BETTER_AUTH_SECRET = 'test-secret'
+      stubEnv('GITHUB_APP_CLIENT_ID', 'Iv1.abc')
+      stubEnv('GITHUB_APP_CLIENT_SECRET', 'shh')
       expect(appEnabled()).toBe(true)
       const jwt = appJwt()
       const [header, payload, signature] = jwt.split('.')
@@ -98,23 +99,17 @@ describe('app jwt', () => {
       expect(ok).toBe(true)
       expect(installUrl('s1')).toBe('https://github.com/apps/doop-import/installations/new?state=s1')
     } finally {
-      delete process.env.GITHUB_APP_ID
-      delete process.env.GITHUB_APP_SLUG
-      delete process.env.GITHUB_APP_PRIVATE_KEY
-      delete process.env.GITHUB_APP_CLIENT_ID
-      delete process.env.GITHUB_APP_CLIENT_SECRET
-      delete process.env.BETTER_AUTH_SECRET
+      unstubAllEnvs()
     }
   })
 })
 
 /* ---- REST surface with the app unconfigured (the default server state) */
 
-const PORT = 4987
 let server: Server
 
 beforeAll(async () => {
-  server = await startServer(PORT)
+  server = await startServer()
 }, 70_000)
 
 afterAll(() => server?.stop())

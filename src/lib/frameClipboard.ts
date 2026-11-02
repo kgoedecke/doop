@@ -3,9 +3,8 @@ import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
 import { recordCreate, recordCreates } from './history'
-
-/** Same-origin frame clipboard: survives canvas switches and browser tabs. */
-const CLIP_KEY = 'doop:frame-clipboard'
+import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
+import { stageViewportSize } from './framePlacement'
 
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
@@ -37,10 +36,7 @@ export function copyFrames(frames: Frame[]) {
     })),
   }
   localStorage.setItem(CLIP_KEY, JSON.stringify(clip))
-}
-
-export function copyFrame(frame: Frame) {
-  copyFrames([frame])
+  localStorage.removeItem(ELEMENT_CLIP_KEY)
 }
 
 function readClip(): ClipFrame[] {
@@ -117,10 +113,12 @@ export function pasteFrameCentered(canvasId: string) {
   if (!frames.length) return
   const { width, height } = clipBounds(frames)
   const vp = useStore.getState().viewport
+  /* the stage, not the window: docked panels leave it only part of it */
+  const stage = stageViewportSize()
   createFromClip(
     canvasId,
-    (window.innerWidth / 2 - vp.x) / vp.zoom - width / 2,
-    (window.innerHeight / 2 - vp.y) / vp.zoom - height / 2,
+    (stage.width / 2 - vp.x) / vp.zoom - width / 2,
+    (stage.height / 2 - vp.y) / vp.zoom - height / 2,
   )
 }
 
@@ -130,20 +128,26 @@ export function pasteFrameCentered(canvasId: string) {
  *  would otherwise land enormous); the asset keeps its full resolution. */
 const MAX_PASTE_DIM = 900
 
-function imageFrameHtml(url: string, alt: string): string {
-  return `<!doctype html>
-<html>
-<head>
-<style>
-  * { margin: 0; }
-  html, body { height: 100%; }
-  img { display: block; width: 100%; height: 100%; object-fit: contain; }
-</style>
-</head>
-<body>
-  <img src="${url}" alt="${alt.replace(/"/g, '&quot;')}">
-</body>
-</html>`
+/** A pasted or dropped image is a top-level canvas element, the way a drawn
+ *  shape is: a transparent shell the size of its one image, which the Layers
+ *  panel lists at the root under its name, moves into frames and back out of,
+ *  and scales with when resized. */
+function imageElementHtml(url: string, name: string): string {
+  const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
+  doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
+  doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
+  doc.body.setAttribute('data-doop-canvas-element', 'true')
+  const img = doc.createElement('img')
+  img.setAttribute('data-doop-drawing', 'image')
+  img.setAttribute('data-name', name)
+  img.src = url
+  img.alt = name
+  img.setAttribute(
+    'style',
+    'position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;margin:0;display:block;object-fit:contain;',
+  )
+  doc.body.append(img)
+  return '<!doctype html>\n' + doc.documentElement.outerHTML
 }
 
 function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
@@ -165,13 +169,14 @@ function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
 /** Horizontal breathing room between images dropped together. */
 const IMAGE_ROW_GAP = 40
 
-/** Upload images and drop them as frames laid out in a row, centered as a
- *  group in the current view (one image lands dead-center). Sizes are read
- *  first so differently-sized images sit side by side, never stacked. */
+/** Upload images and place them as canvas elements laid out in a row,
+ *  centered as a group on `at` (a screen point, the middle of the view when
+ *  left out; one image lands dead-center). Sizes are read first so
+ *  differently-sized images sit side by side, never stacked. */
 export async function uploadImageFrames(
   canvasId: string,
   files: File[],
-  fallbackName = 'Pasted image',
+  { fallbackName = 'Pasted image', at }: { fallbackName?: string; at?: { x: number; y: number } } = {},
 ): Promise<Frame[]> {
   const dims = await Promise.all(files.map((f) => imageSize(f)))
   const scaled = dims.map((d) => {
@@ -179,8 +184,13 @@ export async function uploadImageFrames(
     return { width: Math.max(40, Math.round(d.width * scale)), height: Math.max(40, Math.round(d.height * scale)) }
   })
   const vp = useStore.getState().viewport
-  const cx = (window.innerWidth / 2 - vp.x) / vp.zoom
-  const cy = (window.innerHeight / 2 - vp.y) / vp.zoom
+  /* a drop point is in window coordinates, the viewport in the stage's (the
+     desktop shell's title bar sits above it); a paste centers in the stage */
+  const stage = document.querySelector('.stage')?.getBoundingClientRect()
+  const { width, height } = stageViewportSize()
+  const point = at ? { x: at.x - (stage?.left ?? 0), y: at.y - (stage?.top ?? 0) } : { x: width / 2, y: height / 2 }
+  const cx = (point.x - vp.x) / vp.zoom
+  const cy = (point.y - vp.y) / vp.zoom
   const totalW = scaled.reduce((sum, s) => sum + s.width, 0) + IMAGE_ROW_GAP * (scaled.length - 1)
   let x = cx - totalW / 2
   const placed = scaled.map((size) => {
@@ -196,7 +206,7 @@ export async function uploadImageFrames(
       const name = file.name.replace(/\.[a-z0-9]+$/i, '').trim() || fallbackName
       return api.createFrame(canvasId, {
         name,
-        html: imageFrameHtml(url, name),
+        html: imageElementHtml(url, name),
         width: slot.width,
         height: slot.height,
         x: Math.round(slot.x),
@@ -209,6 +219,18 @@ export async function uploadImageFrames(
 export async function pasteImagesCentered(canvasId: string, files: File[]) {
   const frames = await uploadImageFrames(canvasId, files)
   posthog.capture('image_pasted', { count: frames.length })
+  adoptImageFrames(frames)
+}
+
+/** Images dragged in from the desktop land centered on the drop point. */
+export async function dropImages(canvasId: string, files: File[], at: { x: number; y: number }) {
+  const frames = await uploadImageFrames(canvasId, files, { fallbackName: 'Dropped image', at })
+  posthog.capture('image_dropped', { count: frames.length })
+  adoptImageFrames(frames)
+}
+
+/** New image frames are undoable and the last one becomes the selection. */
+function adoptImageFrames(frames: Frame[]) {
   frames.forEach(recordCreate)
   const last = frames[frames.length - 1]
   if (last) useStore.getState().select(last.id)
@@ -233,8 +255,4 @@ export function duplicateFrames(frames: Frame[]) {
   ).then((created) => {
     if (created.length) posthog.capture('frame_duplicated', { count: created.length })
   })
-}
-
-export function duplicateFrame(frame: Frame) {
-  duplicateFrames([frame])
 }

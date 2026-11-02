@@ -1,16 +1,18 @@
+import { env } from './env.ts'
 import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
-import { CLAUDE_MODEL_IDS, normalizeClaudeModel } from '../shared/localAgent.ts'
 import {
-  DEFAULT_GEMINI_MODEL,
-  DEFAULT_OPENROUTER_MODEL,
+  DEFAULT_ANTHROPIC_MODEL,
   GEMINI_MODELS,
   OPENROUTER_MODELS,
+  isReasoningEffort,
+  type ReasoningEffort,
 } from '../shared/modelMenu.ts'
-import { isKnownModel, modelFor } from './openaiAgent.ts'
+import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
+import { effortFor, modelFor } from './openaiAgent.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -42,15 +44,15 @@ import { isKnownModel, modelFor } from './openaiAgent.ts'
  * boring, fully supported alternative and shares everything downstream.
  */
 
-const ISSUER = process.env.CHATGPT_OAUTH_ISSUER || 'https://auth.openai.com'
+const ISSUER = env.CHATGPT_OAUTH_ISSUER
 /* the Codex CLI's public client; overridable if OpenAI ever issues our own */
-const CLIENT_ID = process.env.CHATGPT_OAUTH_CLIENT_ID || 'app_EMoamEEZ73f0CkXaXp7hrann'
+const CLIENT_ID = env.CHATGPT_OAUTH_CLIENT_ID
 /* fixed by the client registration above — the browser will fail to load it,
    which is fine: the authorization code is in the URL by then */
-const REDIRECT_URI = process.env.CHATGPT_OAUTH_REDIRECT_URI || 'http://localhost:1455/auth/callback'
+const REDIRECT_URI = env.CHATGPT_OAUTH_REDIRECT_URI
 /* auth.openai.com sits behind a bot filter that challenges a default Node
    fetch — an ordinary product User-Agent passes where no header at all does */
-const AUTH_USER_AGENT = process.env.CHATGPT_AUTH_USER_AGENT || 'doop/0.1 (+https://doop.design)'
+const AUTH_USER_AGENT = env.CHATGPT_AUTH_USER_AGENT
 
 export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
 
@@ -74,6 +76,8 @@ export interface ModelAccount {
   apiKey?: string
   /** model tier the user picked; unset = the server default */
   model?: string
+  /** OpenAI reasoning effort the user picked; unset = the server default */
+  effort?: ReasoningEffort
   connectedAt: number
 }
 
@@ -85,11 +89,19 @@ export interface AccountStatus {
   plan?: string
   /** the model tier in effect, resolved (never null in a status) */
   model?: string
+  /** the reasoning effort in effect, resolved; only the OpenAI kinds have one */
+  effort?: string
   connectedAt?: number
 }
 
+const OPENAI_KINDS: readonly AccountKind[] = ['chatgpt', 'openai-key']
+
+export function takesReasoningEffort(kind: AccountKind): boolean {
+  return OPENAI_KINDS.includes(kind)
+}
+
 export function chatgptConnectEnabled(): boolean {
-  return process.env.CHATGPT_CONNECT_DISABLED !== '1'
+  return !env.CHATGPT_CONNECT_DISABLED
 }
 
 /* ---------------------------------------------------------------- */
@@ -114,6 +126,7 @@ function toAccount(row: typeof modelAccounts.$inferSelect): ModelAccount | null 
     ...(row.expiresAt != null ? { expiresAt: row.expiresAt } : {}),
     ...(row.apiKey ? { apiKey: row.apiKey } : {}),
     ...(row.model ? { model: row.model } : {}),
+    ...(isReasoningEffort(row.reasoningEffort) ? { effort: row.reasoningEffort } : {}),
     connectedAt: row.connectedAt,
   }
 }
@@ -133,29 +146,38 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
     ...(account.plan ? { plan: account.plan } : {}),
     /* resolved, so the UI shows what will actually run rather than "default" */
     model: accountModelFor(account),
+    ...(takesReasoningEffort(account.kind) ? { effort: effortFor(account) } : {}),
     connectedAt: account.connectedAt,
   }
 }
 
-const DEFAULT_OPENROUTER = process.env.DOOP_AGENT_OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL
-const DEFAULT_GEMINI = process.env.DOOP_AGENT_GEMINI_MODEL || DEFAULT_GEMINI_MODEL
+const DEFAULT_OPENROUTER = env.DOOP_AGENT_OPENROUTER_MODEL
+const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
 
 /* per-kind model policy: how a stored (possibly unset or stale) model id
    resolves to the one that will run, and which ids the picker may set */
 const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKnown(model: string): boolean }> = {
-  chatgpt: { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
-  'openai-key': { resolve: (model) => modelFor({ model }), isKnown: isKnownModel },
+  /* the catalog-backed kinds take any id shaped like their provider's: the
+     picker offers what the provider's catalog lists (server/modelCatalog.ts)
+     and the run is the final check, as it always was */
+  chatgpt: { resolve: (model) => modelFor({ model }), isKnown: (model) => OPENAI_API_MODEL.test(model) },
+  'openai-key': { resolve: (model) => modelFor({ model }), isKnown: (model) => OPENAI_API_MODEL.test(model) },
+  /* any Claude id the catalog offered (or the user typed) runs as is; an
+     unset model, or a Claude Code alias saved by an older build, falls back
+     to the curated default — the Messages API takes full ids only */
   'anthropic-key': {
-    resolve: normalizeClaudeModel,
-    isKnown: (model) => CLAUDE_MODEL_IDS.some((id) => id === model),
+    resolve: (model) => (model && CLAUDE_API_MODEL.test(model) ? model : DEFAULT_ANTHROPIC_MODEL),
+    isKnown: (model) => CLAUDE_API_MODEL.test(model),
   },
+  /* OpenRouter keeps its curated roster: the roster's vision flags are what
+     the run-time check knows, and its catalog mixes in text-only models */
   'openrouter-key': {
     resolve: (model) => model || DEFAULT_OPENROUTER,
     isKnown: (model) => OPENROUTER_MODELS.some((option) => option.id === model),
   },
   'gemini-key': {
     resolve: (model) => model || DEFAULT_GEMINI,
-    isKnown: (model) => GEMINI_MODELS.some((option) => option.id === model),
+    isKnown: (model) => GEMINI_API_MODEL.test(model),
   },
 }
 
@@ -182,8 +204,36 @@ export async function setAccountModel(userId: string, model: string): Promise<Ac
   const account = await getAccount(userId)
   if (!account) throw new Error('no model account connected')
   if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
-  await save({ ...account, model })
+  await savePick(account, { model })
   return getStatus(userId)
+}
+
+/** Change how hard the connected OpenAI model thinks per turn. */
+export async function setAccountEffort(userId: string, effort: string): Promise<AccountStatus> {
+  const account = await getAccount(userId)
+  if (!account) throw new Error('no model account connected')
+  if (!takesReasoningEffort(account.kind)) throw new Error('only OpenAI models take a reasoning effort')
+  if (!isReasoningEffort(effort)) throw new Error('unknown reasoning effort')
+  await savePick(account, { reasoningEffort: effort })
+  return getStatus(userId)
+}
+
+/** Write ONLY the picked column, and only onto the account the pick was
+ *  checked against. A whole-row upsert here would carry the tokens read
+ *  moments ago back over a refresh that landed in between (the refresh token
+ *  is single-use, so that forces a reconnect), and two picks made at once
+ *  would undo each other; matching the kind keeps a pick validated for one
+ *  provider off an account that switched to another meanwhile. */
+async function savePick(
+  account: Pick<ModelAccount, 'userId' | 'kind'>,
+  pick: { model: string } | { reasoningEffort: string },
+): Promise<void> {
+  const written = await db
+    .update(modelAccounts)
+    .set({ ...pick, updatedAt: Date.now() })
+    .where(and(eq(modelAccounts.userId, account.userId), eq(modelAccounts.kind, account.kind)))
+    .returning({ userId: modelAccounts.userId })
+  if (!written.length) throw new Error('the connected account changed — pick again')
 }
 
 async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
@@ -199,6 +249,7 @@ async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
     expiresAt: account.expiresAt ?? null,
     apiKey: account.apiKey ?? null,
     model: account.model ?? null,
+    reasoningEffort: account.effort ?? null,
     connectedAt: now,
     updatedAt: now,
   }
@@ -217,6 +268,7 @@ async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
         expiresAt: row.expiresAt,
         apiKey: row.apiKey,
         model: row.model,
+        reasoningEffort: row.reasoningEffort,
         updatedAt: row.updatedAt,
       },
     })
@@ -468,7 +520,7 @@ async function exchangeAndSave(
  * when Doop and the browser share a machine.
  */
 
-export const DEVICE_VERIFICATION_URL = process.env.CHATGPT_DEVICE_URL || `${ISSUER}/codex/device`
+export const DEVICE_VERIFICATION_URL = env.CHATGPT_DEVICE_URL ?? `${ISSUER}/codex/device`
 /* the device endpoints sit under /api/accounts, and the code they hand back was
    minted against this redirect — not the loopback one the browser flow uses */
 const DEVICE_API = '/api/accounts'
@@ -622,7 +674,7 @@ export function cancelDeviceAuth(userId: string) {
 /* Loopback catcher: same-machine flows need no copying             */
 /* ---------------------------------------------------------------- */
 
-const CALLBACK_PORT = Number(process.env.CHATGPT_OAUTH_CALLBACK_PORT || 1455)
+const CALLBACK_PORT = env.CHATGPT_OAUTH_CALLBACK_PORT
 const CATCHER_TTL_MS = PENDING_TTL_MS
 
 let catcher: http.Server | null = null
@@ -736,8 +788,8 @@ async function connectKey(userId: string, kind: AccountKind, apiKey: string): Pr
     userId,
     kind,
     apiKey: key,
-    /* a rotation keeps the chosen model; switching providers resets it */
-    model: previous?.kind === kind ? previous.model : undefined,
+    /* a rotation keeps the chosen model and effort; switching providers resets them */
+    ...(previous?.kind === kind ? { model: previous.model, effort: previous.effort } : {}),
   })
   return getStatus(userId)
 }

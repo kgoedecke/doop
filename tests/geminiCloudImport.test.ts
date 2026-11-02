@@ -15,7 +15,7 @@ const env = {
 }
 
 beforeAll(async () => {
-  server = await startServer(5017, env)
+  server = await startServer(env)
   alice = await new Client(server).signUp('gemini-import-alice@example.test', 'Alice')
   bob = await new Client(server).signUp('gemini-import-bob@example.test', 'Bob')
   const { id: userId } = await (await alice.get('/api/me')).json()
@@ -24,7 +24,6 @@ beforeAll(async () => {
   server.stop({ keepData: true })
   await server.stopped
   server = await startServer(
-    5017,
     {
       ...env,
       DOOP_GEMINI_CLOUD_WORKERS: JSON.stringify({ [userId]: { url: 'http://127.0.0.1:1', token: 'x'.repeat(32) } }),

@@ -1,19 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { Browser, Page } from 'puppeteer-core'
+import type { Page } from 'puppeteer-core'
 import { PRUNE_DEADLINE_MS, pruneCssInDocument } from '../server/cssPrune.ts'
-import { findBrowserPath, getBrowser } from '../server/screenshot.ts'
+import { findBrowserPath } from '../server/screenshot.ts'
+import { openBrowser, type TestBrowser } from './browser.ts'
 
 /* The pruner runs inside Chromium and leans on its CSS parser, so it is
    tested in the real thing rather than against a DOM emulation. Skipped where
    no browser is installed. */
 describe.skipIf(!findBrowserPath())('unused CSS pruning', () => {
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
 
-  /* Launching Chromium on a loaded CI runner can take longer than vitest's
-     default 10 s hook timeout. */
   beforeAll(async () => {
-    browser = await getBrowser()
+    browser = await openBrowser()
     page = await browser.newPage()
     await page.setContent(
       '<!doctype html><html><head></head><body><div class="used"><ul><li>one</li></ul><a href="#">link</a></div><p style="font-family: Inline">inline</p></body></html>',

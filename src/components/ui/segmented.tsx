@@ -24,7 +24,7 @@ function Segmented({
       data-slot="segmented"
       value={value}
       onValueChange={(next) => next && onValueChange(next)}
-      className={cn('flex gap-px rounded-md border border-line bg-paper-deep p-px sm:p-[2px]', className)}
+      className={cn('flex gap-px rounded-pill bg-paper-deep p-0.75', className)}
       {...props}
     />
   )
@@ -35,7 +35,7 @@ function SegmentedItem({ className, ...props }: React.ComponentProps<typeof Togg
     <ToggleGroupPrimitive.Item
       data-slot="segmented-item"
       className={cn(
-        'min-h-[30px] flex-1 rounded-sm border-0 bg-transparent px-3 py-1 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-ink-soft transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=on]:bg-ink data-[state=on]:text-paper sm:min-h-0 sm:flex-none',
+        'min-h-[30px] flex-1 rounded-row border-0 bg-transparent px-3 py-1 text-label/3.5 font-normal text-ink-soft transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=on]:bg-surface data-[state=on]:font-medium data-[state=on]:text-ink data-[state=on]:shadow-ring sm:min-h-0 sm:flex-none',
         className,
       )}
       {...props}
@@ -52,7 +52,7 @@ function SegmentedIconItem({ className, ...props }: React.ComponentProps<typeof 
   return (
     <SegmentedItem
       className={cn(
-        'grid min-h-[30px] flex-none place-items-center rounded-sm px-[11px] text-ink-faint data-[state=on]:bg-paper-deep data-[state=on]:text-ink sm:min-h-0 sm:py-[7px]',
+        'grid min-h-[30px] flex-none place-items-center rounded-row px-2.75 text-ink-faint data-[state=on]:bg-paper-deep data-[state=on]:text-ink data-[state=on]:shadow-none sm:min-h-0 sm:py-1.75',
         className,
       )}
       {...props}

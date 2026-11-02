@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { createHmac } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
@@ -42,7 +43,7 @@ export const RETRY_DELAYS_MS = [10_000, 60_000, 5 * 60_000]
 export const DISABLE_AFTER_FAILURES = 100
 export const TIMEOUT_MS = 10_000
 const USER_AGENT = 'doop-webhooks/1'
-const allowPrivate = () => process.env.WEBHOOK_ALLOW_PRIVATE_URLS === 'true'
+const allowPrivate = () => env.WEBHOOK_ALLOW_PRIVATE_URLS
 
 interface WebhookRecord extends WebhookInfo {
   userId: string
@@ -283,7 +284,11 @@ export async function rotateWebhookSecret(userId: string, id: string): Promise<s
 function publicComment(c: ElementComment) {
   return {
     id: c.id,
-    frameId: c.frameId,
+    /* an element comment names its frame; a canvas comment its page and point */
+    frameId: c.frameId ?? null,
+    pageId: c.pageId ?? null,
+    x: c.x ?? null,
+    y: c.y ?? null,
     parentId: c.parentId ?? null,
     from: c.from,
     text: c.text,
@@ -323,7 +328,7 @@ export function payloadFor(event: CanvasEvent): Record<string, unknown> {
       return {
         actor: { name: event.comment.from, kind: event.actorKind },
         comment: publicComment(event.comment),
-        frame: publicFrame(event.frame),
+        frame: event.frame ? publicFrame(event.frame) : null,
       }
     case 'comment.resolved':
       return {

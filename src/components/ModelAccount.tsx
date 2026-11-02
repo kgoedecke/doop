@@ -1,4 +1,5 @@
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
+import { BrandMark } from './ui/brand-mark'
 import { AgentIcon } from './AgentIcon'
 import { LocalClaudeRow } from './LocalClaude'
 import { authClient } from '../lib/auth'
@@ -7,7 +8,7 @@ import { isDesktopShell } from '../lib/shell'
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
-import type { AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
+import type { AgentModelCatalog, AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
 import { CodeBlock } from './ui/code-block'
@@ -15,6 +16,9 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Dot } from './ui/dot'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
+import { Segmented, SegmentedItem } from './ui/segmented'
+import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
+import { t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { CheckIcon, ChevronDownIcon } from './ui/icons'
@@ -45,6 +49,38 @@ export function useModelAccount(): {
   }, [])
   useEffect(refresh, [refresh])
   return { account, refresh, set: setAccount }
+}
+
+/**
+ * The connected provider's live model list, asked for while `wanted` is true
+ * (the picker is open, or the Settings pane is mounted) and again whenever
+ * the provider changes or `generation` is bumped: the Settings panel bumps it
+ * on every connect, rotation and disconnect, since a rotated key keeps the
+ * account's kind and `connectedAt` and would otherwise keep showing the old
+ * key's models. Null until it arrives and whenever it belongs to another
+ * account than the one on screen, so callers fall back to the curated menu.
+ */
+export function useAgentModels(
+  account: ModelAccountStatus | null,
+  wanted: boolean,
+  generation = 0,
+): AgentModelCatalog | null {
+  const kind = account?.connected ? account.kind : undefined
+  const [loaded, setLoaded] = useState<{ kind: ModelAccountKind; generation: number; catalog: AgentModelCatalog }>()
+  useEffect(() => {
+    if (!kind || !wanted) return
+    let stale = false
+    api.agentModels().then(
+      (catalog) => {
+        if (!stale) setLoaded({ kind, generation, catalog })
+      },
+      () => {},
+    )
+    return () => {
+      stale = true
+    }
+  }, [kind, generation, wanted])
+  return loaded && loaded.kind === kind && loaded.generation === generation ? loaded.catalog : null
 }
 
 /**
@@ -79,28 +115,46 @@ function planName(plan: string): string {
   )
 }
 
+/** The effort picker's labels; the ids are what the server stores. */
+const EFFORT_LABELS: Record<ReasoningEffort, { name: PlainMessageKey; blurb: PlainMessageKey }> = {
+  low: { name: 'models.effortLow', blurb: 'models.effortLowBlurb' },
+  medium: { name: 'models.effortMedium', blurb: 'models.effortMediumBlurb' },
+  high: { name: 'models.effortHigh', blurb: 'models.effortHighBlurb' },
+  xhigh: { name: 'models.effortXhigh', blurb: 'models.effortXhighBlurb' },
+}
+
 const planFlow = 'mt-[14px]'
-const maSteps =
-  'mb-3 ml-[18px] mt-[10px] text-[13px] leading-[1.7] text-ink-soft [&_code]:font-mono [&_code]:text-[12px]'
-const maWaiting = 'mt-[10px] flex items-center gap-[9px] text-[13px] text-ink-soft'
+const maSteps = 'mb-3 ml-[18px] mt-[10px] text-body leading-[1.7] text-ink-soft [&_code]:font-mono [&_code]:text-label'
+const maWaiting = 'mt-[10px] flex items-center gap-[9px] text-body text-ink-soft'
 const maActions = 'mt-3 flex items-center gap-[10px] max-md:flex-col max-md:items-stretch'
 /* the "or paste the redirect instead" style link under a flow */
-const maToggle = 'mt-4 block px-0 py-0 text-left text-[12.5px] font-normal text-ink-faint hover:bg-transparent'
+const maToggle = 'mt-4 block px-0 py-0 text-left text-body font-normal text-ink-faint hover:bg-transparent'
 /* the paste-your-redirect field: ink-bordered so it reads as the live step */
-const maInput = 'rounded-[10px] border-ink px-3 py-[10px] font-mono focus:ring-0 md:text-xs'
+const maInput = 'rounded-pill border-ink px-3 py-[10px] font-mono focus:ring-0 md:text-xs'
 /* buttons in the responsive action rows centre their label once stacked */
 const rowBtn = 'max-md:justify-center'
 
 export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
+  const t = useT()
   const desktop = isDesktopShell()
   const { account, refresh, set } = useModelAccount()
+  /* bumped by `settle`, so a rotated key reloads the catalog it unlocks */
+  const [catalogGeneration, setCatalogGeneration] = useState(0)
+  const catalog = useAgentModels(account, true, catalogGeneration)
   const { data: session } = authClient.useSession()
   const local = useLocalAgent((s) => s.preference)
   const userId = session?.user.id
   const localModel = local?.model ?? 'default'
+  const localEffort = local?.effort
+  /* switching to a server provider keeps the local choices for a switch back */
   const selectServer = useCallback(async () => {
-    if (userId) await selectLocalAgent(userId, { enabled: false, model: localModel })
-  }, [userId, localModel])
+    if (userId)
+      await selectLocalAgent(userId, {
+        enabled: false,
+        model: localModel,
+        ...(localEffort ? { effort: localEffort } : {}),
+      })
+  }, [userId, localModel, localEffort])
   const [authUrl, setAuthUrl] = useState('')
   /* true while the server is listening on the loopback callback port for us —
      the user approves in the other tab and this one just flips */
@@ -116,6 +170,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const settle = useCallback(
     (next: ModelAccountStatus) => {
       set(next)
+      setCatalogGeneration((generation) => generation + 1)
       setAuthUrl('')
       setWaiting(false)
       setDevice(null)
@@ -141,7 +196,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         await selectServer()
       } catch {
         setSwitchFailed(true)
-        setError('ChatGPT connected, but switching providers failed. Retry the switch without signing in again.')
+        /* the free translator keeps this callback stable for the polling effect */
+        setError(translate('models.chatgptSwitchFailed'))
       } finally {
         setBusy(false)
       }
@@ -171,7 +227,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           (flow) => {
             if (!cancelled && 'userCode' in flow && flow.status === 'error') {
               setDevice(null)
-              setError(flow.error || 'That sign-in did not complete')
+              setError(flow.error || translate('models.signInIncomplete'))
             }
           },
           () => {},
@@ -186,7 +242,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   const fail = (e: unknown) => {
     const body = (e as { body?: { error?: string } })?.body
-    setError(body?.error || (e instanceof Error ? e.message : 'That did not work — try again'))
+    setError(body?.error || (e instanceof Error ? e.message : t('models.failedRetry')))
   }
 
   const start = async () => {
@@ -286,6 +342,20 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     }
   }
 
+  const pickEffort = async (effort: string) => {
+    setBusy(true)
+    setError('')
+    try {
+      set(await api.setAgentEffort(effort))
+      posthog.capture('agent_effort_changed', { effort })
+    } catch (e) {
+      fail(e)
+      refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const remove = async () => {
     setBusy(true)
     try {
@@ -301,12 +371,42 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
   if (!account) return null
 
-  const menuFor = (kind: ModelAccountKind): AgentModelOption[] => account.menus?.[kind] ?? []
+  /* the connected row offers the provider's live list once it has arrived;
+     every other row advertises its curated menu */
+  const menuFor = (kind: ModelAccountKind): AgentModelOption[] =>
+    (account.connected && kind === account.kind && catalog?.live ? catalog.models : undefined) ??
+    account.menus?.[kind] ??
+    []
   const activeMenu = account.kind ? menuFor(account.kind) : []
   const chosen = activeMenu.find((m) => m.id === account.model)
   const onChatgpt = account.connected && account.kind === 'chatgpt'
   /* only one account is stored per user, so connecting one replaces the other */
   const replaces = account.connected
+
+  /* OpenAI models think as hard as asked: a one-of-four switch under the
+     connected OpenAI row, absent elsewhere (the status carries no effort). */
+  const effortPicker = () =>
+    account.effort ? (
+      <div className="mt-[10px] flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-body text-ink-soft">{t('models.reasoningEffort')}</span>
+        <Segmented
+          aria-label={t('models.reasoningEffort')}
+          value={account.effort}
+          onValueChange={pickEffort}
+          disabled={busy}
+        >
+          {reasoningEffortOptions(account.effort).map((e) => {
+            /* a server default outside the four keeps its raw id as its name */
+            const labels = isReasoningEffort(e.id) ? EFFORT_LABELS[e.id] : undefined
+            return (
+              <SegmentedItem key={e.id} value={e.id} title={labels ? t(labels.blurb) : t('models.effortServerDefault')}>
+                {labels ? t(labels.name) : e.name}
+              </SegmentedItem>
+            )
+          })}
+        </Segmented>
+      </div>
+    ) : null
 
   /* On the connected row the picker changes the model; on any other row it
      only advertises what that plan can run, so it stays inert. A roster too
@@ -316,12 +416,12 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     if (models.length > 5) {
       if (!live) {
         return (
-          <p className="self-center text-[13px] leading-[1.55] text-ink-faint">
+          <p className="self-center text-body leading-[1.55] text-ink-faint">
             {models
               .slice(0, 6)
               .map((m) => m.name)
               .join(' · ')}
-            {models.length > 6 ? ' and more' : ''}
+            {models.length > 6 ? t('models.andMore') : ''}
           </p>
         )
       }
@@ -332,9 +432,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             <Button
               variant="ghost"
               disabled={busy}
-              className="gap-[7px] rounded-[10px] border border-line px-3 text-[13px] font-medium text-ink"
+              className="gap-[7px] rounded-pill border border-line px-3 text-body font-medium text-ink"
             >
-              {current?.name ?? account.model ?? 'Pick a model'}
+              {current?.name ?? account.model ?? t('models.pickModel')}
               {current?.vision === false && <NoVisionBadge />}
               <ChevronDownIcon width={14} height={14} aria-hidden />
             </Button>
@@ -347,7 +447,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                     {m.name}
                     {m.vision === false && <NoVisionBadge />}
                   </span>
-                  <span className="text-[12px] leading-[1.45] text-ink-faint">{m.blurb}</span>
+                  <span className="text-label leading-[1.45] text-ink-faint">{m.blurb}</span>
                 </span>
                 {m.id === account.model && <Tick />}
               </DropdownMenuItem>
@@ -357,9 +457,18 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       )
     }
     return live ? (
-      <ToggleChipGroup aria-label="Model" value={account.model ?? ''} onValueChange={pickModel} disabled={busy}>
+      <ToggleChipGroup
+        aria-label={t('models.model')}
+        value={account.model ?? ''}
+        onValueChange={pickModel}
+        disabled={busy}
+      >
         {models.map((m) => (
-          <ToggleChipItem key={m.id} value={m.id} title={m.vision === false ? `${m.blurb} ${VISION_NOTE}` : m.blurb}>
+          <ToggleChipItem
+            key={m.id}
+            value={m.id}
+            title={m.vision === false ? `${m.blurb} ${t('models.visionNote')}` : m.blurb}
+          >
             {m.id === account.model && <Tick />}
             {m.name}
           </ToggleChipItem>
@@ -397,14 +506,18 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         <span className={planMark(live && !local?.enabled)}>{cfg.mark}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
-            <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
+            <h3 className="font-display text-heading font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-heading">
               {cfg.title}
             </h3>
             <span className={planPill(live)}>
-              {live && showKey !== cfg.kind ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+              {live && showKey !== cfg.kind
+                ? local?.enabled
+                  ? t('models.connected')
+                  : t('models.activeConnected')
+                : t('models.notConnected')}
             </span>
           </div>
-          <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">{cfg.lede}</p>
+          <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">{cfg.lede}</p>
 
           {live && showKey !== cfg.kind ? (
             <>
@@ -418,7 +531,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                       setShowKey(cfg.kind)
                     }}
                   >
-                    Rotate key
+                    {t('models.rotateKey')}
                   </Button>
                   {local?.enabled && (
                     <Button
@@ -427,26 +540,26 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                         selectServer().catch(fail)
                       }}
                     >
-                      Use instead
+                      {t('models.useInstead')}
                     </Button>
                   )}
                   <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                    Disconnect
+                    {t('models.disconnect')}
                   </Button>
                 </div>
               </div>
-              {chosen && (
-                <p className="mt-[10px] text-[13px] text-ink-faint">
+              {chosen && (chosen.blurb || chosen.vision === false) && (
+                <p className="mt-[10px] text-body text-ink-faint">
                   {chosen.blurb}
-                  {chosen.vision === false && ` ${VISION_NOTE}`}
+                  {chosen.vision === false && ` ${t('models.visionNote')}`}
                 </p>
               )}
+              {catalog?.error && <p className="mt-[10px] text-body text-ink-faint">{catalog.error}</p>}
+              {effortPicker()}
             </>
           ) : showKey === cfg.kind ? (
             <div className={planFlow}>
-              <p className="mb-3 mt-2 text-[13px] leading-[1.55] text-ink-soft">
-                The key is stored on the server and never shown again.
-              </p>
+              <p className="mb-3 mt-2 text-body leading-[1.55] text-ink-soft">{t('models.keyStoredNote')}</p>
               <Input
                 className={maInput}
                 value={apiKey}
@@ -458,10 +571,10 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               />
               <div className={maActions}>
                 <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
-                  {busy ? 'Saving…' : live ? 'Rotate key' : 'Save key'}
+                  {busy ? t('models.saving') : live ? t('models.rotateKey') : t('models.saveKey')}
                 </Button>
                 <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
               </div>
             </div>
@@ -476,7 +589,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 }}
                 disabled={busy}
               >
-                {replaces ? 'Use instead' : 'Connect'}
+                {replaces ? t('models.useInstead') : t('models.connect')}
               </Button>
             </div>
           )}
@@ -494,25 +607,27 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
-              <h3 className="font-display text-[18px] font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-[17px]">
-                Codex Plan
+              <h3 className="font-display text-heading font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-heading">
+                {t('models.codexPlan')}
               </h3>
               <span className={planPill(onChatgpt)}>
-                {onChatgpt ? (local?.enabled ? 'Connected' : 'Active · Connected') : 'Not connected'}
+                {onChatgpt
+                  ? local?.enabled
+                    ? t('models.connected')
+                    : t('models.activeConnected')
+                  : t('models.notConnected')}
               </span>
             </div>
-            <p className="mt-1.5 text-[14px] leading-[1.55] text-ink-soft max-md:text-[13.5px]">
-              Route OpenAI models through your ChatGPT subscription
-            </p>
+            <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">{t('models.codexLede')}</p>
             {onChatgpt && account.email && (
-              <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-[13px] text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
-                <dt>Connected as</dt>
+              <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-body text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
+                <dt>{t('models.connectedAs')}</dt>
                 <dd className="min-w-0">
                   <code className={planAsCode}>{account.email}</code>
                 </dd>
                 {account.plan && (
                   <>
-                    <dt className="max-md:mt-2">Plan</dt>
+                    <dt className="max-md:mt-2">{t('models.plan')}</dt>
                     <dd className="min-w-0">
                       <code className={planAsCode}>{planName(account.plan)}</code>
                     </dd>
@@ -528,47 +643,50 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                   <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
                     {(local?.enabled || switchFailed) && (
                       <Button disabled={busy} onClick={() => activateChatgpt(account)}>
-                        {switchFailed ? 'Retry switch' : 'Use instead'}
+                        {switchFailed ? t('models.retrySwitch') : t('models.useInstead')}
                       </Button>
                     )}
                     <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                      Disconnect
+                      {t('models.disconnect')}
                     </Button>
                   </div>
                 </div>
-                {chosen && <p className="mt-[10px] text-[13px] text-ink-faint">{chosen.blurb}</p>}
+                {chosen && <p className="mt-[10px] text-body text-ink-faint">{chosen.blurb}</p>}
+                {effortPicker()}
               </>
             ) : device ? (
               <div className={planFlow}>
                 <ol className={maSteps}>
                   <li>
-                    One-time setup: turn on <b>device code authorization</b> in ChatGPT → Settings → Security. (On a
-                    workspace account an admin has to allow it.)
+                    {t('models.deviceStep1Before')}
+                    <b>{t('models.deviceStep1Bold')}</b>
+                    {t('models.deviceStep1After')}
                   </li>
                   <li>
-                    Open{' '}
+                    {t('models.deviceStep2Before')}{' '}
                     <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
                       {device.verificationUrl.replace(/^https:\/\//, '')}
                     </a>{' '}
-                    and enter this code:
+                    {t('models.deviceStep2After')}
                   </li>
                 </ol>
                 <CodeBlock text={device.userCode} />
                 <p className={maWaiting}>
-                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" /> Waiting for approval…
+                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" />{' '}
+                  {t('models.waitingApproval')}
                 </p>
                 <div className={maActions}>
                   <Button asChild variant="primary" className={rowBtn}>
                     <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
-                      Open verification page
+                      {t('models.openVerificationPage')}
                     </a>
                   </Button>
                   <Button variant="ghost" className={rowBtn} onClick={cancelDevice}>
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                 </div>
                 <Button variant="bare" size="sm" className={maToggle} onClick={usePasteFlow} disabled={busy}>
-                  Device codes not available on your account? Use the browser sign-in instead
+                  {t('models.useBrowserSignIn')}
                 </Button>
               </div>
             ) : waiting ? (
@@ -576,8 +694,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 {/* Doop holds the loopback port itself, so approving is the
                     whole job — this row flips on its own. */}
                 <p className={maWaiting}>
-                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" /> Waiting for you to
-                  approve it in the other tab…
+                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" />{' '}
+                  {t('models.waitingOtherTab')}
                 </p>
                 <div className={maActions}>
                   <Button asChild variant="ghost" className={rowBtn}>
@@ -591,18 +709,22 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                     className={cn(maToggle, 'mt-0 underline')}
                     onClick={() => setWaiting(false)}
                   >
-                    Paste the redirect URL instead
+                    {t('models.pasteRedirectInstead')}
                   </Button>
                 </div>
               </div>
             ) : authUrl ? (
               <div className={planFlow}>
                 <ol className={maSteps}>
-                  <li>Approve the connection in the tab that just opened.</li>
+                  <li>{t('models.pasteStep1')}</li>
                   <li>
-                    You will land on a <code>localhost:1455</code> page that <b>fails to load</b> — that is expected.
+                    {t('models.pasteStep2Before')}
+                    <code>localhost:1455</code>
+                    {t('models.pasteStep2Middle')}
+                    <b>{t('models.pasteStep2Bold')}</b>
+                    {t('models.pasteStep2After')}
                   </li>
-                  <li>Copy that page's full address and paste it below.</li>
+                  <li>{t('models.pasteStep3')}</li>
                 </ol>
                 <Input
                   className={maInput}
@@ -614,7 +736,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 />
                 <div className={maActions}>
                   <Button variant="primary" className={rowBtn} onClick={finish} disabled={busy || !redirect.trim()}>
-                    {busy ? 'Connecting…' : 'Finish connecting'}
+                    {busy ? t('models.connecting') : t('models.finishConnecting')}
                   </Button>
                   <Button asChild variant="ghost" className={rowBtn}>
                     <a href={authUrl} target="_blank" rel="noreferrer noopener">
@@ -627,7 +749,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               <div className={actionsRow}>
                 {modelPicker(false, 'chatgpt')}
                 <Button className={rowBtn} onClick={start} disabled={busy}>
-                  {busy ? 'Opening…' : replaces ? 'Use instead' : 'Connect'}
+                  {busy ? t('models.opening') : replaces ? t('models.useInstead') : t('models.connect')}
                 </Button>
               </div>
             )}
@@ -637,24 +759,24 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
 
       {keySection({
         kind: 'openai-key',
-        title: 'OpenAI API key',
-        lede: 'Pay per token on your own OpenAI account — no ChatGPT subscription involved',
+        title: t('models.openaiKeyTitle'),
+        lede: t('models.openaiKeyLede'),
         mark: <OpenAiMark />,
         placeholder: 'sk-…',
       })}
 
       {keySection({
         kind: 'openrouter-key',
-        title: 'OpenRouter API key',
-        lede: 'One key for Kimi, Qwen, GLM, DeepSeek, MiniMax, Gemini and more — pay per token on your OpenRouter account',
+        title: t('models.openrouterKeyTitle'),
+        lede: t('models.openrouterKeyLede'),
         mark: <OpenRouterMark />,
         placeholder: 'sk-or-…',
       })}
 
       {keySection({
         kind: 'gemini-key',
-        title: 'Gemini API key',
-        lede: 'Google’s Gemini models, plus Nano Banana image generation — pay per token on your Google AI account',
+        title: t('models.geminiKeyTitle'),
+        lede: t('models.geminiKeyLede'),
         mark: <GeminiMark />,
         placeholder: 'AIza…',
       })}
@@ -662,29 +784,28 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       {desktop && <LocalClaudeRow />}
       {keySection({
         kind: 'anthropic-key',
-        title: 'Claude API key',
-        lede: 'Pay per token on your Anthropic account. Runs on Doop’s server.',
+        title: t('models.claudeKeyTitle'),
+        lede: t('models.claudeKeyLede'),
         mark: <AgentIcon name="claude" size={20} />,
         placeholder: 'sk-ant-…',
       })}
 
       {/* the browser cannot run the local CLI, so the plan closes the list as a pointer to the desktop app */}
       {!desktop && <LocalClaudeRow />}
-      {error && <p className="mt-[10px] text-[12.5px] text-accent-ink">{error}</p>}
+      {error && <p className="mt-[10px] text-body text-accent-ink">{error}</p>}
     </div>
   )
 }
-
-const VISION_NOTE = 'Text-only: this model can’t see screenshots, so designs aren’t visually reviewed.'
 
 function Tick() {
   return <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
 }
 
 function NoVisionBadge() {
+  const t = useT()
   return (
-    <span className="rounded-[5px] bg-paper-deep px-[6px] py-[1px] text-[10.5px] font-medium uppercase tracking-[0.04em] text-ink-faint">
-      no visual review
+    <span className="rounded-[5px] bg-paper-deep px-[6px] py-[1px] text-micro font-medium uppercase tracking-[0.04em] text-ink-faint">
+      {t('models.noVisualReview')}
     </span>
   )
 }
@@ -711,28 +832,12 @@ function OpenRouterMark() {
   )
 }
 
-/** The Gemini four-point spark, inlined like the other marks. */
-function GeminiMark() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M12 1c.55 5.93 5.07 10.45 11 11-5.93.55-10.45 5.07-11 11-.55-5.93-5.07-10.45-11-11C6.93 11.45 11.45 6.93 12 1Z"
-      />
-    </svg>
-  )
-}
-
-/** OpenAI's mark, inlined so the page needs no external request. */
 /* 18 in a 36px tile — the same mark-to-tile ratio the presence avatars use on
    a canvas, so the brand tile reads identically wherever it appears */
+function GeminiMark() {
+  return <BrandMark brand="gemini" size={18} />
+}
+
 function OpenAiMark() {
-  return (
-    <svg viewBox="0 0 256 260" width="18" height="18" aria-hidden>
-      <path
-        fill="currentColor"
-        d="M239.184 106.203a64.72 64.72 0 0 0-5.576-53.103C219.452 28.459 191 15.784 163.213 21.74A65.586 65.586 0 0 0 52.096 45.22a64.72 64.72 0 0 0-43.23 31.36c-14.31 24.602-11.061 55.634 8.033 76.74a64.67 64.67 0 0 0 5.525 53.102c14.174 24.65 42.644 37.324 70.446 31.36a64.72 64.72 0 0 0 48.754 21.744c28.481.025 53.714-18.361 62.414-45.481a64.77 64.77 0 0 0 43.229-31.36c14.137-24.558 10.875-55.423-8.083-76.483m-97.56 136.338a48.4 48.4 0 0 1-31.105-11.255l1.535-.87l51.67-29.825a8.6 8.6 0 0 0 4.247-7.367v-72.85l21.845 12.636c.218.111.37.32.409.563v60.367c-.056 26.818-21.783 48.545-48.601 48.601M37.158 197.93a48.35 48.35 0 0 1-5.781-32.589l1.534.921l51.722 29.826a8.34 8.34 0 0 0 8.441 0l63.181-36.425v25.221a.87.87 0 0 1-.358.665l-52.335 30.184c-23.257 13.398-52.97 5.431-66.404-17.803M23.549 85.38a48.5 48.5 0 0 1 25.58-21.333v61.39a8.29 8.29 0 0 0 4.195 7.316l62.874 36.272l-21.845 12.636a.82.82 0 0 1-.767 0L41.353 151.53c-23.211-13.454-31.171-43.144-17.804-66.405zm179.466 41.695l-63.08-36.63L161.73 77.86a.82.82 0 0 1 .768 0l52.233 30.184a48.6 48.6 0 0 1-7.316 87.635v-61.391a8.54 8.54 0 0 0-4.4-7.213m21.742-32.69l-1.535-.922l-51.619-30.081a8.39 8.39 0 0 0-8.492 0L99.98 99.808V74.587a.72.72 0 0 1 .307-.665l52.233-30.133a48.652 48.652 0 0 1 72.236 50.391zM88.061 139.097l-21.845-12.585a.87.87 0 0 1-.41-.614V65.685a48.652 48.652 0 0 1 79.757-37.346l-1.535.87l-51.67 29.825a8.6 8.6 0 0 0-4.246 7.367zm11.868-25.58L128.067 97.3l28.188 16.218v32.434l-28.086 16.218l-28.188-16.218z"
-      />
-    </svg>
-  )
+  return <BrandMark brand="openai" size={18} />
 }

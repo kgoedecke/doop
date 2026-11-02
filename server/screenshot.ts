@@ -1,4 +1,6 @@
+import { env, windowsBrowserDirectories } from './env.ts'
 import fs from 'node:fs'
+import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
@@ -8,8 +10,10 @@ import { guardPublicPageRequests } from './publicUrl.ts'
  * Uses the system browser via puppeteer-core — no bundled download.
  */
 
+const windowsDirectories = process.platform === 'win32' ? windowsBrowserDirectories() : []
+
 const CHROME_PATHS = [
-  process.env.CHROME_PATH,
+  env.CHROME_PATH,
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
@@ -17,6 +21,9 @@ const CHROME_PATHS = [
   '/usr/bin/google-chrome',
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
+  ...windowsDirectories.map((dir) => path.join(dir, 'Google', 'Chrome', 'Application', 'chrome.exe')),
+  ...windowsDirectories.map((dir) => path.join(dir, 'Microsoft', 'Edge', 'Application', 'msedge.exe')),
+  ...windowsDirectories.map((dir) => path.join(dir, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe')),
 ].filter((p): p is string => !!p)
 
 /** The first usable local browser executable, or null when there is none. */
@@ -46,9 +53,23 @@ export async function getBrowser(): Promise<Browser> {
     if (b.connected) return b
     browserPromise = null
   }
-  browserPromise = puppeteer.launch({
+  const launching = launchBrowser()
+  browserPromise = launching
+  /* a launch that failed (a slow cold start past puppeteer's timeout) must not
+     be handed to every later caller: the next one tries again */
+  launching.catch(() => {
+    if (browserPromise === launching) browserPromise = null
+  })
+  return launching
+}
+
+/** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
+ *  for its DevTools endpoint (puppeteer's default, 30s, unless given). */
+export function launchBrowser(timeout?: number): Promise<Browser> {
+  return puppeteer.launch({
     executablePath: findBrowser(),
     headless: true,
+    timeout,
     args: [
       '--no-first-run',
       '--disable-extensions',
@@ -57,10 +78,9 @@ export async function getBrowser(): Promise<Browser> {
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
       '--hide-scrollbars',
       /* containers: no user namespaces for the sandbox, tiny /dev/shm */
-      ...(process.env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
+      ...(env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
     ],
   })
-  return browserPromise
 }
 
 export interface IsolatedPage {
@@ -90,13 +110,18 @@ export async function openIsolatedPage(): Promise<IsolatedPage> {
   }
 }
 
-async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
+export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
   const loaded = await openIsolatedPage()
   const { page } = loaded
   try {
-    const assetOrigin = new URL(process.env.BETTER_AUTH_URL || 'http://localhost:4300').origin
+    const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
     await guardPublicPageRequests(page, {
-      allowUrl: (url) => url.origin === assetOrigin && url.pathname.startsWith('/a/'),
+      allowUrl: (url) =>
+        (url.origin === assetOrigin && url.pathname.startsWith('/a/')) ||
+        /* webfonts referenced by imported frames (imports request the
+           source design's families from Google Fonts) */
+        url.origin === 'https://fonts.googleapis.com' ||
+        url.origin === 'https://fonts.gstatic.com',
     })
     await page.setViewport({
       width: Math.max(1, Math.round(frame.width)),
@@ -105,8 +130,17 @@ async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
       height: Math.max(1, Math.min(Math.round(frame.height), 4000)),
       deviceScaleFactor: 1,
     })
+    /* setContent leaves the page on about:blank, where the relative /a/...
+       asset URLs of imported frames resolve nowhere. In the app an iframe
+       inherits the page origin; here a <base> stands in for it — unless the
+       frame brought its own (website imports do). */
+    let html = frame.html || '<!doctype html><html><body></body></html>'
+    if (!/<base\s/i.test(html)) {
+      const baseTag = `<base href="${assetOrigin.replace(/"/g, '&quot;')}/">`
+      html = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`) : baseTag + html
+    }
     try {
-      await page.setContent(frame.html || '<!doctype html><html><body></body></html>', {
+      await page.setContent(html, {
         waitUntil: 'load',
         timeout: 8000,
       })
@@ -196,6 +230,8 @@ export async function inspectFrame(frame: Frame): Promise<FrameInspection> {
       }
 
       function selectorFor(el: Element): string {
+        const doopId = el.getAttribute('data-doop-id')
+        if (doopId) return `[data-doop-id="${doopId}"]`
         if (el.id && el.id.length < 80) return `#${CSS.escape(el.id)}`
         const parts: string[] = []
         let node: Element | null = el

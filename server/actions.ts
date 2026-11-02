@@ -1,30 +1,28 @@
 import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
 import { nanoid } from 'nanoid'
-import { store } from './store.ts'
+import { FrameConflictError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
-import {
-  DEFAULT_ROLE_ID,
-  mentionedRole,
-  mentionedRoles,
-  normalizePipeline,
-  roleByAgentName,
-  roleName,
-  stripMentions,
-} from '../shared/agents.ts'
+import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
+import { canvasPages } from '../shared/pages.ts'
+import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment, type CommentAnchorInput } from '../shared/comments.ts'
+import { isElementId } from '../shared/elementId.ts'
+import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
+  CanvasGuide,
   ActorKind,
   ActivityItem,
   AgentTask,
   CardScope,
-  ChatMessage,
   DesignDecision,
   ElementComment,
   Frame,
+  FrameVersion,
+  FrameVersionInfo,
   GuidelineDoc,
   MemoryProposal,
   MemoryReference,
@@ -65,7 +63,6 @@ export function hydrateLogs(data: {
   tasks: Map<string, AgentTask[]>
   feedback: Map<string, TaskFeedback[]>
   comments: Map<string, ElementComment[]>
-  chat?: Map<string, ChatMessage[]>
   activity: Map<string, ActivityItem[]>
   decisions: Map<string, DesignDecision[]>
   proposals: Map<string, MemoryProposal[]>
@@ -73,8 +70,6 @@ export function hydrateLogs(data: {
   for (const [canvasId, list] of data.tasks) taskLog.set(canvasId, list)
   for (const [canvasId, list] of data.feedback) feedbackLog.set(canvasId, list)
   for (const [canvasId, list] of data.comments) commentLog.set(canvasId, list)
-  chatLog.clear()
-  for (const [canvasId, list] of data.chat ?? []) chatLog.set(canvasId, list)
   for (const [canvasId, list] of data.activity) activityLog.set(canvasId, list)
   for (const [canvasId, list] of data.decisions) decisionLog.set(canvasId, list)
   for (const [canvasId, list] of data.proposals) proposalLog.set(canvasId, list)
@@ -312,97 +307,6 @@ export function setAgentStatus(canvasId: string, actor: Actor, status: string) {
 
 const feedbackLog = new Map<string, TaskFeedback[]>() // canvasId -> entries (newest first)
 
-/* ---- canvas chat ---- */
-
-const chatLog = new Map<string, ChatMessage[]>() // canvasId -> messages (newest first)
-
-export const MAX_CHAT_CHARS = 4_000
-/** an agent's closing summary is a paragraph, not the whole transcript */
-const MAX_CHAT_REPLY_CHARS = 1_500
-
-export function getChat(canvasId: string): ChatMessage[] {
-  return chatLog.get(canvasId) ?? []
-}
-
-function pushChat(message: ChatMessage) {
-  const list = chatLog.get(message.canvasId) ?? []
-  list.unshift(message)
-  const dropped = list.splice(persist.CHAT_LOG_CAP).map((m) => m.id)
-  chatLog.set(message.canvasId, list)
-  persist.saveChat(message)
-  persist.deleteChat(dropped)
-  broadcast(message.canvasId, { type: 'chat', message })
-}
-
-/** A human says something in the canvas chat. @mentioning resident agents
- *  turns the message into a board card for them, in mention order — the
- *  message keeps the card's id so the chat can show where the work stands. */
-export async function addChatMessage(
-  canvasId: string,
-  text: string,
-  from: string,
-  fromUserId?: string,
-): Promise<ChatMessage | undefined> {
-  const clean = text.trim().slice(0, MAX_CHAT_CHARS)
-  if (!clean || !store.getCanvasMetadata(canvasId)) return undefined
-  const roles = mentionedRoles(clean)
-  const card =
-    roles.length > 0
-      ? await addQueuedCard(
-          canvasId,
-          stripMentions(clean) || clean,
-          from,
-          roles.map((r) => r.id),
-          undefined,
-          fromUserId,
-        )
-      : undefined
-  const list = chatLog.get(canvasId) ?? []
-  const message: ChatMessage = {
-    id: nanoid(8),
-    canvasId,
-    from,
-    fromKind: 'user',
-    ...(fromUserId ? { fromUserId } : {}),
-    color: colorFor(from),
-    text: clean,
-    /* strictly increasing per canvas so the thread order survives a restart */
-    at: Math.max(Date.now(), (list[0]?.at ?? 0) + 1),
-    ...(roles.length > 0 ? { mentions: roles.map((r) => r.id) } : {}),
-    ...(card ? { taskId: card.id } : {}),
-  }
-  pushChat(message)
-  return message
-}
-
-/** An agent answers the chat message that queued one of its cards. Nothing
- *  is posted for cards that came from the board — those have no thread. */
-export function chatReplyForCard(
-  canvasId: string,
-  cardId: string,
-  actor: Actor,
-  text: string,
-): ChatMessage | undefined {
-  const asked = (chatLog.get(canvasId) ?? []).find((m) => m.taskId === cardId && m.fromKind === 'user')
-  if (!asked) return undefined
-  const clean = text.replace(/\s+/g, ' ').trim()
-  if (!clean) return undefined
-  const list = chatLog.get(canvasId) ?? []
-  const message: ChatMessage = {
-    id: nanoid(8),
-    canvasId,
-    from: actor.name,
-    fromKind: 'agent',
-    color: actor.color,
-    text: clean.length > MAX_CHAT_REPLY_CHARS ? clean.slice(0, MAX_CHAT_REPLY_CHARS - 1) + '…' : clean,
-    at: Math.max(Date.now(), (list[0]?.at ?? 0) + 1),
-    taskId: cardId,
-    replyToId: asked.id,
-  }
-  pushChat(message)
-  return message
-}
-
 export function getFeedback(canvasId: string): TaskFeedback[] {
   return feedbackLog.get(canvasId) ?? []
 }
@@ -460,17 +364,23 @@ export function addTaskFeedback(
   return undefined
 }
 
-/** Open feedback this agent may take: everything addressed to it, plus
- *  untargeted feedback — that part stays a canvas-level queue where the first
- *  identified agent call wins. */
-export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
-  const pending = (feedbackLog.get(canvasId) ?? []).filter(
+/** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
+ *  tools mention without assigning anything. */
+export function openFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
+  return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
       (!f.targetAgent || f.targetAgent === agentName) &&
       (payer === undefined || (f.fromUserId ?? '') === payer),
   )
+}
+
+/** Open feedback this agent may take: everything addressed to it, plus
+ *  untargeted feedback — that part stays a canvas-level queue where the first
+ *  identified agent call wins. */
+export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
+  const pending = openFeedbackFor(canvasId, agentName, payer)
   for (const f of pending) {
     f.deliveredAt = Date.now()
     f.claimedBy = agentName
@@ -534,9 +444,9 @@ export function retryTaskFeedback(feedbackId: string, by: string): TaskFeedback 
 }
 
 /* ------------------------------------------------------------------ */
-/* Element comments: pinned to a specific element inside a frame.      */
-/* Comments mentioning @Doop are routed to the resident agent; the     */
-/* rest are notes for the humans in the room.                          */
+/* Comments: pinned to a specific element inside a frame, or to a      */
+/* point on the canvas. Comments mentioning @Doop are routed to the    */
+/* resident agent; the rest are notes for the humans in the room.      */
 /* ------------------------------------------------------------------ */
 
 const commentLog = new Map<string, ElementComment[]>() // canvasId -> entries (newest first)
@@ -554,25 +464,259 @@ export function findComment(commentId: string): ElementComment | undefined {
   return undefined
 }
 
+/** Where a new comment sits: on an element inside a frame (by its
+ *  `data-doop-id`), on a frame as a whole at a design point, or at a world
+ *  point on one page of the canvas. */
+type CommentAnchor =
+  | { frame: Frame; elementId?: string; snippet: string; point?: { x: number; y: number } }
+  | { pageId: string; x: number; y: number }
+
+/** What a client knows about the element it is pointing at: the positional
+ *  path the live document answered with, the id the element already wears if
+ *  any, an excerpt, and the design point of the click. */
+export interface FrameAnchorInput {
+  selector?: unknown
+  elementId?: unknown
+  snippet?: unknown
+  x?: unknown
+  y?: unknown
+}
+
+export const MAX_ELEMENT_SELECTOR_CHARS = 1_000
+
+/** Make the element a positional selector names addressable by id: the id
+ *  it already carries, or a fresh `data-doop-id` written into the frame's
+ *  HTML as an annotation (sign-off stands, no design-history version, no
+ *  activity line). The frame actor has stored the stamp when this returns,
+ *  so whatever names the id (a comment, a copied link) is written after it.
+ *  Undefined when the frame is gone, is being streamed into, the selector
+ *  does not resolve in the stored HTML, or edits keep landing in between. */
+export async function ensureElementId(
+  frameId: string,
+  selector: string,
+  by: string,
+  /** the live element's excerpt, when known: the stamp is refused if the
+   *  saved element at that path is not the one the client saw */
+  like?: string,
+): Promise<{ id: string; frame: Frame } | undefined> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const frame = await store.getFrame(frameId)
+    if (!frame || isFrameStreaming(frameId)) return undefined
+    const stamped = stampElementId(frame.html, selector.slice(0, MAX_ELEMENT_SELECTOR_CHARS), { like })
+    if (!stamped) return undefined
+    if (stamped.html === frame.html) return { id: stamped.id, frame }
+    try {
+      /* stamped against this version only: a concurrent edit is never overwritten */
+      const next = await store.updateFrame(frameId, { html: stamped.html }, by, undefined, {
+        annotation: true,
+        expectedUpdatedAt: frame.updatedAt,
+      })
+      return next ? { id: stamped.id, frame: next } : undefined
+    } catch (error) {
+      if (error instanceof FrameConflictError) continue
+      /* a stamp that cannot be written leaves the caller to fall back (a
+         comment lands on the frame at its point), as an unsaved stamp did */
+      console.error(`[comments] element id stamp on frame ${frameId} not written:`, error)
+      return undefined
+    }
+  }
+  return undefined
+}
+
+/** An anchor inside a frame, as a client sent it. An element is kept by the
+ *  id it carries, else stamped from the positional selector; when neither
+ *  works (the element came from a script, or the frame is mid-stream) the
+ *  comment lands on the frame at the point instead, so it is never lost. A
+ *  client that sends no point (older apps) still gets a frame comment, one
+ *  that is listed without a pin. */
+async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): Promise<CommentAnchor> {
+  const point =
+    Number.isFinite(input.x) && Number.isFinite(input.y) ? { x: Number(input.x), y: Number(input.y) } : undefined
+  const snippet = String(input.snippet ?? '').slice(0, 400)
+  const selector = String(input.selector ?? '').trim()
+  const onElement = selector !== '' && selector !== FRAME_COMMENT_SELECTOR
+  if (isElementId(input.elementId) && hasElementId(frame.html, input.elementId)) {
+    return { frame, elementId: input.elementId, snippet }
+  }
+  if (onElement) {
+    const stamped = await ensureElementId(frame.id, selector, by, snippet || undefined)
+    if (stamped) return { frame: stamped.frame, elementId: stamped.id, snippet }
+  }
+  return { frame, snippet: '', ...(point ? { point } : {}) }
+}
+
 export async function addElementComment(
   frameId: string,
-  input: { selector: string; snippet: string; text: string },
+  input: FrameAnchorInput & { text: string },
   from: string,
   fromUserId?: string,
 ): Promise<ElementComment | undefined> {
   const frame = await store.getFrame(frameId)
-  if (!frame) return undefined
-  return postComment(
-    frame,
-    { selector: String(input.selector ?? '').slice(0, 300), snippet: String(input.snippet ?? '').slice(0, 400) },
-    input.text,
-    from,
-    fromUserId,
-  )
+  if (!frame || !input.text.trim()) return undefined
+  const anchor = await frameAnchor(frame, input, from)
+  /* a frame deleted while its element was being stamped takes no comment */
+  if (!(await store.getFrameMembership(frameId))) return undefined
+  return postComment(frame.canvasId, anchor, input.text, from, fromUserId)
 }
 
-/** Reply inside a thread: the reply inherits the root comment's element so an
- *  @mention in it gives the agent the same anchor the conversation is about. */
+/** The anchor as it is written onto a comment; what the anchor does not
+ *  carry is absent, so a moved comment sheds its old frame, element or page. */
+function anchorFields(
+  anchor: CommentAnchor,
+): Pick<ElementComment, 'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y'> {
+  if ('frame' in anchor) {
+    return {
+      frameId: anchor.frame.id,
+      ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
+      snippet: anchor.snippet,
+      ...anchor.point,
+    }
+  }
+  return { snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }
+}
+
+/** Comments anchored by a positional CSS path before element ids existed:
+ *  stamp each element and keep the comment on it. Runs once after boot, frame
+ *  by frame: every stamp for a frame is written and awaited before the
+ *  comments naming those ids are, so a crash in between leaves selectors to
+ *  retry, never a comment pointing at an id no frame carries. A path that no
+ *  longer resolves spends its selector and leaves a lost anchor (frame and
+ *  snippet, no pin): HTML only drifts further, so retrying it would not help.
+ *  A malformed selector, a frame that will not parse or a failed write is
+ *  logged and left for the next boot; one bad row never stops the others.
+ *  The comments are in memory and displayed throughout; pins appear as the
+ *  stamps land, with the frames broadcast to anyone already in the room. */
+export async function backfillElementIds(
+  legacy: Map<string, string>,
+): Promise<{ stamped: number; lost: number; failed: number }> {
+  const byFrame = new Map<string, Array<{ comment: ElementComment; selector: string }>>()
+  for (const [commentId, selector] of legacy) {
+    const comment = findComment(commentId)
+    if (!comment?.frameId || !(await store.getFrameMembership(comment.frameId))) continue
+    const list = byFrame.get(comment.frameId) ?? []
+    list.push({ comment, selector })
+    byFrame.set(comment.frameId, list)
+  }
+  const counts = { stamped: 0, lost: 0, failed: 0 }
+  for (const [frameId, rows] of byFrame) {
+    const found: Array<{ comment: ElementComment; id: string }> = []
+    const lost: ElementComment[] = []
+    const original = await store.getFrame(frameId)
+    if (!original) continue
+    let html = original.html
+    for (const { comment, selector } of rows) {
+      try {
+        const result = stampElementId(html, selector)
+        if (result) {
+          html = result.html
+          found.push({ comment, id: result.id })
+        } else lost.push(comment)
+      } catch (err) {
+        counts.failed++
+        console.error(`[comments] element id backfill: comment ${comment.id} on frame ${frameId}:`, err)
+      }
+    }
+    try {
+      /* stamped against the version just read: an edit since leaves the rows for the next boot */
+      if (html !== original.html) {
+        const next = await store.updateFrame(frameId, { html }, original.updatedBy, undefined, {
+          annotation: true,
+          expectedUpdatedAt: original.updatedAt,
+        })
+        if (!next) continue
+      }
+      for (const { comment, id } of found) {
+        if (reanchored(comment)) continue
+        comment.elementId = id
+        await persist.saveCommentNow(comment)
+        broadcast(comment.canvasId, { type: 'comment', comment })
+        counts.stamped++
+      }
+      for (const comment of lost) {
+        if (reanchored(comment)) continue
+        await persist.saveCommentNow(comment)
+        counts.lost++
+      }
+    } catch (err) {
+      counts.failed += found.length + lost.length
+      console.error(`[comments] element id backfill: frame ${frameId} not written, left for the next boot:`, err)
+    }
+  }
+  return counts
+}
+
+/* a thread moved while the backfill awaited a write: the move replaced the
+   comment in the log and saved its new anchor (spending the selector), so
+   the object the backfill holds is stale and writing it would undo the move */
+function reanchored(comment: ElementComment): boolean {
+  return findComment(comment.id) !== comment
+}
+
+/** Re-pin a thread where its root pin was dropped: on an element, on a
+ *  frame as a whole or on the canvas, on any frame of the same canvas. The
+ *  root and its replies move together, since replies inherit the anchor.
+ *  Undefined when the comment, the frame or the page is not there. */
+export async function moveComment(
+  commentId: string,
+  input: CommentAnchorInput,
+  by: string,
+): Promise<ElementComment | undefined> {
+  const found = findComment(commentId)
+  if (!found) return undefined
+  const root = found.parentId ? findComment(found.parentId) : found
+  if (!root) return undefined
+  const canvas = await store.syncCanvas(root.canvasId, 'index')
+  if (!canvas) return undefined
+  let anchor: CommentAnchor
+  if ('frameId' in input) {
+    const frame = await store.getFrame(input.frameId)
+    if (!frame || frame.canvasId !== root.canvasId) return undefined
+    anchor = await frameAnchor(frame, input, by)
+    if (!(await store.getFrameMembership(frame.id))) return undefined
+  } else {
+    if (!canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
+    anchor = { pageId: input.pageId, x: input.x, y: input.y }
+  }
+  const fields = anchorFields(anchor)
+  const list = commentLog.get(root.canvasId) ?? []
+  let moved = root
+  list.forEach((c, i) => {
+    if (c.id !== root.id && c.parentId !== root.id) return
+    const { frameId: _frameId, elementId: _elementId, pageId: _pageId, x: _x, y: _y, ...rest } = c
+    const next: ElementComment = { ...rest, ...fields }
+    list[i] = next
+    if (c.id === root.id) moved = next
+    persist.saveComment(next)
+    broadcast(root.canvasId, { type: 'comment', comment: next })
+  })
+  const frame = 'frame' in anchor ? anchor.frame : undefined
+  logActivity(
+    root.canvasId,
+    resolveActor({ name: by, kind: 'user' }),
+    frame ? `moved a comment to “${frame.name}”` : 'moved a comment onto the canvas',
+    frame?.id,
+  )
+  return moved
+}
+
+/** A comment pinned to a point on the canvas (world coordinates on one of
+ *  its pages) rather than to an element — a note about the layout, a gap
+ *  between frames, or a spot where something should go. */
+export async function addCanvasComment(
+  canvasId: string,
+  input: { pageId: string; x: number; y: number; text: string },
+  from: string,
+  fromUserId?: string,
+): Promise<ElementComment | undefined> {
+  const canvas = await store.syncCanvas(canvasId, 'index')
+  if (!canvas || !canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
+  if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) return undefined
+  return postComment(canvasId, { pageId: input.pageId, x: input.x, y: input.y }, input.text, from, fromUserId)
+}
+
+/** Reply inside a thread: the reply inherits the root comment's anchor (its
+ *  element, or its point on the canvas) so an @mention in it gives the agent
+ *  the same anchor the conversation is about. */
 export async function replyToComment(
   commentId: string,
   text: string,
@@ -582,81 +726,88 @@ export async function replyToComment(
 ): Promise<ElementComment | undefined> {
   const open = await openThread(commentId)
   if (!open) return undefined
-  const { root, frame } = open
-  if (root.resolvedAt) return undefined
-  return postComment(
-    frame,
-    { selector: root.selector, snippet: root.snippet, parentId: root.id },
-    text,
-    from,
-    fromUserId,
-    kind,
-  )
+  const anchor = replyAnchor(open)
+  if (!anchor) return undefined
+  return postComment(open.root.canvasId, anchor, text, from, fromUserId, kind, open.root.id)
 }
 
-/** The root and frame a reply to this comment would land on, or undefined
- *  when the thread is resolved or its frame is gone — checked before any
- *  metering so a rejected reply never costs a resident task. */
-export async function openThread(commentId: string): Promise<{ root: ElementComment; frame: Frame } | undefined> {
+function replyAnchor({ root, frame }: { root: ElementComment; frame?: Frame }): CommentAnchor | undefined {
+  if (frame) {
+    const point = isFrameComment(root) ? { point: { x: root.x, y: root.y } } : {}
+    return { frame, ...(root.elementId ? { elementId: root.elementId } : {}), snippet: root.snippet, ...point }
+  }
+  return isCanvasComment(root) ? { pageId: root.pageId, x: root.x, y: root.y } : undefined
+}
+
+/** The root a reply to this comment would land under, with its frame when
+ *  it is an element comment (a canvas comment has none), or undefined when
+ *  the thread is resolved or its frame is gone — checked before any metering
+ *  so a rejected reply never costs a resident task. */
+export async function openThread(commentId: string): Promise<{ root: ElementComment; frame?: Frame } | undefined> {
   const parent = findComment(commentId)
   if (!parent) return undefined
   const root = parent.parentId ? findComment(parent.parentId) : parent
   if (!root || root.resolvedAt) return undefined
-  const frame = await store.getFrame(root.frameId)
+  if (isCanvasComment(root)) return { root }
+  const frame = root.frameId ? await store.getFrame(root.frameId) : undefined
+  /* resolved while the frame was being read */
   if (!frame || root.resolvedAt) return undefined
   return { root, frame }
 }
 
 function postComment(
-  frame: Frame,
-  anchor: { selector: string; snippet: string; parentId?: string },
+  canvasId: string,
+  anchor: CommentAnchor,
   text: string,
   from: string,
   fromUserId?: string,
   kind: ActorKind = 'user',
+  parentId?: string,
 ): ElementComment | undefined {
   const clean = text.trim()
   if (!clean) return undefined
   /* @Doop, @brand, @a11y… — whichever resident agent is mentioned picks it up */
   const mentioned = mentionedRole(clean)
-  const list = commentLog.get(frame.canvasId) ?? []
+  const list = commentLog.get(canvasId) ?? []
   /* strictly increasing per canvas: thread order is reconstructed from `at`
      after a restart, so two messages must never share a timestamp */
   const at = Math.max(Date.now(), (list[0]?.at ?? 0) + 1)
+  const frame = 'frame' in anchor ? anchor.frame : undefined
   const comment: ElementComment = {
     id: nanoid(8),
-    canvasId: frame.canvasId,
-    frameId: frame.id,
-    selector: anchor.selector,
-    snippet: anchor.snippet,
+    canvasId,
+    ...anchorFields(anchor),
     from,
     ...(fromUserId ? { fromUserId } : {}),
     text: clean,
     at,
     ...(mentioned ? { forAgent: true, targetAgent: mentioned.name } : {}),
-    ...(anchor.parentId ? { parentId: anchor.parentId } : {}),
+    ...(parentId ? { parentId } : {}),
   }
   list.unshift(comment)
   if (list.length > 100) list.length = 100
-  commentLog.set(frame.canvasId, list)
+  commentLog.set(canvasId, list)
   persist.saveComment(comment)
-  broadcast(frame.canvasId, { type: 'comment', comment })
+  broadcast(canvasId, { type: 'comment', comment })
   const excerpt = clean.length > 80 ? clean.slice(0, 77) + '…' : clean
+  const where = frame ? `in “${frame.name}”` : 'on the canvas'
   logActivity(
-    frame.canvasId,
+    canvasId,
     resolveActor({ name: from, kind }),
-    anchor.parentId
-      ? `replied to a comment in “${frame.name}”: “${excerpt}”`
-      : `commented on an element in “${frame.name}”: “${excerpt}”`,
-    frame.id,
+    parentId
+      ? `replied to a comment ${where}: “${excerpt}”`
+      : frame
+        ? `commented on an element in “${frame.name}”: “${excerpt}”`
+        : `commented on the canvas: “${excerpt}”`,
+    frame?.id,
   )
   if (comment.forAgent) {
     /* @Doop mention: the resident agent picks it up instantly (no-op without
        an API key). Dynamic import: resident depends on this module. */
-    import('./resident.ts').then((r) => r.onFeedback(frame.canvasId)).catch(() => {})
+    import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
   }
-  emitCanvasEvent(frame.canvasId, {
-    type: anchor.parentId ? 'comment.replied' : 'comment.created',
+  emitCanvasEvent(canvasId, {
+    type: parentId ? 'comment.replied' : 'comment.created',
     comment,
     frame,
     actorKind: kind,
@@ -719,7 +870,7 @@ export function retryComment(commentId: string, by: string): ElementComment | un
     delete comment.failureReason
     persist.saveComment(comment)
     broadcast(canvasId, { type: 'comment', comment })
-    logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), 'retried an element comment', comment.frameId)
+    logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), 'retried a comment', comment.frameId)
     import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
     return comment
   }
@@ -752,7 +903,8 @@ export function resolveComment(commentId: string, by: string): ElementComment | 
       }
     }
     // Notification delivery must not hold up resolving the thread.
-    void store.getFrame(c.frameId).then(
+    const frameId = c.frameId
+    void (frameId ? store.getFrame(frameId) : Promise.resolve(undefined)).then(
       (frame) => emitCanvasEvent(canvasId, { type: 'comment.resolved', comment: c, frame, by }),
       () => emitCanvasEvent(canvasId, { type: 'comment.resolved', comment: c, frame: undefined, by }),
     )
@@ -890,7 +1042,7 @@ export async function addQueuedCard(
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvasMetadata(canvasId)) return undefined
   const pipeline = normalizePipeline(agents)
-  const frames = (await store.syncCanvas(canvasId))?.frames ?? []
+  const frames = (await store.syncCanvas(canvasId, 'summary'))?.frames ?? []
   const target = normalizeScope(frames, scope)
   /* reference-image frame ids: only frames that actually live on this canvas */
   const refs = (Array.isArray(attachments) ? attachments : [])
@@ -1074,7 +1226,8 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
  *  pipeline, or complete it if that was the last one. */
 export function advanceCard(canvasId: string, cardId: string, by: Actor): AgentTask | undefined {
   const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
-  if (!card || card.endedAt) return card
+  /* a card stopped while its run went on stays stopped */
+  if (!card || card.endedAt || card.failedAt) return card
   const pipeline = pipelineOf(card)
   const next = (card.stage ?? 0) + 1
   if (next >= pipeline.length) return completeCard(canvasId, cardId)
@@ -1112,6 +1265,18 @@ export function failCard(canvasId: string, cardId: string, reason: string): Agen
   persist.saveTask(canvasId, card)
   broadcast(canvasId, { type: 'task', task: card })
   emitCanvasEvent(canvasId, { type: 'task.failed', task: card, reason })
+  /* a run whose every card is now failed lets go of its model call at once */
+  import('./resident.ts').then((r) => r.onCardStopped(canvasId)).catch(() => {})
+  return card
+}
+
+/** A person stops a card, waiting or mid-run. It pauses like any failed card,
+ *  so Retry starts it over. */
+export function stopCard(canvasId: string, cardId: string, by: string): AgentTask | undefined {
+  const card = (taskLog.get(canvasId) ?? []).find((t) => t.id === cardId && t.queuedBy)
+  if (!card || card.endedAt || card.failedAt) return card
+  failCard(canvasId, cardId, `Stopped by ${by}.`)
+  logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), `stopped a card: “${card.status}”`)
   return card
 }
 
@@ -1128,6 +1293,57 @@ export function retryCard(canvasId: string, cardId: string, by: string): AgentTa
   logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), `retried a card: “${card.status}”`)
   import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
   return card
+}
+
+/* ------------------------------------------------------------------ */
+/* Design history lives in each frame actor (bursts of edits, filed    */
+/* there because browser edits reach the actor directly). Versions     */
+/* filed in SQL before actors stay readable and restorable.            */
+/* ------------------------------------------------------------------ */
+
+/** Newest first, actor history and any legacy SQL history together. */
+export async function listFrameVersions(frameId: string): Promise<FrameVersionInfo[]> {
+  const [current, legacy] = await Promise.all([frameActor(frameId).listVersions(), persist.listFrameVersions(frameId)])
+  return [...current, ...legacy].sort((a, b) => b.savedAt - a.savedAt)
+}
+
+export async function getFrameVersion(frameId: string, versionId: string): Promise<FrameVersion | undefined> {
+  return (await frameActor(frameId).getVersion(versionId)) ?? (await persist.getFrameVersion(frameId, versionId))
+}
+
+export type RestoredFrame = {
+  frame: Frame
+  /** the complete state the restore replaced — a client mid-reveal only
+   *  holds a partial copy, so this is what its undo must put back */
+  replaced: Pick<Frame, 'html' | 'width' | 'height'>
+}
+
+/** Put a frame back to one of its recorded versions (HTML and size; the name
+ *  and position stay). null = no such version on this frame. The state being
+ *  replaced is filed as a version first, so a restore is itself reversible. */
+export async function restoreFrameVersion(
+  frameId: string,
+  versionId: string,
+  actor: Actor,
+): Promise<RestoredFrame | null | undefined> {
+  if (!(await store.getFrameMembership(frameId))) return undefined
+  const version = await getFrameVersion(frameId, versionId)
+  if (!version) return null
+  return orderedFrame(frameId, async () => {
+    const before = await store.getFrame(frameId)
+    if (!before) return undefined
+    const replaced = { html: before.html, width: before.width, height: before.height }
+    if (before.html === version.html && before.width === version.width && before.height === version.height)
+      return { frame: before, replaced }
+    /* whoever restores takes over: any live stream ends */
+    finishStream(frameId, false)
+    const patch = { html: version.html, width: version.width, height: version.height }
+    const frame = await store.updateFrame(frameId, patch, actor.name, actor, { replace: true })
+    if (!frame) return undefined
+    logActivity(frame.canvasId, actor, `restored “${frame.name}” to an earlier version by ${version.savedBy}`, frame.id)
+    touch(frame.canvasId, actor, frame.id)
+    return { frame, replaced }
+  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -1176,7 +1392,7 @@ setInterval(() => {
   for (const [frameId, stream] of streams) {
     if (!frameOperations.has(frameId) && Date.now() - stream.lastActivity > STREAM_IDLE_MS) finishStream(frameId, false)
   }
-}, 1000)
+}, 1000).unref()
 
 export async function appendFrameHtml(
   frameId: string,
@@ -1185,16 +1401,14 @@ export async function appendFrameHtml(
   opts: { start?: boolean; done?: boolean } = {},
 ): Promise<Frame | undefined> {
   return orderedFrame(frameId, async () => {
-    const before = await store.getFrame(frameId)
-    if (!before) return undefined
-
+    if (!(await store.getFrameMembership(frameId))) return undefined
     const starting = opts.start || !streams.has(frameId)
     /* an agent that escapes its opening chunk escapes the whole stream, so latch
-     the verdict there: a chunk mid-design can hold a legitimate `&lt;` (a code
-     sample) and must never be sniffed on its own */
+       the verdict there: a chunk mid-design can hold a legitimate `&lt;` (a code
+       sample) and must never be sniffed on its own */
     const escaped = starting ? looksEscapedHtml(chunk) : (streams.get(frameId)?.escaped ?? false)
     const piece = escaped ? decodeEscapedHtml(chunk) : chunk
-    const frame = (await store.appendFrameHtml(frameId, piece, !!opts.start, actor.name, actor, !!opts.done))!
+    const frame = await store.appendFrameHtml(frameId, piece, !!opts.start, actor.name, actor, !!opts.done)
     if (!frame) return undefined
 
     if (starting) {
@@ -1234,8 +1448,44 @@ export async function setCanvasPages(
   expectedPages: import('../shared/types.ts').CanvasPageInfo[],
 ) {
   const result = await store.setPages(canvasId, pages, expectedPages)
-  if (result && !result.error) broadcast(canvasId, { type: 'canvas:pages', pages: result.pages, actor })
+  if (result && !result.error) {
+    broadcast(canvasId, { type: 'canvas:pages', pages: result.pages, actor })
+    for (const guide of result.dropped) broadcast(canvasId, { type: 'guide', id: guide.id, guide: null, actor })
+  }
   return result
+}
+
+/** Point a page's prototype flow at a frame (or clear it); peers get the page list. */
+export async function setFlowStart(canvasId: string, pageId: string, frameId: string | null, actor: Actor) {
+  const pages = await store.setFlowStart(canvasId, pageId, frameId)
+  if (pages) broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+  return pages
+}
+
+/** Add or move a ruler guide; peers see it at once. Guides are view
+ *  furniture, not design content, so the canvas stays as recently edited
+ *  as it was and no activity is logged. */
+export function setGuide(canvasId: string, guide: CanvasGuide, actor: Actor) {
+  const saved = store.setGuide(canvasId, guide)
+  if (saved) broadcast(canvasId, { type: 'guide', id: saved.id, guide: saved, actor })
+  return saved
+}
+
+export function deleteGuide(canvasId: string, guideId: string, actor: Actor) {
+  if (store.deleteGuide(canvasId, guideId)) broadcast(canvasId, { type: 'guide', id: guideId, guide: null, actor })
+}
+
+/** Copy a page with its frames; peers get the page list from the room and
+ *  the new frames from the canvas actor. */
+export async function duplicatePage(canvasId: string, pageId: string, actor: Actor) {
+  const copy = await store.duplicatePage(canvasId, pageId, actor.name)
+  if (!copy) return undefined
+  broadcast(canvasId, { type: 'canvas:pages', pages: copy.pages, actor })
+  for (const guide of copy.guides) broadcast(canvasId, { type: 'guide', id: guide.id, guide, actor })
+  for (const frame of copy.frames) emitCanvasEvent(canvasId, { type: 'frame.created', frame, actor })
+  logActivity(canvasId, actor, `duplicated page “${copy.source.name}” as “${copy.page.name}”`)
+  touch(canvasId, actor)
+  return copy
 }
 
 export async function createFrame(
@@ -1249,12 +1499,14 @@ export async function createFrame(
     height?: number
     html?: string
     demo?: boolean
+    hidden?: boolean
+    locked?: boolean
   },
   actor: Actor,
   id?: string,
 ): Promise<Frame | undefined> {
   if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
-  const frame = await store.createFrame(canvasId, input, actor.name, id)
+  const frame = await store.createFrame(canvasId, input, actor.name, id, actor.kind)
   if (!frame) return undefined
   if (actor.kind === 'agent' && frame.html) {
     scheduleAutoTaskEnd(canvasId, autoTask(canvasId, actor, `Designing “${frame.name}”`, frame.id))
@@ -1265,10 +1517,16 @@ export async function createFrame(
   return frame
 }
 
+/** `replace` marks a deliberate whole-document write (set_frame_html): it
+ *  always opens a history burst, even when the new document keeps most of
+ *  the old one's wrapper. Without it a write is judged by how much it
+ *  changed. `expectedUpdatedAt` refuses the write (FrameConflictError) when
+ *  the frame has moved on since the caller read it. */
 export async function updateFrame(
   frameId: string,
-  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html'>>,
+  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked'>>,
   actor: Actor,
+  opts: { replace?: boolean; expectedUpdatedAt?: number } = {},
 ): Promise<Frame | undefined> {
   return orderedFrame(frameId, async () => {
     const before = await store.getFrame(frameId)
@@ -1276,11 +1534,14 @@ export async function updateFrame(
     if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
     const prevName = before.name
     const prevHtml = before.html
-    const frame = (await store.updateFrame(frameId, patch, actor.name, actor))!
+    const prevHidden = !!before.hidden
+    const prevLocked = !!before.locked
+    const frame = await store.updateFrame(frameId, patch, actor.name, actor, opts)
     if (!frame) return undefined
 
     const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
     if (htmlChanged) {
+      /* a full replace ends an open append stream; a human takes over likewise */
       finishStream(frameId, false)
       logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frame.id)
       if (actor.kind === 'agent') {
@@ -1288,6 +1549,12 @@ export async function updateFrame(
       }
     } else if (patch.name !== undefined && patch.name !== prevName) {
       logActivity(frame.canvasId, actor, `renamed “${prevName}” to “${frame.name}”`, frame.id)
+    } else if (patch.hidden !== undefined && !!patch.hidden !== prevHidden) {
+      logActivity(frame.canvasId, actor, `${frame.hidden ? 'hid' : 'showed'} frame “${frame.name}”`, frame.id)
+    }
+    /* a lock change is its own line, whatever else the same update carried */
+    if (patch.locked !== undefined && !!patch.locked !== prevLocked) {
+      logActivity(frame.canvasId, actor, `${frame.locked ? 'locked' : 'unlocked'} “${frame.name}”`, frame.id)
     }
 
     touch(frame.canvasId, actor, frame.id)
@@ -1308,18 +1575,70 @@ export function replaceFrameHtml(
       finishStream(frameId, false)
       logActivity(frame.canvasId, actor, `updated the design of “${frame.name}”`, frameId)
       if (actor.kind === 'agent')
-        scheduleAutoTaskEnd(frame.canvasId, autoTask(frame.canvasId, actor, `Redesigning “${frame.name}”`, frameId))
+        scheduleAutoTaskEnd(frame.canvasId, autoTask(frame.canvasId, actor, `Tweaking “${frame.name}”`, frameId))
     }
     touch(frame.canvasId, actor, frameId)
     return frame
   })
 }
 
+/** Sign-off is a human action, separate from ordinary frame editing. The
+ *  approval names the version the person saw; a design edit landing in
+ *  between is re-read so the sign-off always matches what is stored. */
+export async function setFrameApproval(
+  frameId: string,
+  ready: boolean,
+  user: { id: string; name: string },
+): Promise<Frame | undefined> {
+  return orderedFrame(frameId, async () => {
+    const actor = resolveActor({ name: user.name, kind: 'user' })
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await store.getFrame(frameId)
+      if (!current) return undefined
+      if (ready && current.approval?.status === 'ready_for_dev') return current
+      const approval = ready
+        ? {
+            status: 'ready_for_dev' as const,
+            approvedBy: user.name,
+            approvedByUserId: user.id,
+            approvedAt: Math.max(Date.now(), current.updatedAt + 1),
+            approvedFrameUpdatedAt: current.updatedAt,
+          }
+        : null
+      let frame: Frame | undefined
+      try {
+        frame = await store.updateFrame(frameId, { approval }, user.name, actor, {
+          expectedUpdatedAt: current.updatedAt,
+        })
+      } catch (error) {
+        if (error instanceof FrameConflictError) continue
+        throw error
+      }
+      if (!frame) return undefined
+      logActivity(
+        frame.canvasId,
+        actor,
+        ready ? `marked “${frame.name}” ready for dev` : `moved “${frame.name}” back to draft`,
+        frameId,
+      )
+      return frame
+    }
+    return undefined
+  })
+}
+
+export function isFrameStreaming(frameId: string): boolean {
+  return streams.has(frameId)
+}
+
 export async function deleteFrame(frameId: string, actor: Actor): Promise<Frame | undefined> {
   return orderedFrame(frameId, async () => {
+    /* close any live stream while the frame still exists, so its auto
+       “Designing…” task ends with it */
     finishStream(frameId, false)
     const frame = await store.deleteFrame(frameId)
     if (!frame) return undefined
+    persist.deleteFrameHistory(frameId)
     thumbs.purge(frameId)
     logActivity(frame.canvasId, actor, `deleted frame “${frame.name}”`, frame.id)
     touch(frame.canvasId, actor, null)
@@ -1336,7 +1655,6 @@ export async function deleteCanvas(canvasId: string): Promise<boolean> {
   taskLog.delete(canvasId)
   feedbackLog.delete(canvasId)
   commentLog.delete(canvasId)
-  chatLog.delete(canvasId)
   activityLog.delete(canvasId)
   decisionLog.delete(canvasId)
   proposalLog.delete(canvasId)

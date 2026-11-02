@@ -1,23 +1,39 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { AgentTask } from '../../shared/types'
-import { useStore } from '../lib/store'
+import { canEditOpenCanvas, useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { timeAgo } from '../lib/time'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { MemoryPanel } from './MemoryPanel'
-import { Panel, PanelBody, PanelHeader, PanelTab, PanelTabPanel, PanelTabs, PanelTabsRoot } from './ui/panel'
+import {
+  Panel,
+  type PanelResize,
+  type PanelSurface,
+  PanelBody,
+  PanelClose,
+  PanelHeader,
+  PanelIconTab,
+  PanelTabPanel,
+  PanelTabs,
+  PanelTabsRoot,
+} from './ui/panel'
 import { Button } from './ui/button'
-import { Tooltip } from './ui/tooltip'
-import { PanelCollapseRightIcon } from './ui/icons'
-import { Input } from './ui/input'
+import { BookOpenIcon, CheckIcon, ChevronDownIcon, CommentIcon, PulseIcon, SparkIcon } from './ui/icons'
+import { DotMatrix } from './ui/dot-matrix'
 import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
-import { ChatPanel } from './ChatPanel'
+import { CommentsPanel } from './CommentsPanel'
+import { PromptBar } from './PromptBar'
 import { taskFrameId } from '../lib/taskFrame'
-import { useChatUnread } from '../lib/chatUnread'
+import { useOpenThreadCount } from '../lib/comments'
+import { useT } from '@/lib/i18n'
 
-const emptyNote = 'px-4 py-6 text-center text-[13px] text-ink-faint'
+const emptyNote = 'px-4 py-6 text-center text-[12px] text-ink-faint'
+
+/* Radix mounts a tab's content on switch, so this plays once per switch */
+const tabEnter =
+  'data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-right-1 data-[state=active]:duration-200 motion-reduce:animate-none'
 
 /* feedback and retries are metered like any other resident task — a 403
    here means the free tier ran out, so raise the connect wall */
@@ -36,73 +52,98 @@ function duration(t: AgentTask): string {
 }
 
 export function ActivityPanel({
+  canvasId,
   onClose,
   surface = 'floating',
+  className,
+  style,
+  resize,
 }: {
+  canvasId: string
   onClose: () => void
   /* 'inline' when the panel is filling a mobile Sheet rather than floating */
-  surface?: 'floating' | 'inline'
+  surface?: PanelSurface
+  className?: string
+  /** carries `right` while floating — the panel always hugs the right edge */
+  style?: CSSProperties
+  resize?: PanelResize
 }) {
   const tab = useStore((s) => s.panelTab)
   const setTab = useStore((s) => s.setPanelTab)
+  const canEdit = useStore(canEditOpenCanvas)
   const [, tick] = useState(0)
-  const unread = useChatUnread()
+  const openThreads = useOpenThreadCount()
+  const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
+  const t = useT()
 
   /* refresh relative timestamps and running durations */
   useEffect(() => {
-    const t = window.setInterval(() => tick((n) => n + 1), 5000)
-    return () => window.clearInterval(t)
+    const timer = window.setInterval(() => tick((n) => n + 1), 5000)
+    return () => window.clearInterval(timer)
   }, [])
 
   return (
-    <Panel surface={surface} className={cn(surface === 'floating' && 'inset-y-3 right-3 w-[300px]')}>
+    <Panel
+      surface={surface}
+      resize={resize}
+      className={cn(
+        surface === 'floating' && 'top-2.5 bottom-3.5 w-[280px] transition-[right] duration-150',
+        surface === 'docked' && 'w-[280px] border-l',
+        className,
+      )}
+      style={style}
+    >
       <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)}>
-        <PanelHeader>
-          <PanelTabs>
-            <PanelTab value="tasks">Agents</PanelTab>
-            <PanelTab
-              value="chat"
-              className="relative"
-              title={unread ? `Chat · ${unread} new` : 'Talk to the room — @mention an agent to hand it a task'}
+        <PanelHeader className="pl-2">
+          <PanelTabs aria-label={t('panels.activityPanelAria')}>
+            <PanelIconTab value="tasks" icon={<SparkIcon />} title={t('panels.activityAgents')}>
+              {t('panels.activityAgents')}
+              {working > 0 && <em className="ml-[7px] text-[11px] font-normal not-italic text-ink-faint">{working}</em>}
+            </PanelIconTab>
+            <PanelIconTab
+              value="comments"
+              icon={<CommentIcon />}
+              title={
+                openThreads
+                  ? t('panels.activityCommentsOpen', { count: openThreads })
+                  : t('panels.activityCommentsTitle')
+              }
+              /* open threads on this page: a count on the tab itself */
+              badge={
+                openThreads > 0 && (
+                  <span className="absolute -top-1 -right-1 grid h-[14px] min-w-[14px] place-items-center rounded-lg bg-brand px-[3px] font-mono text-[8px] font-medium text-white">
+                    {openThreads > 99 ? '99+' : openThreads}
+                  </span>
+                )
+              }
             >
-              Chat
-              {/* new messages while another tab is open: a count on the tab itself */}
-              {unread > 0 && (
-                <span className="absolute -top-1 -right-1.5 grid h-[14px] min-w-[14px] place-items-center rounded-lg bg-accent-ink px-[3px] font-mono text-[8px] font-medium normal-case tracking-normal text-white">
-                  {unread > 99 ? '99+' : unread}
-                </span>
-              )}
-            </PanelTab>
-            <PanelTab value="activity">Activity</PanelTab>
-            <PanelTab
-              value="memory"
-              title="Design memory — references, rules and decisions every agent on this canvas designs with"
-            >
-              Memory
-            </PanelTab>
+              {t('panels.activityComments')}
+            </PanelIconTab>
+            <PanelIconTab value="activity" icon={<PulseIcon />} title={t('panels.activityActivity')}>
+              {t('panels.activityActivity')}
+            </PanelIconTab>
+            <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
+              {t('panels.activityMemory')}
+            </PanelIconTab>
           </PanelTabs>
-          <Tooltip label="Collapse panel" side="bottom" align="end">
-            <Button
-              variant="bare"
-              size="icon-sm"
-              className="shrink-0 text-ink-faint hover:bg-paper-deep hover:text-ink"
-              aria-label="Collapse panel"
-              onClick={onClose}
-            >
-              <PanelCollapseRightIcon width={13} height={13} />
-            </Button>
-          </Tooltip>
+          <PanelClose label={t('panels.activityClosePanel')} onClick={onClose} />
         </PanelHeader>
-        <PanelTabPanel value="tasks">
-          <TaskList />
+        {/* the Agents tab is a column: what the agents are doing scrolls above,
+            the prompt composer is docked underneath */}
+        <PanelTabPanel value="tasks" className={tabEnter}>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+            <RecentTasks />
+          </div>
+          {/* the composer briefs agents to change frames: editors only */}
+          {canEdit && <PromptBar canvasId={canvasId} />}
         </PanelTabPanel>
-        <PanelTabPanel value="chat">
-          <ChatPanel active={tab === 'chat'} />
+        <PanelTabPanel value="comments" className={tabEnter}>
+          <CommentsPanel />
         </PanelTabPanel>
-        <PanelTabPanel value="activity">
+        <PanelTabPanel value="activity" className={tabEnter}>
           <ActivityList />
         </PanelTabPanel>
-        <PanelTabPanel value="memory">
+        <PanelTabPanel value="memory" className={tabEnter}>
           <MemoryPanel />
         </PanelTabPanel>
       </PanelTabsRoot>
@@ -110,274 +151,204 @@ export function ActivityPanel({
   )
 }
 
-/* Task history grouped by agent, à la Cursor's agent panel: the active task
-   pulses at the top of each group, finished ones are checked off below. */
-function TaskList() {
+/** How many tasks the strip shows before "Show all". */
+const RECENT_SHOWN = 3
+
+/* The "Recent tasks" strip at the top of the Agents tab: what each agent is
+   working on or just finished, and for whom. "Show all" opens the whole
+   history in the same rows, split into what is running and what is done. */
+function RecentTasks() {
   const tasks = useStore((s) => s.tasks)
-
-  const groups = useMemo(() => {
-    const byAgent = new Map<string, AgentTask[]>()
-    for (const t of tasks) {
-      // Unclaimed board cards belong in the Board's Queued column. They have
-      // no agent identity yet, so rendering them here creates a blank group.
-      if (!t.agentName) continue
-      const key = t.agentName
-      const list = byAgent.get(key) ?? []
-      list.push(t) // tasks arrive newest first, so groups stay newest first too
-      byAgent.set(key, list)
-    }
-    /* agents ordered by their most recent task */
-    return [...byAgent.entries()]
-  }, [tasks])
-
-  if (groups.length === 0) {
-    return (
-      <PanelBody className="py-2">
-        <div className={emptyNote}>
-          No tasks yet. Agents announce what they're working on here — the history sticks around after they finish.
-        </div>
-      </PanelBody>
-    )
-  }
+  const [all, setAll] = useState(false)
+  /* unclaimed board cards have no agent yet, so they are not activity */
+  const claimed = useMemo(() => tasks.filter((t) => t.agentName), [tasks])
+  const working = useMemo(() => claimed.filter((t) => !t.endedAt && !t.failedAt), [claimed])
+  const finished = useMemo(() => claimed.filter((t) => t.endedAt || t.failedAt), [claimed])
+  const t = useT()
 
   return (
-    <PanelBody className="pt-1 pb-3">
-      {groups.map(([key, list]) => (
-        <TaskGroup key={key} list={list} />
-      ))}
-    </PanelBody>
-  )
-}
-
-/* Long histories collapse to the latest few per agent — the panel is a
-   "what's happening" surface, not an archive. */
-const TASKS_SHOWN_INITIALLY = 5
-const TASKS_SHOWN_STEP = 15
-
-const agentTag =
-  'ml-[7px] rounded-full border border-current px-[7px] py-px align-[1px] font-mono text-[9px] uppercase text-accent-ink'
-
-function TaskGroup({ list }: { list: AgentTask[] }) {
-  const [shown, setShown] = useState(TASKS_SHOWN_INITIALLY)
-  const hidden = list.length - shown
-  const latest = list[0]
-  if (!latest) return null
-
-  return (
-    <div className="border-t border-line-soft pt-2.5 pb-0.5 first:border-t-0">
-      <div className="flex items-center gap-2 px-4 pt-1 pb-1.5 text-[12.5px] font-bold">
-        <Dot shape="square" style={{ background: latest.color }} />
-        <span>
-          <AgentIcon name={latest.agentName} /> {latest.agentName}
-          {latest.owner && <span className="ml-1.5 text-[11px] font-medium text-ink-faint">for {latest.owner}</span>}
-          {latest.failedAt ? (
-            <span className={cn(agentTag, 'font-semibold tracking-[0.08em]')}>needs retry</span>
-          ) : !latest.endedAt ? (
-            <span className={cn(agentTag, 'font-medium tracking-[0.1em]')}>working</span>
-          ) : null}
-        </span>
-      </div>
-      {list.slice(0, shown).map((t) => (
-        <TaskRow key={t.id} task={t} />
-      ))}
-      {hidden > 0 && (
+    <section aria-label={t('panels.activityRecentTasks')} className="flex flex-none flex-col pt-1.5 pb-1">
+      <h3 className="flex h-7 flex-none items-center px-3 text-[11.5px] font-normal text-ink-faint">
+        {t('panels.activityRecentTasks')}
+      </h3>
+      {claimed.length === 0 ? (
+        <p className="px-3 pb-2 text-[12px] leading-[1.45] text-ink-faint">{t('panels.activityNoTasks')}</p>
+      ) : all ? (
+        <>
+          {working.length > 0 && <TaskGroup label={t('panels.activityWorkingOn')} tasks={working} />}
+          {finished.length > 0 && <TaskGroup label={t('panels.activityWorkedOn')} tasks={finished} />}
+        </>
+      ) : (
+        claimed.slice(0, RECENT_SHOWN).map((task) => <RecentTaskRow key={task.id} task={task} />)
+      )}
+      {claimed.length > RECENT_SHOWN && (
         <Button
-          variant="link"
-          size="sm"
-          className="mx-4 mt-0.5 mb-2 px-0 py-0.5 text-[11.5px] text-ink-faint hover:text-ink"
-          onClick={() => setShown((n) => n + TASKS_SHOWN_STEP)}
+          variant="bare"
+          className="mx-1.5 mt-0.5 h-[26px] flex-none justify-start gap-1.5 self-start rounded-[7px] px-1.5 text-[11.5px] font-normal text-ink-soft"
+          aria-expanded={all}
+          onClick={() => setAll((v) => !v)}
         >
-          Show {Math.min(hidden, TASKS_SHOWN_STEP)} more ({hidden} older)
+          {all ? t('panels.activityShowLess') : t('panels.activityShowAll')}
+          <ChevronDownIcon className={cn('size-3 text-ink-faint transition-transform', all && 'rotate-180')} />
         </Button>
       )}
-    </div>
+    </section>
   )
 }
 
-/* One task, with its human-feedback thread and a reply box. Feedback is
-   delivered to the agent inside its next MCP tool result; the entry flips
-   from "sending to agent…" to "seen" once that delivery happens. */
-function TaskRow({ task }: { task: AgentTask }) {
+/** A labelled run of rows in the expanded list. */
+function TaskGroup({ label, tasks }: { label: string; tasks: AgentTask[] }) {
+  return (
+    <>
+      <h4 className="flex h-6 flex-none items-center px-3 pt-1 text-[11px] font-normal text-ink-faint">{label}</h4>
+      {tasks.map((t) => (
+        <RecentTaskRow key={t.id} task={t} />
+      ))}
+    </>
+  )
+}
+
+/** The one figure a row shows at its right end: how far a job has got, how
+ *  long a running task has been at it, or how long ago a finished one ended. */
+function taskTime(task: AgentTask): string {
+  if (task.failedAt) return timeAgo(task.failedAt)
+  if (task.endedAt) return timeAgo(task.endedAt)
+  return duration(task)
+}
+
+/** One task: who, for whom, one time figure; then its mark and what it is doing.
+ *  Clicking it selects the frame where the agent is (or was) working and flies
+ *  the camera there, so the click shows even when the frame is already in view. */
+function RecentTaskRow({ task }: { task: AgentTask }) {
   const canvasId = useStore((s) => s.canvas?.id)
-  const feedback = useStore((s) => s.feedback.filter((f) => f.taskId === task.id))
-  const [replying, setReplying] = useState(false)
-  const [draft, setDraft] = useState('')
-
-  async function submit() {
-    const text = draft.trim()
-    if (!text) return setReplying(false)
-    setDraft('')
-    setReplying(false)
-    try {
-      await api.sendTaskFeedback(task.id, text)
-    } catch (e) {
-      reportLimit(e)
-    }
-  }
-
-  const state = task.endedAt ? 'done' : task.failedAt ? 'failed' : 'active'
-
-  /* clicking the task flies the camera to where the agent is (or was) working */
+  const canEdit = useStore(canEditOpenCanvas)
   const frameId = useStore((s) => taskFrameId(task, s))
   const frameName = useStore((s) => s.canvas?.frames.find((f) => f.id === frameId)?.name)
   const goToFrame = () => {
-    if (frameId) useStore.getState().requestFlyTo(frameId)
+    if (!frameId) return
+    const s = useStore.getState()
+    s.select(frameId)
+    s.requestFlyTo(frameId)
   }
-
+  const t = useT()
+  const running = !task.endedAt && !task.failedAt
+  const failed = !!task.failedAt
+  const reason = task.failureReason ?? t('panels.activityTaskUnfinished')
+  /* a job's status already is its reason; a card's status is its brief */
+  const separateReason = failed && reason !== task.status
   return (
-    <div className="group">
-      <div
-        role={frameId ? 'button' : undefined}
-        tabIndex={frameId ? 0 : undefined}
-        title={frameName ? `Go to “${frameName}”` : undefined}
-        onClick={goToFrame}
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            goToFrame()
-          }
-        }}
-        className={cn(
-          'flex animate-[chip-in_0.25s_ease] items-baseline gap-2 py-[5px] pr-4 pl-5 text-[12.5px] leading-[1.4]',
-          frameId &&
-            'cursor-pointer rounded-md hover:bg-paper-deep focus-visible:bg-paper-deep focus-visible:outline-none',
+    <div
+      role={frameId ? 'button' : undefined}
+      tabIndex={frameId ? 0 : undefined}
+      title={frameName ? t('panels.activityGoTo', { name: frameName }) : undefined}
+      onClick={goToFrame}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          goToFrame()
+        }
+      }}
+      className={cn(
+        'mx-1.5 grid animate-[chip-in_0.25s_ease] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-[8px] px-1.5 py-2 text-[12px] leading-[18px]',
+        frameId && 'cursor-pointer hover:bg-sub focus-visible:bg-sub focus-visible:outline-none',
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+        <span className="grid size-4 flex-none place-items-center">
+          <AgentIcon name={task.agentName} size={14} />
+        </span>
+        <b className="truncate font-medium text-ink">{task.agentName}</b>
+        {task.owner && (
+          <em className="truncate not-italic text-ink-faint">{t('panels.activityFor', { name: task.owner })}</em>
         )}
-      >
-        {task.failedAt ? (
-          <span className="grid size-[15px] flex-none place-items-center self-center rounded-full bg-accent-ink text-[10px] font-extrabold text-white">
-            !
-          </span>
-        ) : task.endedAt ? (
-          <span className="flex-none text-[11px] text-ink-faint">✓</span>
-        ) : (
-          <Dot
-            size="sm"
-            className="animate-[status-pulse_1.6s_ease-in-out_infinite] self-center"
-            style={{ background: task.color }}
-          />
-        )}
+      </span>
+      <span className="text-[11px] text-ink-faint tabular-nums">{taskTime(task)}</span>
+      <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-ink-soft">
+        <TaskMark task={task} />
+        {/* one line, with the whole text on hover: a card's status is its
+            whole brief, which must never crowd out why it failed */}
         <span
-          className={cn(
-            'min-w-0 flex-1',
-            state === 'active' && 'font-semibold',
-            state === 'done' && 'text-ink-soft',
-            state === 'failed' && 'font-[650] text-accent-ink',
-            /* server-inferred tasks (agent never announced) read as provisional */
-            task.auto && 'italic text-ink-soft',
-          )}
+          title={task.status}
+          className={cn('min-w-0 truncate', failed && !separateReason && 'text-accent-ink', task.auto && 'italic')}
         >
           {task.status}
         </span>
-        <span className="flex-none font-mono text-[10.5px] text-ink-faint">
-          {task.failedAt
-            ? timeAgo(task.failedAt)
-            : task.endedAt
-              ? `${duration(task)} · ${timeAgo(task.endedAt)}`
-              : duration(task)}
-        </span>
-        {task.failedAt && task.queuedBy && canvasId ? (
+        {running && task.queuedBy && canvasId && canEdit && (
           <Button
-            variant="danger-solid"
+            variant="ghost"
             size="pill"
+            className="ml-auto flex-none"
+            title={t('panels.activityStopTitle')}
             onClick={(e) => {
               e.stopPropagation()
-              api.retryCard(canvasId, task.id).catch(reportLimit)
+              api.stopCard(canvasId, task.id).catch(console.error)
             }}
           >
-            ↻ Retry
-          </Button>
-        ) : null}
-        {!replying && (
-          <Button
-            variant="bare"
-            size="sm"
-            className="flex-none px-1 py-0 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            title="Give the agent feedback on this task"
-            onClick={(e) => {
-              e.stopPropagation()
-              setReplying(true)
-            }}
-          >
-            ↩
+            {t('panels.activityStop')}
           </Button>
         )}
-      </div>
-      {feedback
-        .slice()
-        .reverse()
-        .map((f) => (
-          <div
-            key={f.id}
-            className="mt-px mr-4 mb-1 ml-[34px] animate-[chip-in_0.2s_ease] rounded-[8px] bg-paper-deep px-[9px] py-[5px] text-[12px] leading-[1.4]"
-          >
-            <span className="font-bold">{f.from}:</span> <span className="text-ink-soft">{f.text}</span>
-            {f.failedAt ? (
-              <span className="mt-[5px] flex items-center justify-between gap-2 text-[10.5px] text-accent-ink">
-                {f.failureReason ?? 'The agent did not finish.'}
-                <Button
-                  variant="danger-solid"
-                  size="pill"
-                  onClick={() => api.retryTaskFeedback(f.id).catch(reportLimit)}
-                >
-                  ↻ Retry
-                </Button>
-              </span>
-            ) : (
-              <span
-                className={cn(
-                  'mt-0.5 block font-mono text-[9.5px] tracking-[0.06em]',
-                  f.deliveredAt ? 'text-ink-faint' : 'text-accent-ink',
-                )}
-              >
-                {f.completedAt
-                  ? `✓ handled by ${f.claimedBy ?? 'an agent'}`
-                  : f.deliveredAt
-                    ? `↗ picked up by ${f.claimedBy ?? 'an agent'}`
-                    : '→ waiting for an agent…'}
-              </span>
-            )}
-          </div>
-        ))}
-      {replying && (
-        <div className="mt-0.5 mr-4 mb-1.5 ml-[34px]">
-          <Input
-            inputSize="sm"
-            className="rounded-lg px-[9px] focus:border-ink-soft focus:ring-0 md:text-xs"
-            autoFocus
-            placeholder="Feedback — any agent will pick this up…"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void submit()
-              if (e.key === 'Escape') setReplying(false)
-            }}
-            onBlur={() => (draft.trim() ? submit() : setReplying(false))}
-          />
-        </div>
+      </span>
+      {failed && (
+        <span className="col-span-2 flex min-w-0 items-start gap-2 pl-[22px]">
+          {separateReason && (
+            <span title={reason} className="line-clamp-3 min-w-0 break-words text-accent-ink">
+              {reason}
+            </span>
+          )}
+          {task.queuedBy && canvasId && canEdit && (
+            <Button
+              variant="danger-solid"
+              size="pill"
+              className="ml-auto flex-none"
+              onClick={(e) => {
+                e.stopPropagation()
+                api.retryCard(canvasId, task.id).catch(reportLimit)
+              }}
+            >
+              {t('panels.activityRetry')}
+            </Button>
+          )}
+        </span>
       )}
     </div>
   )
+}
+
+/** Where a task stands, as one 12px glyph: the working matrix, a done check,
+ *  or the failure mark. */
+function TaskMark({ task }: { task: AgentTask }) {
+  if (task.failedAt)
+    return (
+      <span className="flex size-3 flex-none flex-col items-center justify-center gap-[1px] rounded-full bg-accent-ink">
+        {/* drawn, not typed: a text "!" sits on the font's baseline, off centre */}
+        <span className="h-[4px] w-[1.5px] rounded-full bg-white" />
+        <span className="size-[1.5px] rounded-full bg-white" />
+      </span>
+    )
+  if (task.endedAt)
+    return (
+      <span className="grid size-3 flex-none place-items-center rounded-full bg-ink text-paper">
+        <CheckIcon className="size-[8px]" strokeWidth={2.4} />
+      </span>
+    )
+  return <DotMatrix />
 }
 
 function ActivityList() {
   const activity = useStore((s) => s.activity)
+  const t = useT()
   return (
     <PanelBody className="py-2">
-      {activity.length === 0 && <div className={emptyNote}>No activity yet. Add a frame, or connect an agent.</div>}
+      {activity.length === 0 && <div className={emptyNote}>{t('panels.activityEmpty')}</div>}
       {activity.map((a) => (
-        <div
-          key={a.id}
-          className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-4 py-[9px] text-[12.5px] leading-[1.45]"
-        >
+        <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-[12px] leading-[1.45]">
           <Dot className="mt-[5px]" style={{ background: a.actorColor }} />
-          <div>
+          <div className="min-w-0">
             <div>
-              <span className="font-bold">
+              <span className="font-medium">
                 {a.actorName}
-                <span className="ml-[5px] font-mono text-[9.5px] font-medium uppercase tracking-[0.08em] text-ink-faint">
-                  {a.actorKind}
-                </span>
+                <span className="ml-[5px] text-[11px] font-normal text-ink-faint">{a.actorKind}</span>
               </span>{' '}
               <span className="text-ink-soft">{a.message}</span>
             </div>

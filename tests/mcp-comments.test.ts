@@ -49,7 +49,7 @@ function comment(overrides: Partial<ElementComment> & { id: string }): ElementCo
   return {
     canvasId: CANVAS.id,
     frameId: FRAME_A.id,
-    selector: '.hero h1',
+    elementId: 'hero01',
     snippet: '<h1>Hi</h1>',
     from: 'alice',
     text: 'note',
@@ -97,6 +97,10 @@ function stubStore(canvases: Canvas[], frames: Frame[]) {
   vi.spyOn(store, 'getCanvasMetadata').mockImplementation((id: string) => canvases.find((c) => c.id === id))
   vi.spyOn(store, 'getFrame').mockImplementation(async (id: string) => frames.find((f) => f.id === id))
   vi.spyOn(store, 'syncCanvas').mockImplementation(async (id: string) => store.getCanvasMetadata(id))
+  vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id: string) => {
+    const f = frames.find((frame) => frame.id === id)
+    return f ? { id, canvasId: f.canvasId } : undefined
+  })
 }
 
 beforeEach(() => {
@@ -161,6 +165,31 @@ describe('get_comments MCP tool', () => {
     try {
       const { parsed } = await callComments(client, { canvas_id: CANVAS.id, frame_id: FRAME_B.id })
       expect(parsed).toEqual([stored[0]])
+    } finally {
+      await close()
+    }
+  })
+
+  it('returns canvas comments with their page and point, and leaves them out of a frame filter', async () => {
+    const onCanvas = comment({
+      id: 'm4',
+      frameId: undefined,
+      pageId: 'p1',
+      x: 820,
+      y: 240,
+      elementId: undefined,
+      snippet: '',
+    })
+    const onFrame = comment({ id: 'm1', at: 1 })
+    vi.spyOn(actions, 'getComments').mockReturnValue([onCanvas, onFrame])
+    const { client, close } = await connect()
+    try {
+      const all = await callComments(client, { canvas_id: CANVAS.id })
+      expect(all.parsed).toEqual([onCanvas, onFrame])
+      expect((all.parsed as Array<Record<string, unknown>>)[0]).toMatchObject({ pageId: 'p1', x: 820, y: 240 })
+      expect((all.parsed as Array<Record<string, unknown>>)[0]).not.toHaveProperty('frameId')
+      const onlyFrame = await callComments(client, { canvas_id: CANVAS.id, frame_id: FRAME_A.id })
+      expect(onlyFrame.parsed).toEqual([onFrame])
     } finally {
       await close()
     }

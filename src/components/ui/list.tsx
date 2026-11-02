@@ -10,7 +10,7 @@ function ListSection({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="list-section"
       className={cn(
-        'flex items-center justify-between gap-2 px-4 pb-1.5 pt-3 text-[11px] font-extrabold uppercase tracking-[0.08em] text-ink-faint',
+        'flex items-center justify-between gap-2 px-4 pb-1.5 pt-3 text-caption/3.5 font-extrabold uppercase tracking-[0.08em] text-ink-faint',
         className,
       )}
       {...props}
@@ -55,7 +55,7 @@ function ListItem({ className, ...props }: React.ComponentProps<'div'>) {
 }
 
 function ListTitle({ className, ...props }: React.ComponentProps<'span'>) {
-  return <span data-slot="list-title" className={cn('text-[13px] font-bold', className)} {...props} />
+  return <span data-slot="list-title" className={cn('text-body/4 font-bold', className)} {...props} />
 }
 
 function ListSummary({ className, ...props }: React.ComponentProps<'span'>) {
@@ -63,7 +63,33 @@ function ListSummary({ className, ...props }: React.ComponentProps<'span'>) {
 }
 
 function ListMeta({ className, ...props }: React.ComponentProps<'span'>) {
-  return <span data-slot="list-meta" className={cn('text-[11px] text-ink-faint', className)} {...props} />
+  return <span data-slot="list-meta" className={cn('text-caption/3.5 text-ink-faint', className)} {...props} />
 }
 
-export { ListSection, ListHint, ListRow, ListItem, ListTitle, ListSummary, ListMeta }
+export interface PersonRowProps extends Omit<React.ComponentProps<'span'>, 'children'> {
+  /** the face, usually an `Avatar` (28–32px); any disc of the same size fits */
+  avatar: React.ReactNode
+  name: React.ReactNode
+  /** the line under the name: an email, a member count, when they joined */
+  detail?: React.ReactNode
+  /** the right-hand end: a role, a badge, a remove action */
+  trailing?: React.ReactNode
+}
+
+/** One person on a line: face, name over a secondary line, and whatever sits
+ *  at the end. The share list, the members table and the account menu.
+ *  A span all the way down, so it nests inside a `CardRow` or a label. */
+function PersonRow({ avatar, name, detail, trailing, className, ...props }: PersonRowProps) {
+  return (
+    <span data-slot="person-row" className={cn('flex min-w-0 items-center gap-2.5', className)} {...props}>
+      {avatar}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-body font-medium text-ink">{name}</span>
+        {detail ? <span className="truncate text-label font-normal text-ink-faint">{detail}</span> : null}
+      </span>
+      {trailing ? <span className="flex flex-none items-center gap-2.5">{trailing}</span> : null}
+    </span>
+  )
+}
+
+export { ListSection, ListHint, ListRow, ListItem, ListTitle, ListSummary, ListMeta, PersonRow }

@@ -5,7 +5,7 @@ let server: Server
 let alice: Client
 let bob: Client
 beforeAll(async () => {
-  server = await startServer(4397, { ANTHROPIC_API_KEY: '', OPENAI_API_KEY: '', DATABASE_URL: '', SMTP_HOST: '' })
+  server = await startServer({ ANTHROPIC_API_KEY: '', OPENAI_API_KEY: '', DATABASE_URL: '', SMTP_HOST: '' })
   alice = await new Client(server).signUp('claude-alice@example.test', 'Alice')
   bob = await new Client(server).signUp('claude-bob@example.test', 'Bob')
 }, 60000)

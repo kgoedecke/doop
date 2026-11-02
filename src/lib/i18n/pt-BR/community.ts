@@ -1,0 +1,38 @@
+import type { Catalog } from '..'
+
+export const community: Catalog['community'] = {
+  copyFailed: 'Não foi possível copiar este design',
+  searchGallery: 'Buscar na galeria',
+  title: 'Comunidade',
+  subtitle: {
+    one: '{count} design que as pessoas publicaram para copiar e remixar',
+    other: '{count} designs que as pessoas publicaram para copiar e remixar',
+  },
+  sort: 'Ordenar',
+  trending: 'Em alta',
+  newest: 'Mais recentes',
+  shelf: 'Prateleira',
+  allCount: 'Todos · {count}',
+  shelfCount: '{shelf} · {count}',
+  categoryWebsite: 'Sites',
+  categoryApp: 'Apps web',
+  categoryDashboard: 'Dashboards',
+  categoryMobile: 'Mobile',
+  categoryMarketing: 'Marketing',
+  categoryOther: 'Outros',
+  emptyTitle: 'Nada nas prateleiras ainda',
+  emptyDescription:
+    'Qualquer pessoa pode listar um canvas aqui pelo menu Compartilhar — as pessoas o pré-visualizam e copiam para a própria conta, e o original continua privado. Seja a primeira.',
+  pickCanvas: 'Escolha um canvas para publicar',
+  visibleOf: '{visible} de {total}',
+  noMatch: 'Nada encontrado — tente outra busca ou prateleira.',
+  noPreview: 'sem prévia',
+  frames: '{count} frames',
+  byAuthor: 'por {name}',
+  copies: { one: '{count} cópia', other: '{count} cópias' },
+  copying: 'Copiando…',
+  useThis: 'Usar este',
+  published: 'por {name} · publicado {time} · {copies}',
+  copyNote: 'As cópias chegam aos seus canvases como uma cópia privada — edite à vontade, o original fica intacto.',
+  copyToMine: 'Copiar para meus canvases',
+}

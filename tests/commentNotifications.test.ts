@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   workspaceMembers: vi.fn((_id: string): string[] => []),
 }))
 vi.mock('../server/db/persist.ts', () => ({
+  saveFrame: () => {},
+  saveFrameNow: async () => {},
+  saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
   saveComment: () => {},
@@ -46,7 +49,7 @@ const FRAME: Frame = {
   id: 'f1',
   canvasId: CANVAS.id,
   name: 'Hero',
-  html: '<p/>',
+  html: '<h1>Hi</h1><p/>',
   x: 0,
   y: 0,
   width: 10,
@@ -55,6 +58,8 @@ const FRAME: Frame = {
   updatedAt: 0,
   updatedBy: 'alice',
 }
+
+const PAGES = [{ id: 'p1', name: 'Page 1' }]
 
 let unsubscribe = () => {}
 
@@ -75,7 +80,20 @@ beforeEach(() => {
     proposals: new Map(),
   })
   vi.spyOn(store, 'getFrame').mockImplementation(async (id) => (id === FRAME.id ? FRAME : undefined))
-  vi.spyOn(store, 'getCanvasMetadata').mockImplementation((id) => (id === CANVAS.id ? CANVAS : undefined))
+  vi.spyOn(store, 'getFrameMembership').mockImplementation(async (id) =>
+    id === FRAME.id ? { id, canvasId: FRAME.canvasId } : undefined,
+  )
+  /* a comment stamps its element's id into the frame: apply it to the fixture */
+  vi.spyOn(store, 'updateFrame').mockImplementation(async (id, patch) => {
+    const f = await store.getFrame(id)
+    return f ? Object.assign(f, patch) : undefined
+  })
+  vi.spyOn(store, 'getCanvasMetadata').mockImplementation((id) =>
+    id === CANVAS.id ? { ...CANVAS, pages: PAGES } : undefined,
+  )
+  vi.spyOn(store, 'syncCanvas').mockImplementation(async (id) =>
+    id === CANVAS.id ? { ...CANVAS, pages: PAGES } : undefined,
+  )
   unsubscribe = events.onCanvasEvent(notify.onCanvasEvent)
 })
 
@@ -187,6 +205,21 @@ describe('coalescing', () => {
 
 describe('the email itself', () => {
   const person = { id: 'bob', name: 'Bob', email: 'bob@example.com' }
+
+  it('says "the canvas" for a comment pinned to the canvas and links to its page', async () => {
+    const root = (await actions.addCanvasComment(
+      CANVAS.id,
+      { pageId: 'p1', x: 10, y: 20, text: 'Gap here' },
+      'alice',
+      'alice',
+    ))!
+    await deliver()
+    const toBob = mocks.sendMail.mock.calls.map(([m]) => m).find((m) => m.to === 'bob@example.com')!
+    expect(toBob.subject).toBe('alice commented on “Landing”')
+    expect(toBob.text).toContain('alice commented on the canvas:')
+    expect(toBob.text).toContain(`/c/c1?page=p1&comment=${root.id}`)
+    expect(toBob.text).not.toContain('frame=')
+  })
 
   it('names the author and frame, quotes the text, and deep-links the thread', async () => {
     const root = await comment('Too small', 'alice')

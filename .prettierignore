@@ -1,4 +1,5 @@
 dist/
+public/claude-extension/
 node_modules/
 package-lock.json
 bun.lock
@@ -16,3 +17,7 @@ ios/DerivedData*/
 ios/.build/
 ios/BlitzKit/rust/target/
 ios/BlitzKit/lib/
+storybook-static/
+
+# agent worktrees (git worktrees under the repo)
+.claude/

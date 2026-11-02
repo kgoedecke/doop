@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   createFrame: vi.fn(),
   deleteFrame: vi.fn(),
   getCanvas: vi.fn(),
+  duplicatePage: vi.fn(),
 }))
 vi.mock('../src/lib/api', () => ({
   api,
@@ -23,7 +24,7 @@ vi.mock('../src/lib/api', () => ({
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 const { ApiError } = await import('../src/lib/api')
 const { useStore } = await import('../src/lib/store')
-const { savePages, moveFramesToPage } = await import('../src/lib/pageEdits')
+const { savePages, moveFramesToPage, duplicatePage } = await import('../src/lib/pageEdits')
 const { clearHistory, recordCreate, deleteFrameTracked, undo, redo } = await import('../src/lib/history')
 const pages = [
   { id: 'first', name: 'Main' },
@@ -289,4 +290,95 @@ it('waits for page deletion to save before undoing it and preserves redo', async
   expect(useStore.getState().canvas!.pages).toEqual(pages)
   await redo()
   expect(useStore.getState().canvas!.pages).toEqual([pages[0]])
+})
+
+it('shows a duplicated page and undoes it frames-first, redoing it page-first', async () => {
+  const copyPage = { id: 'copy', name: 'Exploration copy' }
+  const copied = { ...frame, id: 'f2', pageId: 'copy' }
+  const withCopy = [pages[0]!, pages[1]!, copyPage]
+  api.duplicatePage.mockResolvedValue({ page: copyPage, pages: withCopy, frames: [copied] })
+  const order: string[] = []
+  api.deleteFrame.mockImplementation(async (id: string) => {
+    order.push(`delete ${id}`)
+    return {}
+  })
+  api.setPages.mockImplementation(async (_id, next: typeof pages) => {
+    order.push(`pages ${next.map((p) => p.id).join(',')}`)
+    return next
+  })
+  api.createFrame.mockImplementation(async (canvasId, input) => {
+    order.push(`create ${input.pageId}`)
+    return { ...frame, ...input, canvasId, id: 'f3' }
+  })
+  useStore.getState().setActivePage('first')
+  await duplicatePage(useStore.getState().canvas!, 'second')
+  expect(api.duplicatePage).toHaveBeenCalledWith('c', 'second')
+  expect(useStore.getState().canvas!.pages).toEqual(withCopy)
+  expect(useStore.getState().canvas!.frames.map((f) => f.id)).toEqual(['f', 'f2'])
+  expect(useStore.getState().activePageId).toBe('copy')
+
+  await undo()
+  expect(order).toEqual(['delete f2', 'pages first,second'])
+  expect(useStore.getState().canvas!.pages).toEqual(pages)
+  expect(useStore.getState().activePageId).toBe('first')
+
+  order.length = 0
+  await redo()
+  expect(order).toEqual(['pages first,second,copy', 'create copy'])
+  expect(useStore.getState().canvas!.pages).toEqual(withCopy)
+  expect(useStore.getState().canvas!.frames.map((f) => f.id)).toContain('f3')
+  expect(useStore.getState().activePageId).toBe('copy')
+})
+
+it('undoes only the copied page, keeping a page a collaborator added meanwhile', async () => {
+  const copyPage = { id: 'copy', name: 'Main copy' }
+  const theirs = { id: 'theirs', name: 'Collaborator' }
+  api.duplicatePage.mockResolvedValue({
+    page: copyPage,
+    pages: [pages[0]!, copyPage, { ...pages[1]!, name: 'Renamed' }, theirs],
+    frames: [],
+  })
+  await duplicatePage(useStore.getState().canvas!, 'first')
+  expect(useStore.getState().canvas!.pages!.map((p) => p.id)).toEqual(['first', 'copy', 'second', 'theirs'])
+  await undo()
+  expect(api.setPages).toHaveBeenLastCalledWith(
+    'c',
+    [pages[0]!, { ...pages[1]!, name: 'Renamed' }, theirs],
+    [pages[0]!, copyPage, { ...pages[1]!, name: 'Renamed' }, theirs],
+  )
+  expect(useStore.getState().canvas!.pages!.map((p) => p.id)).toEqual(['first', 'second', 'theirs'])
+})
+
+it('keeps a duplicate retryable when its page cannot be restored on redo', async () => {
+  const copyPage = { id: 'copy', name: 'Exploration copy' }
+  api.duplicatePage.mockResolvedValue({
+    page: copyPage,
+    pages: [...pages, copyPage],
+    frames: [{ ...frame, id: 'f2', pageId: 'copy' }],
+  })
+  await duplicatePage(useStore.getState().canvas!, 'second')
+  await undo()
+  expect(useStore.getState().canvas!.pages).toEqual(pages)
+  api.setPages.mockRejectedValueOnce(new Error('Too many pages'))
+  await redo()
+  expect(api.createFrame).not.toHaveBeenCalled()
+  expect(useStore.getState().canvas!.pages).toEqual(pages)
+  expect(useStore.getState().notice).toMatchObject({ text: 'Too many pages' })
+  await redo()
+  expect(useStore.getState().canvas!.pages).toEqual([...pages, copyPage])
+  expect(api.createFrame).toHaveBeenCalledWith('c', expect.objectContaining({ pageId: 'copy' }))
+})
+
+it('does not replay the copy response over a newer broadcast of a copied frame', async () => {
+  const copyPage = { id: 'copy', name: 'Exploration copy' }
+  const copied = { ...frame, id: 'f2', pageId: 'copy', updatedAt: 10 }
+  api.duplicatePage.mockImplementation(async () => {
+    /* the creation broadcast and a collaborator's edit arrive before the response */
+    useStore.getState().setPages([...pages, copyPage])
+    useStore.getState().upsertFrame({ ...copied, html: '<h1>Edited</h1>', updatedAt: 20 })
+    return { page: copyPage, pages: [...pages, copyPage], frames: [copied] }
+  })
+  await duplicatePage(useStore.getState().canvas!, 'second')
+  expect(useStore.getState().canvas!.frames.find((f) => f.id === 'f2')!.html).toBe('<h1>Edited</h1>')
+  expect(useStore.getState().activePageId).toBe('copy')
 })

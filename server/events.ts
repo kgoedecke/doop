@@ -11,8 +11,9 @@ import type { Actor, ActorKind, AgentTask, ElementComment, Frame } from '../shar
  * skipped: a broken notifier must never fail the comment it was told about.
  */
 export type CanvasEvent =
-  | { type: 'comment.created'; comment: ElementComment; frame: Frame; actorKind: ActorKind }
-  | { type: 'comment.replied'; comment: ElementComment; frame: Frame; actorKind: ActorKind }
+  /* `frame` is an element comment's frame; a canvas comment has none */
+  | { type: 'comment.created'; comment: ElementComment; frame: Frame | undefined; actorKind: ActorKind }
+  | { type: 'comment.replied'; comment: ElementComment; frame: Frame | undefined; actorKind: ActorKind }
   /** the root of a thread (or a lone reply) was resolved; `by` is a display name */
   | { type: 'comment.resolved'; comment: ElementComment; frame: Frame | undefined; by: string }
   | { type: 'frame.created'; frame: Frame; actor: Actor }

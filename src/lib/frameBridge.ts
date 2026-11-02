@@ -4,6 +4,20 @@
  * page (the element properties panel) reaches the live document through
  * these calls instead of holding an iframe ref of its own.
  */
+import type { DropTarget, FlowPlacement } from './layers'
+import type { Interaction } from '../../shared/prototype'
+
+export interface LayoutDrop {
+  target: DropTarget
+  styles: FlowPlacement
+  container: ElementInfo['rect']
+  line: ElementInfo['rect']
+}
+
+export async function elementMoveTarget(frameId: string, selector: string, x: number, y: number) {
+  const reply = await requestFrame(frameId, 'doop:move-target', { selector, x, y })
+  return reply?.result as { free: boolean; drop: LayoutDrop | null } | undefined
+}
 
 /** The runtime's summary of one element: computed styles resolved to what
  *  the Design panel shows, plus the inline styles the element already carries.
@@ -12,25 +26,60 @@ export interface ElementInfo {
   tag: string
   id: string
   classes: string[]
-  parent: { tag: string; id: string; className: string; display: string; flexDirection: string } | null
+  parent: {
+    tag: string
+    id: string
+    className: string
+    display: string
+    flexDirection: string
+    writingMode: string
+  } | null
+  /** Nearest ancestor with a layout box, skipping display: contents wrappers. */
+  layoutParent?: { display: string; flexDirection: string; writingMode: string } | null
   /** 1-based place among the parent's children, and how many there are */
   index: number
   count: number
   inline: Record<string, string>
   hasText: boolean
   rect: { x: number; y: number; width: number; height: number }
+  /** Rendered bounds relative to the parent's border box, in frame pixels. */
+  geometry: {
+    x: number
+    y: number
+    rotation: number | null
+    scaleX: number
+    scaleY: number
+    enabled: boolean
+    canAlign: boolean
+  }
+  /** rendered box over layout box: the element's own and inherited scale */
+  scale: { x: number; y: number }
   position: string
   display: string
   flexDirection: string
+  flexWrap: string
+  justifyContent: string
+  alignItems: string
+  writingMode: string
   width: number | null
   height: number | null
+  widthValue: string
+  heightValue: string
+  flexGrow: number
+  boxSizing: string
+  /** Unrounded computed padding and border sums, for content-box sizing. */
+  boxExtras: { width: number; height: number }
+  aspectRatio: string
+  naturalAspectRatio: number | null
   minWidth: string
   rowGap: number | null
   columnGap: number | null
   padding: [number | null, number | null, number | null, number | null]
   opacity: number | null
   visibility: string
+  clipsContent: boolean
   backgroundColor: string
+  image: { kind: 'img' | 'background'; src: string; size: string; repeat: string } | null
   /** top, right, bottom, left */
   borderWidths: [number | null, number | null, number | null, number | null]
   /** style and colour of the first side that draws */
@@ -41,11 +90,39 @@ export interface ElementInfo {
   fontSize: number | null
   fontWeight: string
   fontFamily: string
+  /** Font faces declared by this frame, including linked web fonts. */
+  fontFamilies: string[]
   textAlign: string
+  direction: string
 }
 
 /** Inline style changes: a null or empty value removes the property. */
 export type StylePatch = Record<string, string | null>
+
+export type GeometryEdit =
+  | { kind: 'position'; axis: 'x' | 'y'; value: number }
+  /** Move both axes together to a rendered position in frame pixels. */
+  | { kind: 'move'; x: number; y: number }
+  | { kind: 'align'; axis: 'x' | 'y'; edge: 'start' | 'center' | 'end' }
+  | { kind: 'rotate'; value: number }
+  | { kind: 'flip'; axis: 'x' | 'y' }
+  | { kind: 'nudge'; dx: number; dy: number }
+
+export function nudgeElements(frameId: string, selectors: string[], dx: number, dy: number) {
+  return requestFrame(frameId, 'doop:nudge', { selectors, dx, dy })
+}
+
+export function settleFrames() {
+  return Promise.all([...windows.keys()].map((frameId) => requestFrame(frameId, 'doop:settle', {})))
+}
+
+export async function editElementGeometry(
+  frameId: string,
+  selector: string,
+  edit: GeometryEdit,
+): Promise<ElementInfo | null> {
+  return infoOf(await requestFrame(frameId, 'doop:geometry', { selector, edit }))
+}
 
 /* A request `doop:<name>` is answered by `doop:<name>-result` carrying the
    same reqId — the convention every runtime request already follows. */
@@ -58,7 +135,7 @@ interface PendingAsk {
 const REPLY_TIMEOUT_MS = 2000
 
 const windows = new Map<string, Window>()
-const readyListeners = new Map<string, Set<() => void>>()
+const changeListeners = new Map<string, Set<() => void>>()
 const pending = new Map<number, PendingAsk>()
 let nextReq = 0
 let listening = false
@@ -68,6 +145,12 @@ function listen() {
   listening = true
   window.addEventListener('message', (ev: MessageEvent) => {
     const data = ev.data as { type?: string; reqId?: number } | null
+    if (data?.type === 'doop:frame-updated') {
+      for (const [frameId, win] of windows) {
+        if (ev.source === win) changeListeners.get(frameId)?.forEach((cb) => cb())
+      }
+      return
+    }
     if (typeof data?.type !== 'string' || typeof data.reqId !== 'number') return
     const ask = pending.get(data.reqId)
     /* the reply must come from the window that was asked — request ids are
@@ -80,22 +163,61 @@ function listen() {
 
 export function registerFrameWindow(frameId: string, win: Window) {
   windows.set(frameId, win)
-  readyListeners.get(frameId)?.forEach((cb) => cb())
+  changeListeners.get(frameId)?.forEach((cb) => cb())
 }
 
 export function unregisterFrameWindow(frameId: string, win: Window) {
-  if (windows.get(frameId) === win) windows.delete(frameId)
+  if (windows.get(frameId) !== win) return
+  windows.delete(frameId)
+  shownDocuments.delete(frameId)
 }
 
-/** Runs `cb` each time the frame's runtime (re)registers — a panel opened
- *  before the frame was ready uses this to ask again. Returns the unsubscribe. */
-export function onFrameReady(frameId: string, cb: () => void): () => void {
-  const set = readyListeners.get(frameId) ?? new Set()
+/* The HTML each frame's runtime has acknowledged showing; absent while a
+   newer document is still on its way there. */
+const shownDocuments = new Map<string, string>()
+const documentListeners = new Map<string, Set<() => void>>()
+
+/** Record what the frame's runtime shows: the acknowledged HTML, or null
+ *  once a newer document has been posted and not yet acknowledged. */
+export function noteFrameDocument(frameId: string, html: string | null) {
+  if (html === null) shownDocuments.delete(frameId)
+  else shownDocuments.set(frameId, html)
+  documentListeners.get(frameId)?.forEach((cb) => cb())
+}
+
+/** Resolve true once the frame's runtime shows `html`, false if it does not
+ *  within the reply timeout. The store can run ahead of the frame's
+ *  throttled render, and a hit test on the older document would name its
+ *  elements, not the ones `html` has in those places. */
+export function frameShows(frameId: string, html: string): Promise<boolean> {
+  if (shownDocuments.get(frameId) === html) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const set = documentListeners.get(frameId) ?? new Set()
+    documentListeners.set(frameId, set)
+    const done = (shown: boolean) => {
+      window.clearTimeout(timer)
+      set.delete(check)
+      if (set.size === 0 && documentListeners.get(frameId) === set) documentListeners.delete(frameId)
+      resolve(shown)
+    }
+    const check = () => {
+      if (shownDocuments.get(frameId) === html) done(true)
+    }
+    const timer = window.setTimeout(() => done(false), REPLY_TIMEOUT_MS)
+    set.add(check)
+  })
+}
+
+/** Re-read after the runtime registers, renders HTML, or loads font faces.
+ *  Store updates can precede the frame's throttled render. */
+export function onFrameChange(frameId: string, cb: () => void): () => void {
+  listen()
+  const set = changeListeners.get(frameId) ?? new Set()
   set.add(cb)
-  readyListeners.set(frameId, set)
+  changeListeners.set(frameId, set)
   return () => {
     set.delete(cb)
-    if (set.size === 0) readyListeners.delete(frameId)
+    if (set.size === 0) changeListeners.delete(frameId)
   }
 }
 
@@ -136,4 +258,37 @@ export async function inspectElement(frameId: string, selector: string): Promise
  *  element's fresh properties. */
 export async function styleElement(frameId: string, selector: string, styles: StylePatch): Promise<ElementInfo | null> {
   return infoOf(await requestFrame(frameId, 'doop:style', { selector, styles }))
+}
+
+/** Replace image content through the same live edit/undo path as styles. */
+export async function replaceElementImage(
+  frameId: string,
+  selector: string,
+  image: NonNullable<ElementInfo['image']>,
+  url: string,
+): Promise<ElementInfo | null> {
+  return infoOf(await requestFrame(frameId, 'doop:replace-image', { selector, image, url }))
+}
+
+/** One element with interactions, as the frame runtime reports it. */
+export interface ScannedHotspot {
+  selector: string
+  rect: ElementInfo['rect']
+  interactions: Interaction[]
+}
+
+/** Every element of the live document that carries prototype interactions,
+ *  including ones a script created; empty when the frame is not mounted. */
+export async function scanHotspots(frameId: string): Promise<ScannedHotspot[]> {
+  const reply = await requestFrame(frameId, 'doop:proto-scan', {})
+  return Array.isArray(reply?.items) ? (reply.items as ScannedHotspot[]) : []
+}
+
+/** Preview a whole scrub locally, then save once or restore its original CSS. */
+export async function styleGesture(
+  frameId: string,
+  selector: string,
+  phase: 'begin' | 'commit' | 'cancel',
+): Promise<ElementInfo | null> {
+  return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase }))
 }

@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.11.0](https://github.com/kgoedecke/doop/compare/desktop-v0.10.0...desktop-v0.11.0) (2026-11-01)
+
+
+### Features
+
+* **desktop:** build and release the app for Linux ([#295](https://github.com/kgoedecke/doop/issues/295)) ([56d1174](https://github.com/kgoedecke/doop/commit/56d1174ca3214dcb263c2a0cb7fa76a961fa3331))
+
+## [0.10.0](https://github.com/kgoedecke/doop/compare/desktop-v0.9.0...desktop-v0.10.0) (2026-10-31)
+
+
+### Features
+
+* **desktop:** update the app automatically from a signed feed ([#285](https://github.com/kgoedecke/doop/issues/285)) ([3298742](https://github.com/kgoedecke/doop/commit/329874207677d7cf4790b3231aab46fc7f9462e7))
+
+## [0.9.0](https://github.com/kgoedecke/doop/compare/desktop-v0.8.0...desktop-v0.9.0) (2026-10-31)
+
+
+### Features
+
+* **desktop:** sign the Windows app and installer with Azure Artifact Signing ([#273](https://github.com/kgoedecke/doop/issues/273)) ([d47def3](https://github.com/kgoedecke/doop/commit/d47def3382a5080123722c16306c56ada33a04d9))
+
+## [0.8.0](https://github.com/kgoedecke/doop/compare/desktop-v0.7.0...desktop-v0.8.0) (2026-10-30)
+
+
+### Features
+
+* **desktop:** follow new Claude models by alias, and pick the effort ([#251](https://github.com/kgoedecke/doop/issues/251)) ([bfcec7d](https://github.com/kgoedecke/doop/commit/bfcec7d318cf03df440a852844fd0033a05e5e47))
+
+
+### Bug Fixes
+
+* **desktop:** run the Claude Code the login shell runs, and let Settings choose one ([#271](https://github.com/kgoedecke/doop/issues/271)) ([eaf183b](https://github.com/kgoedecke/doop/commit/eaf183ba852bc078c89ed06ad5d8488c9543e4d2))
+* **desktop:** run the newest Claude Code found, and say when it is too old ([#254](https://github.com/kgoedecke/doop/issues/254)) ([ba7b602](https://github.com/kgoedecke/doop/commit/ba7b6025450fc77b0390e50f145ee8ea67a090f8))
+
+## [0.7.0](https://github.com/kgoedecke/doop/compare/desktop-v0.6.0...desktop-v0.7.0) (2026-10-26)
+
+
+### Features
+
+* **canvas:** add rulers and draggable snapping guides ([#372](https://github.com/kgoedecke/doop/issues/372)) ([fdbb07e](https://github.com/kgoedecke/doop/commit/fdbb07e562dbe4d4bd89396d778a9af219314be6))
+* **desktop:** add macOS check for updates menu ([#350](https://github.com/kgoedecke/doop/issues/350)) ([f16644a](https://github.com/kgoedecke/doop/commit/f16644a1fc8e6b758bd85fb7d8355e5d2b939b28))
+
+
+### Bug Fixes
+
+* **desktop:** crisp Windows window icon ([#364](https://github.com/kgoedecke/doop/issues/364)) ([37214b8](https://github.com/kgoedecke/doop/commit/37214b8aa43fec5cb1f03eb1e1fd55655049ead8))
+
+## [0.6.0](https://github.com/kgoedecke/doop/compare/desktop-v0.5.0...desktop-v0.6.0) (2026-10-21)
+
+
+### Features
+
+* **claude:** add direct connector setup and desktop extension ([#280](https://github.com/kgoedecke/doop/issues/280)) ([d058f12](https://github.com/kgoedecke/doop/commit/d058f123b831949725f87654148401b0d1cc1301))
+* **desktop:** add automatic Codex MCP setup ([#289](https://github.com/kgoedecke/doop/issues/289)) ([3b5b090](https://github.com/kgoedecke/doop/commit/3b5b0906a932d1381c713ca9b7fb020553151ea5))
+
+## [0.5.0](https://github.com/kgoedecke/doop/compare/desktop-v0.4.0...desktop-v0.5.0) (2026-10-13)
+
+
+### Features
+
+* **connect:** pick the agent first in Connect AI, nudge to connect a plan from the prompt bar ([#226](https://github.com/kgoedecke/doop/issues/226)) ([aa1442b](https://github.com/kgoedecke/doop/commit/aa1442bc9aa3e836fbe6025e6ad3ad85461e9c70))
+* **desktop:** add a drag-to-Applications background to the macOS DMG ([#225](https://github.com/kgoedecke/doop/issues/225)) ([8f5ada5](https://github.com/kgoedecke/doop/commit/8f5ada56e7cbfe81efae646bede81e8e8e50bbcb))
+
 ## [0.4.0](https://github.com/kgoedecke/doop/compare/desktop-v0.3.0...desktop-v0.4.0) (2026-09-19)
 
 

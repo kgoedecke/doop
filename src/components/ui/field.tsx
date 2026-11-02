@@ -3,14 +3,15 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 
-/* Doop labels a control two ways: a loud uppercase micro-caption above form
-   rows, or a plain sentence-case line in denser panels. */
+/* Doop labels a control three ways, all sentence case in the UI sans: a quiet
+   caption over a field in a dense panel, the label step over a form row, or a
+   bolder body line that heads a group. (The mono uppercase voice is retired.) */
 const labelVariants = cva('block text-ink-soft', {
   variants: {
     variant: {
-      caption: 'mb-1 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint',
-      form: 'mb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.09em] text-ink-soft',
-      plain: 'mb-1 text-[13px] font-semibold text-ink',
+      caption: 'mb-1 text-caption text-ink-faint',
+      form: 'mb-1.5 text-label font-medium text-ink-soft',
+      plain: 'mb-1 text-body/4 font-semibold text-ink',
     },
   },
   defaultVariants: { variant: 'caption' },

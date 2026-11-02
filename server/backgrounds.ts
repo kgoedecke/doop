@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -194,7 +195,7 @@ export function backgroundsEnabled(): boolean {
 /** Where the bytes are served from. Self-hosters without the library can
  *  point BACKGROUNDS_ORIGIN at an instance that has it. */
 function origin(publicOrigin: string): string {
-  return (process.env.BACKGROUNDS_ORIGIN || publicOrigin).replace(/\/$/, '')
+  return (env.BACKGROUNDS_ORIGIN ?? publicOrigin).replace(/\/$/, '')
 }
 
 export function displayKey(id: string): string {
@@ -224,9 +225,9 @@ const REMOTE_THUMB_TIMEOUT_MS = 10_000
  *  preview should not sink the whole search result. */
 export async function fetchThumb(id: string): Promise<{ data: string; mime: string } | null> {
   try {
-    const remote = process.env.BACKGROUNDS_ORIGIN
+    const remote = env.BACKGROUNDS_ORIGIN
     if (remote) {
-      const res = await fetch(`${remote.replace(/\/$/, '')}/bg/${id}-t.webp`, {
+      const res = await fetch(`${remote}/bg/${id}-t.webp`, {
         signal: AbortSignal.timeout(REMOTE_THUMB_TIMEOUT_MS),
       })
       if (!res.ok) return null
@@ -566,7 +567,7 @@ Describe the image for that search:
 - description: one plain sentence, under 20 words, as a designer would say it ("Soft teal aurora ribbon drifting across a near-black field").`
 
 export function taggingEnabled(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY)
+  return Boolean(env.ANTHROPIC_API_KEY)
 }
 
 /** Ask the model to describe an image. Throws when tagging is off or refused. */

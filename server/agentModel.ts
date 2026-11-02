@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
@@ -5,7 +6,7 @@ import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAccount, withFreshToken, accountModelFor, accountVisionFor } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
-import { ModelAuthError, ModelUnavailableError, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
+import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
 import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCompletionsAgent.ts'
 
@@ -36,6 +37,8 @@ export interface AgentTurnRequest {
   tools: Anthropic.Tool[]
   messages: Anthropic.MessageParam[]
   maxTokens: number
+  /** aborts the turn mid-generation: the run's work was stopped */
+  signal?: AbortSignal
 }
 
 export interface AgentTurnResult {
@@ -63,12 +66,12 @@ export class ModelConfigurationError extends ModelAuthError {}
 /* the server tier: pays for everyone's free tasks                  */
 /* ---------------------------------------------------------------- */
 
-const ANTHROPIC_MODEL = process.env.DOOP_AGENT_MODEL || 'claude-opus-5'
+const ANTHROPIC_MODEL = env.DOOP_AGENT_MODEL
 
 let anthropic: Anthropic | null = null
 
 function anthropicTier(): AgentModel | null {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!env.ANTHROPIC_API_KEY) {
     warnOnce(
       '[doop-agent] ANTHROPIC_API_KEY not set — the free Doop Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See README → "The Doop Agent".',
     )
@@ -101,17 +104,20 @@ export async function runAnthropicTurn(
   req: AgentTurnRequest,
 ): Promise<AgentTurnResult> {
   const res = await client.messages
-    .stream({
-      model,
-      max_tokens: req.maxTokens,
-      system: req.system.map((block) => ({
-        type: 'text' as const,
-        text: block.text,
-        ...(block.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
-      })),
-      tools: req.tools,
-      messages: req.messages,
-    })
+    .stream(
+      {
+        model,
+        max_tokens: req.maxTokens,
+        system: req.system.map((block) => ({
+          type: 'text' as const,
+          text: block.text,
+          ...(block.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
+        })),
+        tools: req.tools,
+        messages: req.messages,
+      },
+      { signal: req.signal },
+    )
     .finalMessage()
   const stop: StopReason =
     res.stop_reason === 'refusal'
@@ -125,9 +131,9 @@ export async function runAnthropicTurn(
 }
 
 function azureTier(): AgentModel | null {
-  const endpoint = process.env.AZURE_OPENAI_ENDPOINT
-  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT
-  const apiKey = process.env.AZURE_OPENAI_API_KEY
+  const endpoint = env.AZURE_OPENAI_ENDPOINT
+  const deployment = env.AZURE_OPENAI_DEPLOYMENT
+  const apiKey = env.AZURE_OPENAI_API_KEY
   if (!endpoint || !deployment || !apiKey) {
     warnOnce(
       '[doop-agent] DOOP_AGENT_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY — the free Doop Agent tier is off until all three are set.',
@@ -145,6 +151,7 @@ function azureTier(): AgentModel | null {
           tools: req.tools,
           messages: req.messages,
           maxTokens: req.maxTokens,
+          signal: req.signal,
         })
       } catch (err) {
         /* these are the SERVER's credentials — "reconnect your account" would
@@ -166,13 +173,9 @@ const serverTiers: Record<ServerProvider, () => AgentModel | null> = {
   azure: azureTier,
 }
 
+/* an unknown DOOP_AGENT_PROVIDER fails at boot (server/env.ts) */
 function serverProvider(): ServerProvider {
-  const chosen = process.env.DOOP_AGENT_PROVIDER || 'anthropic'
-  if (chosen in serverTiers) return chosen as ServerProvider
-  warnOnce(
-    `[doop-agent] DOOP_AGENT_PROVIDER="${chosen}" is not a server provider (anthropic | azure) — using anthropic.`,
-  )
-  return 'anthropic'
+  return env.DOOP_AGENT_PROVIDER
 }
 
 /** What the boot banner reports: which provider the free tier would run on,
@@ -256,12 +259,13 @@ function byoModel(account: ModelAccount): AgentModel {
           tools: req.tools,
           messages: req.messages,
           maxTokens: req.maxTokens,
+          signal: req.signal,
         }),
     }
   }
   return {
     provider: account.kind,
-    label: `${BYO_LABELS[account.kind]} (${accountModelFor(account)})`,
+    label: `${BYO_LABELS[account.kind]} (${accountModelFor(account)}, ${effortFor(account)} effort)`,
     userId: account.userId,
     async run(req) {
       /* refreshed per turn, not per run: a long design run outlives an
@@ -272,6 +276,7 @@ function byoModel(account: ModelAccount): AgentModel {
         tools: req.tools,
         messages: req.messages,
         maxTokens: req.maxTokens,
+        signal: req.signal,
       })
     },
   }
@@ -307,9 +312,9 @@ export async function pickModel(payerId?: string): Promise<AgentModel | null> {
       if (!localAgentRuns.online(payerId)) return null
       return {
         provider: 'claude-local',
-        label: `Claude CLI (${local.model})`,
+        label: `Claude CLI (${local.model}${local.effort ? `, ${local.effort} effort` : ''})`,
         userId: payerId,
-        runHarness: (req) => localAgentRuns.start(payerId, local.model, req),
+        runHarness: (req) => localAgentRuns.start(payerId, local, req),
         run: () =>
           Promise.reject(
             new Error('Repository imports require a server provider. Select your connected account in Settings.'),

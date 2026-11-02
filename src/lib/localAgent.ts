@@ -3,10 +3,26 @@ import { api, ApiError } from './api'
 import { useStore } from './store'
 import type { LocalAgentJob, LocalAgentPreference, LocalAgentResult } from '../../shared/localAgent'
 
-type NativeStatus = { installed: boolean; connected: boolean; enabled: boolean; email?: string; plan?: string }
+type NativeStatus = {
+  installed: boolean
+  connected: boolean
+  enabled: boolean
+  email?: string
+  plan?: string
+  /** the Claude Code found is too old to report or complete a sign-in */
+  outdated?: boolean
+  cliPath?: string
+  cliVersion?: string
+  minVersion?: string
+  /** chosen in Settings, what the login shell runs, or the newest install found */
+  cliSource?: 'chosen' | 'shell' | 'found'
+  /** a Claude Code chosen in Settings whose file is gone; the default runs meanwhile */
+  chosenMissing?: string
+}
 type Bridge = {
   __DOOP_CLAUDE_CLI__?: boolean
   __DOOP_CLAUDE_INSTALL__?: boolean
+  __DOOP_CLAUDE_CHOOSE__?: boolean
   __TAURI__?: {
     core: { invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T> }
     event: { listen: <T>(name: string, callback: (event: { payload: T }) => void) => Promise<() => void> }
@@ -15,6 +31,7 @@ type Bridge = {
 const bridge = globalThis as Bridge
 export const canInstallClaude = () => bridge.__DOOP_CLAUDE_INSTALL__ === true
 export const hasLocalClaude = () => bridge.__DOOP_CLAUDE_CLI__ === true
+export const canChooseClaude = () => bridge.__DOOP_CLAUDE_CHOOSE__ === true
 
 export function invokeClaude<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!hasLocalClaude() || !bridge.__TAURI__)
@@ -30,10 +47,11 @@ export const useLocalAgent = create<{
   error: string
 }>(() => ({ preference: null, native: null, running: false, progress: '', error: '' }))
 
-export async function refreshLocalAgent(userId: string) {
+/** `fresh` asks the login shell again for the `claude` it runs (the Refresh button). */
+export async function refreshLocalAgent(userId: string, fresh = false) {
   const [preference, native] = await Promise.all([
     api.localAgent(),
-    hasLocalClaude() ? invokeClaude<NativeStatus>('claude_status', { userId }) : Promise.resolve(null),
+    hasLocalClaude() ? invokeClaude<NativeStatus>('claude_status', { userId, fresh }) : Promise.resolve(null),
   ])
   useLocalAgent.setState({ preference, native })
   return { preference, native }
@@ -52,7 +70,8 @@ export async function selectLocalAgent(userId: string, preference: LocalAgentPre
 }
 
 export async function disconnectLocalAgent(userId: string) {
-  await api.setLocalAgent({ enabled: false, model: useLocalAgent.getState().preference?.model ?? 'default' })
+  const current = useLocalAgent.getState().preference
+  await api.setLocalAgent({ enabled: false, model: current?.model ?? 'default', effort: current?.effort })
   await invokeClaude('claude_stop')
   await invokeClaude('claude_connect', { userId, enabled: false })
   await refreshLocalAgent(userId)

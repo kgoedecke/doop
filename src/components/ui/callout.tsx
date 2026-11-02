@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 
 /* A boxed message inside a form or panel: the notice a reset link was sent,
    the error a sign-in failed with. Bigger than a Note, quieter than a modal. */
-const calloutVariants = cva('rounded-lg border px-3 py-2 text-[13px] leading-[1.45]', {
+const calloutVariants = cva('rounded-lg border px-3 py-2 text-body leading-[1.45]', {
   variants: {
     tone: {
       neutral: 'border-line bg-line-soft text-ink',

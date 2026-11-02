@@ -6,12 +6,30 @@
 
 /** `rgb(…)` / `rgba(…)` as `#rrggbb`; null for a fully transparent colour
  *  or anything that is not an rgb triplet. */
-export function rgbToHex(color: string): string | null {
+export function rgbToHex(color: string, includeTransparent = false): string | null {
   const m = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(color.trim())
   if (!m) return /^#[0-9a-f]{6}$/i.test(color.trim()) ? color.trim().toLowerCase() : null
-  if (m[4] !== undefined && Number(m[4]) === 0) return null
+  if (!includeTransparent && m[4] !== undefined && Number(m[4]) === 0) return null
   const hex = (v: string) => Number(v).toString(16).padStart(2, '0')
   return `#${hex(m[1] ?? '0')}${hex(m[2] ?? '0')}${hex(m[3] ?? '0')}`
+}
+
+/** Alpha is independent of element opacity; keep the RGB channels at zero alpha. */
+export function colorAlpha(color: string): number {
+  if (color === 'transparent') return 0
+  const alpha =
+    /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\s*\)$/.exec(color)?.[1] ?? /\/\s*([\d.]+%?)\s*\)$/.exec(color)?.[1]
+  return alpha === undefined ? 1 : parseFloat(alpha) / (alpha.endsWith('%') ? 100 : 1)
+}
+
+export function colorWithAlpha(color: string, alpha: number): string {
+  const clamped = Math.min(1, Math.max(0, alpha))
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    const channels = [1, 3, 5].map((start) => parseInt(color.slice(start, start + 2), 16))
+    return `rgba(${channels.join(', ')}, ${clamped})`
+  }
+  // Keep modern CSS colors (e.g. Tailwind's oklch palette) when only alpha changes.
+  return `rgb(from ${color} r g b / ${clamped})`
 }
 
 /** Bare numbers get `px`; anything else (auto, 100%, 1.5rem) passes through.
@@ -43,11 +61,29 @@ export function compactBox(values: [number | null, number | null, number | null,
   return `${t} ${r} ${b} ${l}`
 }
 
-/** Which of the panel's size modes an inline length expresses. */
-export type SizeMode = 'fixed' | 'fill' | 'hug'
-export function sizeMode(inline: string | undefined): SizeMode {
-  if (!inline || inline === 'auto') return 'hug'
-  return inline.trim().endsWith('%') ? 'fill' : 'fixed'
+/** Preserve auto as distinct from explicitly hugging the content. */
+export type SizeMode = 'fixed' | 'fill' | 'hug' | 'auto'
+export function sizeMode(value: string | undefined): SizeMode {
+  if (!value || value === 'auto') return 'auto'
+  if (value === 'fit-content' || value === 'max-content' || value === 'min-content') return 'hug'
+  return value.trim() === '100%' || /^calc\(100% - [\d.]+px\)$/.test(value.trim()) ? 'fill' : 'fixed'
+}
+
+/** With `auto`, a loaded image/video's natural ratio takes precedence over
+ *  the explicit fallback. Plain `auto` does not represent an explicit link. */
+export function aspectRatio(value: string, naturalRatio: number | null = null): number | null {
+  const parts = value
+    .replace(/\bauto\b/g, '')
+    .trim()
+    .split('/')
+    .map(Number)
+  const [width, height = 1] = parts
+  if (parts.length > 2 || !width || width <= 0 || height <= 0) return null
+  const ratio = width / height
+  if (!Number.isFinite(ratio) || ratio <= 0) return null
+  return /\bauto\b/.test(value) && naturalRatio !== null && Number.isFinite(naturalRatio) && naturalRatio > 0
+    ? naturalRatio
+    : ratio
 }
 
 /** How a border reads in one field: its width and, when it is not on every

@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { createHmac, createSign, timingSafeEqual } from 'node:crypto'
 
 /**
@@ -29,7 +30,7 @@ import { createHmac, createSign, timingSafeEqual } from 'node:crypto'
 const GH_API = 'https://api.github.com'
 
 function privateKey(): string | undefined {
-  const raw = process.env.GITHUB_APP_PRIVATE_KEY
+  const raw = env.GITHUB_APP_PRIVATE_KEY
   if (!raw) return undefined
   if (raw.includes('BEGIN')) return raw
   try {
@@ -42,17 +43,16 @@ function privateKey(): string | undefined {
 
 export function appEnabled(): boolean {
   return !!(
-    process.env.GITHUB_APP_ID &&
-    process.env.GITHUB_APP_SLUG &&
-    process.env.GITHUB_APP_CLIENT_ID &&
-    process.env.GITHUB_APP_CLIENT_SECRET &&
-    process.env.BETTER_AUTH_SECRET &&
+    env.GITHUB_APP_ID &&
+    env.GITHUB_APP_SLUG &&
+    env.GITHUB_APP_CLIENT_ID &&
+    env.GITHUB_APP_CLIENT_SECRET &&
     privateKey()
   )
 }
 
 export function appSlug(): string {
-  return process.env.GITHUB_APP_SLUG ?? ''
+  return env.GITHUB_APP_SLUG ?? ''
 }
 
 /* ------------------------------------------------------------------ */
@@ -70,7 +70,7 @@ export function appJwt(now = Date.now()): string {
   if (!key) throw new Error('GitHub App is not configured')
   const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
   const iat = Math.floor(now / 1000) - 30
-  const payload = b64url(JSON.stringify({ iat, exp: iat + 8 * 60, iss: process.env.GITHUB_APP_ID }))
+  const payload = b64url(JSON.stringify({ iat, exp: iat + 8 * 60, iss: env.GITHUB_APP_ID }))
   const signature = createSign('RSA-SHA256').update(`${header}.${payload}`).sign(key)
   return `${header}.${payload}.${b64url(signature)}`
 }
@@ -151,8 +151,8 @@ export async function verifyInstallationOwner(code: string, installationId: stri
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'doop-import' },
     body: JSON.stringify({
-      client_id: process.env.GITHUB_APP_CLIENT_ID,
-      client_secret: process.env.GITHUB_APP_CLIENT_SECRET,
+      client_id: env.GITHUB_APP_CLIENT_ID,
+      client_secret: env.GITHUB_APP_CLIENT_SECRET,
       code,
     }),
   })
@@ -177,7 +177,7 @@ export async function verifyInstallationOwner(code: string, installationId: stri
 const STATE_TTL_MS = 15 * 60_000
 
 function secret(): string {
-  return process.env.BETTER_AUTH_SECRET || 'doop-dev-secret-not-for-production'
+  return env.BETTER_AUTH_SECRET
 }
 
 function sign(payload: string): string {
@@ -235,10 +235,6 @@ export function installUrl(state: string): string {
 /* ------------------------------------------------------------------ */
 /* Already-installed bounce                                            */
 
-/* same env read as server/auth.ts — not imported, so this module stays
-   loadable in unit tests without the auth stack */
-const PUBLIC_ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
-
 /** When the app is ALREADY installed on the chosen GitHub account, the
  *  install screen becomes a configure screen and GitHub redirects back
  *  WITHOUT an OAuth code — leaving the ownership check nothing to verify.
@@ -257,8 +253,8 @@ export function verifyOauthState(state: string): { canvasId: string; installatio
 
 export function oauthBounceUrl(oauthState: string): string {
   const params = new URLSearchParams({
-    client_id: process.env.GITHUB_APP_CLIENT_ID ?? '',
-    redirect_uri: `${PUBLIC_ORIGIN}/api/github/app/setup`,
+    client_id: env.GITHUB_APP_CLIENT_ID ?? '',
+    redirect_uri: `${env.BETTER_AUTH_URL}/api/github/app/setup`,
     state: oauthState,
   })
   return `https://github.com/login/oauth/authorize?${params}`

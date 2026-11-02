@@ -11,7 +11,7 @@ vi.mock('../server/localAgentPreferences.ts', () => ({
   getLocalAgentPreference: vi.fn(),
   saveLocalAgentPreference: vi.fn(),
 }))
-vi.mock('../server/access.ts', () => ({ canAccessCanvas: (user: string) => user === 'alice' }))
+vi.mock('../server/access.ts', () => ({ canEditCanvas: (user: string) => user === 'alice' }))
 vi.mock('../server/store.ts', () => ({ store: { getCanvasMetadata: (id: string) => ({ id }), canvases: new Map() } }))
 
 import { handleLocalAgentMcp } from '../server/localAgent.ts'
@@ -46,19 +46,23 @@ describe('per-run MCP transport', () => {
         },
       ],
     }))
-    const result = localAgentRuns.start('alice', 'default', {
-      canvasId: 'canvas-a',
-      prompt: 'Verify',
-      system: 'Use tools',
-      maxTurns: 4,
-      tools: [
-        {
-          name: 'screenshot_frame',
-          input_schema: { type: 'object', properties: { frame_id: { type: 'string' } }, required: ['frame_id'] },
-        },
-      ],
-      execute,
-    })
+    const result = localAgentRuns.start(
+      'alice',
+      { model: 'default' },
+      {
+        canvasId: 'canvas-a',
+        prompt: 'Verify',
+        system: 'Use tools',
+        maxTurns: 4,
+        tools: [
+          {
+            name: 'screenshot_frame',
+            input_schema: { type: 'object', properties: { frame_id: { type: 'string' } }, required: ['frame_id'] },
+          },
+        ],
+        execute,
+      },
+    )
     const job = localAgentRuns.poll('alice', 'desktop')!
     const endpoint = new URL(`${origin}/local-agent/mcp/${job.id}`)
     const denied = await fetch(endpoint, {

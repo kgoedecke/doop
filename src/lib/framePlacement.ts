@@ -44,7 +44,7 @@ export const DEFAULT_FRAME_SIZE = { width: 640, height: 480 } as const
  * back to the window if the Stage isn't mounted, which should not happen
  * from the entry points that call this.
  */
-function stageViewportSize(): { width: number; height: number } {
+export function stageViewportSize(): { width: number; height: number } {
   const rect = document.querySelector('.stage')?.getBoundingClientRect()
   return rect ? { width: rect.width, height: rect.height } : { width: window.innerWidth, height: window.innerHeight }
 }
@@ -53,7 +53,7 @@ function stageViewportSize(): { width: number; height: number } {
  * Create a frame centered in the current view (issue #98), like Figma,
  * instead of always to the right of the right-most frame - which can be
  * off-screen on a large canvas. Pulled out of CanvasPage so the Stage-bounds
- * and viewport wiring driving "+ Frame" has something to test directly, the
+ * and viewport wiring driving the Layers panel's "New frame" has something to test directly, the
  * same way frameClipboard.ts's paste helpers already do.
  */
 export async function createCenteredFrame(canvasId: string, name: string, html: string): Promise<Frame> {

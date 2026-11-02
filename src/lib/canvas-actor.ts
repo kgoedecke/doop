@@ -85,6 +85,12 @@ export async function updateFrame(id: string, patch: Partial<Frame>): Promise<Fr
   })
 }
 
+/** This tab's presence token, so the room can tell its own REST writes from others'. */
+function restActor() {
+  const { clientId, name } = getIdentity()
+  return { clientId, name, kind: 'user' as const }
+}
+
 function paint(frame: Frame) {
   if (members.has(frame.id))
     useStore.getState().upsertFrame({ ...frame, pageId: framePages.get(frame.id) ?? frame.pageId })
@@ -388,7 +394,8 @@ export function refreshFrames() {
     if (current?.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify({ type: 'snapshot' }))
 }
 
-export function previewFrame(frame: Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height' | 'updatedAt'>) {
+/** Stream drag geometry to peers; tagged with the saved version, so a commit since ends the preview. */
+export function previewFrame(frame: Pick<Frame, 'id' | 'x' | 'y' | 'width' | 'height'>) {
   const current = frames.get(frame.id)
   const saved = savedFrames.get(frame.id)
   if (current?.canvasId !== useStore.getState().canvas?.id || current?.socket?.readyState !== WebSocket.OPEN || !saved)
@@ -441,7 +448,7 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
     const response = await fetch(`/api/frames/${encodeURIComponent(write.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(write.patch),
+      body: JSON.stringify({ ...write.patch, actor: restActor() }),
     })
     if (!response.ok) throw new Error((await response.json()).error || 'Frame edit failed')
     return response.json() as Promise<Frame>
@@ -456,7 +463,9 @@ export async function writeFrame(write: FrameWrite, canvasId = useStore.getState
     const response = await fetch(path, {
       method: write.type === 'create' ? 'POST' : 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      ...(write.type === 'create' ? { body: JSON.stringify({ ...write.input, id: write.id }) } : {}),
+      body: JSON.stringify(
+        write.type === 'create' ? { ...write.input, id: write.id, actor: restActor() } : { actor: restActor() },
+      ),
     })
     if (!response.ok) throw new Error((await response.json()).error || 'Frame edit failed')
     if (write.type === 'create') {

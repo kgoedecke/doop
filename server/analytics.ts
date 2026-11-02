@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 /* Server-side PostHog capture — for events that happen where posthog-js
  * can't see them (MCP agents, background work). Events use the user's id
  * as distinct_id, the same id the web client identifies with, so they land
@@ -8,8 +9,8 @@
  * runtime too, not only as a build arg. No key → captures are no-ops
  * (local dev, self-hosted installs with analytics off). */
 
-const PH_INGEST = process.env.POSTHOG_INGEST_HOST || 'https://us.i.posthog.com'
-const PH_KEY = process.env.POSTHOG_KEY || process.env.VITE_POSTHOG_KEY
+const PH_INGEST = env.POSTHOG_INGEST_HOST
+const PH_KEY = env.POSTHOG_KEY ?? env.VITE_POSTHOG_KEY
 
 export function capture(distinctId: string, event: string, properties: Record<string, unknown> = {}) {
   if (!PH_KEY) return

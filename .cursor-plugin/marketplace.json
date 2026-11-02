@@ -1,0 +1,16 @@
+{
+  "name": "doop",
+  "owner": {
+    "name": "Doop"
+  },
+  "metadata": {
+    "description": "Design together with humans and AI agents on Doop."
+  },
+  "plugins": [
+    {
+      "name": "doop",
+      "source": "./cursor-plugin",
+      "description": "Create and edit HTML designs on a shared Doop canvas."
+    }
+  ]
+}

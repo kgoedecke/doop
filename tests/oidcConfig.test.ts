@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import {
+  loadAppleConfig,
   loadGoogleConfig,
   loadMicrosoftConfig,
   loadOidcConfig,
@@ -24,27 +26,22 @@ const OIDC_VARS = [
   'MICROSOFT_CLIENT_ID',
   'MICROSOFT_CLIENT_SECRET',
   'MICROSOFT_TENANT_ID',
+  'APPLE_CLIENT_ID',
+  'APPLE_CLIENT_SECRET',
+  'APPLE_APP_BUNDLE_IDENTIFIER',
 ] as const
-const saved: Record<string, string | undefined> = {}
 
+/* whatever this shell exports for the providers must not leak into the cases */
 beforeEach(() => {
-  for (const key of OIDC_VARS) {
-    saved[key] = process.env[key]
-    delete process.env[key]
-  }
+  for (const key of OIDC_VARS) stubEnv(key, undefined)
 })
 
-afterEach(() => {
-  for (const key of OIDC_VARS) {
-    if (saved[key] === undefined) delete process.env[key]
-    else process.env[key] = saved[key]
-  }
-})
+afterEach(unstubAllEnvs)
 
 function setRequiredOidcEnv(): void {
-  process.env.OIDC_ISSUER = 'https://idp.example.com'
-  process.env.OIDC_CLIENT_ID = 'client-abc'
-  process.env.OIDC_CLIENT_SECRET = 'secret-xyz'
+  stubEnv('OIDC_ISSUER', 'https://idp.example.com')
+  stubEnv('OIDC_CLIENT_ID', 'client-abc')
+  stubEnv('OIDC_CLIENT_SECRET', 'secret-xyz')
 }
 
 describe('loadOidcConfig', () => {
@@ -58,7 +55,7 @@ describe('loadOidcConfig', () => {
     { OIDC_ISSUER: 'https://idp.example.com', OIDC_CLIENT_ID: 'abc' },
     { OIDC_CLIENT_ID: 'abc', OIDC_CLIENT_SECRET: 'shh' },
   ])('throws when only some required vars are set: %o', (partial) => {
-    Object.assign(process.env, partial)
+    for (const [key, value] of Object.entries(partial)) stubEnv(key, value)
     expect(() => loadOidcConfig()).toThrow(/OIDC_ISSUER.*OIDC_CLIENT_ID.*OIDC_CLIENT_SECRET/)
   })
 
@@ -76,21 +73,21 @@ describe('loadOidcConfig', () => {
 
   it('parses comma-separated OIDC_SCOPES', () => {
     setRequiredOidcEnv()
-    process.env.OIDC_SCOPES = 'openid,email,groups'
+    stubEnv('OIDC_SCOPES', 'openid,email,groups')
 
     expect(loadOidcConfig()?.scopes).toEqual(['openid', 'email', 'groups'])
   })
 
   it('parses space-separated OIDC_SCOPES', () => {
     setRequiredOidcEnv()
-    process.env.OIDC_SCOPES = 'openid email groups'
+    stubEnv('OIDC_SCOPES', 'openid email groups')
 
     expect(loadOidcConfig()?.scopes).toEqual(['openid', 'email', 'groups'])
   })
 
   it('uses OIDC_PROVIDER_NAME as the provider name when set', () => {
     setRequiredOidcEnv()
-    process.env.OIDC_PROVIDER_NAME = 'Zitadel'
+    stubEnv('OIDC_PROVIDER_NAME', 'Zitadel')
 
     expect(loadOidcConfig()?.providerName).toBe('Zitadel')
   })
@@ -103,7 +100,7 @@ describe('oidcPublicConfig', () => {
 
   it('reports enabled with the display name when configured', () => {
     setRequiredOidcEnv()
-    process.env.OIDC_PROVIDER_NAME = 'Zitadel'
+    stubEnv('OIDC_PROVIDER_NAME', 'Zitadel')
 
     expect(oidcPublicConfig()).toEqual({ enabled: true, displayName: 'Zitadel' })
   })
@@ -129,14 +126,14 @@ describe('loadGoogleConfig', () => {
   it.each([{ GOOGLE_CLIENT_ID: 'g-client' }, { GOOGLE_CLIENT_SECRET: 'g-secret' }])(
     'throws when only one of the pair is set: %o',
     (partial) => {
-      Object.assign(process.env, partial)
+      for (const [key, value] of Object.entries(partial)) stubEnv(key, value)
       expect(() => loadGoogleConfig()).toThrow(/GOOGLE_CLIENT_ID.*GOOGLE_CLIENT_SECRET/)
     },
   )
 
   it('returns the pair when both are set', () => {
-    process.env.GOOGLE_CLIENT_ID = 'g-client'
-    process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
+    stubEnv('GOOGLE_CLIENT_ID', 'g-client')
+    stubEnv('GOOGLE_CLIENT_SECRET', 'g-secret')
 
     expect(loadGoogleConfig()).toEqual({ clientId: 'g-client', clientSecret: 'g-secret' })
   })
@@ -144,23 +141,42 @@ describe('loadGoogleConfig', () => {
 
 describe('loginProvidersConfig', () => {
   it('reports both providers off when nothing is configured', () => {
-    expect(loginProvidersConfig()).toEqual({ enabled: false, google: false, microsoft: false })
+    expect(loginProvidersConfig()).toEqual({
+      enabled: false,
+      google: false,
+      microsoft: false,
+      apple: false,
+      appleNative: false,
+    })
   })
 
   it('reports google on, independently of SSO, and never the secret', () => {
-    process.env.GOOGLE_CLIENT_ID = 'g-client'
-    process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
+    stubEnv('GOOGLE_CLIENT_ID', 'g-client')
+    stubEnv('GOOGLE_CLIENT_SECRET', 'g-secret')
 
-    expect(loginProvidersConfig()).toEqual({ enabled: false, google: true, microsoft: false })
+    expect(loginProvidersConfig()).toEqual({
+      enabled: false,
+      google: true,
+      microsoft: false,
+      apple: false,
+      appleNative: false,
+    })
     expect(JSON.stringify(loginProvidersConfig())).not.toContain('g-secret')
   })
 
   it('combines SSO and google', () => {
     setRequiredOidcEnv()
-    process.env.GOOGLE_CLIENT_ID = 'g-client'
-    process.env.GOOGLE_CLIENT_SECRET = 'g-secret'
+    stubEnv('GOOGLE_CLIENT_ID', 'g-client')
+    stubEnv('GOOGLE_CLIENT_SECRET', 'g-secret')
 
-    expect(loginProvidersConfig()).toEqual({ enabled: true, displayName: 'SSO', google: true, microsoft: false })
+    expect(loginProvidersConfig()).toEqual({
+      enabled: true,
+      displayName: 'SSO',
+      google: true,
+      microsoft: false,
+      apple: false,
+      appleNative: false,
+    })
   })
 })
 
@@ -172,31 +188,90 @@ describe('loadMicrosoftConfig', () => {
   it.each([{ MICROSOFT_CLIENT_ID: 'm-client' }, { MICROSOFT_CLIENT_SECRET: 'm-secret' }])(
     'throws when only one of the pair is set: %o',
     (partial) => {
-      Object.assign(process.env, partial)
+      for (const [key, value] of Object.entries(partial)) stubEnv(key, value)
       expect(() => loadMicrosoftConfig()).toThrow(/MICROSOFT_CLIENT_ID.*MICROSOFT_CLIENT_SECRET/)
     },
   )
 
   it('defaults the tenant to common', () => {
-    process.env.MICROSOFT_CLIENT_ID = 'm-client'
-    process.env.MICROSOFT_CLIENT_SECRET = 'm-secret'
+    stubEnv('MICROSOFT_CLIENT_ID', 'm-client')
+    stubEnv('MICROSOFT_CLIENT_SECRET', 'm-secret')
 
     expect(loadMicrosoftConfig()).toEqual({ clientId: 'm-client', clientSecret: 'm-secret', tenantId: 'common' })
   })
 
   it('takes MICROSOFT_TENANT_ID when set', () => {
-    process.env.MICROSOFT_CLIENT_ID = 'm-client'
-    process.env.MICROSOFT_CLIENT_SECRET = 'm-secret'
-    process.env.MICROSOFT_TENANT_ID = 'tenant-123'
+    stubEnv('MICROSOFT_CLIENT_ID', 'm-client')
+    stubEnv('MICROSOFT_CLIENT_SECRET', 'm-secret')
+    stubEnv('MICROSOFT_TENANT_ID', 'tenant-123')
 
     expect(loadMicrosoftConfig()?.tenantId).toBe('tenant-123')
   })
 
   it('shows up in loginProvidersConfig without the secret', () => {
-    process.env.MICROSOFT_CLIENT_ID = 'm-client'
-    process.env.MICROSOFT_CLIENT_SECRET = 'm-secret'
+    stubEnv('MICROSOFT_CLIENT_ID', 'm-client')
+    stubEnv('MICROSOFT_CLIENT_SECRET', 'm-secret')
 
-    expect(loginProvidersConfig()).toEqual({ enabled: false, google: false, microsoft: true })
+    expect(loginProvidersConfig()).toEqual({
+      enabled: false,
+      google: false,
+      microsoft: true,
+      apple: false,
+      appleNative: false,
+    })
     expect(JSON.stringify(loginProvidersConfig())).not.toContain('m-secret')
+  })
+})
+
+describe('loadAppleConfig', () => {
+  it('returns null when nothing is set', () => {
+    expect(loadAppleConfig()).toBeNull()
+  })
+
+  it.each([{ APPLE_CLIENT_ID: 'a-client' }, { APPLE_CLIENT_SECRET: 'a-secret' }])(
+    'throws when only one of the web pair is set: %o',
+    (partial) => {
+      for (const [key, value] of Object.entries(partial)) stubEnv(key, value)
+      expect(() => loadAppleConfig()).toThrow(/APPLE_CLIENT_ID.*APPLE_CLIENT_SECRET/)
+    },
+  )
+
+  it('enables the native half on its own', () => {
+    stubEnv('APPLE_APP_BUNDLE_IDENTIFIER', 'design.doop.ios')
+
+    expect(loadAppleConfig()).toEqual({ web: null, appBundleIdentifier: 'design.doop.ios' })
+    expect(loginProvidersConfig()).toEqual({
+      enabled: false,
+      google: false,
+      microsoft: false,
+      apple: false,
+      appleNative: true,
+    })
+  })
+
+  it('enables the web half on its own, never leaking the secret', () => {
+    stubEnv('APPLE_CLIENT_ID', 'design.doop.web')
+    stubEnv('APPLE_CLIENT_SECRET', 'a-secret')
+
+    expect(loadAppleConfig()).toEqual({
+      web: { clientId: 'design.doop.web', clientSecret: 'a-secret' },
+      appBundleIdentifier: null,
+    })
+    expect(loginProvidersConfig()).toEqual({
+      enabled: false,
+      google: false,
+      microsoft: false,
+      apple: true,
+      appleNative: false,
+    })
+    expect(JSON.stringify(loginProvidersConfig())).not.toContain('a-secret')
+  })
+
+  it('combines both halves', () => {
+    stubEnv('APPLE_CLIENT_ID', 'design.doop.web')
+    stubEnv('APPLE_CLIENT_SECRET', 'a-secret')
+    stubEnv('APPLE_APP_BUNDLE_IDENTIFIER', 'design.doop.ios')
+
+    expect(loginProvidersConfig()).toMatchObject({ apple: true, appleNative: true })
   })
 })

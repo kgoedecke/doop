@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
@@ -10,13 +11,15 @@ import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
 import * as backgrounds from './backgrounds.ts'
-import { PUBLIC_ORIGIN } from './auth.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { DESIGN_BRIEF, DESIGN_QUALITY } from './guide.ts'
+import { DESIGN_BRIEF, DESIGN_QUALITY, PROTOTYPES } from './guide.ts'
+import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
 import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
-import type { Actor, AgentTask, Frame } from '../shared/types.ts'
+import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
+import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
+import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
@@ -55,6 +58,15 @@ const MAX_REWRITE_CHARS = 100_000
 /* one run per canvas at a time; feedback arriving mid-run queues a re-run */
 const running = new Set<string>()
 const queued = new Set<string>()
+/* each run in flight on a canvas, as a check that aborts its model call once
+   all of its cards have been stopped */
+const stopChecks = new Map<string, Set<() => void>>()
+
+/** A card on this canvas was stopped or failed: a run left with nothing to do
+ *  drops the turn it is waiting on instead of finishing it. */
+export function onCardStopped(canvasId: string) {
+  for (const check of stopChecks.get(canvasId) ?? []) check()
+}
 
 export function onFeedback(canvasId: string) {
   if (running.has(canvasId)) {
@@ -101,9 +113,11 @@ Rules:
 - Queued cards are standalone work requests from the board. A card may be routed through several agents in turn — you own your stage of it and nothing else. If your specialty is to originate work: a new-asset card means create_frame sized for the job, a change request means editing the existing frame. One card, one deliverable.
 - Later stages inherit whatever earlier stages left. Read the frame as it is now; never undo a previous agent's work because you would have done it differently.
 - Resolve frame references against the numbered frame list in the request. A literal frame name wins; otherwise "Frame 1" means the first listed frame, and "the other frame" means the only remaining frame when there are two.
+- Each frame includes human approval metadata. Only ready_for_dev means the current design is approved for implementation; draft and needs_review are not approved. Content or size edits invalidate sign-off. Approval is context, not a new assignment: do only the requested work, and re-read the frame's approval before using it for implementation.
 - Choose a size-aware strategy. For documents over 60,000 characters, call inspect_frame before reading HTML. Use get_frame_html with a query or bounded range only when markup is needed.
 - For requests to copy, match, or borrow another frame's design: screenshot and inspect BOTH the target and reference before editing. Use the reference screenshot and computed design tokens as the source of visual truth. Read target HTML only when you need to preserve its content; do not load a large reference document just to learn its style. For a full redesign, use begin_frame_rewrite, append_frame_rewrite in chunks under 12,000 characters, and commit_frame_rewrite; then screenshot the changed frame.
-- Element comments are pinned to ONE element (you get its CSS selector and an HTML excerpt). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
+- Element comments are pinned to ONE element (you get its data-doop-id and an HTML excerpt at comment time). Change that element or its immediate context — never rework unrelated parts of the frame because of an element comment.
+- Canvas comments are pinned to a point on the page, not to an element (you get the point and the frames nearest to it). The request is about what sits around that point: edit those frames in place, or add a new frame near the point when the comment asks for something new — never rework the whole page because of a canvas comment.
 - Frames are complete HTML documents with inline CSS. Keep each frame's existing style and structure; change what the feedback requires.
 - Prefer edit_frame_html (exact find/replace) for small changes; use set_frame_html only when the change is structural.
 - After any visual change, call screenshot_frame and LOOK at the result. If it doesn't clearly satisfy the feedback, fix it before finishing.
@@ -118,7 +132,11 @@ Design quality — the bar for anything you originate or restyle (canvas guideli
 ${DESIGN_QUALITY}
 
 Design brief — when your card asks you to ORIGINATE new design work:
-${DESIGN_BRIEF}`
+${DESIGN_BRIEF}
+
+Clickable prototypes:
+${PROTOTYPES}
+- Frame ids are the id= values in the frame list of your request.`
 
 /** The system prompt for one agent: the shared harness rules plus its specialty. */
 function systemFor(role: AgentRole): string {
@@ -152,6 +170,67 @@ interface RunState {
   payerId?: string
   /** images actually produced in this run — capped, since each one spends the payer's quota or money */
   imagesGenerated: number
+  /** where a new frame goes unless the model says otherwise: the page (and,
+   *  for a canvas comment, the point) of the comment this run is about */
+  placement?: FramePlacement
+}
+
+export interface FramePlacement {
+  pageId: string
+  /** a canvas comment's pin — a new frame lands beside it */
+  near?: { x: number; y: number }
+}
+
+/** The page a comment's work belongs on, and the point it was pinned to
+ *  when it is a canvas comment. A reply inherits its root's anchor, so the
+ *  first claimed comment decides for the run. */
+export function placementFor(comment: ElementComment, canvas: Canvas | undefined): FramePlacement | undefined {
+  if (isCanvasComment(comment)) return { pageId: comment.pageId, near: { x: comment.x, y: comment.y } }
+  const frame = comment.frameId ? canvas?.frames.find((f) => f.id === comment.frameId) : undefined
+  return frame && canvas ? { pageId: framePageId(canvas, frame) } : undefined
+}
+
+/* a new frame beside a pin: this far to its right, and this far down from
+   anything it would otherwise overlap */
+const BESIDE_PIN = 40
+const PLACE_STEP = 40
+
+/** A spot for a `width`×`height` frame to the right of `near` that does not
+ *  overlap any frame already on the page: it moves down in steps until it
+ *  is clear, so a crowded spot never hides the new frame under an old one. */
+export function placeBeside(
+  near: { x: number; y: number },
+  size: { width: number; height: number },
+  frames: Frame[],
+): { x: number; y: number } {
+  const x = near.x + BESIDE_PIN
+  const overlaps = (y: number) =>
+    frames.some((f) => x < f.x + f.width && x + size.width > f.x && y < f.y + f.height && y + size.height > f.y)
+  let y = near.y
+  while (overlaps(y)) y += PLACE_STEP
+  return { x, y }
+}
+
+/** What the create_frame tool asks for, placed: the model's own x/y win,
+ *  otherwise the run's placement (the comment's page, and beside its pin). */
+export function createFrameInput(
+  raw: { name?: string; width?: number; height?: number; html: string; x?: number; y?: number },
+  placement: FramePlacement | undefined,
+  canvas: Canvas | undefined,
+) {
+  const size = { width: Number(raw.width) || 800, height: Number(raw.height) || 500 }
+  const chosen = Number.isFinite(raw.x) && Number.isFinite(raw.y) ? { x: Number(raw.x), y: Number(raw.y) } : undefined
+  const beside =
+    !chosen && placement?.near && canvas
+      ? placeBeside(placement.near, size, pageFrames(canvas, placement.pageId))
+      : undefined
+  return {
+    name: String(raw.name || 'Frame'),
+    ...size,
+    html: raw.html,
+    ...(placement ? { pageId: placement.pageId } : {}),
+    ...(chosen ?? beside ?? {}),
+  }
 }
 
 /* enough for a hero plus a retry or two; a run that wants more is looping */
@@ -205,6 +284,38 @@ function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.g
 
 type RunOutcome = 'ran' | 'idle' | 'no-model'
 
+/** Where a comment is pinned, for the kickoff: the element inside its frame
+ *  (with the HTML it had at comment time), or a point on the canvas with the
+ *  frames under or nearest to it, so the agent knows what the human was
+ *  looking at when they wrote it. */
+export function describeCommentAnchor(c: ElementComment, canvas: Canvas | undefined): string {
+  if (!isCanvasComment(c)) {
+    const fname = (c.frameId && canvas?.frames.find((f) => f.id === c.frameId)?.name) || 'unknown frame'
+    if (isFrameComment(c)) {
+      return `on frame ${c.frameId} "${fname}" as a whole at (${Math.round(c.x)}, ${Math.round(c.y)}) in the frame, not one element`
+    }
+    if (c.elementId === undefined) {
+      return `on frame ${c.frameId} "${fname}", an element that is no longer in the frame\n  element HTML at comment time: ${c.snippet}`
+    }
+    return `on frame ${c.frameId} "${fname}", the element with data-doop-id="${c.elementId}"\n  element HTML at comment time: ${c.snippet}`
+  }
+  const pageName = canvas ? canvasPages(canvas).find((page) => page.id === c.pageId)?.name : undefined
+  const near = canvas ? framesAround(pageFrames(canvas, c.pageId), c.x, c.y) : []
+  const nearText = near.length ? `; nearest frames: ${near.map((f) => `${f.id} ("${f.name}")`).join(', ')}` : ''
+  return `on the canvas at (${Math.round(c.x)}, ${Math.round(c.y)}) on page "${pageName ?? c.pageId}" — not pinned to any element${nearText}`
+}
+
+/** The frames a canvas point falls inside, or failing that the two closest
+ *  to it (demo frames are product content, never the subject of a comment). */
+function framesAround(frames: Frame[], x: number, y: number): Frame[] {
+  const real = frames.filter((f) => !f.demo)
+  const inside = real.filter((f) => x >= f.x && x <= f.x + f.width && y >= f.y && y <= f.y + f.height)
+  if (inside.length) return inside
+  const gap = (f: Frame) =>
+    Math.hypot(Math.max(f.x - x, 0, x - (f.x + f.width)), Math.max(f.y - y, 0, y - (f.y + f.height)))
+  return [...real].sort((a, b) => gap(a) - gap(b)).slice(0, 2)
+}
+
 /**
  * Work one requester's queue for one agent. A run bills exactly one person:
  * the account behind the oldest claimable item, resolved BEFORE anything is
@@ -232,10 +343,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini or Claude API key in Settings, then retry.'
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer)) actions.failTaskFeedback(f.id, reason)
     for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer)) actions.failComment(c.id, reason)
-    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer)) {
-      actions.chatReplyForCard(canvasId, c.id, actor, reason)
-      actions.failCard(canvasId, c.id, reason)
-    }
+    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer)) actions.failCard(canvasId, c.id, reason)
     stalled.add(payer)
     return 'no-model'
   }
@@ -254,11 +362,18 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      repo-reading tools; only prompt cards go through the chat loop below */
   const repoCards = allCards.filter((c) => c.kind)
   const cards = allCards.filter((c) => !c.kind)
-  const canceled = () => cards.length > 0 && cards.every((card) => card.failedAt || card.endedAt)
+  /* latched: Retry clears a stopped card's failure on this same object, and
+     the old run, still letting go, must not take the retried card for its own */
+  let stopped = false
+  const canceled = () => (stopped ||= cards.length > 0 && cards.every((card) => card.failedAt || card.endedAt))
 
   /* presence otherwise only refreshes on tool activity, and the sweep's TTL
      is shorter than a big generation turn */
   const heartbeat = setInterval(() => actions.heartbeatAgent(canvasId, actor), 15_000)
+  const abort = new AbortController()
+  const stopCheck = () => {
+    if (canceled()) abort.abort()
+  }
 
   if (repoCards.length > 0) {
     try {
@@ -277,6 +392,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     }
   }
 
+  const checks = stopChecks.get(canvasId) ?? new Set()
+  stopChecks.set(canvasId, checks.add(stopCheck))
   try {
     const tasks = actions.getTasks(canvasId)
     const items: FeedbackItem[] = claimed.map((f) => ({
@@ -299,7 +416,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     const frameList = visibleFrames
       .map(
         (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''})`,
+          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
       )
       .join('\n')
 
@@ -371,10 +488,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     }
     if (comments.length > 0) {
       sections.push(
-        `New element comments addressed to you (each is pinned to a specific element):\n` +
+        `New comments addressed to you (each is pinned to a specific element inside a frame, or to a point on the canvas):\n` +
           comments
             .map((c) => {
-              const fname = canvas?.frames.find((frame) => frame.id === c.frameId)?.name ?? 'unknown frame'
               /* a reply carries the conversation it answers, so "make it
                  bigger" reads against what was said before */
               const history = actions.commentThread(c)
@@ -386,7 +502,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 .map((x) => `    ${x.from}: "${x.text}"`)
                 .join('\n')
               const thread = earlier ? `\n  earlier in this thread:\n${earlier}` : ''
-              return `- ${c.from} on frame ${c.frameId} "${fname}", element ${c.selector}\n  element HTML at comment time: ${c.snippet}${thread}\n  comment: "${c.text}"`
+              return `- ${c.from} ${describeCommentAnchor(c, canvas)}${thread}\n  comment: "${c.text}"`
             })
             .join('\n'),
       )
@@ -419,7 +535,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         : '') +
       `\n\nAddress everything above now.` +
       (comments.length > 0
-        ? ` For element comments, use the selector and HTML excerpt to find the exact element in the frame's HTML — the live document may have drifted since the comment was left, so match on content, not position.`
+        ? ` For element comments, find the element by its data-doop-id attribute in the frame's HTML (get_frame); the HTML excerpt shows it as it was when the comment was left. Keep every data-doop-* attribute on the elements you rewrite — comments and links point at them. A canvas comment is about the frames around its point, not about one element.`
         : '')
 
     console.log(
@@ -438,6 +554,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
       imagesGenerated: 0,
+      /* a run about a comment delivers on that comment's page */
+      ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
     }
     let refused = false
     let crashed = false
@@ -485,6 +603,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
           maxTurns,
           isCanceled: canceled,
+          signal: abort.signal,
           execute: async (block) => {
             if (runState.blockedWebsiteAccess)
               return {
@@ -503,6 +622,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             return execTool(block, canvasId, actor, runState)
           },
         })
+        if (canceled()) return 'ran'
         finished = result.success
         crashed = !result.success
         messages.push({ role: 'assistant', content: [{ type: 'text', text: result.text }] })
@@ -520,6 +640,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
                 tools: TOOLS,
                 messages,
+                signal: abort.signal,
               }),
             {
               isCanceled: canceled,
@@ -702,12 +823,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (finished && !blockedWebsiteAccess && !noMutation && !unverifiedMutation) {
       for (const f of claimed) actions.completeTaskFeedback(f.id)
       for (const c of comments) actions.resolveComment(c.id, role.name)
-      /* a card moves to the next agent in its pipeline, or finishes here —
-         and one that was asked for in the chat gets its answer there */
-      for (const c of cards) {
-        actions.chatReplyForCard(canvasId, c.id, actor, summary || 'Done.')
-        actions.advanceCard(canvasId, c.id, actor)
-      }
+      /* a card moves to the next agent in its pipeline, or finishes here */
+      for (const c of cards) actions.advanceCard(canvasId, c.id, actor)
     } else {
       let reason: string
       if (staleAccount) {
@@ -732,11 +849,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       for (const f of claimed) actions.failTaskFeedback(f.id, reason)
       for (const c of comments) actions.failComment(c.id, reason)
       for (const c of cards) {
-        actions.chatReplyForCard(canvasId, c.id, actor, reason)
         actions.failCard(canvasId, c.id, reason)
       }
     }
   } finally {
+    checks.delete(stopCheck)
+    if (checks.size === 0) stopChecks.delete(canvasId)
     clearInterval(heartbeat)
     /* clear the status — this completes the agent's task in the panel */
     actions.setAgentStatus(canvasId, actor, '')
@@ -771,6 +889,12 @@ const TOOLS: Anthropic.Tool[] = [
         width: { type: 'number', description: 'px, e.g. 1200' },
         height: { type: 'number', description: 'px, e.g. 630' },
         html: { type: 'string', description: 'Complete HTML document with inline CSS' },
+        x: {
+          type: 'number',
+          description:
+            'Canvas position in px. Optional: left out, the frame lands on the page the request is about — beside the pin of a canvas comment, else to the right of the existing frames.',
+        },
+        y: { type: 'number', description: 'Canvas position in px. Optional, see x.' },
       },
       required: ['name', 'width', 'height', 'html'],
     },
@@ -1046,6 +1170,28 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_prototype',
+    description:
+      'List the clickable-prototype wiring of this canvas: each page with its flow start frame, and every interaction (data-doop-on / data-doop-action attributes in frame HTML) with its trigger, action and target. Interactions whose target frame does not exist carry a problem; fix them with edit_frame_html. Call it after wiring a flow.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_prototype_start',
+    description:
+      "Choose the frame a page's clickable prototype starts on (the player at /c/<canvas>/proto opens there). Pass an empty frame_id to clear it; the flow then starts on the page's top-left frame.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        frame_id: { type: 'string', description: "The start frame, or an empty string to clear the page's start" },
+        page_id: {
+          type: 'string',
+          description: "The page; defaults to the start frame's page (the first page when clearing)",
+        },
+      },
+      required: ['frame_id'],
+    },
+  },
+  {
     name: 'screenshot_frame',
     description:
       'Render a frame and SEE it as an image. Call this after every visual change to verify the feedback is actually addressed.',
@@ -1056,6 +1202,9 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ]
+
+/** The resident agents' tool names; tests hold them to the MCP server's (agentToolParity.test.ts). */
+export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
@@ -1097,7 +1246,6 @@ async function execTool(
   actor: ReturnType<typeof actions.resolveActor>,
   runState: RunState,
 ): Promise<Anthropic.ToolResultBlockParam> {
-  await store.syncCanvas(canvasId)
   const input = block.input as { frame_id: string } & Record<string, string>
   const fail = (msg: string): Anthropic.ToolResultBlockParam => ({
     type: 'tool_result',
@@ -1118,7 +1266,14 @@ async function execTool(
         return ok('ok')
       }
       case 'create_frame': {
-        const raw = block.input as { name?: string; width?: number; height?: number; html?: string }
+        const raw = block.input as {
+          name?: string
+          width?: number
+          height?: number
+          html?: string
+          x?: number
+          y?: number
+        }
         const html = completeHtml(raw.html)
         if (!html) return fail('create_frame requires a complete non-empty HTML document ending in </html>')
         if (html.length > MAX_REWRITE_CHUNK_CHARS) {
@@ -1126,12 +1281,7 @@ async function execTool(
         }
         const f = await actions.createFrame(
           canvasId,
-          {
-            name: String(raw.name || 'Frame'),
-            width: Number(raw.width) || 800,
-            height: Number(raw.height) || 500,
-            html,
-          },
+          createFrameInput({ ...raw, html }, runState.placement, await store.syncCanvas(canvasId, 'summary')),
           actor,
         )
         if (!f) return fail('canvas not found')
@@ -1145,13 +1295,20 @@ async function execTool(
         const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         const inspection = await inspectFrame(f)
-        return ok(JSON.stringify(inspection))
+        return ok(
+          JSON.stringify({
+            ...inspection,
+            approvalStatus: f.approval?.status ?? 'draft',
+            approval: f.approval ?? null,
+          }),
+        )
       }
       case 'get_frame_html': {
         const f = await store.getFrame(input.frame_id)
         if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         const raw = block.input as { query?: string; offset?: number; limit?: number }
+        const approval = `Approval: ${JSON.stringify(f.approval ?? { status: 'draft' })}`
         const query = String(raw.query || '').trim()
         const limit = Math.max(1000, Math.min(Number(raw.limit) || 20_000, MAX_HTML_READ_CHARS))
         if (query) {
@@ -1173,13 +1330,13 @@ async function execTool(
             return `--- match ${match + 1} at ${index}, chars ${start}-${end} ---\n${f.html.slice(start, end)}`
           })
           return ok(
-            `Frame HTML: ${f.html.length} characters; ${matches.length} match(es) for "${query}".\n${snippets.join('\n')}`,
+            `Frame HTML: ${f.html.length} characters; ${matches.length} match(es) for "${query}".\n${approval}\n${snippets.join('\n')}`,
           )
         }
         const offset = Math.max(0, Math.min(Number(raw.offset) || 0, f.html.length))
         const end = Math.min(f.html.length, offset + limit)
         return ok(
-          `Frame HTML: ${f.html.length} characters. Returning chars ${offset}-${end}.${end < f.html.length ? ` Continue with offset=${end}, or use query for a targeted snippet.` : ''}\n\n${f.html.slice(offset, end)}`,
+          `Frame HTML: ${f.html.length} characters. Returning chars ${offset}-${end}.${end < f.html.length ? ` Continue with offset=${end}, or use query for a targeted snippet.` : ''}\n${approval}\n\n${f.html.slice(offset, end)}`,
         )
       }
       case 'edit_frame_html': {
@@ -1188,6 +1345,11 @@ async function execTool(
         if (typeof f.html !== 'string') return fail('frame HTML is unavailable; retry after the frame reloads')
         if (typeof input.find !== 'string' || !input.find) return fail('find must be a non-empty exact HTML string')
         if (typeof input.replace !== 'string') return fail('replace must be an HTML string')
+        const count = f.html.split(input.find).length - 1
+        if (count === 0) return fail('"find" text not found — call get_frame_html and copy the exact text')
+        if (count > 1)
+          return fail(`"find" text occurs ${count} times — include more surrounding context to make it unique`)
+        /* the actor checks the match again against its own copy, so a concurrent edit cannot be overwritten */
         if (!(await actions.replaceFrameHtml(input.frame_id, input.find, input.replace, actor)))
           return fail('frame not found on this canvas')
         runState.mutatedFrames.add(input.frame_id)
@@ -1208,7 +1370,7 @@ async function execTool(
             `set_frame_html is limited to ${MAX_REWRITE_CHUNK_CHARS} characters. Use begin_frame_rewrite, append_frame_rewrite chunks, and commit_frame_rewrite.`,
           )
         }
-        await actions.updateFrame(input.frame_id, { html }, actor)
+        await actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
         return ok('applied — the new design is revealing to viewers now')
@@ -1245,7 +1407,7 @@ async function execTool(
         const html = completeHtml(draft)
         if (!html)
           return fail('rewrite draft is not a complete HTML document ending in </html>; append the missing content')
-        await actions.updateFrame(input.frame_id, { html }, actor)
+        await actions.updateFrame(input.frame_id, { html }, actor, { replace: true })
         runState.rewriteDrafts.delete(input.frame_id)
         runState.mutatedFrames.add(input.frame_id)
         runState.verifiedFrames.delete(input.frame_id)
@@ -1308,7 +1470,7 @@ async function execTool(
         /* counted once an image actually exists: a refusal or a transient
            failure spent nothing and must not lock the tool for the run */
         runState.imagesGenerated++
-        const url = `${PUBLIC_ORIGIN}/a/${asset.id}.${asset.ext}`
+        const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
         return ok([
           { type: 'image', source: { type: 'base64', media_type: image.preview.mime, data: image.preview.data } },
           {
@@ -1334,7 +1496,7 @@ async function execTool(
             slot: pick(backgrounds.BACKGROUND_SLOTS, raw.slot),
             count: Number(raw.count) || undefined,
           },
-          PUBLIC_ORIGIN,
+          env.BETTER_AUTH_URL,
         )
         const { results } = listing
         if (results.length === 0)
@@ -1546,6 +1708,20 @@ async function execTool(
             ? `saved design guide "${actions.guidelineTitle(doc)}" (${doc.name}, ${doc.markdown.length} chars) — every actor on this canvas now inherits it`
             : `deleted design guide ${raw.name.trim().toLowerCase()}`,
         )
+      }
+      case 'get_prototype': {
+        const canvas = await store.syncCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        return ok(JSON.stringify(prototypeReport(canvas)))
+      }
+      case 'set_prototype_start': {
+        const raw = block.input as { frame_id?: unknown; page_id?: unknown }
+        if (typeof raw.frame_id !== 'string') return fail('frame_id must be a frame id, or an empty string to clear')
+        const canvas = await store.syncCanvas(canvasId, 'summary')
+        if (!canvas) return fail('canvas not found')
+        const pageId = typeof raw.page_id === 'string' && raw.page_id ? raw.page_id : undefined
+        const result = await setPrototypeStart(canvas, pageId, raw.frame_id.trim() || null, actor)
+        return result.ok ? ok(JSON.stringify({ pages: result.pages })) : fail(result.error)
       }
       case 'screenshot_frame': {
         const f = await store.getFrame(input.frame_id)

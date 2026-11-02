@@ -18,7 +18,7 @@ vi.mock('../server/storage.ts', () => ({
   deleteObject: mocks.deleteObject,
 }))
 
-import { getImage } from '../server/previews.ts'
+import { getImage, primeImage } from '../server/previews.ts'
 
 let seq = 0
 const frame = (over: Partial<Frame> = {}): Frame =>
@@ -112,5 +112,19 @@ describe('getImage', () => {
     const r = await getImage(frame(), req({ ip, preview: true }))
     expect(r.status).toBe('ok')
     expect(r.status === 'ok' && r.buf.toString()).toBe('stored')
+  })
+
+  it('primeImage seeds the png cache so the card load after a screenshot is not metered', async () => {
+    const ip = 'chatgpt-card-ip'
+    for (let i = 0; i < 12; i++) await getImage(frame(), req({ ip }))
+    const f = frame()
+    primeImage(f, 1, Buffer.from('from-the-tool'))
+    const png = req({ ip, ext: 'png', scale: 1 })
+    const r = await getImage(f, png)
+    expect(r.status).toBe('ok')
+    expect(r.status === 'ok' && r.buf.toString()).toBe('from-the-tool')
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(12)
+    /* the prime is per frame version: an edit needs a real render again */
+    expect((await getImage({ ...f, updatedAt: 2 }, png)).status).toBe('rate-limited')
   })
 })

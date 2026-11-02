@@ -69,6 +69,29 @@ Skip the brief only when the canvas already dictates the style — established f
 style guides or pinned references — or when the human handed you a complete design
 system. Then those are the brief; follow them.`
 
+/** How to wire a clickable prototype — shared by the MCP guide and the resident agents' system prompt. */
+export const PROTOTYPES = `When a human asks for a clickable prototype or a flow, wire the screens with data attributes on
+the element that triggers each step (edit_frame_html is enough; they are inert on the canvas and
+only run in the player):
+
+    <button data-doop-on="click" data-doop-action="navigate:<frameId>"
+            data-doop-transition="push-left" data-doop-duration="300">Continue</button>
+
+- data-doop-on: click | hover | press (while held) | delay:<ms> (after the screen shows; on any
+  element, e.g. <body>) | key:<Key> (KeyboardEvent.key: ArrowRight, Escape, Enter, Space).
+- data-doop-action: navigate:<frameId> | back | overlay:<frameId> (opens that frame as a modal
+  over a scrim) | close-overlay | scroll-to:<css selector> | url:<https url> (new tab).
+- data-doop-transition: instant (default) | dissolve | slide-left | slide-right | slide-up |
+  slide-down | push-left | push-right; data-doop-duration in ms (default 300).
+- Several interactions on one element: data-doop-interactions='[{"on":"click","action":
+  "navigate:abc"},{"on":"key:Escape","action":"back"}]' instead of the single attributes.
+- Wire screens only with these attributes: the player does not follow href links or script click
+  handlers between frames.
+- Use real frame ids from the canvas, never invented ones. Size overlay frames to the modal itself, not the page.
+- set_prototype_start picks the frame the flow starts on; get_prototype lists every interaction
+  and flags targets that do not exist — call it after wiring and fix what it flags. The player
+  lives at /c/<canvasId>/proto (append ?frame=<id> to open on a specific screen).`
+
 export const DOOP_GUIDE = `# Doop Agent Guide
 
 ## The room you're in
@@ -92,7 +115,12 @@ to you. If a human asks you for something one of these roles owns, just do it �
 routing is for their benefit, not a lock on your work.
 
 Use get_comments({ canvas_id }) to read element-pinned comments and replies, including
-their frame, selector, snippet, author, thread links, and claim/failure/resolution state.
+their frame, elementId, snippet, author, thread links, and claim/failure/resolution state. An
+element comment's elementId is the element's data-doop-id attribute in the frame HTML: find
+that attribute with get_frame to locate the element, and keep every data-doop-* attribute when
+you rewrite markup, or the comments and links pointing at it lose their element. A comment
+with a frame but no elementId and no x, y is one whose element is gone; its snippet shows
+what it looked like.
 Add frame_id to focus on one frame. Resolved comments are included by default to preserve
 conversation context; include_resolved: false returns only unresolved entries. The result
 is newest first and covers the retained history (up to 100 entries per canvas).
@@ -121,9 +149,10 @@ Do not spam it: one update per phase of work, not one per tool call.
 ## Human feedback — TOP PRIORITY
 
 Humans reply to agent tasks from the canvas UI. Each reply is an OPEN REQUEST on the
-canvas — not mail for one agent. The first agent to make an identified call picks it
-up: it arrives inside your tool results as a block starting with "HUMAN FEEDBACK",
-and picking it up assigns it to you. When you see one:
+canvas — not mail for one agent. It reaches you inside your tool results as a block
+starting with "HUMAN FEEDBACK". A tool that changes the canvas (and get_feedback) picks
+it up and assigns it to you; a read-only tool only says requests are waiting, so call
+get_feedback to claim them. When you see one:
 
 - Stop and address it BEFORE continuing your own plan — a human watching the canvas
   outranks your todo list.
@@ -180,9 +209,18 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - For small tweaks (copy, a color, one element's spacing) use edit_frame_html — an exact
   find/replace that morphs into the rendered frame in place, with no re-render. Resending
   a whole document via set_frame_html is for genuine redesigns.
+- Every replace and stream files the design it overwrote in the frame's version history.
+  list_frame_versions shows the earlier states; restore_frame_version brings one back (HTML
+  and size). Reach for it when a human asks for the previous version, or when your own
+  rework turned out worse than what was there.
 
 ## Frames and HTML
 
+- Human sign-off: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev,
+  needs_review) and approval attribution. Filter get_canvas with approval_status="ready_for_dev"
+  to find approved screens, then re-read get_frame before implementing. HTML and size edits
+  invalidate sign-off; needs_review requires another human approval. Approval alone does not
+  assign an implementation job — follow the human's request.
 - A frame renders a complete HTML document in a sandboxed iframe. Inline <style> and
   <script> work; Google Fonts via <link> work.
 - Always reset: * { margin: 0; box-sizing: border-box; } and design to the exact frame size.
@@ -370,13 +408,22 @@ ${DESIGN_QUALITY}
   you actually observe; otherwise ask the user for screenshots or an HTML export instead
   of inventing the page.
 
-## Exporting frames as images
+## Prototypes — make frames clickable
+
+${PROTOTYPES}
+- Frame ids come from get_canvas.
+
+## Exporting frames (images, PDF)
 
 Every frame response includes an image_url — a public, hotlinkable render of the frame's
 CURRENT html (/i/<frameId>.png?scale=2; use .jpg?quality=90 for JPEG, append &download
 for an attachment). The export_frame tool returns the same URLs on demand. Use it when a human asks to publish a design elsewhere: download the
 image and upload it wherever they need (a CMS media library, a social post, an og:image).
 The URL re-renders on change, so an embedded link stays current as the frame iterates.
+For print, a client handoff or a deck, export_frame with format "pdf" returns the PDF file itself
+(an embedded application/pdf resource, not a URL): vector, text selectable, one page per frame
+at the frame's own size. Pass frame_ids to bind several frames of one canvas into one multi-page
+PDF; pages follow the order given (frame_id first, then frame_ids as listed).
 
 ## Multiplayer etiquette
 

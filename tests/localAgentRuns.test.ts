@@ -21,7 +21,7 @@ function harness(
 describe('local Claude run ownership', () => {
   it('leases each run to one device and only its requester can finish it', async () => {
     const runs = new LocalAgentRuns()
-    const result = runs.start('alice', 'sonnet', harness())
+    const result = runs.start('alice', { model: 'sonnet' }, harness())
     expect(runs.poll('bob', 'bob-device')).toBeNull()
     const job = runs.poll('alice', 'first')!
     expect(job.model).toBe('sonnet')
@@ -36,7 +36,7 @@ describe('local Claude run ownership', () => {
   it('does not allow tools before claiming, with a wrong token, or after cancellation', async () => {
     const runs = new LocalAgentRuns()
     const execute = vi.fn(harness().execute)
-    const result = runs.start('alice', 'default', harness(execute))
+    const result = runs.start('alice', { model: 'default' }, harness(execute))
     const job = runs.poll('alice', 'first')!
     await expect(runs.execute(job.id, 'wrong-token', 'create_frame', {})).rejects.toThrow()
     await expect(runs.execute(job.id, job.token, 'Bash', {})).rejects.toThrow()
@@ -55,7 +55,7 @@ describe('local Claude run ownership', () => {
     const order: string[] = []
     const result = runs.start(
       'alice',
-      'default',
+      { model: 'default' },
       harness(async (block) => {
         order.push('started')
         await pending
@@ -79,7 +79,7 @@ describe('local Claude run ownership', () => {
 
   it('expires disconnected runs without handing them to another device', async () => {
     const runs = new LocalAgentRuns()
-    const result = runs.start('alice', 'default', harness())
+    const result = runs.start('alice', { model: 'default' }, harness())
     const job = runs.poll('alice', 'first')!
     expect(runs.online('alice')).toBe(true)
     const later = Date.now() + 46_000
@@ -93,8 +93,8 @@ describe('local Claude run ownership', () => {
 it('keeps queued canvas runs alive while another canvas occupies the desktop', async () => {
   const runs = new LocalAgentRuns()
   const now = Date.now()
-  const first = runs.start('alice', 'default', harness())
-  const second = runs.start('alice', 'default', harness())
+  const first = runs.start('alice', { model: 'default' }, harness())
+  const second = runs.start('alice', { model: 'default' }, harness())
   const job = runs.poll('alice', 'desktop', now)!
   runs.poll('alice', 'desktop', now + 50_000)
   await runs.expire(now + 50_000)
@@ -110,8 +110,8 @@ it('stops a canceled canvas run without stopping another run on the same account
   const runs = new LocalAgentRuns()
   let canceled = false
   const execute = vi.fn(harness().execute)
-  const first = runs.start('alice', 'default', { ...harness(execute), isCanceled: () => canceled })
-  const second = runs.start('alice', 'default', harness())
+  const first = runs.start('alice', { model: 'default' }, { ...harness(execute), isCanceled: () => canceled })
+  const second = runs.start('alice', { model: 'default' }, harness())
   const job = runs.poll('alice', 'desktop')!
   canceled = true
   await expect(runs.execute(job.id, job.token, 'create_frame', {})).rejects.toThrow()
@@ -122,4 +122,22 @@ it('stops a canceled canvas run without stopping another run on the same account
   expect(next.id).not.toBe(job.id)
   await runs.finish(next.id, 'alice', 'desktop', { success: true, text: 'Done' })
   expect((await second).success).toBe(true)
+})
+
+describe('local Claude job shape', () => {
+  it("carries the effort only when one is set, and reads an old shell's refusal for the person", async () => {
+    const runs = new LocalAgentRuns()
+    void runs.start('alice', { model: 'claude-opus-5-20260901', effort: 'high' }, harness())
+    const job = runs.poll('alice', 'd1')!
+    expect(job).toMatchObject({ model: 'claude-opus-5-20260901', effort: 'high' })
+    await runs.finish(job.id, 'alice', 'd1', { success: true, text: '' })
+
+    const plain = runs.start('alice', { model: 'fable' }, harness())
+    const next = runs.poll('alice', 'd1')!
+    expect(next.model).toBe('fable')
+    expect(next).not.toHaveProperty('effort')
+    /* a shell shipped before the aliases says only "Invalid model" */
+    await runs.finish(next.id, 'alice', 'd1', { success: false, text: 'Invalid model' })
+    expect((await plain).text).toMatch(/desktop app .* too old/)
+  })
 })

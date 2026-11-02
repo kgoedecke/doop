@@ -88,6 +88,8 @@ final class AppModel: ObservableObject {
     @Published var workspaces: [WorkspaceSummary] = []
     @Published var loading = true
     @Published var error: String?
+    /// Provider buttons the sign-in screen offers for the current server.
+    @Published var providers = LoginProviders.none
     @Published var client: DoopClient
 
     init() {
@@ -103,6 +105,14 @@ final class AppModel: ObservableObject {
         let client = self.client
         loading = true
         error = nil
+        /* the provider buttons are optional and public, fetched signed in or
+           out (so the sign-in screen after a sign-out knows them) but never
+           in the way of opening a workspace that is already signed in */
+        Task {
+            let providers: LoginProviders = (try? await client.get("/api/oidc-config")) ?? .none
+            guard self.client === client else { return }
+            self.providers = providers
+        }
         do {
             await client.importWebSession()
             struct Session: Decodable { var user: DoopUser }
@@ -148,6 +158,23 @@ final class AppModel: ObservableObject {
         if user == nil { throw APIError(status: 0, message: "Check your email to verify your account, then sign in.") }
     }
 
+    /// Google / Microsoft / SSO: the provider round trip runs in a browser sheet
+    /// (`WebSignIn`), which hands back a one-time token the app redeems for the
+    /// session cookie. See `ProviderSignIn` for the flow and its challenge check.
+    func signIn(with provider: SignInProvider) async throws {
+        let client = self.client
+        let attempt = ProviderSignIn(provider: provider)
+        let callback = try await WebSignIn().run(attempt.startURL(on: client.server))
+        guard let token = attempt.token(from: callback) else {
+            throw APIError(status: 0, message: "The sign-in did not answer this app's request. Try again.")
+        }
+        guard self.client === client else { return }
+        _ = try await client.data("/api/auth/one-time-token/verify", method: "POST", body: ["token": token])
+        await client.persistWebSession()
+        await restore()
+        if user == nil { throw APIError(status: 0, message: "Signed in, but no session came back. Try again.") }
+    }
+
     func reload() async {
         let client = self.client
         let openBefore = await AgentLiveActivities.shared.openActivityIDs(client: client)
@@ -188,11 +215,40 @@ final class AppModel: ObservableObject {
         workspaces = []
     }
 
+    /// Native Sign in with Apple: the sheet's identity token, the raw nonce the
+    /// request hashed, and on a first authorization the name Apple hands over.
+    /// The server verifies the token against Apple's keys for this bundle id
+    /// and answers with the session cookie.
+    func signIn(appleIdentityToken token: String, nonce: String, givenName: String?, familyName: String?) async throws {
+        let client = self.client
+        let body = AppleSignIn.body(identityToken: token, nonce: nonce, givenName: givenName, familyName: familyName)
+        _ = try await client.data("/api/auth/sign-in/social", method: "POST", body: body)
+        guard self.client === client else { return }
+        await client.persistWebSession()
+        await restore()
+        if user == nil { throw APIError(status: 0, message: "Signed in, but no session came back. Try again.") }
+    }
+
+    /// Whether this account can prove itself with a password: an account that
+    /// only ever signed in through Google / Microsoft / SSO has none. Throws
+    /// rather than guessing: a lookup that failed must not drop the password.
+    func hasPassword() async throws -> Bool {
+        struct Account: Decodable { var providerId: String }
+        let accounts: [Account] = try await client.get("/api/auth/list-accounts")
+        return accounts.contains { $0.providerId == "credential" }
+    }
+
     /// Permanently delete the signed-in account on this server (App Store rule 5.1.1(v)).
-    func deleteAccount(password: String) async throws {
+    /// Without a password (a provider-only account) better-auth accepts a fresh
+    /// session instead, one younger than its `freshAge` (a day by default).
+    func deleteAccount(password: String?) async throws {
         await AgentLiveActivities.shared.stopSystem(client: client)
         await AgentLiveActivities.shared.endAll(client: client)
-        _ = try await client.data("/api/auth/delete-user", method: "POST", body: ["password": password])
+        do {
+            _ = try await client.data("/api/auth/delete-user", method: "POST", body: password.map { ["password": $0] } ?? [:])
+        } catch let error as APIError where password == nil && error.status == 400 {
+            throw APIError(status: error.status, message: "Sign out, sign in again, and then delete your account.")
+        }
         await client.clearCookies()
         user = nil
         canvases = []
@@ -207,6 +263,9 @@ final class AppModel: ObservableObject {
         user = nil
         canvases = []
         workspaces = []
+        /* the old server's buttons must not survive into the new server's
+           sign-in screen: restore() fetches the new ones without waiting */
+        providers = .none
         await restore()
     }
 }

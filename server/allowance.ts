@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { eq, sql } from 'drizzle-orm'
@@ -25,7 +26,7 @@ import type { AccountKind } from './modelAccounts.ts'
  * allowance via RESIDENT_TASK_LIMIT.
  */
 
-export const RESIDENT_TASK_LIMIT = Math.max(0, Number(process.env.RESIDENT_TASK_LIMIT ?? 0))
+export const RESIDENT_TASK_LIMIT = env.RESIDENT_TASK_LIMIT
 
 export interface Allowance {
   used: number

@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
@@ -27,23 +28,19 @@ const STATE_TTL_MS = 15 * 60_000
 const MAX_ADS = 200
 const PAGE_SIZE = 50
 
-/* same env read as server/auth.ts — not imported, so this module stays
-   loadable in unit tests without the auth stack */
-const PUBLIC_ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
-
 export function metaEnabled(): boolean {
-  return !!(process.env.META_APP_ID && process.env.META_APP_SECRET)
+  return !!(env.META_APP_ID && env.META_APP_SECRET)
 }
 
 export function redirectUri(): string {
-  return `${PUBLIC_ORIGIN}/api/integrations/meta/callback`
+  return `${env.BETTER_AUTH_URL}/api/integrations/meta/callback`
 }
 
 /* ------------------------------------------------------------------ */
 /* Signed OAuth state                                                  */
 
 function secret(): string {
-  return process.env.BETTER_AUTH_SECRET || 'doop-dev-secret-not-for-production'
+  return env.BETTER_AUTH_SECRET
 }
 
 function sign(payload: string): string {
@@ -73,7 +70,7 @@ export function verifyState(state: string): { userId: string } | undefined {
 
 export function authorizeUrl(state: string): string {
   const params = new URLSearchParams({
-    client_id: process.env.META_APP_ID ?? '',
+    client_id: env.META_APP_ID ?? '',
     redirect_uri: redirectUri(),
     state,
     scope: SCOPES,
@@ -110,8 +107,8 @@ async function graph<T>(path: string, params: Record<string, string>, token?: st
 
 /** Code → short-lived token → long-lived token. */
 export async function exchangeCode(code: string): Promise<{ token: string; expiresAt: number | null }> {
-  const appId = process.env.META_APP_ID ?? ''
-  const appSecret = process.env.META_APP_SECRET ?? ''
+  const appId = env.META_APP_ID ?? ''
+  const appSecret = env.META_APP_SECRET ?? ''
   const short = await graph<{ access_token: string }>('/oauth/access_token', {
     client_id: appId,
     client_secret: appSecret,

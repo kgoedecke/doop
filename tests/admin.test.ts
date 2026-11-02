@@ -11,12 +11,6 @@ import { Client, startServer, type Server } from './harness.ts'
  *     session.impersonatedBy behind, and cannot mint MCP tokens.
  */
 
-/* Base port for this file. Offsets +1..+3 spawn extra servers, so keep the
-   whole range clear of every other test file's port (they run in parallel —
-   a second server on a taken port passes /healthz against the WRONG instance
-   and the test then reads someone else's database). */
-const PORT = 4993
-
 let server: Server
 let boss: Client
 let alice: Client
@@ -25,7 +19,7 @@ let aliceId: string
 let canvasId: string
 
 beforeAll(async () => {
-  server = await startServer(PORT, { ADMIN_EMAILS: 'boss@test.dev' })
+  server = await startServer({ ADMIN_EMAILS: 'boss@test.dev' })
   boss = new Client(server)
   alice = new Client(server)
   mallory = new Client(server)
@@ -136,11 +130,10 @@ describe('admin surface', () => {
     /* No SMTP means signup is open and nothing can ever be verified, so
        whoever types the admin's address first would otherwise BE the admin.
        Production must refuse; development keeps working for convenience. */
-    const prod = await startServer(PORT + 2, {
+    const prod = await startServer({
       ADMIN_EMAILS: 'boss@test.dev',
       NODE_ENV: 'production',
       BETTER_AUTH_SECRET: 'test-secret-not-for-real-use',
-      BETTER_AUTH_URL: `http://localhost:${PORT + 2}`,
     })
     try {
       const impostor = new Client(prod)
@@ -158,13 +151,12 @@ describe('admin surface', () => {
     /* REQUIRE_EMAIL_VERIFICATION=false trades proof-of-address for signup
        conversion. The admin role must not be part of that trade: signing in
        is opened up, promotion still demands a verified address. */
-    const open = await startServer(PORT + 3, {
+    const open = await startServer({
       ADMIN_EMAILS: 'boss@test.dev',
       REQUIRE_EMAIL_VERIFICATION: 'false',
       SMTP_HOST: 'smtp.invalid.test', // mailer "configured", so verification is possible
       NODE_ENV: 'production',
       BETTER_AUTH_SECRET: 'test-secret-not-for-real-use',
-      BETTER_AUTH_URL: `http://localhost:${PORT + 3}`,
     })
     try {
       const eager = new Client(open)
@@ -185,7 +177,7 @@ describe('admin surface', () => {
     /* the real-world order: someone signs up first, and is named an admin
        later. Reboot the same database with a wider ADMIN_EMAILS. */
     server.stop({ keepData: true })
-    const rebooted = await startServer(PORT + 1, { ADMIN_EMAILS: 'boss@test.dev,alice@test.dev' }, server.dataDir)
+    const rebooted = await startServer({ ADMIN_EMAILS: 'boss@test.dev,alice@test.dev' }, server.dataDir)
     try {
       const promoted = new Client(rebooted)
       await promoted.post('/api/auth/sign-in/email', { email: 'alice@test.dev', password: 'password12345' })

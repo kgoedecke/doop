@@ -1,13 +1,23 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createServer, type ViteDevServer } from 'vite'
-import type { Browser, Page } from 'puppeteer-core'
-import { findBrowserPath, getBrowser } from '../server/screenshot'
+import type { Page } from 'puppeteer-core'
+import { findBrowserPath } from '../server/screenshot'
+import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, Frame } from '../shared/types'
 
 declare global {
   interface Window {
     seedPages: (canvas: Canvas) => void
-    pageState: () => { activePageId: string; viewport: { x: number; y: number; zoom: number }; selectedId: string }
+    pickElement: (frameId: string, selector: string) => void
+    frameHtml: (frameId: string) => string | undefined
+    pageState: () => {
+      activePageId: string
+      viewport: { x: number; y: number; zoom: number }
+      selectedId: string
+      selectedElement: { frameId: string; selector: string } | null
+      elementPanelOpen: boolean
+      inspectorOpen: boolean
+      notice?: string
+    }
   }
 }
 const frame = (id: string, pageId: string, x: number): Frame => ({
@@ -36,27 +46,24 @@ const canvas = (frames: Frame[]): Canvas => ({
   updatedAt: 0,
 })
 
-/* The first load transforms the whole app through a cold Vite dev server, which
-   on a CI runner regularly takes longer than the 5 s default test timeout. */
+/* Each test loads the whole app (hundreds of unbundled modules) in its own body,
+   which on a busy CI runner can take longer than the 5 s default test timeout. */
 describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_000 }, () => {
-  let vite: ViteDevServer
-  let browser: Browser
+  let browser: TestBrowser
   let page: Page
   beforeAll(async () => {
-    vite = await createServer({ server: { port: 0 }, logLevel: 'error' })
-    await vite.listen()
-    browser = await getBrowser()
+    browser = await openBrowser()
+    await browser.grantPermissions(['clipboard-read', 'clipboard-sanitized-write'])
     page = await browser.newPage()
     await page.setViewport({ width: 1200, height: 800 })
   }, 60_000)
   afterAll(async () => {
     await page?.close()
     await browser?.close()
-    await vite?.close()
   })
 
   async function load(data: Canvas, query = '') {
-    await page.goto(`${vite.resolvedUrls!.local[0]}tests/fixtures/pages.html${query}`)
+    await page.goto(fixtureUrl(`pages.html${query}`))
     await page.waitForFunction(() => typeof window.seedPages === 'function')
     await page.evaluate((data) => window.seedPages(data), data)
     await page.waitForSelector('iframe[data-doop-frame]')
@@ -75,6 +82,171 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       viewport: { x: -2500, y: 300, zoom: 1 },
     })
     expect(await page.$('iframe[title="original"]')).toBeNull()
+  })
+
+  it.each(['first', 'second'])('selects a linked element after its frame mounts on the %s page', async (pageId) => {
+    const target = {
+      ...frame('target', pageId, 3000),
+      html: '<main id="hero"><h1 data-doop-id="h1h1h1">Design</h1></main>',
+    }
+    /* the link names the element by id; once found, the selection speaks
+       the positional path the Layers panel knows */
+    const selector = '#hero > h1:nth-of-type(1)'
+    await load(
+      canvas([frame('original', 'first', 0), target]),
+      `?${new URLSearchParams({ frame: target.id, element: 'h1h1h1' })}`,
+    )
+    await page.waitForSelector('button[aria-label="Copy link to element"]')
+    await page.waitForFunction((sel) => window.pageState().selectedElement?.selector === sel, {}, selector)
+    expect(await page.evaluate(() => window.pageState())).toMatchObject({
+      activePageId: pageId,
+      selectedId: target.id,
+      selectedElement: { frameId: target.id, selector },
+      elementPanelOpen: true,
+      inspectorOpen: false,
+      viewport: { x: -2500, y: 300, zoom: 1 },
+    })
+
+    // Copy through the actual element toolbar, then reopen the resulting URL.
+    await page.locator('button[aria-label="Copy link to element"]').click()
+    await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
+    const copied = await page.evaluate(() => navigator.clipboard.readText())
+    const url = new URL(copied)
+    expect(url.pathname).toBe('/c/c')
+    expect(url.searchParams.get('frame')).toBe(target.id)
+    expect(url.searchParams.get('element')).toBe('h1h1h1')
+    expect(url.searchParams.has('selector')).toBe(false)
+    await load(canvas([target]), url.search)
+    await page.waitForSelector('button[aria-label="Copy link to element"]')
+    await page.waitForFunction((sel) => window.pageState().selectedElement?.selector === sel, {}, selector)
+
+    // Deselecting still removes the probe and its panel after a deep link.
+    await page.mouse.click(100, 100)
+    await page.waitForFunction(() => window.pageState().selectedElement === null)
+    expect(await page.evaluate(() => window.pageState().elementPanelOpen)).toBe(false)
+  })
+
+  it('stamps an element that has no id yet when its link is copied', async () => {
+    const target = { ...frame('target', 'first', 0), html: '<main id="hero"><h1>Design</h1><p>Body</p></main>' }
+    await load(canvas([target]), '?frame=target')
+    await page.evaluate(() => window.pickElement('target', '#hero > p:nth-of-type(1)'))
+    await page.waitForSelector('button[aria-label="Copy link to element"]')
+    await page.locator('button[aria-label="Copy link to element"]').click()
+    await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
+    const url = new URL(await page.evaluate(() => navigator.clipboard.readText()))
+    const elementId = url.searchParams.get('element')!
+    expect(elementId).toMatch(/^[a-z0-9]{6}$/)
+    const html = await page.evaluate(() => window.frameHtml('target'))
+    expect(html).toContain(`<p data-doop-id="${elementId}">Body</p>`)
+    expect(html).toContain('<h1>Design</h1>')
+    /* the stamped document answers the link it produced */
+    await load(canvas([{ ...target, html: html! }]), url.search)
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#hero > p:nth-of-type(1)')
+  })
+
+  it('falls back to the frame when no element carries the linked id', async () => {
+    await load(
+      canvas([frame('target', 'second', 3000)]),
+      `?${new URLSearchParams({ frame: 'target', element: 'abcdef' })}`,
+    )
+    await page.waitForFunction(() => !!window.pageState().notice)
+    expect(await page.evaluate(() => window.pageState())).toMatchObject({
+      activePageId: 'second',
+      selectedId: 'target',
+      selectedElement: null,
+      elementPanelOpen: false,
+      inspectorOpen: true,
+      notice: 'This element no longer exists. Showing its frame instead.',
+    })
+  })
+
+  it('opens the frame alone when the element parameter is not an id', async () => {
+    await load(
+      canvas([frame('target', 'second', 3000)]),
+      `?${new URLSearchParams({ frame: 'target', element: '#chart' })}`,
+    )
+    await page.waitForFunction(() => window.pageState().inspectorOpen)
+    expect(await page.evaluate(() => window.pageState())).toMatchObject({
+      selectedId: 'target',
+      selectedElement: null,
+      elementPanelOpen: false,
+      inspectorOpen: true,
+    })
+    expect(await page.evaluate(() => window.pageState().notice)).toBeUndefined()
+  })
+
+  it.each(['first', 'second'])('opens links to script-created elements on the %s page', async (pageId) => {
+    const target = {
+      ...frame('target', pageId, 3000),
+      html: `<main></main><script>
+        const chart = document.createElement('h1')
+        chart.id = 'chart'
+        chart.setAttribute('data-doop-id', 'chart0')
+        chart.textContent = 'Live chart'
+        document.querySelector('main').append(chart)
+      </script>`,
+    }
+    await load(canvas([frame('original', 'first', 0), target]), '?frame=target&element=chart0')
+    await page.waitForSelector('button[aria-label="Copy link to element"]', { timeout: 5000 })
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#chart')
+    expect(await page.evaluate(() => window.pageState())).toMatchObject({
+      activePageId: pageId,
+      selectedId: target.id,
+      selectedElement: { frameId: target.id, selector: '#chart' },
+      elementPanelOpen: true,
+      inspectorOpen: false,
+    })
+    expect(await page.evaluate(() => window.pageState().notice)).toBeUndefined()
+
+    /* the live element wears its id, so the link needs no stamp */
+    await page.locator('button[aria-label="Copy link to element"]').click()
+    await page.waitForFunction(() => window.pageState().notice === 'Element link copied')
+    const copied = await page.evaluate(() => navigator.clipboard.readText())
+    expect(new URL(copied).searchParams.get('element')).toBe('chart0')
+    await load(canvas([target]), new URL(copied).search)
+    await page.waitForSelector('button[aria-label="Copy link to element"]', { timeout: 5000 })
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#chart')
+  })
+
+  it('falls back to frame details when a script removes an element from the saved HTML', async () => {
+    const target = {
+      ...frame('target', 'second', 3000),
+      html: '<h1 id="chart" data-doop-id="chart0">Saved chart</h1><script>document.getElementById("chart").remove()</script>',
+    }
+    await load(canvas([target]), '?frame=target&element=chart0')
+    await page.waitForFunction(() => !!window.pageState().notice, { timeout: 5000 })
+    expect(await page.evaluate(() => window.pageState())).toMatchObject({
+      activePageId: 'second',
+      selectedId: target.id,
+      selectedElement: null,
+      elementPanelOpen: false,
+      inspectorOpen: true,
+      notice: 'This element no longer exists. Showing its frame instead.',
+    })
+    expect(await page.$('button[aria-label="Copy link to element"]')).toBeNull()
+  })
+
+  it('follows another element link and browser history within the same mounted canvas', async () => {
+    const target = {
+      ...frame('target', 'first', 0),
+      html: '<h1 id="one" data-doop-id="one000">One</h1><h2 id="two" data-doop-id="two000">Two</h2>',
+    }
+    await load(canvas([target]), '?frame=target&element=one000')
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#one')
+    await page.evaluate(() => {
+      history.pushState(null, '', '?frame=target&element=two000')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#two')
+    await page.waitForSelector('button[aria-label="Copy link to element"]')
+    await page.evaluate(() => history.back())
+    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#one')
+    await page.evaluate(() => {
+      history.pushState(null, '', '?frame=target')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await page.waitForFunction(() => window.pageState().inspectorOpen && !window.pageState().selectedElement)
+    await page.waitForSelector('button[aria-label="Copy link to element"]', { hidden: true })
   })
 
   it('does not snap a drag to the invisible frame on another page', async () => {

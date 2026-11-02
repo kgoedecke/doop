@@ -12,6 +12,20 @@ export function pageFrames(canvas: Canvas, pageId: string): Frame[] {
   return canvas.frames.filter((frame) => framePageId(canvas, frame) === pageId)
 }
 
+export const MAX_PAGE_NAME = 100
+
+/** The name for a copy of `name`: "<name> copy", then "<name> copy 2", "… 3"
+ *  while `taken` already holds it. The base is trimmed so the result fits
+ *  the page name limit. */
+export function copyPageName(name: string, taken: readonly string[]): string {
+  const used = new Set(taken)
+  for (let n = 1; ; n++) {
+    const suffix = n === 1 ? ' copy' : ` copy ${n}`
+    const candidate = `${name.slice(0, MAX_PAGE_NAME - suffix.length).trimEnd()}${suffix}`
+    if (!used.has(candidate)) return candidate
+  }
+}
+
 export function samePages(a: unknown, b: CanvasPageInfo[]): boolean {
   return (
     Array.isArray(a) &&

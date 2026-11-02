@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { authClient } from '../lib/auth'
 import { desktopHandoffURL, parseDesktopSignInQuery } from '../lib/desktopAuth'
-import { AuthScreen } from '../components/ui/screen'
-import { Wordmark } from '../components/ui/wordmark'
+import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
 import { Callout } from '../components/ui/callout'
+import { useT } from '../lib/i18n'
 
 /* Step 1 of the desktop sign-in (src/lib/desktopAuth.ts), in the system
    browser: begin the provider round trip here so better-auth's state cookie
@@ -11,43 +11,45 @@ import { Callout } from '../components/ui/callout'
    holds a doop session there is nothing to prove — go straight to the
    handoff. Renders only a holding card: the browser leaves within moments. */
 export function DesktopSignIn({ signedIn }: { signedIn: boolean }) {
+  const t = useT()
   /* read once: the query is fixed for the life of this page */
   const request = useMemo(() => parseDesktopSignInQuery(location.search), [])
-  const [startError, setStartError] = useState<string | null>(null)
-  const error = request ? startError : 'This sign-in link is incomplete — go back to the doop app and try again.'
+  /* the provider's own words when it gave any; otherwise ours, picked at render */
+  const [startError, setStartError] = useState<{ message?: string } | null>(null)
+  const error = request
+    ? startError && (startError.message ?? t('auth.desktopStartFailed'))
+    : t('auth.desktopLinkIncomplete')
 
   useEffect(() => {
     if (!request) return
-    const callbackURL = desktopHandoffURL(request.challenge, request.to)
+    const callbackURL = desktopHandoffURL(request.challenge, request.callbackURL)
     if (signedIn) {
       location.replace(callbackURL)
       return
     }
-    const failed = 'Could not start sign-in — go back to the doop app and try again.'
+    /* the handoff carries the in-app landing through to the deep link, so
+       a new account's first-canvas landing survives the hop too */
+    const redirects = {
+      callbackURL,
+      newUserCallbackURL: desktopHandoffURL(request.challenge, request.newUserCallbackURL),
+      errorCallbackURL: '/auth',
+    }
     const start =
       request.provider === 'oidc'
-        ? authClient.signIn.oauth2({ providerId: 'oidc', callbackURL, errorCallbackURL: '/auth' })
-        : authClient.signIn.social({ provider: request.provider, callbackURL, errorCallbackURL: '/auth' })
+        ? authClient.signIn.oauth2({ providerId: 'oidc', ...redirects })
+        : authClient.signIn.social({ provider: request.provider, ...redirects })
     start
       .then((res) => {
-        if (res.error) setStartError(res.error.message ?? failed)
+        if (res.error) setStartError({ message: res.error.message })
       })
-      .catch(() => setStartError(failed))
+      .catch(() => setStartError({}))
   }, [request, signedIn])
 
   return (
     <AuthScreen>
-      <div className="flex w-[min(400px,100%)] flex-col gap-3.5 rounded-[12px] border border-line bg-surface p-6 pt-[30px] shadow-pop sm:p-9 sm:pb-7">
-        <Wordmark className="mb-1.5" />
-        <h1 className="font-serif text-[34px] font-normal leading-[1.05] tracking-[-0.015em]">
-          {error ? 'Something went wrong.' : 'Signing you in…'}
-        </h1>
-        {error ? (
-          <Callout tone="error">{error}</Callout>
-        ) : (
-          <p className="text-sm text-ink-soft">Taking you to your identity provider for the doop app.</p>
-        )}
-      </div>
+      <AuthCard title={error ? t('auth.somethingWentWrongTitle') : t('auth.desktopSigningIn')}>
+        {error ? <Callout tone="error">{error}</Callout> : <AuthCardText>{t('auth.desktopToProvider')}</AuthCardText>}
+      </AuthCard>
     </AuthScreen>
   )
 }

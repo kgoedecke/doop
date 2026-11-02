@@ -3,8 +3,9 @@ import type { CanvasMeta } from '../../shared/types'
 import type { Automation } from '../../shared/automations'
 import { api, type IntegrationsStatus } from '../lib/api'
 import { posthog } from '../lib/posthog'
-import { AccountMenu } from '../components/DashShell'
-import { MetaTile, WorkspaceRail } from '../components/AutomateShell'
+import { connectIntegration } from '../lib/integrationConnect'
+import { MetaTile } from '../components/AutomateShell'
+import { AppRail, railLayout } from '../components/AppRail'
 import { clientIntegrations } from '../integrations'
 import { DisconnectButton, IntegrationCard } from '../integrations/ui'
 import { Button } from '../components/ui/button'
@@ -13,6 +14,7 @@ import { Skeleton } from '../components/ui/skeleton'
 import { Toast } from '../components/ui/toast'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { DashContent, DashHeader, DashLayout, DashMain, DashTitle } from '../components/ui/dash'
+import { t as translate, useT } from '../lib/i18n'
 
 /** Meta plus every registered extension — what the disconnect dialog names. */
 type Disconnectable = { name: string; copy: string; disconnect: () => Promise<IntegrationsStatus> }
@@ -24,7 +26,8 @@ function readNotice(): { tone: 'error' | 'success'; text: string } | null {
   for (const p of providers) {
     const error = q.get(`${p.id}Error`)
     if (error) return { tone: 'error', text: error }
-    if (q.get(p.id) === 'connected') return { tone: 'success', text: `${p.name} connected.` }
+    if (q.get(p.id) === 'connected')
+      return { tone: 'success', text: translate('automations.providerConnected', { name: p.name }) }
   }
   return null
 }
@@ -35,6 +38,7 @@ function readNotice(): { tone: 'error' | 'success'; text: string } | null {
  * an import you start draws on them wherever it runs.
  */
 export function Integrations() {
+  const t = useT()
   const [status, setStatus] = useState<IntegrationsStatus | null>(null)
   const [canvases, setCanvases] = useState<CanvasMeta[]>([])
   const [automations, setAutomations] = useState<Automation[]>([])
@@ -64,12 +68,13 @@ export function Integrations() {
     if (busy) return
     setBusy(true)
     try {
-      const { url } = await api.startMetaConnect()
-      posthog.capture('integration_connect_started', { provider: 'meta' })
-      location.assign(url)
+      const destination = await connectIntegration('meta', () =>
+        posthog.capture('integration_connect_started', { provider: 'meta' }),
+      )
+      if (destination === 'browser') setBusy(false)
     } catch (error) {
       console.error(error)
-      showToast('Couldn’t start the Meta connection')
+      showToast(t('automations.metaStartFailed'))
       setBusy(false)
     }
   }
@@ -91,7 +96,7 @@ export function Integrations() {
       setStatus(await target.disconnect())
     } catch (error) {
       console.error(error)
-      showToast('Couldn’t disconnect')
+      showToast(t('automations.disconnectFailed'))
     } finally {
       setBusy(false)
     }
@@ -101,25 +106,15 @@ export function Integrations() {
   const usedBy = automations.filter((a) => a.steps.some((s) => s.type === 'pull')).length
 
   return (
-    <DashLayout>
-      <WorkspaceRail
-        active="integrations"
-        canvases={canvases}
-        automationCount={automations.length}
-        integrationCount={
-          Number(!!meta?.connected) + (status ? clientIntegrations.filter((i) => i.isConnected(status)).length : 0)
-        }
-      />
-      <DashMain>
-        <DashHeader>
+    <DashLayout className={railLayout}>
+      <AppRail active="integrations" canvases={canvases} />
+      <DashMain className="[background:var(--paper)]">
+        <DashHeader variant="bare">
           <span className="flex-1" />
-          <AccountMenu />
         </DashHeader>
 
-        <DashContent>
-          <DashTitle className="mb-[26px]">
-            Integrations<em className="not-italic text-brand">.</em>
-          </DashTitle>
+        <DashContent className="pt-2 md:pt-3">
+          <DashTitle className="mb-5">{t('rail.integrations')}</DashTitle>
 
           {notice && (
             <Callout tone={notice.tone} className="mb-4 max-w-[720px]">
@@ -130,8 +125,8 @@ export function Integrations() {
           <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {!meta || !status ? (
               <>
-                <Skeleton className="min-h-[150px] rounded-[14px]" />
-                <Skeleton className="min-h-[150px] rounded-[14px]" />
+                <Skeleton shape="card" />
+                <Skeleton shape="card" />
               </>
             ) : (
               <>
@@ -147,7 +142,7 @@ export function Integrations() {
                       requestDisconnect(
                         {
                           name: integration.name,
-                          copy: integration.disconnectCopy,
+                          copy: t(integration.disconnectCopy),
                           disconnect: integration.disconnect,
                         },
                         integration.id,
@@ -161,17 +156,18 @@ export function Integrations() {
                   name="Meta Ads"
                   detail={
                     meta.connected
-                      ? `${meta.accountName ?? 'Meta'} · ${meta.accounts?.length ?? 0} ad ${
-                          meta.accounts?.length === 1 ? 'account' : 'accounts'
-                        }`
-                      : 'Pull ad creatives onto a canvas'
+                      ? t('automations.metaAccounts', {
+                          name: meta.accountName ?? 'Meta',
+                          count: meta.accounts?.length ?? 0,
+                        })
+                      : t('automations.metaPitch')
                   }
                   connected={meta.connected}
                   footnote={
                     meta.connected
                       ? usedBy > 0
-                        ? `Used by ${usedBy} ${usedBy === 1 ? 'automation' : 'automations'}`
-                        : 'Not used by an automation yet'
+                        ? t('automations.usedBy', { count: usedBy })
+                        : t('automations.notUsedYet')
                       : ''
                   }
                   actions={
@@ -183,7 +179,7 @@ export function Integrations() {
                           disabled={busy || !meta.enabled}
                           onClick={() => void connectMeta()}
                         >
-                          Reconnect
+                          {t('automations.reconnect')}
                         </Button>
                         <DisconnectButton
                           disabled={busy}
@@ -191,7 +187,7 @@ export function Integrations() {
                             requestDisconnect(
                               {
                                 name: 'Meta',
-                                copy: 'Automations that pull from Meta will fail until you connect again. Frames already on your canvases stay.',
+                                copy: t('automations.metaDisconnectCopy'),
                                 disconnect: api.disconnectMeta,
                               },
                               'meta',
@@ -206,21 +202,15 @@ export function Integrations() {
                         disabled={busy || !meta.enabled}
                         onClick={() => void connectMeta()}
                       >
-                        Connect
+                        {t('automations.connect')}
                       </Button>
                     )
                   }
                 >
                   {meta.connected && meta.expiresAt && meta.expiresAt < soon && (
-                    <p className="text-[11.5px] text-accent-ink">
-                      Meta’s access expires soon — reconnect to keep pulls running.
-                    </p>
+                    <p className="text-caption text-accent-ink">{t('automations.metaExpiresSoon')}</p>
                   )}
-                  {!meta.enabled && (
-                    <p className="text-[11.5px] text-ink-faint">
-                      Not configured on this server — set META_APP_ID and META_APP_SECRET.
-                    </p>
-                  )}
+                  {!meta.enabled && <p className="text-caption text-ink-faint">{t('automations.metaNotConfigured')}</p>}
                 </IntegrationCard>
               </>
             )}
@@ -230,9 +220,9 @@ export function Integrations() {
       <ConfirmDialog
         open={!!confirmDisconnect}
         onOpenChange={(open) => !open && setConfirmDisconnect(null)}
-        title={`Disconnect ${confirmDisconnect?.name ?? ''}?`}
+        title={t('automations.disconnectTitle', { name: confirmDisconnect?.name ?? '' })}
         description={confirmDisconnect?.copy ?? ''}
-        confirmLabel="Disconnect"
+        confirmLabel={t('automations.disconnect')}
         destructive
         onConfirm={() => {
           const target = confirmDisconnect

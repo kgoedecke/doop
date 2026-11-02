@@ -20,6 +20,8 @@ interface $CanvasIndexContract {
         initialize(frameIds?: string[]): Promise<IndexSnapshot>
         /** Import SQL-owned pages once. Later reads never relocate a frame. */
         initializePages(pages: CanvasPageInfo[], framePages?: Record<string, string>): Promise<IndexSnapshot>
+        /** Insert a page after `afterPageId` (or last), for page copies. */
+        insertPage(page: CanvasPageInfo, afterPageId: string): Promise<PageUpdate>
         moveFrame(id: string, pageId: string): Promise<boolean>
         pending(): Promise<IndexEntry[]>
         remove(id: string): Promise<boolean>
@@ -39,6 +41,8 @@ interface $CanvasIndexContract {
             >
         ): Promise<Frame | "retry" | null>
         revokeAccess(): Promise<void>
+        /** Set (frameId) or clear (null) the frame a page's prototype starts on. */
+        setFlowStart(pageId: string, frameId: string | null): Promise<CanvasPageInfo[] | null>
         /** Page deletion and page moves share this actor's invocation queue. */
         setPages(pages: CanvasPageInfo[], expectedPages: CanvasPageInfo[]): Promise<PageUpdate>
         snapshot(): Promise<IndexSnapshot>
@@ -54,7 +58,10 @@ interface $FrameActorContract {
     Methods: {
         accessVersion(): Promise<number>
         destroy(): Promise<void>
-        initialize(frame: Frame): Promise<boolean>
+        getVersion(versionId: string): Promise<FrameVersion | null>
+        initialize(frame: Frame, creatorKind?: Actor["kind"]): Promise<boolean>
+        /** Newest first, without the HTML. */
+        listVersions(): Promise<FrameVersionInfo[]>
         revokeAccess(): Promise<void>
         snapshot(): Promise<FrameSnapshot>
         /** Dashboard/activity responses omit HTML. */
@@ -62,7 +69,7 @@ interface $FrameActorContract {
             frame: Omit<Frame, "html"> | null
             activity: ActivityItem[]
         }>
-        write(write: FrameEdit, by: Actor, requestId?: string): Promise<FrameChange | null>
+        write(write: FrameEdit, by: Actor, requestId?: string): Promise<FrameChange | FrameWriteConflict | null>
     }
 }
 interface ActivityItem {
@@ -85,6 +92,10 @@ interface Actor {
 interface CanvasPageInfo {
     id: string
     name: string
+    /** the frame this page's prototype flow starts on (shared/prototype.ts).
+     *  Set only through the flow-start route or MCP tool; page-list saves keep
+     *  whatever the server already has. */
+    startFrameId?: string
 }
 interface Frame {
     id: string
@@ -103,6 +114,39 @@ interface Frame {
     /** product-made onboarding/example content (welcome demo, seeded frames) —
      *  not the user's work; agents must never read it as the canvas's style */
     demo?: boolean
+    /** hidden from the stage (the eye in the Layers panel); the frame keeps
+     *  its row, its HTML and its exports — only the canvas stops drawing it */
+    hidden?: boolean
+    /** Figma-style lock: the frame cannot be selected, moved, resized or
+     *  deleted from the stage until it is unlocked (Layers panel, Inspector,
+     *  ⌘⇧L, or an agent via update_frame) */
+    locked?: boolean
+    /** Human sign-off for implementation. Missing/null means draft. Design
+     * edits retain the attribution but change the status to needs_review. */
+    approval?: FrameApproval | null
+}
+interface FrameApproval {
+    status: "ready_for_dev" | "needs_review"
+    approvedBy: string
+    approvedByUserId: string
+    approvedAt: number
+    /** The frame revision the person reviewed before approving. */
+    approvedFrameUpdatedAt: number
+}
+interface FrameVersion extends FrameVersionInfo {
+    html: string
+}
+interface FrameVersionInfo {
+    id: string
+    frameId: string
+    canvasId: string
+    width: number
+    height: number
+    /** who authored that state, and when it was last written */
+    savedBy: string
+    savedByKind?: ActorKind
+    savedAt: number
+    htmlBytes: number
 }
 type ActorKind = "user" | "agent"
 type FrameChange = {
@@ -133,6 +177,12 @@ type FrameEdit =
     | {
           type: "update"
           patch: FramePatch
+          /** Refuse the write unless the frame is still at this version. */
+          expectedUpdatedAt?: number
+          /** The HTML change only marks elements up (a `data-doop-id` stamp), so sign-off stands. */
+          annotation?: boolean
+          /** A deliberate whole-document write: it always opens a design-history burst. */
+          replace?: boolean
       }
     | {
           type: "replace"
@@ -155,13 +205,19 @@ type FrameMetadata$1 = {
     readOnly: boolean
     accessVersion?: number
 }
-type FramePatch = Partial<Pick<Frame, "name" | "pageId" | "x" | "y" | "width" | "height" | "html">>
+type FramePatch = Partial<
+    Pick<Frame, "name" | "pageId" | "x" | "y" | "width" | "height" | "html" | "hidden" | "locked" | "approval">
+>
 type FrameSnapshot = {
     type: "frame-snapshot"
     revision: number
     frame: Frame | null
     deleted: boolean
     activity: ActivityItem[]
+}
+type FrameWriteConflict = {
+    type: "conflict"
+    frame: Frame
 }
 type IndexCommand = {
     type: "snapshot"

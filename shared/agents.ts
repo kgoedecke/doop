@@ -128,7 +128,7 @@ export function mentionsFor(role: AgentRole): string[] {
 }
 
 /** Every role a piece of text @mentions, in order of first appearance and
- *  without repeats — a chat message's pipeline. */
+ *  without repeats. */
 export function mentionedRoles(text: string): AgentRole[] {
   const found: { role: AgentRole; at: number }[] = []
   for (const role of AGENT_ROLES) {
@@ -145,14 +145,4 @@ export function mentionedRoles(text: string): AgentRole[] {
 /** The role a piece of text @mentions, if any. First mention wins. */
 export function mentionedRole(text: string): AgentRole | undefined {
   return mentionedRoles(text)[0]
-}
-
-/** The text with every resident @mention taken out — what the agent is
- *  actually asked to do, without its own name in the brief. */
-export function stripMentions(text: string): string {
-  let out = text
-  for (const role of AGENT_ROLES) {
-    for (const mention of mentionsFor(role)) out = out.replace(new RegExp(`@${mention}\\b`, 'gi'), '')
-  }
-  return out.replace(/[ \t]{2,}/g, ' ').trim()
 }

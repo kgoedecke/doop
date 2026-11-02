@@ -78,5 +78,5 @@ it('releases a failed creation so its empty page can still be deleted', async ()
   await expect(store.createFrame(id, { name: 'Failed', pageId: 'empty', x: 120 }, 'Alice')).rejects.toThrow(
     'Actor unavailable',
   )
-  expect(await store.setPages(id, canvas.pages!, pages)).toEqual({ pages: canvas.pages })
+  expect(await store.setPages(id, canvas.pages!, pages)).toEqual({ pages: canvas.pages, dropped: [] })
 })

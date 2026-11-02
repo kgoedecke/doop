@@ -1,0 +1,16 @@
+{
+  "name": "doop",
+  "displayName": "Doop",
+  "version": "0.1.0",
+  "description": "Create and edit HTML designs on a shared canvas with your team and Cursor.",
+  "author": {
+    "name": "Doop"
+  },
+  "homepage": "https://doop.design",
+  "repository": "https://github.com/kgoedecke/doop",
+  "license": "AGPL-3.0-only",
+  "keywords": ["design", "canvas", "html", "multiplayer", "mcp"],
+  "logo": "assets/logo.png",
+  "mcpServers": "./mcp.json",
+  "skills": "./skills/"
+}

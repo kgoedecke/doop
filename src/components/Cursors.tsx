@@ -8,6 +8,7 @@ import { AgentIcon } from './AgentIcon'
 export const Cursors = memo(function Cursors() {
   const cursors = useStore((s) => s.cursors)
   const presences = useStore((s) => s.presences)
+  const peerViewports = useStore((s) => s.peerViewports)
   const activePageId = useStore((s) => s.activePageId)
   const me = getIdentity().clientId
 
@@ -16,7 +17,8 @@ export const Cursors = memo(function Cursors() {
       {Object.entries(cursors).map(([clientId, pos]) => {
         if (clientId === me) return null
         const p = presences[clientId]
-        if (!p || (p.viewport?.pageId && p.viewport.pageId !== activePageId)) return null
+        const pageId = peerViewports[clientId]?.pageId
+        if (!p || (pageId && pageId !== activePageId)) return null
         return (
           <div
             key={clientId}
@@ -33,7 +35,7 @@ export const Cursors = memo(function Cursors() {
               />
             </svg>
             <span
-              className="absolute left-3.5 top-4 whitespace-nowrap rounded-[999px_999px_999px_4px] px-2 py-[3px] text-[11px] font-bold text-white"
+              className="absolute left-3.5 top-4 whitespace-nowrap rounded-[999px_999px_999px_4px] px-2 py-[3px] text-[11px] font-medium text-white"
               style={{ background: p.color }}
             >
               {p.kind === 'agent' && (

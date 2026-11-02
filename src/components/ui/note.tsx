@@ -14,7 +14,7 @@ const noteVariants = cva('leading-[1.45]', {
     },
     size: {
       xs: 'text-[11.5px]',
-      sm: 'text-[13px]',
+      sm: 'text-body',
     },
   },
   defaultVariants: { tone: 'muted', size: 'xs' },

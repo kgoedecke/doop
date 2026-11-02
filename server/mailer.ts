@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import nodemailer from 'nodemailer'
 import type { Transporter } from 'nodemailer'
 
@@ -8,16 +9,16 @@ import type { Transporter } from 'nodemailer'
  * usable in development and small self-hosts without an email provider.
  */
 
-export const mailerConfigured = !!process.env.SMTP_HOST
+export const mailerConfigured = !!env.SMTP_HOST
 
 let transport: Transporter | null = null
 if (mailerConfigured) {
   transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
+    host: env.SMTP_HOST,
+    port: env.SMTP_PORT,
     /* 465 = implicit TLS; anything else negotiates STARTTLS */
-    secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
-    auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+    secure: env.SMTP_SECURE || env.SMTP_PORT === 465,
+    auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
   })
 }
 
@@ -29,7 +30,7 @@ export async function sendMail(opts: { to: string; subject: string; text: string
     return
   }
   await transport.sendMail({
-    from: process.env.EMAIL_FROM || 'doop <no-reply@localhost>',
+    from: env.EMAIL_FROM,
     to: opts.to,
     subject: opts.subject,
     text: opts.text,

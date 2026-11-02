@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
-import type { ClaudeModel, LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
+import type { LocalAgentJob, LocalAgentPreference, LocalAgentResult } from '../shared/localAgent.ts'
 
 export interface LocalHarnessRequest {
   canvasId: string
@@ -10,6 +10,9 @@ export interface LocalHarnessRequest {
   maxTurns: number
   /** Stops this canvas run without canceling other work for the account. */
   isCanceled?: () => boolean
+  /** fires when the run's work is stopped, so the run ends now rather than
+   *  on the next expiry sweep */
+  signal?: AbortSignal
   execute: (block: Anthropic.ToolUseBlockParam) => Promise<Anthropic.ToolResultBlockParam>
 }
 
@@ -46,10 +49,14 @@ export class LocalAgentRuns {
     return run.job
   }
 
-  start(userId: string, model: ClaudeModel, request: LocalHarnessRequest): Promise<LocalAgentResult> {
+  start(
+    userId: string,
+    { model, effort }: Pick<LocalAgentPreference, 'model' | 'effort'>,
+    request: LocalHarnessRequest,
+  ): Promise<LocalAgentResult> {
     const id = randomUUID()
     return new Promise((resolve) => {
-      this.runs.set(id, {
+      const run: Run = {
         userId,
         request,
         resolve,
@@ -61,10 +68,15 @@ export class LocalAgentRuns {
           id,
           token: randomBytes(32).toString('hex'),
           model,
+          ...(effort ? { effort } : {}),
           prompt: request.prompt,
           system: request.system,
           maxTurns: request.maxTurns,
         },
+      }
+      this.runs.set(id, run)
+      request.signal?.addEventListener('abort', () => void this.close(run, { success: false, text: 'Task stopped.' }), {
+        once: true,
       })
     })
   }
@@ -90,11 +102,12 @@ export class LocalAgentRuns {
   async finish(id: string, userId: string, deviceId: string, result: LocalAgentResult) {
     const run = this.runs.get(id)
     if (!run || run.userId !== userId || run.deviceId !== deviceId || run.closing) return false
-    await this.close(run, result)
+    await this.close(run, shellResult(result))
     return true
   }
 
   private async close(run: Run, result: LocalAgentResult) {
+    if (run.closing) return
     run.closing = true
     await run.tail
     this.runs.delete(run.job.id)
@@ -130,6 +143,16 @@ export class LocalAgentRuns {
         ),
     )
     for (const [userId, device] of this.devices) if (now - device.at > 60_000) this.devices.delete(userId)
+  }
+}
+
+/** A desktop shell from before the model aliases refuses them with a bare
+ *  "Invalid model"; say what the person can do about it. */
+function shellResult(result: LocalAgentResult): LocalAgentResult {
+  if (result.success || !/^invalid model$/i.test(result.text.trim())) return result
+  return {
+    success: false,
+    text: 'The Doop desktop app on this device is too old for that model. Update it, or pick a pinned model id in Settings.',
   }
 }
 

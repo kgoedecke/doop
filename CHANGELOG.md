@@ -1,5 +1,240 @@
 # Changelog
 
+## [0.12.0](https://github.com/kgoedecke/doop/compare/v0.11.0...v0.12.0) (2026-10-31)
+
+
+### Features
+
+* **desktop:** sign the Windows app and installer with Azure Artifact Signing ([#273](https://github.com/kgoedecke/doop/issues/273)) ([d47def3](https://github.com/kgoedecke/doop/commit/d47def3382a5080123722c16306c56ada33a04d9))
+
+
+### Bug Fixes
+
+* **desktop:** fetch the Artifact Signing token right after the Azure login ([#276](https://github.com/kgoedecke/doop/issues/276)) ([994e860](https://github.com/kgoedecke/doop/commit/994e860665b248895157f23785c11eba5a0272fc))
+
+## [0.11.0](https://github.com/kgoedecke/doop/compare/v0.10.0...v0.11.0) (2026-10-30)
+
+
+### Features
+
+* **agents:** stop Doop agent tasks mid-flight ([#262](https://github.com/kgoedecke/doop/issues/262)) ([f8ca5bb](https://github.com/kgoedecke/doop/commit/f8ca5bb4bdd7f3cb86a73e2a2f89b6b3ddd23c21))
+* **canvas:** add an Edit / Prototype / Comment mode switch to the tool rail ([#381](https://github.com/kgoedecke/doop/issues/381)) ([be87fb8](https://github.com/kgoedecke/doop/commit/be87fb8440fb75322f163603e27deec68e458983))
+* **comments:** anchor comments and element links by data-doop-id ([#398](https://github.com/kgoedecke/doop/issues/398)) ([18e3c39](https://github.com/kgoedecke/doop/commit/18e3c39e3dee62cfd62195802636a7c28e855f64))
+* **comments:** move a comment pin by drag ([#393](https://github.com/kgoedecke/doop/issues/393)) ([e4d41c5](https://github.com/kgoedecke/doop/commit/e4d41c5e3c8c0c2b8d945a96ab85b72e2a8de0ff))
+* **desktop:** follow new Claude models by alias, and pick the effort ([#251](https://github.com/kgoedecke/doop/issues/251)) ([bfcec7d](https://github.com/kgoedecke/doop/commit/bfcec7d318cf03df440a852844fd0033a05e5e47))
+* **ios:** glass side panels beside the canvas on iPhone Duo ([d6fec6d](https://github.com/kgoedecke/doop/commit/d6fec6d58cdc727e1579f2a6dfa441a08b405de0))
+* **ios:** move page picker and frame count into the canvas actions menu ([#248](https://github.com/kgoedecke/doop/issues/248)) ([21ddd8c](https://github.com/kgoedecke/doop/commit/21ddd8c7f79780550aaa7f7d48d02416f81969dc))
+* **ios:** pages and people pickers, drop the canvas status row ([f4968e4](https://github.com/kgoedecke/doop/commit/f4968e42cf8dfbba61e6494152ae0c918bf06652))
+* **ios:** put the canvas tools in a system side rail ([7a87238](https://github.com/kgoedecke/doop/commit/7a87238b5d8ec676ef8f3861484994b4d1d45d32))
+* **layers:** drag layers between frames and onto the canvas ([#380](https://github.com/kgoedecke/doop/issues/380)) ([8ad1742](https://github.com/kgoedecke/doop/commit/8ad17428f96c49f7430501a424755def291c1e85))
+* **models:** discover ChatGPT subscription models from the Codex catalog ([#250](https://github.com/kgoedecke/doop/issues/250)) ([ad028ab](https://github.com/kgoedecke/doop/commit/ad028ab9ae2a0e2bd26c3f2718361e32d48e2b58))
+* **models:** let users pick the OpenAI reasoning effort ([#246](https://github.com/kgoedecke/doop/issues/246)) ([b28219a](https://github.com/kgoedecke/doop/commit/b28219a779169b53303aec48e8cd45c0e555e042))
+
+
+### Bug Fixes
+
+* **activity:** show why a card failed, not its whole brief ([#382](https://github.com/kgoedecke/doop/issues/382)) ([87aa8f8](https://github.com/kgoedecke/doop/commit/87aa8f8dd13ea13b982fb624a240f1c0d1283e69))
+* **canvas:** give frames corner grips, a size badge and a 1px floor ([#379](https://github.com/kgoedecke/doop/issues/379)) ([88e54bb](https://github.com/kgoedecke/doop/commit/88e54bb3a60140526d3a3953f21e6e78f0a63a53))
+* **canvas:** hit-test layer drags on the frame's current document ([5802eb7](https://github.com/kgoedecke/doop/commit/5802eb7401fc32f3c3f23fe2c2c97584359c575f))
+* **canvas:** keep agent chips visible on zoomed-out frames ([#265](https://github.com/kgoedecke/doop/issues/265)) ([5eb27d6](https://github.com/kgoedecke/doop/commit/5eb27d66155160adeb4443d6b92d1d7173e8f248))
+* **canvas:** stack a frame's name with its own frame ([#387](https://github.com/kgoedecke/doop/issues/387)) ([f7d1da2](https://github.com/kgoedecke/doop/commit/f7d1da2e20fb32c7c00f0ca39d11ae3b7054ab3e))
+* comment anchor races and layer-carry edge cases from the [#261](https://github.com/kgoedecke/doop/issues/261) review ([#263](https://github.com/kgoedecke/doop/issues/263)) ([9319a7c](https://github.com/kgoedecke/doop/commit/9319a7c2c1b3426b3d3529c09d4df6ea2cc26856))
+* **comments:** comment on a frame where no element is under the pointer ([#391](https://github.com/kgoedecke/doop/issues/391)) ([cbd6de2](https://github.com/kgoedecke/doop/commit/cbd6de2788c820d31903764581e35971ae8d2ba3))
+* **db:** keep integrations.refresh_token in the ported drizzle snapshots ([e43e6cd](https://github.com/kgoedecke/doop/commit/e43e6cdf46169850df9c03a0181ba4665881963a))
+* **desktop:** run the Claude Code the login shell runs, and let Settings choose one ([#271](https://github.com/kgoedecke/doop/issues/271)) ([eaf183b](https://github.com/kgoedecke/doop/commit/eaf183ba852bc078c89ed06ad5d8488c9543e4d2))
+* **desktop:** run the newest Claude Code found, and say when it is too old ([#254](https://github.com/kgoedecke/doop/issues/254)) ([ba7b602](https://github.com/kgoedecke/doop/commit/ba7b6025450fc77b0390e50f145ee8ea67a090f8))
+* **export:** keep a PDF over the frame limit on the checklist ([e70fbab](https://github.com/kgoedecke/doop/commit/e70fbabfbec0c9cef80f96d91733b74111801c9b))
+* **ios:** do not place agents on the first page ([f73f868](https://github.com/kgoedecke/doop/commit/f73f868b32e4c9c6d51d423afcb68afde5a5dc3b))
+* **ios:** keep side-panel inspector drafts on their frame and exports open while busy ([a9b24cc](https://github.com/kgoedecke/doop/commit/a9b24cc9a81e4eda47e539b6999200e58a5e2cb0))
+* **ios:** mask an element's shadow with it ([dc55336](https://github.com/kgoedecke/doop/commit/dc553367d57603203cc1d0d1c6db15caa0c3dbbe))
+* **ios:** paint gradient text and match box-shadow blur to browsers ([fba5e8d](https://github.com/kgoedecke/doop/commit/fba5e8d3932e212f93b573253c2e48d04f7ce16a))
+* **ios:** render sprite SVGs, web fonts and placeholders like the web ([#392](https://github.com/kgoedecke/doop/issues/392)) ([4636a84](https://github.com/kgoedecke/doop/commit/4636a84114a5afd8c91e9210d16df4815c565937))
+* **ios:** show the sign-in button's label in dark mode ([8c7af8b](https://github.com/kgoedecke/doop/commit/8c7af8b40bc6a5be153d748ba654a9be3021c326))
+* **ios:** tile SVG backgrounds and render texture filters ([#378](https://github.com/kgoedecke/doop/issues/378)) ([aba2c97](https://github.com/kgoedecke/doop/commit/aba2c9793344be4a5ae16d0733ed4ddc8e5e6109))
+* **mcp:** make tool annotations match what each tool does ([#266](https://github.com/kgoedecke/doop/issues/266)) ([4b04ac1](https://github.com/kgoedecke/doop/commit/4b04ac14dbd5865652baa9b345e502bac5d8dc90))
+* **prototype:** hand the focus back when an overlay closes ([74961ce](https://github.com/kgoedecke/doop/commit/74961ce04919671f4c4718b55b862b64d84cb4ef))
+* **prototype:** let only the top screen run while overlays are open ([cb7d5b7](https://github.com/kgoedecke/doop/commit/cb7d5b7c6341ff60bcb2eccd3d3ab4e07308304f))
+* **prototype:** point copied pages and canvases at their own frames ([061bc48](https://github.com/kgoedecke/doop/commit/061bc486eb9d30800ebff3e4d9680e3f7c4f365f))
+* **prototype:** remap copied frame targets only inside interaction attributes ([506bc24](https://github.com/kgoedecke/doop/commit/506bc2460a420d1b99b315cfb1417598d169de1b))
+* survive page translation, report auth network errors, ship source maps ([#264](https://github.com/kgoedecke/doop/issues/264)) ([9560cd4](https://github.com/kgoedecke/doop/commit/9560cd4975b064673869e9709f806ae3d7b216f5))
+* **test:** root out the flaky browser tests in CI ([#394](https://github.com/kgoedecke/doop/issues/394)) ([cfd6c22](https://github.com/kgoedecke/doop/commit/cfd6c223635a287c8fe2184e30ba3d8369d58820))
+* **ui:** centre the initials in avatar discs ([#390](https://github.com/kgoedecke/doop/issues/390)) ([5264a8a](https://github.com/kgoedecke/doop/commit/5264a8a3f3e5f42d87a8bbf1beabc16b79e3418f))
+* **ui:** draw icons from the Lucide set instead of text glyphs ([#244](https://github.com/kgoedecke/doop/issues/244)) ([6dedda8](https://github.com/kgoedecke/doop/commit/6dedda83b049626004a4f1db10dc7671d9d2d606))
+
+
+### Performance
+
+* **canvas:** keep peer cameras out of the presences map ([#384](https://github.com/kgoedecke/doop/issues/384)) ([6a54ff5](https://github.com/kgoedecke/doop/commit/6a54ff517685c37302f6cf5e3a411cb3df1bd0bf))
+
+
+### Documentation
+
+* **readme:** bring the README up to date with the open-source build ([#258](https://github.com/kgoedecke/doop/issues/258)) ([a9659ae](https://github.com/kgoedecke/doop/commit/a9659ae76d39511ad5c959fdbb3c42ab3e80bbbe))
+* **readme:** list all 40 MCP tools, prototype tools included ([#256](https://github.com/kgoedecke/doop/issues/256)) ([d261a85](https://github.com/kgoedecke/doop/commit/d261a85d3f9d87ac0653bb8512915f4e5bdff2b9))
+
+## [0.10.0](https://github.com/kgoedecke/doop/compare/v0.9.0...v0.10.0) (2026-10-26)
+
+
+### Features
+
+* **automations:** run workflows when designs are approved ([#358](https://github.com/kgoedecke/doop/issues/358)) ([8df0e89](https://github.com/kgoedecke/doop/commit/8df0e89320745aa0086afc95c2a0e177bfaccbce))
+* **canvas:** add design panel geometry, layout, and appearance controls ([#340](https://github.com/kgoedecke/doop/issues/340)) ([d98df37](https://github.com/kgoedecke/doop/commit/d98df37115931f0e515414ae351232a2afe3f7a0))
+* **canvas:** add element context menus and restrict frame menus to titles ([#351](https://github.com/kgoedecke/doop/issues/351)) ([0c13614](https://github.com/kgoedecke/doop/commit/0c13614de0668adfd442ae23226d0b4430285437))
+* **canvas:** add image fill editor with replacement and sizing ([#361](https://github.com/kgoedecke/doop/issues/361)) ([803a750](https://github.com/kgoedecke/doop/commit/803a75002e3d4c5d5ca09be52b2ac0a2fa335d7a))
+* **canvas:** add ready-for-dev screen approvals ([#353](https://github.com/kgoedecke/doop/issues/353)) ([ded535d](https://github.com/kgoedecke/doop/commit/ded535d882b9c7539bdd7898ef65a5e1a7c99f50))
+* **canvas:** add rulers and draggable snapping guides ([#372](https://github.com/kgoedecke/doop/issues/372)) ([fdbb07e](https://github.com/kgoedecke/doop/commit/fdbb07e562dbe4d4bd89396d778a9af219314be6))
+* **canvas:** clickable prototypes with interactions and a player ([#373](https://github.com/kgoedecke/doop/issues/373)) ([420e177](https://github.com/kgoedecke/doop/commit/420e177043e39f4eb89eaf0ca933c7d9c53268db))
+* **canvas:** copy a frame as PNG from its menu and the inspector ([#219](https://github.com/kgoedecke/doop/issues/219)) ([06169b4](https://github.com/kgoedecke/doop/commit/06169b43a5a50d33d4ed649af27a7d0e46af8be0))
+* **canvas:** copy links to specific frame elements ([#338](https://github.com/kgoedecke/doop/issues/338)) ([81fb23a](https://github.com/kgoedecke/doop/commit/81fb23a5c8cf455548e32661e733bba8e948398a))
+* **canvas:** drag HTML and SVG layers directly on the canvas ([#347](https://github.com/kgoedecke/doop/issues/347)) ([989721c](https://github.com/kgoedecke/doop/commit/989721c7c0dd94aa1490c3c12dac253e24dd4f23))
+* **canvas:** keep zoom sharp up to 800% and steady peer cursors ([#216](https://github.com/kgoedecke/doop/issues/216)) ([aa04e95](https://github.com/kgoedecke/doop/commit/aa04e959bb9dfef75e0abfb6145bb491f817807a))
+* **canvas:** open element properties while editing text ([#226](https://github.com/kgoedecke/doop/issues/226)) ([dcb3a84](https://github.com/kgoedecke/doop/commit/dcb3a84c1449d0304f5dcab5722c04c5ce7c96fb))
+* **canvas:** resize elements inside a frame with drag handles ([#343](https://github.com/kgoedecke/doop/issues/343)) ([f897395](https://github.com/kgoedecke/doop/commit/f897395dd1721f8525b86feb4a4006074ddb7456))
+* **canvas:** resize the Layers and Agents panels ([#225](https://github.com/kgoedecke/doop/issues/225)) ([3b3bd59](https://github.com/kgoedecke/doop/commit/3b3bd595cad5926ed7a73cab821ad4ba20c2771e))
+* **canvas:** select multiple elements in a frame ([#362](https://github.com/kgoedecke/doop/issues/362)) ([98b646a](https://github.com/kgoedecke/doop/commit/98b646a5870c5cc71b348a192784d57fc44f890f))
+* **canvas:** snap dragged elements into DOM layout ([#359](https://github.com/kgoedecke/doop/issues/359)) ([f7e3a19](https://github.com/kgoedecke/doop/commit/f7e3a19516dd6e57b985442b578e9e2002bc304b))
+* **canvas:** use icons in the element toolbar ([#227](https://github.com/kgoedecke/doop/issues/227)) ([7e8a7c6](https://github.com/kgoedecke/doop/commit/7e8a7c60d8f800e74ab3b03785e53eec93414933))
+* **design:** link width and height with an aspect ratio toggle ([#342](https://github.com/kgoedecke/doop/issues/342)) ([8ef7396](https://github.com/kgoedecke/doop/commit/8ef739603fe4b05c4bfdc863ee5b9ff53dfbcdd4))
+* **design:** support dragging numeric field units ([#339](https://github.com/kgoedecke/doop/issues/339)) ([1a3373f](https://github.com/kgoedecke/doop/commit/1a3373fdd9c275be801ea054215c26b4e72d1710))
+* **export:** vector PDF export for frames, selections and pages ([#370](https://github.com/kgoedecke/doop/issues/370)) ([0bd4647](https://github.com/kgoedecke/doop/commit/0bd46479c61eb60ce5dd04ab16f341ace9bc935e))
+* **ios:** add selection action bar and image sharing ([#357](https://github.com/kgoedecke/doop/issues/357)) ([609ce87](https://github.com/kgoedecke/doop/commit/609ce8710257d89de4a680e7bfcb9376c3af1527))
+* **ios:** refine composer and add agent and model pickers ([#238](https://github.com/kgoedecke/doop/issues/238)) ([1cef0cf](https://github.com/kgoedecke/doop/commit/1cef0cf71d5832981097c1e049f3420781e58be4))
+* **models:** discover API-key provider models from their catalogs ([#236](https://github.com/kgoedecke/doop/issues/236)) ([754d6b8](https://github.com/kgoedecke/doop/commit/754d6b8d099b92b341be411f35bab8154ae68cfe))
+* **sharing:** view-only and comment-only share links ([#369](https://github.com/kgoedecke/doop/issues/369)) ([c65183b](https://github.com/kgoedecke/doop/commit/c65183b90d4f485f08f729a7e2a110c872279416))
+* **ui:** animate rail icons on hover ([#374](https://github.com/kgoedecke/doop/issues/374)) ([f8c256e](https://github.com/kgoedecke/doop/commit/f8c256eec3aad00c235d1464291553920efca8f9))
+
+
+### Bug Fixes
+
+* **analytics:** count Google, Microsoft, Apple and SSO signups ([#367](https://github.com/kgoedecke/doop/issues/367)) ([7c2e75e](https://github.com/kgoedecke/doop/commit/7c2e75eec4d406ff2ee275cbc90c04c88eed05dc))
+* **canvas:** add font selector and text alignment controls ([#337](https://github.com/kgoedecke/doop/issues/337)) ([4e3e8b6](https://github.com/kgoedecke/doop/commit/4e3e8b6600d4004d49ca8533621749b367a89a7c))
+* **canvas:** bring the top bar and panel chrome in line with the system ([#231](https://github.com/kgoedecke/doop/issues/231)) ([64d62c4](https://github.com/kgoedecke/doop/commit/64d62c493bc63d69b62a111884e2206350cc8493))
+* **canvas:** drop the "Click any text to edit" note from the edit pill ([2ee9ec4](https://github.com/kgoedecke/doop/commit/2ee9ec4033e8654cf7b83d5cb7cf5a24a3223d15))
+* **canvas:** give the Connect AI button the shadow ring ([#232](https://github.com/kgoedecke/doop/issues/232)) ([bd37598](https://github.com/kgoedecke/doop/commit/bd37598cf5f564b4ff53f1bf3686ed99e25ef70c))
+* **canvas:** hide resize handles for unsupported transforms ([91e8bad](https://github.com/kgoedecke/doop/commit/91e8bad07690410b70dcf446895dbf209dabac6d))
+* **canvas:** keep the follow pill clear of the presence avatars ([#224](https://github.com/kgoedecke/doop/issues/224)) ([4512dae](https://github.com/kgoedecke/doop/commit/4512daef60c53dbe62f6669c0a707a22cabaa22b))
+* **canvas:** keep the hover tag above the selection outline ([#218](https://github.com/kgoedecke/doop/issues/218)) ([0531b70](https://github.com/kgoedecke/doop/commit/0531b70ea127a7390e1d1b2fcbb6ecfc2cafe85c))
+* **canvas:** match the welcome frame's Connect AI chip to the app ([#228](https://github.com/kgoedecke/doop/issues/228)) ([116d6c1](https://github.com/kgoedecke/doop/commit/116d6c166b87d7388297858532698b0707570528))
+* **canvas:** polish the remote-edit flash and selection cues ([#230](https://github.com/kgoedecke/doop/issues/230)) ([70ac16b](https://github.com/kgoedecke/doop/commit/70ac16b49f01289b62928139a7bd758d7dff6b4b))
+* **canvas:** preserve fast element resize gestures ([cb176aa](https://github.com/kgoedecke/doop/commit/cb176aab1d7aef28729a38df6c44a0db49f0edd6))
+* **canvas:** resize flex Fill children with handles ([#211](https://github.com/kgoedecke/doop/issues/211)) ([0ab9cf0](https://github.com/kgoedecke/doop/commit/0ab9cf02386c91e3b55aa1dbc9b51607c4ab18ea))
+* **canvas:** tidy the getting started card ([#229](https://github.com/kgoedecke/doop/issues/229)) ([a4b7ab8](https://github.com/kgoedecke/doop/commit/a4b7ab84e1ac6d5847a30b00d6f1d23482ed5201))
+* **comments:** make resolved replies readable in the panel ([#332](https://github.com/kgoedecke/doop/issues/332)) ([d1f9752](https://github.com/kgoedecke/doop/commit/d1f9752d3c999fd53967a7efacd90a8ed17e5f55))
+* **drawing:** reject conflicting transfer saves and deletes ([#335](https://github.com/kgoedecke/doop/issues/335)) ([2caad52](https://github.com/kgoedecke/doop/commit/2caad52ef7281d8e4ea1eafa2d27f113c86f6bf1))
+* **inspector:** align coordinate and dimension field labels ([#346](https://github.com/kgoedecke/doop/issues/346)) ([3d94cb4](https://github.com/kgoedecke/doop/commit/3d94cb45c427f1c757a60fdbdbf8171b5c20018a))
+* **integrations:** finish OAuth connections started in the desktop app ([#349](https://github.com/kgoedecke/doop/issues/349)) ([c87949b](https://github.com/kgoedecke/doop/commit/c87949bc6037fa791a22f90f1d1057a976c8b08d))
+* **ios:** clip outer box-shadow and outline with clip-path ([#368](https://github.com/kgoedecke/doop/issues/368)) ([bf18156](https://github.com/kgoedecke/doop/commit/bf18156b574a42f96d829f17bdf3349f828eb1f8))
+* **ios:** isolate canvas pages and add page switching ([#348](https://github.com/kgoedecke/doop/issues/348)) ([832427d](https://github.com/kgoedecke/doop/commit/832427df52a0816f024e7598a3623d6a99cbb63c))
+* **ios:** refine canvas interactions and native controls ([#344](https://github.com/kgoedecke/doop/issues/344)) ([bf3ebac](https://github.com/kgoedecke/doop/commit/bf3ebac2b148cd44e03113f6a28132b60ceb65e0))
+* **layers:** preserve visibility during inline text edits ([1df6c0b](https://github.com/kgoedecke/doop/commit/1df6c0b92de2407e6a31e1ea4785eb13c92994fb))
+* **mcp:** mark save_decision idempotent ([#223](https://github.com/kgoedecke/doop/issues/223)) ([2f2e56b](https://github.com/kgoedecke/doop/commit/2f2e56bd217016e0f3ea6b66ef0d8c8ab73ae743))
+* **pages:** persist hidden and locked frames in page copies ([7f509bd](https://github.com/kgoedecke/doop/commit/7f509bdd8462928a0d3ca9c1bfe2cd01897df12f))
+* **pages:** restore the selected-frame destination picker ([#334](https://github.com/kgoedecke/doop/issues/334)) ([3edf6e8](https://github.com/kgoedecke/doop/commit/3edf6e85dddf15ef88aad711158a5376264cfb8e))
+* **ui:** readable native select options in Windows dark mode ([#363](https://github.com/kgoedecke/doop/issues/363)) ([524d5bc](https://github.com/kgoedecke/doop/commit/524d5bca582a5234b082904623965225ee7f41d7))
+* **ui:** replace window.confirm with ConfirmDialog for destructive settings actions ([#205](https://github.com/kgoedecke/doop/issues/205)) ([2f88fa9](https://github.com/kgoedecke/doop/commit/2f88fa9014118b8434fe0b36877d7641c80a5c54))
+
+
+### Documentation
+
+* refresh the README visuals and add agents and integrations ([#207](https://github.com/kgoedecke/doop/issues/207)) ([74e7eb4](https://github.com/kgoedecke/doop/commit/74e7eb4680ee34b05c1f9f1eb046f687f621ccd5))
+
+## [0.9.0](https://github.com/kgoedecke/doop/compare/v0.8.0...v0.9.0) (2026-10-21)
+
+
+### Features
+
+* **agents:** dock the "Design it" composer in the agents tab instead of a floating bar ([#277](https://github.com/kgoedecke/doop/issues/277)) ([361ada6](https://github.com/kgoedecke/doop/commit/361ada6abbea29709634c68d58691d58adb97e4b))
+* **auth:** land social and SSO signups on their first canvas ([#245](https://github.com/kgoedecke/doop/issues/245)) ([c32df65](https://github.com/kgoedecke/doop/commit/c32df6571e7bdebbcc40331ad4848a752d1aa8b9))
+* **auth:** sign in with Apple on the web and natively on iOS ([#263](https://github.com/kgoedecke/doop/issues/263)) ([8397b1e](https://github.com/kgoedecke/doop/commit/8397b1eb6171d7c9a2a54e9bdd18ca9751cee957))
+* **canvas:** ⌘. hides all panels and toolbars, Figma-style ([#274](https://github.com/kgoedecke/doop/issues/274)) ([8fb92e5](https://github.com/kgoedecke/doop/commit/8fb92e55904dd7506f46c248c9245e804b97d0ec))
+* **canvas:** add drawing tools to the bottom toolbar ([#292](https://github.com/kgoedecke/doop/issues/292)) ([9a771f5](https://github.com/kgoedecke/doop/commit/9a771f58cd6d9f60bad1ef837c4efbe0c8fd3a72))
+* **canvas:** bottom toolbar with select, hand and comment tools ([#275](https://github.com/kgoedecke/doop/issues/275)) ([210525a](https://github.com/kgoedecke/doop/commit/210525ab70a535164c6b0759e3afd79285711a6e))
+* **canvas:** draw Bézier curves and move elements between frames ([#293](https://github.com/kgoedecke/doop/issues/293)) ([b611204](https://github.com/kgoedecke/doop/commit/b6112043749d61771130f099e07b3338b0588c97))
+* **canvas:** replace chat with a comments panel and drop the chat data model ([#272](https://github.com/kgoedecke/doop/issues/272)) ([abe2fa5](https://github.com/kgoedecke/doop/commit/abe2fa53c67bba80f1b3610baeaab4743d0685bf))
+* **canvas:** snap and edit vector path anchors ([#295](https://github.com/kgoedecke/doop/issues/295)) ([7e24f96](https://github.com/kgoedecke/doop/commit/7e24f96df4b420324c678d4263adf596a080f185))
+* **canvas:** zoom controls move to the bottom-right with a zoom menu on the percentage ([#271](https://github.com/kgoedecke/doop/issues/271)) ([5058e61](https://github.com/kgoedecke/doop/commit/5058e61341e170213a4cf45001b1137285930d69))
+* **claude:** add direct connector setup and desktop extension ([#280](https://github.com/kgoedecke/doop/issues/280)) ([d058f12](https://github.com/kgoedecke/doop/commit/d058f123b831949725f87654148401b0d1cc1301))
+* **comments:** comment cursor and comments anywhere on the canvas ([#290](https://github.com/kgoedecke/doop/issues/290)) ([a880ff8](https://github.com/kgoedecke/doop/commit/a880ff822a59f579bd1dbabf45735bbab31e2669))
+* **connect:** add Cursor plugin and ChatGPT setup ([#281](https://github.com/kgoedecke/doop/issues/281)) ([1881b5e](https://github.com/kgoedecke/doop/commit/1881b5e82d295f154a2aa1e355e7a7f5372ce529))
+* **desktop:** add automatic Codex MCP setup ([#289](https://github.com/kgoedecke/doop/issues/289)) ([3b5b090](https://github.com/kgoedecke/doop/commit/3b5b0906a932d1381c713ca9b7fb020553151ea5))
+* **editor:** getting-started panel sits bottom left of the canvas ([#306](https://github.com/kgoedecke/doop/issues/306)) ([83f2f95](https://github.com/kgoedecke/doop/commit/83f2f955a1f2f506ba0f762b6ae2a340fedc61b5))
+* **editor:** help button in the side rail with Docs and Contact support ([c77801f](https://github.com/kgoedecke/doop/commit/c77801f9af2e66b549130c806c72577bcd6bc8c7))
+* **editor:** the tool rail's active fill slides between tools ([#303](https://github.com/kgoedecke/doop/issues/303)) ([9abe6b3](https://github.com/kgoedecke/doop/commit/9abe6b38f6e04fa7814f5095d09d04813ba1cdba))
+* **editor:** white design system refresh for the canvas editor ([#300](https://github.com/kgoedecke/doop/issues/300)) ([8dc2269](https://github.com/kgoedecke/doop/commit/8dc226974dd18f5a7f287d93def47da2111e7120))
+* **frames:** add frame version history with restore ([#258](https://github.com/kgoedecke/doop/issues/258)) ([a30bb35](https://github.com/kgoedecke/doop/commit/a30bb35ed37cda872e3215f4fb34a8898ed8a102))
+* **home:** new home with prompt composer, shared rail and canvas tiles ([#307](https://github.com/kgoedecke/doop/issues/307)) ([ba97429](https://github.com/kgoedecke/doop/commit/ba97429662cb148e6377dfc4356fe8174a87a617))
+* **ios:** lighter dark canvas and selection-scoped prompts ([c2db870](https://github.com/kgoedecke/doop/commit/c2db870afa61dfddc5db253723c9d3c5364af139))
+* **ios:** sign in with Google, Microsoft and SSO ([#259](https://github.com/kgoedecke/doop/issues/259)) ([2958a9c](https://github.com/kgoedecke/doop/commit/2958a9c8e039e78a0d464da7724d8e7e11ecfbdb))
+* **ios:** snap dragged frames to alignment guides ([#257](https://github.com/kgoedecke/doop/issues/257)) ([4c28b38](https://github.com/kgoedecke/doop/commit/4c28b38a8814815d8df641badef23491a922d325))
+* **layers:** a Layers header like the right-hand panel ([#291](https://github.com/kgoedecke/doop/issues/291)) ([b31f7e0](https://github.com/kgoedecke/doop/commit/b31f7e06ba37896de684cb035850fefee8253269))
+* **layers:** eye toggle to hide frames and layers from the layers panel ([#276](https://github.com/kgoedecke/doop/issues/276)) ([e829182](https://github.com/kgoedecke/doop/commit/e82918226458d0eb6ea75368c6995c48e40341c7))
+* **layers:** lock frames and layers ([#278](https://github.com/kgoedecke/doop/issues/278)) ([cd0b827](https://github.com/kgoedecke/doop/commit/cd0b827777ac2054abdc7d8db334aa1699484821))
+* **layers:** pages above frames, search at the bottom, no hints or counter ([#288](https://github.com/kgoedecke/doop/issues/288)) ([de4390c](https://github.com/kgoedecke/doop/commit/de4390c0e80e697d90c12e1849f97c7c04c63e1b))
+* **mcp:** make Doop a ChatGPT app with an inline frame preview card ([#264](https://github.com/kgoedecke/doop/issues/264)) ([35579dd](https://github.com/kgoedecke/doop/commit/35579dd3f753797a05aa2c0f9c769aee56117578))
+* **pages:** duplicate page from the context menu ([#273](https://github.com/kgoedecke/doop/issues/273)) ([ad62ebd](https://github.com/kgoedecke/doop/commit/ad62ebdb380e5bc5d58f624f706bc9bb17e92213))
+* **panel:** icon tabs in the side panel, the active one unfolds its label ([#284](https://github.com/kgoedecke/doop/issues/284)) ([8251a12](https://github.com/kgoedecke/doop/commit/8251a12f94da8951607794863ec494e7c3a7776a))
+* **slack:** add the Doop Slack agent ([#256](https://github.com/kgoedecke/doop/issues/256)) ([8a54d79](https://github.com/kgoedecke/doop/commit/8a54d7971a7f1c8d34fe7c9dd199d60d61a1ec05))
+* **ui:** component layer for every dashboard screen ([#325](https://github.com/kgoedecke/doop/issues/325)) ([07af1be](https://github.com/kgoedecke/doop/commit/07af1be3562b21eabcd9470f0ec5f03521469e9b))
+* **ui:** component layer for the dashboard chrome ([03b2599](https://github.com/kgoedecke/doop/commit/03b259945c980d3aa4bd431cc8405fc897a8b1ae))
+* **ui:** modals open over 250ms from 96% and close over 150ms ([#304](https://github.com/kgoedecke/doop/issues/304)) ([9bcf1ec](https://github.com/kgoedecke/doop/commit/9bcf1ec16e8b5164a21facdd52003fc909eb305d))
+* **ui:** named type scale and corner shapes in the design system ([#308](https://github.com/kgoedecke/doop/issues/308)) ([0a5a78e](https://github.com/kgoedecke/doop/commit/0a5a78efe95c5ae43c50b601f80de66004504efb))
+* **ui:** quieter modal chrome ([#305](https://github.com/kgoedecke/doop/issues/305)) ([408050d](https://github.com/kgoedecke/doop/commit/408050db3aade3f7d77899b4075f5a531d1b3095))
+* **ui:** storybook catalogue of the design system ([cb6d3d6](https://github.com/kgoedecke/doop/commit/cb6d3d68ab0f633be8e153db1bee3aaf694106c7))
+
+
+### Bug Fixes
+
+* **agents:** refuse and stop work for a banned installer ([0d087c6](https://github.com/kgoedecke/doop/commit/0d087c6946623b74bcadd065ec7fe289776956c0))
+* **agents:** time a run out from dispatch, not from the request's arrival ([faf4528](https://github.com/kgoedecke/doop/commit/faf45285d4b7e7c83084ad75ab6ed9daf861fed7))
+* **auth:** disconnect the Slack and Linear agents when an account is deleted ([63139ed](https://github.com/kgoedecke/doop/commit/63139ed8b213dcb483ac2355c7086ea9e5945066))
+* **build:** resolve Claude extension dependencies under Bun ([#283](https://github.com/kgoedecke/doop/issues/283)) ([a4c54d5](https://github.com/kgoedecke/doop/commit/a4c54d5533b2a193be629a528ccb9cd3846723e6))
+* **canvas:** carry body attributes into the frame runtime ([#326](https://github.com/kgoedecke/doop/issues/326)) ([e56ac62](https://github.com/kgoedecke/doop/commit/e56ac625f1e2392adce364e880e85653a9167376))
+* **canvas:** crisp-render zoom keeps a frame's viewport units intact ([#329](https://github.com/kgoedecke/doop/issues/329)) ([23e4e06](https://github.com/kgoedecke/doop/commit/23e4e06c9763f259c138b1cfceffb0997d2a7057))
+* **canvas:** keep contact support chat open ([#328](https://github.com/kgoedecke/doop/issues/328)) ([f097917](https://github.com/kgoedecke/doop/commit/f0979178acb74553a6e4e0c2d16b9cb031a15ba5))
+* **canvas:** slim path editing guides and handles ([#296](https://github.com/kgoedecke/doop/issues/296)) ([6e155c9](https://github.com/kgoedecke/doop/commit/6e155c938fbbfbb8771ae063747b877e9f0454d0))
+* **canvas:** the Select tool keeps the arrow cursor over frames ([#287](https://github.com/kgoedecke/doop/issues/287)) ([2c35f3c](https://github.com/kgoedecke/doop/commit/2c35f3ca80f513a9f09af227e8c0149519338769))
+* **chatgpt:** no blank card on create_frame, placeholder for empty frames ([#267](https://github.com/kgoedecke/doop/issues/267)) ([83b96a0](https://github.com/kgoedecke/doop/commit/83b96a0fefc453ee4c1d1cfe10069a43774f981c))
+* **comments:** the comment UI keeps its screen size at every zoom ([#286](https://github.com/kgoedecke/doop/issues/286)) ([fc3005f](https://github.com/kgoedecke/doop/commit/fc3005f21d7e4d2c657348b31059d06112959bd5))
+* **editor:** no names on layer rows, even gap in the online pill ([43cb94a](https://github.com/kgoedecke/doop/commit/43cb94ae5ee6b9a57ccb64883f776e52c84bab45))
+* **editor:** no tooltips on the layer row eye and lock ([5310393](https://github.com/kgoedecke/doop/commit/53103931963c534ba72a35eb78143566690ad61d))
+* **editor:** support chat bubble stays off the canvas editor ([a13eb55](https://github.com/kgoedecke/doop/commit/a13eb5562c0af99685fb582fb48f81048d0786fa))
+* **ios:** hold the pinch anchor when a finger lifts and snap borders at every zoom ([#262](https://github.com/kgoedecke/doop/issues/262)) ([2758f4b](https://github.com/kgoedecke/doop/commit/2758f4be4429824d331813ef43aca2a75849703b))
+* **ios:** stop false connection interruption loops ([#268](https://github.com/kgoedecke/doop/issues/268)) ([89fd9b1](https://github.com/kgoedecke/doop/commit/89fd9b1d32e1a1a9a13b24223650bc1bf4c03e96))
+* **mcp:** prime the screenshot cache from a frame snapshot ([9209c89](https://github.com/kgoedecke/doop/commit/9209c89c651c5686895dded792ab03f69baabc6a))
+* **pages:** page rename input text was invisible in light mode ([#270](https://github.com/kgoedecke/doop/issues/270)) ([ed23d23](https://github.com/kgoedecke/doop/commit/ed23d230c926e17e422ef0b2d768f4e538307824))
+* **slack:** join an early follow-up to the thread's first request ([1e85e62](https://github.com/kgoedecke/doop/commit/1e85e6282ac6387d3fd730e517fe2f4d17ce53aa))
+* **tests:** keep the test harness off the live PostHog project ([#327](https://github.com/kgoedecke/doop/issues/327)) ([0afa052](https://github.com/kgoedecke/doop/commit/0afa05269f2bfda1b5e76ad34de39f5aef17571f))
+* **ui:** phone dashboard opens the rail as a drawer ([#313](https://github.com/kgoedecke/doop/issues/313)) ([38e45fe](https://github.com/kgoedecke/doop/commit/38e45fe450a89b6f4da03c4bdb83c7af44905a7c))
+
+## [0.8.0](https://github.com/kgoedecke/doop/compare/v0.7.0...v0.8.0) (2026-10-13)
+
+
+### Features
+
+* **canvas:** add named pages within canvases ([#235](https://github.com/kgoedecke/doop/issues/235)) ([0e3484c](https://github.com/kgoedecke/doop/commit/0e3484cfcbb8f60b17ffcb188a6dbe16590f0a48))
+* **comments:** email collaborators about new comments and replies ([e402606](https://github.com/kgoedecke/doop/commit/e402606987c4f1c3e267679753155485c41af107))
+* **connect:** pick the agent first in Connect AI, nudge to connect a plan from the prompt bar ([#226](https://github.com/kgoedecke/doop/issues/226)) ([aa1442b](https://github.com/kgoedecke/doop/commit/aa1442bc9aa3e836fbe6025e6ad3ad85461e9c70))
+* **ios:** add native app with agent status and Live Activities ([#173](https://github.com/kgoedecke/doop/issues/173)) ([94afcd7](https://github.com/kgoedecke/doop/commit/94afcd75b12de12c9fab84898b8716fdfb010453))
+* **ios:** end Live Activities as soon as the app sees the task is over ([#243](https://github.com/kgoedecke/doop/issues/243)) ([6f1aabf](https://github.com/kgoedecke/doop/commit/6f1aabf4316167bc0502f8e165ca3b09a0c4e56d))
+* **ios:** redesign Live Activity with doop logo and step log ([#241](https://github.com/kgoedecke/doop/issues/241)) ([fa2a02a](https://github.com/kgoedecke/doop/commit/fa2a02a71c8afc4eafa5bfecc6ebe4e6385321e0))
+* **server:** make per-tool rate limits configurable via env vars ([#176](https://github.com/kgoedecke/doop/issues/176)) ([a7322df](https://github.com/kgoedecke/doop/commit/a7322df187e338007efdc7c067fc53329264f66b))
+* **ui:** dark mode with theme tokens, zero-flash boot and contrast fixes ([#164](https://github.com/kgoedecke/doop/issues/164)) ([1a3c3a6](https://github.com/kgoedecke/doop/commit/1a3c3a6678d88e30d3359a305bdcd64fd2fee625))
+* **webhooks:** add per-user outbound webhooks for canvas events ([#230](https://github.com/kgoedecke/doop/issues/230)) ([74df768](https://github.com/kgoedecke/doop/commit/74df76835554593a7dd2f7b7e583c232e21ba863))
+
+
+### Bug Fixes
+
+* **agent:** recover interrupted model streams ([#223](https://github.com/kgoedecke/doop/issues/223)) ([67ee169](https://github.com/kgoedecke/doop/commit/67ee169b431859774b3a186bdbde49f233c373a2))
+* **identity:** keep one client id when localStorage writes throw ([a939c69](https://github.com/kgoedecke/doop/commit/a939c690f2787f1beb61c272b144808f7c3e5cdb))
+* **integrations:** stop the Linear tile shrinking in Safari ([#227](https://github.com/kgoedecke/doop/issues/227)) ([e1f3861](https://github.com/kgoedecke/doop/commit/e1f3861d6af6bf6b7a06b476b2cb67bc5e4cf8d1))
+* **ios:** only reconcile activities open before the fetch ([1e9136d](https://github.com/kgoedecke/doop/commit/1e9136dc0a837452821c837c0ea6cd7c9d140fb8))
+* **ios:** pick the APNs environment from the provisioning profile ([#237](https://github.com/kgoedecke/doop/issues/237)) ([32f62a2](https://github.com/kgoedecke/doop/commit/32f62a25f95672107529c4db1ab94a9255a50df3))
+* **live-activities:** log every push outcome ([#240](https://github.com/kgoedecke/doop/issues/240)) ([9036777](https://github.com/kgoedecke/doop/commit/90367770441e8f8649b83135e40ba603518e755f))
+* **live-activities:** log registration requests ahead of auth ([#238](https://github.com/kgoedecke/doop/issues/238)) ([ce76cb7](https://github.com/kgoedecke/doop/commit/ce76cb75dd4a93ea00f428c1b05834db4e18170b))
+* **live-activities:** register push-to-start tokens on their own route ([#236](https://github.com/kgoedecke/doop/issues/236)) ([5be9651](https://github.com/kgoedecke/doop/commit/5be9651b0880a5a79a179ba10f599f4425e5ab92))
+* **pages:** rehome frames whose page is gone on boot ([178dff9](https://github.com/kgoedecke/doop/commit/178dff9100ddb9b244ae94423b5a91e9ee435f7d))
+* **ui:** use theme colors in element action popover ([1c20765](https://github.com/kgoedecke/doop/commit/1c2076529fc583a803f9becf0548b694509b18aa))
+
 ## [0.7.0](https://github.com/kgoedecke/doop/compare/v0.6.0...v0.7.0) (2026-10-01)
 
 

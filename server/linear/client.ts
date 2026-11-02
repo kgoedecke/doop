@@ -1,3 +1,4 @@
+import { env } from '../env.ts'
 import { z } from 'zod'
 
 export class LinearError extends Error {
@@ -18,7 +19,7 @@ export async function linearQuery<T>(
 ): Promise<T> {
   let response: Response
   try {
-    response = await fetch(process.env.LINEAR_API_URL || 'https://api.linear.app/graphql', {
+    response = await fetch(env.LINEAR_API_URL, {
       method: 'POST',
       headers: { Authorization: token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables }),

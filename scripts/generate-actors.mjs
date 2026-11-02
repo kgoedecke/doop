@@ -10,6 +10,15 @@ import { ActorCompiler } from 'durable-actors/compiler'
 const root = fileURLToPath(new URL('../', import.meta.url))
 const output = path.join(root, 'generated/actors')
 
+/** Every file under `dir`, as paths relative to it. */
+async function listFiles(dir) {
+  const entries = await readdir(dir, { recursive: true, withFileTypes: true })
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.relative(dir, path.join(entry.parentPath, entry.name)))
+    .sort()
+}
+
 export async function generateActors(check = false) {
   const contract = new ActorCompiler().compileContract(path.join(root, 'src/actor.ts'))
   const publication = JSON.stringify({
@@ -40,15 +49,18 @@ export async function generateActors(check = false) {
       child.once('exit', resolve)
     })
     if (code !== 0) throw new Error('Actor generation failed')
-    const files = await readdir(staging)
-    const existing = await readdir(output).catch(() => [])
-    if (existing.some((name) => !files.includes(name))) throw new Error('Unexpected files in generated/actors')
-    if (!check) await mkdir(output, { recursive: true })
+    const files = await listFiles(staging)
+    const existing = await listFiles(output).catch(() => [])
+    const unexpected = existing.filter((name) => !files.includes(name))
+    if (check && unexpected.length) throw new Error(`Unexpected files in generated/actors: ${unexpected.join(', ')}`)
+    // The generator's output set changes between SDK versions; drop files it no longer writes.
+    for (const file of unexpected) await rm(path.join(output, file))
     for (const file of files) {
       const expected = await readFile(path.join(staging, file), 'utf8')
       const actual = await readFile(path.join(output, file), 'utf8').catch(() => undefined)
       if (expected === actual) continue
       if (check) throw new Error(`Stale generated actor client: ${file}. Run bun run actors:generate.`)
+      await mkdir(path.dirname(path.join(output, file)), { recursive: true })
       await writeFile(path.join(output, file), expected)
     }
     console.log(`[actors] Generated client ${check ? 'is current' : 'updated'}.`)

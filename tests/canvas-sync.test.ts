@@ -42,7 +42,7 @@ let canvas: Canvas
 const sockets: WebSocket[] = []
 
 beforeEach(async () => {
-  server = await startServer(await port(), { ADMIN_EMAILS: 'admin@frame-actors.test' })
+  server = await startServer({ ADMIN_EMAILS: 'admin@frame-actors.test' })
   owner = await new Client(server).signUp('owner@frame-actors.test', 'Owner')
   canvas = await json<Canvas>(owner.post('/api/canvases', { name: 'Canvas' }))
 }, 70_000)
@@ -61,7 +61,8 @@ async function restartServer(env: Record<string, string> = {}, whileStopped = as
   server.stop({ keepData: true })
   await server.stopped
   await whileStopped()
-  server = await startServer(await port(), env, dataDir)
+  /* a reboot on the same data dir keeps its port, so cookies and origins stay valid */
+  server = await startServer(env, dataDir)
   owner = new Client(server)
   owner.cookies = new Map(cookies)
 }

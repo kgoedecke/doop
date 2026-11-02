@@ -1,19 +1,22 @@
 import { nanoid } from 'nanoid'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
+import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type {
   ActivityItem,
+  ActorKind,
   AgentTask,
   CardScope,
   Canvas,
-  ChatMessage,
   DesignDecision,
   ElementComment,
-  GuidelineDoc,
   Frame,
+  FrameVersion,
+  FrameVersionInfo,
+  GuidelineDoc,
   MemoryProposal,
   MemoryReference,
   RepoCardKind,
@@ -33,8 +36,11 @@ function swallow(p: Promise<unknown>) {
   void write.finally(() => pendingWrites.delete(write))
 }
 
-/** Finish metadata and collaboration writes before a normal shutdown. */
+/** Finish metadata, collaboration and queued history writes before a normal
+ *  shutdown: a design must not survive a restart without its history.
+ *  Frame content lives in actors. */
 export async function flush(): Promise<void> {
+  await pendingVersionWrites(() => true)
   while (pendingWrites.size) await Promise.all(pendingWrites)
 }
 
@@ -43,8 +49,9 @@ function canvasColumns(c: Canvas) {
   return {
     name: c.name,
     pages: c.pages ?? null,
+    guides: c.guides?.length ? c.guides : null,
     ownerId: c.ownerId ?? null,
-    linkAccess: c.linkAccess ?? null,
+    linkAccess: storedLinkAccess(c.linkAccess) ?? null,
     publishedAt: c.publishedAt ?? null,
     description: c.description ?? null,
     category: c.category ?? null,
@@ -249,19 +256,158 @@ export function saveProposal(canvasId: string, p: MemoryProposal) {
   )
 }
 
+/* Frame design history: one row per burst boundary (see actions.ts), newest
+   kept to MAX_FRAME_VERSIONS per frame. Appends are fire-and-forget like every
+   other write; reads happen only when someone opens the history. */
+const MAX_FRAME_VERSIONS = 50
+
+/* A version write reads the newest row before it inserts, so a frame's
+   deletion must queue behind its pending writes (and they behind each
+   other), or a late insert could put back history the delete just removed.
+   One queue per frame; deleteCanvas waits for every frame of the canvas. */
+const versionWrites = new Map<string, { canvasId: string; queued: Promise<unknown> }>()
+
+function queueVersionWrite(frameId: string, canvasId: string, work: () => Promise<unknown>) {
+  const previous = versionWrites.get(frameId)?.queued ?? Promise.resolve()
+  const queued = previous.then(work, work)
+  versionWrites.set(frameId, { canvasId, queued })
+  swallow(queued.finally(() => versionWrites.get(frameId)?.queued === queued && versionWrites.delete(frameId)))
+}
+
+export function saveFrameVersion(version: FrameVersion) {
+  queueVersionWrite(version.frameId, version.canvasId, () => appendFrameVersion(version))
+}
+
+/** Settles once every queued version write the filter picks has landed. */
+function pendingVersionWrites(pick: (frameId: string, canvasId: string) => boolean) {
+  const queued = [...versionWrites].filter(([frameId, e]) => pick(frameId, e.canvasId)).map(([, e]) => e.queued)
+  return Promise.allSettled(queued)
+}
+
+async function appendFrameVersion(version: FrameVersion) {
+  /* a burst that ended where it began (an edit typed and reverted) would
+     snapshot the same state twice — the newest row already holds it. Size
+     counts: the same document at another frame size is a state of its own */
+  const [latest] = await db
+    .select({ html: t.frameVersions.html, width: t.frameVersions.width, height: t.frameVersions.height })
+    .from(t.frameVersions)
+    .where(eq(t.frameVersions.frameId, version.frameId))
+    .orderBy(desc(t.frameVersions.savedAt))
+    .limit(1)
+  if (latest && latest.html === version.html && latest.width === version.width && latest.height === version.height)
+    return
+  await db.insert(t.frameVersions).values({
+    id: version.id,
+    frameId: version.frameId,
+    canvasId: version.canvasId,
+    html: version.html,
+    width: version.width,
+    height: version.height,
+    savedAt: version.savedAt,
+    savedBy: version.savedBy,
+    savedByKind: version.savedByKind ?? null,
+  })
+  const excess = await db
+    .select({ id: t.frameVersions.id })
+    .from(t.frameVersions)
+    .where(eq(t.frameVersions.frameId, version.frameId))
+    .orderBy(desc(t.frameVersions.savedAt))
+    .offset(MAX_FRAME_VERSIONS)
+  if (excess.length) {
+    await db.delete(t.frameVersions).where(
+      inArray(
+        t.frameVersions.id,
+        excess.map((e) => e.id),
+      ),
+    )
+  }
+}
+
+function frameVersionKind(kind: string | null): ActorKind | undefined {
+  return kind === 'user' || kind === 'agent' ? kind : undefined
+}
+
+/** Newest first, without the HTML — the list stays light however large the
+ *  designs are; `getFrameVersion` fetches one in full. */
+export async function listFrameVersions(frameId: string): Promise<FrameVersionInfo[]> {
+  /* a replace files its version behind the response; the list that follows
+     it must show it */
+  await pendingVersionWrites((id) => id === frameId)
+  const rows = await db
+    .select({
+      id: t.frameVersions.id,
+      frameId: t.frameVersions.frameId,
+      canvasId: t.frameVersions.canvasId,
+      width: t.frameVersions.width,
+      height: t.frameVersions.height,
+      savedAt: t.frameVersions.savedAt,
+      savedBy: t.frameVersions.savedBy,
+      savedByKind: t.frameVersions.savedByKind,
+      htmlBytes: sql<number>`length(${t.frameVersions.html})`,
+    })
+    .from(t.frameVersions)
+    .where(eq(t.frameVersions.frameId, frameId))
+    .orderBy(desc(t.frameVersions.savedAt))
+  return rows.map((row) => ({
+    id: row.id,
+    frameId: row.frameId,
+    canvasId: row.canvasId,
+    width: row.width,
+    height: row.height,
+    savedAt: row.savedAt,
+    savedBy: row.savedBy,
+    savedByKind: frameVersionKind(row.savedByKind),
+    htmlBytes: Number(row.htmlBytes),
+  }))
+}
+
+/** One version in full; undefined when the id is unknown OR belongs to
+ *  another frame, so a caller can never read across frames by id alone. */
+export async function getFrameVersion(frameId: string, versionId: string): Promise<FrameVersion | undefined> {
+  const [row] = await db
+    .select()
+    .from(t.frameVersions)
+    .where(and(eq(t.frameVersions.id, versionId), eq(t.frameVersions.frameId, frameId)))
+    .limit(1)
+  if (!row) return undefined
+  return {
+    id: row.id,
+    frameId: row.frameId,
+    canvasId: row.canvasId,
+    width: row.width,
+    height: row.height,
+    savedAt: row.savedAt,
+    savedBy: row.savedBy,
+    savedByKind: frameVersionKind(row.savedByKind),
+    htmlBytes: row.html.length,
+    html: row.html,
+  }
+}
+
 export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.tasks).where(eq(t.tasks.canvasId, canvasId)))
   swallow(db.delete(t.feedback).where(eq(t.feedback.canvasId, canvasId)))
   swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
-  swallow(db.delete(t.chatMessages).where(eq(t.chatMessages.canvasId, canvasId)))
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
+  swallow(
+    pendingVersionWrites((_, c) => c === canvasId).then(() =>
+      db.delete(t.frameVersions).where(eq(t.frameVersions.canvasId, canvasId)),
+    ),
+  )
   swallow(db.delete(t.memoryReferences).where(eq(t.memoryReferences.canvasId, canvasId)))
   swallow(db.delete(t.decisions).where(eq(t.decisions.canvasId, canvasId)))
   swallow(db.delete(t.memoryProposals).where(eq(t.memoryProposals.canvasId, canvasId)))
   swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
   swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
+}
+
+/** A deleted frame takes its design history with it. */
+export function deleteFrameHistory(frameId: string) {
+  queueVersionWrite(frameId, versionWrites.get(frameId)?.canvasId ?? '', () =>
+    db.delete(t.frameVersions).where(eq(t.frameVersions.frameId, frameId)),
+  )
 }
 
 /** The frame/element a prompt card was scoped to, or nothing when the row
@@ -375,12 +521,26 @@ export function saveFeedback(fb: TaskFeedback) {
 }
 
 export function saveComment(c: ElementComment) {
+  swallow(writeComment(c))
+}
+
+/** The comment's write, for a caller that must know it landed. */
+export function saveCommentNow(c: ElementComment): Promise<void> {
+  return writeComment(c)
+}
+
+async function writeComment(c: ElementComment): Promise<void> {
   const row = {
     id: c.id,
     canvasId: c.canvasId,
-    frameId: c.frameId,
-    selector: c.selector,
+    frameId: c.frameId ?? null,
+    elementId: c.elementId ?? null,
+    /* the pre-element-id anchor is spent once the comment is saved again */
+    selector: null,
     snippet: c.snippet,
+    pageId: c.pageId ?? null,
+    x: c.x ?? null,
+    y: c.y ?? null,
     fromName: c.from,
     fromUserId: c.fromUserId ?? null,
     text: c.text,
@@ -395,47 +555,28 @@ export function saveComment(c: ElementComment) {
     resolvedAt: c.resolvedAt ?? null,
     parentId: c.parentId ?? null,
   }
-  swallow(
-    db
-      .insert(t.comments)
-      .values(row)
-      .onConflictDoUpdate({
-        target: t.comments.id,
-        set: {
-          claimedBy: row.claimedBy,
-          claimedAt: row.claimedAt,
-          failedAt: row.failedAt,
-          failureReason: row.failureReason,
-          resolvedBy: row.resolvedBy,
-          resolvedAt: row.resolvedAt,
-        },
-      }),
-  )
-}
-
-export function saveChat(m: ChatMessage) {
-  swallow(
-    db.insert(t.chatMessages).values({
-      id: m.id,
-      canvasId: m.canvasId,
-      fromName: m.from,
-      fromKind: m.fromKind,
-      fromUserId: m.fromUserId ?? null,
-      color: m.color,
-      text: m.text,
-      at: m.at,
-      mentions: m.mentions?.length ? m.mentions.join(',') : null,
-      taskId: m.taskId ?? null,
-      replyToId: m.replyToId ?? null,
-    }),
-  )
-}
-
-/** Messages that fell off the in-memory cap leave the table too, so the
- *  history stays bounded on disk and boot never reads more than it keeps. */
-export function deleteChat(ids: string[]) {
-  if (ids.length === 0) return
-  swallow(db.delete(t.chatMessages).where(inArray(t.chatMessages.id, ids)))
+  await db
+    .insert(t.comments)
+    .values(row)
+    .onConflictDoUpdate({
+      target: t.comments.id,
+      set: {
+        /* a moved thread keeps its id and takes a new anchor */
+        frameId: row.frameId,
+        elementId: row.elementId,
+        selector: row.selector,
+        snippet: row.snippet,
+        pageId: row.pageId,
+        x: row.x,
+        y: row.y,
+        claimedBy: row.claimedBy,
+        claimedAt: row.claimedAt,
+        failedAt: row.failedAt,
+        failureReason: row.failureReason,
+        resolvedBy: row.resolvedBy,
+        resolvedAt: row.resolvedAt,
+      },
+    })
 }
 
 export function saveActivity(canvasId: string, item: ActivityItem) {
@@ -462,15 +603,15 @@ export interface Hydrated {
   tasks: Map<string, AgentTask[]> // canvasId -> newest first
   feedback: Map<string, TaskFeedback[]>
   comments: Map<string, ElementComment[]>
-  chat: Map<string, ChatMessage[]>
+  /** comment id -> the positional CSS path an element comment was anchored
+   *  by before element ids; `backfillElementIds` turns each into a stamp */
+  legacyCommentSelectors: Map<string, string>
   activity: Map<string, ActivityItem[]>
   decisions: Map<string, DesignDecision[]>
   proposals: Map<string, MemoryProposal[]>
 }
 
 const LOG_CAP = 100
-/** the chat keeps more history than the other logs — it is the conversation */
-export const CHAT_LOG_CAP = 300
 
 /** Read-only bridge for existing installs; actors become authoritative on first access. */
 export async function loadLegacyFrameIds(canvasId: string): Promise<string[]> {
@@ -485,8 +626,15 @@ export async function loadLegacyFrameIds(canvasId: string): Promise<string[]> {
 export async function loadLegacyFrame(id: string): Promise<Frame | undefined> {
   const [row] = await db.select().from(t.frames).where(eq(t.frames.id, id))
   if (!row) return undefined
-  const { demo, pageId, ...frame } = row
-  return { ...frame, ...(demo === null ? {} : { demo }), ...(pageId === null ? {} : { pageId }) }
+  const { demo, pageId, hidden, locked, approval, ...frame } = row
+  return {
+    ...frame,
+    ...(demo === null ? {} : { demo }),
+    ...(pageId === null ? {} : { pageId }),
+    ...(hidden ? { hidden } : {}),
+    ...(locked ? { locked } : {}),
+    ...(approval ? { approval } : {}),
+  }
 }
 
 export async function legacyFrameCanvasId(id: string): Promise<string | undefined> {
@@ -510,8 +658,10 @@ export async function loadCanvas(id: string): Promise<Canvas | undefined> {
   return {
     id,
     name: c.name,
+    pages: c.pages ?? undefined,
+    ...(c.guides?.length ? { guides: c.guides } : {}),
     ownerId: c.ownerId ?? undefined,
-    linkAccess: c.linkAccess === 'edit' ? 'edit' : undefined,
+    linkAccess: storedLinkAccess(c.linkAccess),
     publishedAt: c.publishedAt ?? undefined,
     description: c.description ?? undefined,
     category: isCommunityCategory(c.category) ? c.category : undefined,
@@ -540,7 +690,6 @@ export async function hydrate(): Promise<Hydrated> {
     taskRows,
     feedbackRows,
     commentRows,
-    chatRows,
     activityRows,
     guidelineRows,
     referenceRows,
@@ -552,7 +701,6 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.tasks).orderBy(desc(t.tasks.startedAt)),
     db.select().from(t.feedback).orderBy(desc(t.feedback.at)),
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
-    db.select().from(t.chatMessages).orderBy(desc(t.chatMessages.at)),
     db.select().from(t.activity).orderBy(desc(t.activity.at)),
     db.select().from(t.guidelines).orderBy(t.guidelines.name),
     db.select().from(t.memoryReferences).orderBy(desc(t.memoryReferences.pinnedAt)),
@@ -565,8 +713,10 @@ export async function hydrate(): Promise<Hydrated> {
     id: c.id,
     name: c.name,
     pages: c.pages ?? undefined,
+    ...(c.guides?.length ? { guides: c.guides } : {}),
     ownerId: c.ownerId ?? undefined,
-    linkAccess: c.linkAccess === 'edit' ? 'edit' : undefined,
+    /* 'view' / 'comment' / 'edit'; null and anything unknown read as private */
+    linkAccess: storedLinkAccess(c.linkAccess),
     ...(c.publishedAt != null ? { publishedAt: c.publishedAt } : {}),
     ...(c.description ? { description: c.description } : {}),
     ...(isCommunityCategory(c.category) ? { category: c.category } : {}),
@@ -688,9 +838,13 @@ export async function hydrate(): Promise<Hydrated> {
   }
 
   const comments = new Map<string, ElementComment[]>()
+  const legacyCommentSelectors = new Map<string, string>()
   for (const row of commentRows) {
     const list = comments.get(row.canvasId) ?? []
     if (list.length >= LOG_CAP) continue
+    if (row.elementId == null && row.frameId != null && row.selector && row.selector !== 'body') {
+      legacyCommentSelectors.set(row.id, row.selector)
+    }
     const interrupted = row.claimedBy != null && row.resolvedAt == null && row.failedAt == null
     const failedAt = row.failedAt ?? (interrupted ? now : undefined)
     const failureReason = row.failureReason ?? (interrupted ? interruptedReason : undefined)
@@ -698,9 +852,12 @@ export async function hydrate(): Promise<Hydrated> {
     list.push({
       id: row.id,
       canvasId: row.canvasId,
-      frameId: row.frameId,
-      selector: row.selector,
+      ...(row.frameId != null ? { frameId: row.frameId } : {}),
+      ...(row.elementId != null ? { elementId: row.elementId } : {}),
       snippet: row.snippet,
+      ...(row.pageId != null ? { pageId: row.pageId } : {}),
+      ...(row.x != null ? { x: row.x } : {}),
+      ...(row.y != null ? { y: row.y } : {}),
       from: row.fromName,
       ...(row.fromUserId != null ? { fromUserId: row.fromUserId } : {}),
       text: row.text,
@@ -716,26 +873,6 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.parentId != null ? { parentId: row.parentId } : {}),
     })
     comments.set(row.canvasId, list)
-  }
-
-  const chat = new Map<string, ChatMessage[]>()
-  for (const row of chatRows) {
-    const list = chat.get(row.canvasId) ?? []
-    if (list.length >= CHAT_LOG_CAP) continue
-    list.push({
-      id: row.id,
-      canvasId: row.canvasId,
-      from: row.fromName,
-      fromKind: row.fromKind === 'agent' ? 'agent' : 'user',
-      ...(row.fromUserId != null ? { fromUserId: row.fromUserId } : {}),
-      color: row.color,
-      text: row.text,
-      at: row.at,
-      ...(row.mentions ? { mentions: row.mentions.split(',') } : {}),
-      ...(row.taskId != null ? { taskId: row.taskId } : {}),
-      ...(row.replyToId != null ? { replyToId: row.replyToId } : {}),
-    })
-    chat.set(row.canvasId, list)
   }
 
   const activity = new Map<string, ActivityItem[]>()
@@ -791,5 +928,5 @@ export async function hydrate(): Promise<Hydrated> {
     proposals.set(row.canvasId, list)
   }
 
-  return { canvases, tasks, feedback, comments, chat, activity, decisions, proposals }
+  return { canvases, tasks, feedback, comments, legacyCommentSelectors, activity, decisions, proposals }
 }

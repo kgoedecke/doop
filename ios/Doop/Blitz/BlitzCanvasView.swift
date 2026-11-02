@@ -20,15 +20,20 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private let chrome = CALayer()
     private let selectionOutline = CAShapeLayer()
     private let elementOutline = CAShapeLayer()
+    private let snapGuideLayer = CAShapeLayer()
+    private var snapGuides: [SnapGuide] = []
     private var frames: [String: FrameLayer] = [:]
     private var labels: [String: CATextLayer] = [:]
     private var cursors: [String: CursorLayer] = [:]
     private var zoom: CGFloat = 1
     private var offset = CGPoint(x: 40, y: 80)
     private var fitted = false
+    private var displayedPageID: String?
     private var fitCommand = 0
-    private var drag: (id: String, origin: CGPoint)?
+    private var drag: (id: String, origin: CGPoint, proposedOrigin: CGPoint)?
     private var pinchAnchor = CGPoint.zero
+    /// Fingers in the pinch at the last update; the centroid jumps when one lifts.
+    private var pinchTouches = 0
     private var relayout: DispatchWorkItem?
     private var pendingWakes = Set<Int>()
     private var animationLink: CADisplayLink?
@@ -50,6 +55,9 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         self.model = model
         super.init(frame: .zero)
         backgroundColor = UIColor(named: "CanvasPaper") ?? .systemGroupedBackground
+        // World and chrome are transformed CALayers: without a native mask
+        // they draw over the navigation/status bars even outside this view.
+        clipsToBounds = true
         isMultipleTouchEnabled = true
         world.anchorPoint = .zero
         layer.addSublayer(world)
@@ -63,6 +71,10 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         selectionOutline.strokeColor = UIColor.tintColor.cgColor
         elementOutline.strokeColor = UIColor(red: 0.90, green: 0.33, blue: 0.24, alpha: 1).cgColor
         elementOutline.fillColor = UIColor(red: 0.90, green: 0.33, blue: 0.24, alpha: 0.08).cgColor
+        snapGuideLayer.fillColor = nil
+        snapGuideLayer.strokeColor = UIColor.tintColor.cgColor
+        snapGuideLayer.lineWidth = 1
+        chrome.addSublayer(snapGuideLayer)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
         pan.maximumNumberOfTouches = 1
@@ -90,6 +102,9 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func tearDown() {
+        drag = nil
+        snapGuides = []
+        snapGuideLayer.path = nil
         animationLink?.invalidate()
         animationLink = nil
         BlitzDocument.onWake = nil
@@ -104,8 +119,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         world.bounds = CGRect(origin: .zero, size: bounds.size)
         world.position = .zero
         chrome.frame = bounds
-        if !fitted, let canvas = model.canvas, !canvas.frames.isEmpty {
-            fit(canvas.frames)
+        if !fitted, !model.pageFrames.isEmpty {
+            fit(model.pageFrames)
             rerenderVisible()
         }
         applyTransform()
@@ -119,7 +134,25 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
 
     /// Reconcile layers with the model. Called by SwiftUI on every change.
     func sync() {
-        let current = model.canvas?.frames ?? []
+        let current = model.pageFrames
+        if displayedPageID != model.activePageID {
+            displayedPageID = model.activePageID
+            // A page change can arrive while dragging or while a render is queued.
+            // End the old interaction before fitting or hit-testing the new page.
+            drag = nil
+            snapGuides = []
+            gestureActive = false
+            for recognizer in gestureRecognizers ?? [] {
+                recognizer.isEnabled = false
+                recognizer.isEnabled = true
+            }
+            relayout?.cancel()
+            pendingWakes.removeAll()
+            fitted = false
+            zoom = 1
+            offset = CGPoint(x: 40, y: 80)
+            applyTransform()
+        }
         let ids = Set(current.map(\.id))
         for (id, frame) in frames where !ids.contains(id) {
             frame.cancel()
@@ -130,11 +163,11 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         }
         // Fit before creating layers so the first bitmaps are requested at the
         // fitted density, not at 1:1 for every frame on the board.
-        if !fitted, !current.isEmpty, bounds.width > 0 { fit(current) }
+        if (!fitted || frames.isEmpty), !current.isEmpty, bounds.width > 0 { fit(current) }
         var added = false
         for frame in current {
             if let existing = frames[frame.id] {
-                existing.update(frame)
+                existing.update(frame, preservingOrigin: drag?.id == frame.id)
             } else {
                 let layer = FrameLayer(frame: frame, baseURL: model.client.server.origin)
                 layer.onDocumentRegistered = { [weak self] docID in
@@ -155,6 +188,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                 added = true
             }
         }
+        snapDraggedFrame()
         if added { rerenderVisible() }
         // A collaborator can move or resize an animating frame into view: restart the loop.
         let viewport = toWorldRect(bounds)
@@ -180,13 +214,12 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                     guard let self else { return }
                     let held = self.frames.values.first { $0.rect.contains(CGPoint(x: parts[0] + 1, y: parts[1] + 1)) }
                     canvasLog.info("held camera: \(self.describe(held?.rect ?? .zero), privacy: .public)")
-                    // -pickElement "x,y": select the held frame, turn on Inspect and pick the element at
+                    // -pickElement "x,y": select the held frame and pick the element at
                     // frame-local CSS px (x, y), exactly as a tap inside the frame would.
                     if let held, let pick = UserDefaults.standard.string(forKey: "pickElement") {
                         let p = pick.split(separator: ",").compactMap { Double($0) }
                         guard p.count == 2 else { return }
                         self.model.select(held.id)
-                        self.model.inspecting = true
                         held.pickElement(at: CGPoint(x: p[0], y: p[1])) { [weak self] info, htmlHash in
                             guard let self, htmlHash == held.html.hashValue else { return }
                             if let info, let rect = info.frameRect {
@@ -213,7 +246,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func syncCursors() {
-        let people = model.presences.filter { $0.cursor != nil }
+        let people = model.pagePresences.filter { $0.cursor != nil }
         let ids = Set(people.map(\.clientId))
         for (id, cursor) in cursors where !ids.contains(id) {
             cursor.layer.removeFromSuperlayer()
@@ -315,12 +348,18 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         guard !frames.isEmpty else { zoom = 1; offset = CGPoint(x: 40, y: 80); applyTransform(); return }
         let minX = frames.map(\.x).min()!, minY = frames.map(\.y).min()!
         let maxX = frames.map { $0.x + $0.width }.max()!, maxY = frames.map { $0.y + $0.height }.max()!
-        // Keep fitted frames above the floating prompt and dock.
-        let available = CGSize(width: bounds.width - 48, height: max(120, bounds.height - 200))
+        let viewport = unobscuredViewport
+        let available = viewport.size
         zoom = max(Self.minZoom, min(1, available.width / CGFloat(maxX - minX), available.height / CGFloat(maxY - minY)))
-        offset = CGPoint(x: (bounds.width - CGFloat(maxX - minX) * zoom) / 2 - CGFloat(minX) * zoom,
-                         y: 24 + (available.height - CGFloat(maxY - minY) * zoom) / 2 - CGFloat(minY) * zoom)
+        offset = CGPoint(x: viewport.midX - CGFloat(maxX + minX) * zoom / 2,
+                         y: viewport.midY - CGFloat(maxY + minY) * zoom / 2)
         applyTransform()
+    }
+
+    /// Keep fitted designs clear of the right rail and bottom prompt.
+    private var unobscuredViewport: CGRect {
+        CGRect(x: 24, y: 24, width: max(1, bounds.width - 100),
+               height: max(1, bounds.height - safeAreaInsets.bottom - model.composerHeight - 100))
     }
 
     /// After a zoom change settles, re-render visible frames at the new density.
@@ -366,7 +405,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         return CGRect(x: origin.x, y: origin.y, width: rect.width / zoom, height: rect.height / zoom)
     }
 
-    // MARK: - Chrome (labels, selection, cursors) in screen space
+    // MARK: - Chrome (labels, selection, guides, cursors) in screen space
 
     private func drawChrome() {
         CATransaction.begin()
@@ -400,7 +439,15 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             selectionOutline.isHidden = true
             elementOutline.isHidden = true
         }
-        for person in model.presences {
+        let guidePath = UIBezierPath()
+        for guide in snapGuides {
+            let start = guide.axis == .vertical ? CGPoint(x: guide.at, y: guide.from) : CGPoint(x: guide.from, y: guide.at)
+            let end = guide.axis == .vertical ? CGPoint(x: guide.at, y: guide.to) : CGPoint(x: guide.to, y: guide.at)
+            guidePath.move(to: toScreen(start))
+            guidePath.addLine(to: toScreen(end))
+        }
+        snapGuideLayer.path = snapGuides.isEmpty ? nil : guidePath.cgPath
+        for person in model.pagePresences {
             guard let cursor = cursors[person.clientId], let point = person.cursor else { continue }
             let world = CGPoint(x: point.x, y: point.y)
             cursor.move(to: toScreen(world), world: world)
@@ -410,10 +457,21 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
 
     // MARK: - Gestures
 
+    private func snapDraggedFrame() {
+        guard let drag, let frame = frames[drag.id] else { snapGuides = []; return }
+        // Use the unsnapped finger position on every update so an existing snap
+        // never accumulates into the next movement. Model order breaks ties.
+        let others = model.pageFrames.compactMap { $0.id == drag.id ? nil : frames[$0.id]?.rect }
+        let raw = CGRect(origin: drag.proposedOrigin, size: frame.rect.size)
+        let snapped = FrameSnapping.move(raw, among: others, zoom: zoom)
+        frame.move(to: snapped.rect.origin)
+        snapGuides = snapped.guides
+    }
+
     private func frame(at screenPoint: CGPoint) -> FrameLayer? {
         let point = toWorld(screenPoint)
         // Topmost frame wins: later frames are drawn above earlier ones.
-        return (model.canvas?.frames ?? []).reversed().lazy.compactMap { self.frames[$0.id] }.first { $0.rect.contains(point) }
+        return model.pageFrames.reversed().lazy.compactMap { self.frames[$0.id] }.first { $0.rect.contains(point) }
     }
 
     private func label(at screenPoint: CGPoint) -> String? {
@@ -422,13 +480,21 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func tapped(_ gesture: UITapGestureRecognizer) {
         let point = gesture.location(in: self)
-        if model.inspecting, let id = model.selectedID, let frame = frames[id], frame.rect.contains(toWorld(point)) {
+        // The prompt is a SwiftUI sibling, not a child of this UIView.
+        // End editing in the window without adding a competing tap gesture.
+        window?.endEditing(true)
+        model.selectedElement = nil
+        if let frame = frame(at: point) {
+            let id = frame.id
+            model.select(id)
+            drawChrome()
             let local = toWorld(point)
             let inFrame = CGPoint(x: local.x - frame.rect.minX, y: local.y - frame.rect.minY)
             frame.pickElement(at: inFrame) { [weak self] info, htmlHash in
                 // The HTML moved on while the hit test ran: this result describes an element
                 // that may no longer exist, so it is not selected.
-                guard let self, let info, let rect = info.frameRect, htmlHash == frame.html.hashValue else { return }
+                guard let self, self.model.selectedID == id, let info, let rect = info.frameRect,
+                      htmlHash == frame.html.hashValue else { return }
                 self.model.selectedElement = SelectedElement(frameID: id, nodeID: info.id, selector: info.selector, label: info.label, text: info.text, rect: rect, htmlHash: htmlHash)
                 self.drawChrome()
             }
@@ -442,14 +508,27 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
 
     @objc private func doubleTapped(_ gesture: UITapGestureRecognizer) {
         let point = gesture.location(in: self)
-        if let frame = frame(at: point) {
+        let anchor = toWorld(point)
+        let hit = frame(at: point) ?? label(at: point).flatMap { frames[$0] }
+        window?.endEditing(true)
+        if let frame = hit {
             let padded = frame.rect.insetBy(dx: -frame.rect.width * 0.05, dy: -frame.rect.height * 0.05)
-            zoom = max(Self.minZoom, min(Self.maxZoom, min(bounds.width / padded.width, (bounds.height - 200) / padded.height)))
-            offset = CGPoint(x: (bounds.width - padded.width * zoom) / 2 - padded.minX * zoom,
-                             y: 24 + ((bounds.height - 200) - padded.height * zoom) / 2 - padded.minY * zoom)
+            let viewport = unobscuredViewport
+            let fitZoom = max(Self.minZoom, min(Self.maxZoom, min(viewport.width / padded.width, viewport.height / padded.height)))
+            let detailZoom = min(Self.maxZoom, max(1, fitZoom * 2))
+            // Fitting an already-fitted frame made double-tap look broken.
+            // Zoom into the touched detail, then fit the frame on the next tap.
+            if zoom >= fitZoom * 0.95, zoom < detailZoom * 0.95 {
+                zoom = detailZoom
+                offset = CGPoint(x: point.x - anchor.x * zoom, y: point.y - anchor.y * zoom)
+            } else {
+                zoom = fitZoom
+                offset = CGPoint(x: viewport.midX - padded.midX * zoom,
+                                 y: viewport.midY - padded.midY * zoom)
+            }
             model.select(frame.id)
         } else {
-            fit(model.canvas?.frames ?? [])
+            fit(model.pageFrames)
         }
         applyTransform()
         scheduleRelayout()
@@ -464,15 +543,18 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             monitor.begin("pan")
             #endif
             let start = gesture.location(in: self)
-            if let id = label(at: CGPoint(x: start.x - translation.x, y: start.y - translation.y)), let frame = frames[id] {
-                drag = (id, frame.rect.origin)
+            if model.canEdit, let id = label(at: CGPoint(x: start.x - translation.x, y: start.y - translation.y)), let frame = frames[id] {
+                drag = (id, frame.rect.origin, frame.rect.origin)
                 model.select(id)
             } else {
                 drag = nil
             }
+            snapGuides = []
         case .changed:
-            if let drag, let frame = frames[drag.id] {
-                frame.move(to: CGPoint(x: drag.origin.x + translation.x / zoom, y: drag.origin.y + translation.y / zoom))
+            if let drag {
+                self.drag?.proposedOrigin = CGPoint(x: drag.origin.x + translation.x / zoom,
+                                                   y: drag.origin.y + translation.y / zoom)
+                snapDraggedFrame()
                 drawChrome()
             } else {
                 offset.x += translation.x
@@ -480,23 +562,24 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
                 gesture.setTranslation(.zero, in: self)
                 applyTransform()
             }
-        case .ended, .cancelled:
+        case .ended, .cancelled, .failed:
             gestureActive = false
             #if DEBUG
             monitor.end()
             #endif
             if let drag, let frame = frames[drag.id] {
                 let target = frame.rect.origin
-                self.drag = nil
                 if gesture.state == .ended, hypot(translation.x, translation.y) > 3 {
                     Task { await model.moveFrame(drag.id, x: target.x, y: target.y) }
                 } else {
                     frame.move(to: drag.origin)
-                    drawChrome()
                 }
             } else {
                 scheduleRelayout()
             }
+            self.drag = nil
+            snapGuides = []
+            drawChrome()
         default: break
         }
     }
@@ -510,7 +593,15 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             monitor.begin("pinch")
             #endif
             pinchAnchor = toWorld(center)
+            pinchTouches = gesture.numberOfTouches
         case .changed:
+            // The centroid moves to the remaining finger when one lifts (or to the
+            // midpoint when one lands): anchor the world point now under it so the
+            // view holds still instead of jumping to the new centre.
+            if gesture.numberOfTouches != pinchTouches {
+                pinchTouches = gesture.numberOfTouches
+                pinchAnchor = toWorld(center)
+            }
             zoom = max(Self.minZoom, min(Self.maxZoom, zoom * gesture.scale))
             gesture.scale = 1
             offset = CGPoint(x: center.x - pinchAnchor.x * zoom, y: center.y - pinchAnchor.y * zoom)
@@ -665,8 +756,9 @@ private final class FrameLayer {
     }
 
     /// Apply a model change: geometry is immediate, HTML re-parses in the engine.
-    func update(_ frame: DesignFrame) {
-        let newRect = CGRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height)
+    func update(_ frame: DesignFrame, preservingOrigin: Bool = false) {
+        let newRect = CGRect(x: preservingOrigin ? rect.minX : frame.x,
+                             y: preservingOrigin ? rect.minY : frame.y, width: frame.width, height: frame.height)
         name = frame.name
         if newRect != rect {
             let resized = newRect.size != rect.size
@@ -1024,7 +1116,7 @@ private final class CursorLayer {
     }
 }
 
-private extension UIColor {
+extension UIColor {
     convenience init?(hex: String) {
         var value = hex.trimmingCharacters(in: .whitespaces)
         if value.hasPrefix("#") { value.removeFirst() }

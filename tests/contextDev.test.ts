@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import {
   contextDevConfigured,
   prepareContextHtmlForRendering,
@@ -15,12 +16,12 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 afterEach(() => {
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
 })
 
 describe('Context.dev rendered HTML client', () => {
   it('requests a fresh settled capture with bearer auth and parses a successful response', async () => {
-    vi.stubEnv('CONTEXT_DEV_API_KEY', '  context-secret  ')
+    stubEnv('CONTEXT_DEV_API_KEY', '  context-secret  ')
     const request = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
       jsonResponse({
         success: true,
@@ -60,7 +61,7 @@ describe('Context.dev rendered HTML client', () => {
   })
 
   it('reports whether a trimmed API key is configured and fails before requesting when it is absent', async () => {
-    vi.stubEnv('CONTEXT_DEV_API_KEY', '   ')
+    stubEnv('CONTEXT_DEV_API_KEY', '   ')
     const request = vi.fn(async () => jsonResponse({ success: true }))
 
     expect(contextDevConfigured()).toBe(false)
@@ -69,12 +70,12 @@ describe('Context.dev rendered HTML client', () => {
     )
     expect(request).not.toHaveBeenCalled()
 
-    vi.stubEnv('CONTEXT_DEV_API_KEY', 'configured')
+    stubEnv('CONTEXT_DEV_API_KEY', 'configured')
     expect(contextDevConfigured()).toBe(true)
   })
 
   it('maps a blocked website response to the shared capture-unavailable error', async () => {
-    vi.stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
+    stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
     const request = vi.fn(async () =>
       jsonResponse(
         {
@@ -95,7 +96,7 @@ describe('Context.dev rendered HTML client', () => {
   })
 
   it('surfaces an invalid API key as configuration failure, not a website access failure', async () => {
-    vi.stubEnv('CONTEXT_DEV_API_KEY', 'invalid-secret')
+    stubEnv('CONTEXT_DEV_API_KEY', 'invalid-secret')
     const request = vi.fn(async () =>
       jsonResponse(
         {
@@ -120,7 +121,7 @@ describe('Context.dev rendered HTML client', () => {
     [413, 'CONTENT_TOO_LARGE'],
     [415, 'UNSUPPORTED_CONTENT'],
   ])('maps HTTP %s %s to a capture-unavailable error', async (status, errorCode) => {
-    vi.stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
+    stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
     const request = vi.fn(async () =>
       jsonResponse({ error_code: errorCode, message: 'Cannot import this page' }, status),
     )
@@ -135,7 +136,7 @@ describe('Context.dev rendered HTML client', () => {
   })
 
   it('rejects an unsafe final URL returned by Context.dev', async () => {
-    vi.stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
+    stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
     const request = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
       jsonResponse({
         success: true,
@@ -152,7 +153,7 @@ describe('Context.dev rendered HTML client', () => {
   })
 
   it('discovers a bounded sitemap through Context.dev', async () => {
-    vi.stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
+    stubEnv('CONTEXT_DEV_API_KEY', 'context-secret')
     const request = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) =>
       jsonResponse({
         success: true,

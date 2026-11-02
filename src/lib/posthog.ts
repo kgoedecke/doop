@@ -110,4 +110,83 @@ export function suspendAnalyticsWhileImpersonating() {
   posthog.stopSessionRecording()
 }
 
+/* The Support widget (PostHog Conversations, switched on in the project
+   settings for doop.design) floats in the bottom-right corner, where it sits
+   on the editor's zoom bar and the prompt bar. It is for the pages around the
+   editor, not the canvas itself. The SDK renders it only after the remote
+   config arrives, and hide() before that is a no-op, so the wish is kept and
+   re-applied the moment the widget's container is mounted. */
+const WIDGET_CONTAINER_ID = 'ph-conversations-widget-container'
+let supportWidgetWanted = true
+let supportWidgetObserver: MutationObserver | null = null
+let cancelSupportChat: (() => void) | null = null
+
+const applySupportWidget = () => {
+  if (!key || !posthog.conversations?.isAvailable()) return
+  if (supportWidgetWanted || cancelSupportChat) posthog.conversations.show()
+  else posthog.conversations.hide()
+}
+
+export function setSupportWidgetVisible(visible: boolean) {
+  cancelSupportChat?.()
+  supportWidgetWanted = visible
+  applySupportWidget()
+  if (!key || supportWidgetObserver || typeof MutationObserver === 'undefined') return
+  supportWidgetObserver = new MutationObserver((mutations) => {
+    if (supportWidgetWanted || cancelSupportChat) return
+    const mounted = mutations.some((m) =>
+      Array.from(m.addedNodes).some((n) => n instanceof Element && n.id === WIDGET_CONTAINER_ID),
+    )
+    if (mounted) applySupportWidget()
+  })
+  supportWidgetObserver.observe(document.body, { childList: true })
+}
+
+/* "Contact support" from the editor: show the widget and open its chat
+   panel. The SDK has no open(): show() restores the saved panel state, so
+   click the launcher if it mounts closed. On a canvas
+   the bubble is otherwise hidden, so when the person closes the panel (the
+   launcher returns) the widget goes back out of the way. */
+const LAUNCHER = `#${WIDGET_CONTAINER_ID} button[aria-label^="Open chat"]`
+const CLOSE_CHAT = `#${WIDGET_CONTAINER_ID} button[aria-label="Close"]`
+export function openSupportChat() {
+  if (!key || !posthog.conversations?.isAvailable()) return false
+  if (cancelSupportChat) return true
+  let frame = 0
+  let closed: MutationObserver | null = null
+  // Override the canvas's mount observer before show() adds the widget.
+  cancelSupportChat = () => {
+    cancelAnimationFrame(frame)
+    closed?.disconnect()
+    cancelSupportChat = null
+  }
+  const finish = () => {
+    cancelSupportChat?.()
+    applySupportWidget()
+  }
+  const started = Date.now()
+  const open = () => {
+    const launcher = document.querySelector<HTMLButtonElement>(LAUNCHER)
+    if (!launcher && !document.querySelector(CLOSE_CHAT)) {
+      if (Date.now() - started < 3000) frame = requestAnimationFrame(open)
+      else finish()
+      return
+    }
+    launcher?.click()
+    const container = document.getElementById(WIDGET_CONTAINER_ID)
+    if (!container) {
+      finish()
+      return
+    }
+    closed = new MutationObserver(() => {
+      if (!document.querySelector(LAUNCHER)) return
+      finish()
+    })
+    closed.observe(container, { childList: true, subtree: true })
+  }
+  posthog.conversations.show()
+  frame = requestAnimationFrame(open)
+  return true
+}
+
 export { posthog }

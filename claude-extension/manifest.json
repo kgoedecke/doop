@@ -1,0 +1,46 @@
+{
+  "manifest_version": "0.3",
+  "name": "doop",
+  "display_name": "Doop",
+  "version": "0.1.0",
+  "description": "Design with Claude on a shared canvas. Create, edit and review designs together in real time.",
+  "author": { "name": "Doop", "url": "https://doop.design" },
+  "homepage": "https://doop.design",
+  "documentation": "https://github.com/kgoedecke/doop/tree/main/claude-extension",
+  "support": "https://github.com/kgoedecke/doop/issues",
+  "repository": { "type": "git", "url": "https://github.com/kgoedecke/doop" },
+  "license": "AGPL-3.0-only",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "node_modules/mcp-remote/dist/proxy.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/node_modules/mcp-remote/dist/proxy.js",
+        "${user_config.server_url}",
+        "--transport",
+        "http-only",
+        "--auth-timeout",
+        "300",
+        "--static-oauth-client-metadata",
+        "{\"client_name\":\"Doop for Claude Desktop\",\"client_uri\":\"https://doop.design\"}"
+      ]
+    }
+  },
+  "user_config": {
+    "server_url": {
+      "type": "string",
+      "title": "Doop server URL",
+      "description": "Keep this for Doop Cloud. For self-hosting, use your Doop server's URL followed by /mcp. HTTPS is required except on localhost.",
+      "default": "https://doop.design/mcp",
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": { "node": ">=20.18.1" }
+  },
+  "tools_generated": true,
+  "keywords": ["design", "canvas", "html", "css", "multiplayer"]
+}

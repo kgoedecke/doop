@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-claude-add-extension"
+description = "Enables the claude_add_extension command without any pre-configured scope."
+commands.allow = ["claude_add_extension"]
+
+[[permission]]
+identifier = "deny-claude-add-extension"
+description = "Denies the claude_add_extension command without any pre-configured scope."
+commands.deny = ["claude_add_extension"]

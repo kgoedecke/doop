@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import {
   fetchThumb,
   keyForFile,
@@ -240,16 +241,14 @@ describe('normalizeTags', () => {
 })
 
 describe('fetchThumb', () => {
-  const originalOrigin = process.env.BACKGROUNDS_ORIGIN
   const originalFetch = globalThis.fetch
   afterEach(() => {
-    if (originalOrigin === undefined) delete process.env.BACKGROUNDS_ORIGIN
-    else process.env.BACKGROUNDS_ORIGIN = originalOrigin
+    unstubAllEnvs()
     globalThis.fetch = originalFetch
   })
 
   it('reads thumbnails over HTTP from BACKGROUNDS_ORIGIN when set', async () => {
-    process.env.BACKGROUNDS_ORIGIN = 'https://doop.example/'
+    stubEnv('BACKGROUNDS_ORIGIN', 'https://doop.example/')
     const seen: string[] = []
     globalThis.fetch = (async (input: string | URL | Request) => {
       seen.push(String(input))
@@ -261,7 +260,7 @@ describe('fetchThumb', () => {
   })
 
   it('returns null rather than throwing when the remote origin fails', async () => {
-    process.env.BACKGROUNDS_ORIGIN = 'https://doop.example'
+    stubEnv('BACKGROUNDS_ORIGIN', 'https://doop.example')
     globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch
     expect(await fetchThumb('abc')).toBeNull()
   })

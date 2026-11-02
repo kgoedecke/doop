@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { ModelAccount } from './modelAccounts.ts'
@@ -25,8 +26,8 @@ import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
  * message. The model sees the same pixels in the same order.
  */
 
-export const CHATGPT_URL = process.env.CHATGPT_RESPONSES_URL || 'https://chatgpt.com/backend-api/codex/responses'
-export const OPENAI_URL = process.env.OPENAI_RESPONSES_URL || 'https://api.openai.com/v1/responses'
+export const CHATGPT_URL = env.CHATGPT_RESPONSES_URL
+export const OPENAI_URL = env.OPENAI_RESPONSES_URL
 /**
  * The OpenAI tiers a ChatGPT sign-in and an API key can both reach: GPT-6
  * Astra (the September 2026 flagship — on Codex it needs a Plus plan or
@@ -43,14 +44,14 @@ export const AGENT_MODELS = [
   { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', blurb: 'Fastest and cheapest — fine for small, mechanical edits' },
 ] as const
 
-export const DEFAULT_OPENAI_MODEL = process.env.DOOP_AGENT_OPENAI_MODEL || 'gpt-5.6-terra'
-const REASONING_EFFORT = process.env.DOOP_AGENT_OPENAI_EFFORT || 'medium'
+export const DEFAULT_OPENAI_MODEL = env.DOOP_AGENT_OPENAI_MODEL
+const REASONING_EFFORT = env.DOOP_AGENT_OPENAI_EFFORT
 /* Azure deployments are named by their owner and can host non-reasoning
    models, which reject a `reasoning` block outright — so unlike the OpenAI
    paths there is no default effort: unset means the parameter stays home. */
-const AZURE_REASONING_EFFORT = process.env.AZURE_OPENAI_REASONING_EFFORT || ''
+const AZURE_REASONING_EFFORT = env.AZURE_OPENAI_REASONING_EFFORT
 /* Azure's v1 surface needs no api-version; older resources can pin one. */
-const AZURE_API_VERSION = process.env.AZURE_OPENAI_API_VERSION || ''
+const AZURE_API_VERSION = env.AZURE_OPENAI_API_VERSION
 
 export function isKnownModel(id: string): boolean {
   return AGENT_MODELS.some((model) => model.id === id)
@@ -60,10 +61,15 @@ export function isKnownModel(id: string): boolean {
 export function modelFor(account: Pick<ModelAccount, 'model'>): string {
   return account.model || DEFAULT_OPENAI_MODEL
 }
+
+/** How hard it thinks per turn: the user's choice, else the server default. */
+export function effortFor(account: Pick<ModelAccount, 'effort'>): string {
+  return account.effort || REASONING_EFFORT
+}
 /* The Codex backend only answers clients it recognises, so this is the value
    it expects rather than a free-form product name. Override if OpenAI ever
    admits other originators. */
-export const ORIGINATOR = process.env.CHATGPT_ORIGINATOR || 'codex_cli_rs'
+export const ORIGINATOR = env.CHATGPT_ORIGINATOR
 
 export type TurnBlock = Anthropic.TextBlockParam | Anthropic.ToolUseBlockParam
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'refusal'
@@ -73,6 +79,7 @@ export interface TurnRequest {
   tools: Anthropic.Tool[]
   messages: Anthropic.MessageParam[]
   maxTokens: number
+  signal?: AbortSignal
 }
 
 export interface TurnResult {
@@ -365,10 +372,11 @@ async function runChatgpt(account: ModelAccount, req: TurnRequest): Promise<Turn
       tools: toTools(req.tools),
       tool_choice: 'auto',
       parallel_tool_calls: false,
-      reasoning: { effort: REASONING_EFFORT, summary: 'auto' },
+      reasoning: { effort: effortFor(account), summary: 'auto' },
       store: false,
       stream: true,
     }),
+    signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'ChatGPT')
   return fromResponse(await readEventStream(res))
@@ -386,10 +394,11 @@ async function runApiKey(account: ModelAccount, req: TurnRequest): Promise<TurnR
       tools: toTools(req.tools),
       tool_choice: 'auto',
       parallel_tool_calls: false,
-      reasoning: { effort: REASONING_EFFORT },
+      reasoning: { effort: effortFor(account) },
       max_output_tokens: req.maxTokens,
       store: false,
     }),
+    signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'OpenAI')
   return fromResponse((await res.json()) as ResponseBody)
@@ -429,6 +438,7 @@ export async function runAzureTurn(config: AzureConfig, req: TurnRequest): Promi
       max_output_tokens: req.maxTokens,
       store: false,
     }),
+    signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'Azure OpenAI')
   return fromResponse((await res.json()) as ResponseBody)

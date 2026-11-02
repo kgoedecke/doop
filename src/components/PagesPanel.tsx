@@ -2,18 +2,28 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { nanoid } from 'nanoid'
 import { canvasPages } from '../../shared/pages'
 import type { CanvasPageInfo } from '../../shared/types'
-import { useStore } from '../lib/store'
-import { savePages, moveFramesToPage } from '../lib/pageEdits'
+import { canEditOpenCanvas, useStore } from '../lib/store'
+import { savePages, duplicatePage, moveFramesToPage } from '../lib/pageEdits'
 import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
-import { PlusIcon } from './ui/icons'
+import { PageIcon, PlusIcon } from './ui/icons'
 import { cn } from '../lib/utils'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
+import { useT } from '@/lib/i18n'
+
+/** The small grey sub-heading over a section of the Layers panel, shared with
+ *  its "Layers" row: the two must read as one family (a browser test checks
+ *  their typography). */
+export const sectionHeading = 'text-[11px] font-normal text-ink-faint'
+const sectionBtn = 'size-5 rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink'
 
 export function PagesPanel({ fill = false }: { fill?: boolean }) {
   const canvas = useStore((s) => s.canvas)
   const activePageId = useStore((s) => s.activePageId)
   const selectedIds = useStore((s) => s.selectedIds)
+  /* view and comment links switch pages; they add, rename and move none */
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const [busy, setBusy] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -21,8 +31,22 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   const didDrag = useRef(false)
   const stopDrag = useRef<(() => void) | null>(null)
   useEffect(() => () => stopDrag.current?.(), [])
+  const t = useT()
   if (!canvas) return null
   const pages = canvasPages(canvas)
+  const movableIds = canvas.frames.filter((f) => selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
+
+  async function moveSelection(pageId: string) {
+    if (!canvas || busy || !movableIds.length) return
+    setBusy(true)
+    try {
+      await moveFramesToPage(canvas, movableIds, pageId)
+    } catch {
+      if (useStore.getState().canvas?.id === canvas.id) useStore.getState().pushNotice(t('panels.pagesMoveFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function save(next: CanvasPageInfo[], selectId?: string) {
     if (!canvas || busy) return
@@ -36,7 +60,9 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
       useStore
         .getState()
         .pushNotice(
-          error instanceof ApiError && typeof error.body.error === 'string' ? error.body.error : 'Could not save pages',
+          error instanceof ApiError && typeof error.body.error === 'string'
+            ? error.body.error
+            : t('panels.pagesSaveFailed'),
         )
     } finally {
       setBusy(false)
@@ -92,48 +118,52 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
     window.addEventListener('pointercancel', cleanup, { signal: controller.signal })
   }
 
-  async function moveSelection(pageId: string) {
+  async function duplicate(pageId: string) {
     if (!canvas || busy) return
     setBusy(true)
     try {
-      await moveFramesToPage(canvas, selectedIds, pageId)
-    } catch {
+      await duplicatePage(canvas, pageId)
+    } catch (error) {
       if (useStore.getState().canvas?.id !== canvas.id) return
-      useStore.getState().pushNotice('Could not move all selected frames. Please try again.')
+      useStore
+        .getState()
+        .pushNotice(
+          error instanceof ApiError && typeof error.body.error === 'string'
+            ? error.body.error
+            : t('panels.pagesDuplicateFailed'),
+        )
     } finally {
       setBusy(false)
     }
   }
 
-  return (
-    <div
-      className={cn('overflow-y-auto px-3 py-2', fill ? 'min-h-0 flex-1' : 'max-h-[35vh] border-b border-line-soft')}
+  const addPage = (
+    <Button
+      variant="bare"
+      size="icon-sm"
+      className={sectionBtn}
+      aria-label={t('panels.pagesAdd')}
+      disabled={busy}
+      onClick={() => {
+        const page = { id: nanoid(10), name: `Page ${pages.length + 1}` }
+        void save([...pages, page], page.id)
+      }}
     >
-      <div className="flex items-center justify-between py-1 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">
-        <span data-slot="page-section-heading">Pages</span>
-        <Button
-          variant="bare"
-          size="icon-sm"
-          className="size-5 rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink"
-          aria-label="Add page"
-          disabled={busy}
-          onClick={() => {
-            const page = { id: nanoid(10), name: `Page ${pages.length + 1}` }
-            void save([...pages, page], page.id)
-          }}
-        >
-          <PlusIcon width={12} height={12} />
-        </Button>
-      </div>
+      <PlusIcon className="size-3.5" />
+    </Button>
+  )
+
+  const list = (
+    <>
       {pages.map((page) => (
         <ContextMenu key={page.id}>
-          <ContextMenuTrigger asChild>
+          <ContextMenuTrigger asChild disabled={readOnly}>
             <div
               data-page-id={page.id}
               onContextMenu={() => useStore.getState().setActivePage(page.id)}
               className={cn(
-                'group relative flex h-[26px] items-center gap-1 rounded-md text-[12.5px] text-ink hover:bg-paper-deep',
-                page.id === activePageId && 'bg-brand text-white hover:bg-brand',
+                'group relative flex h-[27px] items-center gap-1 rounded-[7px] pr-2.5 text-[12px] text-ink-soft hover:bg-sub',
+                page.id === activePageId && 'bg-paper-deep text-ink hover:bg-paper-deep',
                 drag?.id === page.id && 'opacity-40',
               )}
             >
@@ -142,6 +172,14 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                   className={`pointer-events-none absolute inset-x-0 h-0.5 bg-brand ${drag.after ? 'bottom-0' : 'top-0'}`}
                 />
               )}
+              <span
+                className={cn(
+                  'grid size-4 flex-none place-items-center pl-2.5 pr-0 box-content text-ink-faint',
+                  page.id === activePageId && 'text-ink',
+                )}
+              >
+                <PageIcon className="size-3.5" />
+              </span>
               {renaming === page.id ? (
                 <form
                   className="min-w-0 flex-1"
@@ -152,11 +190,11 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                 >
                   <input
                     autoFocus
-                    aria-label="Page name"
+                    aria-label={t('panels.pagesName')}
                     maxLength={100}
                     disabled={busy}
                     onFocus={(e) => e.target.select()}
-                    className="w-full rounded border border-line bg-paper px-2 py-1 text-xs"
+                    className="w-full rounded-[6px] bg-surface px-2 py-1 text-[12px] text-ink shadow-elevation-1-focus outline-none"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     onKeyDown={(e) => {
@@ -166,11 +204,11 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                 </form>
               ) : (
                 <button
-                  className={`min-w-0 flex-1 touch-none select-none truncate px-2 py-1.5 text-left text-[12.5px] ${drag ? 'cursor-grabbing' : 'cursor-grab'} ${page.id === activePageId ? 'font-semibold' : ''}`}
+                  className={`min-w-0 flex-1 touch-none select-none truncate py-1.5 pl-0.5 text-left text-[12px] ${drag ? 'cursor-grabbing' : 'cursor-grab'} ${page.id === activePageId ? 'font-medium' : ''}`}
                   aria-current={page.id === activePageId ? 'page' : undefined}
                   onPointerDown={(e) => {
                     didDrag.current = false
-                    startDrag(e, page.id)
+                    if (!readOnly) startDrag(e, page.id)
                   }}
                   onClick={(e) => {
                     if (didDrag.current) {
@@ -180,7 +218,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                     useStore.getState().setActivePage(page.id)
                   }}
                   onDoubleClick={() => {
-                    if (busy || didDrag.current) return
+                    if (busy || readOnly || didDrag.current) return
                     setRenaming(page.id)
                     setName(page.name)
                   }}
@@ -202,37 +240,54 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
                 setName(page.name)
               }}
             >
-              Rename
+              {t('panels.pagesRename')}
+            </ContextMenuItem>
+            <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
+              {t('panels.pagesDuplicate')}
             </ContextMenuItem>
             <ContextMenuItem
               tone="danger"
               disabled={busy || pages.length === 1}
               onSelect={() => void save(pages.filter((p) => p.id !== page.id))}
             >
-              Delete page
+              {t('panels.pagesDelete')}
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
       ))}
-      {selectedIds.length > 0 && pages.length > 1 && (
-        <select
-          aria-label="Move selected frames to page"
-          className="mt-2 w-full rounded border border-line bg-paper p-1 text-xs"
-          value=""
-          disabled={busy}
-          onChange={(e) => void moveSelection(e.target.value)}
-        >
-          <option value="" disabled>
-            Move selection to page…
-          </option>
-          {pages
-            .filter((p) => p.id !== activePageId)
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-        </select>
+    </>
+  )
+
+  return (
+    <div className={cn('flex flex-none flex-col', fill && 'min-h-0 flex-1')}>
+      <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
+        <span data-slot="page-section-heading" className={sectionHeading}>
+          {t('panels.pagesTitle')}
+        </span>
+        {!readOnly && addPage}
+      </div>
+      <div className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}>{list}</div>
+      {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
+        /* the canvas shortcuts listen on window: ⌫ would delete the frames
+           being moved and typed letters would switch tools, so the picker's
+           keys stop here; React bubbles the portalled list's keys through this
+           div too, before the native event reaches window */
+        <div className="px-2 pb-2" onKeyDown={(e) => e.stopPropagation()}>
+          <Select value="" disabled={busy || !movableIds.length} onValueChange={(id) => void moveSelection(id)}>
+            <SelectTrigger size="sm" className="w-full" aria-label={t('panels.pagesMoveSelection')}>
+              <SelectValue placeholder={t('panels.pagesMoveSelectionPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent>
+              {pages
+                .filter((page) => page.id !== activePageId)
+                .map((page) => (
+                  <SelectItem key={page.id} value={page.id}>
+                    {page.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
     </div>
   )

@@ -2,12 +2,11 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 
-const PORT = 4987
 let server: Server
 let owner: Client
 let outsider: Client
 beforeAll(async () => {
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  server = await startServer()
   owner = new Client(server)
   await owner.signUp('pages-owner@test.dev', 'Page Owner')
   outsider = new Client(server)
@@ -31,7 +30,7 @@ it('creates, reorders and copies pages while preserving frame membership and acc
   expect((await save([first, second], outsider)).status).toBe(403)
   expect((await save([])).status).toBe(400)
   expect((await save([first, first])).status).toBe(400)
-  const socket = new WebSocket(`ws://localhost:${PORT}/ws`, { headers: { Cookie: owner.header() } })
+  const socket = new WebSocket(`ws://localhost:${server.port}/ws`, { headers: { Cookie: owner.header() } })
   await new Promise<void>((resolve, reject) => {
     socket.on('error', reject)
     socket.on('open', () =>
@@ -84,7 +83,7 @@ it('creates, reorders and copies pages while preserving frame membership and acc
   await new Promise((resolve) => setTimeout(resolve, 600))
   server.stop({ keepData: true })
   await server.stopped
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` }, server.dataDir)
+  server = await startServer({}, server.dataDir)
   const persisted = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
   expect(persisted.pages).toEqual([second])
   expect(persisted.frames.every((f: { pageId: string }) => f.pageId === second.id)).toBe(true)
@@ -112,4 +111,160 @@ it('rejects stale page replacements instead of removing another collaborator’s
       })
     ).status,
   ).toBe(409)
+})
+
+it('duplicates a page with its frames right after the source, numbering the name when taken', async () => {
+  const canvas = await (await owner.post('/api/canvases', { name: 'Duplicate page' })).json()
+  const [first] = canvas.pages
+  const second = { id: 'second', name: 'Exploration' }
+  expect(
+    (
+      await owner.req(`/api/canvases/${canvas.id}/pages`, {
+        method: 'PUT',
+        body: JSON.stringify({ pages: [first, second], expectedPages: canvas.pages }),
+      })
+    ).status,
+  ).toBe(200)
+  const hero = await (
+    await owner.post(`/api/canvases/${canvas.id}/frames`, {
+      name: 'Hero',
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+      html: '<h1>Hero</h1>',
+      hidden: true,
+      locked: true,
+    })
+  ).json()
+  const card = await (
+    await owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Card', x: 400, y: 20, html: '<p>Card</p>' })
+  ).json()
+  await owner.post(`/api/canvases/${canvas.id}/frames`, { name: 'Elsewhere', pageId: second.id })
+  const url = `/api/canvases/${canvas.id}/pages/${first.id}/duplicate`
+  expect((await outsider.post(url)).status).toBe(403)
+  expect((await owner.post(`/api/canvases/${canvas.id}/pages/missing/duplicate`)).status).toBe(404)
+
+  const socket = new WebSocket(`ws://localhost:${server.port}/ws`, { headers: { Cookie: owner.header() } })
+  const seen: { type: string; frame?: { id: string }; pages?: unknown }[] = []
+  await new Promise<void>((resolve, reject) => {
+    socket.on('error', reject)
+    socket.on('open', () =>
+      socket.send(
+        JSON.stringify({ type: 'join', canvasId: canvas.id, clientId: 'dup-observer', name: 'Observer', kind: 'user' }),
+      ),
+    )
+    socket.on('message', (data) => {
+      const message = JSON.parse(String(data))
+      if (message.type === 'init') resolve()
+      else seen.push(message)
+    })
+  })
+  let copy: { page: { id: string; name: string }; pages: { id: string }[]; frames: Record<string, unknown>[] }
+  try {
+    const res = await owner.post(url)
+    expect(res.status).toBe(200)
+    copy = await res.json()
+    const deadline = Date.now() + 5_000
+    while (!seen.some((m) => m.type === 'canvas:pages') && Date.now() < deadline)
+      await new Promise((r) => setTimeout(r, 20))
+  } finally {
+    socket.close()
+  }
+  expect(copy.page.name).toBe('Page 1 copy')
+  expect(copy.pages.map((p) => p.id)).toEqual([first.id, copy.page.id, second.id])
+  expect(copy.frames).toHaveLength(2)
+  const copiedHero = copy.frames.find((f) => f.name === 'Hero')!
+  expect(copiedHero).toMatchObject({
+    pageId: copy.page.id,
+    x: 10,
+    y: 20,
+    width: 300,
+    height: 200,
+    html: '<h1>Hero</h1>',
+    hidden: true,
+    locked: true,
+  })
+  expect(copiedHero.id).not.toBe(hero.id)
+  expect(copy.frames.find((f) => f.name === 'Card')).toMatchObject({
+    pageId: copy.page.id,
+    x: 400,
+    html: '<p>Card</p>',
+  })
+  expect(copy.frames.every((f) => f.id !== card.id)).toBe(true)
+  expect(seen.find((m) => m.type === 'canvas:pages')?.pages).toEqual(copy.pages)
+  /* the copied frames reach viewers through the canvas actor's membership: a fresh read lists them on the copy */
+  const reread = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
+  expect(
+    reread.frames
+      .filter((f: { pageId: string }) => f.pageId === copy.page.id)
+      .map((f: { id: string }) => f.id)
+      .sort(),
+  ).toEqual(copy.frames.map((f) => f.id as string).sort())
+
+  const again = await (await owner.post(url)).json()
+  expect(again.page.name).toBe('Page 1 copy 2')
+  expect(again.pages.map((p: { id: string }) => p.id)).toEqual([first.id, again.page.id, copy.page.id, second.id])
+  const nested = await (await owner.post(`/api/canvases/${canvas.id}/pages/${copy.page.id}/duplicate`)).json()
+  expect(nested.page.name).toBe('Page 1 copy copy')
+  expect(nested.pages.map((p: { id: string }) => p.id)).toEqual([
+    first.id,
+    again.page.id,
+    copy.page.id,
+    nested.page.id,
+    second.id,
+  ])
+
+  // Reopen the database: the page and its frames were written as one unit.
+  server.stop({ keepData: true })
+  await server.stopped
+  server = await startServer({}, server.dataDir)
+  const persisted = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
+  expect(persisted.pages).toEqual(nested.pages)
+  const onPage = (pageId: string) => persisted.frames.filter((f: { pageId: string }) => f.pageId === pageId)
+  expect(onPage(first.id)).toHaveLength(2)
+  expect(
+    onPage(copy.page.id)
+      .map((f: { name: string }) => f.name)
+      .sort(),
+  ).toEqual(['Card', 'Hero'])
+  expect(onPage(again.page.id)).toHaveLength(2)
+  expect(onPage(nested.page.id)).toHaveLength(2)
+  expect(onPage(second.id)).toHaveLength(1)
+  for (const pageId of [copy.page.id, again.page.id, nested.page.id]) {
+    expect(onPage(pageId).find((f: { name: string }) => f.name === 'Hero')).toMatchObject({
+      hidden: true,
+      locked: true,
+    })
+    const card = onPage(pageId).find((f: { name: string }) => f.name === 'Card')
+    expect(card.hidden).toBeFalsy()
+    expect(card.locked).toBeFalsy()
+  }
+}, 60_000)
+
+it('serializes concurrent duplicates so names stay unique and the page limit holds', async () => {
+  const canvas = await (await owner.post('/api/canvases', { name: 'Concurrent duplicates' })).json()
+  const [first] = canvas.pages
+  const url = `/api/canvases/${canvas.id}/pages/${first.id}/duplicate`
+  const pair = await Promise.all([owner.post(url), owner.post(url)])
+  expect(pair.map((r) => r.status)).toEqual([200, 200])
+  const copies = await Promise.all(pair.map((r) => r.json()))
+  expect(copies.map((c) => c.page.name).sort()).toEqual(['Page 1 copy', 'Page 1 copy 2'])
+  const after = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
+  expect(after.pages.map((p: { name: string }) => p.name)).toEqual(['Page 1', 'Page 1 copy 2', 'Page 1 copy'])
+
+  const filler = Array.from({ length: 96 }, (_, i) => ({ id: `fill-${i}`, name: `Fill ${i}` }))
+  expect(
+    (
+      await owner.req(`/api/canvases/${canvas.id}/pages`, {
+        method: 'PUT',
+        body: JSON.stringify({ pages: [...after.pages, ...filler], expectedPages: after.pages }),
+      })
+    ).status,
+  ).toBe(200)
+  const atLimit = await Promise.all([owner.post(url), owner.post(url)])
+  expect(atLimit.map((r) => r.status).sort()).toEqual([200, 400])
+  const full = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
+  expect(full.pages).toHaveLength(100)
+  expect((await owner.post(url)).status).toBe(400)
 })

@@ -19,8 +19,8 @@ through a share link do not count. You can have up to 10.
 
 | `type`             | When                                               | Extra fields                                |
 | ------------------ | -------------------------------------------------- | ------------------------------------------- |
-| `comment.created`  | a comment is pinned to an element                  | `actor`, `comment`, `frame`                 |
-| `comment.replied`  | a reply lands in a thread                          | `actor`, `comment`, `frame`                 |
+| `comment.created`  | a comment is pinned to an element or to the canvas | `actor`, `comment`, `frame` (may be `null`) |
+| `comment.replied`  | a reply lands in a thread                          | `actor`, `comment`, `frame` (may be `null`) |
 | `comment.resolved` | a thread (or a lone reply) is resolved             | `actor`, `comment`, `frame` (may be `null`) |
 | `frame.created`    | a frame is created, by a person or an agent        | `actor`, `frame`                            |
 | `task.completed`   | an agent finishes a board card                     | `actor`, `task`                             |

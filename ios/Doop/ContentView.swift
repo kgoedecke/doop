@@ -1,6 +1,5 @@
+import AuthenticationServices
 import SwiftUI
-
-private let doopBlue = Color(red: 39/255, green: 67/255, blue: 238/255)
 
 struct ContentView: View {
     @StateObject private var app = AppModel()
@@ -16,18 +15,20 @@ struct ContentView: View {
                 LibraryView(app: app, settings: $settings)
             }
         }
-        .tint(doopBlue)
+        .tint(.primary)
         .task { await app.restore() }
-        .sheet(isPresented: $settings) { NativeSettings(app: app).tint(doopBlue) }
+        .sheet(isPresented: $settings) { NativeSettings(app: app).tint(.primary) }
     }
 }
 
 private struct DoopWordmark: View {
     var body: some View {
-        HStack(spacing: 10) {
-            Image("AppMark").resizable().frame(width: 34, height: 34).clipShape(RoundedRectangle(cornerRadius: 9))
+        HStack(spacing: 12) {
+            Image("AppMark").resizable().frame(width: 30, height: 30).clipShape(RoundedRectangle(cornerRadius: 7.2))
                 .accessibilityHidden(true)
-            Text("doop").font(.system(size: 28, weight: .heavy, design: .rounded))
+            // Match src/components/ui/wordmark.tsx: Inter 800, -0.01em.
+            Text("Doop").font(.custom("Inter-Regular_ExtraBold", size: 18, relativeTo: .headline))
+                .tracking(-0.18)
         }
     }
 }
@@ -41,6 +42,35 @@ private struct SignInView: View {
     @State private var registering = false
     @State private var submitting = false
     @State private var error: String?
+    /// The raw nonce behind the Apple request in flight; its hash is in the identity token.
+    @State private var appleNonce = ""
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var offersProviders: Bool { app.providers.appleNative || !app.providers.available.isEmpty }
+
+    private func finishAppleSignIn(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .failure(let failure):
+            if (failure as? ASAuthorizationError)?.code != .canceled { error = failure.localizedDescription }
+        case .success(let authorization):
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  let data = credential.identityToken, let token = String(data: data, encoding: .utf8) else {
+                error = "Apple did not return a sign-in token. Try again."
+                return
+            }
+            let nonce = appleNonce
+            let name = credential.fullName
+            submitting = true
+            error = nil
+            Task {
+                do {
+                    try await app.signIn(appleIdentityToken: token, nonce: nonce,
+                                         givenName: name?.givenName, familyName: name?.familyName)
+                } catch { self.error = error.localizedDescription }
+                submitting = false
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -49,9 +79,53 @@ private struct SignInView: View {
                     DoopWordmark().padding(.top, 32)
                     VStack(alignment: .leading, spacing: 10) {
                         Text(registering ? "Make room for\nyour next idea." : "Your ideas.\nAnywhere.")
-                            .font(.system(size: 42, weight: .bold, design: .rounded)).fixedSize(horizontal: false, vertical: true)
+                            .font(.custom("Inter-Regular_Medium", size: 42, relativeTo: .largeTitle))
+                            .tracking(-0.42).fixedSize(horizontal: false, vertical: true)
                         Text("A shared design space for you, your team, and your agents.")
                             .font(.title3).foregroundStyle(.secondary)
+                    }
+                    if offersProviders {
+                        VStack(spacing: 12) {
+                            if app.providers.appleNative {
+                                SignInWithAppleButton(registering ? .signUp : .signIn) { request in
+                                    appleNonce = ProviderSignIn.newChallenge()
+                                    request.requestedScopes = [.fullName, .email]
+                                    request.nonce = AppleSignIn.hashedNonce(appleNonce)
+                                } onCompletion: { result in finishAppleSignIn(result) }
+                                .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                                .frame(height: 50)
+                                .disabled(submitting)
+                                .accessibilityIdentifier("login.apple")
+                            }
+                            ForEach(app.providers.available, id: \.self) { provider in
+                                Button {
+                                    submitting = true
+                                    error = nil
+                                    Task {
+                                        do { try await app.signIn(with: provider) }
+                                        catch is SignInCancelled {}
+                                        catch { self.error = error.localizedDescription }
+                                        submitting = false
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        ProviderMark(provider: provider)
+                                        Text("\(registering ? "Sign up" : "Sign in") with \(app.providers.label(for: provider))").bold()
+                                    }
+                                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+                                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.primary.opacity(0.12)))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(submitting)
+                                .accessibilityIdentifier("login.\(provider.rawValue)")
+                            }
+                        }
+                        HStack(spacing: 12) {
+                            Rectangle().fill(.quaternary).frame(height: 1)
+                            Text("or").font(.footnote).foregroundStyle(.secondary)
+                            Rectangle().fill(.quaternary).frame(height: 1)
+                        }
                     }
                     VStack(spacing: 16) {
                         if registering {
@@ -72,7 +146,10 @@ private struct SignInView: View {
                             submitting = false
                         }
                     } label: {
-                        HStack { Spacer(); if submitting { ProgressView().tint(.white) }; Text(registering ? "Create account" : "Sign in").bold(); Spacer() }.padding(.vertical, 8)
+                        // The app tints with .primary, which is white in dark mode, so the label
+                        // takes the background colour rather than the prominent style's white.
+                        HStack { Spacer(); if submitting { ProgressView().tint(Color(uiColor: .systemBackground)) }; Text(registering ? "Create account" : "Sign in").bold(); Spacer() }.padding(.vertical, 8)
+                            .foregroundStyle(Color(uiColor: .systemBackground))
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(submitting || email.isEmpty || password.isEmpty || (registering && name.trimmingCharacters(in: .whitespaces).isEmpty))
@@ -84,6 +161,18 @@ private struct SignInView: View {
             }
             .background(Color(uiColor: .systemGroupedBackground))
             .toolbar { ToolbarItem(placement: .primaryAction) { Button { settings = true } label: { Image(systemName: "gearshape") }.accessibilityLabel("Server settings") } }
+        }
+    }
+}
+
+/// The provider's own mark, per its sign-in branding guidelines (the same SVGs the web page inlines).
+private struct ProviderMark: View {
+    let provider: SignInProvider
+    var body: some View {
+        switch provider {
+        case .google: Image("GoogleMark").resizable().frame(width: 18, height: 18).accessibilityHidden(true)
+        case .microsoft: Image("MicrosoftMark").resizable().frame(width: 18, height: 18).accessibilityHidden(true)
+        case .oidc: Image(systemName: "person.badge.key").font(.body).accessibilityHidden(true)
         }
     }
 }
@@ -104,6 +193,10 @@ private struct LibraryView: View {
     @State private var busy = false
     /// A Live Activity tapped before the library loaded; opened after the first reload.
     @State private var pendingLink: (canvasID: String, serverOrigin: String)?
+    #if DEBUG
+    /// `.task` restarts every time the library reappears, so `-openCanvas` must fire only once.
+    @State private var openedLaunchCanvas = false
+    #endif
 
     private var filtered: [CanvasSummary] {
         app.canvases.filter { canvas in
@@ -122,24 +215,24 @@ private struct LibraryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("YOUR DESIGN SPACE").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(doopBlue)
                         Text("What’s next, \(app.user?.name.components(separatedBy: " ").first ?? "designer")?")
-                            .font(.system(.largeTitle, design: .rounded).bold())
+                            .font(.custom("HankenGrotesk-Regular_Light", size: 34, relativeTo: .largeTitle))
                         Text("Pick up an idea. Or start something new.").foregroundStyle(.secondary)
                     }.padding(.top, 12)
-                    HStack {
+                    // The count sits beside the scope it counts, not at the far edge.
+                    HStack(spacing: 4) {
                         Picker("Workspace", selection: $workspace) {
                             Text("All canvases").tag("all")
                             Text("Personal").tag("personal")
                             ForEach(app.workspaces) { Text($0.name).tag($0.id) }
                         }.pickerStyle(.menu)
-                        Spacer()
                         Text("\(filtered.count) \(filtered.count == 1 ? "canvas" : "canvases")").font(.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
                     }
                     if let error = app.error { Text(error).foregroundStyle(.red).font(.callout) }
                     if filtered.isEmpty {
                         VStack(spacing: 12) {
-                            Image(systemName: query.isEmpty ? "square.stack.3d.up" : "magnifyingglass").font(.largeTitle).foregroundStyle(doopBlue)
+                            Image(systemName: query.isEmpty ? "square.stack.3d.up" : "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
                             Text(query.isEmpty ? "Your next idea starts here." : "No matching canvases").font(.headline)
                             if query.isEmpty { Button("Create a canvas") { title = ""; creating = true }.buttonStyle(.borderedProminent) }
                         }.frame(maxWidth: .infinity).padding(.vertical, 60)
@@ -162,10 +255,6 @@ private struct LibraryView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(showingAgents ? "Agents" : "").navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Image("AppMark").resizable().frame(width: 26, height: 26)
-                        .clipShape(RoundedRectangle(cornerRadius: 6)).accessibilityLabel("Doop")
-                }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if !showingAgents {
                     Button { title = ""; creating = true } label: { Image(systemName: "plus") }
@@ -188,13 +277,14 @@ private struct LibraryView: View {
                 if let link = pendingLink { pendingLink = nil; open(link) }
                 #if DEBUG
                 // -openCanvas <id> jumps straight to a canvas (simulator automation).
-                if path.isEmpty, let id = UserDefaults.standard.string(forKey: "openCanvas"), let canvas = app.canvases.first(where: { $0.id == id }) {
+                if !openedLaunchCanvas, path.isEmpty, let id = UserDefaults.standard.string(forKey: "openCanvas"), let canvas = app.canvases.first(where: { $0.id == id }) {
+                    openedLaunchCanvas = true
                     path.append(canvas)
                 }
                 #endif
             }
 
-            .navigationDestination(for: CanvasSummary.self) { canvas in NativeCanvasView(summary: canvas, client: app.client) }
+            .navigationDestination(for: CanvasSummary.self) { canvas in NativeCanvasView(summary: canvas, client: app.client, currentUser: app.user) }
             .onOpenURL { url in
                 guard let link = CanvasLink.parse(url) else { return }
                 if app.canvases.isEmpty { pendingLink = link } else { open(link) }
@@ -235,12 +325,11 @@ private struct LibraryView: View {
                     GlassDockButton(label: "Canvases", symbol: "square.grid.2x2.fill", selected: !showingAgents) {
                         showingAgents = false; searching = false; query = ""
                     }
-                    GlassDockButton(label: "Working agents", symbol: "sparkles", caption: "Agents", selected: showingAgents) { showingAgents = true; searchFocused = false }
+                    GlassDockButton(label: "Working agents", symbol: "sparkles", selected: showingAgents) { showingAgents = true; searchFocused = false }
                 }
                 Button { settings = true } label: {
-                    Text(String(app.user?.name.prefix(1) ?? "D")).font(.title3.bold())
-                        .frame(width: 48, height: 48)
-                        .background(Color.accentColor.opacity(0.15), in: Circle()).padding(6)
+                    Text(String(app.user?.name.prefix(1) ?? "D")).font(.body.weight(.medium))
+                        .frame(width: 44, height: 44).padding(4)
                 }.buttonStyle(.plain).modifier(FloatingGlass()).accessibilityLabel("Account and settings")
             }
         }.frame(maxWidth: 600).padding(.horizontal, 20).padding(.top, 10)
@@ -313,14 +402,14 @@ private struct CanvasCard: View {
                     Spacer()
                     Text(Date(timeIntervalSince1970: canvas.updatedAt / 1000).formatted(.relative(presentation: .named)))
                 }.font(.caption).foregroundStyle(.secondary)
-                if canvas.shared == true { Label("Shared with you", systemImage: "person.2").font(.caption2).foregroundStyle(doopBlue) }
+                if canvas.shared == true { Label("Shared with you", systemImage: "person.2").font(.caption2).foregroundStyle(.secondary) }
             }.padding(18)
         }
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.primary.opacity(0.06)))
     }
-    private var placeholder: some View { Image(systemName: "square.stack.3d.up").font(.system(size: 42, weight: .ultraLight)).foregroundStyle(doopBlue.opacity(0.5)) }
+    private var placeholder: some View { Image(systemName: "square.stack.3d.up").font(.system(size: 42, weight: .ultraLight)).foregroundStyle(.tertiary) }
 }
 
 private struct NativeSettings: View {
@@ -330,6 +419,7 @@ private struct NativeSettings: View {
     @State private var error: String?
     @State private var busy = false
     @State private var confirmingDeletion = false
+    @State private var hasPassword = true
     @State private var deletionPassword = ""
     var body: some View {
         NavigationStack {
@@ -346,15 +436,25 @@ private struct NativeSettings: View {
                         }.disabled(busy)
                     }
                     Section {
-                        Button("Delete account…", role: .destructive) { confirmingDeletion = true }.disabled(busy)
+                        Button("Delete account…", role: .destructive) {
+                            busy = true
+                            error = nil
+                            Task {
+                                do { hasPassword = try await app.hasPassword(); confirmingDeletion = true }
+                                catch { self.error = error.localizedDescription }
+                                busy = false
+                            }
+                        }.disabled(busy)
                     } footer: {
                         Text("Deletes your account on this server. Canvases only you own are removed; canvases shared with others stay with them.")
                     }
                     .alert("Delete your account?", isPresented: $confirmingDeletion) {
-                        SecureField("Password", text: $deletionPassword)
+                        /* an account that only ever signed in through Google /
+                           Microsoft / SSO has no password to ask for */
+                        if hasPassword { SecureField("Password", text: $deletionPassword) }
                         Button("Delete", role: .destructive) {
                             busy = true
-                            let password = deletionPassword
+                            let password = hasPassword ? deletionPassword : nil
                             deletionPassword = ""
                             Task {
                                 do { try await app.deleteAccount(password: password); dismiss() } catch { self.error = error.localizedDescription }
@@ -363,7 +463,7 @@ private struct NativeSettings: View {
                         }
                         Button("Cancel", role: .cancel) { deletionPassword = "" }
                     } message: {
-                        Text("This cannot be undone. Enter your password to confirm.")
+                        Text(hasPassword ? "This cannot be undone. Enter your password to confirm." : "This cannot be undone.")
                     }
                 }
                 Section {
@@ -453,9 +553,9 @@ struct WorkingAgentsView: View {
                             ForEach((canvas.activeTasks ?? []).sorted { $0.startedAt > $1.startedAt }) { task in
                                 HStack(alignment: .top, spacing: 12) {
                                     Image(systemName: task.agentName.isEmpty ? "clock" : "sparkles")
-                                        .foregroundStyle(task.agentName.isEmpty ? .orange : .blue)
+                                        .foregroundStyle(task.agentName.isEmpty ? .orange : .primary)
                                         .frame(width: 36, height: 36)
-                                        .background(Color.accentColor.opacity(0.08), in: Circle())
+                                        .background(Color.primary.opacity(0.08), in: Circle())
                                     VStack(alignment: .leading, spacing: 5) {
                                         HStack {
                                             Text(task.agentName.isEmpty ? "Waiting for an agent" : task.agentName).font(.subheadline.bold())

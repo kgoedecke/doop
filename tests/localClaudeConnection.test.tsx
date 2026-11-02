@@ -13,6 +13,7 @@ vi.mock('../src/lib/localAgent', () => ({
   }),
   hasLocalClaude: () => true,
   canInstallClaude: () => true,
+  canChooseClaude: () => false,
   refreshLocalAgent: mocks.refresh,
   selectLocalAgent: mocks.select,
   disconnectLocalAgent: vi.fn(),

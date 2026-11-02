@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import type express from 'express'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
@@ -145,17 +146,17 @@ export function wrapSnapshotHtml(html: string, marker: string, baseUrl: string |
 
 /* ------------------------------------------------------------------ */
 
-const INGESTS_PER_MIN = Number(process.env.SYNC_INGESTS_PER_MIN || 30)
+const INGESTS_PER_MIN = env.SYNC_INGESTS_PER_MIN
 /** floor between rewrites of the SAME page — a busy app must not churn the
  *  canvas (and its websocket room) with a frame write per user interaction */
-const PAGE_MIN_INTERVAL_MS = Number(process.env.SYNC_PAGE_INTERVAL_MS ?? 30_000)
+const PAGE_MIN_INTERVAL_MS = env.SYNC_PAGE_INTERVAL_MS
 /** Import-once: after this age a synced frame freezes — later captures no
  *  longer rewrite it (traversal edges keep accumulating). The grace window
  *  exists so the creating visit can still improve its own capture: scroll
  *  reveals completing, late images, a second look at the same screen.
  *  Re-import = delete the frame and visit the page again. Continuous
  *  updating can return later as an opt-in. */
-const FREEZE_AFTER_MS = Number(process.env.SYNC_FREEZE_MS ?? 15 * 60_000)
+const FREEZE_AFTER_MS = env.SYNC_FREEZE_MS
 
 const ingestHits = new Map<string, number[]>()
 const pageLastWrite = new Map<string, number>()

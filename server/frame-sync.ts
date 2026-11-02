@@ -1,6 +1,8 @@
 import { actors } from '../generated/actors/index.js'
+import { env } from './env.ts'
 
-if (process.env.NODE_ENV === 'production' && !process.env.TERSE_ACTOR_URL?.trim()) {
+/* env validation already refuses a production boot without it; say why */
+if (env.NODE_ENV === 'production' && !env.TERSE_ACTOR_URL) {
   throw new Error(
     'TERSE_ACTOR_URL is required in production. Configure a separately hosted actor API with a public WebSocket endpoint.',
   )

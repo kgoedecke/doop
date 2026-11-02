@@ -26,7 +26,12 @@
     "allow-claude-connect",
     "allow-claude-login",
     "allow-claude-install",
+    "allow-claude-choose-cli",
+    "allow-claude-reset-cli",
     "allow-claude-run",
-    "allow-claude-stop"
+    "allow-claude-stop",
+    "allow-claude-add-extension",
+    "allow-codex-add-mcp",
+    "allow-view-menu-state"
   ]
 }

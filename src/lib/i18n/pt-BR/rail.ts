@@ -1,0 +1,31 @@
+import type { Catalog } from '..'
+
+export const rail: Catalog['rail'] = {
+  navigation: 'Navegação',
+  showSidebar: 'Mostrar barra lateral',
+  hideSidebar: 'Ocultar barra lateral',
+  searchCanvasesShortcut: 'Buscar canvases (⌘K)',
+  allCanvases: 'Todos os canvases',
+  ownedByMe: 'Meus canvases',
+  sharedWithMe: 'Compartilhados comigo',
+  workspaces: 'Workspaces',
+  newWorkspace: 'Novo workspace',
+  createWorkspace: 'Criar workspace',
+  noPlanYet: 'Ainda sem plano',
+  explore: 'Explorar',
+  community: 'Comunidade',
+  resources: 'Recursos',
+  automations: 'Automações',
+  integrations: 'Integrações',
+  agents: 'Agentes',
+  agentCanvases: { one: '{count} canvas', other: '{count} canvases' },
+  workingNow: 'trabalhando agora',
+  connectAgent: 'Conectar um agente',
+
+  searchCanvases: 'Buscar canvases',
+  results: 'Resultados',
+  noMatch: 'Nenhum canvas corresponde a “{query}”.',
+  frameCount: { one: '{count} frame', other: '{count} frames' },
+  edited: 'editado {time}',
+  sharedWithYou: 'compartilhado com você',
+}

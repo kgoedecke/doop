@@ -1,9 +1,11 @@
+import { env } from '../env.ts'
 import { randomUUID } from 'node:crypto'
 import { and, eq, inArray, isNull, lt, lte, or } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { z } from 'zod'
 import { db, type Db } from '../db/index.ts'
 import { canvases, tasks, linearInstallations, linearSessions } from '../db/schema.ts'
+import { isBanned } from '../auth.ts'
 import { store } from '../store.ts'
 import * as actions from '../actions.ts'
 import { consumeResidentTask, refundResidentTask } from '../allowance.ts'
@@ -17,6 +19,8 @@ type Session = typeof linearSessions.$inferSelect
 const terminal = ['complete', 'failed', 'canceled']
 const active = ['pending', 'preparing', 'running']
 const workInFlight = new Set<string>()
+const RUN_TIMEOUT_MS = 60 * 60_000
+const SUSPENDED = 'The Doop account behind this Linear agent is suspended, so it cannot design.'
 
 export const sessionEvent = z.object({
   type: z.literal('AgentSessionEvent'),
@@ -48,7 +52,7 @@ export const sessionEvent = z.object({
 /** Called only after verifying the signature and freshness of the raw payload. */
 export async function receiveSession(event: z.infer<typeof sessionEvent>) {
   if (
-    event.oauthClientId !== process.env.LINEAR_CLIENT_ID ||
+    event.oauthClientId !== env.LINEAR_CLIENT_ID ||
     event.appUserId !== event.agentSession.appUserId ||
     event.organizationId !== event.agentSession.organizationId
   )
@@ -162,6 +166,7 @@ async function dispatch(session: Session) {
   let gate: Awaited<ReturnType<typeof consumeResidentTask>> | undefined
   let committed = false
   try {
+    if (await isBanned(session.userId)) throw new Error(SUSPENDED)
     if (!session.issueId) throw new Error('Delegate an issue with a design brief to Doop.')
     if (!(await pickModel(session.userId)))
       throw new Error('Connect a model account in Doop Settings, then delegate the issue again.')
@@ -251,7 +256,7 @@ async function dispatch(session: Session) {
         error:
           error instanceof LinearError
             ? error.message
-            : error instanceof Error && /^(Connect|Delegate)/.test(error.message)
+            : error instanceof Error && /^(Connect|Delegate|The Doop account)/.test(error.message)
               ? error.message
               : 'Doop could not start the design. Check your model account and delegate again.',
         updatedAt: Date.now(),
@@ -276,6 +281,14 @@ async function processSession(session: Session) {
         ),
       )
     if (!installation) return
+    if (await isBanned(installation.userId)) {
+      // Access was revoked after the request was queued: stop the installer's work and say why.
+      const rows = await db.transaction((tx) => cancelStoredSessions(tx, installation.organizationId, SUSPENDED))
+      stopPublishedCards(rows, SUSPENDED)
+      const [latest] = await db.select().from(linearSessions).where(eq(linearSessions.id, session.id))
+      if (!latest) return
+      session = latest
+    }
     if (!session.acknowledged && !terminal.includes(session.status)) {
       await activity(
         session,
@@ -305,11 +318,12 @@ async function processSession(session: Session) {
         await db.update(linearSessions).set({ linked: true }).where(eq(linearSessions.id, session.id))
       }
       const card = actions.getTasks(session.canvasId).find((task) => task.id === session.taskId)
+      // The run's hour starts at dispatch: a request may queue behind the concurrency limit for longer.
       if (
         card?.failedAt ||
         card?.endedAt ||
         !store.getCanvasMetadata(session.canvasId) ||
-        Date.now() - session.createdAt > 60 * 60_000
+        Date.now() - (card?.startedAt ?? session.updatedAt) > RUN_TIMEOUT_MS
       ) {
         const success = !!card?.endedAt && !card.failedAt
         session = {

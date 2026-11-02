@@ -57,7 +57,7 @@ function comment(id: string, userId: string, at: number): ElementComment {
     id,
     canvasId: CANVAS,
     frameId: 'f1',
-    selector: '.x',
+    elementId: 'xx0001',
     snippet: '<p/>',
     from: userId,
     fromUserId: userId,

@@ -37,16 +37,24 @@ export const DESKTOP_SIGNIN_PATH = '/desktop/signin'
 export const DESKTOP_HANDOFF_PATH = '/desktop/handoff'
 
 /** better-auth's social providers, plus 'oidc' for the genericOAuth SSO plugin. */
-export type DesktopSignInProvider = 'google' | 'microsoft' | 'oidc'
-const PROVIDERS: readonly DesktopSignInProvider[] = ['google', 'microsoft', 'oidc']
+export type DesktopSignInProvider = 'google' | 'microsoft' | 'apple' | 'oidc'
+const PROVIDERS: readonly DesktopSignInProvider[] = ['google', 'microsoft', 'apple', 'oidc']
+
+/** Where to land once signed in, as better-auth's sign-ins take it: one
+ *  path for a returning account and one for an account the sign-in just
+ *  created (its first canvas, usually). */
+export interface ProviderRedirects {
+  /** same-origin path for an existing account */
+  callbackURL: string
+  /** same-origin path for a brand-new account */
+  newUserCallbackURL: string
+}
 
 /** What the app asked the browser to do, carried through every hop. */
-export interface DesktopSignInRequest {
+export interface DesktopSignInRequest extends ProviderRedirects {
   provider: DesktopSignInProvider
   /** random per-attempt value the app compares against its pending sign-in */
   challenge: string
-  /** same-origin path to land on in the app once signed in */
-  to: string
 }
 
 /** 128 random bits, URL-safe. */
@@ -59,17 +67,26 @@ const CHALLENGE_PATTERN = /^[0-9a-f]{32}$/
 
 /** The browser-side page that begins a provider sign-in for the desktop app. */
 export function desktopSignInURL(origin: string, request: DesktopSignInRequest): string {
-  const params = new URLSearchParams({ provider: request.provider, challenge: request.challenge, to: request.to })
+  const params = new URLSearchParams({
+    provider: request.provider,
+    challenge: request.challenge,
+    to: request.callbackURL,
+    newUserTo: request.newUserCallbackURL,
+  })
   return `${origin}${DESKTOP_SIGNIN_PATH}?${params}`
 }
 
-/** Null unless the query names a known provider and carries a challenge. */
+/** Null unless the query names a known provider and carries a challenge.
+ *  A new account without a landing of its own goes where a returning one
+ *  would. */
 export function parseDesktopSignInQuery(search: string): DesktopSignInRequest | null {
   const params = new URLSearchParams(search)
   const provider = PROVIDERS.find((p) => p === params.get('provider'))
   const challenge = params.get('challenge')
   if (!provider || !challenge || !CHALLENGE_PATTERN.test(challenge)) return null
-  return { provider, challenge, to: safeRelativeTarget(params.get('to')) ?? '/' }
+  const callbackURL = safeRelativeTarget(params.get('to')) ?? '/'
+  const newUserCallbackURL = safeRelativeTarget(params.get('newUserTo')) ?? callbackURL
+  return { provider, challenge, callbackURL, newUserCallbackURL }
 }
 
 /** Registered by the shell (desktop/src-tauri/tauri.conf.json, plugins.deep-link). */

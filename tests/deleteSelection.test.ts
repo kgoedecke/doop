@@ -57,6 +57,29 @@ describe('deleteSelection (the canvas ⌫ shortcut)', () => {
   })
 })
 
+describe('deleteSelection with locked frames', () => {
+  beforeEach(() => {
+    updateFrame.mockClear()
+    deleteFrame.mockClear()
+  })
+
+  it('skips the locked frames of a selection and deletes the rest', () => {
+    const locked: Frame = { ...frame, id: 'f2', locked: true }
+    const canvas: Canvas = { id: 'c1', name: 'Canvas', frames: [frame, locked] } as Canvas
+    useStore.setState({ canvas, selectedId: 'f2', selectedIds: ['f1', 'f2'], selectedElement: null })
+    expect(deleteSelection()).toBe(true)
+    expect(deleteFrame).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a selection made only of locked frames alone', () => {
+    const locked: Frame = { ...frame, locked: true }
+    const canvas: Canvas = { id: 'c1', name: 'Canvas', frames: [locked] } as Canvas
+    useStore.setState({ canvas, selectedId: 'f1', selectedIds: ['f1'], selectedElement: null })
+    expect(deleteSelection()).toBe(false)
+    expect(deleteFrame).not.toHaveBeenCalled()
+  })
+})
+
 describe('deleteSelection with a stale pick', () => {
   beforeEach(() => {
     updateFrame.mockClear()

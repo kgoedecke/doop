@@ -1,3 +1,4 @@
+import { env } from '../env.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { and, eq, gt, lt } from 'drizzle-orm'
 import { z } from 'zod'
@@ -6,10 +7,9 @@ import { linearInstallations, linearOAuthStates } from '../db/schema.ts'
 import { LinearError, linearQuery } from './client.ts'
 
 export type Installation = typeof linearInstallations.$inferSelect
-export const publicOrigin = () => (process.env.BETTER_AUTH_URL || 'http://localhost:4300').replace(/\/$/, '')
+export const publicOrigin = () => env.BETTER_AUTH_URL
 export const redirectUri = () => `${publicOrigin()}/api/integrations/linear/callback`
-export const agentEnabled = () =>
-  !!(process.env.LINEAR_CLIENT_ID && process.env.LINEAR_CLIENT_SECRET && process.env.LINEAR_WEBHOOK_SECRET)
+export const agentEnabled = () => !!(env.LINEAR_CLIENT_ID && env.LINEAR_CLIENT_SECRET && env.LINEAR_WEBHOOK_SECRET)
 const hash = (value: string) => createHash('sha256').update(value).digest('base64url')
 
 export async function startInstall(userId: string) {
@@ -21,7 +21,7 @@ export async function startInstall(userId: string) {
     .insert(linearOAuthStates)
     .values({ hash: hash(state), verifier, userId, expiresAt: Date.now() + 10 * 60_000 })
   const params = new URLSearchParams({
-    client_id: process.env.LINEAR_CLIENT_ID!,
+    client_id: env.LINEAR_CLIENT_ID!,
     redirect_uri: redirectUri(),
     response_type: 'code',
     actor: 'app',
@@ -43,12 +43,12 @@ const tokenSchema = z.object({
 async function exchange(form: Record<string, string>) {
   let response: Response
   try {
-    response = await fetch(process.env.LINEAR_TOKEN_URL || 'https://api.linear.app/oauth/token', {
+    response = await fetch(env.LINEAR_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: process.env.LINEAR_CLIENT_ID ?? '',
-        client_secret: process.env.LINEAR_CLIENT_SECRET ?? '',
+        client_id: env.LINEAR_CLIENT_ID ?? '',
+        client_secret: env.LINEAR_CLIENT_SECRET ?? '',
         ...form,
       }),
       signal: AbortSignal.timeout(20_000),

@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import express from 'express'
 import Stripe from 'stripe'
 import { PLANS, isBillingInterval, workspaceStatusFrom } from '../shared/billing.ts'
@@ -16,13 +17,13 @@ import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
  * without a tunnel). Both go through the same subscriptionPatch().
  */
 
-const SECRET_KEY = process.env.STRIPE_SECRET_KEY
-const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET
+const SECRET_KEY = env.STRIPE_SECRET_KEY
+const WEBHOOK_SECRET = env.STRIPE_WEBHOOK_SECRET
 const PRICES: Record<BillingInterval, string | undefined> = {
-  month: process.env.STRIPE_PRICE_TEAM_MONTHLY,
-  year: process.env.STRIPE_PRICE_TEAM_YEARLY,
+  month: env.STRIPE_PRICE_TEAM_MONTHLY,
+  year: env.STRIPE_PRICE_TEAM_YEARLY,
 }
-const ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
+const ORIGIN = env.BETTER_AUTH_URL
 
 export function billingEnabled(): boolean {
   return !!SECRET_KEY

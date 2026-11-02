@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-claude-choose-cli"
+description = "Enables the claude_choose_cli command without any pre-configured scope."
+commands.allow = ["claude_choose_cli"]
+
+[[permission]]
+identifier = "deny-claude-choose-cli"
+description = "Denies the claude_choose_cli command without any pre-configured scope."
+commands.deny = ["claude_choose_cli"]

@@ -1,5 +1,6 @@
 node_modules
 dist
+public/claude-extension
 data
 desktop/src-tauri/target
 desktop/src-tauri/gen
@@ -12,3 +13,11 @@ desktop/src-tauri/gen
 # files are ignored.
 .claude/settings.local.json
 .claude/.current-tool
+chatgpt-plugin/dist/
+
+# the built component catalogue
+storybook-static/
+*storybook.log
+
+# Playwright MCP snapshots, logs and screenshots
+.playwright-mcp/

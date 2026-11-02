@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import { mkdtemp, rm, writeFile, access, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,7 +27,7 @@ function deferred() {
   return { promise, resolve }
 }
 afterEach(async () => {
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -130,8 +131,8 @@ describe('Gemini cloud worker', () => {
       script,
       `const fs = require('node:fs'); let prompt = ''; process.stdin.on('data', x => prompt += x); process.stdin.on('end', () => console.log(JSON.stringify({response: JSON.stringify({prompt, directory: process.cwd(), system: fs.readFileSync(process.env.GEMINI_SYSTEM_MD, 'utf8'), workerSecret: process.env.GEMINI_WORKER_TOKEN, apiKey: process.env.GEMINI_API_KEY})})));`,
     )
-    vi.stubEnv('GEMINI_WORKER_TOKEN', secret)
-    vi.stubEnv('GEMINI_API_KEY', 'must-not-reach-child')
+    stubEnv('GEMINI_WORKER_TOKEN', secret)
+    stubEnv('GEMINI_API_KEY', 'must-not-reach-child')
     const result = await runGeminiCli(job, 'https://doop.example', new AbortController().signal, {
       executable: process.execPath,
       args: [script],
@@ -184,10 +185,10 @@ describe('Gemini cloud worker', () => {
   })
 
   it('rejects shared workers and hides configuration secrets in errors', () => {
-    vi.stubEnv('DOOP_GEMINI_CLOUD_WORKERS', JSON.stringify({ alice: { url: 'https://worker.example', token: secret } }))
+    stubEnv('DOOP_GEMINI_CLOUD_WORKERS', JSON.stringify({ alice: { url: 'https://worker.example', token: secret } }))
     expect(geminiCloudWorkerFor('bob')).toBeUndefined()
     expect(geminiCloudWorkerFor('alice')?.url).toBe('https://worker.example')
-    vi.stubEnv(
+    stubEnv(
       'DOOP_GEMINI_CLOUD_WORKERS',
       JSON.stringify({
         alice: { url: 'https://worker.example', token: secret },

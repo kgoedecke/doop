@@ -2,6 +2,8 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
+import { CheckIcon } from './icons'
+
 /* A checkbox drawn as a square that fills with ink when checked. The real
    input stays in the DOM (visually hidden, not display:none) so the control
    keeps native keyboard behaviour and form semantics; `peer-focus-visible`
@@ -18,11 +20,11 @@ function Checkbox({ className, boxClassName, ...props }: React.ComponentProps<'i
       <span
         aria-hidden="true"
         className={cn(
-          'grid size-5 flex-none place-items-center rounded-[5px] border border-ink-faint bg-surface text-xs font-extrabold text-paper transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand peer-disabled:opacity-50',
+          'grid size-5 flex-none place-items-center rounded-tag border border-ink-faint bg-surface text-paper transition-colors peer-checked:border-ink peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand peer-disabled:opacity-50',
           boxClassName,
         )}
       >
-        {props.checked ? '✓' : ''}
+        {props.checked ? <CheckIcon size={14} /> : null}
       </span>
     </>
   )
@@ -47,7 +49,7 @@ function CheckboxCard({
   return (
     <label
       className={cn(
-        'relative mt-3.5 grid cursor-pointer grid-cols-[22px_1fr] items-start gap-3 rounded-[11px] border border-line bg-surface p-[15px] transition-[border-color,background] hover:border-ink-faint',
+        'relative mt-3.5 grid cursor-pointer grid-cols-[22px_1fr] items-start gap-3 rounded-card border border-line bg-surface p-3.75 transition-[border-color,background] hover:border-ink-faint',
         checked &&
           'border-ink hover:border-ink [background:linear-gradient(110deg,color-mix(in_srgb,var(--brand)_5%,transparent),transparent_72%),var(--surface)]',
         className,
@@ -55,8 +57,8 @@ function CheckboxCard({
     >
       <Checkbox checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       <span>
-        <span className="block text-[13.5px] font-bold text-ink">{title}</span>
-        {description ? <span className="mt-1 block text-xs leading-[1.4] text-ink-soft">{description}</span> : null}
+        <span className="block text-copy/4 font-bold text-ink">{title}</span>
+        {description ? <span className="mt-1 block text-label text-ink-soft">{description}</span> : null}
       </span>
     </label>
   )

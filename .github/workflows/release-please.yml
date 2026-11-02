@@ -8,10 +8,15 @@
 #
 # The desktop shell is a second package (desktop/): commits touching it get
 # their own "chore(desktop): release x.y.z" PR that bumps the version in
-# package.json, tauri.conf.json, Cargo.toml and Cargo.lock together, plus
-# desktop/CHANGELOG.md. That PR does NOT tag (skip-github-release): push the
+# package.json, tauri.conf.json and Cargo.toml together, plus
+# desktop/CHANGELOG.md (not Cargo.lock: release-please cannot address one
+# package in it, so desktop.yml refreshes that entry before `cargo --locked`). That PR does NOT tag (skip-github-release): push the
 # `desktop-vX.Y.Z` tag by hand after merging, which runs desktop-release.yml
-# and attaches the signed DMG (see desktop/README.md).
+# and attaches the signed DMG (see desktop/README.md). Because no GitHub
+# Release is cut, release-please never flips that merged PR's label from
+# `autorelease: pending` to `autorelease: tagged`, and a pending merged PR
+# makes every later run abort with "untagged, merged release PRs
+# outstanding". The relabel step below does the flip for desktop PRs.
 #
 # Token: with the default GITHUB_TOKEN, the release PR's own CI run will not
 # trigger (GitHub suppresses workflows on events created by that token). Add a
@@ -39,3 +44,15 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - name: Mark merged desktop release PRs as tagged
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr list --repo "$GITHUB_REPOSITORY" --state merged --label 'autorelease: pending' \
+            --search 'release desktop in:title' --json number,title \
+            --jq '.[] | select(.title | test("^chore\\(main\\): release desktop ")) | .number' |
+          while read -r number; do
+            echo "Relabeling merged desktop release PR #$number as tagged"
+            gh pr edit "$number" --repo "$GITHUB_REPOSITORY" \
+              --remove-label 'autorelease: pending' --add-label 'autorelease: tagged'
+          done

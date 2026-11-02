@@ -15,31 +15,52 @@
   <body>
     <div id="root"></div>
     <script type="module">
+      import '/tests/fixtures/restFrames.ts'
       import React from 'react'
       import { createRoot } from 'react-dom/client'
       import { Stage } from '/src/components/Stage.tsx'
       import { useStore } from '/src/lib/store.ts'
-      import { api } from '/src/lib/api.ts'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import '/src/styles.css'
-      // This camera fixture supplies loaded frames and an HTTP save stub; actor transport has its own tests.
-      api.updateFrame = async (id, patch) => {
-        const response = await fetch(`/api/frames/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch),
-        })
-        return response.json()
-      }
       window.seedPages = (canvas) => {
         useStore.getState().setCanvas(canvas)
         useStore.getState().setFrameIndex(canvas.frames.map((frame) => frame.id))
+      }
+      window.pickElement = (frameId, selector) => useStore.getState().pickElement({ frameId, selector })
+      window.frameHtml = (frameId) => useStore.getState().canvas?.frames.find((f) => f.id === frameId)?.html
+      /* the one API call an element link makes: stamp the element's data-doop-id
+         into the frame HTML, as server/elementIds.ts does, and answer with it */
+      const realFetch = window.fetch.bind(window)
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url
+        const match = /^\/api\/frames\/([^/]+)\/element-id$/.exec(url)
+        if (!match) return realFetch(input, init)
+        const { selector } = JSON.parse(init.body)
+        const frame = useStore.getState().canvas?.frames.find((f) => f.id === match[1])
+        const doc = new DOMParser().parseFromString(frame?.html ?? '', 'text/html')
+        const el = doc.querySelector(selector)
+        if (!el) return new Response(JSON.stringify({ error: 'no element' }), { status: 409 })
+        const elementId = el.getAttribute('data-doop-id') || Math.random().toString(36).slice(2, 8).padEnd(6, '0')
+        el.setAttribute('data-doop-id', elementId)
+        useStore.getState().patchFrameLocal(frame.id, { html: doc.documentElement.outerHTML })
+        return new Response(JSON.stringify({ elementId }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
       }
       window.pageState = () => ({
         activePageId: useStore.getState().activePageId,
         viewport: useStore.getState().viewport,
         selectedId: useStore.getState().selectedId,
+        selectedElement: useStore.getState().selectedElement,
+        elementPanelOpen: useStore.getState().elementPanelOpen,
+        inspectorOpen: useStore.getState().inspectorOpen,
+        notice: useStore.getState().notice?.text,
       })
-      createRoot(document.getElementById('root')).render(React.createElement(Stage, { onAddFrame: () => {} }))
+      /* mounted as main.tsx mounts it: the toolbar's tooltips need the provider */
+      createRoot(document.getElementById('root')).render(
+        React.createElement(TooltipProvider, null, React.createElement(Stage, { onAddFrame: () => {} })),
+      )
     </script>
   </body>
 </html>

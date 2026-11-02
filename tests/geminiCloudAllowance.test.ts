@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 const mocks = vi.hoisted(() => ({ insert: vi.fn() }))
 vi.mock('../server/db/index.ts', () => ({
@@ -12,11 +13,11 @@ vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: 
 import { consumeResidentTask, getAllowance } from '../server/allowance.ts'
 
 afterEach(() => {
-  vi.unstubAllEnvs()
+  unstubAllEnvs()
   vi.clearAllMocks()
 })
 it('permits pilot tasks without spending free credits and keeps other users metered', async () => {
-  vi.stubEnv(
+  stubEnv(
     'DOOP_GEMINI_CLOUD_WORKERS',
     JSON.stringify({ alice: { url: 'https://worker.example', token: 'x'.repeat(32) } }),
   )

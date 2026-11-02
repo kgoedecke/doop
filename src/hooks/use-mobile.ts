@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 /* Mirrors --breakpoint-md in styles.css: below this the canvas swaps its
    rails for sheets and the dashboard hides its sidebar. Change both together. */
-const MOBILE_QUERY = '(max-width: 900px)'
+export const MOBILE_QUERY = '(max-width: 900px)'
 
 /** One shared breakpoint for the dashboard rail and canvas workspace. */
 export function useIsMobile(): boolean {

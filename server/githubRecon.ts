@@ -1,3 +1,4 @@
+import { env } from './env.ts'
 import { ModelAuthError, ModelUnavailableError, type AgentModel } from './agentModel.ts'
 import type { TurnBlock } from './openaiAgent.ts'
 import { createAsset } from './assets.ts'
@@ -340,9 +341,8 @@ export async function extractDesignSystem(conn: GithubConnection, paths: string[
 const REPO_REF_RE = /(["'(])repo:([^"')\s]+)(["')])/g
 const MAX_TRANSPLANTED_ASSETS = 12
 const TRANSPARENT_PX = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
-/* same env read as server/auth.ts — asset URLs must be absolute inside
-   sandboxed frame iframes */
-const ORIGIN = process.env.BETTER_AUTH_URL || 'http://localhost:4300'
+/* asset URLs must be absolute inside sandboxed frame iframes */
+const ORIGIN = env.BETTER_AUTH_URL
 
 /** Transplant the repository's real image assets: every src="repo:<path>"
  *  the model emitted is fetched through the connection and re-hosted in

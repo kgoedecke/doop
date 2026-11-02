@@ -90,11 +90,6 @@ const codeToClaims = new Map<string, Record<string, unknown>>()
 let idp: HttpServer
 let server: Server
 
-/* 4973/4974: clear of every other test file's port range (see
-   tests/oidc.test.ts for the full accounting) - the fake IdP itself binds an
-   OS-assigned port. */
-const PORT = 4973
-const PORT_RESTRICTED = 4974
 let restricted: Server
 
 beforeAll(async () => {
@@ -106,8 +101,8 @@ beforeAll(async () => {
     OIDC_CLIENT_SECRET: 'test-secret',
   }
   ;[server, restricted] = await Promise.all([
-    startServer(PORT, oidcEnv),
-    startServer(PORT_RESTRICTED, { ...oidcEnv, SIGNUP_EMAIL_DOMAINS: 'jointhetroops.com' }),
+    startServer(oidcEnv),
+    startServer({ ...oidcEnv, SIGNUP_EMAIL_DOMAINS: 'jointhetroops.com' }),
   ])
 }, 70_000)
 

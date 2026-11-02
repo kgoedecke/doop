@@ -1,13 +1,17 @@
 import { nanoid } from 'nanoid'
 import { canvasIndex, frameActor, mapFrames } from './frame-sync.ts'
-import type { FrameInput, FramePatch, PageUpdate } from '../src/actor.ts'
-import { canvasPages } from '../shared/pages.ts'
+import type { FrameChange, FrameInput, FramePatch, FrameWriteConflict, PageUpdate } from '../src/actor.ts'
+import { canvasPages, copyPageName } from '../shared/pages.ts'
 import { validateFrame } from '../shared/frame-validation.ts'
 import * as persist from './db/persist.ts'
+import type { LinkAccess } from '../shared/canvasRole.ts'
+import { MAX_GUIDES } from '../shared/guides.ts'
+import { remapFrameTargets } from '../shared/prototype.ts'
 import { colorFor } from '../shared/types.ts'
 import type {
   Actor,
   Canvas,
+  CanvasGuide,
   CanvasPageInfo,
   CommunityCategory,
   Frame,
@@ -16,11 +20,55 @@ import type {
 } from '../shared/types.ts'
 
 export const MAX_GUIDELINE_DOCS = 20
+export const MAX_PAGES = 100
+
+export class PageLimitError extends Error {
+  constructor() {
+    super(`A canvas holds at most ${MAX_PAGES} pages.`)
+  }
+}
+
+export class GuideLimitError extends Error {
+  constructor() {
+    super(`A canvas holds at most ${MAX_GUIDES} guides.`)
+  }
+}
+
+/** An optimistic save whose frame moved on; carries the current frame. */
+export class FrameConflictError extends Error {
+  constructor(readonly frame: Frame) {
+    super('Frame changed. Reload it and try again.')
+  }
+}
+
+type PageCopy = {
+  source: CanvasPageInfo
+  page: CanvasPageInfo
+  pages: CanvasPageInfo[]
+  frames: Frame[]
+  guides: CanvasGuide[]
+}
+
+export type FrameUpdateOptions = {
+  /** the html change only marks elements up (a `data-doop-id` stamp):
+   *  nothing a reviewer signed off on moved, so sign-off stands */
+  annotation?: boolean
+  /** refuse the write (FrameConflictError) unless the frame is at this version */
+  expectedUpdatedAt?: number
+  /** a deliberate whole-document write: it always opens a design-history burst */
+  replace?: boolean
+}
+
+const names = (pages: CanvasPageInfo[]) => pages.map((page) => page.name)
+const isConflict = (result: FrameChange | FrameWriteConflict | null): result is FrameWriteConflict =>
+  result?.type === 'conflict'
 
 /** SQL owns canvas metadata. Every frame read and write goes through actor RPC. */
 class Store {
   canvases = new Map<string, Canvas>()
   private cleaning = new Map<string, Promise<void>>()
+  /** the page copy in flight per canvas, so the next one waits for it */
+  private pageCopies = new Map<string, Promise<unknown>>()
 
   private async loadCanvasMetadata(id: string): Promise<Canvas | undefined> {
     let canvas = this.canvases.get(id)
@@ -36,12 +84,16 @@ class Store {
   private async ensureMembership(id: string): Promise<boolean> {
     const index = canvasIndex(id)
     let status = await index.snapshot()
+    /* the canvas can be deleted from memory while any await below is pending */
+    const metadata = () => this.canvases.get(id)
     if (!status.initialized) {
       const ids = await persist.loadLegacyFrameIds(id)
       await mapFrames(ids, async (frameId) => {
         const frame = await persist.loadLegacyFrame(frameId)
         if (!frame || frame.canvasId !== id) throw new Error(`Legacy frame unavailable: ${frameId}`)
-        const pages = canvasPages(this.canvases.get(id)!)
+        const canvas = metadata()
+        if (!canvas) throw new Error(`Canvas unavailable: ${id}`)
+        const pages = canvasPages(canvas)
         const pageId = pages.some((page) => page.id === frame.pageId) ? frame.pageId : pages[0]!.id
         await frameActor(frameId).initialize({ ...frame, pageId })
       })
@@ -55,9 +107,12 @@ class Store {
         if (!frame && (await index.has(frameId))) throw new Error(`Frame unavailable: ${frameId}`)
         return [frameId, frame?.pageId ?? ''] as const
       })
-      status = await index.initializePages(canvasPages(this.canvases.get(id)!), Object.fromEntries(frames))
+      const canvas = metadata()
+      if (!canvas) return false
+      status = await index.initializePages(canvasPages(canvas), Object.fromEntries(frames))
     }
-    if (status.pages) this.canvases.get(id)!.pages = status.pages
+    const canvas = metadata()
+    if (status.pages && canvas) canvas.pages = status.pages
     // Removal is durable before cleanup. A later request resumes cleanup after
     // an app crash; tombstones prevent retries from bringing a frame back.
     void this.recoverCanvasFrames(id, status.deleted)
@@ -182,6 +237,17 @@ class Store {
       .map((c) => this.toMeta(c, userId))
   }
 
+  /** The canvas signup made for this user (server/auth.ts): the oldest one
+   *  they own. Undefined once they have deleted it, or for an account that
+   *  predates the signup hook. */
+  firstCanvasOf(userId: string): Canvas | undefined {
+    let first: Canvas | undefined
+    for (const c of this.canvases.values()) {
+      if (c.ownerId === userId && (!first || c.createdAt < first.createdAt)) first = c
+    }
+    return first
+  }
+
   /** Every canvas on the instance, for the admin index only. Access is the
    *  caller's problem — the only caller is server/admin.ts, behind isAdmin.
    *  A deliberately separate method rather than a flag on listCanvases: a
@@ -231,6 +297,8 @@ class Store {
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
+      html: remapFrameTargets(frame.html, frameIds),
+      approval: null,
       canvasId,
       createdAt: now,
       updatedAt: now,
@@ -251,7 +319,11 @@ class Store {
       createdAt: now,
       updatedAt: now,
       frames,
-      pages: canvasPages(source).map((page) => ({ ...page })),
+      pages: canvasPages(source).map(({ startFrameId, ...page }) => {
+        const start = startFrameId && frameIds.get(startFrameId)
+        return start ? { ...page, startFrameId: start } : page
+      }),
+      ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
       ...(references?.length ? { references } : {}),
@@ -278,24 +350,151 @@ class Store {
     return canvas
   }
 
+  /** Copy a page and every frame on it (same names, geometry and html under
+   * fresh ids) into a new page right after the source, named "<source> copy"
+   * (numbered when that name is taken). Copies of one canvas run one after
+   * another so two at once cannot pick the same name or overshoot the page
+   * limit. Rejects with PageLimitError when the canvas is full. */
+  duplicatePage(canvasId: string, pageId: string, by: string): Promise<PageCopy | undefined> {
+    const previous = this.pageCopies.get(canvasId) ?? Promise.resolve()
+    const task = previous.then(
+      () => this.copyPage(canvasId, pageId, by),
+      () => this.copyPage(canvasId, pageId, by),
+    )
+    this.pageCopies.set(canvasId, task)
+    const release = () => {
+      if (this.pageCopies.get(canvasId) === task) this.pageCopies.delete(canvasId)
+    }
+    void task.then(release, release)
+    return task
+  }
+
+  private async copyPage(canvasId: string, pageId: string, by: string): Promise<PageCopy | undefined> {
+    const canvas = await this.syncCanvas(canvasId)
+    if (!canvas) return undefined
+    const pages = canvasPages(canvas)
+    const source = pages.find((page) => page.id === pageId)
+    if (!source) return undefined
+    if (pages.length >= MAX_PAGES) throw new PageLimitError()
+    const now = Date.now()
+    const sourceFrames = canvas.frames.filter((frame) => frame.pageId === pageId)
+    const frameIds = new Map(sourceFrames.map((frame) => [frame.id, `${canvasId}.${nanoid(10)}`]))
+    const start = source.startFrameId && frameIds.get(source.startFrameId)
+    const page: CanvasPageInfo = {
+      id: nanoid(10),
+      name: copyPageName(source.name, names(pages)),
+      ...(start ? { startFrameId: start } : {}),
+    }
+    const guides: CanvasGuide[] = (canvas.guides ?? [])
+      .filter((guide) => guide.pageId === pageId)
+      .map((guide) => ({ ...guide, id: nanoid(10), pageId: page.id }))
+    /* the copy's guides count against the canvas like any other */
+    if ((canvas.guides?.length ?? 0) + guides.length > MAX_GUIDES) throw new GuideLimitError()
+    const index = canvasIndex(canvasId)
+    const inserted = await index.insertPage(page, pageId)
+    if (inserted.error) return undefined
+    /* links within the page follow the copy; links to other pages stay */
+    const frames: Frame[] = sourceFrames.map((frame) => ({
+      ...frame,
+      id: frameIds.get(frame.id)!,
+      html: remapFrameTargets(frame.html, frameIds),
+      pageId: page.id,
+      approval: null,
+      createdAt: now,
+      updatedAt: now,
+      updatedBy: by,
+    }))
+    try {
+      for (const frame of frames) {
+        if (!(await index.reserveFrame(frame, false, {}))) throw new Error('Could not prepare copied frame')
+        await frameActor(frame.id).initialize(frame)
+        if (!(await index.activate(frame.id))) throw new Error('Could not finish copied frame')
+      }
+    } catch (error) {
+      // Take the half-made copy back out: its frames, then its page.
+      await mapFrames(frames, (frame) => index.remove(frame.id))
+        .then(() => this.cleanupFrames(canvasId))
+        .then(async () => {
+          const current = (await index.snapshot()).pages ?? []
+          await index.setPages(
+            current.filter((candidate) => candidate.id !== page.id),
+            current,
+          )
+        })
+        .catch((cleanupError) => console.error('[page copy cleanup]', cleanupError))
+      throw error
+    }
+    const metadata = this.canvases.get(canvasId)
+    if (!metadata) return undefined
+    metadata.pages = inserted.pages
+    /* guides placed while the copy was being written stay alongside; the
+       copy keeps only as many of its own as the limit still has room for */
+    const room = Math.max(0, MAX_GUIDES - (metadata.guides?.length ?? 0))
+    if (guides.length > room) guides.splice(room)
+    if (guides.length) metadata.guides = [...(metadata.guides ?? []), ...guides]
+    metadata.updatedAt = Math.max(metadata.updatedAt, now)
+    persist.saveCanvas(metadata)
+    return { source, page, pages: inserted.pages, frames, guides }
+  }
+
   getCanvasMetadata(id: string) {
     return this.canvases.get(id)
   }
 
+  /** Replace the page list through the canvas actor, which refuses to drop a
+   *  page that still holds frames. Flow starts are kept; the guides of
+   *  deleted pages go with them and are returned so peers can drop them. */
   async setPages(
     canvasId: string,
     pages: CanvasPageInfo[],
     expectedPages: CanvasPageInfo[],
-  ): Promise<PageUpdate | undefined> {
+  ): Promise<(PageUpdate & { dropped: CanvasGuide[] }) | undefined> {
     const canvas = await this.loadCanvasMetadata(canvasId)
     if (!canvas || !(await this.ensureMembership(canvasId))) return undefined
     const result = await canvasIndex(canvasId).setPages(pages, expectedPages)
     canvas.pages = result.pages
-    if (!result.error) {
-      canvas.updatedAt = Date.now()
-      persist.saveCanvas(canvas)
-    }
-    return result
+    if (result.error) return { ...result, dropped: [] }
+    /* a deleted page takes its guides with it */
+    const kept = (guide: CanvasGuide) => result.pages.some((page) => page.id === guide.pageId)
+    const dropped = (canvas.guides ?? []).filter((guide) => !kept(guide))
+    if (dropped.length) canvas.guides = canvas.guides!.filter(kept)
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return { ...result, dropped }
+  }
+
+  /** Set (frameId) or clear (null) the frame a page's prototype starts on. */
+  async setFlowStart(canvasId: string, pageId: string, frameId: string | null): Promise<CanvasPageInfo[] | undefined> {
+    const canvas = await this.loadCanvasMetadata(canvasId)
+    if (!canvas || !(await this.ensureMembership(canvasId))) return undefined
+    const pages = await canvasIndex(canvasId).setFlowStart(pageId, frameId)
+    if (!pages) return undefined
+    canvas.pages = pages
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return pages
+  }
+
+  /** Add a ruler guide, or move one that exists. Undefined when the canvas
+   *  is gone; throws GuideLimitError on a canvas already holding the most. */
+  setGuide(canvasId: string, guide: CanvasGuide): CanvasGuide | undefined {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return undefined
+    const guides = canvas.guides ?? []
+    const exists = guides.some((g) => g.id === guide.id)
+    if (!exists && guides.length >= MAX_GUIDES) throw new GuideLimitError()
+    canvas.guides = exists ? guides.map((g) => (g.id === guide.id ? guide : g)) : [...guides, guide]
+    persist.saveCanvas(canvas)
+    return guide
+  }
+
+  /** Remove a ruler guide; false when there was no such guide. */
+  deleteGuide(canvasId: string, guideId: string): boolean {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas?.guides?.some((g) => g.id === guideId)) return false
+    canvas.guides = canvas.guides.filter((g) => g.id !== guideId)
+    persist.saveCanvas(canvas)
+    return true
   }
 
   /** Invalidate issued tickets as well as sockets, before an access change answers. */
@@ -332,11 +531,11 @@ class Store {
   /** Owner-set link policy ('none' is the default and stored as unset).
    *  Deliberately does not bump updatedAt — a privacy toggle is not a
    *  design edit. */
-  async setLinkAccess(id: string, mode: 'edit' | 'none'): Promise<Canvas | undefined> {
+  async setLinkAccess(id: string, mode: LinkAccess): Promise<Canvas | undefined> {
     const c = this.canvases.get(id)
     if (!c) return undefined
-    if (mode === 'edit') c.linkAccess = 'edit'
-    else delete c.linkAccess
+    if (mode === 'none') delete c.linkAccess
+    else c.linkAccess = mode
     persist.saveCanvas(c)
     await this.revokeCanvasAccess(id)
     return c
@@ -582,7 +781,13 @@ class Store {
     return { ...frame, pageId: membership.pageId ?? frame.pageId }
   }
 
-  async createFrame(canvasId: string, input: FrameInput, by: string, creationId?: string): Promise<Frame | undefined> {
+  async createFrame(
+    canvasId: string,
+    input: FrameInput,
+    by: string,
+    creationId?: string,
+    kind: Actor['kind'] = 'user',
+  ): Promise<Frame | undefined> {
     const metadata = await this.loadCanvasMetadata(canvasId)
     if (!metadata || !(await this.ensureMembership(canvasId))) return undefined
     const pages = canvasPages(metadata)
@@ -605,6 +810,8 @@ class Store {
       updatedAt: now,
       updatedBy: by,
       ...(input.demo === undefined ? {} : { demo: input.demo }),
+      ...(input.hidden ? { hidden: true } : {}),
+      ...(input.locked ? { locked: true } : {}),
     }
     const index = canvasIndex(canvasId)
     let frame: Frame | 'retry' | null
@@ -619,7 +826,7 @@ class Store {
     const actor = frameActor(id)
     let saved: Frame | null
     try {
-      await actor.initialize(frame)
+      await actor.initialize(frame, kind)
       saved = (await actor.snapshot()).frame
     } catch (error) {
       // Release the page reservation when this create fails, even if its payload committed.
@@ -637,7 +844,13 @@ class Store {
     return { ...saved, pageId: frame.pageId }
   }
 
-  async updateFrame(frameId: string, patch: FramePatch, by: string, actor?: Actor): Promise<Frame | undefined> {
+  async updateFrame(
+    frameId: string,
+    patch: FramePatch,
+    by: string,
+    actor?: Actor,
+    options: FrameUpdateOptions = {},
+  ): Promise<Frame | undefined> {
     const membership = await this.getFrameMembership(frameId)
     if (!membership) return undefined
     if (
@@ -649,13 +862,17 @@ class Store {
     if (pageId !== undefined) {
       const current = (await frameActor(frameId).snapshot()).frame
       if (!current) return undefined
+      if (options.expectedUpdatedAt !== undefined && options.expectedUpdatedAt !== current.updatedAt)
+        throw new FrameConflictError({ ...current, pageId: membership.pageId ?? current.pageId })
       validateFrame({ ...current, ...content })
       if (!(await canvasIndex(membership.canvasId).moveFrame(frameId, pageId))) return undefined
     }
     const change = await frameActor(frameId).write(
-      { type: 'update', patch: content },
+      { type: 'update', patch: content, ...options },
       actor ?? { name: by, kind: 'user', color: colorFor(by) },
     )
+    if (isConflict(change))
+      throw new FrameConflictError({ ...change.frame, pageId: membership.pageId ?? change.frame.pageId })
     return change ? { ...change.frame, pageId: pageId ?? membership.pageId ?? change.frame.pageId } : undefined
   }
 
@@ -663,6 +880,7 @@ class Store {
     const membership = await this.getFrameMembership(frameId)
     if (!membership) return undefined
     const change = await frameActor(frameId).write({ type: 'replace', find, replacement }, actor)
+    if (isConflict(change)) return undefined
     return change ? { ...change.frame, pageId: membership.pageId ?? change.frame.pageId } : undefined
   }
 
@@ -680,6 +898,7 @@ class Store {
       { type: 'append', chunk, start, done },
       actor ?? { name: by, kind: 'user', color: colorFor(by) },
     )
+    if (isConflict(change)) return undefined
     return change ? { ...change.frame, pageId: membership.pageId ?? change.frame.pageId } : undefined
   }
 

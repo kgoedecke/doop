@@ -14,8 +14,22 @@ const api = `http://localhost:${apiPort}`
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   test: {
+    /* agent worktrees live under .claude/ inside the repo; their copies of the
+       suite must not run as ours */
+    exclude: ['**/node_modules/**', '**/.claude/**'],
     setupFiles: ['tests/setup.ts'],
+    /* actor-backed tests wake real actors (a cold start and a create take a
+       few hundred ms each), which a full parallel run multiplies */
+    testTimeout: 60_000,
+    globalSetup: ['tests/globalSetup.ts'],
+    /* seven files drive a real Chromium; closing one under a full parallel
+       run can outlast the 10s default */
+    hookTimeout: 30_000,
   },
+  /* Error tracking resolves minified stack frames through the .map next to
+     each bundle. The source is public (AGPL), so the maps are too; browsers
+     only fetch them when devtools open. */
+  build: { sourcemap: true },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-claude-reset-cli"
+description = "Enables the claude_reset_cli command without any pre-configured scope."
+commands.allow = ["claude_reset_cli"]
+
+[[permission]]
+identifier = "deny-claude-reset-cli"
+description = "Denies the claude_reset_cli command without any pre-configured scope."
+commands.deny = ["claude_reset_cli"]

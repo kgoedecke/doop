@@ -82,7 +82,7 @@ impl Doc {
     fn new(html: &str, base_url: &str, width: u32, height: u32, scale: f32) -> Self {
         let _guard = runtime().enter();
         let net = Arc::new(Provider::new(Some(Arc::new(Waker) as Arc<dyn NetWaker>)));
-        let document = HtmlDocument::from_html(
+        let mut document = HtmlDocument::from_html(
             html,
             DocumentConfig {
                 base_url: Some(base_url.to_string()),
@@ -92,6 +92,9 @@ impl Doc {
                 ..Default::default()
             },
         );
+        // Icon sprites: inline SVG is drawn from standalone markup, so `<use>` references are
+        // expanded into clones that inherit from the `<use>` site, as a browser's shadow tree does.
+        document.as_mut().expand_svg_use_elements();
         Self { document, net, base_url: base_url.to_string(), width, height, scale }
     }
 
@@ -208,11 +211,12 @@ pub extern "C" fn doopblitz_doc_is_animating(doc: *const Doc) -> bool {
     doc.base().is_animating()
 }
 
-/// True while fonts or images are still being fetched for this document.
+/// True while fonts or images are still being fetched for this document, or have
+/// arrived but not been applied yet (a stylesheet whose fonts are fetched on the next paint).
 #[unsafe(no_mangle)]
 pub extern "C" fn doopblitz_doc_loading(doc: *const Doc) -> bool {
     let doc = unsafe { &*doc };
-    !doc.net.is_empty()
+    !doc.net.is_empty() || doc.base().has_pending_events()
 }
 
 // ---------------------------------------------------------------------------
@@ -226,12 +230,15 @@ pub extern "C" fn doopblitz_doc_loading(doc: *const Doc) -> bool {
 ///
 /// Taffy rounds every box to whole CSS pixels after layout, so at a paint scale
 /// above 1 a box on a half-pixel edge (a 1.5px outline, an 8px handle centred on
-/// it) gets a different number of device pixels on each side. Browsers keep
-/// sub-pixel layout and snap at paint time instead; this pass does the same
-/// arithmetic as `taffy::round_layout`, but on the `1 / scale` grid.
+/// it) gets a different number of device pixels on each side. Below 1 the CSS
+/// grid is finer than the device grid, so a one-device-pixel border (Stylo snaps
+/// hairlines up to one) came out one or two CSS pixels wide depending on where
+/// the box sat: a faint line here, a heavy one there. Browsers keep sub-pixel
+/// layout and snap at paint time instead; this pass does the same arithmetic as
+/// `taffy::round_layout`, but on the `1 / scale` grid, at every scale.
 fn round_layout_to_device(doc: &mut BaseDocument, scale: f32) {
     use taffy::{NodeId as TaffyId, RoundTree, TraversePartialTree};
-    if scale <= 1.0 || !scale.is_finite() {
+    if scale <= 0.0 || !scale.is_finite() {
         return;
     }
     fn walk(doc: &mut BaseDocument, node: TaffyId, scale: f32, cumulative_x: f32, cumulative_y: f32) {

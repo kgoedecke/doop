@@ -84,7 +84,9 @@ describe('normalize', () => {
       { id: 's1', type: 'pull', provider: 'meta', accountId: 'act_1', filter: 'active', canvasId: 'c1' },
       { id: 's2', type: 'agent', title: '', prompt: 'Review it', roles: ['ux'], canvasId: 'c1' },
     ])
-    expect(normalizeSteps([{ type: 'webhook' }])).toBe('each step is a pull or an agent task')
+    expect(normalizeSteps([{ type: 'webhook' }])).toBe(
+      'each step must be a pull, agent task, Slack message or Linear ticket',
+    )
   })
 
   it('says what is missing before an automation can run', () => {
@@ -220,14 +222,12 @@ describe('meta', () => {
 /* ------------------------------------------------------------------ */
 /* REST                                                                */
 
-const PORT = 4994
-
 let server: Server
 let owner: Client
 let other: Client
 
 beforeAll(async () => {
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  server = await startServer()
   owner = new Client(server)
   await owner.signUp('owner@test.dev', 'Olive Owner')
   other = new Client(server)

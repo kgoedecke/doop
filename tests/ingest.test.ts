@@ -9,13 +9,11 @@ import type { Frame } from '../shared/types.ts'
  * disabled via env so consecutive writes to the same page can be asserted.
  */
 
-const PORT = 4980
-
 let server: Server
 let BASE: string
 
 beforeAll(async () => {
-  server = await startServer(PORT, { SYNC_PAGE_INTERVAL_MS: '0' })
+  server = await startServer({ SYNC_PAGE_INTERVAL_MS: '0' })
   BASE = server.base
 }, 70_000)
 
@@ -320,7 +318,7 @@ describe('design sync freeze', () => {
   let owner: Client
 
   beforeAll(async () => {
-    frozenServer = await startServer(4985, { SYNC_PAGE_INTERVAL_MS: '0', SYNC_FREEZE_MS: '0' })
+    frozenServer = await startServer({ SYNC_PAGE_INTERVAL_MS: '0', SYNC_FREEZE_MS: '0' })
     owner = new Client(frozenServer)
     await owner.signUp('freeze-owner@test.dev', 'Owner')
   }, 70_000)
@@ -347,7 +345,9 @@ describe('design sync freeze', () => {
 
     const got = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
     expect(got.frames).toHaveLength(1)
-    expect(got.frames[0].html).toContain('v1') // the rewrite was refused
-    expect(got.frames[0].html).not.toContain('v2')
+    /* the headings, not bare 'v1'/'v2': the frame also carries the random sync
+       key id, which can contain either */
+    expect(got.frames[0].html).toContain('<h1>v1</h1>') // the rewrite was refused
+    expect(got.frames[0].html).not.toContain('<h1>v2</h1>')
   })
 })

@@ -1,83 +1,185 @@
-import type { ComponentProps } from 'react'
+import type { CSSProperties } from 'react'
 import { useStore, type PanelTab } from '../lib/store'
-import { useChatUnread } from '../lib/chatUnread'
+import { useOpenThreadCount } from '../lib/comments'
+import { navigate } from '../App'
 import { cn } from '@/lib/utils'
-import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import { BookmarkIcon, ChatIcon, PanelExpandRightIcon, PulseIcon, SparkIcon } from './ui/icons'
+import { Toolbar, ToolbarButton, ToolbarControl, ToolbarDot } from './ui/toolbar'
+import { BookOpenIcon, CommentIcon, GearIcon, HelpIcon, PulseIcon, SlidersIcon, SparkIcon } from './ui/icons'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
+import { openSupportChat } from '../lib/posthog'
+import { PresenceFace } from './PeerAvatars'
+import { useT } from '../lib/i18n'
 
-/** The collapsed side panel: a column of icon buttons pinned to the top-right
- *  of the canvas while the panel is closed. Each opens the panel on its tab;
- *  the panel takes the rail's place until its ✕ closes it. Counts and alerts
- *  ride on the icons so a closed panel still tells you whether anything is
- *  happening. */
-export function SideRail({ onOpen }: { onOpen: () => void }) {
-  const setTab = useStore((s) => s.setPanelTab)
-  const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
-  const proposalPending = useStore((s) => s.proposals.some((p) => p.status === 'pending'))
-  const unread = useChatUnread()
+const island = 'pointer-events-auto absolute z-[38]'
+/* docked, both islands share one full-height column instead */
+const dockedIsland = 'rounded-none bg-transparent shadow-none'
 
-  function show(next: PanelTab) {
-    setTab(next)
-    onOpen()
+/** The right-hand icon islands, sitting just left of the open panels. The top
+ *  island offers what is hidden: the Inspector for a selected frame, and one
+ *  button per tab of the Agents panel (agents, comments, activity, memory),
+ *  each opening the panel on that tab, with a live dot while an agent works or
+ *  a message waits. Open panels close from their own header. The bottom
+ *  island holds Settings, Help (docs, support chat) and you. Docked, the two
+ *  share one column at full height, the second at its foot. */
+export function SideRail({
+  style,
+  agentsOpen,
+  onToggleAgents,
+  inspectorOpen,
+  inspectorAvailable,
+  onToggleInspector,
+  me,
+  onRenameSelf,
+  docked = false,
+}: {
+  /** carries `right`, so the islands follow the panels as they open */
+  style: CSSProperties
+  docked?: boolean
+  agentsOpen: boolean
+  onToggleAgents: () => void
+  inspectorOpen: boolean
+  /** a frame is selected — there is something to inspect */
+  inspectorAvailable: boolean
+  onToggleInspector: () => void
+  me: { name: string; color: string }
+  onRenameSelf: () => void
+}) {
+  const t = useT()
+  const setPanelTab = useStore((s) => s.setPanelTab)
+  const openTab = (tab: PanelTab) => {
+    setPanelTab(tab)
+    onToggleAgents()
   }
+  const showInspector = inspectorAvailable && !inspectorOpen
 
+  const islandStyle = docked ? undefined : style
+  const islands = (
+    <>
+      {(showInspector || !agentsOpen) && (
+        <Toolbar
+          aria-label={t('canvas.canvasPanels')}
+          orientation="vertical"
+          className={docked ? dockedIsland : cn(island, 'top-2.5')}
+          style={islandStyle}
+        >
+          {showInspector && (
+            <ToolbarControl label={t('canvas.inspectFrame')} onClick={onToggleInspector}>
+              <SlidersIcon />
+            </ToolbarControl>
+          )}
+          {!agentsOpen && <PanelTabButtons onOpen={openTab} />}
+        </Toolbar>
+      )}
+      <Toolbar
+        aria-label={t('shell.account')}
+        orientation="vertical"
+        className={cn(docked ? cn(dockedIsland, 'mt-auto') : cn(island, 'bottom-3.5'), 'gap-1.5')}
+        style={islandStyle}
+      >
+        <ToolbarControl label={t('shell.settings')} onClick={() => navigate('/settings')}>
+          <GearIcon />
+        </ToolbarControl>
+        <DropdownMenu>
+          <Tooltip label={t('canvas.help')} side="left">
+            <DropdownMenuTrigger asChild>
+              <ToolbarButton
+                aria-label={t('canvas.help')}
+                className="data-[state=open]:bg-paper-deep data-[state=open]:text-ink"
+              >
+                <HelpIcon />
+              </ToolbarButton>
+            </DropdownMenuTrigger>
+          </Tooltip>
+          <DropdownMenuContent side="left" align="end" width="sm">
+            <DropdownMenuItem asChild>
+              <a href="/docs" target="_blank" rel="noopener noreferrer">
+                <BookOpenIcon /> {t('canvas.docs')}
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => openSupportChat()}>
+              <CommentIcon /> {t('canvas.contactSupport')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Tooltip label={t('canvas.youAre', { name: me.name })} side="left">
+          <button
+            type="button"
+            aria-label={t('canvas.changeDisplayName')}
+            className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
+            onClick={onRenameSelf}
+          >
+            <PresenceFace name={me.name} color={me.color} kind="user" size={26} className="text-[10px] shadow-none" />
+          </button>
+        </Tooltip>
+      </Toolbar>
+    </>
+  )
+  if (!docked) return islands
   return (
-    <nav
-      aria-label="Canvas side panel"
-      className="absolute top-3 right-3 z-[38] flex w-12 flex-col items-center gap-1.5 rounded-[14px] border border-line bg-surface p-1.5 shadow-card"
+    <div
+      className="pointer-events-auto absolute inset-y-0 z-[38] flex w-10 flex-col items-center border-l border-line-soft bg-surface pb-3"
+      style={style}
     >
-      <RailControl label="Expand panel" onClick={onOpen}>
-        <PanelExpandRightIcon />
-      </RailControl>
-      <span aria-hidden className="my-0.5 h-px w-6 bg-line-soft" />
-      <RailControl
-        label={working ? `Agents · ${working} working` : 'Agents'}
-        className={cn(working > 0 && 'bg-brand/6 text-brand')}
-        onClick={() => show('tasks')}
-      >
-        <SparkIcon className="size-4" />
-        {working > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 grid h-[15px] min-w-[15px] place-items-center rounded-lg border-2 border-surface bg-brand px-[3px] font-mono text-[8px] font-medium text-white">
-            {working}
-          </span>
-        )}
-      </RailControl>
-      <RailControl
-        label={unread ? `Chat · ${unread} new` : 'Chat'}
-        className={cn(unread > 0 && 'text-ink')}
-        onClick={() => show('chat')}
-      >
-        <ChatIcon />
-        {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 grid h-[15px] min-w-[15px] place-items-center rounded-lg border-2 border-surface bg-accent-ink px-[3px] font-mono text-[8px] font-medium text-white">
-            {unread > 99 ? '99+' : unread}
-          </span>
-        )}
-      </RailControl>
-      <RailControl label="Activity" onClick={() => show('activity')}>
-        <PulseIcon />
-      </RailControl>
-      <RailControl label={proposalPending ? 'Memory · suggestion to review' : 'Memory'} onClick={() => show('memory')}>
-        <BookmarkIcon />
-        {proposalPending && (
-          <span className="absolute top-[5px] right-[5px] size-1.5 rounded-full bg-accent-ink shadow-[0_0_0_2px_var(--surface)]" />
-        )}
-      </RailControl>
-    </nav>
+      {islands}
+    </div>
   )
 }
 
-function RailControl({ label, className, ...props }: ComponentProps<typeof Button> & { label: string }) {
+/** One button per tab of the Agents panel — agents, comments, activity,
+ *  memory — each opening the panel on that tab, with a live dot while an
+ *  agent works or a message waits. The desktop island stacks them; on phones
+ *  they run along the top-right corner as their own island. */
+export function PanelTabButtons({
+  onOpen,
+  tooltipSide = 'left',
+}: {
+  onOpen: (tab: PanelTab) => void
+  tooltipSide?: 'left' | 'bottom'
+}) {
+  const t = useT()
+  const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
+  const proposalPending = useStore((s) => s.proposals.some((p) => p.status === 'pending'))
+  const openThreads = useOpenThreadCount()
   return (
-    <Tooltip label={label} side="left">
-      <Button
-        variant="bare"
-        size="icon"
-        aria-label={label}
-        className={cn('relative size-[34px] rounded-lg text-ink-soft hover:bg-paper-deep hover:text-ink', className)}
-        {...props}
-      />
-    </Tooltip>
+    <>
+      <ToolbarControl
+        side={tooltipSide}
+        label={working ? t('canvas.agentsWorking', { working }) : t('canvas.agents')}
+        onClick={() => onOpen('tasks')}
+      >
+        <SparkIcon />
+        {working > 0 && <ToolbarDot className="bg-success" />}
+      </ToolbarControl>
+      <ToolbarControl
+        side={tooltipSide}
+        label={openThreads ? t('canvas.commentsOpen', { open: openThreads }) : t('canvas.comments')}
+        onClick={() => onOpen('comments')}
+      >
+        <CommentIcon />
+        {openThreads > 0 && <ToolbarDot className="bg-brand" />}
+      </ToolbarControl>
+      <ToolbarControl side={tooltipSide} label={t('canvas.activity')} onClick={() => onOpen('activity')}>
+        <PulseIcon />
+      </ToolbarControl>
+      <ToolbarControl
+        side={tooltipSide}
+        label={proposalPending ? t('canvas.memorySuggestion') : t('canvas.memory')}
+        onClick={() => onOpen('memory')}
+      >
+        <BookOpenIcon />
+        {proposalPending && <ToolbarDot className="bg-brand" />}
+      </ToolbarControl>
+    </>
+  )
+}
+
+/** The phone-sized island of those buttons, in the top-right corner under the bar. */
+export function MobilePanelTabs({ onOpen }: { onOpen: (tab: PanelTab) => void }) {
+  const t = useT()
+  return (
+    <Toolbar aria-label={t('canvas.canvasPanels')} className={cn(island, 'top-2 right-2')}>
+      <PanelTabButtons onOpen={onOpen} tooltipSide="bottom" />
+    </Toolbar>
   )
 }

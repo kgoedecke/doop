@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/assets/banner.png" alt="doop — the open-source alternative to Paper.design: humans and AI agents designing together, live" width="100%">
+  <img src=".github/assets/banner.png" alt="Doop, the open-source alternative to Paper.design: a live canvas where Claude Code streams a pricing section while ChatGPT and Claude Code cursors move across the frames" width="100%">
 </p>
 
 <p align="center">
@@ -17,29 +17,68 @@ in the browser; AI agents edit through the built-in **MCP server**, streaming th
 live. Everyone sees everything as it happens: cursors, presence, frame edits, agent status, and an
 activity feed.
 
+Think of it as Claude Design for whichever agent you already use: **Claude Code, Codex, ChatGPT,
+Cursor, OpenCode** or any other MCP client designs on the same canvas, and the built-in Doop Agent
+runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
+([every agent and model](#works-with-any-agent)).
+
 <p align="center">
-  <img src=".github/assets/canvas.png" alt="A doop canvas: three frames of a ceramics brand — landing hero, mobile product page and brand tokens" width="100%">
+  <img src=".github/assets/canvas.png" alt="A Doop canvas with three frames for a travel app (landing hero, mobile itinerary and a booking card) and two collaborators' live cursors" width="100%">
 </p>
 
 - **Design with agents, not prompts-and-refresh** — connect Claude Code (or any MCP client) once,
   then watch it sketch, stream and self-review designs on your canvas, next to your cursor.
 - **A built-in Doop Agent** — queue a card or @mention a role and it designs on its own, no client
-  to connect. Runs on the server's `ANTHROPIC_API_KEY` for a handful of free tasks, then on the
-  **ChatGPT subscription** (or OpenAI key) each user connects ([setup](#the-doop-agent)); the
+  to connect. Runs on the model account each user connects (a **ChatGPT subscription**, or an
+  OpenAI, Claude, Gemini or OpenRouter key), or on the server's `ANTHROPIC_API_KEY` for as many
+  free tasks as `RESIDENT_TASK_LIMIT` grants (none by default) ([setup](#the-doop-agent)); the
   first-canvas welcome performance is scripted and runs without any of it.
 - **Pages within a canvas** — organize frames into named pages from the Layers panel. Add, rename,
   drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
   `expectedPages` to protect collaborators), and target frames with `pageId`.
-- **True multiplayer** — live cursors, presence, per-frame editing indicators, undo/redo, comments
-  pinned to elements, and an activity feed.
+- **Clickable prototypes** — wire elements to other frames (click, hover, press, key or delay;
+  navigate, overlay, back, scroll or link, with transitions) in Prototype mode or straight in the
+  HTML, then click through the flow with Play or share `/c/<id>/proto`. Agents use the same
+  `data-doop-*` attributes plus `get_prototype` / `set_prototype_start`.
+- **A real canvas editor** — draw frames, shapes, pen paths and text, edit any element's fill,
+  type and flex layout, snap to rulers and guides, zoom from 8% to 1600%
+  ([the editor](#the-canvas-editor)).
+- **True multiplayer** — live cursors, presence, follow mode, per-frame editing indicators,
+  undo/redo, threaded comments on elements or the canvas, and an activity feed. Frames sync through
+  durable actors (one per frame); everything else rides one WebSocket room per canvas.
 - **Design memory** — pin exemplar frames, capture decisions, and let the distiller propose durable
   style rules that every agent follows.
-- **Private by default** — invite collaborators by email or flip on link sharing per canvas;
-  agents inherit exactly their human's access.
-- **Self-host** — configure a separate actor API, then `docker compose up`; develop locally with zero-config `bun run dev`
+- **Private by default** — invite collaborators by email or share a link that can view, comment
+  or edit; agents inherit exactly their human's access.
+- **Self-host** — configure a separate actor API, then `docker compose up`; develop locally with
+  zero-config `bun run dev`
   (embedded Postgres, no external services required).
+
+## Works with any agent
+
+Doop isn't tied to one model vendor. Every agent below designs through the same MCP server, works
+as the person who connected it, and shows up live on the canvas with its own cursor, status and
+tasks. **Connect AI** in the top bar walks you through each one.
+
+<p align="center">
+  <img src=".github/assets/connect-ai.png" alt="The Connect AI dialog: choose Claude Code, Claude, ChatGPT, Codex, Cursor or any other MCP client" width="100%">
+</p>
+
+| Agent                                        | How it connects                                                                 |
+| -------------------------------------------- | ------------------------------------------------------------------------------- |
+| Claude Code                                  | `claude mcp add`, OAuth in the browser ([setup](#hook-up-claude-code))          |
+| Claude (web and desktop)                     | **Add to Claude** in Connect AI ([setup](#connect-claude))                      |
+| Codex (CLI and desktop)                      | `codex mcp add`, OAuth in the browser ([setup](#connect-an-ai-agent))           |
+| ChatGPT                                      | A custom MCP server in ChatGPT, guided by **Connect AI → ChatGPT**              |
+| Cursor                                       | **Add to Cursor** in Connect AI                                                 |
+| OpenCode, VS Code Copilot, OpenClaw and more | Any MCP client, over OAuth or with an agent key ([setup](#connect-an-ai-agent)) |
+| Headless agents (n8n, Mastra, CI)            | An agent key as a bearer header ([setup](#headless-agents-agent-keys))          |
+
+No agent of your own? The built-in [Doop Agent](#the-doop-agent) runs on the model account you
+connect: a ChatGPT subscription, or an OpenAI, Claude, Gemini or OpenRouter key. OpenRouter brings
+DeepSeek, Kimi, Qwen, GLM and MiniMax ([details](#past-the-free-tasks-connect-your-own-chatgpt)).
 
 ## Quickstart
 
@@ -49,17 +88,22 @@ bun install
 bun run dev
 ```
 
-Doop builds and installs with [bun](https://bun.sh) (`bun.lock` is the only
-lockfile); the server itself runs on Node 22.19+.
+Doop builds and installs with [bun](https://bun.sh) 1.4.2 or newer (`bun.lock` is the only
+lockfile; the local actor runtime runs on it); the server itself runs on Node 22.19+.
 
 - Web app: **http://localhost:4300**
-- API + WebSocket + MCP server: **http://localhost:4400** (the web port proxies `/api`, `/ws`, `/mcp` to it)
+- API + WebSocket + MCP server: **http://localhost:4400** (the web port proxies `/api`, `/ws`,
+  `/mcp`, `/.well-known`, `/i/`, `/ingest` and `/local-agent` to it)
+
+`bun run dev` and `bun run build` also package the Claude Desktop extension with a Node script,
+so Node must be on your `PATH` as well.
 
 Everything works with no configuration: canvas metadata persists to embedded Postgres (PGlite) in `data/pg`,
 with frame actors in `data/actors`,
 and every optional integration (SMTP, stock photos, object storage, analytics) degrades gracefully
-until its variable in [.env.example](.env.example) is set. The one you will most likely want is
-`ANTHROPIC_API_KEY`, which turns on the built-in [Doop Agent](#the-doop-agent) — agents you connect
+until its variable in [.env.example](.env.example) is set ([the ones that matter](#environment-variables)).
+The built-in [Doop Agent](#the-doop-agent) runs once a user connects a model account in Settings
+(or on the server's `ANTHROPIC_API_KEY` if you raise `RESIDENT_TASK_LIMIT`) — agents you connect
 yourself over MCP need no key.
 
 To self-host the production build, first configure `TERSE_ACTOR_URL` and `TERSE_API_KEY` in `.env`
@@ -74,20 +118,183 @@ same actor configuration from `.env`). Set `DATABASE_URL` to use a real Postgres
 
 Prefer not to run anything? **[doop.design](https://doop.design)** is the hosted version.
 
-## Canvas chat, imports and exports
+Once you sign in, Home is where you start: describe what you want and Doop makes a canvas with
+drafts queued for the Doop Agent, or pick up one of your canvases, workspaces and connected agents.
 
-The canvas Chat tab keeps a shared conversation alongside the design. Mention an agent role to
-queue a design card; its reply threads back into the chat.
+<p align="center">
+  <img src=".github/assets/home.png" alt="Doop's home: the agent prompt with suggestion chips over a gradient wave, the canvas grid, and a rail with workspaces and connected agents" width="100%">
+</p>
 
-The import source picker offers **Website**, **Live app** (the sync snippet), and **GitHub repo**.
-Right-click a frame and choose **Export…** to download PNG or JPG. A progress toast tracks the
-render; the desktop app opens its native save panel.
+## The canvas editor
 
-## Linear
+The bottom toolbar holds the tools; every one has a single-key shortcut. Shapes drawn on the
+canvas become standalone elements, and shapes drawn inside a frame become positioned HTML/SVG
+layers of that frame, so agents read and edit them like any other markup.
 
-Connect Linear from **Integrations** to read issues through MCP or install Doop as a delegated
-agent. Delegated tickets create a canvas and a design card, then report the result back to Linear.
-See [Linear setup](docs/linear.md) for OAuth and webhook configuration.
+| Tool        | Key | What it does                                                                          |
+| ----------- | --- | ------------------------------------------------------------------------------------- |
+| Select      | V   | Click to select, drag the background for a marquee, ⇧/⌘-click to add to the selection |
+| Hand        | H   | Pan (Space or the middle button pans from any tool)                                   |
+| Frame       | F   | Draw an empty frame                                                                   |
+| Rectangle   | R   | Draw a rectangle                                                                      |
+| Circle      | O   | Draw a circle or ellipse                                                              |
+| Vector path | P   | Bézier pen: snaps to its own anchors, previews closing the path; Alt skips snapping   |
+| Text        | T   | Place a text layer                                                                    |
+| Comment     | C   | Pin a comment to an element or to the canvas                                          |
+
+- **Frames** — drag to move, pull the corner handle to resize, snap to neighbours and guides.
+  The Inspector edits name,
+  position, size and the raw HTML, marks the frame ready for dev, exports it, and pins it as a
+  style reference; **Version history…** in the frame menu previews and restores earlier designs.
+- **Elements inside a frame** — click to select, drag a corner grip or edge to resize (⇧ keeps the
+  ratio; a `W × H` badge shows the size), drag the element to
+  move it within or across frames. The **Design** tab edits fill, stroke, text (font, size, weight,
+  alignment), opacity, corner radius, rotation, position, flex layout (direction, gap, padding,
+  wrap, alignment) and image fills; **HTML** shows its source; **Prototype** wires interactions. The
+  floating toolbar adds Comment, **Ask AI** (pre-fills an `@mention`), Code, Edit text and Copy link.
+- **Path editing** — double-click a path to drag its anchors and Bézier handles, switch points
+  between corner and curve, or delete them. Alt moves one handle on its own; ⇧ constrains its angle.
+- **Layers** — a searchable tree of pages, frames and elements: drag to reorder or reparent, hide,
+  lock, collapse, and right-click an element for copy, paste, duplicate, Copy HTML, Copy selector
+  and Copy link to element.
+- **Rulers and guides** — ⇧R shows rulers; drag out of one to add a guide. Guides belong to the page,
+  undo like any edit, and everything snaps to them within 8 screen pixels.
+- **Zoom** — 8% to 1600%. Wheel pans, ⌘/Ctrl + wheel or a pinch zooms; a 1px pixel grid fades in from
+  300%. The zoom menu has 50/100/200% presets and the rulers toggle.
+- **Panels** — the right side panel has **Agents**, **Comments**, **Activity** and **Memory** tabs;
+  Layers and the side panel can be resized, and ⌘. hides all UI.
+- **Themes** — Light, Dark or System under Settings → Appearance.
+- **Phones** — the canvas works on a phone: one-finger pan, pinch zoom, tap to comment, and bottom
+  sheets for canvas actions, Layers and the Inspector.
+
+| Shortcut         | Action                                                 |
+| ---------------- | ------------------------------------------------------ |
+| ⌘Z / ⌘⇧Z (or ⌘Y) | Undo / redo your own edits                             |
+| ⌘C / ⌘V / ⌘D     | Copy, paste, duplicate frames or layers                |
+| ⌫                | Delete the selected element, else the selected frames  |
+| ⌘⇧H / ⌘⇧L        | Hide / lock the selection                              |
+| ⌥↑ / ⌥↓          | Move a layer up or down (Layers panel)                 |
+| ⇧1 / ⇧2          | Zoom to fit everything / the selection                 |
+| ⌘0 / ⌘+ / ⌘−     | Zoom to 100%, in, out                                  |
+| ⇧R               | Toggle rulers                                          |
+| ⌘.               | Hide or show all UI                                    |
+| ⌘K               | Open the Agents composer (on Home: the search palette) |
+| Esc              | Deselect, stop following                               |
+
+Click a collaborator's avatar to follow their viewport; an agent's avatar flies you to what it is
+working on. Placeholder
+frames show where an agent that has picked up a card is about to design.
+
+## Comments, imports and exports
+
+Comment on any element or anywhere on the canvas. The **Comments** tab lists the page's threads
+(open or resolved) with their replies. `@mention` an agent role in a comment or a reply (for example
+`@doop`) to queue a design card; the agent's answer comes back in the thread. People who miss a
+comment get an email digest (opt out under Settings → Account), and canvases opened through a
+view-only or comment-only link show a badge and disable editing.
+
+The import source picker offers **Website** (one page, or discover a whole site and pick its pages),
+**Live app** (the [sync snippet](#design-sync-push-an-apps-live-screens-onto-a-canvas)), and
+**GitHub repo** (through the GitHub App or a fine-grained token: Doop reviews the repo's screens and
+components and queues cards for the Doop Agent to sketch them and extract the design system into a
+style guide).
+Right-click a frame and choose **Export…** to download PNG, JPG or a vector PDF (of the frame, or of
+every selected frame as one PDF). **Export** in the top bar binds any frames of the page into one PDF. A progress toast tracks the
+render; the desktop app opens its native save panel. Every frame also has a public live image at
+`/i/<frameId>.png?scale=2` (or `.jpg`) that re-renders when the design changes, handy as an
+`og:image` or in docs.
+
+Figma, Canva and Photoshop (PSD) import and export are currently available in
+[Doop Cloud](https://doop.design) and not part of the open source.
+
+## Integrations
+
+**Integrations** in the rail is where an account connects the outside tools Doop works with:
+
+| Integration | What it does                                                                                                                               |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Linear      | Read issues through MCP, or delegate an issue to Doop: it designs a canvas and reports the result back to Linear ([setup](docs/linear.md)) |
+| Slack       | Mention `@Doop` with a brief; it designs a canvas and posts the result in the thread ([setup](docs/slack.md))                              |
+| Meta Ads    | Pull ad creatives onto a canvas on a schedule with an [automation](#automations)                                                           |
+
+The Figma integration (import frames as editable HTML, export frames back to Figma) and the Canva
+integration (import designs as editable frames, send frames back with live text) are currently
+available in [Doop Cloud](https://doop.design) and not part of the open source. A self-hosted
+Integrations page shows Linear, Slack and Meta Ads.
+
+<p align="center">
+  <img src=".github/assets/integrations.png" alt="The Integrations page on Doop Cloud with cards for Figma, Canva, Linear, Slack and Meta Ads" width="100%">
+</p>
+
+**Outbound webhooks** (Settings → Webhooks) POST a signed JSON event to your own URL when a
+comment is created, replied to or resolved, when a frame is created, or when an agent finishes or
+fails a board card, with retries and a test ping ([events and signatures](docs/webhooks.md)).
+
+To reference a specific element in feedback, select it and choose **Copy link**
+in its floating toolbar, or right-click its Layers row and choose **Copy link to
+element**. Opening the link selects the element and opens its properties on the
+correct page. The URL includes the canvas ID, frame ID and URL-encoded CSS
+`selector`, so an AI agent can locate it in the frame HTML. Canvas access rules
+still apply. Selectors that use element IDs survive layout changes; selectors
+based on sibling positions can change when the HTML is restructured.
+
+## Approve screens for development
+
+Select a frame and turn on **Development → Mark as approved** in the inspector,
+or right-click one or more frames and choose **Mark ready for dev**. A green badge
+appears above the screen and in Layers. Hover the toggle row or a badge to see
+who approved it and when. Turn the toggle off to move an approved screen back to draft.
+
+Changing the HTML or frame dimensions switches an approved screen to **Needs review**;
+review it and turn **Mark as approved** on again. Moving, renaming, hiding, locking, or moving
+between pages keeps approval. Copies start as drafts. An approval checks the frame
+revision so a concurrent edit cannot accidentally be approved, and waits for live
+design streams to finish.
+
+Agents can read `approvalStatus` (`draft`, `ready_for_dev`, `needs_review`) and
+`approval` attribution in `get_canvas` and `get_frame`. Call
+`get_canvas({ canvas_id, approval_status: "ready_for_dev" })` to find approved
+screens, then re-read `get_frame` before implementing. Only `ready_for_dev` is
+current sign-off. Approval is set by people in the app. In **Automations**, choose
+**Designs are approved** to run a workflow when frames on a selected canvas become
+ready for dev. Without an enabled workflow, approval only records sign-off.
+
+The REST equivalent is `PUT /api/frames/:id/approval` with
+`{ status: "ready_for_dev" | "draft", expectedUpdatedAt }`. The signed-in user's
+identity supplies the attribution; the endpoint uses the same canvas access rules
+as editing and returns `409` when the reviewed revision is stale.
+
+## Clickable prototypes
+
+Turn frames into a flow you can click through. Switch on **Prototype mode** (top bar), pick an
+element and add an interaction in its **Prototype** tab, or drag the handle on its right edge
+onto another frame. Each interaction is a trigger (click, hover, press, a key or a delay) and an
+action (go to a frame, open one as an overlay, go back, close the overlay, scroll, open a link),
+with an optional transition: dissolve, slide or push. Connectors on the canvas show where every
+element leads, and a **Start** flag marks the frame each page's flow begins on.
+
+<p align="center">
+  <img src=".github/assets/prototype-canvas.jpg" alt="A travel app prototype in Prototype mode: four iPhone screens with liquid-glass panels over photos, blue connectors from a trending card to the destination screen, from Book stay to the booking sheet overlay and from Confirm and pay to the confirmation, and a Start flag on the first screen" width="100%">
+</p>
+
+Press **Play** to run it full screen, or share `/c/<canvas-id>/proto`: the player follows the
+same canvas access rules, and the browser's Back and Forward walk the flow. Frames stay live
+while you play, so an edit on the canvas shows up on the screen you are looking at.
+
+<p align="center">
+  <img src=".github/assets/prototype-player.jpg" alt="The prototype player at phone size, three steps of the flow: tapping the Lago di Braies card on Explore, Book stay opening the booking sheet as an overlay, and Confirm and pay dissolving to the confirmation" width="100%">
+</p>
+
+Interactions are plain attributes on the element in the frame HTML, so they sync, version and
+export with the frame, and agents write them with the same tools they design with:
+
+```html
+<button data-doop-on="click" data-doop-action="navigate:<frameId>" data-doop-transition="push-left">Book stay</button>
+```
+
+Agents check their wiring with `get_prototype`, which flags links to missing frames, and set
+the start with `set_prototype_start`. Both the MCP server and the built-in Doop Agent have them.
+The full attribute reference is in [`.context/specs/prototyping.md`](.context/specs/prototyping.md).
 
 ## iPhone and iPad app
 
@@ -95,6 +302,20 @@ The SwiftUI iOS app lives in [`ios/`](ios/README.md). Open `ios/Doop.xcodeproj`
 in Xcode to run it against Doop Cloud or your own HTTPS server. It uses SwiftUI for the app interface and a native canvas that
 renders frames with the Blitz HTML/CSS engine (Rust, no WebKit), over the same REST API and WebSocket rooms. The app is in development;
 see the iOS README for validation status and remaining release requirements.
+
+## Connect Claude
+
+Choose **Connect AI → Claude → Add to Claude**. On hosted Doop, this opens Claude's
+connector form with Doop's name and server URL filled in. Confirm it, sign in to
+Doop, then start a new Claude chat and paste the canvas prompt from the dialog.
+No file download, terminal or API key needed.
+
+The updated Doop desktop app also offers **Add to Claude** for local and self-hosted
+servers: it opens Claude Desktop's extension installer directly, with your server
+URL filled in. Confirm the installation in Claude and approve the Doop sign-in.
+The online connector needs a publicly reachable HTTPS server; localhost connections
+use the desktop app. Manual extension installation remains available as a fallback.
+Build and installation details: [`claude-extension/`](claude-extension/README.md).
 
 ## Hook up Claude Code
 
@@ -131,12 +352,13 @@ needs a key.
 ## The Doop Agent
 
 Doop ships a built-in design team that lives in the server and picks work up on its own: queue a
-board card, `@mention` a role on an element comment, or leave feedback on a task, and it runs
+board card, `@mention` a role in a comment, or post task feedback over the API, and it runs
 without a human in the loop. Roles (Doop builds; specialists own one pass each — UX, copy, brand,
 accessibility) are defined in [`shared/agents.ts`](shared/agents.ts), and a card can be routed
 through several in order.
 
-The server pays for the free tier, on Anthropic by default:
+Normally each user's own connected model account pays for their runs (next section). The server
+can also pay for a free tier, on Anthropic by default, once `RESIDENT_TASK_LIMIT` is above 0:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...   # in .env, or the environment of your deployment
@@ -164,8 +386,9 @@ model account and the Doop Agent keeps running on it. **A connected account take
 from the very next task: the free tier is a trial that gets people here, not a balance to spend down
 first, and connecting stops costing the server anything from that moment. The connection is
 account-level, so it lives at **/settings** (Home → Settings); the free-tier wall links there rather
-than carrying its own copy, and "Connect an AI agent" on a canvas stays about MCP clients only. Six
-kinds of account:
+than carrying its own copy, and "Connect an AI agent" on a canvas stays about MCP clients only. A
+user can connect five kinds of account; the Gemini cloud pilot and Claude Plan appear only where
+the operator or the desktop app provides them:
 
 - **ChatGPT subscription** — OAuth against `auth.openai.com`, then inference through the Codex
   backend that Plus/Pro/Business plans include. Tokens live in `model_accounts` and never reach a
@@ -182,6 +405,19 @@ kinds of account:
   isolated worker using Google sign-in. Disabled by default; see the
   [pilot setup and verification guide](docs/gemini-cloud-pilot.md).
 - **Claude API key** — pay-as-you-go on the user's own Anthropic account.
+- **Claude Plan (desktop app)** — the Doop desktop app runs the Doop Agent through the user's own
+  local Claude Code login (`claude -p`), with a per-run scoped MCP token. Once switched on it takes
+  precedence over connected accounts while the app is online. Setup: [`desktop/README.md`](desktop/README.md#local-claude-cli).
+
+The ChatGPT, OpenAI, Claude and Gemini kinds get their model menu from the provider's own
+catalog, asked with that account's credential when the picker opens (`server/modelCatalog.ts`,
+`GET /api/model-account/models`): the Codex backend's catalog for a ChatGPT subscription (the
+same list the Codex CLI reads, asked as `CHATGPT_CODEX_CLIENT_VERSION`), OpenAI's and
+Anthropic's `/v1/models`, Gemini's `/v1beta/models`. A newly released model is on the menu
+without an upgrade; the curated entries above sit on top as recommendations, a curated tier the
+account cannot run is left off, and the curated menu alone is served if the provider cannot be
+reached. OpenRouter stays on its curated roster, whose hand-checked vision flags are what the
+run relies on.
 
 Azure OpenAI is deliberately _not_ a connectable account kind, and the OpenRouter/Gemini endpoints
 are fixed constants: a user-supplied endpoint would be a URL the server fetches with the run's full
@@ -242,13 +478,14 @@ own agent over MCP.
 | `RESIDENT_TASK_LIMIT`           | `0`                         | Free Doop Agent tasks per account; `0` means a connected account from the first task |
 | `DOOP_AGENT_MODEL`              | `claude-opus-5`             | Model for the Doop Agent on the server's Anthropic key                               |
 | `DOOP_AGENT_OPENAI_MODEL`       | `gpt-5.6-terra`             | Default tier on a user's account; each user can pick another in Settings             |
+| `DOOP_AGENT_OPENAI_EFFORT`      | `medium`                    | Default reasoning effort on a user's OpenAI account; each user can pick low–xhigh    |
 | `DOOP_AGENT_OPENROUTER_MODEL`   | `moonshotai/kimi-k2.6`      | Default model on a connected OpenRouter key                                          |
 | `DOOP_AGENT_GEMINI_MODEL`       | `gemini-3.7-flash`          | Default model on a connected Gemini key                                              |
 | `CHATGPT_CONNECT_DISABLED`      | _unset_                     | `1` hides the ChatGPT flow, leaving the API-key path                                 |
 | `DOOP_DISTILL_MODEL`            | `claude-haiku-4-5-20251001` | Model for the guideline distiller                                                    |
 
 `RESIDENT_TASK_LIMIT` is the free-tier meter. By default it is `0`: the Doop Agent only runs once
-the user connects a model account (their ChatGPT subscription or an OpenAI key) — a connected
+the user connects a model account (any of the kinds above) — a connected
 account is never metered. Connecting your own MCP agent does not lift the meter: it runs on your
 model when _it_ designs, but resident tasks still bill a credential. Set the limit above 0 to
 grant that many free tasks on the server's key; everything that triggers resident work counts,
@@ -262,14 +499,16 @@ name is your identity everywhere: cursors, presence, the activity feed, and feed
 attribution are all server-authoritative from the session, and the WebSocket rejects
 unauthenticated joins. **Canvases are private by default**, Figma-style: only the owner
 and people they invite (Share → invite by email, existing doop accounts) can open one.
-The Share modal can also turn on link sharing per canvas ("anyone with the link can
-edit"), which restores drop-a-link collaboration for that canvas. Your home screen lists
+The Share modal also sets what anyone with the link gets: nothing (invite-only, the
+default), **view**, **comment** or **edit**. From the same modal an owner can file the canvas
+in a workspace or list it in the **Community** gallery (`/community`), where signed-in people
+browse published canvases and copy them into their own. Your home screen lists
 your own canvases plus ones shared with you (plus unowned legacy ones, claimable there).
 Agents connected over MCP act under the account that approved them and get exactly that
 user's access.
 
 <p align="center">
-  <img src=".github/assets/share-modal.png" alt="The share modal: invite collaborators by email, see who has access, and toggle link sharing" width="100%">
+  <img src=".github/assets/share-modal.png" alt="The share modal: invite collaborators by email, see who has access, and choose what the link grants" width="100%">
 </p>
 
 With SMTP configured (`SMTP_HOST` etc. — see [.env.example](.env.example)), signups require email
@@ -379,15 +618,37 @@ ID token includes the `email` and `verified_primary_email` optional claims; with
 Microsoft sign-in still works but only links to an existing account that is already
 verified. Everything else (allowlist, admin promotion) follows the SSO rules above.
 
+### Sign in with Apple
+
+Two independent halves, documented in [.env.example](.env.example). For the web button,
+register a Services ID with Sign in with Apple enabled and
+`<BETTER_AUTH_URL>/api/auth/callback/apple` as a return URL, then set `APPLE_CLIENT_ID` (the
+Services ID) and `APPLE_CLIENT_SECRET` (the client-secret JWT signed with your Sign in with
+Apple key, which Apple caps at six months) together. For the iOS app, set
+`APPLE_APP_BUNDLE_IDENTIFIER` to the app's bundle id: the app shows the native Sign in with
+Apple button and posts the identity token Apple issues for that bundle id to
+`/api/auth/sign-in/social`, which the server verifies against Apple's keys. Apple only sends
+the person's name on their first sign-in, so the app forwards it then; a later sign-in from a
+fresh install leaves the name as stored. Linking and admin promotion follow the SSO rules
+above. Apple's "Hide My Email" addresses are on `privaterelay.appleid.com`, which
+`SIGNUP_EMAIL_DOMAINS` rejects unless listed.
+
 ## Agent auth (MCP OAuth)
 
 The `/mcp` endpoint requires OAuth. Adding the server in Claude Code / Codex triggers
 the standard MCP OAuth flow: a browser window opens, you sign in to Doop and approve,
 and the client stores a bearer token. Every tool call then carries your identity —
-agent tasks show "for ⟨you⟩" in the Tasks panel, and presence tooltips name the owner.
-Unauthenticated calls get a 401 with `WWW-Authenticate` discovery pointers
-(`/.well-known/oauth-authorization-server` + `oauth-protected-resource`), which is what
-kicks off the flow. Dynamic client registration is enabled, so no manual client setup.
+agent tasks show "for ⟨you⟩" in the Agents panel, and presence tooltips name the owner.
+Unauthenticated calls get a 401 whose `WWW-Authenticate` header points at
+`/.well-known/oauth-protected-resource/mcp` and asks for `openid profile email offline_access`
+(so clients get refresh tokens); that is what kicks off the flow. The approval screen lives at
+`/oauth/consent`. Dynamic client registration is enabled, so no manual client setup.
+`ping` and `resources/list`/`resources/read` answer without a token, and a banned account's
+agents get a 403 even with a valid one.
+
+The endpoint takes `POST` only and answers with plain JSON rather than an SSE stream, which is what
+ChatGPT needs. Tool results also carry `structuredContent` for an inline frame-preview card
+(`ui://doop/frame-preview-2.html`) in clients that render MCP Apps, such as ChatGPT.
 
 In production also set `BETTER_AUTH_URL` to the public origin — OAuth URLs are built on it.
 
@@ -426,6 +687,32 @@ storage alongside SQL and uploaded assets. Automatic local actors are limited to
 Actor deployment uses the source list in `scripts/deploy-actors.mjs` and the package settings in
 `actors/`. Add new actor source dependencies to that list when introducing imports.
 
+### Environment variables
+
+Every variable is optional except the two marked required in production. Each one is declared and
+validated once at boot ([`server/env.ts`](server/env.ts)) and documented in
+[`.env.example`](.env.example), which also lists endpoint overrides and other rarely needed knobs.
+This is the short list a self-hoster usually touches:
+
+| What               | Variables                                                                                                                                                            | Without them                                                                       |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Core               | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` (both required in production), `DATABASE_URL`, `TRUSTED_ORIGINS`, `PORT`                                                     | Embedded PGlite in `data/pg`, localhost origins                                    |
+| Sign-in            | `OIDC_*`, `GOOGLE_*`, `MICROSOFT_*`, `APPLE_*`, `SIGNUP_EMAIL_DOMAINS`, `ADMIN_EMAILS` ([Accounts](#accounts))                                                       | Email/password only, open signup                                                   |
+| Email              | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `EMAIL_FROM`, `REQUIRE_EMAIL_VERIFICATION`                                                        | Emails print to the server log; no verification                                    |
+| Object storage     | `BUCKET`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`, `REGION` (any S3-compatible store)                                                                       | Uploaded assets stored under `data/assets`                                         |
+| Doop Agent         | `ANTHROPIC_API_KEY`, `RESIDENT_TASK_LIMIT`, `DOOP_AGENT_*`, `AZURE_OPENAI_*` ([The Doop Agent](#the-doop-agent))                                                     | Runs only on accounts users connect                                                |
+| Image generation   | `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ARK_API_KEY` (Seedream), `DOOP_IMAGE_MODEL`                                                                                     | Runs only on accounts users connect; Seedream off                                  |
+| Agent search tools | `PEXELS_API_KEY` (photos), `BRANDFETCH_CLIENT_ID` (logos), `BACKGROUNDS_ORIGIN`, `CONTEXT_DEV_API_KEY`                                                               | No photo search; open-source and favicon logos; local Chromium                     |
+| Screenshots        | `CHROME_PATH`, `CHROME_NO_SANDBOX` (the Docker image sets both up)                                                                                                   | Auto-detected Chrome/Chromium                                                      |
+| Integrations       | `META_APP_ID`/`_SECRET`, `LINEAR_*` ([setup](docs/linear.md)), `SLACK_*` ([setup](docs/slack.md)), `GITHUB_APP_*`                                                    | That integration is unavailable; GitHub import uses a personal token               |
+| Billing            | `STRIPE_SECRET_KEY`, `STRIPE_PRICE_TEAM_*`, `STRIPE_WEBHOOK_SECRET` ([billing](#workspaces-and-billing-team-plan))                                                   | Billing off, every workspace active                                                |
+| Rate limits        | `MCP_UPLOADS_PER_MIN`, `MCP_SEARCHES_PER_MIN`, `MCP_GENERATIONS_PER_MIN`, `MCP_IMPORTS_PER_MIN`, `SYNC_INGESTS_PER_MIN`, `PREVIEW_RENDERS_PER_MIN`, `SYNC_FREEZE_MS` | Defaults sized for the hosted service; requests over a cap get `429`               |
+| Webhooks           | `WEBHOOK_ALLOW_PRIVATE_URLS` ([webhooks](docs/webhooks.md))                                                                                                          | Webhook URLs on private networks are refused                                       |
+| Analytics          | `VITE_POSTHOG_KEY` (build time: a Docker build `ARG`), `POSTHOG_KEY`, `POSTHOG_*_HOST`                                                                               | No analytics; when set, the browser reports through the same-origin `/relay` proxy |
+| iOS push           | `DOOP_APNS_TEAM_ID`, `DOOP_APNS_KEY_ID`, `DOOP_APNS_PRIVATE_KEY`, `DOOP_APNS_BUNDLE_ID`                                                                              | No Live Activity pushes; the app polls                                             |
+| Frame actors       | `TERSE_ACTOR_URL`, `TERSE_API_KEY` (required in production)                                                                                                          | `bun run dev` / `bun run test` start local actors (`data/actors`)                  |
+| Gemini cloud pilot | `DOOP_GEMINI_CLOUD_WORKERS` ([pilot guide](docs/gemini-cloud-pilot.md))                                                                                              | Off                                                                                |
+
 ## Connect an AI agent
 
 The MCP endpoint (streamable HTTP, stateless) is at:
@@ -440,10 +727,38 @@ Claude Code:
 claude mcp add --transport http doop http://localhost:4300/mcp
 ```
 
+Codex:
+
+```bash
+codex mcp add doop --url http://localhost:4300/mcp
+codex mcp login doop   # approve in the browser
+```
+
+In the Doop desktop app, **Connect AI → Codex → Add to Codex** writes the entry into
+`~/.codex/config.toml` for you (CLI and the Codex tab of the ChatGPT desktop app). Connect AI also
+has one-click **Add to Claude** and **Add to Cursor**. ChatGPT needs Doop on a public HTTPS address
+(or an OpenAI Secure MCP Tunnel); it cannot reach `localhost`.
+
 Generic MCP config:
 
 ```json
 { "mcpServers": { "doop": { "type": "http", "url": "http://localhost:4300/mcp" } } }
+```
+
+OpenCode takes Doop as a remote MCP server in `opencode.json`. An
+[agent key](#headless-agents-agent-keys) in the header skips the browser sign-in:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "doop": {
+      "type": "remote",
+      "url": "http://localhost:4300/mcp",
+      "headers": { "Authorization": "Bearer dpk_…" }
+    }
+  }
+}
 ```
 
 ### Headless agents (agent keys)
@@ -470,7 +785,7 @@ Then tell the agent something like:
 
 > Work on canvas `<canvas-id>` (shown in the top bar). Call `get_canvas` to see the existing frames.
 > To design, create a frame with `create_frame`, then stream the design into it with `append_frame_html`
-> in ~300–500 character chunks (`start=true` on the first, `done=true` on the last) so people watch it
+> one complete section at a time, roughly 1–4 KB per chunk (`start=true` on the first, `done=true` on the last) so people watch it
 > build up live. Complete HTML with inline CSS. After finishing, call `get_frame_screenshot` to see it,
 > fix what looks wrong, and re-check. Pick an `agent_name` and reuse it on every call.
 
@@ -483,14 +798,14 @@ to the public page directly in Chromium.
 ### Design sync: push an app's live screens onto a canvas
 
 Server-side import can't reach apps behind SSO or a VPN. The **doop-sync snippet** flips the capture
-to the user's browser: mint a write-only key in a canvas's Share dialog, drop one tag into the app —
+to the user's browser: mint a write-only key under a canvas's **Import → Live app**, drop one tag into the app —
 
 ```html
 <script async src="https://your-doop-origin/doop-sync.js?key=dk_…"></script>
 ```
 
 — and every distinct screen people visit lands on that canvas as a frame (one row per app), imported
-once: a short grace window lets the first capture settle (scroll reveals, late images), then the frame
+once: a grace window (`SYNC_FREEZE_MS`, 15 minutes by default) lets the first capture settle (scroll reveals, late images), then the frame
 freezes so later visits — different viewports, other users' data, open menus — never churn it. Deleting
 a frame re-imports it on the next visit; navigation counts keep accumulating regardless. Routes are
 normalized (`/orders/8231` → `/orders/:id`) so each screen maps to one
@@ -499,19 +814,21 @@ same-origin webfonts and small images are inlined as data: URIs — fonts requir
 sandboxed frame, and intranet URLs would never render for viewers outside the network. Scripts are
 stripped client- and server-side, input values are always dropped, and anything marked `data-doop-mask`
 is redacted before upload (`data-doop-sync-ignore` excludes an element entirely). The key is the whole
-credential: it can only write frames to its one canvas, so revoking it in the Share dialog cuts the
+credential: it can only write frames to its one canvas, so revoking it under Import → Live app cuts the
 app off instantly. Endpoint: `POST /ingest/<key>` (CORS-open, no cookies).
 
 ### How streaming looks
 
 Frame actors persist agent HTML and send it to subscribed browsers. Appended chunks render as they
 arrive; large agent updates get a browser-side **typewriter reveal**. Partial HTML is _healed_ before
-rendering: trailing incomplete tags and scripts are dropped, and unclosed styles are closed.
-Human edits bypass the reveal. The reveal changes only presentation; actor reads return saved HTML.
+rendering: a trailing half-written tag is dropped, an unclosed `<script>` is cut (never run
+half-written JS), and an unclosed `<style>` is closed so content paints instead of blanking. Human
+edits bypass the reveal. The reveal changes only presentation; actor reads return saved HTML.
 
 While a stream/reveal is open the frame gets a pulsing dashed border and a "✦ <agent> is designing…"
 chip; "finished designing" logs when the agent sends `done=true`. A stale stream auto-closes after 30s.
-There is also a REST equivalent: `POST /api/frames/:id/append` with `{ html_chunk, start?, done?, actor? }`.
+There is also a REST equivalent: `POST /api/frames/:id/append` with `{ html_chunk, start?, done? }`;
+the author is always the signed-in user.
 
 ### How agents learn the workflow
 
@@ -524,31 +841,70 @@ Steering happens at three layers (the same architecture paper.design uses, plus 
    re-loadable after context compaction. Source: `server/guide.ts`.
 3. **Result nudges** — `create_frame` / `set_frame_html` / final `append_frame_html` results tell
    the agent it hasn't _seen_ its design yet and to call `get_frame_screenshot` before moving on.
+   Other results remind an agent to read canvas style guides it hasn't opened, to announce itself
+   with `set_status`, and point out HTML that arrived escaped; open human feedback rides along too.
+
+`get_guide` has one topic, `doop-instructions`, covering human feedback, the design brief, images,
+style guides and memory, redesigns, prototypes and exporting; extensions such as Linear add their
+own lines. The built-in Doop Agent gets the same text in its system prompt and most of the same
+tools; `tests/agentToolParity.test.ts` lists the MCP tools it does not have yet.
 
 ### MCP tools
 
-| Tool                   | What it does                                                                                                                                                           |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_guide`            | The agent playbook — agents are instructed to load this first                                                                                                          |
-| `set_status`           | Broadcast a one-line "what I'm working on" — shown live in the working-now strip, avatar tooltip, and activity feed                                                    |
-| `get_feedback`         | Fetch & claim open human feedback requests — for agents whose job is to poll the canvas periodically                                                                   |
-| `get_comments`         | Read element-pinned comments and replies, optionally filtered by frame or resolution state, without claiming work                                                      |
-| `reply_to_comment`     | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment                                                                |
-| `resolve_comment`      | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory                                                                |
-| `list_canvases`        | List all canvases                                                                                                                                                      |
-| `create_canvas`        | Create a canvas, returns its shareable id                                                                                                                              |
-| `get_canvas`           | Canvas layout: every frame's position/size/meta                                                                                                                        |
-| `view_website`         | Inspect one public page read-only; returns a desktop screenshot and visible text without changing the canvas                                                           |
-| `import_webpage`       | Import one public URL onto a canvas as an editable HTML snapshot/frame                                                                                                 |
-| `create_frame`         | Add a frame with HTML (auto-placed if no x/y)                                                                                                                          |
-| `get_frame`            | Read a frame including its HTML                                                                                                                                        |
-| `get_frame_screenshot` | Render the frame headlessly and return a PNG — lets agents _see_ and iterate on their design                                                                           |
-| `set_frame_html`       | Replace a frame's design in one shot — renders live for everyone                                                                                                       |
-| `append_frame_html`    | **Stream** a design in chunks (`start=true` first, `done=true` last) — viewers watch it build up                                                                       |
-| `edit_frame_html`      | Targeted exact find/replace in a frame's HTML — morphs into the render in place                                                                                        |
-| `update_frame`         | Rename / move / resize a frame                                                                                                                                         |
-| `delete_frame`         | Remove a frame                                                                                                                                                         |
-| `generate_image`       | Generate an image from a prompt with the image model picked in Settings (GPT Image, Nano Banana or Seedream), on the user's own account, else a server key → asset URL |
+40 tools: 38 built in ([`server/mcp.ts`](server/mcp.ts)) plus the two Linear tools its extension
+registers ([`server/linear/extension.ts`](server/linear/extension.ts)). Every tool carries
+read-only / destructive / idempotent annotations; the server registers no MCP prompts.
+
+| Tool                     | What it does                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `get_guide`              | The agent playbook — agents are instructed to load this first                                                       |
+| `set_status`             | Broadcast a one-line "what I'm working on" — shown live in the working-now strip, avatar tooltip, and activity feed |
+| `get_profile`            | The Doop account this connection is signed in as                                                                    |
+| **Canvases**             |                                                                                                                     |
+| `list_canvases`          | List the canvases you can open, including workspace canvases                                                        |
+| `create_canvas`          | Create a canvas (optionally in a workspace), returns its shareable id                                               |
+| `get_canvas`             | Canvas layout: every frame's position/size/meta                                                                     |
+| `set_canvas_pages`       | Create, rename, reorder or delete canvas pages                                                                      |
+| **Frames**               |                                                                                                                     |
+| `create_frame`           | Add a frame with HTML (auto-placed if no x/y)                                                                       |
+| `get_frame`              | Read a frame including its HTML                                                                                     |
+| `append_frame_html`      | **Stream** a design in chunks (`start=true` first, `done=true` last) — viewers watch it build up                    |
+| `set_frame_html`         | Replace a frame's design in one shot — renders live for everyone                                                    |
+| `edit_frame_html`        | Targeted exact find/replace in a frame's HTML — morphs into the render in place                                     |
+| `update_frame`           | Rename / move / resize a frame                                                                                      |
+| `delete_frame`           | Remove a frame                                                                                                      |
+| `list_frame_versions`    | Earlier states of a frame, newest first, with author and time                                                       |
+| `restore_frame_version`  | Put a frame back to an earlier state; the replaced design is kept as a version                                      |
+| `get_frame_screenshot`   | Render the frame headlessly and return a PNG — lets agents _see_ and iterate on their design                        |
+| `export_frame`           | PNG/JPG URLs that re-render when the design changes, or a vector PDF                                                |
+| **Prototypes**           |                                                                                                                     |
+| `get_prototype`          | Each page's flow start and every interaction (trigger, action, target), flagging links to missing frames            |
+| `set_prototype_start`    | Choose the frame a page's clickable prototype starts on                                                             |
+| **Collaboration**        |                                                                                                                     |
+| `get_feedback`           | Fetch & claim open human feedback requests — for agents whose job is to poll the canvas periodically                |
+| `get_comments`           | Read element and canvas comments with their replies, optionally filtered by frame or resolution state, no claiming  |
+| `reply_to_comment`       | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment             |
+| `resolve_comment`        | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory             |
+| **Design memory**        |                                                                                                                     |
+| `list_guidelines`        | List a canvas's style guides (brand rules, style recipes) with one-line summaries                                   |
+| `get_guidelines`         | Read one style guide in full — the rules every frame on the canvas must follow                                      |
+| `set_guidelines`         | Write or revise a style guide (versioned, with history)                                                             |
+| `get_reference`          | Read a frame a human pinned as a "more like this" style reference                                                   |
+| `save_decision`          | Record a design decision so later agents don't re-litigate it; feeds the distiller                                  |
+| **Assets & inspiration** |                                                                                                                     |
+| `search_images`          | Stock photo search (Pexels) — returns thumbnails the agent picks from                                               |
+| `search_icons`           | 200,000+ open-source icons (Iconify) as hotlinkable SVGs                                                            |
+| `search_logos`           | Real company logos by brand name or domain (Brandfetch, vector marks)                                               |
+| `list_backgrounds`       | Curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly) as thumbnails                      |
+| `search_inspiration`     | Curated real landing pages with palette, fonts and a mood line (Refero Styles)                                      |
+| `generate_image`         | Generate an image with the model the user picked in Settings (GPT Image, Nano Banana or Seedream) → asset URL       |
+| `upload_asset`           | Store your own file — from a URL, a one-time local-file upload URL, or inline base64                                |
+| **Web**                  |                                                                                                                     |
+| `view_website`           | Inspect one public page read-only; returns a desktop screenshot and visible text without changing the canvas        |
+| `import_webpage`         | Import one public URL onto a canvas as an editable HTML snapshot/frame                                              |
+| **Linear**               |                                                                                                                     |
+| `list_linear_issues`     | List tickets through the user's Linear connection (open, most recently updated first)                               |
+| `get_linear_issue`       | Read a Linear ticket and its description by UUID or identifier                                                      |
 
 Mutating tools accept `agent_name`; the agent then appears in the presence stack (pulsing square avatar),
 gets an "editing" ring + chip on the frame it touched, and its actions land in the activity feed. Agents
@@ -562,8 +918,9 @@ the connection, and that user shows up as the agent's owner in tasks and presenc
 
 Agents are steered (instructions + guide) to call `set_status` with a one-line, present-tense summary
 when they start a task and whenever their focus shifts — e.g. _"Sketching a mobile onboarding flow"_.
-Statuses appear in a floating **working-now strip** at the bottom-left of the canvas (pulsing dot in the
-agent's color), in the presence avatar tooltip, and as an activity feed entry, so you always know what
+Statuses appear in a floating **working-now strip** at the top-left of the canvas, beside the tool rail
+(at the bottom on phones; on screens 1180px and wider the top-bar presence pill shows them instead), in
+the presence avatar tooltip, and as an activity feed entry, so you always know what
 each agent is doing even while it's silently thinking. An empty string clears the status; it also
 expires with the agent's presence.
 
@@ -571,28 +928,31 @@ Every status also becomes a **task**: posting a new status completes the previou
 going silent) ends the open task. Agents that never call `set_status` still show up: the server
 infers a task from what they visibly do (_"Designing 'Hero'"_, italicized in the panel), closes it
 when the stream finishes, and nudges them in tool results to start announcing — so the panel works
-even for sessions that connected before the tool existed or skipped the guide. The side panel is split into two tabs — **Tasks** shows the history
-per agent (active task pulsing with a running duration, finished ones checked off with how long they
-took), Cursor-agent-panel style; **Activity** is the raw event feed. Task history survives agents
-leaving and is sent to late joiners.
+even for sessions that connected before the tool existed or skipped the guide. The **Agents** tab of
+the side panel shows the history per agent (active task pulsing with a running duration, finished
+ones checked off with how long they took, failed cards with **Retry**), Cursor-agent-panel style,
+above the composer that queues new cards (with a model and effort picker and image attachments);
+**Activity** is the raw event feed. Task history survives agents leaving and is sent to late joiners.
 
 ### Steering agents: feedback on tasks
 
-Hover any task in the Tasks tab and hit **↩** to leave feedback (e.g. _"make the accent warmer"_).
+In the app, people steer agents with [comments](#comments-imports-and-exports): `@mention` a role
+on the element in question. For scripts and integrations, `POST /api/tasks/:id/feedback` with
+`{ text }` leaves a note on a task (the signed-in user is the author; it counts as one Doop Agent
+task, so it can return `403 resident_limit`).
+
 Each note becomes an **open request on the canvas** — a work item, not mail for the agent whose
 task it was. MCP is pull-based, so delivery rides the result-nudge layer: the **next identified
 agent call** on the canvas that supports feedback delivery (carrying an `agent_name`, whoever it is) returns a
 `HUMAN FEEDBACK` block quoting the note, saying whose work it concerns, and instructing the agent
 to address it before continuing — including editing another agent's frame (a human request
-overrides the don't-touch etiquette). Picking it up claims it: the UI flips from _"→ waiting for
-an agent…"_ to _"✓ picked up by ⟨agent⟩"_, and each note is claimed exactly once.
+overrides the don't-touch etiquette). Each note is claimed exactly once.
 
 Agents don't linger waiting for replies — sessions end when their work ends. Open requests simply
 wait for the next agent to show up: the original agent in a later session, a different agent
 already on the canvas, or a fresh one you spawn (_"check in on canvas ⟨id⟩"_). For a dedicated
 caretaker, point an agent at `get_feedback` — a non-blocking fetch-and-claim designed for a
 "check the canvas every few minutes, address whatever humans requested" loop.
-REST equivalent: `POST /api/tasks/:id/feedback` with `{ text, from }`.
 
 ### Element comments through MCP
 
@@ -615,34 +975,108 @@ role spends one resident task from the account's allowance — the same free-tie
 card, an `@mention` comment, or task feedback consumes (`server/allowance.ts`); plain replies are
 free. `resolve_comment` also costs nothing.
 
+## Automations
+
+An automation runs on a schedule (daily, weekdays or weekly, in any time zone) or
+when designs on a selected canvas are approved. Configure up to six steps at `/automations`.
+Approval presets make different sizes, localize designs, or create companion assets;
+edit the brief to choose dimensions, languages and deliverables. Generated designs start as drafts.
+
+- **Pull steps** land designs on a canvas: **Meta ad creatives** (up to 200 ads, each with its image,
+  name, copy and CTA; `META_APP_ID`/`_SECRET`, read-only `ads_read` scope).
+- **Agent steps** queue a board card for one Doop Agent role, identical to a card a person writes,
+  and billed to the automation's owner. Following steps wait until that card completes.
+- **Create Linear ticket** uses the owner's connected Linear account and selected team.
+  The connection needs permission to create issues.
+- **Post to Slack** uses the owner's Slack installation and a channel ID. Invite @Doop
+  to the destination channel. Both handoff actions include source design links and links
+  produced by earlier steps.
+
+Schedules are checked every minute; approvals and ongoing work every five seconds. One run
+per automation is active at a time. Up to ten approvals are grouped into each run, with each
+approval processed once, including after a restart or run-history cleanup. Enabling a workflow
+watches future approvals; **Run now** also picks up existing, unprocessed approvals.
+Changing an approved source to draft or needs review stops its remaining workflow steps.
+Agent work times out after one hour. Sizes, languages, and asset briefs are editable presets.
+
+Every run has a summary or an actionable error. Interrupted external calls fail visibly instead
+of automatically repeating a possibly successful ticket or message. Check the destination before
+reapproving a design to start another run. Approval receipts are retained until the automation is
+deleted; completed run history is limited to 100 entries. Existing scheduled automations retain
+their schedules and now wait for agent completion between steps.
+
+Types live in [`shared/automations.ts`](shared/automations.ts), the runner in
+[`server/automations.ts`](server/automations.ts).
+
 ## What's in the box
 
-- **Infinite canvas** — wheel to pan, `⌘`/`ctrl` + wheel (or pinch) to zoom, drag the background to pan,
-  zoom-to-fit; dot grid tracks the viewport.
-- **Frames** — drag to move, corner handle to resize, click to select. The right-hand inspector edits
-  name/position/size and the raw HTML with live saves batched every 50ms. `⌫` deletes the selected frame.
-- **Multiplayer** — live cursors with name tags, presence avatars, per-frame "who's editing" indicators,
-  colored flash when a remote actor changes a frame, drag positions streamed live, auto-reconnect.
+- **Infinite canvas and editor** — tools, frames, elements, layers, rulers and shortcuts are in
+  [The canvas editor](#the-canvas-editor).
+- **Multiplayer** — live cursors with name tags, presence avatars, follow mode, per-frame "who's
+  editing" indicators, colored flash when a remote actor changes a frame, drag positions streamed
+  live, a "Reconnecting / saved" status, auto-reconnect.
 - **Activity feed** — every create/edit/rename/delete, by whom (user or agent), with timestamps.
-- **Sharing** — the canvas URL is the share link (`Share` button copies it).
-- **Connect AI modal** — copy-paste MCP setup instructions from the app itself.
+- **Sharing** — invites, link levels (view / comment / edit), workspaces and the Community gallery
+  from the **Share** modal ([Accounts](#accounts)).
+- **Connect AI modal** — one-click installs for Claude, Cursor and Codex, plus copy-paste setup for
+  every other MCP client.
+- **Home** — a prompt that turns into a canvas with drafts queued (choose drafts per prompt, attach a
+  design to start from), your canvases in a grid or list with sorting and owner filters, a
+  self-ticking getting-started checklist, and the ⌘K search palette.
+- **Desktop app** — macOS and Windows ([`desktop/`](desktop/README.md)): canvas tabs, a native View
+  menu, Check for Updates, one-click agent installs and `doop://` links that hand sign-in and
+  integration OAuth back from the browser.
+
+## REST API
+
+The web app talks to the same REST API you can script against. It authenticates with the
+better-auth session cookie (agents use [MCP](#connect-an-ai-agent) instead), and every route
+applies the same canvas access rules. Route handlers live in
+[`server/index.ts`](server/index.ts) plus the routers it mounts.
+
+| Prefix                                                      | What it covers                                                                                                                           |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/canvases`                                             | Canvases and their members, pages, flow start, guides, guidelines, references, cards, comments, imports, sync keys, assets, `export.pdf` |
+| `/api/frames`                                               | Frames: edit, stream (`/append`), versions and restore, approval, comments, `screenshot.png`                                             |
+| `/api/comments`, `/api/tasks`, `/api/feedback`              | Replies, resolve and retry; task feedback                                                                                                |
+| `/api/workspaces`, `/api/billing`                           | Workspaces, people, roles, Stripe checkout                                                                                               |
+| `/api/automations`, `/api/integrations`, `/api/webhooks`    | Automations, connected tools, outbound webhooks                                                                                          |
+| `/api/model-account`, `/api/image-model`, `/api/agent-keys` | Model accounts and their catalogs, the image model, agent keys                                                                           |
+| `/api/community`, `/api/admin`, `/api/notifications`        | The gallery, instance admin, comment-email preferences                                                                                   |
+| `/i/<frameId>.png`, `/a/<id>.<ext>`, `/u/<token>`           | Public live frame images, stored assets, single-use upload tickets (15 minutes, 5 MB)                                                    |
+| `/ingest/<key>`, `/stripe/webhook`, `/healthz`              | Design-sync captures, Stripe events, health check                                                                                        |
+
+The realtime protocol is plain JSON over `/ws`, one room per canvas; its message types are in
+[`shared/types.ts`](shared/types.ts).
 
 ## Architecture
 
+The main entry points (the server has about 70 modules in all):
+
 ```
-server/          Node (tsx) — one process on :4400
-  index.ts       Express REST API + ws rooms + presence + static serving (prod)
-  store.ts       Canvas metadata cache + frame access through actor RPC
-  db/            PGlite/Postgres application records + legacy frame imports
-  actions.ts     Shared mutations: broadcast + activity log + agent presence
-  mcp.ts         MCP server (@modelcontextprotocol/sdk), stateless streamable HTTP at /mcp
-  seed.ts        Demo canvas on first run
-shared/types.ts  Store + ws protocol types shared by server and client
-src/             React + Vite + zustand client on :4300
-  actor.ts       CanvasIndex membership and FrameActor state, persisted in actor SQLite
+server/            Node (tsx) — one process on :4400
+  index.ts         Express REST API + ws rooms + presence + static serving (prod)
+  store.ts         Canvas metadata cache + frame access through actor RPC
+  db/              Drizzle schema + PGlite/Postgres application records + legacy frame imports
+  actions.ts       Shared mutations: broadcast + activity log + agent presence
+  mcp.ts           MCP server (@modelcontextprotocol/sdk), stateless streamable HTTP at /mcp
+  guide.ts         The agent guide (get_guide) and the shared prototype/design doctrine
+  resident.ts      The built-in Doop Agent; agentModel.ts picks the credential a run uses
+  auth.ts          better-auth: email/password, SSO, Google/Microsoft/Apple, MCP OAuth
+  automations.ts   Scheduled and approval-triggered workflows
+  extensions.ts    Registry for the Linear and Slack integrations (server/linear, server/slack)
+  seed.ts          Demo canvas on first run
+shared/            Types and logic shared by server and client (ws protocol, prototypes, pages)
+src/               React + Vite + zustand client on :4300
+  pages/           Route-level screens (Home, CanvasPage, Settings, Automations…)
+  components/      Canvas editor and app UI; components/ui/ holds every styled primitive
+  actor.ts         CanvasIndex membership and FrameActor state, persisted in actor SQLite
   lib/canvas-actor.ts  Browser subscriptions and edits over actor WebSockets
-  components/ui/ The component system — every styled primitive lives here
-  styles.css     Design tokens, the base reset, and keyframes. Nothing else.
+  styles.css       Design tokens, the base reset, and keyframes. Nothing else.
+desktop/           Tauri desktop app (macOS, Windows)
+ios/               SwiftUI iPhone and iPad app
+claude-extension/  Claude Desktop extension (.mcpb); cursor-plugin/ and chatgpt-plugin/ beside it
+public/doop-sync.js  The design-sync snippet
 ```
 
 ### Styling
@@ -668,7 +1102,8 @@ frame IDs, and creation/deletion bookkeeping. Page deletion and frame placement 
 an occupied page cannot be deleted, and a deleted page cannot receive frames.
 Browsers subscribe directly to this index and to one `FrameActor` per frame; reconnecting
 loads a fresh snapshot. Browser edits go directly to frame actors, while REST/MCP edits reach the same
-actors through the server. The `/ws` room carries chat, presence, and other collaboration events.
+actors through the server. The `/ws` room carries cursors, presence, comments, tasks and other
+collaboration events.
 PostgreSQL stores canvas metadata and collaboration records, including a mirror of the page list;
 actors own frames, pages, and their membership. Copies become visible in PostgreSQL after all copied
 frame actors are ready.
@@ -682,11 +1117,22 @@ Deletion tombstones prevent stale SQL data or retried requests from bringing fra
 
 ## Contributing
 
-PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style.
-After actor changes, run `bun run actors:generate`, commit the generated client, and restart `bun run dev`.
-`bun run test` starts isolated local actors and real servers against throwaway databases.
-Schema changes go through drizzle migrations (`npx drizzle-kit generate` after editing
-`server/db/schema.ts`). Security issues: see [SECURITY.md](SECURITY.md) — please report privately.
+PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions and code style. First-time
+contributors sign the [CLA](CLA.md); a bot asks for it on your first PR.
+
+| Command                           | What it does                                                                  |
+| --------------------------------- | ----------------------------------------------------------------------------- |
+| `bun run test`                    | Starts isolated local actors, then Vitest over `tests/` (unit + real servers) |
+| `bun run typecheck`               | `tsgo`, the native TypeScript compiler                                        |
+| `bun run lint` / `bun run format` | oxlint + ESLint / Prettier                                                    |
+| `bun run doc-lint`                | Checks that `CLAUDE.md` and `.context/` stay in step with the code            |
+| `bun run storybook`               | The component catalogue on :6006                                              |
+| `bun run actors:generate`         | Regenerates the actor client after `src/actor.ts` changes (commit it)         |
+
+CI runs all of these except Storybook, plus `format:check` and a production build, on every PR, and lints the PR title as a conventional
+commit (PRs land as a squash). Schema changes go through drizzle migrations (`npx drizzle-kit generate`
+after editing `server/db/schema.ts`). Security issues: see [SECURITY.md](SECURITY.md) — please report
+privately.
 
 ## License
 

@@ -8,13 +8,11 @@ import { Client, startServer, type Server } from './harness.ts'
  * — this is the same surface a self-hoster exposes to the internet.
  */
 
-const PORT = 4977
-
 let server: Server
 let BASE: string
 
 beforeAll(async () => {
-  server = await startServer(PORT, { BETTER_AUTH_URL: `http://localhost:${PORT}` })
+  server = await startServer()
   BASE = server.base
 }, 70_000)
 
@@ -41,11 +39,79 @@ describe('canvas access model', () => {
     expect(mcp.headers.get('www-authenticate')).toContain(`${BASE}/.well-known/oauth-protected-resource/mcp`)
   })
 
+  it('carries the OAuth challenge in the 401 body too, with invalid_token for a stale bearer', async () => {
+    /* ChatGPT offers "Connect" only when the challenge is in the header AND
+       in _meta; a presented-but-invalid token must say so (RFC 6750 §3.1). */
+    const post = (headers: Record<string, string>) =>
+      fetch(`${BASE}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      })
+    const bare = await post({})
+    expect(bare.status).toBe(401)
+    const bareHeader = bare.headers.get('www-authenticate')!
+    expect(bareHeader).toContain('scope="openid profile email offline_access"')
+    expect(bareHeader).not.toContain('error=')
+    expect((await bare.json())._meta['mcp/www_authenticate']).toEqual([bareHeader])
+
+    const stale = await post({ authorization: 'Bearer not-a-real-token' })
+    expect(stale.status).toBe(401)
+    expect(stale.headers.get('www-authenticate')).toContain('error="invalid_token"')
+  })
+
+  it('serves the component template and the resource list without a token, but never tools', async () => {
+    /* ChatGPT re-fetches a rendered card's template with no usable token;
+       the template is static, so that read is open. tools/list is not. */
+    const rpc = (method: string, params?: unknown) =>
+      fetch(`${BASE}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      })
+    const list = await rpc('resources/list')
+    expect(list.status).toBe(200)
+    expect((await list.json()).result.resources.map((r: { uri: string }) => r.uri)).toContain(
+      'ui://doop/frame-preview-2.html',
+    )
+    const read = await rpc('resources/read', { uri: 'ui://doop/frame-preview-2.html' })
+    expect(read.status).toBe(200)
+    expect((await read.json()).result.contents[0].text).toContain('<!doctype html>')
+    expect((await rpc('tools/list')).status).toBe(401)
+    expect((await rpc('tools/call', { name: 'list_canvases', arguments: {} })).status).toBe(401)
+    /* a batch never qualifies as anonymous discovery */
+    const batch = await fetch(`${BASE}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify([{ jsonrpc: '2.0', id: 1, method: 'resources/list' }]),
+    })
+    expect(batch.status).toBe(401)
+  })
+
+  it('answers the OpenAI domain-verification probe only when a token is configured', async () => {
+    expect((await fetch(`${BASE}/.well-known/openai-apps-challenge`)).status).toBe(404)
+  })
+
   it('publishes protected-resource metadata naming the /mcp endpoint (RFC 9728)', async () => {
     for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
       const meta = await (await fetch(`${BASE}${path}`)).json()
       expect(meta.resource).toBe(`${BASE}/mcp`)
       expect(meta.authorization_servers).toEqual([BASE])
+    }
+  })
+
+  it('publishes authorization-server metadata a ChatGPT connector can consume', async () => {
+    /* ChatGPT reads either well-known name, needs PKCE S256, and registers
+       itself through dynamic client registration; the issuer must equal the
+       protected-resource document's authorization_servers entry exactly. */
+    for (const path of ['/.well-known/oauth-authorization-server', '/.well-known/openid-configuration']) {
+      const meta = await (await fetch(`${BASE}${path}`)).json()
+      expect(meta.issuer, path).toBe(BASE)
+      expect(meta.code_challenge_methods_supported, path).toContain('S256')
+      expect(meta.registration_endpoint, path).toMatch(/\/register$/)
+      expect(meta.token_endpoint_auth_methods_supported, path).toContain('none')
+      expect(meta.authorization_endpoint, path).toMatch(/^http/)
+      expect(meta.token_endpoint, path).toMatch(/^http/)
     }
   })
 
@@ -123,6 +189,8 @@ describe('canvas access model', () => {
     const list = await (await invited.get('/api/canvases')).json()
     const entry = list.find((c: { id: string }) => c.id === canvasId)
     expect(entry?.shared).toBe(true)
+    /* the tile's avatar stack: owner first, then the invited member, by name */
+    expect(entry?.people.map((p: { name: string }) => p.name)).toEqual(['Owner', 'Invited'])
   })
 
   it('only the owner can flip link access; edit opens the canvas to everyone signed in', async () => {

@@ -35,13 +35,18 @@ vi.mock('../server/workspaces.ts', () => ({
   workspaceIdsFor: (userId: string) => [...rig.workspaces].filter(([, m]) => m.has(userId)).map(([id]) => id),
   removeMember: (workspaceId: string, userId: string) => rig.workspaces.get(workspaceId)?.delete(userId) ?? false,
 }))
+vi.mock('../server/slack/jobs.ts', () => ({ disconnectAgent: vi.fn() }))
+vi.mock('../server/linear/jobs.ts', () => ({ disconnectAgent: vi.fn() }))
 import { store } from '../server/store.ts'
 import { purgeUserData } from '../server/accountDeletion.ts'
+import { disconnectAgent as disconnectSlack } from '../server/slack/jobs.ts'
+import { disconnectAgent as disconnectLinear } from '../server/linear/jobs.ts'
 
 beforeEach(async () => {
   for (const canvas of store.allCanvases()) await store.deleteCanvas(canvas.id)
   rig.workspaces.clear()
   rig.dbDeletes = 0
+  vi.clearAllMocks()
 })
 
 it('deletes only the canvases nobody else can reach, and leaves the rest', async () => {
@@ -62,5 +67,11 @@ it('deletes only the canvases nobody else can reach, and leaves the rest', async
   expect(store.getCanvasMetadata(theirs.id)?.memberIds ?? []).not.toContain('alice')
   expect(rig.workspaces.get('ws1')?.has('alice')).toBe(false)
   expect(rig.workspaces.get('ws1')?.has('bob')).toBe(true)
-  expect(rig.dbDeletes).toBe(2) // live activity update tokens and push-to-start tokens
+  expect(rig.dbDeletes).toBe(4) // Slack and Linear OAuth handoffs, live activity update tokens, push-to-start tokens
+})
+
+it('disconnects the Slack and Linear agents, so no installation outlives its installer', async () => {
+  await purgeUserData('alice')
+  expect(disconnectSlack).toHaveBeenCalledWith('alice')
+  expect(disconnectLinear).toHaveBeenCalledWith('alice')
 })

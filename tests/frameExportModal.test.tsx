@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { Frame } from '../shared/types'
 import { FrameContextMenu } from '../src/components/FrameContextMenu'
 import { ContextMenu, ContextMenuTrigger } from '../src/components/ui/context-menu'
+import { useStore } from '../src/lib/store'
 
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -85,6 +86,7 @@ it('hands focus from the frame menu to a persistent export dialog and dismisses 
   expect(dialog.textContent).toContain('Download PNG')
   expect(dialog.textContent).toContain('Download JPG')
   expect(dialog.textContent).not.toMatch(/PSD|Canva|Figma/)
+  expect(dialog.textContent).toContain('Download PDF')
   expect(dialog.textContent).not.toContain('Copy image URL')
   await act(async () => {
     document.activeElement!.dispatchEvent(
@@ -93,4 +95,20 @@ it('hands focus from the frame menu to a persistent export dialog and dismisses 
   })
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   expect(document.body.style.pointerEvents).not.toBe('none')
+})
+
+it('offers the whole selection as one PDF', async () => {
+  useStore.setState({
+    canvas: {
+      id: 'canvas',
+      name: 'Test',
+      createdAt: 0,
+      updatedAt: 0,
+      frames: [frame, { ...frame, id: 'other', name: 'Other' }],
+    },
+    selectedIds: [frame.id, 'other'],
+  })
+  const dialog = await openExportDialog()
+  expect(dialog.textContent).toContain('Download PDF of 2 frames')
+  expect(dialog.textContent).toContain('One vector page per frame')
 })

@@ -34,7 +34,6 @@ it('upgrades an existing OSS database without the deferred Figma migration', asy
     )
     expect(tables.rows.map((row) => row.table_name)).toEqual(
       expect.arrayContaining([
-        'chat_messages',
         'image_prefs',
         'agent_keys',
         'linear_installations',

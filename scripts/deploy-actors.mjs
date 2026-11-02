@@ -20,6 +20,7 @@ try {
     'shared/pages.ts',
     'shared/frame-validation.ts',
     'shared/billing.ts',
+    'shared/canvasRole.ts',
   ]) {
     const target = path.join(staging, file)
     await mkdir(path.dirname(target), { recursive: true })

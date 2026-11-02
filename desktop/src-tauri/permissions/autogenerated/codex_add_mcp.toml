@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-codex-add-mcp"
+description = "Enables the codex_add_mcp command without any pre-configured scope."
+commands.allow = ["codex_add_mcp"]
+
+[[permission]]
+identifier = "deny-codex-add-mcp"
+description = "Denies the codex_add_mcp command without any pre-configured scope."
+commands.deny = ["codex_add_mcp"]
