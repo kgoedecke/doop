@@ -203,9 +203,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       el.focus({ preventScroll: true })
       postActive()
     }
-    /* double/triple clicks carry a native word/paragraph selection —
-       placing a caret here would collapse it the instant it appears */
-    if (!keepSelection) placeCaret(x, y)
+    /* double/triple clicks carry a native word/paragraph selection, and a
+       drag ends in a click carrying the range it swept — placing a caret
+       here would collapse either the instant it appears */
+    if (!keepSelection && !hasRangeIn(el)) placeCaret(x, y)
+  }
+
+  function hasRangeIn(el) {
+    var s = getSelection()
+    return !!s && !s.isCollapsed && el.contains(s.anchorNode) && el.contains(s.focusNode)
   }
 
   function serialize() {
