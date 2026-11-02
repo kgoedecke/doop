@@ -346,6 +346,33 @@ with one-line summaries; list_guidelines shows the same list on demand.
   ready-to-paste <style> blocks, uploaded logo URLs, sizing rules.
 - Update a doc when its style evolves; empty markdown deletes it.
 
+## Design system — build from the components
+
+A canvas can draw from a component library: one global stylesheet (tokens as
+\`:root\` custom properties, fonts, base rules) plus reusable components sorted
+into groups (Buttons, Forms, Navigation, Overlays… and custom ones). A team
+shares one library across its workspace's canvases. get_canvas lists a
+\`designSystem\` when there is one.
+
+- Before designing on such a canvas, call get_design_system and plan the screen
+  out of its components.
+- Place a component by writing its markup (the default or a variant) and keep
+  \`data-doop-component="<slug>"\` on its root. Doop stamps the component's CSS
+  and JS, and the global stylesheet, into the frame as \`data-doop-library\`
+  blocks on every write: never copy that CSS, never edit those blocks.
+- Change copy, attributes and modifier classes inside an instance freely; the
+  component's own look comes from the library, so a library edit restyles every
+  frame using it.
+- Name the blocks you write with \`data-name\` ("Filtros", "Tabela de títulos",
+  "Rodapé", in the human's language): the Layers panel shows that name instead of
+  "div". Component instances carry the component's name already; keep it.
+- Style everything that is not a component with the tokens (\`var(--color-primary)\`,
+  \`var(--space-4)\`, \`var(--radius-md)\`) rather than literal values.
+- When you design something reusable that the library lacks, register it with
+  save_component (only its own CSS; shared values through tokens), then use it.
+  set_design_system changes the tokens and usage rules; create_component_group adds
+  a group.
+
 ## Memory references — the look to match
 
 Humans can pin frames to the canvas's Memory as style references: "more designs

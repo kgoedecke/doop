@@ -34,6 +34,7 @@ import {
   ArrowUp,
   Bell,
   Blocks,
+  Component as ComponentGlyph,
   Calendar,
   BookOpen,
   Brain,
@@ -260,6 +261,8 @@ export const LockIcon = icon(Lock)
 export const DesktopIcon = icon(Monitor)
 export const DownloadIcon = icon(Download)
 export const PuzzleIcon = icon(Puzzle)
+/* the component library: the canvas tab, the workspace pane, the library modal */
+export const ComponentIcon = icon(ComponentGlyph)
 /* the theme switch: sun for light, moon for dark */
 export const SunIcon = icon(Sun)
 export const MoonIcon = icon(Moon)

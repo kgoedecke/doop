@@ -464,6 +464,19 @@ body:has([data-panel-resizing]) * {
   }
 }
 
+/* A label too long for its box drifts to its end and back (run alternate):
+   it rests at each end, then travels (PanelIconTab). */
+@keyframes marquee {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  85%,
+  100% {
+    transform: translateX(var(--marquee-shift));
+  }
+}
+
 /* Modals: in over 250ms from 96%, out over 150ms back to 96%, both on the
    ease-out-quint curve (transitions.dev "Modal open/close"). */
 @keyframes modal-in {

@@ -25,7 +25,7 @@ export interface Viewport {
   zoom: number
 }
 
-export type PanelTab = 'tasks' | 'comments' | 'activity' | 'memory'
+export type PanelTab = 'tasks' | 'comments' | 'activity' | 'memory' | 'components'
 
 /** A send from the Agents tab composer: in flight, or how the last one
  *  ended. Lives in the store because the composer unmounts with its tab and
@@ -133,6 +133,9 @@ interface State {
   /** bumped whenever the allowance could have changed (a model account was
    *  connected or dropped) so every meter on screen re-reads it */
   allowanceVersion: number
+  /** bumped when the canvas's component library changed, so open library
+   *  views re-read it */
+  libraryVersion: number
   /** a request for the Stage to glide the camera to a frame — the prompt bar
    *  raises it so a first deliverable streams in on-screen, never off-canvas */
   flyTo: { frameId: string; at: number } | { point: { x: number; y: number }; at: number } | null
@@ -195,6 +198,7 @@ interface State {
   pushNotice(text: string, options?: { busy?: boolean }): void
   setLimitWall(v: boolean): void
   allowanceChanged(): void
+  libraryChanged(): void
   requestFlyTo(frameId: string): void
   /** glide the camera to a world point at the current zoom (a peer's cursor) */
   requestFlyToPoint(x: number, y: number): void
@@ -282,6 +286,7 @@ export const useStore = create<State>((set, get) => ({
   panelTab: 'tasks',
   limitWall: false,
   allowanceVersion: 0,
+  libraryVersion: 0,
   flyTo: null,
   threadRequest: null,
   composerFocusAt: 0,
@@ -547,6 +552,7 @@ export const useStore = create<State>((set, get) => ({
   },
   setLimitWall: (limitWall) => set({ limitWall }),
   allowanceChanged: () => set((s) => ({ allowanceVersion: s.allowanceVersion + 1 })),
+  libraryChanged: () => set((s) => ({ libraryVersion: s.libraryVersion + 1 })),
   requestFlyTo: (frameId) => {
     const s = get()
     const frame = s.canvas?.frames.find((f) => f.id === frameId)

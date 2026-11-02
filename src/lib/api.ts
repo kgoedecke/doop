@@ -24,6 +24,7 @@ import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } fro
 import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
+import type { LibraryComponent, LibrarySnapshot } from '../../shared/designSystem'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -593,7 +594,42 @@ export const api = {
   integrations: () => req<IntegrationsStatus>('/api/integrations'),
   automationLinearTeams: () => req<{ id: string; name: string; key: string }[]>('/api/integrations/linear/teams'),
   disconnectMeta: () => req<IntegrationsStatus>('/api/integrations/meta', { method: 'DELETE' }),
+  /* the component library a canvas draws from, or a workspace's (shared/designSystem.ts) */
+  library: (target: LibraryTarget) => req<LibrarySnapshot>(`/api/library${libraryQuery(target)}`),
+  saveLibraryStyles: (target: LibraryTarget, styles: { globalCss?: string; notes?: string }) =>
+    req<LibrarySnapshot>(`/api/library/styles${libraryQuery(target)}`, { method: 'PUT', body: JSON.stringify(styles) }),
+  createComponentGroup: (target: LibraryTarget, group: { name: string; description?: string }) =>
+    req<LibrarySnapshot>(`/api/library/groups${libraryQuery(target)}`, { method: 'POST', body: JSON.stringify(group) }),
+  updateComponentGroup: (target: LibraryTarget, id: string, group: { name?: string; description?: string }) =>
+    req<LibrarySnapshot>(`/api/library/groups/${id}${libraryQuery(target)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(group),
+    }),
+  deleteComponentGroup: (target: LibraryTarget, id: string) =>
+    req<LibrarySnapshot>(`/api/library/groups/${id}${libraryQuery(target)}`, { method: 'DELETE' }),
+  saveComponent: (target: LibraryTarget, input: ComponentDraft, id?: string) =>
+    req<LibrarySnapshot>(`/api/library/components${id ? `/${id}` : ''}${libraryQuery(target)}`, {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteComponent: (target: LibraryTarget, id: string) =>
+    req<LibrarySnapshot>(`/api/library/components/${id}${libraryQuery(target)}`, { method: 'DELETE' }),
 }
+
+/** Which library a request means: the one a canvas draws from, or a workspace's. */
+export type LibraryTarget = { canvasId: string } | { workspaceId: string }
+
+function libraryQuery(target: LibraryTarget): string {
+  return 'canvasId' in target
+    ? `?canvas=${encodeURIComponent(target.canvasId)}`
+    : `?workspace=${encodeURIComponent(target.workspaceId)}`
+}
+
+/** A component as the editor sends it. */
+export type ComponentDraft = Pick<
+  LibraryComponent,
+  'name' | 'slug' | 'groupId' | 'description' | 'html' | 'css' | 'js' | 'variants'
+> & { kind?: string }
 
 export interface AdminCanvas extends CanvasMeta {
   linkAccess: LinkAccess

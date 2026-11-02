@@ -461,6 +461,55 @@ export const guidelineVersions = pgTable(
   (t) => [index('guideline_versions_doc_idx').on(t.canvasId, t.name)],
 )
 
+/** The design system of a library scope ('workspace:<id>' | 'user:<id>' |
+ *  'canvas:<id>', see shared/designSystem.ts): the global stylesheet every
+ *  component builds on and the usage notes agents read. A row exists once
+ *  someone saved styles or a component; until then the defaults are only
+ *  offered. Hydrated at boot (server/library.ts). */
+export const designSystems = pgTable('design_systems', {
+  scope: text('scope').primaryKey(),
+  globalCss: text('global_css').notNull(),
+  notes: text('notes').notNull().default(''),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  updatedBy: text('updated_by').notNull(),
+})
+
+/** Component groups a person added next to the presets. */
+export const componentGroups = pgTable(
+  'component_groups',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('component_groups_scope_idx').on(t.scope)],
+)
+
+/** Reusable components of a library scope. Frames reference one by slug
+ *  (`data-doop-component`); its CSS/JS are stamped into those frames. */
+export const libraryComponents = pgTable(
+  'library_components',
+  {
+    id: text('id').primaryKey(),
+    scope: text('scope').notNull(),
+    slug: text('slug').notNull(),
+    name: text('name').notNull(),
+    groupId: text('group_id').notNull(),
+    kind: text('kind'),
+    description: text('description').notNull().default(''),
+    html: text('html').notNull(),
+    css: text('css').notNull().default(''),
+    js: text('js').notNull().default(''),
+    variants: jsonb('variants').$type<{ name: string; html: string }[]>(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [uniqueIndex('library_components_scope_slug_idx').on(t.scope, t.slug)],
+)
+
 /** Frames pinned to Memory as style exemplars: the HTML is a snapshot taken
  *  at pin time, deliberately decoupled from the (mutable, deletable) frame. */
 export const memoryReferences = pgTable(

@@ -56,15 +56,21 @@ export function stageViewportSize(): { width: number; height: number } {
  * and viewport wiring driving the Layers panel's "New frame" has something to test directly, the
  * same way frameClipboard.ts's paste helpers already do.
  */
-export async function createCenteredFrame(canvasId: string, name: string, html: string): Promise<Frame> {
-  const { x, y } = frameCenterPosition(useStore.getState().viewport, stageViewportSize(), DEFAULT_FRAME_SIZE)
+export async function createCenteredFrame(
+  canvasId: string,
+  name: string,
+  html: string,
+  size: { width: number; height: number } = DEFAULT_FRAME_SIZE,
+): Promise<Frame> {
+  const { x, y } = frameCenterPosition(useStore.getState().viewport, stageViewportSize(), size)
   const frame = await api.createFrame(canvasId, {
     name,
     html,
     x,
     y,
     pageId: useStore.getState().activePageId ?? undefined,
-    ...DEFAULT_FRAME_SIZE,
+    width: size.width,
+    height: size.height,
   })
   posthog.capture('frame_created')
   recordCreate(frame)
