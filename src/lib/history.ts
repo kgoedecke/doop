@@ -1,4 +1,4 @@
-import { stackOf } from '../../shared/frameStack'
+import { stackOf, type StackWrite } from '../../shared/frameStack'
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
@@ -32,6 +32,9 @@ type Entry =
     }
   | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean }
   | { type: 'create'; frameId: string; snapshot: Snapshot }
+  /* frames restacked together (the Layers panel renumbering a page): saved
+     as one request, so undo and redo change the order whole or not at all */
+  | { type: 'stack'; canvasId: string; before: StackWrite[]; after: StackWrite[] }
   /* a ruler guide added (before null), moved, or removed (after null) */
   | { type: 'guide'; canvasId: string; before: CanvasGuide | null; after: CanvasGuide | null }
   | { type: 'delete'; frameId: string; snapshot: Snapshot }
@@ -133,6 +136,29 @@ export function recordUpdate(frameId: string, before: Patch, after: Patch, discr
     return
   }
   push(entry)
+}
+
+/** Frames restacked together: one undo step, saved as one request. */
+export function recordStack(canvasId: string, before: StackWrite[], after: StackWrite[]) {
+  if (after.length) push({ type: 'stack', canvasId, before, after })
+}
+
+/** Write a stacking order: locally at once, then to the server as one
+ *  request; a refusal puts every frame back, so the order is never half
+ *  changed. Rejects with the server's error after rolling back. */
+export async function saveStack(canvasId: string, before: StackWrite[], after: StackWrite[]) {
+  const set = (writes: StackWrite[]) => {
+    const s = useStore.getState()
+    if (s.canvas?.id !== canvasId) return
+    for (const { id, z } of writes) s.patchFrameLocal(id, { z })
+  }
+  set(after)
+  try {
+    await api.restackFrames(canvasId, after)
+  } catch (err) {
+    set(before)
+    throw err
+  }
 }
 
 /** Several frames moved together (a group drag): one undo step. */
@@ -299,7 +325,9 @@ export function deleteFramesTracked(frames: Frame[]) {
 function remapId(oldId: string, newId: string) {
   const visit = (e: Entry) => {
     if (e.type === 'group' || e.type === 'transfer') e.entries.forEach(visit)
-    else if (e.type !== 'pages' && e.type !== 'guide' && e.frameId === oldId) e.frameId = newId
+    else if (e.type === 'stack') {
+      for (const w of [...e.before, ...e.after]) if (w.id === oldId) w.id = newId
+    } else if (e.type !== 'pages' && e.type !== 'guide' && e.frameId === oldId) e.frameId = newId
   }
   for (const e of [...undoStack, ...redoStack]) visit(e)
 }
@@ -320,7 +348,7 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
    so undo/redo displays the page where the affected designs now live. */
 function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
   if (e.type === 'group' || e.type === 'transfer') return e.entries.flatMap((child) => selectionIds(child, direction))
-  if (e.type === 'pages' || e.type === 'guide') return []
+  if (e.type === 'pages' || e.type === 'guide' || e.type === 'stack') return []
   if (e.type === 'update' && 'pageId' in (direction === 'redo' ? e.after : e.before)) return [e.frameId]
   const recreated = e.type === (direction === 'redo' ? 'create' : 'delete')
   return recreated ? [e.frameId] : []
@@ -439,6 +467,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     if (e.guides?.length && restored.length) await restoreGuides(canvas.id, e.guides, restored)
   } else if (e.type === 'guide') {
     await applyGuide(e, forward ? e.after : e.before)
+  } else if (e.type === 'stack') {
+    if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
     const canvas = useStore.getState().canvas

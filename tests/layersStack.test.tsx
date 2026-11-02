@@ -4,17 +4,25 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Canvas, Frame } from '../shared/types'
 
-const updateFrame = vi.fn((_id: string, _patch: Partial<Frame>) => Promise.resolve())
+type StackWrite = { id: string; z: number }
+const restackFrames = vi.fn((_canvasId: string, _frames: StackWrite[]) => Promise.resolve([]))
+const createFrame = vi.fn((canvasId: string, input: Partial<Frame> & { name: string }) =>
+  Promise.resolve({ ...frameWith('new', 9), canvasId, ...input } as Frame),
+)
 vi.mock('../src/lib/api', () => ({
   api: {
-    updateFrame: (id: string, patch: Partial<Frame>) => updateFrame(id, patch),
+    restackFrames: (canvasId: string, frames: StackWrite[]) => restackFrames(canvasId, frames),
+    createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) => createFrame(canvasId, input),
+    updateFrame: () => Promise.resolve(),
     deleteFrame: () => Promise.resolve(),
   },
+  ApiError: class extends Error {},
   errorMessage: (_err: unknown, fallback: string) => fallback,
 }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/lib/frameBridge', () => ({
   requestFrame: () => Promise.resolve(null),
+  inspectElement: () => Promise.resolve({ rect: { x: 5, y: 5, width: 40, height: 20 } }),
   settleFrames: () => Promise.resolve(),
 }))
 
@@ -84,7 +92,9 @@ function dragRow(from: string, to: string | null, atY = 14) {
 
 describe('LayersPanel stacking', () => {
   beforeEach(() => {
-    updateFrame.mockClear()
+    restackFrames.mockClear()
+    restackFrames.mockImplementation(() => Promise.resolve([]))
+    createFrame.mockClear()
     const canvas: Canvas = {
       id: 'c1',
       name: 'Canvas',
@@ -118,8 +128,8 @@ describe('LayersPanel stacking', () => {
     dragRow('f1', 's1', 2)
     expect(stack()).toEqual(['f2', 's1', 'f1'])
     expect(listed()).toEqual(['f1', 's1', 'f2'])
-    expect(updateFrame).toHaveBeenCalledTimes(1)
-    expect(updateFrame.mock.calls[0]?.[0]).toBe('f1')
+    expect(restackFrames).toHaveBeenCalledTimes(1)
+    expect(restackFrames.mock.calls[0]?.[1].map((w) => w.id)).toEqual(['f1'])
   })
 
   it('sends a standalone element dragged under the last row to the back', () => {
@@ -136,7 +146,7 @@ describe('LayersPanel stacking', () => {
     dragRow('f2', 'f2', 2)
     dragRow('f2', 'f1', 2)
     expect(stack()).toEqual(['f1', 'f2', 's1'])
-    expect(updateFrame).not.toHaveBeenCalled()
+    expect(restackFrames).not.toHaveBeenCalled()
   })
 
   it('moves the selected frame with ⌥↑ and ⌥↓, and undoes the move', async () => {
@@ -157,5 +167,53 @@ describe('LayersPanel stacking', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
     expect(stack()).toEqual(['f2', 's1', 'f1'])
+  })
+
+  it('leaves a locked frame or shape where it is', () => {
+    act(() => useStore.getState().patchFrameLocal('f1', { locked: true }))
+    dragRow('f1', 's1', 2)
+    const lockedShape = shape.replace('data-doop-drawing="rect"', 'data-doop-drawing="rect" data-doop-locked=""')
+    act(() => useStore.getState().patchFrameLocal('s1', { html: lockedShape }))
+    act(() => useStore.getState().select('s1'))
+    const tree = container.querySelector<HTMLElement>('[role="tree"]')!
+    act(() => {
+      tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
+    })
+    expect(stack()).toEqual(['f1', 'f2', 's1'])
+    expect(restackFrames).not.toHaveBeenCalled()
+  })
+
+  it('puts the whole order back when a renumbering save fails', async () => {
+    restackFrames.mockImplementation(() => Promise.reject(new Error('nope')))
+    /* f2 and s1 so close that nothing fits between them */
+    act(() => {
+      useStore.getState().patchFrameLocal('f2', { z: 1_700_000_000_000 })
+      useStore.getState().patchFrameLocal('s1', { z: 1_700_000_000_000 + 2 ** -12 })
+    })
+    dragRow('f1', 's1', 26)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(restackFrames.mock.calls[0]?.[1]).toHaveLength(3)
+    expect(stack()).toEqual(['f1', 'f2', 's1'])
+  })
+
+  it('renumbers the page before an element dropped into a full gap comes out', async () => {
+    /* f1 and f2 so close that nothing fits between them, s1 in front */
+    act(() => {
+      useStore.getState().patchFrameLocal('f1', { z: 1_700_000_000_000 })
+      useStore.getState().patchFrameLocal('f2', { z: 1_700_000_000_000 + 2 ** -12 })
+      useStore.getState().patchFrameLocal('s1', { z: 1_700_000_000_001 })
+    })
+    /* f2's paragraph onto the band above f1's row: between f1 and f2 */
+    act(() => row('f2').querySelector<HTMLElement>('[data-icon]')!.click())
+    dragRow('f2|body', 'f1', 2)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(restackFrames).toHaveBeenCalledTimes(1)
+    /* the element comes out where the line was: between f1 and f2 */
+    expect(stack()).toEqual(['f1', 'new', 'f2', 's1'])
+    expect(createFrame.mock.calls[0]?.[1].z).toBe(0.5)
   })
 })

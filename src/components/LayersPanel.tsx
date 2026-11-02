@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from 'react'
 import type { Frame } from '../../shared/types'
-import { zAt } from '../../shared/frameStack'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
@@ -33,7 +32,9 @@ import {
   setLayerHidden,
   setLayerLocked,
   detachLayer,
+  isStackLocked,
   restackFrame,
+  stackRoom,
   shiftFrame,
   shiftLayer,
   standaloneSelector,
@@ -377,6 +378,8 @@ export function LayersPanel({
      element over into that frame. */
   function onRowPointerDown(e: ReactPointerEvent<HTMLDivElement>, row: VisibleRow) {
     if (e.button !== 0 || readOnly) return
+    /* a locked frame or shape keeps its place in the stack */
+    if (isRoot(row) && isStackLocked(row.frame)) return
     const start = { x: e.clientX, y: e.clientY }
     const body = e.currentTarget.closest<HTMLElement>('[data-slot="panel-body"]')
     let active = false
@@ -416,7 +419,10 @@ export function LayersPanel({
           const others = stacked.filter((f) => f.id !== row.frame.id)
           restackFrame(stacked, row.frame.id, stackSlot(target, others))
         } else if (row.kind === 'node') {
-          void detachLayer(row.frame, row.node.selector, zAt(stacked, stackSlot(target, stacked)))
+          const slot = stackSlot(target, stacked)
+          void stackRoom(stacked, slot).then((z) => {
+            if (z !== null) return detachLayer(row.frame, row.node.selector, z)
+          })
         }
         return
       }

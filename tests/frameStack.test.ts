@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { frontOf, restack, sortByStack, stackOf, zAt } from '../shared/frameStack'
+import { frontOf, restack, roomAt, sortByStack, stackOf, zAt } from '../shared/frameStack'
 
 const f = (id: string, createdAt: number, z?: number) => ({ id, createdAt, ...(z === undefined ? {} : { z }) })
 const ids = (frames: { id: string }[]) => frames.map((frame) => frame.id)
@@ -59,5 +59,19 @@ describe('frame stacking', () => {
       { id: 'c', z: 1 },
       { id: 'b', z: 2 },
     ])
+  })
+
+  it('makes room for a new frame where its neighbours leave none', () => {
+    expect(roomAt([f('a', 0, 0), f('b', 0, 1)], 1)).toEqual({ z: 0.5, renumber: [] })
+    const lo = 1_700_000_000_000
+    const room = roomAt([f('a', 0, lo), f('b', 0, lo + 2 ** -12)], 1)
+    expect(room).toEqual({
+      z: 0.5,
+      renumber: [
+        { id: 'a', z: 0 },
+        { id: 'b', z: 1 },
+      ],
+    })
+    expect(roomAt([], 0)).toEqual({ z: undefined, renumber: [] })
   })
 })

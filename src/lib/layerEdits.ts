@@ -1,5 +1,5 @@
 import type { Frame } from '../../shared/types'
-import { restack, stackOf } from '../../shared/frameStack'
+import { restack, roomAt, stackOf } from '../../shared/frameStack'
 import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
 import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
@@ -10,8 +10,10 @@ import {
   dropEntry,
   keepTransferDestination,
   recordDrawingTransfer,
+  recordStack,
   recordUpdate,
   recordUpdates,
+  saveStack,
   trackSave,
 } from './history'
 import {
@@ -202,25 +204,47 @@ export function duplicateLayers(frame: Frame, selectors: string[]) {
 
 /* ---- stacking: which frame or shape is in front ---- */
 
+/** A frame, or a standalone element, locked against moving in the stack:
+ *  the frame's lock, or the shape's own (⌘⇧L sets that one). */
+export function isStackLocked(frame: Frame): boolean {
+  const shape = standaloneSelector(frame)
+  return !!frame.locked || (!!shape && isElementLocked(frame.html, shape))
+}
+
 /** Move a frame (or a standalone element, which is one) to `index` of its
  *  page's back-to-front order, `frames` — the page's frames as the stage
- *  paints them. One undo step, however many frames had to be renumbered to
- *  make room; a save the server refused puts that frame back. */
+ *  paints them. One undo step and one request, however many frames had to
+ *  be renumbered to make room; a refused save puts every frame back. A
+ *  locked frame or shape stays where it is. */
 export function restackFrame(frames: Frame[], frameId: string, index: number) {
-  const writes = restack(frames, frameId, index)
-  if (!writes.length) return
-  const before = new Map(frames.map((f) => [f.id, stackOf(f)]))
-  recordUpdates(writes.map(({ id, z }) => ({ frameId: id, before: { z: before.get(id) }, after: { z } })))
-  const store = useStore.getState()
-  for (const { id, z } of writes) {
-    store.patchFrameLocal(id, { z })
-    trackSave(
-      api.updateFrame(id, { z }).catch((err: unknown) => {
-        const s = useStore.getState()
-        s.patchFrameLocal(id, { z: before.get(id) })
-        s.pushNotice(errorMessage(err, 'Couldn’t change the layer order'))
-      }),
-    )
+  const frame = frames.find((f) => f.id === frameId)
+  if (!frame || isStackLocked(frame)) return
+  const after = restack(frames, frameId, index)
+  if (!after.length) return
+  const before = after.map(({ id }) => ({ id, z: stackOf(frames.find((f) => f.id === id)!) }))
+  recordStack(frame.canvasId, before, after)
+  trackSave(
+    saveStack(frame.canvasId, before, after).catch((err: unknown) => {
+      useStore.getState().pushNotice(errorMessage(err, 'Couldn’t change the layer order'))
+    }),
+  )
+}
+
+/** The `z` that puts a new frame at `index` of the page's back-to-front
+ *  order (`frames`): when its neighbours leave no room, the page is
+ *  renumbered first, keeping its order, so the frame lands where it was
+ *  dropped rather than in front. Undefined on an empty page (the server
+ *  then puts it in front) and null when the renumbering was refused. */
+export async function stackRoom(frames: Frame[], index: number): Promise<number | undefined | null> {
+  const { z, renumber } = roomAt(frames, index)
+  if (!renumber.length) return z
+  const before = renumber.map(({ id }) => ({ id, z: stackOf(frames.find((f) => f.id === id)!) }))
+  try {
+    await saveStack(frames[0]!.canvasId, before, renumber)
+    return z
+  } catch (err) {
+    useStore.getState().pushNotice(errorMessage(err, 'Couldn’t change the layer order'))
+    return null
   }
 }
 

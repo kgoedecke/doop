@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
@@ -1799,6 +1800,27 @@ app.post('/api/canvases/:id/frames', (req, res) => {
   )
   if (!frame) return res.status(404).json({ error: 'canvas not found' })
   res.json(frame)
+})
+
+/* the Layers panel's stacking order for several frames at once: all of
+   them or none */
+app.put('/api/canvases/:id/stack', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const writes: unknown = req.body?.frames
+  if (
+    !Array.isArray(writes) ||
+    writes.length === 0 ||
+    writes.length > MAX_STACK_WRITES ||
+    !writes.every((w) => typeof w?.id === 'string' && Number.isFinite(w?.z))
+  )
+    return res.status(400).json({ error: 'frames must be a list of { id, z }' })
+  const frames = actions.restackFrames(
+    req.params.id,
+    writes.map((w: StackWrite) => ({ id: w.id, z: w.z })),
+    userActor(req),
+  )
+  if (!frames) return res.status(404).json({ error: 'frame not found' })
+  res.json(frames)
 })
 
 app.patch('/api/frames/:id', (req, res) => {

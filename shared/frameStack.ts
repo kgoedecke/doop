@@ -25,6 +25,12 @@ export function frontOf(frames: readonly Pick<Frame, 'z' | 'createdAt'>[]): numb
   return frames.length ? Math.max(...frames.map(stackOf)) + 1 : undefined
 }
 
+/** One frame's new place in its page's stack. */
+export type StackWrite = { id: string; z: number }
+
+/** The most frames one stacking save may write: a page renumbered whole. */
+export const MAX_STACK_WRITES = 2000
+
 /** The `z` for a frame put at `index` of `frames` (back to front, without
  *  it): just past the end it is in front, at 0 behind, otherwise halfway
  *  between its neighbours. Undefined for an empty page, or when the two
@@ -40,6 +46,24 @@ export function zAt(frames: readonly Pick<Frame, 'z' | 'createdAt'>[], index: nu
   return mid > lo && mid < hi ? mid : undefined
 }
 
+/* `order` numbered 0, 1, 2…: the writes for the frames not there already */
+function renumber(order: readonly Pick<Frame, 'id' | 'z'>[]): StackWrite[] {
+  return order.flatMap((f, i) => (f.z === i ? [] : [{ id: f.id, z: i }]))
+}
+
+/** Room for a frame put at `index` of `frames` (back to front, without it):
+ *  its `z`, and the writes that renumber the page first when its new
+ *  neighbours are too close to fit it between them (keeping their order,
+ *  so they can be saved on their own). `z` is undefined on an empty page. */
+export function roomAt(
+  frames: readonly Pick<Frame, 'id' | 'z' | 'createdAt'>[],
+  index: number,
+): { z: number | undefined; renumber: StackWrite[] } {
+  const z = zAt(frames, index)
+  if (z !== undefined || !frames.length) return { z, renumber: [] }
+  return { z: Math.max(0, Math.min(index, frames.length)) - 0.5, renumber: renumber(frames) }
+}
+
 /** The writes that move `frameId` to `index` of the page's back-to-front
  *  order (`frames`, already sorted, the moved frame among them). Usually one
  *  write, a `z` between its new neighbours; when there is no room left
@@ -49,7 +73,7 @@ export function restack(
   frames: readonly Pick<Frame, 'id' | 'z' | 'createdAt'>[],
   frameId: string,
   index: number,
-): { id: string; z: number }[] {
+): StackWrite[] {
   const from = frames.findIndex((f) => f.id === frameId)
   if (from === -1) return []
   const rest = frames.filter((f) => f.id !== frameId)
@@ -57,6 +81,5 @@ export function restack(
   if (at === from) return []
   const z = zAt(rest, at)
   if (z !== undefined) return [{ id: frameId, z }]
-  const order = [...rest.slice(0, at), frames[from]!, ...rest.slice(at)]
-  return order.flatMap((f, i) => (f.z === i ? [] : [{ id: f.id, z: i }]))
+  return renumber([...rest.slice(0, at), frames[from]!, ...rest.slice(at)])
 }
