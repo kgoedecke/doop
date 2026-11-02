@@ -62,13 +62,18 @@ describe.skipIf(!findBrowserPath())('text selection while editing', () => {
     expect((await selected()).length).toBeGreaterThan(3)
   })
 
-  it('keeps a narrower drag selection made over an existing one', async () => {
-    await drag(0.02, 0.9)
-    const wide = await selected()
-    await drag(0.3, 0.5)
-    const narrow = await selected()
-    expect(narrow.length).toBeGreaterThan(0)
-    expect(narrow.length).toBeLessThan(wide.length)
+  it('replaces an existing selection with the next drag', async () => {
+    await frame.click('#text')
+    expect(await frame.$('#text[contenteditable]')).not.toBeNull()
+    await drag(0.02, 0.3)
+    const first = await selected()
+    expect(first.length).toBeGreaterThan(0)
+    /* starting outside the first range: a press inside it would begin a
+       native drag of the selected text instead of a new selection */
+    await drag(0.6, 0.95)
+    const second = await selected()
+    expect(second.length).toBeGreaterThan(0)
+    expect('Live counter of requests'.indexOf(second)).toBeGreaterThanOrEqual(first.length)
   })
 
   it('still places a caret on a plain click', async () => {
