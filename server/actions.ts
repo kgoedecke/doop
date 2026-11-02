@@ -1522,8 +1522,17 @@ function finishStream(frameId: string, logDone: boolean) {
      replace cut it off) still gets the faces of the library fonts it uses;
      a finished one already has them, and this is then a no-op */
   const html = withLibraryFaces(current.canvasId, current.html)
-  const frame = html === current.html ? current : store.updateFrame(frameId, { html }, s.actor.name)!
-  if (frame !== current) broadcast(frame.canvasId, { type: 'frame:updated', frame, actor: s.actor })
+  /* compare the HTML, not the objects: updateFrame edits the frame in place */
+  const htmlChanged = html !== current.html
+  const frame = htmlChanged ? store.updateFrame(frameId, { html }, s.actor.name)! : current
+  /* the store keeps what arrived; viewers get it healed, like every chunk,
+     so a script cut off mid-way never runs in their frames */
+  if (htmlChanged)
+    broadcast(frame.canvasId, {
+      type: 'frame:updated',
+      frame: { ...frame, html: healPartialHtml(frame.html) },
+      actor: s.actor,
+    })
   broadcast(frame.canvasId, { type: 'frame:streaming', frameId, active: false, actor: s.actor })
   if (logDone) logActivity(frame.canvasId, s.actor, `finished designing “${frame.name}”`, frameId)
   endAutoTask(frame.canvasId, s.actor)

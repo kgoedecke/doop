@@ -42,8 +42,12 @@ const { store } = await import('../server/store.ts')
 const agent: Actor = { name: 'Claude', kind: 'agent', color: '#e5533c' }
 const DESIGN = `<!doctype html><html><head></head><body><h1 style="font-family:'Brand Sans'">Hi</h1>`
 
+/* what open canvases are sent: the frame HTML each frame:updated carried */
+const sent: { frameId: string; html: string }[] = []
 actions.wire(
-  () => {},
+  (_canvasId, msg) => {
+    if (msg.type === 'frame:updated') sent.push({ frameId: msg.frame.id, html: msg.frame.html })
+  },
   () => {},
 )
 
@@ -67,7 +71,25 @@ describe('library faces on frame writes', () => {
     const canvasId = store.createCanvas('fonts', 'kevin').id
     const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
     actions.appendFrameHtml(frame.id, DESIGN, agent, { start: true })
+    sent.length = 0
     vi.advanceTimersByTime(31_000)
     expect(store.getFrame(frame.id)!.html).toContain(BRAND.url)
+    /* and open canvases are sent the document with the faces, not just the store */
+    expect(sent.some((m) => m.frameId === frame.id && m.html.includes(BRAND.url))).toBe(true)
+  })
+
+  it('never sends viewers a script the stream left unfinished', () => {
+    const canvasId = store.createCanvas('fonts', 'kevin').id
+    const frame = actions.createFrame(canvasId, { name: 'Hero' }, agent)!
+    actions.appendFrameHtml(frame.id, `${DESIGN}<script>document.body.innerHTML = ''; // and then`, agent, {
+      start: true,
+    })
+    sent.length = 0
+    vi.advanceTimersByTime(31_000)
+    const last = sent.filter((m) => m.frameId === frame.id).at(-1)!
+    expect(last.html).toContain(BRAND.url)
+    expect(last.html).not.toContain('<script>')
+    /* the store keeps what the agent actually sent */
+    expect(store.getFrame(frame.id)!.html).toContain('<script>')
   })
 })
