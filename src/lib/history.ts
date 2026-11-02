@@ -1,3 +1,4 @@
+import { stackOf } from '../../shared/frameStack'
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
@@ -9,10 +10,12 @@ import { posthog } from './posthog'
  *  inverse through the normal API, so every collaborator sees it live —
  *  remote actors' work is never undone from here. */
 
-type Patch = Partial<Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked'>>
+type Patch = Partial<
+  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'>
+>
 type Snapshot = Pick<
   Frame,
-  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked'
+  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'
 >
 
 type Entry =
@@ -90,6 +93,8 @@ function snapshot(f: Frame): Snapshot {
     /* a hidden or locked frame comes back as it was when its deletion is undone */
     hidden: f.hidden,
     locked: f.locked,
+    /* and back to its place in the stack */
+    z: stackOf(f),
   }
 }
 

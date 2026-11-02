@@ -182,6 +182,8 @@ export const frames = pgTable(
     hidden: boolean('hidden'),
     /** Figma-style lock; null = unlocked */
     locked: boolean('locked'),
+    /** stacking order on the page (shared/frameStack.ts); null = by created_at */
+    z: doublePrecision('z'),
     approval: jsonb('approval').$type<FrameApproval>(),
   },
   (t) => [index('frames_canvas_idx').on(t.canvasId)],

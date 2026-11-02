@@ -1,4 +1,5 @@
 import type { Frame } from '../../shared/types'
+import { restack, stackOf } from '../../shared/frameStack'
 import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
 import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
@@ -197,6 +198,37 @@ export function duplicateLayers(frame: Frame, selectors: string[]) {
   if (!picked.some((selector) => selectors.includes(selector))) return
   store.pickElement(null)
   for (const selector of duplicated.selectors) store.toggleElement({ frameId: frame.id, selector })
+}
+
+/* ---- stacking: which frame or shape is in front ---- */
+
+/** Move a frame (or a standalone element, which is one) to `index` of its
+ *  page's back-to-front order, `frames` — the page's frames as the stage
+ *  paints them. One undo step, however many frames had to be renumbered to
+ *  make room; a save the server refused puts that frame back. */
+export function restackFrame(frames: Frame[], frameId: string, index: number) {
+  const writes = restack(frames, frameId, index)
+  if (!writes.length) return
+  const before = new Map(frames.map((f) => [f.id, stackOf(f)]))
+  recordUpdates(writes.map(({ id, z }) => ({ frameId: id, before: { z: before.get(id) }, after: { z } })))
+  const store = useStore.getState()
+  for (const { id, z } of writes) {
+    store.patchFrameLocal(id, { z })
+    trackSave(
+      api.updateFrame(id, { z }).catch((err: unknown) => {
+        const s = useStore.getState()
+        s.patchFrameLocal(id, { z: before.get(id) })
+        s.pushNotice(errorMessage(err, 'Couldn’t change the layer order'))
+      }),
+    )
+  }
+}
+
+/** ⌥↑ / ⌥↓ on a frame row: one step toward the front (-1, up the list) or
+ *  the back (1, down it). */
+export function shiftFrame(frames: Frame[], frameId: string, dir: 1 | -1) {
+  const index = frames.findIndex((f) => f.id === frameId)
+  if (index !== -1) restackFrame(frames, frameId, index - dir)
 }
 
 /* ---- the eye: hiding and showing, frames and elements alike ---- */
@@ -431,7 +463,7 @@ function sizedToShell(outerHtml: string, shell: Frame): string {
  *  once that landed; one undo step removes the element and puts the source
  *  back. False when the element is locked, already standalone, or its
  *  frame changed since the press. */
-export async function detachLayer(pressed: Frame, selector: string): Promise<boolean> {
+export async function detachLayer(pressed: Frame, selector: string, z?: number): Promise<boolean> {
   const source = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
   if (!source || source.html !== pressed.html) return false
   if (isLayerLocked(source, selector) || standaloneSelector(source) === selector) return false
@@ -461,6 +493,8 @@ export async function detachLayer(pressed: Frame, selector: string): Promise<boo
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
       html,
+      /* where it was dropped in the Layers list; in front when unset */
+      z,
     })
   } catch (err) {
     useStore.getState().pushNotice(errorMessage(err, 'Couldn’t move the layer onto the canvas'))

@@ -4,6 +4,7 @@ import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
+import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
 import type {
   Canvas,
   CanvasGuide,
@@ -165,11 +166,13 @@ class Store {
     const canvasId = nanoid(10)
     const sourceFrames = options.dropDemo ? source.frames.filter((frame) => !frame.demo) : source.frames
     const frameIds = new Map(sourceFrames.map((frame) => [frame.id, nanoid(10)]))
+    /* the copies share one createdAt, so each keeps its place in the stack */
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
       html: remapFrameTargets(frame.html, frameIds),
       approval: null,
+      z: stackOf(frame),
       canvasId,
       createdAt: now,
       updatedAt: now,
@@ -248,6 +251,7 @@ class Store {
       html: remapFrameTargets(frame.html, frameIds),
       pageId: page.id,
       approval: null,
+      z: stackOf(frame),
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
@@ -273,6 +277,7 @@ class Store {
     canvas.pages = [...live]
     canvas.pages.splice(at === -1 ? live.length : at + 1, 0, page)
     canvas.frames.push(...frames)
+    canvas.frames.sort(byStack)
     for (const frame of frames) this.frameIndex.set(frame.id, canvasId)
     /* guides placed while the copy was being written stay alongside; the
        copy keeps only as many of its own as the limit still has room for */
@@ -616,6 +621,9 @@ class Store {
       demo?: boolean
       hidden?: boolean
       locked?: boolean
+      /** where it stacks (undo brings a deleted frame back to its place);
+       *  in front of everything on the page when unset */
+      z?: number
     },
     by: string,
   ): Frame | undefined {
@@ -646,11 +654,13 @@ class Store {
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
+      z: input.z ?? frontOf(frames) ?? now,
     }
     if (input.demo) frame.demo = true
     if (input.hidden) frame.hidden = true
     if (input.locked) frame.locked = true
     c.frames.push(frame)
+    c.frames.sort(byStack)
     c.updatedAt = now
     this.frameIndex.set(frame.id, canvasId)
     persist.saveFrame(frame, true)
@@ -661,7 +671,7 @@ class Store {
   updateFrame(
     frameId: string,
     patch: Partial<
-      Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'approval'>
+      Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z' | 'approval'>
     >,
     by: string,
     opts: {
@@ -680,7 +690,12 @@ class Store {
     const designChanged =
       !opts.annotation &&
       (['html', 'width', 'height'] as const).some((key) => patch[key] !== undefined && patch[key] !== frame[key])
+    const c = this.canvases.get(frame.canvasId)!
+    /* a frame moved to another page lands in front there, as Figma does */
+    if (patch.pageId !== undefined && patch.pageId !== frame.pageId && patch.z === undefined)
+      patch = { ...patch, z: frontOf(pageFrames(c, patch.pageId)) ?? frame.z }
     Object.assign(frame, patch)
+    if (patch.z !== undefined) c.frames.sort(byStack)
     // All writers (including streams, sync and restores) invalidate sign-off.
     if (designChanged && frame.approval?.status === 'ready_for_dev') {
       frame.approval = { ...frame.approval, status: 'needs_review' }
@@ -688,7 +703,6 @@ class Store {
     // Also serves as the optimistic-save version, including writes in the same millisecond.
     frame.updatedAt = Math.max(Date.now(), frame.updatedAt + 1)
     frame.updatedBy = by
-    const c = this.canvases.get(frame.canvasId)!
     c.updatedAt = frame.updatedAt
     persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
     persist.saveCanvas(c)

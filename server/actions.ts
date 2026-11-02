@@ -1712,6 +1712,7 @@ export function createFrame(
     demo?: boolean
     hidden?: boolean
     locked?: boolean
+    z?: number
   },
   actor: Actor,
 ): Frame | undefined {
@@ -1739,7 +1740,7 @@ export function createFrame(
  *  based. Without it a write is judged by how much it changed. */
 export function updateFrame(
   frameId: string,
-  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked'>>,
+  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z'>>,
   actor: Actor,
   opts: { replace?: boolean } = {},
 ): Frame | undefined {

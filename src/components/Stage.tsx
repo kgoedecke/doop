@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { roleOf, toolAllowed, useStore, type Viewport } from '../lib/store'
 import { roleAllows } from '../../shared/canvasRole'
 import { onViewCommand } from '../lib/viewMenu'
@@ -944,13 +944,7 @@ export function Stage({
               ref={worldRef}
             >
               <FrameLabelLayer.Provider value={labelLayer}>
-                {canvas?.frames.map((f) =>
-                  f.hidden ? (
-                    <HiddenFrameView key={f.id} frame={f} />
-                  ) : (
-                    <FrameView key={f.id} frame={f} layoutZoom={layoutZoom} />
-                  ),
-                )}
+                <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} />
               </FrameLabelLayer.Provider>
               <GhostFrames />
               <FlowOverlay />
@@ -1141,6 +1135,33 @@ function ModeSwitch({ canComment }: { canComment: boolean }) {
           </ToolbarButton>
         </Tooltip>
       ))}
+    </div>
+  )
+}
+
+/* the order frames mount in: creation, then id (frames copied together
+   share a creation time), neither of which ever changes */
+function byCreation(a: Frame, b: Frame) {
+  return a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+}
+
+/** The page's frames, `frames` in paint order (back to front, as the store
+ *  keeps them). They mount in creation order and stack by z-index: moving
+ *  an iframe in the DOM reloads it, so a restack must not move any. The
+ *  layer isolates the stack, so the overlays after it (cursors, guides, the
+ *  marquee) stay above every frame. */
+function FrameStack({ frames, layoutZoom }: { frames: Frame[]; layoutZoom: number }) {
+  const mounted = useMemo(() => [...frames].sort(byCreation), [frames])
+  const rank = useMemo(() => new Map(frames.map((f, i) => [f.id, i + 1])), [frames])
+  return (
+    <div className="absolute top-0 left-0 isolate">
+      {mounted.map((f) =>
+        f.hidden ? (
+          <HiddenFrameView key={f.id} frame={f} stack={rank.get(f.id)} />
+        ) : (
+          <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} />
+        ),
+      )}
     </div>
   )
 }

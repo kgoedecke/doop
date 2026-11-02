@@ -8,6 +8,7 @@ import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
+import { byStack } from '../../shared/frameStack.ts'
 import type {
   ActivityItem,
   ActorKind,
@@ -87,6 +88,7 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
           demo: frame.demo ?? null,
           hidden: frame.hidden ?? null,
           locked: frame.locked ?? null,
+          z: frame.z ?? null,
         })),
       )
     }
@@ -306,6 +308,7 @@ export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
         demo: frame.demo ?? null,
         hidden: frame.hidden ?? null,
         locked: frame.locked ?? null,
+        z: frame.z ?? null,
       })),
     )
     const refs = frames.flatMap((frame) =>
@@ -358,6 +361,7 @@ async function writeFrame(f: Frame) {
     demo: f.demo ?? null,
     hidden: f.hidden ?? null,
     locked: f.locked ?? null,
+    z: f.z ?? null,
     approval: f.approval ?? null,
   }
   const { id, createdAt, ...set } = row
@@ -827,8 +831,9 @@ export async function hydrate(): Promise<Hydrated> {
       demo: f.demo ?? undefined,
       hidden: f.hidden ?? undefined,
       locked: f.locked ?? undefined,
+      z: f.z ?? undefined,
     })
-  for (const c of canvases) c.frames.sort((a, b) => a.createdAt - b.createdAt)
+  for (const c of canvases) c.frames.sort(byStack)
   for (const r of referenceRows) {
     const c = byId.get(r.canvasId)
     if (!c) continue

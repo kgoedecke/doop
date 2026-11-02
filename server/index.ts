@@ -1776,11 +1776,11 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
 
 app.post('/api/canvases/:id/frames', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const { name, pageId, x, y, width, height, html, hidden, locked } = req.body ?? {}
+  const { name, pageId, x, y, width, height, html, hidden, locked, z } = req.body ?? {}
   if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
     return res.status(400).json({ error: 'page not found' })
   const actor = userActor(req)
-  /* `hidden` and `locked` let undo bring a deleted frame back as it was */
+  /* `hidden`, `locked` and `z` let undo bring a deleted frame back as it was */
   const frame = actions.createFrame(
     req.params.id,
     {
@@ -1793,6 +1793,7 @@ app.post('/api/canvases/:id/frames', (req, res) => {
       html,
       hidden: hidden === true,
       locked: locked === true,
+      z: Number.isFinite(z) ? z : undefined,
     },
     actor,
   )
@@ -1816,6 +1817,11 @@ app.patch('/api/frames/:id', (req, res) => {
   /* the eye in the Layers panel: anything but a literal true shows the frame */
   if (patch.hidden !== undefined) clean.hidden = patch.hidden === true
   if (patch.locked !== undefined) clean.locked = !!patch.locked
+  /* the stacking order the Layers panel sets */
+  if (patch.z !== undefined) {
+    if (!Number.isFinite(patch.z)) return res.status(400).json({ error: 'z must be a finite number' })
+    clean.z = patch.z
+  }
   const frame = actions.updateFrame(req.params.id, clean, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
   res.json(frame)
