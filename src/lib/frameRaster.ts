@@ -114,7 +114,21 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
 async function inlineAttr(el: Element, attr: string, base: string, resources: ResourceCache): Promise<void> {
   const raw = el.getAttribute(attr)
   if (!raw || isInlineUrl(raw)) return
-  el.setAttribute(attr, await resources.dataUrl(new URL(raw, base).href))
+  el.setAttribute(attr, await inlineUrl(raw, base, resources))
+}
+
+/** The data: URL for `ref`, keeping its fragment: `sprite.svg#icon` and
+ *  `#svgView(...)` pick what an SVG shows. */
+async function inlineUrl(
+  ref: string,
+  base: string,
+  resources: ResourceCache,
+  chain?: ReadonlySet<string>,
+): Promise<string> {
+  const url = new URL(ref, base)
+  const fragment = url.hash
+  url.hash = ''
+  return (await resources.dataUrl(url.href, chain)) + fragment
 }
 
 const CSS_URL = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi
@@ -138,8 +152,7 @@ async function inlineCssUrls(
   const replacements = new Map<string, string>()
   await Promise.all(
     [...new Set(refs)].map(async (ref) => {
-      const url = new URL(ref, base).href
-      replacements.set(ref, await resources.dataUrl(url, chain))
+      replacements.set(ref, await inlineUrl(ref, base, resources, chain))
     }),
   )
   return css.replace(CSS_URL, (whole, _quote: string, ref: string) => {
@@ -148,9 +161,11 @@ async function inlineCssUrls(
   })
 }
 
-/** data: and blob: carry their own bytes, `#id` points inside the document */
+/** data: carries its own bytes, `#id` points inside the document. A blob:
+ *  URL is left to the fetch, which fails for another document's object
+ *  URL and so hands the export to the server. */
 function isInlineUrl(ref: string): boolean {
-  return /^(data:|blob:|#|about:)/i.test(ref)
+  return /^(data:|#|about:)/i.test(ref)
 }
 
 /** Fetches, one per URL, as the bytes of everything inlined. A failed

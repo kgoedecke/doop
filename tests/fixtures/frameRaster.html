@@ -26,6 +26,7 @@
         .chart { position: absolute; left: 100px; top: 100px; width: 100px; height: 100px }
         .adopted { position: absolute; left: 200px; top: 100px; width: 100px; height: 100px }
         .picked { position: absolute; left: 100px; top: 0; width: 100px; height: 100px; display: block }
+        .blobbed { position: absolute; left: 0; top: 200px; width: 100px; height: 100px; display: block }
       </style></head><body><img class="picked" srcset="/tests/fixtures/raster/blue.svg 1x"><script>
         document.body.appendChild(Object.assign(document.createElement('div'), { className: 'made' }))
         var chart = Object.assign(document.createElement('canvas'), { className: 'chart', width: 10, height: 10 })
@@ -34,13 +35,15 @@
         var sheet = new CSSStyleSheet(); sheet.replaceSync('.adopted { background: rgb(255, 128, 0) }')
         document.adoptedStyleSheets = document.adoptedStyleSheets.concat(sheet)
         document.body.appendChild(Object.assign(document.createElement('div'), { className: 'adopted' }))
+        var blob = new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="rgb(0,128,128)"/></svg>'], { type: 'image/svg+xml' })
+        document.body.appendChild(Object.assign(document.createElement('img'), { className: 'blobbed', src: URL.createObjectURL(blob) }))
       </scr` + `ipt></body></html>`
 
       /* mount the runtime the way FrameView does and hand it the document */
       async function mountLive() {
         const iframe = document.createElement('iframe')
         iframe.sandbox = 'allow-scripts'
-        iframe.style.cssText = 'display:block;border:0;width:300px;height:200px'
+        iframe.style.cssText = 'display:block;border:0;width:300px;height:300px'
         const ready = new Promise((resolve) => {
           window.addEventListener('message', function onMessage(ev) {
             if (ev.source === iframe.contentWindow && ev.data?.type === 'doop:frame-ready') {
@@ -71,7 +74,7 @@
           x: 0,
           y: 0,
           width: 300,
-          height: 200,
+          height: 300,
           html,
         }
         const blob = await rasterizeFrame(frame, { scale, type })
@@ -93,6 +96,7 @@
           chart: at(150 * scale, 150 * scale),
           adopted: at(250 * scale, 150 * scale),
           picked: at(150 * scale, 50 * scale),
+          blobbed: at(50 * scale, 250 * scale),
         }
       }
     </script>

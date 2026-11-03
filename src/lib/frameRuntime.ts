@@ -275,17 +275,23 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      the HTML loses is captured onto the clone first — the pixels of every
      <canvas>, the source the browser picked for each <img>, and the rules
      of every stylesheet as the CSSOM holds them (insertRule, adopted
-     sheets). Null when a canvas will not give up its pixels (tainted), so
-     the parent lets the server render instead. Live and clone are walked
-     by the same selectors, so they pair by index. */
+     sheets), and an image at an object URL as its bytes, which only this
+     document can read. Resolves null when a canvas will not give up its
+     pixels (tainted) or a blob cannot be read, so the parent lets the
+     server render instead. Live and clone are walked by the same
+     selectors, so they pair by index. */
   function exportSnapshot() {
     var live = document.documentElement
     var root = live.cloneNode(true)
+    var reads = []
     var imgs = live.querySelectorAll('img'), imgClones = root.querySelectorAll('img')
     for (var i = 0; i < imgs.length; i++) {
-      if (imgs[i].currentSrc) imgClones[i].setAttribute('src', imgs[i].currentSrc)
+      var src = imgs[i].currentSrc
+      if (src) imgClones[i].setAttribute('src', src)
       imgClones[i].removeAttribute('srcset')
       imgClones[i].removeAttribute('sizes')
+      /* an object URL names bytes only this document can reach */
+      if (src && src.indexOf('blob:') === 0) reads.push(readBlobUrl(src, imgClones[i]))
     }
     root.querySelectorAll('picture > source').forEach(function (source) { source.remove() })
     var canvases = live.querySelectorAll('canvas'), canvasClones = root.querySelectorAll('canvas')
@@ -294,7 +300,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       try {
         painted.setAttribute('src', canvases[c].toDataURL())
       } catch (e) {
-        return null
+        return Promise.resolve(null)
       }
       var attrs = canvasClones[c].attributes
       for (var a = 0; a < attrs.length; a++) painted.setAttribute(attrs[a].name, attrs[a].value)
@@ -328,7 +334,23 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       adoptedStyle.textContent = adoptedText
       ;(root.querySelector('head') || root).appendChild(adoptedStyle)
     }
-    return '<!doctype html>\\n' + cleanClone(root).outerHTML
+    return Promise.all(reads).then(
+      function () { return '<!doctype html>\\n' + cleanClone(root).outerHTML },
+      function () { return null },
+    )
+  }
+
+  function readBlobUrl(src, clone) {
+    return fetch(src)
+      .then(function (res) { return res.blob() })
+      .then(function (blob) {
+        return new Promise(function (resolve, reject) {
+          var reader = new FileReader()
+          reader.onload = function () { clone.setAttribute('src', reader.result); resolve() }
+          reader.onerror = function () { reject(reader.error) }
+          reader.readAsDataURL(blob)
+        })
+      })
   }
 
   function postEdited(discrete) {
@@ -1174,7 +1196,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:snapshot') {
       /* the document as it stands, script-made elements included, for an
          export of what the person sees */
-      parent.postMessage({ type: 'doop:snapshot-result', reqId: d.reqId, html: exportSnapshot() }, '*')
+      exportSnapshot().then(function (html) {
+        parent.postMessage({ type: 'doop:snapshot-result', reqId: d.reqId, html: html }, '*')
+      })
     }
     if (d.type === 'doop:locate') {
       var found = null

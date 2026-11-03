@@ -14,6 +14,7 @@ interface Rendered {
   chart: number[]
   adopted: number[]
   picked: number[]
+  blobbed: number[]
 }
 
 /* the user-triggered export is drawn by the browser showing the frame:
@@ -39,7 +40,7 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
   it('paints the frame, its image included, at the frame size', async () => {
     const out = await render()
     expect(out.type).toBe('image/png')
-    expect([out.width, out.height]).toEqual([300, 200])
+    expect([out.width, out.height]).toEqual([300, 300])
     expect(out.block).toEqual([255, 0, 0, 255])
     expect(out.pic).toEqual([0, 0, 255, 255])
     expect(out.paper).toEqual([255, 255, 255, 255])
@@ -47,7 +48,7 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
 
   it('renders at 2x for a retina export', async () => {
     const out = await render({ scale: 2 })
-    expect([out.width, out.height]).toEqual([600, 400])
+    expect([out.width, out.height]).toEqual([600, 600])
     expect(out.block).toEqual([255, 0, 0, 255])
     expect(out.pic).toEqual([0, 0, 255, 255])
   })
@@ -70,6 +71,7 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
     expect(out.chart).toEqual([128, 0, 128, 255])
     expect(out.adopted).toEqual([255, 128, 0, 255])
     expect(out.picked).toEqual([0, 0, 255, 255])
+    expect(out.blobbed).toEqual([0, 128, 128, 255])
   })
 
   it('rejects a frame with an image the browser cannot fetch, for the server to render', async () => {

@@ -147,8 +147,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   and Copy as PNG are drawn by the browser showing the frame, not by the server's Chromium. The
   runtime answers `doop:snapshot` with its live document (`exportSnapshot`: what an HTML copy
   loses is captured first, every `<canvas>` as its pixels, each `<img>` at the source the
-  browser picked, every stylesheet as the CSSOM holds it, adopted sheets included; `html: null`
-  when a canvas is tainted, and the export goes to the server; `snapshotFrame` in
+  browser picked, a `blob:` image as its bytes, every stylesheet as the CSSOM holds it, adopted
+  sheets included; `html: null` when a canvas is tainted, and the export goes to the server; `snapshotFrame` in
   `frameBridge.ts`, the store's HTML when the frame is not mounted), `inlineDocument` turns it
   into one SVG sized to the frame, every image, stylesheet (both `@import` forms, cycles cut)
   and font fetched and inlined as a data: URL (an SVG drawn as an image loads nothing itself;

@@ -64,7 +64,7 @@ it('inlines images, stylesheets and the fonts they name as data: URLs', async ()
   expect(calls).not.toContain('http://localhost:3000/a/pic@2x.png')
 })
 
-it('leaves data:, blob: and fragment references alone', async () => {
+it('leaves data: and fragment references alone', async () => {
   const calls = serve({})
   const svg = await inlineDocument(
     `<html><body><img src="${PNG_DATA}"><svg><defs><linearGradient id="g"/></defs><rect fill="url(#g)"/></svg></body></html>`,
@@ -73,6 +73,25 @@ it('leaves data:, blob: and fragment references alone', async () => {
   expect(calls).toHaveLength(0)
   expect(svg).toContain(`src="${PNG_DATA}"`)
   expect(svg).toContain('fill="url(#g)"')
+})
+
+it('keeps the fragment that picks an SVG view, in markup and in CSS', async () => {
+  const calls = serve({ 'https://cdn.example/sprite.svg': { body: '<svg/>', type: 'image/svg+xml' } })
+  const svg = await inlineDocument(
+    '<html><head><style>.i{background:url(https://cdn.example/sprite.svg#icon)}</style></head>' +
+      '<body><img src="https://cdn.example/sprite.svg#svgView(viewBox(0,0,10,10))"></body></html>',
+    opts(),
+  )
+  expect(calls).toEqual(['https://cdn.example/sprite.svg'])
+  expect(svg).toMatch(/src="data:image\/svg\+xml;base64,[^"]+#svgView\(viewBox\(0,0,10,10\)\)"/)
+  expect(svg).toMatch(/url\("data:image\/svg\+xml;base64,[^"]+#icon"\)/)
+})
+
+it('rejects an image at an object URL it cannot read, for the server to render', async () => {
+  serve({})
+  await expect(
+    inlineDocument('<html><body><img src="blob:https://doop.design/0c1d"></body></html>', opts()),
+  ).rejects.toThrow()
 })
 
 it('resolves relative URLs against the document base', async () => {
