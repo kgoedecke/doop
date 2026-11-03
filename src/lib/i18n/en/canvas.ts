@@ -226,6 +226,8 @@ export const canvas = {
   connecting: 'Connecting…',
   connect: 'Connect',
   allConnected: 'All installed repositories are connected.',
+  addRepos: 'Add repositories on GitHub',
+  refreshRepos: 'Refresh list',
   openingGithub: 'Opening GitHub…',
   connectGithub: 'Connect GitHub',
   pasteToken: 'paste a token instead',

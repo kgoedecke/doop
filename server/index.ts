@@ -427,6 +427,9 @@ app.get('/a/:id.:ext', async (req, res) => {
     res.set('Content-Type', found.meta.mime)
     res.set('Cache-Control', 'public, max-age=31536000, immutable')
     res.set('X-Content-Type-Options', 'nosniff')
+    /* Fonts load with CORS from sandboxed frames with opaque origins.
+       Assets are public by unguessable id. */
+    res.set('Access-Control-Allow-Origin', '*')
     /* svg can script when opened as a document — neuter it; <img> embeds
        are unaffected */
     if (found.meta.mime === 'image/svg+xml')

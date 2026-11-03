@@ -836,7 +836,7 @@ tools; `tests/agentToolParity.test.ts` lists the MCP tools it does not have yet.
 
 ### MCP tools
 
-40 tools: 38 built in ([`server/mcp.ts`](server/mcp.ts)) plus the two Linear tools its extension
+42 tools: 40 built in ([`server/mcp.ts`](server/mcp.ts)) plus the two Linear tools its extension
 registers ([`server/linear/extension.ts`](server/linear/extension.ts)). Every tool carries
 read-only / destructive / idempotent annotations; the server registers no MCP prompts.
 
@@ -870,6 +870,8 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `get_comments`           | Read element and canvas comments with their replies, optionally filtered by frame or resolution state, no claiming  |
 | `reply_to_comment`       | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment             |
 | `resolve_comment`        | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory             |
+| `report_issue`           | Report a tool failure or missing capability to the instance admins                                                  |
+| `share_feedback`         | Share suggestions and feedback with the instance admins                                                             |
 | **Design memory**        |                                                                                                                     |
 | `list_guidelines`        | List a canvas's style guides (brand rules, style recipes) with one-line summaries                                   |
 | `get_guidelines`         | Read one style guide in full — the rules every frame on the canvas must follow                                      |
