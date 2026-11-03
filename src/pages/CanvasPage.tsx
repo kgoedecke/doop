@@ -2099,13 +2099,13 @@ function GithubSection({
             <div className="flex items-center gap-3 pt-1">
               <Button variant="bare" size="inline" className="text-ink-faint" asChild>
                 <a href={`/api/canvases/${canvasId}/github/app/install`} target="_blank" rel="noreferrer">
-                  Add repositories on GitHub
+                  {t('canvas.addRepos')}
                 </a>
               </Button>
               {/* asks GitHub again rather than re-reading the pass: an
                   installation made in the other tab is only in a new one */}
               <Button variant="bare" size="inline" className="text-ink-faint" disabled={!!busy} onClick={startInstall}>
-                Refresh list
+                {t('canvas.refreshRepos')}
               </Button>
             </div>
           </div>

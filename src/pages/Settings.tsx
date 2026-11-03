@@ -118,7 +118,7 @@ export function Settings() {
             active={pane === 'general'}
             onClick={() => setPane('general')}
           >
-            General
+            {t('settings.generalTitle')}
           </DashNavItem>
           <DashNavItem
             density="rail"

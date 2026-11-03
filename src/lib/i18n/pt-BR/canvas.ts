@@ -217,6 +217,8 @@ export const canvas: Catalog['canvas'] = {
   connecting: 'Conectando…',
   connect: 'Conectar',
   allConnected: 'Todos os repositórios instalados estão conectados.',
+  addRepos: 'Adicionar repositórios no GitHub',
+  refreshRepos: 'Atualizar lista',
   openingGithub: 'Abrindo o GitHub…',
   connectGithub: 'Conectar GitHub',
   pasteToken: 'colar um token em vez disso',

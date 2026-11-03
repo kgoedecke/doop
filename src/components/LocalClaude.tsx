@@ -30,9 +30,8 @@ import { AgentIcon } from './AgentIcon'
 import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { CheckIcon, DesktopIcon, DownloadIcon } from './ui/icons'
 import { cn } from '@/lib/utils'
+import { DOWNLOAD_URL } from '../lib/siteLinks'
 import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
-
-const DESKTOP_DOWNLOAD_URL = 'https://doop.design/download/mac'
 
 /** How the desktop found the Claude Code it runs, closing the "Using …" line. */
 const CLI_SOURCE_NOTE: Record<'chosen' | 'shell' | 'found', PlainMessageKey> = {
@@ -100,7 +99,7 @@ function DesktopOnlyClaudeRow({ active }: { active: boolean }) {
           <p className="text-[13px] text-ink-faint">{active ? t('models.waitingDesktop') : t('models.useInDesktop')}</p>
           <a
             className="inline-flex items-center gap-[7px] py-1 text-[13px] font-semibold text-brand hover:underline"
-            href={DESKTOP_DOWNLOAD_URL}
+            href={DOWNLOAD_URL}
             target="_blank"
             rel="noreferrer"
           >
