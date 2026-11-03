@@ -551,6 +551,10 @@ export function Home() {
           onClose={() => setCreatingWorkspace(false)}
           onCreated={(ws) => {
             setCreatingWorkspace(false)
+            /* listed before it is picked, or the vanished-scope check would
+               send the view back to all until the reload lands */
+            setWorkspaces((list) => (list.some((w) => w.id === ws.id) ? list : [...list, ws]))
+            shown.current.workspaces = reloadSeq.current // a list asked for before this one is stale
             reload()
             setScope(`ws:${ws.id}`)
             /* a workspace that cannot grow yet goes straight to the plan picker */
