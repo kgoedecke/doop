@@ -1370,11 +1370,13 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     /* Escape hands the keyboard back to the page: the next key (⌫ on the
        still-selected element) must reach the canvas's window, not the frame */
     await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME')
-    const heard = page.evaluate(
-      () => new Promise<string>((resolve) => window.addEventListener('keydown', (e) => resolve(e.key), { once: true })),
+    /* the listener is in place before the key is sent: an un-awaited
+       evaluate raced the key to the page on CI and never settled */
+    await page.evaluate(() =>
+      window.addEventListener('keydown', (e) => (document.documentElement.dataset.heard = e.key), { once: true }),
     )
     await page.keyboard.press('Backspace')
-    expect(await heard).toBe('Backspace')
+    await page.waitForFunction(() => document.documentElement.dataset.heard === 'Backspace')
     const before = await page.$eval('iframe[title="Layers"]', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
     await drag([before.x + 20, before.y - 14], [before.x + 80, before.y + 16])
     await expect.poll(() => saved[0]?.x).toBe(source.x + 60)
