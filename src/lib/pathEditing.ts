@@ -95,6 +95,13 @@ export function unmapPathPoint(point: Point, [a, b, c, d, e, f]: PathMatrix): Po
   }
 }
 
+/** A matrix that only scales along the axes (and, once shifted to the
+ *  shell's origin, no longer translates): no rotation, skew or flip. */
+function isAxisAligned([a, b, c, d]: PathMatrix): boolean {
+  const epsilon = 1e-6
+  return a > 0 && d > 0 && Math.abs(b) < epsilon && Math.abs(c) < epsilon
+}
+
 /** Keep the path's affine transform while resizing its SVG viewport to fit new points. */
 export function updatePathFrame(frame: Frame, source: PathEditSource, path: EditablePath): Partial<Frame> | null {
   const doc = new DOMParser().parseFromString(frame.html, 'text/html')
@@ -124,6 +131,12 @@ export function updatePathFrame(frame: Frame, source: PathEditSource, path: Edit
   }
   matrix[4] += matrix[0] * bounds.x + matrix[2] * bounds.y
   matrix[5] += matrix[1] * bounds.x + matrix[3] * bounds.y
+  /* A standalone path that is not rotated or skewed keeps filling its shell,
+     the way the drawing tool made it: the shell is exactly the scaled box,
+     the viewBox stretches the path onto it, and the shell's grips (the only
+     ones a standalone's root wears) keep resizing the path. A rotated or
+     skewed one needs its own box and transform. */
+  const fillsShell = standalone && isAxisAligned(matrix)
   svg.setAttribute('viewBox', `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`)
   svg.setAttribute('preserveAspectRatio', 'none')
   Object.assign(svg.style, {
@@ -131,13 +144,13 @@ export function updatePathFrame(frame: Frame, source: PathEditSource, path: Edit
     left: '0px',
     top: '0px',
     margin: '0',
-    width: `${bounds.width}px`,
-    height: `${bounds.height}px`,
+    width: fillsShell ? '100%' : `${bounds.width}px`,
+    height: fillsShell ? '100%' : `${bounds.height}px`,
     boxSizing: 'border-box',
     padding: '0',
     border: '0',
     transformOrigin: '0 0',
-    transform: `matrix(${matrix.join(',')})`,
+    transform: fillsShell ? 'none' : `matrix(${matrix.join(',')})`,
     translate: 'none',
     rotate: 'none',
     scale: 'none',

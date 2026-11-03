@@ -93,8 +93,9 @@ describe('editable vector paths', () => {
     const patch = updatePathFrame(frame, source, changed)!
     const doc = new DOMParser().parseFromString(patch.html!, 'text/html')
     const svg = doc.querySelector('svg')!
-    const matrix = svg.style.transform.match(/[-+]?\d*\.?\d+/g)!.map(Number) as PathMatrix
     const viewBox = svg.getAttribute('viewBox')!.split(' ').map(Number)
+    /* an unrotated standalone has no transform: its shell is its box */
+    const matrix: PathMatrix = [patch.width! / viewBox[2]!, 0, 0, patch.height! / viewBox[3]!, 0, 0]
     const unchanged = source.points[1]!
     const local = mapPathPoint({ x: unchanged.x - viewBox[0]!, y: unchanged.y - viewBox[1]! }, matrix)
     expect({ x: patch.x! + local.x, y: patch.y! + local.y }).toEqual({
@@ -102,6 +103,34 @@ describe('editable vector paths', () => {
       y: frame.y + unchanged.y,
     })
     expect(patch.width).toBeGreaterThan(frame.width)
+  })
+  it('keeps an unrotated standalone path filling its shell, so the shell grips still size it', () => {
+    /* the drawing tool makes a standalone's root 100% of its shell and the
+       shell's grips are the only ones it wears: an edit must leave it that
+       way, or the shell would grow around a path that stays put */
+    const scaled: PathEditSource = { ...source, matrix: [2, 0, 0, 2, 0, 0], layoutMatrix: [2, 0, 0, 2, 0, 0] }
+    const changed = { ...scaled, points: scaled.points.map((p, i) => (i ? p : { ...p, x: -40, y: -10 })) }
+    const patch = updatePathFrame(frame, scaled, changed)!
+    const svg = new DOMParser().parseFromString(patch.html!, 'text/html').querySelector('svg')!
+    expect({ width: svg.style.width, height: svg.style.height, transform: svg.style.transform }).toEqual({
+      width: '100%',
+      height: '100%',
+      transform: 'none',
+    })
+    const viewBox = svg.getAttribute('viewBox')!.split(' ').map(Number)
+    expect(patch.width).toBeCloseTo(viewBox[2]! * 2)
+    expect(patch.height).toBeCloseTo(viewBox[3]! * 2)
+  })
+  it('gives a rotated standalone path its own box and transform', () => {
+    const rotated: PathEditSource = {
+      ...source,
+      matrix: [0.8, 0.6, -0.6, 0.8, 50, 0],
+      layoutMatrix: [0.8, 0.6, -0.6, 0.8, 50, 0],
+    }
+    const patch = updatePathFrame(frame, rotated, rotated)!
+    const svg = new DOMParser().parseFromString(patch.html!, 'text/html').querySelector('svg')!
+    expect(svg.style.width).toMatch(/px$/)
+    expect(svg.style.transform).toMatch(/^matrix\(/)
   })
   it('saves each edit as one undo step, including a standalone bounding-box change', async () => {
     const changed = { ...source, points: source.points.map((p, i) => (i ? p : { ...p, x: -40 })) }
