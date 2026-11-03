@@ -9,6 +9,7 @@ import { store } from './store.ts'
 import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { dropWorkspaceFonts } from './fonts.ts'
+import { notifyUsers } from './userEvents.ts'
 import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
 import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
 import { isWorkspaceRole } from '../shared/types.ts'
@@ -587,6 +588,7 @@ workspacesRouter.post('/:id/members', async (req, res) => {
     .where(eq(authSchema.user.email, email))
   if (row) {
     if (!addMember(ws.id, row.id, role, req.user!.id)) return res.status(400).json({ error: 'already a member' })
+    notifyUsers([row.id], { type: 'canvases' })
     const member: WorkspaceMember = { userId: row.id, name: row.name, email: row.email, role, addedAt: Date.now() }
     return res.json({ member })
   }
@@ -633,6 +635,7 @@ workspacesRouter.delete('/:id/members/:userId', async (req, res) => {
       .json({ error: self ? 'delete the workspace instead of leaving it' : 'the owner cannot be removed' })
   try {
     if (!(await removeMember(ws.id, target))) return res.status(404).json({ error: 'not a member' })
+    notifyUsers([target], { type: 'canvases' })
   } catch (err) {
     console.error('[workspaces] remove member failed', err)
     return res.status(500).json({ error: 'could not remove the member' })

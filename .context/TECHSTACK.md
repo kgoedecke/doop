@@ -136,6 +136,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   name. A confirm dialog before the upload says the fonts are shared with the library and that
   OS fonts are often licensed for one person; Doop checks no licences (Figma's posture for shared
   fonts). Tests: the Rust unit tests in `fonts.rs`, `localFonts.test.ts`.
+- Outside a canvas room, `GET /api/me/events` (`server/userEvents.ts`, Server-Sent Events, one
+  stream per tab) pings a user's open pages with `{ type: 'canvases' }` when a canvas or workspace
+  membership adds or removes them; Home (`src/hooks/use-user-events.ts`) refetches on each ping
+  and on every reconnect. Inviting someone to a canvas also emails them once
+  (`server/canvasShares.ts`, SMTP only). Tests: `canvasShares.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size, pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed

@@ -3,6 +3,7 @@ import type { Canvas, CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
+import { useUserEvents } from '../hooks/use-user-events'
 import { navigate } from '../App'
 import { timeAgo } from '../lib/time'
 import { useStore } from '../lib/store'
@@ -112,6 +113,12 @@ export function Home() {
     }
     reload()
   }, [])
+
+  /* a canvas shared with (or taken from) this account, elsewhere: refetch so
+     "Shared with me" follows without a reload */
+  useUserEvents((event) => {
+    if (event.type === 'canvases') reload()
+  })
 
   /* ⌘/ hands the keyboard to the composer; ⌘K opens the rail's search */
   useEffect(() => {

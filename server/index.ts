@@ -82,6 +82,8 @@ import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
+import { emailShare } from './canvasShares.ts'
+import * as userEvents from './userEvents.ts'
 import type { Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = env.PORT
@@ -683,6 +685,9 @@ app.use('/api', async (req, res, next) => {
     next(err)
   }
 })
+
+/* Home's push channel: tells an open dashboard its canvas list changed */
+app.get('/api/me/events', userEvents.subscribe)
 
 app.get('/api/me', async (req, res) => {
   const { id, name, email } = req.user!
@@ -1298,7 +1303,12 @@ app.post('/api/canvases/:id/members', async (req, res) => {
     .where(eq(authSchema.user.email, email))
   if (!row) return res.status(404).json({ error: 'no doop account with that email — ask them to sign up first' })
   if (row.id === c.ownerId) return res.status(400).json({ error: 'the owner already has access' })
+  const isNew = !c.memberIds?.includes(row.id)
   store.addMember(c.id, row.id, req.user!.id)
+  if (isNew) {
+    void emailShare(req.user!, row.id, c)
+    userEvents.notifyUsers([row.id], { type: 'canvases' })
+  }
   res.json({ userId: row.id, name: row.name, email: row.email, owner: false })
 })
 
@@ -1308,6 +1318,7 @@ app.delete('/api/canvases/:id/members/:userId', (req, res) => {
   if (c.ownerId !== req.user!.id && req.params.userId !== req.user!.id)
     return res.status(403).json({ error: 'only the owner can remove collaborators' })
   if (!store.removeMember(c.id, req.params.userId)) return res.status(404).json({ error: 'not a collaborator' })
+  userEvents.notifyUsers([req.params.userId], { type: 'canvases' })
   res.json({ ok: true })
 })
 
