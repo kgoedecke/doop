@@ -10,7 +10,8 @@ import {
 import { navigate } from '../App'
 import { timeAgo } from '../lib/time'
 import { AppRail, railLayout } from '../components/AppRail'
-import { ChevronRightIcon, GridIcon, MessageSquareIcon, UsersIcon } from '../components/ui/icons'
+import { ChevronRightIcon, GridIcon, LockIcon, MessageSquareIcon, UsersIcon } from '../components/ui/icons'
+import { SignInSettings } from '../components/SignInSettings'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
@@ -49,9 +50,10 @@ const LINK_TITLE = {
   edit: 'admin.linkAccessEdit',
 } as const satisfies Record<SharedAccess, PlainMessageKey>
 
-type Tab = 'canvases' | 'users' | 'feedback'
+type Tab = 'canvases' | 'users' | 'feedback' | 'signin'
 
-const SEARCH_LABEL: Record<Tab, PlainMessageKey> = {
+/* the header's search, for the tabs that are lists */
+const SEARCH_LABEL: Partial<Record<Tab, PlainMessageKey>> = {
   canvases: 'admin.searchCanvases',
   users: 'admin.searchAccounts',
   feedback: 'admin.searchFeedback',
@@ -123,6 +125,7 @@ export function Admin() {
     )
   }
 
+  const searchLabel = SEARCH_LABEL[tab]
   const needle = q.trim().toLowerCase()
   const canvases = (data?.canvases ?? []).filter(
     (c) =>
@@ -168,6 +171,14 @@ export function Admin() {
           >
             {t('admin.feedbackNav')}
           </DashNavItem>
+          <DashNavItem
+            density="rail"
+            icon={<LockIcon size="rail" />}
+            active={tab === 'signin'}
+            onClick={() => setTab('signin')}
+          >
+            {t('admin.signInNav')}
+          </DashNavItem>
         </nav>
       </AppRail>
 
@@ -185,13 +196,15 @@ export function Admin() {
             <ChevronRightIcon size={12} />
             <b className="font-semibold text-ink">{t('admin.admin')}</b>
           </nav>
-          <SearchField
-            size="header"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={`${t(SEARCH_LABEL[tab])}…`}
-            aria-label={t(SEARCH_LABEL[tab])}
-          />
+          {searchLabel && (
+            <SearchField
+              size="header"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={`${t(searchLabel)}…`}
+              aria-label={t(searchLabel)}
+            />
+          )}
         </DashHeader>
 
         <DashContent>
@@ -221,6 +234,9 @@ export function Admin() {
               </TabsTrigger>
               <TabsTrigger value="feedback">
                 <MessageSquareIcon size="rail" /> {t('admin.feedbackTab', { count: stats?.agentFeedback ?? '…' })}
+              </TabsTrigger>
+              <TabsTrigger value="signin">
+                <LockIcon size="rail" /> {t('admin.signInTab')}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -273,6 +289,8 @@ export function Admin() {
             </>
           ) : tab === 'feedback' ? (
             <AgentFeedbackList q={q} />
+          ) : tab === 'signin' ? (
+            <SignInSettings />
           ) : (
             <div className="mt-4 overflow-hidden rounded-panel border border-line bg-surface shadow-card">
               {users === null && <p className="mt-7 text-copy text-ink-soft">…</p>}

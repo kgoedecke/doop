@@ -424,6 +424,20 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   plain try-again rather than being shown. Tests: `authError.test.ts`,
   `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
 
+- Sign-in policy (`shared/instanceSettings.ts`, `server/instanceSettings.ts`): instance admins set,
+  in Admin → Sign-in, whether visitors may sign up with email and password (off hides the form and
+  the `/api/auth/*` mount refuses `sign-up/email` with `SIGNUP_DISABLED`; existing accounts still
+  sign in, provider sign-ups are untouched), whether signed-out visitors go straight to the OIDC
+  provider (`AuthPage` starts the round trip on mount; never after a provider error, under
+  `?manual=1`, or in the desktop shell), and a default workspace every new account joins as a member
+  (`joinDefaultWorkspace`, in the user-create hook, or on verification when SMTP is on, like
+  invites). One row in `instance_settings` (migration 0044), read into memory at boot;
+  `GET /api/oidc-config` adds the public half as `emailPasswordSignup` / `ssoAutoRedirect`;
+  `GET`/`PATCH /api/admin/instance-settings` edit it (409 with a `refusal`). Auto-redirect is
+  refused until an admin has signed in through SSO, so a provider nobody has proven cannot lock the
+  instance out. Env keeps secrets and provider wiring only. Tests: `instanceSettings.test.ts`, the
+  policy cases in `authFormBrowser.test.ts`.
+
 - MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
   (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; the plugin neither rotates nor revokes
   them). A daily prune deletes expired token rows but keeps the newest per user and client,
