@@ -146,6 +146,19 @@ a fresh chat. WSL installation remains a manual CLI path.
 
 Reference: [OpenAI's MCP configuration docs](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
+## Fonts from this computer
+
+Settings → Fonts and Workspace → Fonts show **Add from this computer** in shells that set the
+`__DOOP_LOCAL_FONTS__` marker. `fonts_choose_local` opens the native file panel in the
+platform's fonts folder (`~/Library/Fonts` then `/Library/Fonts` on macOS, the per-user
+`Microsoft\Windows\Fonts` then `C:\Windows\Fonts`, `~/.local/share/fonts` and friends on Linux)
+and remembers the picked paths; `fonts_read_local` returns one picked file's bytes, once, and
+refuses any path the panel did not hand out. The page then uploads the file through the ordinary
+font upload, so the font joins the library like a dropped file and renders for every viewer and in
+every export. Collections (`.ttc`, `.dfont`) and files over 10 MB are skipped by name. The page
+shows a licence notice before the upload; the shell checks no licences and never reads a font
+file the person did not pick.
+
 ## Local Claude CLI
 
 Settings → Doop Agent includes **Claude Plan** in shells built with the

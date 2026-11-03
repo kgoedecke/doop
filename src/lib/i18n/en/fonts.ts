@@ -34,4 +34,14 @@ export const fonts = {
   uploadFailed: 'upload failed',
   tooLarge: '{name} is over the 10 MB limit',
   removeFailed: 'That font could not be removed',
+  addLocal: 'Add from this computer',
+  addLocalTitle: { one: 'Add {name} to this library?', other: 'Add {count} fonts from this computer?' },
+  addLocalDescription:
+    'Everyone this library serves gets the font, and frames that use it carry it into screenshots and exports. Fonts installed with your operating system or bought for one machine are often licensed for your use only; check the font’s licence before sharing it here. Doop does not check licences for you.',
+  addLocalConfirm: 'Add fonts',
+  localSkipped: {
+    one: '{names} is not a single font file (TTF, OTF, WOFF or WOFF2) and was left out.',
+    other: '{names} are not single font files (TTF, OTF, WOFF or WOFF2) and were left out.',
+  },
+  localReadFailed: '{name} could not be read from this computer',
 } as const

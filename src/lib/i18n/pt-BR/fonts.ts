@@ -35,4 +35,14 @@ export const fonts: Catalog['fonts'] = {
   uploadFailed: 'falha no envio',
   tooLarge: '{name} passa do limite de 10 MB',
   removeFailed: 'Não foi possível remover essa fonte',
+  addLocal: 'Adicionar deste computador',
+  addLocalTitle: { one: 'Adicionar {name} a esta biblioteca?', other: 'Adicionar {count} fontes deste computador?' },
+  addLocalDescription:
+    'Todos que usam esta biblioteca recebem a fonte, e os frames que a usam a levam para capturas de tela e exportações. Fontes instaladas com o sistema operacional ou compradas para uma máquina costumam ser licenciadas só para o seu uso; verifique a licença da fonte antes de compartilhá-la aqui. O Doop não verifica licenças por você.',
+  addLocalConfirm: 'Adicionar fontes',
+  localSkipped: {
+    one: '{names} não é um arquivo de fonte único (TTF, OTF, WOFF ou WOFF2) e ficou de fora.',
+    other: '{names} não são arquivos de fonte únicos (TTF, OTF, WOFF ou WOFF2) e ficaram de fora.',
+  },
+  localReadFailed: 'Não foi possível ler {name} deste computador',
 }
