@@ -310,3 +310,24 @@ it('does not roll back a failed save over a colour that arrived from elsewhere',
   await expect(task).rejects.toThrow('offline')
   expect(background('first')).toBe('#aaaaaa')
 })
+
+it('takes a restored colour off again when its save fails, unless a newer colour arrived', async () => {
+  useStore.getState().setPageBackgroundLocal('second', '#1e1e1e')
+  await savePages(useStore.getState().canvas!, [pages[0]!])
+  api.setPageBackground.mockRejectedValueOnce(new Error('offline'))
+  await undo()
+  expect(background('second')).toBeUndefined()
+  expect(useStore.getState().notice?.text).toContain('could not be put back')
+
+  /* painted again and deleted again, the page remembers the colour it wears now */
+  useStore.getState().setPageBackgroundLocal('second', '#1e1e1e')
+  await redo()
+  const restore = deferred<never>()
+  api.setPageBackground.mockReturnValueOnce(restore.promise)
+  const task = undo()
+  await vi.waitFor(() => expect(background('second')).toBe('#1e1e1e'))
+  useStore.getState().setPageBackgroundLocal('second', '#3e3e3e')
+  restore.reject(new Error('offline'))
+  await task
+  expect(background('second')).toBe('#3e3e3e')
+})

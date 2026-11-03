@@ -224,7 +224,9 @@ function rememberBackgrounds(e: Extract<Entry, { type: 'pages' }>, current: Canv
    never carry one): paint the pages that just came back the colour the
    entry remembers for them, at once locally and then on the server. Each
    is its own request; one that fails does not hold the page change back,
-   and a reply never repaints, so an edit made meanwhile stands. */
+   and a reply never repaints, so an edit made meanwhile stands. A failed
+   request takes its colour off again (the server shows the theme paper),
+   unless the page already shows a newer one, and says so. */
 async function restoreBackgrounds(canvasId: string, remembered: CanvasPageInfo[], restored: CanvasPageInfo[]) {
   const painted = restored.flatMap((page) => {
     const background = pageBackground(remembered.find((p) => p.id === page.id))
@@ -233,8 +235,22 @@ async function restoreBackgrounds(canvasId: string, remembered: CanvasPageInfo[]
   const s = useStore.getState()
   if (s.canvas?.id !== canvasId) return
   for (const { id, background } of painted) s.setPageBackgroundLocal(id, background)
-  await Promise.all(
-    painted.map(({ id, background }) => api.setPageBackground(canvasId, id, background).catch(console.error)),
+  const results = await Promise.allSettled(
+    painted.map(({ id, background }) => api.setPageBackground(canvasId, id, background)),
+  )
+  const failed = painted.filter((_, i) => results[i]!.status === 'rejected')
+  if (!failed.length) return
+  const current = useStore.getState()
+  if (current.canvas?.id !== canvasId) return
+  for (const { id, background } of failed) {
+    const page = canvasPages(current.canvas).find((p) => p.id === id)
+    if (page && pageBackground(page) === background) current.setPageBackgroundLocal(id, null)
+  }
+  const reason = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')?.reason
+  current.pushNotice(
+    `${failed.length === 1 ? 'A page’s background' : `${failed.length} pages’ backgrounds`} could not be put back: ${
+      reason instanceof Error ? reason.message : 'request failed'
+    }`,
   )
 }
 
