@@ -53,6 +53,7 @@ export const stage = {
 
   /* the frame and element menus */
   paste: 'Paste',
+  copyClipboardFailed: 'Couldn’t copy to the clipboard. Please try again.',
   duplicate: 'Duplicate',
   show: 'Show',
   hide: 'Hide',

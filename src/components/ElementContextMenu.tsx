@@ -1,6 +1,7 @@
 import type { Frame } from '../../shared/types'
 import { copyElementLink } from '../lib/elementLink'
 import { copyLayer, hasElementClip, pasteLayer } from '../lib/elementClipboard'
+import { writeCanvasClipboard } from '../lib/canvasClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
 import { elementHtml, isElementHidden, isElementLocked } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
@@ -34,7 +35,12 @@ function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: st
   const t = useT()
   return (
     <>
-      <ContextMenuItem disabled={!exists} onSelect={() => selector && copyLayer(frame, selector)}>
+      <ContextMenuItem
+        disabled={!exists}
+        onSelect={() => {
+          if (selector) writeCanvasClipboard(() => copyLayer(frame, selector))
+        }}
+      >
         {t('common.copy')}
         <MenuHint>{MOD_KEY}C</MenuHint>
       </ContextMenuItem>

@@ -64,6 +64,7 @@ import {
   toggleSelectionHidden,
 } from '../lib/layerEdits'
 import { copyLayers, hasElementClip, pasteLayer } from '../lib/elementClipboard'
+import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
@@ -358,8 +359,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
         useStore.getState().requestComposerFocus()
         return
       }
-      const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      if (isTypingTarget(e.target)) return
       const selectedIds = useStore.getState().selectedIds
       /* a picked element (from the canvas or the layers tree) is what ⌫
          removes — the frame it lives in only goes when nothing inside it is
@@ -374,15 +374,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
         if (canEdit && !e.repeat) deleteSelection()
       }
       const nudge = ARROW_NUDGE[e.key]
-      if (
-        canEdit &&
-        nudge &&
-        target.tagName !== 'SELECT' &&
-        !e.defaultPrevented &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.altKey
-      ) {
+      if (canEdit && nudge && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const step = e.shiftKey ? 10 : 1
         if (nudgeSelection(nudge[0] * step, nudge[1] * step)) e.preventDefault()
         return
@@ -400,14 +392,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       }
       /* ⌘⌥↩ presents from the selected frame (else the page's flow start),
          as the Play button does; while presenting the player owns the keys */
-      if (isPresentShortcut(e) && !presenting && !isTypingTarget(target)) {
+      if (isPresentShortcut(e) && !presenting) {
         e.preventDefault()
         const state = useStore.getState()
         const from = presentStartFrame(state.canvas, state.selectedId, state.activePageId)
         if (from) setPresenting(from)
         return
       }
-      /* undo, redo, hide, lock and duplicate all change the canvas; ⌘C does not */
+      /* undo, redo, hide, lock and duplicate all change the canvas */
       if (canEdit && (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
         if (e.shiftKey) void redo()
@@ -435,14 +427,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
         const picked = state.selectedElement
         const pickedFrame = state.canvas?.frames.find((f) => f.id === picked?.frameId)
         const frames = state.canvas?.frames.filter((f) => selectedIds.includes(f.id)) ?? []
-        /* don't hijack ⌘C when the user is copying selected text */
-        if (e.key === 'c' && !window.getSelection()?.toString()) {
-          if (picked && pickedFrame) {
-            e.preventDefault()
-            copyLayers(pickedFrame, pickedSelectors(state))
-          } else if (!picked && frames.length) copyFrames(frames)
-        }
-        if (canEdit && e.key === 'd' && frames.length) {
+        if (canEdit && e.key.toLowerCase() === 'd' && frames.length) {
           e.preventDefault()
           if (picked && pickedFrame) duplicateLayers(pickedFrame, pickedSelectors(state))
           else if (!picked) duplicateFrames(frames)
@@ -453,14 +438,28 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [canvasId, hideUiActive, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ⌘V lands here as a real paste event: clipboard images upload and drop in
-     as frames; otherwise a copied frame (⌘C) pastes centered. Handled on
-     'paste' rather than keydown so the browser hands us the clipboard bytes
-     without a permission prompt. */
+  /* Native copy/paste events let us write the selection's token and read
+     clipboard images without asking for clipboard-read permission. */
   useEffect(() => {
+    function onCopy(e: ClipboardEvent) {
+      if (isTypingTarget(e.target) || window.getSelection()?.toString() || !e.clipboardData) return
+      const state = useStore.getState()
+      const picked = state.selectedElement
+      const frame = state.canvas?.frames.find((f) => f.id === picked?.frameId)
+      let copy: () => boolean | void
+      if (picked) {
+        if (!frame) return
+        const selectors = pickedSelectors(state)
+        copy = () => copyLayers(frame, selectors)
+      } else {
+        const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
+        if (!frames.length) return
+        copy = () => copyFrames(frames)
+      }
+      if (writeCanvasClipboard(copy, e.clipboardData)) e.preventDefault()
+    }
     function onPaste(e: ClipboardEvent) {
-      const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return
+      if (isTypingTarget(e.target)) return
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
       const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
@@ -470,19 +469,23 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           setToast(translate('canvas.pasteImageFailed', { error: err.message }))
           window.setTimeout(() => setToast(null), 4000)
         })
-      } else if (hasElementClip()) {
+      } else if (isCanvasClipboard(e.clipboardData) && hasElementClip()) {
         e.preventDefault()
         const state = useStore.getState()
         const picked = state.selectedElement
         const frame = state.canvas?.frames.find((f) => f.id === (picked?.frameId ?? state.selectedId))
         if (frame) pasteLayer(frame, picked?.selector ?? null)
-      } else if (hasFrameClip()) {
+      } else if (isCanvasClipboard(e.clipboardData) && hasFrameClip()) {
         e.preventDefault()
         pasteFrameCentered(canvasId)
       }
     }
+    window.addEventListener('copy', onCopy)
     window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
+    return () => {
+      window.removeEventListener('copy', onCopy)
+      window.removeEventListener('paste', onPaste)
+    }
   }, [canvasId])
 
   /* Image files dragged in from the desktop land as frames centered on the
