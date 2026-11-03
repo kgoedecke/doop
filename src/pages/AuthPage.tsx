@@ -398,7 +398,13 @@ export function AuthPage() {
             variant="link"
             size="sm"
             className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
-            onClick={() => location.assign(`${location.pathname}?manual=1`)}
+            onClick={() => {
+              /* keep the rest of the query: an interrupted MCP connect or a
+                 redirect_to must survive the switch to the card */
+              const params = new URLSearchParams(location.search)
+              params.set('manual', '1')
+              location.assign(`${location.pathname}?${params}`)
+            }}
           >
             {t('auth.signInAnotherWay')}
           </Button>

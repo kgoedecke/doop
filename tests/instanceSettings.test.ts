@@ -80,6 +80,19 @@ describe('GET/PATCH /api/admin/instance-settings', () => {
     expect((await policy()).ssoAutoRedirect).toBe(false)
   })
 
+  it('keeps every field when two admins save at once', async () => {
+    const [a, b] = await Promise.all([
+      boss.patch('/api/admin/instance-settings', { emailPasswordSignup: false }),
+      boss.patch('/api/admin/instance-settings', { defaultWorkspaceId: null }),
+    ])
+    expect([a.status, b.status]).toEqual([200, 200])
+    const view = await (await boss.get('/api/admin/instance-settings')).json()
+    expect(view.settings.emailPasswordSignup).toBe(false)
+    /* and the row says so after a reload of it, not just memory */
+    await boss.patch('/api/admin/instance-settings', { emailPasswordSignup: true })
+    expect((await policy()).emailPasswordSignup).toBe(true)
+  })
+
   it('refuses a default workspace that does not exist', async () => {
     const res = await boss.patch('/api/admin/instance-settings', { defaultWorkspaceId: 'nope' })
     expect(res.status).toBe(409)

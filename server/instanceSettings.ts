@@ -100,25 +100,34 @@ export async function ssoAdminSignedIn(): Promise<boolean> {
   return !!row
 }
 
+/* writes run one after another: two admin tabs saving at once must each
+   land their own fields, not have the later one put the earlier one back */
+let chain: Promise<unknown> = Promise.resolve()
+
 /** Apply an admin's patch: checked, written, then live. The write is awaited
- *  so a refused or failed change never shows as applied. */
-export async function updateInstanceSettings(
+ *  so a refused or failed change never shows as applied, and only the
+ *  fields in the patch are written, so a concurrent save of other fields is
+ *  kept whichever lands last. */
+export function updateInstanceSettings(
   patch: InstanceSettingsPatch,
   updatedBy: string,
   ssoConfigured: boolean,
 ): Promise<{ settings: InstanceSettings } | { refusal: InstanceSettingsRefusal }> {
-  const refusal = refusalFor(patch, {
-    ssoConfigured,
-    ssoAdminSignedIn: patch.ssoAutoRedirect ? await ssoAdminSignedIn() : false,
-    workspaceExists: (id) => workspaces.getWorkspace(id) !== undefined,
+  const run = chain.then(async () => {
+    const refusal = refusalFor(patch, {
+      ssoConfigured,
+      ssoAdminSignedIn: patch.ssoAutoRedirect ? await ssoAdminSignedIn() : false,
+      workspaceExists: (id) => workspaces.getWorkspace(id) !== undefined,
+    })
+    if (refusal) return { refusal }
+    const change = { ...patch, updatedAt: Date.now(), updatedBy }
+    await db
+      .insert(t.instanceSettings)
+      .values({ id: ROW_ID, ...current, ...change })
+      .onConflictDoUpdate({ target: t.instanceSettings.id, set: change })
+    current = { ...current, ...patch }
+    return { settings: getInstanceSettings() }
   })
-  if (refusal) return { refusal }
-  const next: InstanceSettings = { ...getInstanceSettings(), ...patch }
-  const row = { ...next, updatedAt: Date.now(), updatedBy }
-  await db
-    .insert(t.instanceSettings)
-    .values({ id: ROW_ID, ...row })
-    .onConflictDoUpdate({ target: t.instanceSettings.id, set: row })
-  current = next
-  return { settings: next }
+  chain = run.catch(() => {})
+  return run
 }

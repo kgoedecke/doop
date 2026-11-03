@@ -160,6 +160,17 @@ describe.skipIf(!findBrowserPath())('sign-in policy', { timeout: 30_000 }, () =>
     expect(await buttonLabels()).toContain('Sign in another way')
   })
 
+  it('keeps the rest of the query when the visitor asks for the card', async () => {
+    await open({ ...SSO, ssoAutoRedirect: true }, '&redirect_to=%2Fc%2Fabc')
+    await page.waitForFunction(() => location.hash === '#idp')
+    await page.evaluate(() => {
+      ;[...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Sign in another way'))?.click()
+    })
+    await page.waitForFunction(() => new URLSearchParams(location.search).get('manual') === '1')
+    expect(await page.evaluate(() => new URLSearchParams(location.search).get('redirect_to'))).toBe('/c/abc')
+    expect(await buttonLabels()).toContain('Sign in with Zitadel')
+  })
+
   it('shows the card instead when asked for it, or after the provider failed', async () => {
     await open({ ...SSO, ssoAutoRedirect: true }, '&manual=1')
     expect(await buttonLabels()).toContain('Sign in with Zitadel')
