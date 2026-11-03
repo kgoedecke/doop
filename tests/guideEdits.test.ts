@@ -251,3 +251,62 @@ it('leaves a fresh visit alone when a colour save from before it finishes', asyn
   /* nothing to undo: no further request */
   expect(api.setPageBackground).toHaveBeenCalledTimes(2)
 })
+
+it('brings a page back with the colour a teammate gave it after the step was recorded', async () => {
+  api.setPageBackground.mockImplementation(async () => [])
+  api.duplicatePage.mockResolvedValue({
+    page: { id: 'twin', name: 'Exploration copy', background: '#1e1e1e' },
+    pages: [...pages, { id: 'twin', name: 'Exploration copy', background: '#1e1e1e' }],
+    frames: [],
+  })
+  await duplicatePage(useStore.getState().canvas!, 'second')
+  /* a teammate repaints the copy */
+  useStore.getState().setPageBackgroundLocal('twin', '#2e2e2e')
+  await undo()
+  await redo()
+  expect(api.setPageBackground).toHaveBeenLastCalledWith('c', 'twin', '#2e2e2e')
+  expect(background('twin')).toBe('#2e2e2e')
+})
+
+it('paints a restored page at once and lets an edit made meanwhile stand', async () => {
+  useStore.getState().setPageBackgroundLocal('second', '#1e1e1e')
+  await savePages(useStore.getState().canvas!, [pages[0]!])
+  const restore = deferred<unknown[]>()
+  api.setPageBackground.mockReturnValueOnce(restore.promise).mockResolvedValue([])
+  const task = undo()
+  await vi.waitFor(() => expect(background('second')).toBe('#1e1e1e'))
+  useStore.getState().setPageBackgroundLocal('second', '#3e3e3e')
+  restore.resolve([])
+  await task
+  expect(background('second')).toBe('#3e3e3e')
+})
+
+it('goes back to a teammate’s colour that arrived between two of its own edits', async () => {
+  const first = deferred<unknown[]>()
+  api.setPageBackground.mockReturnValueOnce(first.promise).mockResolvedValue([])
+  const one = setPageBackground(useStore.getState().canvas!, 'first', '#111111')
+  await vi.waitFor(() => expect(api.setPageBackground).toHaveBeenCalledTimes(1))
+  /* the room delivers a teammate's colour while the first write is out */
+  useStore.getState().setPageBackgroundLocal('first', '#aaaaaa')
+  const two = setPageBackground(useStore.getState().canvas!, 'first', '#222222')
+  first.resolve([])
+  await one
+  await two
+  /* undo walks back through this client's own edits, then reaches the
+     teammate's colour rather than the page's original one */
+  await undo()
+  expect(background('first')).toBe('#111111')
+  await undo()
+  expect(background('first')).toBe('#aaaaaa')
+})
+
+it('does not roll back a failed save over a colour that arrived from elsewhere', async () => {
+  const pending = deferred<never>()
+  api.setPageBackground.mockReturnValueOnce(pending.promise)
+  const task = setPageBackground(useStore.getState().canvas!, 'first', '#111111')
+  await vi.waitFor(() => expect(api.setPageBackground).toHaveBeenCalledTimes(1))
+  useStore.getState().setPageBackgroundLocal('first', '#aaaaaa')
+  pending.reject(new Error('offline'))
+  await expect(task).rejects.toThrow('offline')
+  expect(background('first')).toBe('#aaaaaa')
+})

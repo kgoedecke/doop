@@ -205,26 +205,36 @@ function rememberGuides(kept: CanvasGuide[] = [], departing: string[], now: Canv
   return [...kept.filter((g) => !departing.includes(g.pageId)), ...now]
 }
 
+/* Update the entry's copies of the pages a list change removes with the
+   colour each wears now (a teammate may have repainted a page since the
+   step was recorded), so the opposite direction restores that one. */
+function rememberBackgrounds(e: Extract<Entry, { type: 'pages' }>, current: CanvasPageInfo[], next: CanvasPageInfo[]) {
+  for (const page of current) {
+    if (next.some((p) => p.id === page.id)) continue
+    for (const list of [e.before, e.after]) {
+      const copy = list.find((p) => p.id === page.id)
+      if (!copy) continue
+      delete copy.background
+      if (page.background) copy.background = page.background
+    }
+  }
+}
+
 /* A page comes back from the page route without its colour (page-list saves
    never carry one): paint the pages that just came back the colour the
-   entry remembers for them. Each is its own request; one that fails does not
-   hold the page change back. */
+   entry remembers for them, at once locally and then on the server. Each
+   is its own request; one that fails does not hold the page change back,
+   and a reply never repaints, so an edit made meanwhile stands. */
 async function restoreBackgrounds(canvasId: string, remembered: CanvasPageInfo[], restored: CanvasPageInfo[]) {
   const painted = restored.flatMap((page) => {
     const background = pageBackground(remembered.find((p) => p.id === page.id))
     return background ? [{ id: page.id, background }] : []
   })
+  const s = useStore.getState()
+  if (s.canvas?.id !== canvasId) return
+  for (const { id, background } of painted) s.setPageBackgroundLocal(id, background)
   await Promise.all(
-    painted.map(async ({ id, background }) => {
-      try {
-        await api.setPageBackground(canvasId, id, background)
-      } catch (err) {
-        console.error(err)
-        return
-      }
-      const s = useStore.getState()
-      if (s.canvas?.id === canvasId) s.setPageBackgroundLocal(id, background)
-    }),
+    painted.map(({ id, background }) => api.setPageBackground(canvasId, id, background).catch(console.error)),
   )
 }
 
@@ -492,6 +502,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     const expected = canvasPages(canvas)
     const next = applyPageChanges(expected, forward ? e.before : e.after, forward ? e.after : e.before)
     const leaving = guidesLeaving(canvas, next)
+    /* the colours the departing pages wear now, so the way back brings
+       those, not the ones remembered when the step was recorded */
+    rememberBackgrounds(e, expected, next)
     const saved = await api.setPages(canvas.id, next, expected)
     const departing = expected.filter((page) => !next.some((p) => p.id === page.id)).map((page) => page.id)
     if (departing.length) e.guides = rememberGuides(e.guides, departing, leaving)

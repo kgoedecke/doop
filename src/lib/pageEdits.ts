@@ -105,10 +105,17 @@ export function moveFramesToPage(canvas: Canvas, ids: string[], pageId: string) 
   return task
 }
 
+/** The colour the open canvas shows for a page right now. */
+function shownBackground(canvasId: string, pageId: string): string | null {
+  const canvas = useStore.getState().canvas
+  if (canvas?.id !== canvasId) return null
+  return pageBackground(canvasPages(canvas).find((page) => page.id === pageId))
+}
+
 /* One page's colour writes in flight, run one after another so they land in
    the order they were made. `saved` is what the server last accepted, which
    a failed write puts back when no newer edit of the page is queued. */
-type BackgroundWrites = { tail: Promise<unknown>; latest: number; saved: string | null }
+type BackgroundWrites = { tail: Promise<unknown>; latest: number; saved: string | null; shown: string | null }
 const backgroundWrites = new Map<string, BackgroundWrites>()
 
 /** Paint a page's canvas (`#rrggbb`) or put the theme paper back (null):
@@ -123,8 +130,13 @@ export function setPageBackground(canvas: Canvas, pageId: string, color: string 
   if (before === color) return Promise.resolve()
   state.setPageBackgroundLocal(pageId, color)
   const key = `${canvas.id}:${pageId}`
-  const queue = backgroundWrites.get(key) ?? { tail: Promise.resolve(), latest: 0, saved: before }
+  const queue = backgroundWrites.get(key) ?? { tail: Promise.resolve(), latest: 0, saved: before, shown: before }
   backgroundWrites.set(key, queue)
+  /* a colour this queue did not paint arrived meanwhile (a teammate's): that
+     is what the person saw before this edit, so it is what undo and a
+     failed save go back to */
+  if (before !== queue.shown) queue.saved = before
+  queue.shown = color
   const seq = ++queue.latest
   const epoch = historyEpoch()
   /* the canvas this save was made on is still open, under the same history */
@@ -138,7 +150,12 @@ export function setPageBackground(canvas: Canvas, pageId: string, color: string 
         if (current()) recordPageBackground(canvas.id, pageId, from, color)
       },
       (error: unknown) => {
-        if (current() && queue.latest === seq) useStore.getState().setPageBackgroundLocal(pageId, queue.saved)
+        /* put back what the server holds, unless a newer edit of this page
+           is queued or the page already shows a colour from elsewhere */
+        if (current() && queue.latest === seq && shownBackground(canvas.id, pageId) === queue.shown) {
+          useStore.getState().setPageBackgroundLocal(pageId, queue.saved)
+          queue.shown = queue.saved
+        }
         throw error
       },
     )
