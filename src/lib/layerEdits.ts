@@ -4,6 +4,7 @@ import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
 import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
+import { duplicateFrames } from './frameClipboard'
 import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
 import {
   deleteFramesTracked,
@@ -192,6 +193,12 @@ export function duplicateLayer(frame: Frame, selector: string) {
  *  originals' positional paths would now point at shifted elements. */
 export function duplicateLayers(frame: Frame, selectors: string[]) {
   if (frame.locked || selectors.some((selector) => isLayerLocked(frame, selector))) return
+  /* a standalone element's shape is the element: its copy is a second
+     element on the canvas, not a second shape inside its shell */
+  if (isStandalonePick(frame, selectors)) {
+    duplicateFrames([frame])
+    return
+  }
   const duplicated = duplicateElements(frame.html, selectors)
   if (!duplicated) return
   saveFrameHtml(frame, duplicated.html)
@@ -381,6 +388,12 @@ export function standaloneSelector(frame: Frame): string | null {
   if (!isCanvasElement(frame.html)) return null
   const [only, ...more] = buildLayerTree(frame.html)
   return only && !more.length ? only.selector : null
+}
+
+/** The pick is a standalone element's one shape, and nothing else. */
+export function isStandalonePick(frame: Frame, selectors: string[]): boolean {
+  const shape = standaloneSelector(frame)
+  return !!shape && selectors.length === 1 && selectors[0] === shape
 }
 
 /** Move the element out of `source` and next to, or into, a layer of

@@ -52,3 +52,53 @@ it('does not parse frame HTML for closed menus, including after a frame update',
     container.remove()
   }
 })
+
+it('pastes a copied standalone shape as a new element on the canvas', async () => {
+  const { copyFrames } = await import('../src/lib/frameClipboard')
+  const { useStore } = await import('../src/lib/store')
+  const { api } = await import('../src/lib/api')
+  const shape = {
+    id: 's',
+    canvasId: 'c',
+    name: 'Rectangle',
+    x: 10,
+    y: 20,
+    width: 100,
+    height: 50,
+    html: '<body data-doop-canvas-element><div id="layer" data-doop-drawing="rect"></div></body>',
+  } as Frame
+  useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames: [shape], createdAt: 0, updatedAt: 0 })
+  const create = vi.spyOn(api, 'createFrame').mockResolvedValue({ ...shape, id: 'new' })
+  copyFrames([shape])
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  try {
+    act(() =>
+      root.render(
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div data-layer="0">Layer</div>
+          </ContextMenuTrigger>
+          <ElementContextMenu frame={shape} selector="#layer" />
+        </ContextMenu>,
+      ),
+    )
+    await act(async () => {
+      container
+        .querySelector('[data-layer="0"]')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    })
+    const paste = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>
+      item.textContent?.startsWith('Paste'),
+    )!
+    expect(paste.getAttribute('aria-disabled')).toBeNull()
+    await act(async () => paste.click())
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(create.mock.calls[0]![1]).toMatchObject({ name: 'Rectangle', html: shape.html, width: 100, height: 50 })
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+    localStorage.clear()
+  }
+})

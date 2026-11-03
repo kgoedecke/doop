@@ -67,7 +67,7 @@ import {
   toggleLockSelection,
   toggleSelectionHidden,
 } from '../lib/layerEdits'
-import { copyLayers, hasElementClip, pasteLayer } from '../lib/elementClipboard'
+import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
 import { avatarUrl } from '../../shared/avatar'
@@ -455,7 +455,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (picked) {
         if (!frame) return
         const selectors = pickedSelectors(state)
-        copy = () => copyLayers(frame, selectors)
+        copy = () => copyPicked(frame, selectors)
       } else {
         const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
         if (!frames.length) return

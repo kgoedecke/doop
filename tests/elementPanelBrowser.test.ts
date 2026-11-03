@@ -16,6 +16,7 @@ declare global {
       select: (selector: string) => void
       selectFrame: () => void
       deselect: () => void
+      panelOpen: () => boolean
       picked: () => string[]
       pickAlso: (selector: string) => void
       nudge: (dx: number, dy: number) => boolean
@@ -1453,6 +1454,20 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     expect(await position()).toEqual([20, 30])
     expect(saved.html).not.toContain('translate: 0px 7px')
+  })
+
+  it('keeps the element picked when its panel is closed', async () => {
+    await seedPanel(
+      `<!doctype html><html><head><style>#box { width: 120px; height: 40px }</style></head><body><div id="box"></div></body></html>`,
+      '#box',
+    )
+    await page.click('button[aria-label="Close"]')
+    await page.waitForSelector('[aria-label="Width"]', { hidden: true })
+    expect(await page.evaluate(() => window.elementPanelHarness.panelOpen())).toBe(false)
+    expect(await page.evaluate(() => window.elementPanelHarness.picked())).toEqual(['#box'])
+    /* picking it again reopens the panel */
+    await page.evaluate(() => window.elementPanelHarness.select('#box'))
+    await page.waitForSelector('[aria-label="Width"]')
   })
 
   it('leaves a standalone canvas element in place', async () => {
