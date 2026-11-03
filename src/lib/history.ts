@@ -235,13 +235,16 @@ async function restoreBackgrounds(canvasId: string, remembered: CanvasPageInfo[]
   const s = useStore.getState()
   if (s.canvas?.id !== canvasId) return
   for (const { id, background } of painted) s.setPageBackgroundLocal(id, background)
+  const started = epoch
   const results = await Promise.allSettled(
     painted.map(({ id, background }) => api.setPageBackground(canvasId, id, background)),
   )
   const failed = painted.filter((_, i) => results[i]!.status === 'rejected')
   if (!failed.length) return
   const current = useStore.getState()
-  if (current.canvas?.id !== canvasId) return
+  /* the canvas was left (or revisited, under a fresh history) meanwhile:
+     whatever it shows now is that visit's, not this restore's */
+  if (current.canvas?.id !== canvasId || epoch !== started) return
   for (const { id, background } of failed) {
     const page = canvasPages(current.canvas).find((p) => p.id === id)
     if (page && pageBackground(page) === background) current.setPageBackgroundLocal(id, null)

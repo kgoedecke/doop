@@ -331,3 +331,21 @@ it('takes a restored colour off again when its save fails, unless a newer colour
   await task
   expect(background('second')).toBe('#3e3e3e')
 })
+
+it('leaves a colour saved on a fresh visit alone when an older restore fails', async () => {
+  useStore.getState().setPageBackgroundLocal('second', '#1e1e1e')
+  await savePages(useStore.getState().canvas!, [pages[0]!])
+  const restore = deferred<never>()
+  api.setPageBackground.mockReturnValueOnce(restore.promise).mockResolvedValue([])
+  const task = undo()
+  await vi.waitFor(() => expect(api.setPageBackground).toHaveBeenCalledTimes(1))
+  /* leave and come back; the page is painted the same colour on this visit */
+  clearHistory()
+  useStore.getState().setCanvas(structuredClone(canvas))
+  await setPageBackground(useStore.getState().canvas!, 'second', '#1e1e1e')
+  const noticeBefore = useStore.getState().notice
+  restore.reject(new Error('offline'))
+  await task
+  expect(background('second')).toBe('#1e1e1e')
+  expect(useStore.getState().notice).toBe(noticeBefore)
+})
