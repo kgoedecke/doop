@@ -89,9 +89,10 @@ export async function createConnection(input: {
   repo: string
   /** PAT mode; mutually exclusive with installationId */
   token?: string
-  /** app mode — the installations of a verified install handoff (pass); the
-   *  one that grants the repo is bound */
-  installationIds?: string[]
+  /** app mode — the grants of a verified install handoff (pass): the repos
+   *  GitHub lets the connecting user reach through each installation; the
+   *  installation that grants the repo is bound */
+  grants?: githubApp.InstallationGrant[]
   branch?: string
   createdBy: string
 }): Promise<GithubConnection> {
@@ -101,11 +102,12 @@ export async function createConnection(input: {
     .replace(/\.git$/, '')
   if (!REPO_RE.test(repo)) throw new Error('repository must be "owner/name"')
   const token = input.token?.trim() || null
-  /* App mode grants exactly the installations' repos — refuse anything the
-     user did not select on GitHub's install screen. */
+  /* App mode grants exactly what GitHub showed the user — refuse anything
+     the install did not select, or that the user may not reach even though
+     the installation covers it. */
   let installationId: string | null = null
-  if (input.installationIds?.length) {
-    installationId = (await githubApp.installationForRepo(input.installationIds, repo)) ?? null
+  if (input.grants?.length) {
+    installationId = githubApp.installationForRepo(input.grants, repo) ?? null
     if (!installationId) throw new Error('that repository is not part of the GitHub App installation')
   }
   if (!token && !installationId) throw new Error('a fine-grained personal access token is required')

@@ -1375,17 +1375,16 @@ app.post('/api/canvases/:id/github', async (req, res) => {
   try {
     /* app mode: a signed pass from the install round-trip stands in for the
        token, binding the GitHub App installation to this canvas */
-    let installationIds: string[] | undefined
+    let grants: githubApp.InstallationGrant[] | undefined
     if (typeof req.body?.pass === 'string') {
-      const verified = githubApp.verifyInstallPass(req.body.pass, c.id)
-      if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
-      installationIds = verified.installationIds
+      grants = githubApp.redeemInstallPass(req.body.pass, c.id)
+      if (!grants) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
     }
     const conn = await github.createConnection({
       canvasId: c.id,
       repo: String(req.body?.repo ?? ''),
       token: typeof req.body?.token === 'string' ? req.body.token : undefined,
-      installationIds,
+      grants,
       branch: typeof req.body?.branch === 'string' ? req.body.branch : undefined,
       createdBy: req.user!.id,
     })
@@ -1427,8 +1426,11 @@ app.get('/api/canvases/:id/github/app/install', (req, res) => {
    user authorization during installation" on). Verifies the state minted at
    start AND that the OAuth code's user actually owns the installation —
    installation ids are guessable, and without the ownership proof a valid
-   state could bind someone else's installation. Then swaps state for a pass
-   and returns to the canvas, where the import modal shows the repo picker. */
+   state could bind someone else's installation. The same user token lists
+   the repos GitHub lets THIS user reach through it (an org installation
+   covers more than one member may see); that snapshot is what the pass
+   stands for. Then swaps state for the pass and returns to the canvas,
+   where the import modal shows the repo picker. */
 app.get('/api/github/app/setup', async (req, res) => {
   const rawState = String(req.query.state ?? '')
   const code = String(req.query.code ?? '')
@@ -1436,9 +1438,9 @@ app.get('/api/github/app/setup', async (req, res) => {
      homepage redirect reads as "nothing happened" */
   const fail = (canvasId: string, reason: string) =>
     res.redirect(`/c/${encodeURIComponent(canvasId)}?ghError=${encodeURIComponent(reason)}`)
-  const succeed = (canvasId: string, installationIds: string[]) =>
+  const succeed = (canvasId: string, grants: githubApp.InstallationGrant[]) =>
     res.redirect(
-      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.signInstallPass(canvasId, installationIds))}`,
+      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.issueInstallPass(canvasId, grants))}`,
     )
 
   /* return leg of Connect's authorize step: the installations this GitHub
@@ -1447,10 +1449,9 @@ app.get('/api/github/app/setup', async (req, res) => {
   if (find) {
     if (!code) return fail(find.canvasId, 'GitHub authorization was cancelled — connect again when you’re ready')
     try {
-      const installationIds = await githubApp.userInstallationIds(code)
-      if (installationIds?.length) return succeed(find.canvasId, installationIds)
-      if (installationIds)
-        return res.redirect(githubApp.installUrl(githubApp.signInstallState(find.canvasId, find.userId)))
+      const grants = await githubApp.userAccess(code)
+      if (grants?.length) return succeed(find.canvasId, grants)
+      if (grants) return res.redirect(githubApp.installUrl(githubApp.signInstallState(find.canvasId, find.userId)))
     } catch {
       /* fall through to the error redirect */
     }
@@ -1462,8 +1463,8 @@ app.get('/api/github/app/setup', async (req, res) => {
   const oauth = githubApp.verifyOauthState(rawState)
   if (oauth) {
     try {
-      if (await githubApp.verifyInstallationOwner(code, oauth.installationId))
-        return succeed(oauth.canvasId, [oauth.installationId])
+      const grants = await githubApp.userAccess(code, [oauth.installationId])
+      if (grants?.length) return succeed(oauth.canvasId, grants)
     } catch {
       /* fall through to the error redirect */
     }
@@ -1482,7 +1483,8 @@ app.get('/api/github/app/setup', async (req, res) => {
   if (!code) return res.redirect(githubApp.oauthBounceUrl(githubApp.signOauthState(state.canvasId, installationId)))
 
   try {
-    if (await githubApp.verifyInstallationOwner(code, installationId)) return succeed(state.canvasId, [installationId])
+    const grants = await githubApp.userAccess(code, [installationId])
+    if (grants?.length) return succeed(state.canvasId, grants)
   } catch {
     /* fall through to the error redirect */
   }
@@ -1492,13 +1494,9 @@ app.get('/api/github/app/setup', async (req, res) => {
 app.get('/api/canvases/:id/github/app/repos', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
-  const verified = githubApp.verifyInstallPass(String(req.query.pass ?? ''), c.id)
-  if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
-  try {
-    res.json(await githubApp.listReposAcross(verified.installationIds))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not list the installation’s repositories' })
-  }
+  const grants = githubApp.redeemInstallPass(String(req.query.pass ?? ''), c.id)
+  if (!grants) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
+  res.json(githubApp.listReposAcross(grants))
 })
 
 app.delete('/api/canvases/:id/github/:connId', async (req, res) => {
