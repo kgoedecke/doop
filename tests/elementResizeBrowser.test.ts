@@ -98,7 +98,7 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     await page.evaluate(() => window.elementPanelHarness.deselect())
     await page.waitForFunction(() => !document.querySelector('[data-resize-handles]'))
     const updatedAt = saved.updatedAt + 1
-    saved = { ...saved, html: html.replace('<body>', `<body data-test-reset="${updatedAt}">`), updatedAt }
+    saved = { ...saved, html: html.replace(/<body\b/, `<body data-test-reset="${updatedAt}"`), updatedAt }
     await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
     await page.evaluate(() => window.elementPanelHarness.selectFrame())
     const frame = (await frameDoc())!
@@ -611,6 +611,35 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     await expect.poll(picked).toHaveLength(1)
     await page.waitForFunction(() => document.querySelectorAll('[data-picked-element]').length === 0)
     await page.waitForFunction(() => !!document.querySelector('[data-resize-handles]'))
+  }, 20_000)
+
+  it("keeps the shell's grips, ring and badge on a standalone element whose own shape is picked", async () => {
+    /* a standalone is a shell holding one shape at 100% of it: the shell's
+       grips size the shape, so the shape wears no grips or outline of its
+       own even while it is the pick (a click, its Layers row) */
+    await reset(
+      '<body data-doop-canvas-element="true" style="margin:0"><p data-doop-drawing="text" style="position:absolute;left:0;top:0;width:100%;height:100%;margin:0;font:48px/1.2 Arial">Text</p></body>',
+    )
+    await page.waitForSelector('[data-frame-resize-handle="nw"]')
+    await page.evaluate((s) => window.elementPanelHarness.select(s), 'body:nth-of-type(1) > p:nth-of-type(1)')
+    await new Promise((r) => setTimeout(r, 400))
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+    expect(await page.$('[data-element-outline]')).toBeNull()
+    expect(await page.$('[data-frame-resize-handle="nw"]')).not.toBeNull()
+    expect(await page.$('[data-frame-size]')).not.toBeNull()
+  }, 20_000)
+
+  it("withholds the shell's grips from a standalone element whose shape is locked", async () => {
+    /* a lock on the shape (its Layers row) is a lock on its size: the
+       shell's grips would resize the shape with it */
+    await reset(
+      '<body data-doop-canvas-element="true" style="margin:0"><div data-doop-drawing="rectangle" data-doop-locked="" style="position:absolute;left:0;top:0;width:100%;height:100%;background:#ddd"></div></body>',
+    )
+    await page.waitForFunction(() => !document.querySelector('[data-frame-resize-handle]'))
+    await page.evaluate((s) => window.elementPanelHarness.select(s), 'body:nth-of-type(1) > div:nth-of-type(1)')
+    await new Promise((r) => setTimeout(r, 400))
+    expect(await page.$('[data-frame-resize-handle]')).toBeNull()
+    expect(await page.$('[data-resize-handles]')).toBeNull()
   }, 20_000)
 
   it('outlines a layer wider than its frame in full, hovered and selected, while the frame clips its content', async () => {

@@ -1,8 +1,9 @@
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { isCanvasElement } from '../lib/drawing'
+import { isLayerLocked, standaloneSelector } from '../lib/layerEdits'
 import { drawingDropFrame, moveDrawing, type DrawingHit } from '../lib/drawingMove'
 import { useElementMove } from './ElementMove'
 import { FrameLabelLayer } from './FrameLabelLayer'
@@ -900,6 +901,16 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     }
   }, [probeSel, frame.id])
   const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
+  /* a standalone element is one thing on the canvas, its shape filling its
+     shell: picking that shape (a click, its Layers row) keeps the shell's
+     ring, grips and size badge, which size the shape with it, and never
+     dresses the shape in a second outline and grips of its own, which would
+     size it inside a shell that stays put */
+  const shellSel = useMemo(() => standaloneSelector(frame), [frame])
+  const shellPicked = !!wantedSel && wantedSel === shellSel
+  /* the shape's own layer lock holds the shell's grips too: a resize of the
+     shell is a resize of the locked shape */
+  const shellLocked = useMemo(() => !!shellSel && isLayerLocked(frame, shellSel), [frame, shellSel])
   /* Returning to a frame-only link (or closing the element panel) also
      removes the previous element's toolbar and outline. */
   useLayoutEffect(() => {
@@ -1307,7 +1318,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             selected &&
             !editing &&
             !pathEdit &&
-            !wantedSel &&
+            (!wantedSel || shellPicked) &&
             createPortal(
               <div
                 data-frame-size=""
@@ -1548,14 +1559,20 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 </span>
               </div>
             )}
-            {probe && probe.selector !== FRAME_COMMENT_SELECTOR && selected && !editing && !pathEdit && !dragging && (
-              <div
-                data-element-outline=""
-                /* a one-pixel hairline, the way Paper outlines a selection */
-                className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                style={{ left: probe.rect.x, top: probe.rect.y, width: probe.rect.width, height: probe.rect.height }}
-              />
-            )}
+            {probe &&
+              probe.selector !== FRAME_COMMENT_SELECTOR &&
+              probe.selector !== shellSel &&
+              selected &&
+              !editing &&
+              !pathEdit &&
+              !dragging && (
+                <div
+                  data-element-outline=""
+                  /* a one-pixel hairline, the way Paper outlines a selection */
+                  className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                  style={{ left: probe.rect.x, top: probe.rect.y, width: probe.rect.width, height: probe.rect.height }}
+                />
+              )}
             {/* the text being edited wears the same hairline, grips aside: one
               look for a selected element, in or out of a text edit */}
             {editing && activeHit && (
@@ -1593,6 +1610,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               a locked layer or frame, or under the Comment tool — nor on a
               multi-element pick, where a drag would size only one */}
             {probe &&
+              probe.selector !== shellSel &&
               !multiPick &&
               selected &&
               !editing &&
@@ -1797,9 +1815,10 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               element's own grips, which sit under this layer */}
           {selected &&
             tool === 'select' &&
-            !wantedSel &&
+            (!wantedSel || shellPicked) &&
             !elementMove.moving &&
             !frame.locked &&
+            !shellLocked &&
             !readOnly &&
             !pathEdit &&
             !editing && (
