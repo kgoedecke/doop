@@ -63,7 +63,10 @@ export function useValueScrub({
       lastX = e.clientX
       const step = e.shiftKey ? 10 : e.altKey ? 0.1 : 1
       for (const part of parts!) {
-        part.number = Math.min(max, Math.max(min, Number((part.number + dx * step).toFixed(4))))
+        // Land on the step's grid, so a field that starts at a measured
+        // fraction (9.94) scrubs through whole values rather than 10.94, 11.94.
+        const snapped = Math.round((part.number + dx * step) / step) * step
+        part.number = Math.min(max, Math.max(min, Number(snapped.toFixed(4))))
       }
       const next = parts!.map((part) => `${part.number}${part.unit}`).join(' ')
       if (next !== lastValue) {
