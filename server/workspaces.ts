@@ -10,6 +10,7 @@ import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { dropWorkspaceFonts } from './fonts.ts'
 import { notifyUsers } from './userEvents.ts'
+import { avatarUrl } from '../shared/avatar.ts'
 import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
 import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
 import { isWorkspaceRole } from '../shared/types.ts'
@@ -478,7 +479,12 @@ async function acceptPendingInvitesFor(ws: WorkspaceRecord): Promise<void> {
 async function userRows(ids: string[]) {
   const rows = ids.length
     ? await db
-        .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+        .select({
+          id: authSchema.user.id,
+          name: authSchema.user.name,
+          email: authSchema.user.email,
+          image: authSchema.user.image,
+        })
         .from(authSchema.user)
         .where(inArray(authSchema.user.id, ids))
     : []
@@ -493,6 +499,7 @@ async function listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
       userId,
       name: users.get(userId)?.name ?? 'Unknown',
       email: users.get(userId)?.email ?? '',
+      image: avatarUrl(users.get(userId)?.image),
       role: m.role,
       addedAt: m.addedAt,
     }))
@@ -588,12 +595,24 @@ workspacesRouter.post('/:id/members', async (req, res) => {
   if (!email || !email.includes('@')) return res.status(400).json({ error: 'a valid email is required' })
   const role: WorkspaceRole = req.body?.role === 'admin' ? 'admin' : 'member'
   const [row] = await db
-    .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+    .select({
+      id: authSchema.user.id,
+      name: authSchema.user.name,
+      email: authSchema.user.email,
+      image: authSchema.user.image,
+    })
     .from(authSchema.user)
     .where(eq(authSchema.user.email, email))
   if (row) {
     if (!addMember(ws.id, row.id, role, req.user!.id)) return res.status(400).json({ error: 'already a member' })
-    const member: WorkspaceMember = { userId: row.id, name: row.name, email: row.email, role, addedAt: Date.now() }
+    const member: WorkspaceMember = {
+      userId: row.id,
+      name: row.name,
+      email: row.email,
+      image: avatarUrl(row.image),
+      role,
+      addedAt: Date.now(),
+    }
     return res.json({ member })
   }
   if (!unknownEmailInvitesAllowed())
