@@ -449,29 +449,54 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (pathSvg) pathSvg.setAttribute('data-v-path-hidden', '')
     }
   }
+  /* the topmost unlocked element under a point, a standalone's root included:
+     a double-click on a shape inside an imported group edits that shape */
+  function vectorAt(x, y) {
+    var stack = document.elementsFromPoint(x, y)
+    for (var i = 0; i < stack.length; i++) {
+      var el = stack[i]
+      if (el === document.documentElement || el === document.body) return null
+      if (!isLocked(el)) return el
+    }
+    return null
+  }
+  /* the one path a pen or imported shape's SVG draws: its direct path child
+     (a defs block beside it, for a gradient or clip, is fine) */
+  function shapePath(svg) {
+    var paths = []
+    for (var i = 0; i < svg.children.length; i++) if (svg.children[i].localName === 'path') paths.push(svg.children[i])
+    return paths.length === 1 ? paths[0] : null
+  }
   function pathInfo(d) {
-    var hit = d.selector ? document.querySelector(d.selector) : d.standalone ? document.body.firstElementChild : elementAt(d.x, d.y)
+    var hit = d.selector ? document.querySelector(d.selector) : vectorAt(d.x, d.y)
     var svg = hit && hit.closest('svg[data-doop-drawing="path"]')
-    var path = svg && svg.querySelector('path')
-    // Native pen paths have one direct path child. Other SVG artwork keeps its normal editor.
-    if (!svg || svg.parentElement !== document.body || !path || path.parentElement !== svg || svg.querySelectorAll('path').length !== 1 || isLocked(svg)) return null
+    var path = svg && shapePath(svg)
+    // Native pen paths and imported shapes have one direct path child. Other SVG artwork keeps its normal editor.
+    if (!svg || !path || (svg.parentElement && svg.parentElement.closest('svg')) || isLocked(svg)) return null
     var matrix = path.getScreenCTM()
     if (!matrix || Math.abs(matrix.a * matrix.d - matrix.b * matrix.c) < 1e-9) return null
     var probe = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     probe.setAttribute('viewBox', '0 0 1 1')
     probe.style.cssText = 'position:fixed!important;left:0!important;top:0!important;width:1px!important;height:1px!important;margin:0!important;padding:0!important;border:0!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;visibility:hidden!important'
-    var layout
+    var layout, page
     try {
       document.body.appendChild(probe)
-      layout = probe.getScreenCTM().inverse().multiply(matrix)
+      page = probe.getScreenCTM()
+      layout = page.inverse().multiply(matrix)
     } finally { probe.remove() }
     var css = getComputedStyle(path)
-    return {
+    var info = {
       selector: cssPath(svg), data: path.getAttribute('d'),
       matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
       layoutMatrix: [layout.a, layout.b, layout.c, layout.d, layout.e, layout.f],
       paint: { fill: css.fill, stroke: css.stroke, strokeWidth: css.strokeWidth },
     }
+    /* a shape inside a group: where the group's box is, in the same layout px */
+    if (svg.parentElement && svg.parentElement !== document.body) {
+      var box = svg.parentElement.getBoundingClientRect()
+      info.parentBox = { x: box.left / page.a, y: box.top / page.d, width: box.width / page.a, height: box.height / page.d }
+    }
+    return info
   }
 
   /* the topmost unlocked element under a design-space point: a click on a

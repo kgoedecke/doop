@@ -50,10 +50,15 @@ import { getIdentity, setName } from '../lib/identity'
 import {
   copyFrames,
   dropImages,
+  dropVectors,
   duplicateFrames,
   hasFrameClip,
+  isSvgFile,
   pasteFrameCentered,
   pasteImagesCentered,
+  pasteVectorsCentered,
+  svgMarkupOf,
+  vectorSources,
 } from '../lib/frameClipboard'
 import { clearHistory, redo, undo } from '../lib/history'
 import {
@@ -462,13 +467,23 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (isTypingTarget(e.target)) return
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
-      const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
-      if (images.length) {
+      const files = [...(e.clipboardData?.files ?? [])]
+      const vectors = files.filter(isSvgFile)
+      const images = files.filter((f) => f.type.startsWith('image/') && !isSvgFile(f))
+      const markup = files.length ? null : svgMarkupOf(e.clipboardData)
+      const failed = (err: Error) => {
+        setToast(translate('canvas.pasteImageFailed', { error: err.message }))
+        window.setTimeout(() => setToast(null), 4000)
+      }
+      if (vectors.length || markup) {
+        /* an SVG lands as editable shapes, not a picture */
         e.preventDefault()
-        pasteImagesCentered(canvasId, images).catch((err: Error) => {
-          setToast(translate('canvas.pasteImageFailed', { error: err.message }))
-          window.setTimeout(() => setToast(null), 4000)
-        })
+        const sources = markup ? Promise.resolve([{ name: 'Vector', markup }]) : vectorSources(vectors)
+        sources.then((s) => pasteVectorsCentered(canvasId, s)).catch(failed)
+        if (images.length) pasteImagesCentered(canvasId, images).catch(failed)
+      } else if (images.length) {
+        e.preventDefault()
+        pasteImagesCentered(canvasId, images).catch(failed)
       } else if (isCanvasClipboard(e.clipboardData) && hasElementClip()) {
         e.preventDefault()
         const state = useStore.getState()
@@ -523,12 +538,19 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (!carriesFiles(e) || e.defaultPrevented) return
       e.preventDefault()
       if (!canEditOpenCanvas(useStore.getState())) return
-      const images = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/'))
-      if (!images.length) return
-      dropImages(canvasId, images, { x: e.clientX, y: e.clientY }).catch((err: Error) => {
+      const files = [...(e.dataTransfer?.files ?? [])]
+      const vectors = files.filter(isSvgFile)
+      const images = files.filter((f) => f.type.startsWith('image/') && !isSvgFile(f))
+      const at = { x: e.clientX, y: e.clientY }
+      const failed = (err: Error) => {
         setToast(translate('canvas.dropImageFailed', { error: err.message }))
         window.setTimeout(() => setToast(null), 4000)
-      })
+      }
+      if (vectors.length)
+        vectorSources(vectors)
+          .then((s) => dropVectors(canvasId, s, at))
+          .catch(failed)
+      if (images.length) dropImages(canvasId, images, at).catch(failed)
     }
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragleave', onDragLeave)

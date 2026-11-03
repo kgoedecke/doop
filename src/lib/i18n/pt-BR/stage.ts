@@ -22,7 +22,7 @@ export const stage: Catalog['stage'] = {
   pathHandleOutgoing: 'Alça de saída do ponto {n}',
   pathPoint: 'Ponto {n} do caminho',
   savingPath: 'Salvando caminho…',
-  pathHint: 'Arraste pontos ou alças · Alt para soltar o encaixe',
+  pathHint: 'Arraste pontos ou alças · clique no contorno para adicionar um ponto · Alt para soltar o encaixe',
   makeCorner: 'Tornar canto',
   makeCurve: 'Tornar curva',
   deletePoint: 'Excluir ponto',

@@ -3,6 +3,7 @@ import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, ElementComment, Frame } from '../shared/types'
+import type { ImportedSvg } from '../src/lib/svgImport'
 
 declare global {
   interface Window {
@@ -23,6 +24,8 @@ declare global {
       undo: () => Promise<void>
       redo: () => Promise<void>
       pick: (el: { frameId: string; selector: string } | null) => void
+      /** an SVG file read the way a paste reads it, with the browser's computed styles */
+      importSvg: (markup: string, name: string) => ImportedSvg | null
     }
     delayedLayerProbe: MessageEvent | null
     heldMoveHits: MessageEvent[] | null

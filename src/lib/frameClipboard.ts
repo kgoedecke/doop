@@ -5,6 +5,7 @@ import { posthog } from './posthog'
 import { recordCreate, recordCreates } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
+import { importSvgInBrowser, looksLikeSvg } from './svgImport'
 
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
@@ -169,17 +170,10 @@ function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
 /** Horizontal breathing room between images dropped together. */
 const IMAGE_ROW_GAP = 40
 
-/** Upload images and place them as canvas elements laid out in a row,
- *  centered as a group on `at` (a screen point, the middle of the view when
- *  left out; one image lands dead-center). Sizes are read first so
- *  differently-sized images sit side by side, never stacked. */
-export async function uploadImageFrames(
-  canvasId: string,
-  files: File[],
-  { fallbackName = 'Pasted image', at }: { fallbackName?: string; at?: { x: number; y: number } } = {},
-): Promise<Frame[]> {
-  const dims = await Promise.all(files.map((f) => imageSize(f)))
-  const scaled = dims.map((d) => {
+/** Lay sizes out in a row centered as a group on `at` (a screen point, the
+ *  middle of the view when left out; one lands dead-center), in world px. */
+function rowSlots(sizes: { width: number; height: number }[], at?: { x: number; y: number }) {
+  const scaled = sizes.map((d) => {
     const scale = Math.min(1, MAX_PASTE_DIM / Math.max(d.width, d.height))
     return { width: Math.max(40, Math.round(d.width * scale)), height: Math.max(40, Math.round(d.height * scale)) }
   })
@@ -193,27 +187,106 @@ export async function uploadImageFrames(
   const cy = (point.y - vp.y) / vp.zoom
   const totalW = scaled.reduce((sum, s) => sum + s.width, 0) + IMAGE_ROW_GAP * (scaled.length - 1)
   let x = cx - totalW / 2
-  const placed = scaled.map((size) => {
-    const slot = { ...size, x }
+  return scaled.map((size) => {
+    const slot = { ...size, x: Math.round(x), y: Math.round(cy - size.height / 2) }
     x += size.width + IMAGE_ROW_GAP
     return slot
   })
+}
+
+/** Upload images and place them as canvas elements laid out in a row,
+ *  centered as a group on `at`. Sizes are read first so differently-sized
+ *  images sit side by side, never stacked. */
+export async function uploadImageFrames(
+  canvasId: string,
+  files: File[],
+  { fallbackName = 'Pasted image', at }: { fallbackName?: string; at?: { x: number; y: number } } = {},
+): Promise<Frame[]> {
+  const placed = rowSlots(await Promise.all(files.map((f) => imageSize(f))), at)
   return Promise.all(
     files.map(async (file, i) => {
       const slot = placed[i]
       if (!slot) throw new Error('image slot missing')
       const { url } = await api.uploadAsset(canvasId, file)
-      const name = file.name.replace(/\.[a-z0-9]+$/i, '').trim() || fallbackName
+      const name = fileStem(file.name) || fallbackName
       return api.createFrame(canvasId, {
         name,
         html: imageElementHtml(url, name),
         width: slot.width,
         height: slot.height,
-        x: Math.round(slot.x),
-        y: Math.round(cy - slot.height / 2),
+        x: slot.x,
+        y: slot.y,
       })
     }),
   )
+}
+
+function fileStem(name: string): string {
+  return name.replace(/\.[a-z0-9]+$/i, '').trim()
+}
+
+/* ---- SVG: a file's shapes become editable vector layers, not a picture ---- */
+
+/** An SVG on the clipboard or in a drop, by type or by name. */
+export function isSvgFile(file: File): boolean {
+  return file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
+}
+
+/** The text on the clipboard when it is an SVG document, as copying a file's
+ *  source or an icon from a design tool puts there. */
+export function svgMarkupOf(data: DataTransfer | null): string | null {
+  const text = data?.getData('text/plain') ?? ''
+  return looksLikeSvg(text) ? text : null
+}
+
+export interface VectorSource {
+  name: string
+  markup: string
+}
+
+export async function vectorSources(files: File[]): Promise<VectorSource[]> {
+  return Promise.all(files.map(async (file) => ({ name: fileStem(file.name) || 'Vector', markup: await file.text() })))
+}
+
+/** Import SVG sources as standalone vector elements in a row centered on `at`.
+ *  Nothing is uploaded: the shapes live in the element's own HTML. */
+export async function importVectorFrames(
+  canvasId: string,
+  sources: VectorSource[],
+  at?: { x: number; y: number },
+): Promise<Frame[]> {
+  const imported = sources.map((source) => importSvgInBrowser(source.markup, source.name))
+  const usable = imported.flatMap((result, i) => (result ? [{ result, name: sources[i]!.name }] : []))
+  if (!usable.length) throw new Error('The SVG has no shapes to import.')
+  const placed = rowSlots(
+    usable.map(({ result }) => ({ width: result.width, height: result.height })),
+    at,
+  )
+  return Promise.all(
+    usable.map(({ result, name }, i) => {
+      const slot = placed[i]!
+      return api.createFrame(canvasId, {
+        name,
+        html: result.html,
+        width: slot.width,
+        height: slot.height,
+        x: slot.x,
+        y: slot.y,
+      })
+    }),
+  )
+}
+
+export async function pasteVectorsCentered(canvasId: string, sources: VectorSource[]) {
+  const frames = await importVectorFrames(canvasId, sources)
+  posthog.capture('svg_pasted', { count: frames.length })
+  adoptImageFrames(frames)
+}
+
+export async function dropVectors(canvasId: string, sources: VectorSource[], at: { x: number; y: number }) {
+  const frames = await importVectorFrames(canvasId, sources, at)
+  posthog.capture('svg_dropped', { count: frames.length })
+  adoptImageFrames(frames)
 }
 
 export async function pasteImagesCentered(canvasId: string, files: File[]) {
