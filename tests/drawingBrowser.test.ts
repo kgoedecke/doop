@@ -249,7 +249,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.screenshot({ path: '/tmp/doop-drawing-desktop.png' })
   })
 
-  it('types literal multiline text without triggering shortcuts, and cancels empty or escaped drafts', async () => {
+  it('types literal multiline text without triggering shortcuts, keeps escaped text and drops empty drafts', async () => {
     await page.keyboard.press('t')
     await page.mouse.click(220, 200)
     await page.waitForSelector('textarea[data-drawing-input]')
@@ -264,15 +264,21 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(frame!.html).toContain('&lt;b&gt;Rectangle &amp; circle&lt;/b&gt;\nSecond line')
     await page.keyboard.press('t')
     await page.mouse.click(800, 400)
-    await page.keyboard.type('discard me')
+    await page.keyboard.type('keep me')
     await page.keyboard.press('Escape')
     expect(await page.$('textarea[data-drawing-input]')).toBeNull()
-    expect(saved).toHaveLength(1)
+    expect((await waitForFrames(2))[1]!.html).toContain('keep me')
+    expect(await page.evaluate(() => window.drawingHarness.state().tool)).toBe('select')
     await page.keyboard.press('t')
-    await page.mouse.click(800, 400)
-    await page.mouse.click(800, 500)
+    await page.mouse.click(800, 600)
+    await page.keyboard.press('Escape')
     expect(await page.$('textarea[data-drawing-input]')).toBeNull()
-    expect(saved).toHaveLength(1)
+    expect(saved).toHaveLength(2)
+    await page.keyboard.press('t')
+    await page.mouse.click(800, 600)
+    await page.mouse.click(800, 700)
+    expect(await page.$('textarea[data-drawing-input]')).toBeNull()
+    expect(saved).toHaveLength(2)
   })
 
   it('draws smooth Bézier curves by dragging anchors, including a curved closed path', async () => {

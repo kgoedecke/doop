@@ -77,8 +77,13 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       } else if (e.key === 'Escape') {
         e.preventDefault()
         e.stopImmediatePropagation()
-        cancel()
-        useStore.getState().setTool('select')
+        // Esc leaves text editing the way a blur does: what was typed stays
+        // (an empty draft still vanishes); a shape or path mid-gesture is dropped.
+        if (current.typing) finish()
+        else {
+          cancel()
+          useStore.getState().setTool('select')
+        }
       } else if (
         e.key === 'Enter' &&
         (current.drawing.tool === 'path' || (current.typing && (e.metaKey || e.ctrlKey)))

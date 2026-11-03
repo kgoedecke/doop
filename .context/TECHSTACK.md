@@ -213,7 +213,8 @@
 - Saves are serialized, tracked by undo/redo, and scoped to the originating canvas/page. Each
   completed gesture has its own undo entry. The Layers panel shows the drawing's `data-name`.
   Completed saves survive navigation; unfinished drafts are cancelled. Drawing shortcuts leave
-  native fields and rich-text editors alone, except for the drawing textarea's save/cancel keys.
+  native fields and rich-text editors alone, except for the drawing textarea's keys: ⌘/Ctrl+Enter,
+  Esc and a blur all commit the typed text (an empty draft is dropped).
 - `ElementMove.tsx` renders an unclipped drawing preview and highlights the destination frame.
   Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
   preserving layout and transforms and committing one undo step per drag.
