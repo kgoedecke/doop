@@ -146,6 +146,9 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
         })
       } else if (path === '/api/canvases/c/fonts') {
         await request.respond({ status: 200, contentType: 'application/json', body: '[]' })
+      } else if (path === '/api/auth/get-session') {
+        /* signed out, as the server says it: a `{}` session has no `user` */
+        await request.respond({ status: 200, contentType: 'application/json', body: 'null' })
       } else if (path.startsWith('/api/')) {
         await request.respond({ status: 200, contentType: 'application/json', body: '{}' })
       } else await request.continue()
