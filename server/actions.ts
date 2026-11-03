@@ -5,7 +5,7 @@ import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
 import { canvasPages } from '../shared/pages.ts'
-import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment, type CommentAnchorInput } from '../shared/comments.ts'
+import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
@@ -463,7 +463,13 @@ export function findComment(commentId: string): ElementComment | undefined {
  *  `data-doop-id`), on a frame as a whole at a design point, or at a world
  *  point on one page of the canvas. */
 type CommentAnchor =
-  | { frame: Frame; elementId?: string; snippet: string; point?: { x: number; y: number } }
+  | {
+      frame: Frame
+      elementId?: string
+      snippet: string
+      point?: { x: number; y: number }
+      elementOrigin?: { x: number; y: number }
+    }
   | { pageId: string; x: number; y: number }
 
 /** What a client knows about the element it is pointing at: the positional
@@ -475,6 +481,7 @@ export interface FrameAnchorInput {
   snippet?: unknown
   x?: unknown
   y?: unknown
+  elementOrigin?: unknown
 }
 
 export const MAX_ELEMENT_SELECTOR_CHARS = 1_000
@@ -570,6 +577,18 @@ export async function ensureElementId(
 async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): Promise<CommentAnchor> {
   const point =
     Number.isFinite(input.x) && Number.isFinite(input.y) ? { x: Number(input.x), y: Number(input.y) } : undefined
+  const origin = input.elementOrigin
+  const elementOrigin =
+    point &&
+    origin &&
+    typeof origin === 'object' &&
+    'x' in origin &&
+    'y' in origin &&
+    Number.isFinite(origin.x) &&
+    Number.isFinite(origin.y)
+      ? { x: Number(origin.x), y: Number(origin.y) }
+      : undefined
+  const placement = { ...(point ? { point } : {}), ...(elementOrigin ? { elementOrigin } : {}) }
   const snippet = String(input.snippet ?? '').slice(0, 400)
   const selector = String(input.selector ?? '').trim()
   const onElement = selector !== '' && selector !== FRAME_COMMENT_SELECTOR
@@ -578,11 +597,11 @@ async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): P
     hasElementId(frame.html, input.elementId) &&
     (await stampSaved(frame.id, input.elementId))
   ) {
-    return { frame, elementId: input.elementId, snippet }
+    return { frame, elementId: input.elementId, snippet, ...placement }
   }
   if (onElement) {
     const stamped = await ensureElementId(frame.id, selector, by, snippet || undefined)
-    if (stamped) return { frame: stamped.frame, elementId: stamped.id, snippet }
+    if (stamped) return { frame: stamped.frame, elementId: stamped.id, snippet, ...placement }
   }
   return { frame, snippet: '', ...(point ? { point } : {}) }
 }
@@ -605,13 +624,14 @@ export async function addElementComment(
  *  carry is absent, so a moved comment sheds its old frame, element or page. */
 function anchorFields(
   anchor: CommentAnchor,
-): Pick<ElementComment, 'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y'> {
+): Pick<ElementComment, 'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y' | 'elementOrigin'> {
   if ('frame' in anchor) {
     return {
       frameId: anchor.frame.id,
       ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
       snippet: anchor.snippet,
       ...anchor.point,
+      ...(anchor.elementOrigin ? { elementOrigin: anchor.elementOrigin } : {}),
     }
   }
   return { snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }
@@ -726,7 +746,15 @@ export async function moveComment(
   let moved = root
   list.forEach((c, i) => {
     if (c.id !== root.id && c.parentId !== root.id) return
-    const { frameId: _frameId, elementId: _elementId, pageId: _pageId, x: _x, y: _y, ...rest } = c
+    const {
+      frameId: _frameId,
+      elementId: _elementId,
+      elementOrigin: _elementOrigin,
+      pageId: _pageId,
+      x: _x,
+      y: _y,
+      ...rest
+    } = c
     const next: ElementComment = { ...rest, ...fields }
     list[i] = next
     if (c.id === root.id) moved = next
@@ -777,8 +805,14 @@ export function replyToComment(
 
 function replyAnchor({ root, frame }: { root: ElementComment; frame?: Frame }): CommentAnchor | undefined {
   if (frame) {
-    const point = isFrameComment(root) ? { point: { x: root.x, y: root.y } } : {}
-    return { frame, ...(root.elementId ? { elementId: root.elementId } : {}), snippet: root.snippet, ...point }
+    const point = root.x !== undefined && root.y !== undefined ? { point: { x: root.x, y: root.y } } : {}
+    return {
+      frame,
+      ...(root.elementId ? { elementId: root.elementId } : {}),
+      snippet: root.snippet,
+      ...point,
+      ...(root.elementOrigin ? { elementOrigin: root.elementOrigin } : {}),
+    }
   }
   return isCanvasComment(root) ? { pageId: root.pageId, x: root.x, y: root.y } : undefined
 }

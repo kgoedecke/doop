@@ -28,6 +28,7 @@ export interface CommentDropHit {
   /** the `data-doop-id` the element already carries, if any */
   elementId?: string
   snippet: string
+  rect?: { x: number; y: number }
 }
 
 /** A screen point in world px, the way the Stage maps its own presses. */
@@ -82,6 +83,7 @@ export async function resolveCommentDrop(
       selector: hit.selector,
       ...(hit.elementId ? { elementId: hit.elementId } : {}),
       snippet: hit.snippet,
+      ...(hit.rect ? { elementOrigin: { x: hit.rect.x, y: hit.rect.y } } : {}),
       x,
       y,
     }
@@ -97,6 +99,7 @@ async function probeFrame(frameId: string, x: number, y: number): Promise<Commen
     selector: hit.selector,
     ...(typeof hit.elementId === 'string' ? { elementId: hit.elementId } : {}),
     snippet: hit.snippet ?? '',
+    ...(hit.rect ? { rect: hit.rect } : {}),
   }
 }
 

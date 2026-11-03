@@ -32,7 +32,7 @@ import { DEFAULT_ROLE_ID } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
-import { FRAME_COMMENT_SELECTOR, isElementComment, isFrameComment } from '../../shared/comments'
+import { FRAME_COMMENT_SELECTOR, isElementComment, isFrameComment, elementCommentPosition } from '../../shared/comments'
 import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
@@ -805,7 +805,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
 
   /* keep comment pins glued to their elements: re-locate whenever the frame's
      html or the comment set changes, or a pin is moved onto another element */
-  const commentKey = comments.map((c) => c.id + (c.elementId ?? '')).join(',')
+  const commentKey = JSON.stringify(comments.map((c) => [c.id, c.elementId, c.x, c.y, c.elementOrigin]))
   useEffect(() => {
     if (!runtimeReady) return
     for (const c of comments) {
@@ -815,7 +815,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         '*',
       )
     }
-  }, [runtimeReady, html, commentKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runtimeReady, runtimeDocument, html, frame.width, frame.height, commentKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* the selection outline follows its element across html updates (streams,
      agent edits) the same way pins do */
@@ -1065,7 +1065,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
           return
         }
         const rect = ev.data.rect as { x: number; y: number; width: number } | null
-        setPinPos((m) => ({ ...m, [ev.data.reqId]: rect ? { x: rect.x + rect.width, y: rect.y } : null }))
+        setPinPos((m) => ({ ...m, [ev.data.reqId]: rect ? { x: rect.x, y: rect.y } : null }))
       }
     }
     window.addEventListener('message', onMsg)
@@ -1661,7 +1661,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             return (
               <div data-comment-ui className="pointer-events-none absolute inset-0">
                 {comments.map((c) => {
-                  const pos = isFrameComment(c) ? { x: c.x, y: c.y } : pinPos[c.id]
+                  const pos = isFrameComment(c) ? { x: c.x, y: c.y } : elementCommentPosition(c, pinPos[c.id])
                   if (!pos) return null
                   const open = openThread === c.id
                   const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
@@ -1671,8 +1671,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                       key={c.id}
                       thread={thread}
                       open={open}
-                      left={Math.min(Math.max(pos.x, 10), frame.width - 10)}
-                      top={Math.min(Math.max(pos.y, 10), frame.height - 10)}
+                      left={pos.x}
+                      top={pos.y}
                       onToggle={() => {
                         setProbe(null)
                         setComposing(false)
@@ -1714,8 +1714,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   <div
                     className={cn('pointer-events-auto absolute z-[7] origin-top-left', POPOVER_SCALE)}
                     style={{
-                      left: Math.min(Math.max(anchor.rect.x, 4), Math.max(4, frame.width - 60)),
-                      top: Math.max(anchor.rect.y, 2),
+                      left: Math.min(
+                        Math.max(composing ? (anchor.point?.x ?? anchor.rect.x) : anchor.rect.x, 4),
+                        Math.max(4, frame.width - 60),
+                      ),
+                      top: Math.max(composing ? (anchor.point?.y ?? anchor.rect.y) : anchor.rect.y, 2),
                     }}
                     onPointerDown={(e) => e.stopPropagation()}
                   >
@@ -1781,9 +1784,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                         initialText={composePrefill}
                         placeholder={anchor.selector === FRAME_COMMENT_SELECTOR ? t('stage.commentOnFrame') : undefined}
                         onSubmit={(text) => {
-                          /* the point rides along with an element too: should the
-                             element not be found in the saved HTML (a script made
-                             it), the comment lands on the frame there instead */
+                          /* Keep the clicked point until the element moves. If the
+                             element cannot be found in saved HTML, use a frame pin. */
                           api
                             .addComment(frame.id, {
                               selector: anchor.selector,
@@ -1792,6 +1794,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                               text,
                               x: anchor.point?.x ?? anchor.rect.x,
                               y: anchor.point?.y ?? anchor.rect.y,
+                              elementOrigin: { x: anchor.rect.x, y: anchor.rect.y },
                             })
                             .then(() => posthog.capture('element_comment_created'))
                             .catch((err) => {

@@ -384,6 +384,7 @@ export const comments = pgTable(
        stamp the element and fill `element_id`, never written again. */
     frameId: text('frame_id'),
     elementId: text('element_id'),
+    elementOrigin: jsonb('element_origin').$type<{ x: number; y: number }>(),
     selector: text('selector'),
     snippet: text('snippet').notNull(),
     pageId: text('page_id'),

@@ -31,21 +31,55 @@ export function isFrameComment(c: ElementComment): c is FrameComment {
 /** Where a thread is pinned after a move. On a frame, `selector` is the
  *  positional path of the element under the pointer in the live document
  *  (the server stamps its `data-doop-id` from it), `elementId` the id it
- *  already carries if any, and the point is where the pin was let go, which
- *  the frame-wide pin sits at when there is no element. Off every frame it is
+ *  already carries if any, and the point is where the pin was let go. `elementOrigin` records
+ *  the element top-left then, so a later move can fall back to its new top-left. Off every frame it is
  *  a page and a world point. The root and every reply take the new anchor
  *  together, so a thread never straddles two. */
 export type CommentAnchorInput =
-  | { frameId: string; selector?: string; elementId?: string; snippet?: string; x: number; y: number }
+  | {
+      frameId: string
+      selector?: string
+      elementId?: string
+      snippet?: string
+      x: number
+      y: number
+      elementOrigin?: { x: number; y: number }
+    }
   | { pageId: string; x: number; y: number }
 
 /** Whether a dropped anchor is where the thread already sits: the same
- *  element, or a frame-wide or canvas pin at the same point. */
+ *  element and placement, or a frame-wide or canvas pin at the same point. */
 export function sameCommentAnchor(c: ElementComment, anchor: CommentAnchorInput): boolean {
   if ('frameId' in anchor) {
     if (c.frameId !== anchor.frameId) return false
-    if (anchor.selector || anchor.elementId) return c.elementId !== undefined && c.elementId === anchor.elementId
+    if (anchor.selector || anchor.elementId)
+      return (
+        c.elementId !== undefined &&
+        c.elementId === anchor.elementId &&
+        c.x === anchor.x &&
+        c.y === anchor.y &&
+        c.elementOrigin?.x === anchor.elementOrigin?.x &&
+        c.elementOrigin?.y === anchor.elementOrigin?.y
+      )
     return c.elementId === undefined && c.x === anchor.x && c.y === anchor.y
   }
   return c.frameId === undefined && c.pageId === anchor.pageId && c.x === anchor.x && c.y === anchor.y
+}
+
+/** Keep the clicked point while the element stays put. Missing elements hide
+ * their pins; older comments and moved elements use the current top-left. */
+export function elementCommentPosition(
+  comment: ElementComment,
+  origin: { x: number; y: number } | null | undefined,
+): { x: number; y: number } | null {
+  if (!origin) return null
+  if (
+    comment.x !== undefined &&
+    comment.y !== undefined &&
+    comment.elementOrigin &&
+    Math.abs(origin.x - comment.elementOrigin.x) < 0.5 &&
+    Math.abs(origin.y - comment.elementOrigin.y) < 0.5
+  )
+    return { x: comment.x, y: comment.y }
+  return { x: origin.x, y: origin.y }
 }

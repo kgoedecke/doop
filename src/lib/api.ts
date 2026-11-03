@@ -535,12 +535,20 @@ export const api = {
     req(`/api/canvases/${canvasId}/cards/${cardId}/retry`, { method: 'POST' }),
   stopCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/stop`, { method: 'POST' }),
-  /** x/y: where a comment on the frame as a whole was left, in design px */
+  /** x/y: where the comment was left, in frame design px */
   /** a comment on an element (its positional selector, which the server turns into a stamped
    *  data-doop-id, or the id it already carries) or, with neither, on the frame at the point */
   addComment: (
     frameId: string,
-    input: { selector?: string; elementId?: string; snippet: string; text: string; x: number; y: number },
+    input: {
+      selector?: string
+      elementId?: string
+      snippet: string
+      text: string
+      x: number
+      y: number
+      elementOrigin?: { x: number; y: number }
+    },
   ) => req<ElementComment>(`/api/frames/${frameId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
   /** the stable id of the element a positional selector names, stamped into the frame if needed */
   ensureElementId: (frameId: string, selector: string, snippet?: string) =>
