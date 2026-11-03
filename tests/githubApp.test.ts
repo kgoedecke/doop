@@ -8,53 +8,69 @@ import {
   appJwt,
   installationForRepo,
   installUrl,
+  issueInstallPass,
   listReposAcross,
   oauthBounceUrl,
+  redeemInstallPass,
   signFindState,
-  signInstallPass,
   signInstallState,
   signOauthState,
+  userAccess,
   userInstallationIds,
   verifyFindState,
-  verifyInstallPass,
   verifyInstallState,
   verifyOauthState,
+  type InstallationGrant,
 } from '../server/githubApp.ts'
 import { Client, startServer, type Server } from './harness.ts'
 
 /**
  * GitHub App plumbing: the app JWT and the signed install handoff that keeps
  * guessable installation ids from being bound to canvases that never started
- * an install. Plus the REST surface's disabled-mode behavior — the app is
- * off unless its env vars are set, and every UI falls back to the PAT form.
+ * an install, and that grants only the repos GitHub lets the connecting USER
+ * reach (an org installation covers more than one member may see). Plus the
+ * REST surface's disabled-mode behavior — the app is off unless its env vars
+ * are set, and every UI falls back to the PAT form.
  */
+
+const grant = (installationId: string, ...names: string[]): InstallationGrant => ({
+  installationId,
+  repos: names.map((fullName) => ({ fullName, private: true })),
+})
 
 describe('install handoff signatures', () => {
   it('round-trips state and pass', () => {
     const state = signInstallState('canvas1', 'user1')
     expect(verifyInstallState(state)).toEqual({ canvasId: 'canvas1', userId: 'user1' })
-    const pass = signInstallPass('canvas1', ['12345'])
-    expect(verifyInstallPass(pass, 'canvas1')).toEqual({ installationIds: ['12345'] })
+    const grants = [grant('12345', 'me/site')]
+    const pass = issueInstallPass('canvas1', grants)
+    expect(redeemInstallPass(pass, 'canvas1')).toEqual(grants)
   })
 
-  it('carries every installation found for the user, capped and numeric only', () => {
-    const pass = signInstallPass('canvas1', ['1', '22', '333'])
-    expect(verifyInstallPass(pass, 'canvas1')).toEqual({ installationIds: ['1', '22', '333'] })
-    const many = Array.from({ length: 15 }, (_, i) => String(i + 1))
-    expect(verifyInstallPass(signInstallPass('canvas1', many), 'canvas1')?.installationIds).toHaveLength(10)
-    expect(() => signInstallPass('canvas1', [])).toThrow(/invalid id/)
-    expect(() => signInstallPass('canvas1', ['1,2'])).toThrow(/invalid id/)
+  it('stands for every grant found for the user, capped and numeric only, and keeps the repos off the URL', () => {
+    const grants = [grant('1', 'me/site'), grant('22', 'org/app', 'org/site'), grant('333')]
+    const pass = issueInstallPass('canvas1', grants)
+    expect(redeemInstallPass(pass, 'canvas1')).toEqual(grants)
+    expect(pass).not.toContain('org')
+    expect(pass.length).toBeLessThan(120)
+    const many = Array.from({ length: 15 }, (_, i) => grant(String(i + 1)))
+    expect(redeemInstallPass(issueInstallPass('canvas1', many), 'canvas1')).toHaveLength(10)
+    expect(() => issueInstallPass('canvas1', [])).toThrow(/invalid id/)
+    expect(() => issueInstallPass('canvas1', [grant('1,2')])).toThrow(/invalid id/)
   })
 
-  it('rejects tampering, wrong canvas, and expiry', () => {
-    const pass = signInstallPass('canvas1', ['12345'])
-    expect(verifyInstallPass(pass.slice(0, -2) + 'xx', 'canvas1')).toBeUndefined()
-    expect(verifyInstallPass(pass.replace('12345', '99999'), 'canvas1')).toBeUndefined()
-    expect(verifyInstallPass(pass, 'canvas2')).toBeUndefined()
-    const expired = signInstallPass('canvas1', ['12345'], Date.now() - 60 * 60_000)
-    expect(verifyInstallPass(expired, 'canvas1')).toBeUndefined()
+  it('rejects tampering, wrong canvas, expiry, and a nonce it never issued', () => {
+    const pass = issueInstallPass('canvas1', [grant('12345')])
+    expect(redeemInstallPass(pass.slice(0, -2) + 'xx', 'canvas1')).toBeUndefined()
+    expect(redeemInstallPass(pass, 'canvas2')).toBeUndefined()
+    const expired = issueInstallPass('canvas1', [grant('12345')], Date.now() - 60 * 60_000)
+    expect(redeemInstallPass(expired, 'canvas1')).toBeUndefined()
     /* a state is not a pass */
-    expect(verifyInstallPass(signInstallState('canvas1', 'user1'), 'canvas1')).toBeUndefined()
+    expect(redeemInstallPass(signInstallState('canvas1', 'user1'), 'canvas1')).toBeUndefined()
+    /* two passes for one canvas stand for their own grants */
+    const other = issueInstallPass('canvas1', [grant('777', 'other/repo')])
+    expect(redeemInstallPass(other, 'canvas1')).toEqual([grant('777', 'other/repo')])
+    expect(redeemInstallPass(pass, 'canvas1')).toEqual([grant('12345')])
   })
 
   it('keeps the oauth-bounce and find states distinct from install state and pass', () => {
@@ -64,12 +80,12 @@ describe('install handoff signatures', () => {
     expect(verifyFindState(find)).toEqual({ canvasId: 'canvas1', userId: 'user1' })
     /* the kinds must never be interchangeable */
     expect(verifyOauthState(signInstallState('canvas1', 'user1'))).toBeUndefined()
-    expect(verifyOauthState(signInstallPass('canvas1', ['12345']))).toBeUndefined()
-    expect(verifyInstallPass(oauth, 'canvas1')).toBeUndefined()
+    expect(verifyOauthState(issueInstallPass('canvas1', [grant('12345')]))).toBeUndefined()
+    expect(redeemInstallPass(oauth, 'canvas1')).toBeUndefined()
     expect(verifyInstallState(oauth)).toBeUndefined()
     expect(verifyFindState(signInstallState('canvas1', 'user1'))).toBeUndefined()
     expect(verifyInstallState(find)).toBeUndefined()
-    expect(verifyInstallPass(find, 'canvas1')).toBeUndefined()
+    expect(redeemInstallPass(find, 'canvas1')).toBeUndefined()
   })
 
   it('builds the authorize bounce URL from the app client id', () => {
@@ -103,8 +119,6 @@ function repoPage(names: string[]) {
 }
 
 describe('finding the installations a user already has', () => {
-  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
-
   afterEach(() => {
     vi.restoreAllMocks()
     unstubAllEnvs()
@@ -130,43 +144,74 @@ describe('finding the installations a user already has', () => {
     expect(await userInstallationIds('')).toBeUndefined()
   })
 
-  it('lists repos across installations and binds the one that grants the repo', async () => {
-    stubEnv('GITHUB_APP_ID', '123')
-    stubEnv('GITHUB_APP_PRIVATE_KEY', privateKey.export({ type: 'pkcs8', format: 'pem' }) as string)
-    const tokenFor = (url: URL) => ({
-      token: `tok-${url.pathname.split('/')[3]}`,
-      expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-    })
+  it('grants each installation only the repos GitHub shows the user, not everything the app holds', async () => {
     stubGithub({
-      '/app/installations/301/access_tokens': tokenFor,
-      '/app/installations/302/access_tokens': tokenFor,
-      '/installation/repositories': (_url, init) =>
-        new Headers(init?.headers).get('Authorization') === 'Bearer tok-301'
-          ? repoPage(['me/site', 'me/app'])
-          : repoPage(['org/app', 'Me/Site']),
+      '/login/oauth/access_token': () => ({ access_token: 'ghu_user' }),
+      '/user/installations': () => ({ installations: [{ id: 301 }, { id: 302 }] }),
+      /* 302 is an org installation covering more than this member may read */
+      '/user/installations/301/repositories': () => repoPage(['me/site', 'me/app']),
+      '/user/installations/302/repositories': () => repoPage(['org/app', 'Me/Site']),
+      '/installation/repositories': () => {
+        throw new Error('the installation token must not decide what a user sees')
+      },
     })
-    expect((await listReposAcross(['301', '302'])).map((r) => r.fullName)).toEqual(['me/site', 'me/app', 'org/app'])
-    expect(await installationForRepo(['301', '302'], 'org/app')).toBe('302')
-    expect(await installationForRepo(['301', '302'], 'ME/APP')).toBe('301')
-    expect(await installationForRepo(['301', '302'], 'someone/else')).toBeUndefined()
+    const grants = await userAccess('code1')
+    expect(grants).toEqual([grant('301', 'me/site', 'me/app'), grant('302', 'org/app', 'Me/Site')])
+    expect(listReposAcross(grants!).map((r) => r.fullName)).toEqual(['me/site', 'me/app', 'org/app'])
+    expect(installationForRepo(grants!, 'org/app')).toBe('302')
+    expect(installationForRepo(grants!, 'ME/APP')).toBe('301')
+    expect(installationForRepo(grants!, 'org/secret')).toBeUndefined()
+    expect(installationForRepo(grants!, 'someone/else')).toBeUndefined()
   })
 
-  it('keeps healthy installations working when another one is gone', async () => {
-    stubEnv('GITHUB_APP_ID', '123')
-    stubEnv('GITHUB_APP_PRIVATE_KEY', privateKey.export({ type: 'pkcs8', format: 'pem' }) as string)
-    /* 401 was uninstalled after the pass was issued: its token mint 404s */
+  it('narrows a fresh install to the one installation named, and refuses one the user cannot see', async () => {
     stubGithub({
-      '/app/installations/402/access_tokens': () => ({
-        token: 'tok-402',
-        expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-      }),
-      '/installation/repositories': () => repoPage(['org/app']),
+      '/login/oauth/access_token': () => ({ access_token: 'ghu_user' }),
+      '/user/installations': () => ({ installations: [{ id: 301 }, { id: 302 }] }),
+      '/user/installations/301/repositories': () => repoPage(['me/site']),
+      '/user/installations/302/repositories': () => repoPage(['org/app']),
     })
-    expect((await listReposAcross(['401', '402'])).map((r) => r.fullName)).toEqual(['org/app'])
-    expect(await installationForRepo(['401', '402'], 'org/app')).toBe('402')
-    /* the repo may have lived in the gone one: say so rather than "not part" */
-    await expect(installationForRepo(['401', '402'], 'me/site')).rejects.toThrow(/no longer exists/)
-    await expect(listReposAcross(['401'])).rejects.toThrow(/no longer exists/)
+    expect(await userAccess('code1', ['302'])).toEqual([grant('302', 'org/app')])
+    /* a guessed installation id from another account grants nothing */
+    expect(await userAccess('code1', ['999'])).toEqual([])
+  })
+
+  it('keeps the healthy installations when another one fails to list', async () => {
+    /* 302 was removed since the installations were listed: its repos 404 */
+    stubGithub({
+      '/login/oauth/access_token': () => ({ access_token: 'ghu_user' }),
+      '/user/installations': () => ({ installations: [{ id: 301 }, { id: 302 }] }),
+      '/user/installations/301/repositories': () => repoPage(['me/site']),
+    })
+    expect(await userAccess('code1')).toEqual([grant('301', 'me/site')])
+    /* the one installation a fresh install named is the one that failed */
+    expect(await userAccess('code1', ['302'])).toBeUndefined()
+  })
+
+  it('reports an unidentified user, or no listing succeeding, as undefined', async () => {
+    stubGithub({
+      '/login/oauth/access_token': () => ({ access_token: 'ghu_user' }),
+      '/user/installations': () => ({ installations: [{ id: 301 }] }),
+    })
+    /* no repositories route: GitHub answers 404, and the pass must not be issued on a guess */
+    expect(await userAccess('code1')).toBeUndefined()
+    vi.restoreAllMocks()
+    stubGithub({ '/login/oauth/access_token': () => ({ error: 'bad_verification_code' }) })
+    expect(await userAccess('stale')).toBeUndefined()
+    expect(await userAccess('')).toBeUndefined()
+  })
+
+  it('pages through a large installation', async () => {
+    const page = (n: number) => Array.from({ length: n }, (_, i) => `org/repo-${i}`)
+    stubGithub({
+      '/login/oauth/access_token': () => ({ access_token: 'ghu_user' }),
+      '/user/installations': () => ({ installations: [{ id: 301 }] }),
+      '/user/installations/301/repositories': (url) =>
+        repoPage(url.searchParams.get('page') === '1' ? page(100) : ['org/last']),
+    })
+    const grants = await userAccess('code1')
+    expect(grants?.[0]?.repos).toHaveLength(101)
+    expect(installationForRepo(grants!, 'org/last')).toBe('301')
   })
 })
 
@@ -220,7 +265,8 @@ beforeAll(async () => {
 afterAll(() => server?.stop())
 
 /** Just enough of GitHub for the connect round-trip: the OAuth code names the
- *  user ("has-installs" or "no-installs"), installation 555 grants me/site. */
+ *  user ("has-installs" or "no-installs"), installation 555 covers me/site
+ *  and org/secret, but the user may reach only me/site through it. */
 function startFakeGithub(): Promise<HttpServer> {
   const fake = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://fake')
@@ -236,10 +282,14 @@ function startFakeGithub(): Promise<HttpServer> {
         return json({ access_token: `ghu_${(JSON.parse(body) as { code: string }).code}` })
       if (url.pathname === '/user/installations')
         return json({ installations: auth === 'Bearer ghu_has-installs' ? [{ id: 555 }] : [] })
+      if (url.pathname === '/user/installations/555/repositories' && auth === 'Bearer ghu_has-installs')
+        return json(repoPage(['me/site']))
       if (url.pathname === '/app/installations/555/access_tokens')
         return json({ token: 'ghs_555', expires_at: new Date(Date.now() + 60 * 60_000).toISOString() })
-      if (url.pathname === '/installation/repositories' && auth === 'Bearer ghs_555') return json(repoPage(['me/site']))
-      if (url.pathname === '/repos/me/site') return json({ default_branch: 'main' })
+      if (url.pathname === '/installation/repositories' && auth === 'Bearer ghs_555')
+        return json(repoPage(['me/site', 'org/secret']))
+      if (url.pathname === '/repos/me/site' || url.pathname === '/repos/org/secret')
+        return json({ default_branch: 'main' })
       res.writeHead(404).end()
     })
   })
@@ -287,13 +337,20 @@ describe('app REST when configured', () => {
     expect(setup.status).toBe(302)
     const back = new URL(setup.headers.get('location')!, 'http://x')
     expect(back.pathname).toBe(`/c/${canvasId}`)
+    /* the pass names the canvas and a nonce; the grants stay in the server */
     const pass = back.searchParams.get('ghInstall')!
-    expect(verifyInstallPass(pass, canvasId)).toEqual({ installationIds: ['555'] })
+    expect(pass.split('.').slice(0, 2)).toEqual(['gh-pass', canvasId])
+    expect(pass).not.toContain('555')
 
+    /* the picker and the bind see what GitHub shows the user, not the
+       installation's wider list (org/secret) */
     const repos = await (
       await owner.get(`/api/canvases/${canvasId}/github/app/repos?pass=${encodeURIComponent(pass)}`)
     ).json()
     expect(repos).toEqual([{ fullName: 'me/site', private: true }])
+    const denied = await owner.post(`/api/canvases/${canvasId}/github`, { repo: 'org/secret', pass })
+    expect(denied.status).toBe(400)
+    expect((await denied.json()).error).toMatch(/not part of the GitHub App installation/)
     const conn = await owner.post(`/api/canvases/${canvasId}/github`, { repo: 'me/site', pass })
     expect(conn.status).toBe(200)
     expect(await conn.json()).toMatchObject({ repo: 'me/site', branch: 'main', via: 'app', installationId: '555' })

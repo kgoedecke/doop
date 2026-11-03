@@ -1,5 +1,5 @@
 import { env } from './env.ts'
-import { createHmac, createSign, timingSafeEqual } from 'node:crypto'
+import { createHmac, createSign, randomBytes, timingSafeEqual } from 'node:crypto'
 
 /**
  * GitHub App plumbing for the repo import source: the click-to-install flow
@@ -28,9 +28,18 @@ import { createHmac, createSign, timingSafeEqual } from 'node:crypto'
  * Install handoff integrity: installation ids are small guessable integers,
  * so binding one to a canvas requires proof the round-trip actually happened
  * for THAT canvas and that GitHub's user can access the installation. The
- * setup callback verifies both and issues `signInstallPass` (canvas +
- * installations), which the client must echo to list repos or create a
- * connection. HMAC over the auth secret, 15-minute expiry.
+ * setup callback verifies both and issues `issueInstallPass`, which the
+ * client must echo to list repos or create a connection. HMAC over the auth
+ * secret, 15-minute expiry.
+ *
+ * What a pass grants is what GITHUB'S USER may reach, not what the app may:
+ * an organization installation's token lists every repo the org granted the
+ * app, while a member of that org may be allowed into only some of them. So
+ * the callback asks GitHub, with the user's own one-shot token, for the repos
+ * the user can access through each installation (`userAccess`), keeps that
+ * snapshot server-side under a nonce the pass carries, and both the repo
+ * picker and the connect step read from the snapshot alone — the
+ * installation token is never used to decide what a user may see or bind.
  */
 
 function privateKey(): string | undefined {
@@ -124,6 +133,8 @@ function ghHeaders(token: string) {
 }
 
 const MAX_PAGES = 5 // 500 repos/installations — beyond that, narrow the install
+/** A pass names at most this many installations — the picker's fan-out stays bounded. */
+const MAX_PASS_INSTALLATIONS = 10
 
 /** Repos the installation grants — what the picker shows after install.
  *  Paginated: a 400-repo installation must not hide repos past page one
@@ -143,51 +154,36 @@ export async function listInstallationRepos(installationId: string): Promise<Ins
   return repos
 }
 
-/** Every repo across a pass's installations (a personal account and an org
- *  can each hold one), first installation first, each repo listed once. An
- *  installation removed since the pass was issued drops out on its own; only
- *  when none answers is the listing an error. */
-export async function listReposAcross(installationIds: string[]): Promise<InstallationRepo[]> {
-  const settled = await Promise.allSettled(installationIds.map(listInstallationRepos))
-  const lists = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []))
-  if (!lists.length) throw firstFailure(settled)
+/** One installation and the repos GitHub's user may reach through it. */
+export interface InstallationGrant {
+  installationId: string
+  repos: InstallationRepo[]
+}
+
+/** Every repo across a pass's grants (a personal account and an org can
+ *  each hold one), first installation first, each repo listed once. */
+export function listReposAcross(grants: InstallationGrant[]): InstallationRepo[] {
   const seen = new Set<string>()
-  return lists.flat().filter((r) => {
-    const key = r.fullName.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  return grants
+    .flatMap((g) => g.repos)
+    .filter((r) => {
+      const key = r.fullName.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
 }
 
-/** The installation among `installationIds` that grants `repo`, or
- *  undefined — app mode binds exactly what the user selected on GitHub. A
- *  failing installation is skipped; its error surfaces only when no other
- *  installation grants the repo. */
-export async function installationForRepo(installationIds: string[], repo: string): Promise<string | undefined> {
-  const failures: PromiseRejectedResult[] = []
-  for (const id of installationIds) {
-    try {
-      const repos = await listInstallationRepos(id)
-      if (repos.some((r) => r.fullName.toLowerCase() === repo.toLowerCase())) return id
-    } catch (reason) {
-      failures.push({ status: 'rejected', reason })
-    }
-  }
-  if (failures.length) throw firstFailure(failures)
-  return undefined
+/** The installation among `grants` through which the user may reach `repo`,
+ *  or undefined — app mode binds exactly what GitHub lets this user see. */
+export function installationForRepo(grants: InstallationGrant[], repo: string): string | undefined {
+  const wanted = repo.toLowerCase()
+  return grants.find((g) => g.repos.some((r) => r.fullName.toLowerCase() === wanted))?.installationId
 }
 
-function firstFailure(settled: PromiseSettledResult<unknown>[]): unknown {
-  const failed = settled.find((s) => s.status === 'rejected')
-  return failed?.reason ?? new Error('no GitHub App installation answered')
-}
-
-/** Installations of this app the OAuth code's user can access, or undefined
- *  when GitHub would not identify the user. The user token is used once and
- *  discarded. Installation ids are guessable integers, so this list is the
- *  only thing that may put an installation into a pass. */
-export async function userInstallationIds(code: string): Promise<string[] | undefined> {
+/** The OAuth code's user token, or undefined when GitHub would not identify
+ *  the user. Used once and discarded. */
+async function userToken(code: string): Promise<string | undefined> {
   if (!code) return undefined
   const res = await fetch(env.GITHUB_OAUTH_TOKEN_URL, {
     method: 'POST',
@@ -200,27 +196,73 @@ export async function userInstallationIds(code: string): Promise<string[] | unde
   })
   if (!res.ok) return undefined
   const { access_token } = (await res.json()) as { access_token?: string }
-  if (!access_token) return undefined
-  const ids: string[] = []
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const r = await fetch(`${env.GITHUB_API_URL}/user/installations?per_page=100&page=${page}`, {
-      headers: ghHeaders(access_token),
-    })
-    if (!r.ok) return undefined
-    const body = (await r.json()) as { installations: { id: number }[] }
-    ids.push(...body.installations.map((i) => String(i.id)))
-    if (body.installations.length < 100) break
-  }
-  return ids
+  return access_token || undefined
 }
 
-/** The setup callback's ownership proof for a fresh install: the app
- *  requests user authorization during install, so GitHub appends an OAuth
- *  code identifying WHO completed it, and that user must actually have the
- *  installation — without this, any valid state could bind a guessed
- *  installation id from a different account and read its private repo list. */
-export async function verifyInstallationOwner(code: string, installationId: string): Promise<boolean> {
-  return (await userInstallationIds(code))?.includes(installationId) ?? false
+/** Pages of a GitHub list the user token may read, undefined on any refusal. */
+async function userPages<T>(token: string, path: string, pick: (body: unknown) => T[]): Promise<T[] | undefined> {
+  const items: T[] = []
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const sep = path.includes('?') ? '&' : '?'
+    const r = await fetch(`${env.GITHUB_API_URL}${path}${sep}per_page=100&page=${page}`, { headers: ghHeaders(token) })
+    if (!r.ok) return undefined
+    const batch = pick(await r.json())
+    items.push(...batch)
+    if (batch.length < 100) break
+  }
+  return items
+}
+
+/** Installations of this app the user token can access. Installation ids
+ *  are guessable integers, so this list is the only thing that may put an
+ *  installation into a pass. */
+async function installationIdsOf(token: string): Promise<string[] | undefined> {
+  return userPages(token, '/user/installations', (body) =>
+    (body as { installations: { id: number }[] }).installations.map((i) => String(i.id)),
+  )
+}
+
+/** The repos the user token may reach through one installation — GitHub's
+ *  user-scoped listing, which an org member sees narrowed to their own
+ *  access, unlike the installation token's listing of everything the org
+ *  granted the app. */
+async function userReposIn(token: string, installationId: string): Promise<InstallationRepo[] | undefined> {
+  return userPages(token, `/user/installations/${encodeURIComponent(installationId)}/repositories`, (body) =>
+    (body as { repositories: { full_name: string; private: boolean }[] }).repositories.map((r) => ({
+      fullName: r.full_name,
+      private: r.private,
+    })),
+  )
+}
+
+/** Installations of this app the OAuth code's user can access, or undefined
+ *  when GitHub would not identify the user. */
+export async function userInstallationIds(code: string): Promise<string[] | undefined> {
+  const token = await userToken(code)
+  return token ? installationIdsOf(token) : undefined
+}
+
+/** What the OAuth code's user may reach: every installation of theirs (or
+ *  only those in `only`, for a fresh install naming one), each with the
+ *  repos GitHub lets THIS user see through it. An installation whose listing
+ *  fails (removed since the installations were listed, a passing GitHub
+ *  error) drops out so the others still open the picker; undefined when
+ *  GitHub would not identify the user or no listing succeeded; empty when
+ *  the user has no installation (or none of `only`). The callback's
+ *  ownership proof — an installation the user cannot see never becomes a
+ *  grant — and the only source of what a pass may list or bind. */
+export async function userAccess(code: string, only?: string[]): Promise<InstallationGrant[] | undefined> {
+  const token = await userToken(code)
+  if (!token) return undefined
+  const ids = await installationIdsOf(token)
+  if (!ids) return undefined
+  const chosen = (only ? ids.filter((id) => only.includes(id)) : ids).slice(0, MAX_PASS_INSTALLATIONS)
+  const listed = await Promise.allSettled(chosen.map((id) => userReposIn(token, id)))
+  const grants = chosen.flatMap((installationId, i) => {
+    const r = listed[i]
+    return r?.status === 'fulfilled' && r.value ? [{ installationId, repos: r.value }] : []
+  })
+  return chosen.length && !grants.length ? undefined : grants
 }
 
 /* ------------------------------------------------------------------ */
@@ -267,23 +309,35 @@ export function verifyInstallState(state: string): { canvasId: string; userId: s
   return fields ? { canvasId: fields[0]!, userId: fields[1]! } : undefined
 }
 
-/** A pass names at most this many installations — the URL stays short and
- *  the repo picker's fan-out stays bounded. */
-const MAX_PASS_INSTALLATIONS = 10
+/** The grants behind outstanding passes, by the nonce each pass carries.
+ *  In memory, like the installation token cache: a restart turns an open
+ *  picker into "handoff expired — connect again", which is the safe way
+ *  round. Pruned whenever a pass is issued. */
+const passGrants = new Map<string, { canvasId: string; grants: InstallationGrant[]; expiresAt: number }>()
 
 /** Issued by the setup callback after GitHub redirects back; the client
- *  echoes it to list the installations' repos and bind one to the canvas.
- *  Several installations when the user's existing ones were found at once. */
-export function signInstallPass(canvasId: string, installationIds: string[], now = Date.now()): string {
-  const ids = installationIds.slice(0, MAX_PASS_INSTALLATIONS)
-  if (!ids.length || /[.]/.test(canvasId) || !ids.every((id) => /^\d+$/.test(id))) throw new Error('invalid id')
-  return pack('gh-pass', [canvasId, ids.join(',')], now + STATE_TTL_MS)
+ *  echoes it to list the grants' repos and bind one to the canvas. The pass
+ *  itself carries only the canvas and a nonce — a grant can hold hundreds of
+ *  repo names, which no query string should. */
+export function issueInstallPass(canvasId: string, grants: InstallationGrant[], now = Date.now()): string {
+  const kept = grants.slice(0, MAX_PASS_INSTALLATIONS)
+  if (!kept.length || /[.]/.test(canvasId) || !kept.every((g) => /^\d+$/.test(g.installationId)))
+    throw new Error('invalid id')
+  for (const [nonce, entry] of passGrants) if (entry.expiresAt < now) passGrants.delete(nonce)
+  const nonce = randomBytes(16).toString('base64url')
+  const expiresAt = now + STATE_TTL_MS
+  passGrants.set(nonce, { canvasId, grants: kept, expiresAt })
+  return pack('gh-pass', [canvasId, nonce], expiresAt)
 }
 
-export function verifyInstallPass(pass: string, canvasId: string): { installationIds: string[] } | undefined {
+/** The grants a pass stands for, or undefined when it is forged, expired,
+ *  for another canvas, or issued before the server last started. */
+export function redeemInstallPass(pass: string, canvasId: string): InstallationGrant[] | undefined {
   const fields = unpack('gh-pass', pass, 2)
   if (!fields || fields[0] !== canvasId) return undefined
-  return { installationIds: fields[1]!.split(',') }
+  const entry = passGrants.get(fields[1]!)
+  if (!entry || entry.canvasId !== canvasId || entry.expiresAt < Date.now()) return undefined
+  return entry.grants
 }
 
 /** Goes out with the authorize link "Connect GitHub" opens first: the code
