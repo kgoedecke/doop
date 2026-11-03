@@ -1829,9 +1829,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       return (await pin.boundingBox())!
     }
     const home = await pinBox()
-    /* the pin hangs off the element's top-right corner, inside the frame */
-    expect(home.x + home.width / 2).toBeGreaterThan(box.x + 200)
-    expect(home.x + home.width / 2).toBeLessThan(box.x + 300)
+    /* a comment with no recorded origin sits at the element's top-left: the body's 8px margin, at zoom 2 */
+    expect(Math.abs(home.x + home.width / 2 - (box.x + 16))).toBeLessThan(8)
     let pin = home
 
     /* onto empty canvas, right of the frame: the ghost rides along, the pin hides */
