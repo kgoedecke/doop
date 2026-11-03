@@ -8,10 +8,22 @@ export const account: Catalog['account'] = {
   notifySaveFailed: 'Não foi possível salvar — tente de novo',
   verificationSendFailed: 'Não foi possível enviar esse e-mail',
   verificationSent: 'E-mail de verificação enviado',
+  photoSaveFailed: 'Não foi possível salvar essa foto',
+  photoSaved: 'Foto atualizada',
+  photoRemoved: 'Foto removida — suas iniciais voltaram',
+  photoTooLarge: 'Escolha uma foto com menos de 2 MB',
 
   profileTitle: 'Perfil',
   profileDescription:
     'Seu nome é a identidade mostrada nos cursores, no feed de atividades e em tudo o que você deixa para um agente. Os agentes veem a mudança em até um minuto.',
+  photoRow: 'Foto',
+  photoHint:
+    'Aparece no lugar das suas iniciais onde quer que seu rosto apareça. PNG, JPG, WebP ou GIF, com menos de 2 MB.',
+  uploadPhoto: 'Enviar foto',
+  changePhoto: 'Trocar foto',
+  removePhoto: 'Remover',
+  uploadingPhoto: 'Enviando…',
+  choosePhotoAria: 'Escolher uma foto de perfil',
   nameRow: 'Nome',
   saving: 'Salvando…',
   displayNameAria: 'Nome de exibição',

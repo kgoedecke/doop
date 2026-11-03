@@ -70,6 +70,7 @@ import {
 import { copyLayers, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
+import { avatarUrl } from '../../shared/avatar'
 import { posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
@@ -602,6 +603,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   }
 
   const me = getIdentity()
+  /* the face's photo comes from the account, not the room: our own presence
+     is never in the roster */
+  const { data: session } = authClient.useSession()
   const others = useMemo(
     () => Object.values(presences).filter((p) => p.clientId !== me.clientId),
     [presences, me.clientId],
@@ -712,7 +716,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
      it the whole window back */
   const stageBounds: StageInsets | undefined =
     docked && !uiHidden ? { top: DOCKED_BAR_H, right: chrome.right, bottom: 0, left: chrome.left } : undefined
-  const meFace = { name: me.name, color: presences[me.clientId]?.color ?? 'var(--brand)' }
+  const meFace = {
+    name: me.name,
+    image: avatarUrl(session?.user.image),
+    color: presences[me.clientId]?.color ?? 'var(--brand)',
+  }
 
   function openConnect() {
     posthog.capture('agent_connection_opened')
@@ -791,7 +799,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             className="mr-1 flex items-center min-[1181px]:hidden"
             title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
           >
-            <PresenceFace name={meFace.name} color={meFace.color} kind="user" />
+            <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
             <span className="-ml-[7px] flex items-center">
               <PeerAvatars others={others} />
             </span>
@@ -860,7 +868,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             className="mr-1 flex items-center max-sm:hidden"
             title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
           >
-            <PresenceFace name={meFace.name} color={meFace.color} kind="user" />
+            <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
             <span className="-ml-[7px] flex items-center">
               <PeerAvatars others={others} />
             </span>

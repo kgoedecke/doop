@@ -28,7 +28,7 @@ const MIME_EXT = {
 type AssetMime = keyof typeof MIME_EXT
 
 /* trust the bytes, not the sender: content sniffing decides the type */
-function sniffMime(buf: Buffer): AssetMime | undefined {
+export function sniffMime(buf: Buffer): AssetMime | undefined {
   if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
   if (buf.length >= 6 && buf.toString('latin1', 0, 4) === 'GIF8') return 'image/gif'

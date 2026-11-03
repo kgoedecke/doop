@@ -5,6 +5,8 @@ export interface Me {
   id: string
   name: string
   email: string
+  /** the profile photo's URL when one was uploaded (shared/avatar.ts) */
+  image?: string
   /** instance admin: renders the /admin entry point */
   admin: boolean
   /** 'team' while a member of a live paid workspace; the account menu's plan line */

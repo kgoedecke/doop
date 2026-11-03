@@ -7,6 +7,7 @@ import { isDesktopShell } from '../lib/shell'
 import { isTheme, useTheme } from '../lib/theme'
 import { LOCALES, LOCALE_NAMES, isLocale, useLocale, useT } from '../lib/i18n'
 import { colorFor } from '../../shared/types'
+import { avatarUrl } from '../../shared/avatar'
 import { themeOptions } from './ThemePicker'
 import { Badge } from './ui/badge'
 import { Avatar } from './ui/avatar'
@@ -46,6 +47,7 @@ export function AccountMenu({
   const { locale, setLocale } = useLocale()
   const t = useT()
   const name = session?.user.name ?? ''
+  const image = avatarUrl(session?.user.image)
 
   return (
     <DropdownMenu>
@@ -57,7 +59,13 @@ export function AccountMenu({
             shape="round"
             className="size-7 hover:bg-transparent focus-visible:ring-ink-faint data-[state=open]:ring-2 data-[state=open]:ring-ink-faint"
           >
-            <Avatar name={name} color={colorFor(session?.user.id ?? name)} size={28} className="shadow-none" />
+            <Avatar
+              name={name}
+              image={image}
+              color={colorFor(session?.user.id ?? name)}
+              size={28}
+              className="shadow-none"
+            />
           </IconButton>
         ) : (
           <Pressable
@@ -67,14 +75,22 @@ export function AccountMenu({
             focus="ring"
             className="flex-none rounded-full"
           >
-            <Avatar tone="ink" name={name} size={34} />
+            <Avatar tone="ink" name={name} image={image} size={34} />
           </Pressable>
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent side={side} align={align} width="lg">
         <DropdownMenuLabel className="px-2.5 pb-2.5 pt-2">
           <PersonRow
-            avatar={<Avatar name={name} color={colorFor(session?.user.id ?? name)} size={32} className="shadow-none" />}
+            avatar={
+              <Avatar
+                name={name}
+                image={image}
+                color={colorFor(session?.user.id ?? name)}
+                size={32}
+                className="shadow-none"
+              />
+            }
             name={name}
             detail={me?.email ?? session?.user.email}
           />

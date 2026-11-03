@@ -227,7 +227,7 @@ export function ShareModal({
             <PersonRow
               key={person.userId}
               className="px-[2px] py-1.5"
-              avatar={<Avatar name={person.name} size={28} />}
+              avatar={<Avatar name={person.name} image={person.image} size={28} />}
               name={person.userId === meId ? t('panels.shareYou', { name: person.name }) : person.name}
               detail={person.email}
               trailing={
