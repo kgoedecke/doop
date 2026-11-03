@@ -6,7 +6,7 @@ import { visibleGuides } from '../lib/guides'
 import { snapPointToGuides } from '../lib/snap'
 import { isTypingTarget } from '../lib/keys'
 import { useT } from '../lib/i18n'
-import { useTheme } from '../lib/theme'
+import { usePaper } from '../lib/paper'
 import {
   defaultDrawing,
   drawingBounds,
@@ -324,9 +324,9 @@ function DrawingPreview({
 }) {
   const zoom = useStore((s) => s.viewport.zoom)
   const t = useT()
-  const { resolved } = useTheme()
+  const paper = usePaper()
   const d = draft.drawing
-  const ink = drawingInk(draft.target, resolved)
+  const ink = drawingInk(draft.target, paper.tone)
   if (draft.typing)
     return (
       <textarea

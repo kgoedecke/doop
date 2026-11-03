@@ -3,7 +3,8 @@ import { api, errorMessage } from './api'
 import { recordCreate, recordUpdates, trackSave } from './history'
 import { currentPageCanvas } from './pages'
 import { useStore } from './store'
-import { getTheme, resolveTheme, type ResolvedTheme } from './theme'
+import { currentPaper } from './paper'
+import type { ResolvedTheme } from './theme'
 import type { DrawingTool } from './tools'
 import { paddedBounds, subpathsData } from './svgPath'
 
@@ -56,10 +57,11 @@ export const DRAWING_INK = '#202124'
 export const DRAWING_INK_ON_DARK = '#f2f2f2'
 
 /** A standalone element sits on the canvas paper, so its ink inverts with the
- *  theme. Inside a frame the document's own background applies, and the frame
- *  cannot know the viewer's theme, so it keeps the dark ink. */
-export function drawingInk(target: DrawingTarget, theme: ResolvedTheme): string {
-  return !target.frameId && theme === 'dark' ? DRAWING_INK_ON_DARK : DRAWING_INK
+ *  paper's tone (the theme, or the page's own colour). Inside a frame the
+ *  document's own background applies, and the frame cannot know the viewer's
+ *  theme, so it keeps the dark ink. */
+export function drawingInk(target: DrawingTarget, tone: ResolvedTheme): string {
+  return !target.frameId && tone === 'dark' ? DRAWING_INK_ON_DARK : DRAWING_INK
 }
 const names: Record<DrawingTool, string> = {
   rectangle: 'Rectangle',
@@ -180,7 +182,7 @@ export function drawingDocument(drawing: Drawing, ink = DRAWING_INK): string {
  *  gesture survive. Use the normal API for collaboration and tracked history. */
 export function saveDrawing(drawing: Drawing, target: DrawingTarget): Promise<void> {
   // Read now, not when the queue reaches this save: the ink matches the paper the person drew on.
-  const ink = drawingInk(target, resolveTheme(getTheme()))
+  const ink = drawingInk(target, currentPaper(target.pageId).tone)
   const save = async () => {
     const s = useStore.getState()
     // This gesture is complete. Navigation only cancels drafts; queued saves

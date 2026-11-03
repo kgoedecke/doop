@@ -215,6 +215,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `Stage.tsx` mounts frames in creation order and paints them by `z-index` inside an isolated
   layer, since moving an iframe in the DOM reloads it. Tests: `frameStack.test.ts`,
   `frameStackStore.test.ts`, `layersStack.test.tsx`.
+- Page background (`shared/pageBackground.ts`): a page may carry `background` (`#rrggbb`),
+  kept across page-list saves the way `startFrameId` is and copied with the page and the
+  canvas; `PUT /api/canvases/:id/pages/:pageId/background { color | null }` (edit role) and MCP
+  `set_page_background` set it, peers get the page list. `PagePanel.tsx` is the page's own
+  settings in the properties slot: with nothing selected, the rail's sliders icon opens it
+  (`pagePanelOpen`, kept until closed) in place of the frame Inspector, as Figma's Design panel
+  shows "Page" then; its Background `ColorField` edits the active page, one undo step
+  (`page-background` history entry).
+  `src/lib/paper.ts` resolves the paper a page shows (its colour, else the theme) and its tone;
+  `Stage` paints it with contrast dots and a standalone drawing takes its ink from that tone.
+  Tests: `pageBackground.test.ts`, the background cases in `storePages.test.ts`, `pages.test.ts`
+  and `guideEdits.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.

@@ -431,6 +431,11 @@ export const api = {
       `/api/canvases/${canvasId}/pages/${encodeURIComponent(pageId)}/flow-start`,
       { method: 'PUT', body: JSON.stringify({ frameId }) },
     ),
+  setPageBackground: (canvasId: string, pageId: string, color: string | null) =>
+    req<import('../../shared/types').CanvasPageInfo[]>(
+      `/api/canvases/${canvasId}/pages/${encodeURIComponent(pageId)}/background`,
+      { method: 'PUT', body: JSON.stringify({ color }) },
+    ),
   putGuide: (canvasId: string, guide: import('../../shared/types').CanvasGuide) =>
     req<import('../../shared/types').CanvasGuide>(`/api/canvases/${canvasId}/guides/${guide.id}`, {
       method: 'PUT',
