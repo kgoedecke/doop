@@ -629,6 +629,19 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     expect(await page.$('[data-frame-size]')).not.toBeNull()
   }, 20_000)
 
+  it("withholds the shell's grips from a standalone element whose shape is locked", async () => {
+    /* a lock on the shape (its Layers row) is a lock on its size: the
+       shell's grips would resize the shape with it */
+    await reset(
+      '<body data-doop-canvas-element="true" style="margin:0"><div data-doop-drawing="rectangle" data-doop-locked="" style="position:absolute;left:0;top:0;width:100%;height:100%;background:#ddd"></div></body>',
+    )
+    await page.waitForFunction(() => !document.querySelector('[data-frame-resize-handle]'))
+    await page.evaluate((s) => window.elementPanelHarness.select(s), 'body:nth-of-type(1) > div:nth-of-type(1)')
+    await new Promise((r) => setTimeout(r, 400))
+    expect(await page.$('[data-frame-resize-handle]')).toBeNull()
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+  }, 20_000)
+
   it('outlines a layer wider than its frame in full, hovered and selected, while the frame clips its content', async () => {
     /* the seeded frame is 600px wide: this box runs 300px past its right edge */
     await reset(HTML.replace('#box { width: 200px;', '#box { width: 900px;'))

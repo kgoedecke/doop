@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { isCanvasElement } from '../lib/drawing'
-import { standaloneSelector } from '../lib/layerEdits'
+import { isLayerLocked, standaloneSelector } from '../lib/layerEdits'
 import { drawingDropFrame, moveDrawing, type DrawingHit } from '../lib/drawingMove'
 import { useElementMove } from './ElementMove'
 import { FrameLabelLayer } from './FrameLabelLayer'
@@ -908,6 +908,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
      size it inside a shell that stays put */
   const shellSel = useMemo(() => standaloneSelector(frame), [frame])
   const shellPicked = !!wantedSel && wantedSel === shellSel
+  /* the shape's own layer lock holds the shell's grips too: a resize of the
+     shell is a resize of the locked shape */
+  const shellLocked = useMemo(() => !!shellSel && isLayerLocked(frame, shellSel), [frame, shellSel])
   /* Returning to a frame-only link (or closing the element panel) also
      removes the previous element's toolbar and outline. */
   useLayoutEffect(() => {
@@ -1815,6 +1818,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             (!wantedSel || shellPicked) &&
             !elementMove.moving &&
             !frame.locked &&
+            !shellLocked &&
             !readOnly &&
             !pathEdit &&
             !editing && (
