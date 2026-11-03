@@ -149,7 +149,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   loses is captured first, every `<canvas>` as its pixels, each `<img>` at the source the
   browser picked, a `blob:` image as its bytes, every stylesheet as the CSSOM holds it, adopted
   sheets included; `html: null` when a canvas is tainted, and the export goes to the server; `snapshotFrame` in
-  `frameBridge.ts`, the store's HTML when the frame is not mounted), `inlineDocument` turns it
+  `frameBridge.ts`, the store's HTML only when the frame is not mounted: a mounted frame that
+  does not answer within its 15s is unreadable, and the server renders), `inlineDocument` turns it
   into one SVG sized to the frame, every image, stylesheet (both `@import` forms, cycles cut)
   and font fetched and inlined as a data: URL (an SVG drawn as an image loads nothing itself;
   scripts, nested documents and `srcset` are dropped, a link's `media` kept),

@@ -334,8 +334,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       adoptedStyle.textContent = adoptedText
       ;(root.querySelector('head') || root).appendChild(adoptedStyle)
     }
+    /* cleaned now, while live and clone still match (a replay retry could
+       add its loader to the live document during the reads); the reads only
+       set src on image clones the cleaning leaves alone */
+    cleanClone(root)
     return Promise.all(reads).then(
-      function () { return '<!doctype html>\\n' + cleanClone(root).outerHTML },
+      function () { return '<!doctype html>\\n' + root.outerHTML },
       function () { return null },
     )
   }
@@ -1196,9 +1200,14 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:snapshot') {
       /* the document as it stands, script-made elements included, for an
          export of what the person sees */
-      exportSnapshot().then(function (html) {
+      var answer = function (html) {
         parent.postMessage({ type: 'doop:snapshot-result', reqId: d.reqId, html: html }, '*')
-      })
+      }
+      try {
+        exportSnapshot().then(answer, function () { answer(null) })
+      } catch (e) {
+        answer(null)
+      }
     }
     if (d.type === 'doop:locate') {
       var found = null
