@@ -166,7 +166,7 @@ export function Admin() {
             active={tab === 'feedback'}
             onClick={() => setTab('feedback')}
           >
-            Agent feedback
+            {t('admin.feedbackNav')}
           </DashNavItem>
         </nav>
       </AppRail>
@@ -220,7 +220,7 @@ export function Admin() {
                 <UsersIcon size="rail" /> {t('admin.accountsTab', { count: stats?.users ?? '…' })}
               </TabsTrigger>
               <TabsTrigger value="feedback">
-                <MessageSquareIcon size="rail" /> Feedback · {stats?.agentFeedback ?? '…'}
+                <MessageSquareIcon size="rail" /> {t('admin.feedbackTab', { count: stats?.agentFeedback ?? '…' })}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -363,6 +363,7 @@ function FeedbackPages({
   search: string
   onKind: (kind: KindFilter) => void
 }) {
+  const t = useT()
   const [reports, setReports] = useState<AdminAgentFeedback[]>([])
   const [page, setPage] = useState<AdminAgentFeedbackPage | null>(null)
   const [loading, setLoading] = useState(true)
@@ -386,29 +387,23 @@ function FeedbackPages({
 
   const counts = page?.counts
   const total = counts ? counts.issue + counts.feedback : null
-  if (total === 0 && !search)
-    return (
-      <p className="mt-7 text-copy text-ink-soft">
-        No agent has sent anything yet. Agents call report_issue when Doop gets in their way and share_feedback with
-        ideas.
-      </p>
-    )
+  if (total === 0 && !search) return <p className="mt-7 text-copy text-ink-soft">{t('admin.feedbackEmpty')}</p>
   return (
     <>
       <ToggleChipGroup
         className="mt-4 gap-1.5"
-        aria-label="Kind"
+        aria-label={t('admin.feedbackKind')}
         value={kind}
         onValueChange={(next) => next && onKind(next as KindFilter)}
       >
         <ToggleChipItem value="all" size="sm">
-          All · {total ?? '…'}
+          {t('admin.feedbackAll', { count: total ?? '…' })}
         </ToggleChipItem>
         <ToggleChipItem value="issue" size="sm">
-          Issues · {counts?.issue ?? '…'}
+          {t('admin.feedbackIssues', { count: counts?.issue ?? '…' })}
         </ToggleChipItem>
         <ToggleChipItem value="feedback" size="sm">
-          Ideas · {counts?.feedback ?? '…'}
+          {t('admin.feedbackIdeas', { count: counts?.feedback ?? '…' })}
         </ToggleChipItem>
       </ToggleChipGroup>
       {reports.length > 0 && (
@@ -416,13 +411,15 @@ function FeedbackPages({
           {reports.map((f) => (
             <div key={f.id} className="border-b border-line-soft p-3.5 last:border-b-0 md:px-[18px] md:py-[13px]">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={f.kind === 'issue' ? 'accent' : 'success'}>{f.kind === 'issue' ? 'issue' : 'idea'}</Badge>
+                <Badge tone={f.kind === 'issue' ? 'accent' : 'success'}>
+                  {f.kind === 'issue' ? t('admin.feedbackIssue') : t('admin.feedbackIdea')}
+                </Badge>
                 <Badge tone="outline">{f.category.replaceAll('_', ' ')}</Badge>
                 {f.tool && <span className="font-mono text-caption text-ink-soft">{f.tool}</span>}
               </div>
               <p className="mt-1.5 text-copy whitespace-pre-wrap text-ink">{f.message}</p>
               <MetaLine className="mt-1.5">
-                <span>{f.agentName ?? 'unnamed agent'}</span>
+                <span>{f.agentName ?? t('admin.unnamedAgent')}</span>
                 <span>{f.source === 'resident' ? 'Doop Agent' : (f.client ?? 'MCP')}</span>
                 {f.user && <span>{f.user.email}</span>}
                 {f.canvasId && <span className="font-mono">{f.canvasId}</span>}
@@ -433,27 +430,29 @@ function FeedbackPages({
         </div>
       )}
       {page && !loading && !failed && reports.length === 0 && (
-        <p className="mt-4 text-copy text-ink-soft">Nothing matches this search.</p>
+        <p className="mt-4 text-copy text-ink-soft">{t('admin.feedbackNoMatch')}</p>
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2.5 text-body text-ink-faint">
         {failed ? (
           <>
-            <span className="text-accent-ink">Could not load agent feedback.</span>
+            <span className="text-accent-ink">{t('admin.feedbackLoadFailed')}</span>
             <Button variant="ghost" size="sm" onClick={() => load(reports.at(-1))}>
-              Try again
+              {t('admin.tryAgain')}
             </Button>
           </>
         ) : loading ? (
-          <span>Loading…</span>
+          <span>{t('admin.loading')}</span>
         ) : (
           page?.hasMore && (
             <>
               <span>
-                Showing the newest {reports.length} of{' '}
-                {kind === 'all' ? total : kind === 'issue' ? counts?.issue : counts?.feedback}
+                {t('admin.showingNewest', {
+                  shown: reports.length,
+                  total: (kind === 'all' ? total : kind === 'issue' ? counts?.issue : counts?.feedback) ?? '…',
+                })}
               </span>
               <Button variant="ghost" size="sm" onClick={() => load(reports.at(-1))}>
-                Load older
+                {t('admin.loadOlder')}
               </Button>
             </>
           )

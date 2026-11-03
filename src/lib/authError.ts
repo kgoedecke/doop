@@ -33,9 +33,10 @@ export function authErrorCode(error: AuthClientError): string {
 /**
  * What to tell a person about a failed call. A platform error's own wording
  * ("Application not found") describes our deployment, not anything they did
- * or can fix, so it becomes a plain try-again instead.
+ * or can fix, so it becomes `unreachable`, a plain try-again in the person's
+ * language (`auth.unreachable`), instead.
  */
-export function authErrorMessage(error: AuthClientError, fallback: string): string {
-  if (foreign(error)) return 'doop could not be reached — it may be restarting. Try again in a moment.'
+export function authErrorMessage(error: AuthClientError, fallback: string, unreachable: string): string {
+  if (foreign(error)) return unreachable
   return typeof error.message === 'string' ? error.message : fallback
 }

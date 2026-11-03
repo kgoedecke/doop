@@ -41,7 +41,11 @@ const WANTED = new Set(['name', 'OS/2', 'head', 'fvar'])
 /* Decompression is bounded before it starts, so a small upload cannot expand
    into a stall or an out-of-memory: the tables read here are metadata (a
    name table is kilobytes), and WOFF2's single stream also carries the
-   glyphs, which a real font keeps well under this. */
+   glyphs, which a real font keeps well under this. A directory that names a
+   wanted table twice is refused before anything is inflated (`claim`), so the
+   work a WOFF can ask for is at most one inflate per wanted table — a
+   directory of 65,535 `name` entries over one compressed table would
+   otherwise inflate it 65,535 times. */
 const MAX_TABLE_BYTES = 1024 * 1024
 const MAX_WOFF2_STREAM_BYTES = 48 * 1024 * 1024
 
@@ -51,6 +55,14 @@ class FontFileError extends Error {}
 
 function fail(message: string): never {
   throw new FontFileError(message)
+}
+
+/** Takes a wanted table's slot in the directory; a second entry for the same
+ *  table is malformed, and refusing it is what bounds the inflate work. */
+function claim(tables: Tables, tag: string): boolean {
+  if (!WANTED.has(tag)) return false
+  if (tables.has(tag)) fail('the font file is malformed')
+  return true
 }
 
 function slice(buf: Buffer, offset: number, length: number): Buffer {
@@ -64,7 +76,7 @@ function sfntTables(buf: Buffer): Tables {
   for (let i = 0; i < count; i++) {
     const at = 12 + i * 16
     const tag = slice(buf, at, 4).toString('latin1')
-    if (WANTED.has(tag)) tables.set(tag, slice(buf, buf.readUInt32BE(at + 8), buf.readUInt32BE(at + 12)))
+    if (claim(tables, tag)) tables.set(tag, slice(buf, buf.readUInt32BE(at + 8), buf.readUInt32BE(at + 12)))
   }
   return tables
 }
@@ -75,7 +87,7 @@ function woffTables(buf: Buffer): Tables {
   for (let i = 0; i < count; i++) {
     const at = 44 + i * 20
     const tag = slice(buf, at, 4).toString('latin1')
-    if (!WANTED.has(tag)) continue
+    if (!claim(tables, tag)) continue
     const data = slice(buf, buf.readUInt32BE(at + 4), buf.readUInt32BE(at + 8))
     const origLength = buf.readUInt32BE(at + 12)
     if (origLength > MAX_TABLE_BYTES) fail('the font file is malformed')
@@ -117,7 +129,7 @@ function woff2Tables(buf: Buffer): Tables {
   const tables: Tables = new Map()
   let offset = 0
   for (const { tag, length } of entries) {
-    if (WANTED.has(tag)) tables.set(tag, slice(stream, offset, length))
+    if (claim(tables, tag)) tables.set(tag, slice(stream, offset, length))
     offset += length
   }
   return tables
