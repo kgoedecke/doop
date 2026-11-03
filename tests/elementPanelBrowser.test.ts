@@ -1048,6 +1048,28 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await frame.waitForFunction(() => (document.querySelector('#box') as HTMLElement).style.translate === '10px 5px')
   }, 15_000)
 
+  it('scrubs a fractional position onto whole values, zoomed in too', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+        body { margin: 0 } #box { width: 120px; height: 80px }
+      </style></head><body><div id="box" style="translate: 9.94px 5px">Move</div></body></html>`,
+      '#box',
+    )
+    await page.waitForFunction(
+      () => document.querySelector<HTMLInputElement>('[aria-label="X position"]')?.value === '9.94',
+    )
+    await page.evaluate(() => window.elementPanelHarness.setZoom(2.5))
+    const point = await startScrub('X position')
+    for (let i = 1; i <= 12; i++) await page.mouse.move(point.x + 3 + i * 0.5, point.y)
+    await frame.waitForFunction(() => (document.querySelector('#box') as HTMLElement).style.translate === '19px 5px')
+    await page.mouse.up()
+    await expect.poll(() => saved.html).toContain('translate: 19px 5px')
+    await page.waitForFunction(
+      () => document.querySelector<HTMLInputElement>('[aria-label="X position"]')?.value === '19',
+    )
+    await page.evaluate(() => window.elementPanelHarness.setZoom(1))
+  }, 15_000)
+
   it('scrubs live in both directions, saves, and undoes/redoes the edit', async () => {
     const frame = await seedScrubTarget()
     const original = saved.html
