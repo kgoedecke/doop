@@ -4,7 +4,6 @@ import { useT, type PlainMessageKey } from '../lib/i18n'
 import type { InstanceSettingsPatch, InstanceSettingsRefusal } from '../../shared/instanceSettings'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
 import { Switch } from './ui/switch'
-import { Badge } from './ui/badge'
 import { Callout } from './ui/callout'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 
@@ -79,38 +78,8 @@ export function SignInSettings() {
           <CardTitle>{t('admin.methodsTitle')}</CardTitle>
           <CardDescription>{t('admin.methodsDescription')}</CardDescription>
         </CardHeader>
-        <CardRow label={t('admin.providersLabel')}>
-          <Badge>{t('admin.providerEmail')}</Badge>
-          {providers.enabled && <Badge tone="brand">{t('admin.providerSso', { provider: sso })}</Badge>}
-          {social.map((name) => (
-            <Badge key={name}>{name}</Badge>
-          ))}
-        </CardRow>
         <CardRow
-          label={<label htmlFor="sso-auto-redirect">{t('admin.ssoAutoRedirect', { provider: sso })}</label>}
-          action={
-            <Switch
-              id="sso-auto-redirect"
-              checked={settings.ssoAutoRedirect}
-              disabled={busy || !!redirectBlocker}
-              onCheckedChange={(checked) => void save({ ssoAutoRedirect: checked })}
-            />
-          }
-        >
-          <span className="text-body text-ink-soft">
-            {t('admin.ssoAutoRedirectHint')} {t('admin.ssoAutoRedirectEscape')}
-            {redirectBlocker && <span className="block text-ink-faint">{redirectBlocker}</span>}
-          </span>
-        </CardRow>
-      </SettingsCard>
-
-      <SettingsCard>
-        <CardHeader>
-          <CardTitle>{t('admin.newAccountsTitle')}</CardTitle>
-          <CardDescription>{t('admin.newAccountsDescription')}</CardDescription>
-        </CardHeader>
-        <CardRow
-          label={<label htmlFor="email-password-signup">{t('admin.emailPasswordSignup')}</label>}
+          label={<label htmlFor="email-password-signup">{t('admin.providerEmail')}</label>}
           action={
             <Switch
               id="email-password-signup"
@@ -120,8 +89,44 @@ export function SignInSettings() {
             />
           }
         >
-          <span className="text-body text-ink-soft">{t('admin.emailPasswordSignupHint')}</span>
+          <span className="text-body text-ink-soft">
+            {t('admin.emailPasswordSignup')}
+            <span className="block text-ink-faint">{t('admin.emailPasswordSignupHint')}</span>
+          </span>
         </CardRow>
+        {social.map((name) => (
+          <CardRow key={name} label={name}>
+            <span className="text-body text-ink-soft">{t('admin.providerSocialHint')}</span>
+          </CardRow>
+        ))}
+        <CardRow
+          label={<label htmlFor="sso-auto-redirect">{t('admin.providerSso', { provider: sso })}</label>}
+          action={
+            providers.enabled && (
+              <Switch
+                id="sso-auto-redirect"
+                checked={settings.ssoAutoRedirect}
+                disabled={busy || !!redirectBlocker}
+                onCheckedChange={(checked) => void save({ ssoAutoRedirect: checked })}
+              />
+            )
+          }
+        >
+          <span className="text-body text-ink-soft">
+            {providers.enabled ? t('admin.ssoAutoRedirect') : t('admin.ssoNotConfigured')}
+            <span className="block text-ink-faint">
+              {providers.enabled && `${t('admin.ssoAutoRedirectHint')} ${t('admin.ssoAutoRedirectEscape')} `}
+              {redirectBlocker}
+            </span>
+          </span>
+        </CardRow>
+      </SettingsCard>
+
+      <SettingsCard>
+        <CardHeader>
+          <CardTitle>{t('admin.newAccountsTitle')}</CardTitle>
+          <CardDescription>{t('admin.newAccountsDescription')}</CardDescription>
+        </CardHeader>
         <CardRow
           label={t('admin.defaultWorkspace')}
           control={
