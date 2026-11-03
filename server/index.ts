@@ -25,6 +25,8 @@ import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
+import { fontsRouter } from './fontRoutes.ts'
+import { fontsForCanvas, hydrateFonts } from './fonts.ts'
 import {
   canEditCanvas,
   canManageCanvas,
@@ -38,12 +40,15 @@ import { auth, initAuth, syncAdmins, getUserName, loginProvidersConfig } from '.
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
+import { startMcpTokenPrune } from './mcpTokens.ts'
 import { integrationsRouter, relayDesktopCallback } from './integrations.ts'
 import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
+import { resealSecrets } from './secretBackfill.ts'
+import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
@@ -107,6 +112,7 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await webhooks.hydrateWebhooks()
+await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
 seed()
@@ -421,6 +427,9 @@ app.get('/a/:id.:ext', async (req, res) => {
     res.set('Content-Type', found.meta.mime)
     res.set('Cache-Control', 'public, max-age=31536000, immutable')
     res.set('X-Content-Type-Options', 'nosniff')
+    /* Fonts load with CORS from sandboxed frames with opaque origins.
+       Assets are public by unguessable id. */
+    res.set('Access-Control-Allow-Origin', '*')
     /* svg can script when opened as a document — neuter it; <img> embeds
        are unaffected */
     if (found.meta.mime === 'image/svg+xml')
@@ -830,6 +839,13 @@ function requireFrame(
 app.use('/api/local-agent', localAgentRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
+app.use('/api/fonts', fontsRouter)
+
+/* the font library a canvas designs with: its workspace's, or its owner's */
+app.get('/api/canvases/:id/fonts', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (canvas) res.json(fontsForCanvas(canvas))
+})
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)
@@ -1359,17 +1375,16 @@ app.post('/api/canvases/:id/github', async (req, res) => {
   try {
     /* app mode: a signed pass from the install round-trip stands in for the
        token, binding the GitHub App installation to this canvas */
-    let installationId: string | undefined
+    let grants: githubApp.InstallationGrant[] | undefined
     if (typeof req.body?.pass === 'string') {
-      const verified = githubApp.verifyInstallPass(req.body.pass, c.id)
-      if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
-      installationId = verified.installationId
+      grants = githubApp.redeemInstallPass(req.body.pass, c.id)
+      if (!grants) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
     }
     const conn = await github.createConnection({
       canvasId: c.id,
       repo: String(req.body?.repo ?? ''),
       token: typeof req.body?.token === 'string' ? req.body.token : undefined,
-      installationId,
+      grants,
       branch: typeof req.body?.branch === 'string' ? req.body.branch : undefined,
       createdBy: req.user!.id,
     })
@@ -1392,15 +1407,30 @@ app.post('/api/canvases/:id/github/app/start', (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
   if (!githubApp.appEnabled()) return res.status(400).json({ error: 'the GitHub App is not configured' })
-  res.json({ url: githubApp.installUrl(githubApp.signInstallState(c.id, req.user!.id)) })
+  /* authorize first: it finds installations the user already has, so a new
+     canvas skips the install screen (see the setup callback) */
+  res.json({ url: githubApp.oauthBounceUrl(githubApp.signFindState(c.id, req.user!.id)) })
+})
+
+/* "Add repositories on GitHub" from the repo picker: a plain link the
+   picker opens in a new tab, straight to the install screen with a state
+   for this canvas, so a fresh install on another account returns here too. */
+app.get('/api/canvases/:id/github/app/install', (req, res) => {
+  const c = requireDurableCanvas(req, res, req.params.id)
+  if (!c) return
+  if (!githubApp.appEnabled()) return res.status(400).json({ error: 'the GitHub App is not configured' })
+  res.redirect(githubApp.installUrl(githubApp.signInstallState(c.id, req.user!.id)))
 })
 
 /* GitHub's post-install redirect (the app's callback URL, with "request
    user authorization during installation" on). Verifies the state minted at
    start AND that the OAuth code's user actually owns the installation —
    installation ids are guessable, and without the ownership proof a valid
-   state could bind someone else's installation. Then swaps state for a pass
-   and returns to the canvas, where the import modal shows the repo picker. */
+   state could bind someone else's installation. The same user token lists
+   the repos GitHub lets THIS user reach through it (an org installation
+   covers more than one member may see); that snapshot is what the pass
+   stands for. Then swaps state for the pass and returns to the canvas,
+   where the import modal shows the repo picker. */
 app.get('/api/github/app/setup', async (req, res) => {
   const rawState = String(req.query.state ?? '')
   const code = String(req.query.code ?? '')
@@ -1408,18 +1438,33 @@ app.get('/api/github/app/setup', async (req, res) => {
      homepage redirect reads as "nothing happened" */
   const fail = (canvasId: string, reason: string) =>
     res.redirect(`/c/${encodeURIComponent(canvasId)}?ghError=${encodeURIComponent(reason)}`)
-  const succeed = (canvasId: string, installationId: string) =>
+  const succeed = (canvasId: string, grants: githubApp.InstallationGrant[]) =>
     res.redirect(
-      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.signInstallPass(canvasId, installationId))}`,
+      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.issueInstallPass(canvasId, grants))}`,
     )
+
+  /* return leg of Connect's authorize step: the installations this GitHub
+     user already has go straight to the repo picker; none, on to install */
+  const find = githubApp.verifyFindState(rawState)
+  if (find) {
+    if (!code) return fail(find.canvasId, 'GitHub authorization was cancelled — connect again when you’re ready')
+    try {
+      const grants = await githubApp.userAccess(code)
+      if (grants?.length) return succeed(find.canvasId, grants)
+      if (grants) return res.redirect(githubApp.installUrl(githubApp.signInstallState(find.canvasId, find.userId)))
+    } catch {
+      /* fall through to the error redirect */
+    }
+    return fail(find.canvasId, 'GitHub couldn’t confirm your account — try connecting again')
+  }
 
   /* return leg of the already-installed bounce: the authorize round-trip
      produced the code the configure screen didn't */
   const oauth = githubApp.verifyOauthState(rawState)
   if (oauth) {
     try {
-      if (await githubApp.verifyInstallationOwner(code, oauth.installationId))
-        return succeed(oauth.canvasId, oauth.installationId)
+      const grants = await githubApp.userAccess(code, [oauth.installationId])
+      if (grants?.length) return succeed(oauth.canvasId, grants)
     } catch {
       /* fall through to the error redirect */
     }
@@ -1438,7 +1483,8 @@ app.get('/api/github/app/setup', async (req, res) => {
   if (!code) return res.redirect(githubApp.oauthBounceUrl(githubApp.signOauthState(state.canvasId, installationId)))
 
   try {
-    if (await githubApp.verifyInstallationOwner(code, installationId)) return succeed(state.canvasId, installationId)
+    const grants = await githubApp.userAccess(code, [installationId])
+    if (grants?.length) return succeed(state.canvasId, grants)
   } catch {
     /* fall through to the error redirect */
   }
@@ -1448,13 +1494,9 @@ app.get('/api/github/app/setup', async (req, res) => {
 app.get('/api/canvases/:id/github/app/repos', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
-  const verified = githubApp.verifyInstallPass(String(req.query.pass ?? ''), c.id)
-  if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
-  try {
-    res.json(await githubApp.listInstallationRepos(verified.installationId))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not list the installation’s repositories' })
-  }
+  const grants = githubApp.redeemInstallPass(String(req.query.pass ?? ''), c.id)
+  if (!grants) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
+  res.json(githubApp.listReposAcross(grants))
 })
 
 app.delete('/api/canvases/:id/github/:connId', async (req, res) => {
@@ -2439,6 +2481,18 @@ server.listen(PORT, () => {
       )
       .catch((err) => console.error('[comments] element id backfill failed:', err))
   }
+  /* credentials stored before encryption (or under a rotated-out key) are
+     sealed now; reads open either form, so serving need not wait for it */
+  if (encryptionConfigured()) {
+    resealSecrets(db)
+      .then(({ resealed, failed }) => {
+        if (resealed || failed)
+          console.log(`[secrets] ${resealed} credential(s) sealed, ${failed} left for the next boot`)
+      })
+      .catch((err) => console.error('[secrets] reseal failed:', err))
+  } else {
+    console.warn('⟡ secrets           SECRETS_ENCRYPTION_KEYS unset — user credentials are stored unencrypted')
+  }
   console.log(`⟡ mcp endpoint      http://localhost:${PORT}/mcp`)
   console.log(`⟡ websocket         ws://localhost:${PORT}/ws`)
   /* The Doop Agent failing silently is the one "why is nothing happening?"
@@ -2457,5 +2511,6 @@ server.listen(PORT, () => {
   )
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()
+  startMcpTokenPrune()
   for (const extension of extensions) extension.startWorker?.()
 })

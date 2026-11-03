@@ -10,6 +10,7 @@ export const workspace: Catalog['workspace'] = {
   backToCanvases: 'Voltar aos canvases',
   workspace: 'Workspace',
   people: 'Pessoas',
+  fonts: 'Fontes',
   planBilling: 'Plano e cobrança',
   billing: 'Cobrança',
   general: 'Geral',

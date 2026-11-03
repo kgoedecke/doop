@@ -39,6 +39,26 @@
   generated into `src/components/ui`.
 - `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
+- Design inspiration (`server/inspiration.ts`, `search_inspiration` in MCP and the resident agent):
+  One Page Love's API (`ONEPAGELOVE_API_KEY`; unset, the tool tells agents to brief without an
+  exemplar). `/v1/search` resolves the query to taxonomy filters, `/v1/inspirations?status=live`
+  returns the sites with style, colour, fonts and sections, dropping the broadest filter until
+  something matches; six-hour in-memory cache for the free plan's 1,000 requests a day. Every
+  result credits One Page Love and the authors with the entry's link (their terms). Tests:
+  `inspiration.test.ts`.
+- Agent feedback (`server/agentFeedback.ts`, `shared/agentFeedback.ts`): agents talk to the Doop
+  team through two MCP tools, which the resident agent has under the same names. `report_issue`
+  (kind `issue`: `bug`, `tool_error`, `confusing`, `missing_capability`, `other`) is for where Doop
+  got in their way; `share_feedback` (kind `feedback`: `idea`, `improvement`, `praise`, `other`) is
+  for what would help or what worked. Each takes a message and optionally the tool and canvas
+  involved. Both land in `agent_feedback` with the account and the MCP client's name. `/mcp` is
+  stateless (a fresh server per request), so `handleMcpRequest` remembers the `initialize`
+  clientInfo name per credential (a hash of the bearer) and falls back to the OAuth application's
+  name. Reports go to PostHog as `agent_feedback_reported` with `kind` and share a cap of 20 an hour
+  per account. Instance admins read them at `GET /api/admin/agent-feedback` (Admin → Agent
+  feedback), 50 at a time with `kind`, `q` (searched on the server, account email included) and a
+  `before=<at>:<id>` cursor for older pages. They never reach the humans on a canvas. Tests:
+  `agentFeedback.test.ts`, `agentFeedbackHttp.test.ts` (separate HTTP requests).
 - Claude Code on the desktop (`shared/localAgent.ts`, `server/localAgent.ts`,
   `desktop/src-tauri/src/claude.rs`): the model menu is the CLI's aliases (`CLAUDE_MODEL_ALIASES`),
   which `claude --model` resolves to the newest model the installed CLI knows, plus a pinned
@@ -71,6 +91,27 @@
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
+- Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
+  per workspace (used on its canvases) and one per person (used on their personal canvases),
+  managed in Settings → Fonts and Workspace → Fonts (`FontLibrary.tsx`, strings in the `fonts`
+  catalog) over `/api/fonts`
+  (`?workspace=` for a workspace's, members only); `GET /api/canvases/:id/fonts` is a canvas's.
+  Uploads are TTF/OTF/WOFF/WOFF2 up to 10 MB, one face per file; `fontFile.ts` reads format,
+  family (name id 16, else 1), weight (a variable font's `wght` range) and style from the bytes,
+  with no font library dependency (zlib for WOFF, brotli for WOFF2), every decompression bounded
+  before it starts (1 MB per metadata table, 48 MB for a WOFF2 stream). Bytes are an ordinary `/a/`
+  asset, so removing a font never breaks a frame that loads it; re-uploading a face replaces it
+  (writes queue per library, so racing uploads of one face leave one row).
+  A frame stays self-contained: `withFontFaces` adds the `@font-face` rules for the library
+  families its CSS names to one `<style data-doop-fonts>` block in its own HTML (only adds, never
+  removes). `actions.createFrame` / `updateFrame` / the final append chunk run it on every write,
+  and `FrameView`'s save path runs it too, so a family picked from the Design panel's "Custom
+  fonts" group renders at once. Every renderer that reads frame HTML (screenshots, PDF
+  export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
+  `get_canvas` and as a system block in the resident agent (`libraryBrief`): name the family,
+  never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
+  `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
+  healed document, so a cut-off script never runs).
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size, pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
@@ -137,7 +178,9 @@
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker
   for transparent canvas chrome; no separate shape schema or protocol is required. Pasted and
   dropped images (`src/lib/frameClipboard.ts`) are standalone elements too: one
-  `<img data-doop-drawing="image">` named after its file. The Layers
+  `<img data-doop-drawing="image">` named after its file. A standalone text or path takes its ink
+  from the theme the person drew under (`drawingInk`: the dark theme's `--ink`, else `DRAWING_INK`),
+  since it sits on the canvas paper; inside a frame the dark ink stays. The Layers
   panel shows one as a single layer at the root (no frame row, no name label on the canvas) and
   its rows drag between frames and the root: a drop on another frame's row moves the element
   there (`transferLayer` in `src/lib/layerEdits.ts`, removing a standalone's shell), a drop on
@@ -170,7 +213,8 @@
 - Saves are serialized, tracked by undo/redo, and scoped to the originating canvas/page. Each
   completed gesture has its own undo entry. The Layers panel shows the drawing's `data-name`.
   Completed saves survive navigation; unfinished drafts are cancelled. Drawing shortcuts leave
-  native fields and rich-text editors alone, except for the drawing textarea's save/cancel keys.
+  native fields and rich-text editors alone, except for the drawing textarea's keys: ⌘/Ctrl+Enter,
+  Esc and a blur all commit the typed text (an empty draft is dropped).
 - `ElementMove.tsx` renders an unclipped drawing preview and highlights the destination frame.
   Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
   preserving layout and transforms and committing one undo step per drag.
@@ -260,6 +304,31 @@
   (`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, provider client IDs/secrets) come from the
   environment (`.env`, documented in `.env.example`); never committed.
 
+- Credentials kept for users are encrypted at rest (`server/secretBox.ts`): `sealedText` columns
+  in `server/db/schema.ts` (model-account keys and tokens, integration and GitHub tokens,
+  Linear/Slack installs, webhook secrets) are AES-256-GCM sealed on write and opened on read, so
+  call sites see plaintext. Keys come from `SECRETS_ENCRYPTION_KEYS` (`id:base64`, first one
+  active; dev and tests use a built-in key, unset in production stores plaintext and warns). After
+  boot `resealSecrets` (`server/secretBackfill.ts`) seals legacy plaintext and re-seals rows under
+  a rotated-out key. Never filter on a sealed column; each write uses a fresh IV. better-auth seals
+  social sign-in tokens itself (`account.encryptOAuthTokens`). Sync-key secrets, APNs tokens and
+  MCP OAuth tokens stay plaintext (looked up by value). Tests: `secretBox.test.ts`.
+
+- Reading a failed auth call (`src/lib/authError.ts`): only our own API sends a string
+  `error.code`, so `authErrorCode` is what `AuthPage.tsx` matches on and `authErrorMessage`
+  is what it shows. Railway's edge answers in its own shape whenever it cannot reach the
+  container (every deploy restart) — `status`, a NUMERIC `code`, `message`, `request_id` — and
+  better-fetch spreads that body into `error`, numeric code and all, so a code match that called
+  a string method on it threw inside the submit handler and left the form silent. A code that is
+  not a string matches nothing, and such a message (`Application failed to respond`) becomes a
+  plain try-again rather than being shown. Tests: `authError.test.ts`,
+  `authFormBrowser.test.ts` (the real form in Chromium, against that exact edge body).
+
+- MCP OAuth (better-auth `mcp()` plugin): 1h access tokens, 30-day refresh tokens
+  (`MCP_REFRESH_TOKEN_TTL_S` in `server/mcpTokens.ts`; the plugin neither rotates nor revokes
+  them). A daily prune deletes expired token rows but keeps the newest per user and client,
+  since `allowance.ts` reads any row as proof an agent once connected.
+
 ## 6. Build and Dependency Management
 
 - Canvas access: `canvasRole` in `server/access.ts` gives owners, members and workspace members
@@ -326,6 +395,9 @@
   (the "on" chip wears the drifting colour beam from `src/styles.css`) and a composer. A prompt makes
   a canvas named after it (`src/lib/homePrompt.ts`), queues it as the first board card asking for N
   drafts, and opens the canvas; a card that cannot queue rides along as the canvas composer's draft.
+  The hero's top-right close button asks to "Hide Prompt Box" before hiding the whole prompt area.
+  `src/lib/homePreferences.ts` remembers the choice in this browser under `doop.home.prompt-box-hidden`;
+  Settings → General → Show Prompt Box restores it. The preference also updates other open tabs.
   Import makes a canvas and opens it with `?import=1`, which `CanvasPage` turns into the import
   picker. `GET /api/canvases` adds `people` (owner, then members) for the tiles' avatar stacks.
   The rail is `src/components/AppRail.tsx`, mounted by Home, Automations, Integrations, Community,
@@ -353,3 +425,8 @@ sync and GitHub repositories; frame exports offer PNG/JPG with progress feedback
 Figma, Canva and PSD are deferred. Migration 0019 is reserved for the deferred Figma integration;
 the OSS journal skips it while retaining the shared migration tags and timestamps for 0020–0022.
 Gemini cloud workers remain an operator-managed, opt-in pilot; see `docs/gemini-cloud-pilot.md`.
+
+The shared font library serves public font assets with CORS so sandboxed frames can load them.
+Migrations 0040 (agent feedback) and 0041 (custom fonts) retain their shared timestamps; their OSS
+snapshots omit the deferred Figma `integrations.refresh_token` column, as does the credential
+encryption backfill. Desktop downloads use the platform-neutral `https://doop.design/download` page.

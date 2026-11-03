@@ -1,4 +1,8 @@
 import { env } from './env.ts'
+import { createHash } from 'node:crypto'
+import { eq } from 'drizzle-orm'
+import { db } from './db/index.ts'
+import * as authSchema from './db/auth-schema.ts'
 import { canvasPages, samePages } from '../shared/pages.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -7,6 +11,8 @@ import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
 import { store } from './store.ts'
+import { fontsForCanvas } from './fonts.ts'
+import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import * as actions from './actions.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
@@ -26,7 +32,14 @@ import {
 } from './pdfExport.ts'
 import { primeImage } from './previews.ts'
 import { DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
-import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
+import {
+  describeInspiration,
+  INSPIRATION_NO_MATCH_NOTE,
+  INSPIRATION_UNAVAILABLE_NOTE,
+  INSPIRATION_USAGE_NOTE,
+  inspirationSearchEnabled,
+  searchInspiration,
+} from './inspiration.ts'
 import { ESCAPED_HTML_NOTE, looksEscapedHtml } from './escapedHtml.ts'
 import { describeSyncFlow, getSyncFlow } from './ingest.ts'
 import * as assets from './assets.ts'
@@ -43,6 +56,14 @@ import * as allowance from './allowance.ts'
 import { previewOf, previewToolMeta, registerFramePreview, type CanvasPreview } from './chatgptApp.ts'
 import * as persist from './db/persist.ts'
 import type { FrameApproval } from '../shared/types.ts'
+import { recordAgentFeedback } from './agentFeedback.ts'
+import {
+  AGENT_IDEA_CATEGORIES,
+  AGENT_ISSUE_CATEGORIES,
+  MAX_AGENT_FEEDBACK_CHARS,
+  type AgentFeedbackCategory,
+  type AgentFeedbackKind,
+} from '../shared/agentFeedback.ts'
 
 const INSTRUCTIONS = `Doop is a shared multiplayer design canvas: humans and AI agents design together in real time. Canvases contain frames — artboards that render complete HTML documents live for everyone viewing.
 
@@ -64,7 +85,8 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 ${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
 - Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
-- Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.`
+- Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.
+- Problems with Doop itself: when a Doop tool errors, misbehaves or lacks something you need, or the guide leaves you guessing, call report_issue with what you tried and what happened, then carry on. Ideas for making Doop better for agents, or something that worked well, go to share_feedback. Both reach the Doop team, not the humans on the canvas.`
 
 function extensionGuideLines(): string {
   const lines = extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
@@ -247,8 +269,14 @@ function frameSummary(f: {
 
 /** owner is the connecting user's display name (for attribution); ownerId is
  *  their user id — canvases the agent creates or lists are scoped to it, the
- *  same isolation the web UI gets. */
-export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
+ *  same isolation the web UI gets. clientName names the connecting client
+ *  when this server did not see its initialize (handleMcpRequest builds one
+ *  server per stateless request). */
+export function buildMcpServer(
+  owner?: string,
+  ownerId?: string,
+  clientName?: () => Promise<string | undefined>,
+): McpServer {
   const actorFrom = (agent_name?: string) => actions.resolveActor({ name: agent_name, kind: 'agent', owner })
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
      through the same canvasRole gate as browser sessions, so an agent
@@ -352,18 +380,19 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
     {
       title: 'Search design inspiration',
       description:
-        'Search a curated gallery of real, well-designed live websites by category and SEE thumbnails of each, with pre-distilled style facts (one-line mood north star, named palette, fonts). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages: query the page archetype plus the register you want ("law firm landing page, editorial", "dark fintech dashboard"), not just the product noun. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
+        'Search One Page Love\'s hand-curated gallery of real, well-designed live websites and SEE thumbnails of each, with their tags (style, colour, fonts, genre, sections). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages. Query the genre plus the look you want in the words the catalog is tagged with ("saas landing page, dark minimal", "finance, editorial", "portfolio, typographic", "pricing, illustrative"), not the product noun alone. The catalog is landing pages and one-page sites, not app screens: for a dashboard or app UI, query the product\'s register ("saas, minimal") and take the type, colour and density from it. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       inputSchema: {
         query: z
           .string()
-          .describe('Page archetype + register, e.g. "grocery delivery landing page, warm", "dark fintech dashboard"'),
+          .describe('Genre + look, e.g. "saas landing page, dark minimal", "restaurant, retro", "finance, editorial"'),
         count: z.number().min(1).max(6).optional().describe('Exemplars to return, default 4'),
         canvas_id: z.string().optional().describe('The canvas you are designing on (lets human feedback reach you)'),
         agent_name: agentName,
       },
     },
     async ({ query, count, canvas_id, agent_name }) => {
+      if (!inspirationSearchEnabled()) return text({ ok: true, results: [], note: INSPIRATION_UNAVAILABLE_NOTE })
       const now = Date.now()
       const limitKey = ownerId ?? agent_name
       const hits = (searchHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
@@ -373,7 +402,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       try {
         const results = await searchInspiration(query, count ?? 4)
         if (results.length === 0)
-          return text({ ok: true, results: [], note: `No inspiration for "${query}" — try a broader category.` })
+          return text({ ok: true, results: [], note: `No inspiration for "${query}" — ${INSPIRATION_NO_MATCH_NOTE}.` })
         const thumbs = await Promise.all(results.map((r) => imageSearch.fetchThumb(r.thumb_url)))
         type ResultBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
         const content: ResultBlock[] = [
@@ -473,7 +502,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       title: 'Get a canvas and its frames',
       _meta: previewToolMeta('Reading the canvas…', 'Canvas loaded'),
       description:
-        'Get a canvas: its name and frames with position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so any human feedback waiting for you is delivered with the result.',
+        'Get a canvas: its name and frames with position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so the result can tell you when human feedback is waiting (claim it with get_feedback).',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -487,6 +516,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
       arrive(canvas_id, agent_name)
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
+      const library = fontsForCanvas(c)
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
@@ -501,6 +531,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
               'This canvas has style guides. Call get_guidelines for each relevant one BEFORE designing — every frame must follow them.',
             ]
           : []),
+        ...(library.length ? [libraryBrief(library)] : []),
         ...(refs.length
           ? [
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
@@ -532,6 +563,7 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
               htmlBytes: r.html.length,
               pinnedBy: r.pinnedBy,
             })),
+            ...(library.length ? { fonts: describeLibrary(library) } : {}),
             ...(flow.length ? { flow } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),
@@ -901,6 +933,80 @@ export function buildMcpServer(owner?: string, ownerId?: string): McpServer {
         note: "These requests are now assigned to you. Address each one (a human request overrides the don't-touch-others'-frames etiquette), review with get_frame_screenshot, and update your set_status.",
       })
     },
+  )
+
+  /* report_issue and share_feedback: both go to the Doop team, never to the canvas */
+  const tellDoopTeam = async (
+    kind: AgentFeedbackKind,
+    input: { category: AgentFeedbackCategory; message: string; tool?: string; canvas_id?: string; agent_name?: string },
+  ) => {
+    if (input.canvas_id && !canvasFor(input.canvas_id, 'view')) return noCanvas(input.canvas_id)
+    const saved = await recordAgentFeedback({
+      kind,
+      source: 'mcp',
+      category: input.category,
+      message: input.message,
+      tool: input.tool,
+      agentName: input.agent_name,
+      client: server.server.getClientVersion()?.name ?? (await clientName?.()),
+      canvasId: input.canvas_id,
+      userId: ownerId,
+    })
+    if (!saved.ok) return err(saved.error)
+    return text({ ok: true, id: saved.id, note: 'Thanks — the Doop team reads these. Carry on with your task.' })
+  }
+  const teamMessageFields = {
+    tool: z.string().max(80).optional().describe('The Doop tool involved, if any (e.g. "edit_frame_html").'),
+    canvas_id: z.string().optional().describe('The canvas you were working on, if any.'),
+    agent_name: agentName.optional(),
+  }
+
+  server.registerTool(
+    'report_issue',
+    {
+      title: 'Report a problem with Doop',
+      description:
+        "Tell the Doop team where Doop itself got in your way, so it can be fixed: a tool that errored or did something other than its description says, a guide or tool description that left you guessing, a capability you needed and did not have, or a workaround you had to invent. Call it whenever you struggle with Doop — after a retry fails, when you fall back to a workaround, or when you give up on part of a task — then carry on with the task. Ideas and suggestions that did not block you go to share_feedback instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be specific: what you tried (tool and arguments in brief), what happened, what you expected. Never include secrets.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        category: z
+          .enum(AGENT_ISSUE_CATEGORIES)
+          .describe(
+            'bug: a tool misbehaved · tool_error: a tool returned an error you could not get past · confusing: the guide or a description was unclear · missing_capability: you needed something Doop cannot do · other',
+          ),
+        message: z
+          .string()
+          .min(1)
+          .max(MAX_AGENT_FEEDBACK_CHARS)
+          .describe('What you tried, what happened, and what you expected or needed instead.'),
+        ...teamMessageFields,
+      },
+    },
+    (input) => tellDoopTeam('issue', input),
+  )
+
+  server.registerTool(
+    'share_feedback',
+    {
+      title: 'Share an idea or feedback about Doop',
+      description:
+        "Tell the Doop team how Doop could work better for agents like you: a tool you wish existed, a parameter or result field that would have saved you calls, a workflow that felt clumsy, or something that worked especially well and should stay. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue instead. It does not reach the humans on the canvas and does not change any canvas; for the human's design feedback use save_decision. Be concrete: what you were doing and what would have helped. Never include secrets.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        category: z
+          .enum(AGENT_IDEA_CATEGORIES)
+          .describe(
+            'idea: something new Doop could offer · improvement: a change to something that exists · praise: something that worked well · other',
+          ),
+        message: z
+          .string()
+          .min(1)
+          .max(MAX_AGENT_FEEDBACK_CHARS)
+          .describe('What you were doing and what would have helped (or what worked well).'),
+        ...teamMessageFields,
+      },
+    },
+    (input) => tellDoopTeam('feedback', input),
   )
 
   server.registerTool(
@@ -1852,6 +1958,38 @@ export function isAnonymousDiscovery(body: unknown): boolean {
   return typeof method === 'string' && ANONYMOUS_METHODS.has(method)
 }
 
+/* Every HTTP request gets a fresh server, so the name a client sent in
+   initialize is gone by the time it calls a tool. Remember it per credential
+   (a hash of the bearer, never the bearer itself); for OAuth clients the
+   registered application name also survives a restart. */
+const MAX_REMEMBERED_CLIENTS = 10_000
+const clientNamesByCredential = new Map<string, string>()
+const oauthClientNames = new Map<string, string | undefined>()
+
+const credentialKey = (bearer: string) => createHash('sha256').update(bearer).digest('hex')
+
+function rememberClientName(bearer: string, name: unknown) {
+  if (typeof name !== 'string' || !name.trim()) return
+  const key = credentialKey(bearer)
+  clientNamesByCredential.delete(key)
+  clientNamesByCredential.set(key, name.trim().slice(0, 80))
+  if (clientNamesByCredential.size > MAX_REMEMBERED_CLIENTS) {
+    const oldest = clientNamesByCredential.keys().next().value
+    if (oldest) clientNamesByCredential.delete(oldest)
+  }
+}
+
+async function oauthClientName(clientId: string): Promise<string | undefined> {
+  if (oauthClientNames.has(clientId)) return oauthClientNames.get(clientId)
+  const [app] = await db
+    .select({ name: authSchema.oauthApplication.name })
+    .from(authSchema.oauthApplication)
+    .where(eq(authSchema.oauthApplication.clientId, clientId))
+  if (oauthClientNames.size >= MAX_REMEMBERED_CLIENTS) oauthClientNames.clear()
+  oauthClientNames.set(clientId, app?.name)
+  return app?.name
+}
+
 export async function handleMcpRequest(req: Request, res: Response) {
   if (req.method !== 'POST') {
     res.status(405).json({
@@ -1869,7 +2007,7 @@ export async function handleMcpRequest(req: Request, res: Response) {
      sending a headless client into OAuth discovery helps nobody. Everything
      else falls through to the OAuth gate below. */
   const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1]
-  let session: { userId?: string | null } | null
+  let session: { userId?: string | null; clientId?: string | null } | null
   if (bearer && isAgentKeySecret(bearer)) {
     session = await verifyAgentKey(bearer)
     if (!session) {
@@ -1932,6 +2070,7 @@ export async function handleMcpRequest(req: Request, res: Response) {
     const msgs = Array.isArray(req.body) ? req.body : [req.body]
     for (const msg of msgs) {
       if (msg?.method === 'initialize') {
+        if (bearer) rememberClientName(bearer, msg.params?.clientInfo?.name)
         capture(session.userId, 'custom_agent_connected', {
           agent_client: msg.params?.clientInfo?.name,
           agent_client_version: msg.params?.clientInfo?.version,
@@ -1942,7 +2081,11 @@ export async function handleMcpRequest(req: Request, res: Response) {
     }
   }
   const owner = session?.userId ? await getUserName(session.userId) : undefined
-  const server = buildMcpServer(owner, session?.userId ?? undefined)
+  const oauthClientId = session?.clientId
+  const clientName = async () =>
+    (bearer ? clientNamesByCredential.get(credentialKey(bearer)) : undefined) ??
+    (oauthClientId ? await oauthClientName(oauthClientId) : undefined)
+  const server = buildMcpServer(owner, session?.userId ?? undefined, clientName)
   /* Stateless, and plain JSON rather than an SSE stream per response: no
      tool here sends notifications mid-call, so a stream carries nothing a
      JSON body does not, and JSON is what every client — including ChatGPT's

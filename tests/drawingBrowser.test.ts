@@ -249,7 +249,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.screenshot({ path: '/tmp/doop-drawing-desktop.png' })
   })
 
-  it('types literal multiline text without triggering shortcuts, and cancels empty or escaped drafts', async () => {
+  it('types literal multiline text without triggering shortcuts, keeps escaped text and drops empty drafts', async () => {
     await page.keyboard.press('t')
     await page.mouse.click(220, 200)
     await page.waitForSelector('textarea[data-drawing-input]')
@@ -264,15 +264,21 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(frame!.html).toContain('&lt;b&gt;Rectangle &amp; circle&lt;/b&gt;\nSecond line')
     await page.keyboard.press('t')
     await page.mouse.click(800, 400)
-    await page.keyboard.type('discard me')
+    await page.keyboard.type('keep me')
     await page.keyboard.press('Escape')
     expect(await page.$('textarea[data-drawing-input]')).toBeNull()
-    expect(saved).toHaveLength(1)
+    expect((await waitForFrames(2))[1]!.html).toContain('keep me')
+    expect(await page.evaluate(() => window.drawingHarness.state().tool)).toBe('select')
     await page.keyboard.press('t')
-    await page.mouse.click(800, 400)
-    await page.mouse.click(800, 500)
+    await page.mouse.click(800, 600)
+    await page.keyboard.press('Escape')
     expect(await page.$('textarea[data-drawing-input]')).toBeNull()
-    expect(saved).toHaveLength(1)
+    expect(saved).toHaveLength(2)
+    await page.keyboard.press('t')
+    await page.mouse.click(800, 600)
+    await page.mouse.click(800, 700)
+    expect(await page.$('textarea[data-drawing-input]')).toBeNull()
+    expect(saved).toHaveLength(2)
   })
 
   it('draws smooth Bézier curves by dragging anchors, including a curved closed path', async () => {
@@ -522,6 +528,54 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       await page.keyboard.press('Escape')
     },
   )
+
+  it("resizes an edited standalone path through its shell's grips", async () => {
+    /* a standalone path's root fills its shell and wears only the shell's
+       grips: an edit must leave it filling the shell, or the grips would
+       grow the frame around a path that stays put */
+    const frame: Frame = {
+      id: 'pen',
+      updatedBy: 'User',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'Pen',
+      x: 30,
+      y: 30,
+      width: 140,
+      height: 100,
+      createdAt: 0,
+      updatedAt: 0,
+      html: '<body data-doop-canvas-element="true" style="margin:0"><svg id="pen" data-doop-drawing="path" viewBox="0 0 140 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;margin:0"><path d="M 10 50 C 30 0 80 100 120 50" stroke="black" fill="none" stroke-width="2" /></svg></body>',
+    }
+    await seedFrames([frame])
+    const rect = await visibleDrawing('Pen')
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { count: 2, delay: 60 })
+    const first = await editorPoint(0)
+    await drag(first, [first[0] - 30, first[1] + 40])
+    await page.waitForFunction((before) => window.drawingHarness.state().frames[0]!.html !== before, {}, frame.html)
+    await page.waitForFunction(() => !document.body.textContent?.includes('Saving path…'))
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[data-path-editor]'))
+    const edited = saved[0]!
+    expect(edited.html).toMatch(/width:\s*100%;\s*height:\s*100%/)
+    expect(edited.html).not.toContain('matrix(')
+    await page.evaluate(() => window.drawingHarness.selectFrames(['pen']))
+    const grip = await page.waitForSelector('[data-frame-resize-handle="se"]')
+    const box = (await grip!.boundingBox())!
+    await drag(
+      [box.x + box.width / 2, box.y + box.height / 2],
+      [box.x + box.width / 2 + 100, box.y + box.height / 2 + 60],
+    )
+    await page.waitForFunction((before) => window.drawingHarness.state().frames[0]!.width !== before, {}, edited.width)
+    const grown = await page.evaluate(() => window.drawingHarness.state().frames[0]!)
+    expect(grown.width).toBeGreaterThan(edited.width)
+    expect(grown.height).toBeGreaterThan(edited.height)
+    /* the rendered path follows the shell: no empty band, no clipping */
+    const after = await visibleDrawing('Pen', 'svg')
+    const shell = (await (await page.$('iframe[title="Pen"]'))!.boundingBox())!
+    expect(after.width).toBeCloseTo(shell.width, 0)
+    expect(after.height).toBeCloseTo(shell.height, 0)
+  })
 
   it('keeps a Layers pick when a save refreshes the element being text-edited', async () => {
     await seedFrames([
@@ -1273,6 +1327,25 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(saved[0]?.html).toContain('left:400px;top:60px;width:100px;height:80px;background:coral"></div>')
   })
 
+  it('drops the hover outline of a layer the document no longer has, without the pointer moving', async () => {
+    const box =
+      '<div id="box" style="position:absolute;left:50px;top:50px;width:100px;height:80px;background:teal"></div>'
+    await seedFrames([layerFrame(box)])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    const target = await visibleDrawing('Layers', '#box')
+    await page.mouse.move(target.x + 20, target.y + 20)
+    await page.waitForSelector('[data-hover-outline]')
+    /* the layer goes (⌫, a collaborator's save): the pointer has not moved,
+       and the outline it was wearing must not outlive it */
+    await seedFrames([layerFrame('')])
+    await page.waitForFunction(() => !document.querySelector('[data-hover-outline]'))
+    /* and what is under the pointer now gets the outline instead */
+    await seedFrames([
+      layerFrame('<p id="under" style="position:absolute;left:0;top:0;width:300px;height:200px">Under</p>'),
+    ])
+    await page.waitForFunction(() => document.querySelector('[data-hover-outline]')?.textContent === 'p')
+  })
+
   it('still enters text editing on double-click and moves the whole frame from its title', async () => {
     const source = layerFrame('<p id="text" style="width:100px;height:80px;margin:50px">Edit me</p>')
     await seedFrames([source])
@@ -1281,10 +1354,27 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.mouse.click(text.x + 20, text.y + 10, { count: 2, delay: 60 })
     const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
     await iframe.waitForSelector('style[data-v-edit]')
-    await iframe.click('#text')
+    /* the double-click itself opens the text with every character selected
+       (no second click to place a caret), outlined by the page's hairline
+       with no grips and no badge to dismiss */
     await iframe.waitForSelector('#text[contenteditable]')
+    expect(await iframe.evaluate(() => getSelection()?.toString())).toBe('Edit me')
+    await page.waitForSelector('[data-editing-outline]')
+    expect(await page.$('[data-element-outline]')).toBeNull()
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+    expect(await page.$$eval('button', (buttons) => buttons.some((b) => b.textContent?.trim() === 'Done'))).toBe(false)
     await page.keyboard.press('Escape')
     await iframe.waitForFunction(() => !document.querySelector('style[data-v-edit]'))
+    /* the edit's text selection does not outlive it */
+    expect(await iframe.evaluate(() => getSelection()?.toString() ?? '')).toBe('')
+    /* Escape hands the keyboard back to the page: the next key (⌫ on the
+       still-selected element) must reach the canvas's window, not the frame */
+    await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME')
+    const heard = page.evaluate(
+      () => new Promise<string>((resolve) => window.addEventListener('keydown', (e) => resolve(e.key), { once: true })),
+    )
+    await page.keyboard.press('Backspace')
+    expect(await heard).toBe('Backspace')
     const before = await page.$eval('iframe[title="Layers"]', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
     await drag([before.x + 20, before.y - 14], [before.x + 80, before.y + 16])
     await expect.poll(() => saved[0]?.x).toBe(source.x + 60)

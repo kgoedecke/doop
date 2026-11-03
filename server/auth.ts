@@ -11,6 +11,7 @@ import * as demo from './demo.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { acceptInvites } from './workspaces.ts'
 import { purgeUserData } from './accountDeletion.ts'
+import { MCP_REFRESH_TOKEN_TTL_S } from './mcpTokens.ts'
 import { createHash } from 'node:crypto'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
@@ -349,6 +350,9 @@ function buildAuth() {
        it, so in dev it must be the web port that proxies /api and /mcp */
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
+    /* the provider tokens a social or SSO sign-in leaves on its account row,
+       sealed with the auth secret; doop never reads them back */
+    account: { encryptOAuthTokens: true },
     /* prod: the public origin, plus any extras from env, plus Apple when its
        web flow is on: Apple returns the authorization code by POSTing a form
        from appleid.apple.com to /api/auth/callback/apple, and better-auth's
@@ -500,7 +504,10 @@ function buildAuth() {
        so the gate's own default (matching, IdP-verified email) is what
        actually decides linking, as intended. */
     plugins: [
-      mcp({ loginPage: '/', oidcConfig: { loginPage: '/', consentPage: '/oauth/consent' } }),
+      mcp({
+        loginPage: '/',
+        oidcConfig: { loginPage: '/', consentPage: '/oauth/consent', refreshTokenExpiresIn: MCP_REFRESH_TOKEN_TTL_S },
+      }),
       admin({ impersonationSessionDuration: 15 * 60 }),
       /* oneTimeToken: how a Google / Microsoft / SSO sign-in finished in the
          system browser reaches the desktop app (src/lib/desktopAuth.ts). The

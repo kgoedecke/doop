@@ -8,6 +8,7 @@ import { auth } from './auth'
 import { account } from './account'
 import { agentKeys } from './agentKeys'
 import { webhooks } from './webhooks'
+import { fonts } from './fonts'
 import { models } from './models'
 import { canvas } from './canvas'
 import { stage } from './stage'
@@ -31,6 +32,7 @@ export const en = {
   account,
   agentKeys,
   webhooks,
+  fonts,
   models,
   canvas,
   stage,

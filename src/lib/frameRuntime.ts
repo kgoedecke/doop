@@ -125,10 +125,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var activeEl = null
   var editTimer = null
 
+  /* the edited element's outline is the parent's (its selection hairline,
+     drawn over the frame from the hit rect): in here only the caret cursor,
+     and no focus ring of the browser's own */
   var EDIT_CSS =
-    '[data-v-hover]{outline:1.5px dashed rgba(39,67,238,0.75)!important;outline-offset:2px;cursor:text}' +
-    '[data-v-active]{outline:2px solid rgba(39,67,238,0.9)!important;outline-offset:2px;cursor:text}' +
-    '[data-v-active]:focus{outline:2px solid rgba(39,67,238,0.9)!important}'
+    '[data-v-hover]{cursor:text}' +
+    '[data-v-active]{cursor:text}' +
+    '[data-v-active]:focus{outline:none!important}'
 
   function hasOwnText(el) {
     for (var n = el.firstChild; n; n = n.nextSibling) {
@@ -165,6 +168,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     activeEl.removeAttribute('contenteditable')
     activeEl.removeAttribute('data-v-active')
     activeEl = null
+    /* the edit's highlight goes with it: a click outside the frame (or
+       Escape) ends the edit, and the text must not stay selected */
+    var sel = getSelection()
+    if (sel) sel.removeAllRanges()
     postActive()
   }
 
@@ -207,6 +214,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
        drag ends in a click carrying the range it swept — placing a caret
        here would collapse either the instant it appears */
     if (!keepSelection && !hasRangeIn(el)) placeCaret(x, y)
+  }
+
+  /* a double-click edits the whole text at once: every character selected,
+     the way Figma opens a text layer */
+  function selectAllIn(el) {
+    var r = document.createRange()
+    r.selectNodeContents(el)
+    var s = getSelection()
+    s.removeAllRanges()
+    s.addRange(r)
   }
 
   function hasRangeIn(el) {
@@ -968,7 +985,16 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       protoHtmlChanged()
       if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId }, '*')
     }
-    if (d.type === 'doop:edit') setEdit(!!d.on)
+    if (d.type === 'doop:edit') {
+      setEdit(!!d.on)
+      if (d.on && typeof d.x === 'number' && typeof d.y === 'number') {
+        var dblEl = candidate(document.elementFromPoint(d.x, d.y))
+        if (dblEl) {
+          activate(dblEl, d.x, d.y, true)
+          selectAllIn(dblEl)
+        }
+      }
+    }
     // Mirror the Layers eye in the live document, including during text edits.
     if (d.type === 'doop:visibility') {
       var hideEl = null

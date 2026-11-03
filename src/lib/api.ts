@@ -3,6 +3,7 @@ import { beginFrameSave } from './frameSaves'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
+import type { AgentFeedbackKind, AgentFeedbackReport } from '../../shared/agentFeedback'
 import type {
   ActivityItem,
   Canvas,
@@ -24,6 +25,7 @@ import type { Automation, AutomationRun, AutomationTrigger, Schedule, Step } fro
 import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
+import type { CustomFont } from '../../shared/fonts'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -286,6 +288,17 @@ export const api = {
   updateWebhook: (id: string, patch: { url?: string; events?: WebhookEventType[]; enabled?: boolean }) =>
     req<WebhookInfo>(`/api/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteWebhook: (id: string) => req<{ ok: boolean }>(`/api/webhooks/${id}`, { method: 'DELETE' }),
+  /* font libraries: a workspace's with an id, the signed-in person's without */
+  listFonts: (workspaceId?: string) =>
+    req<CustomFont[]>(`/api/fonts${workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''}`),
+  uploadFont: (file: File, workspaceId?: string) =>
+    req<CustomFont>(`/api/fonts${workspaceId ? `?workspace=${encodeURIComponent(workspaceId)}` : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
+      body: file,
+    }),
+  deleteFont: (id: string) => req<{ ok: boolean }>(`/api/fonts/${id}`, { method: 'DELETE' }),
+  canvasFonts: (canvasId: string) => req<CustomFont[]>(`/api/canvases/${canvasId}/fonts`),
   rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
   testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
   notificationSettings: () => req<NotificationSettings>('/api/notifications'),
@@ -611,12 +624,36 @@ export interface AdminUser {
   canvasCount: number
 }
 
+export interface AdminAgentFeedback extends AgentFeedbackReport {
+  user?: { id: string; name: string; email: string }
+}
+
+export interface AdminAgentFeedbackPage {
+  reports: AdminAgentFeedback[]
+  counts: Record<AgentFeedbackKind, number>
+  hasMore: boolean
+}
+
+export interface AdminStats {
+  users: number
+  canvases: number
+  frames: number
+  agentFeedback: number
+}
+
 /** Instance-admin surface. Every route 404s for non-admins, so a failure here
  *  is indistinguishable from the feature not existing — which is the point. */
 export const adminApi = {
   canvases: () => req<{ total: number; canvases: AdminCanvas[] }>('/api/admin/canvases'),
-  stats: () => req<{ users: number; canvases: number; frames: number }>('/api/admin/stats'),
+  stats: () => req<AdminStats>('/api/admin/stats'),
   users: () => req<AdminUser[]>('/api/admin/users'),
+  agentFeedback: (query: { kind?: AgentFeedbackKind; q?: string; before?: AdminAgentFeedback }) => {
+    const params = new URLSearchParams()
+    if (query.kind) params.set('kind', query.kind)
+    if (query.q) params.set('q', query.q)
+    if (query.before) params.set('before', `${query.before.at}:${query.before.id}`)
+    return req<AdminAgentFeedbackPage>(`/api/admin/agent-feedback?${params}`)
+  },
 
   /* better-auth's own endpoints, not ours: they swap the session cookie, so
      every caller reloads afterwards rather than trying to reconcile state. */

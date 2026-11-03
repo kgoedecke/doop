@@ -212,7 +212,12 @@ export const FRAME_PROTO_RUNTIME = `
     if (ev.source !== parent) return
     var d = ev.data
     if (!d) return
-    if (d.type === 'doop:proto') setProto(!!d.on, d.hints !== false)
+    if (d.type === 'doop:proto') {
+      setProto(!!d.on, d.hints !== false)
+      /* answered once the switch has taken: a key the player lets through
+         after this reply meets a runtime that is listening */
+      if (d.reqId) parent.postMessage({ type: 'doop:proto-result', reqId: d.reqId, on: protoOn }, '*')
+    }
     if (d.type === 'doop:proto-hotspots') protoFlash()
     if (d.type === 'doop:proto-key') {
       var handled = protoActive() && protoKey(d.key)

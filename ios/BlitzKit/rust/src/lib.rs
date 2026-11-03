@@ -21,7 +21,7 @@ use blitz_paint::{paint_scene, paint_scene_region};
 use blitz_traits::net::NetWaker;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use peniko::Fill;
-use peniko::kurbo::Rect;
+use peniko::kurbo::{Affine, Rect};
 
 type WakeCallback = extern "C" fn(doc_id: usize);
 
@@ -523,11 +523,31 @@ fn element_parent(base: &BaseDocument, id: NodeId) -> Option<NodeId> {
     None
 }
 
+/// Document-relative bounding box of a node's border box as it is drawn: the
+/// node's transform and layout offset, and those of each containing block up
+/// to the root, are composed into one affine (the mirror of the hit test, which
+/// undoes them one by one on the way down) and the box is bounded once, so a
+/// child rotated back inside a rotated parent reports its drawn square rather
+/// than a bounding box of a bounding box. Blitz keeps transforms in device
+/// pixels, so the composition happens at the viewport scale.
 fn node_rect(base: &BaseDocument, id: NodeId) -> Option<[f32; 4]> {
-    let node = base.get_node(id)?;
-    let origin = node.absolute_position(0.0, 0.0);
-    let size = node.final_layout().size;
-    Some([origin.x, origin.y, size.width, size.height])
+    let scale = base.viewport().scale() as f64;
+    let size = base.get_node(id)?.final_layout().size;
+    let mut to_document = Affine::IDENTITY;
+    let mut current = Some(id);
+    while let Some(node_id) = current {
+        let node = base.get_node(node_id)?;
+        let location = node.final_layout().location;
+        let scroll = node.scroll_offset();
+        let mut local = Affine::translate(((location.x as f64 - scroll.x) * scale, (location.y as f64 - scroll.y) * scale));
+        if let Some(transform) = node.transform().as_deref() {
+            local *= *transform;
+        }
+        to_document = local * to_document;
+        current = node.containing_block();
+    }
+    let rect = to_document.transform_rect_bbox(Rect::new(0.0, 0.0, size.width as f64 * scale, size.height as f64 * scale));
+    Some([(rect.x0 / scale) as f32, (rect.y0 / scale) as f32, (rect.width() / scale) as f32, (rect.height() / scale) as f32])
 }
 
 fn tag_of(base: &BaseDocument, id: NodeId) -> Option<String> {

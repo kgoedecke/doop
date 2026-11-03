@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
+import { authErrorCode, authErrorMessage } from '../lib/authError'
 import { BrandMark } from '../components/ui/brand-mark'
 import { setName } from '../lib/identity'
 import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
@@ -39,12 +40,6 @@ async function accountExists(email: string): Promise<boolean> {
   } catch {
     return true
   }
-}
-
-/* better-auth types the error code as a string, but what arrives is whatever
-   the response carried, and a non-string code crashed the signup form */
-function isUserAlreadyExists(code: unknown): boolean {
-  return typeof code === 'string' && code.startsWith('USER_ALREADY_EXISTS')
 }
 
 function interruptedTarget(): string | null {
@@ -254,7 +249,7 @@ export function AuthPage() {
         return
       }
       const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
-      if (res.error) setError(res.error.message ?? startFailed)
+      if (res.error) setError(authErrorMessage(res.error, startFailed, t('auth.unreachable')))
     } catch {
       setError(t(NETWORK_ERROR))
     } finally {
@@ -301,7 +296,8 @@ export function AuthPage() {
       if (mode === 'reset') {
         const res = await authClient.resetPassword({ newPassword: password, token: resetToken ?? '' })
         if (res.error) {
-          setError(res.error.message ?? t('auth.resetLinkInvalid'))
+          /* a platform error must not be reported as an expired link */
+          setError(authErrorMessage(res.error, t('auth.resetLinkInvalid'), t('auth.unreachable')))
         } else {
           history.replaceState(null, '', '/auth')
           switchMode('signin')
@@ -319,18 +315,22 @@ export function AuthPage() {
             })
           : await authClient.signIn.email({ email, password })
       if (res.error) {
-        if (mode === 'signin' && res.error.code === 'EMAIL_NOT_VERIFIED') {
+        /* authErrorCode, not res.error.code: only our own API sends a string
+           code, and matching whatever the platform sent instead must not
+           throw in here — see src/lib/authError.ts */
+        const code = authErrorCode(res.error)
+        if (mode === 'signin' && code === 'EMAIL_NOT_VERIFIED') {
           setError(t('auth.emailNotVerified'))
           setUnverified(true)
         } else if (mode === 'signin' && !(await accountExists(email))) {
           setError(t('auth.noAccountFound'))
           setSuggestMode('signup')
           posthog.capture('login_no_account_found')
-        } else if (mode === 'signup' && isUserAlreadyExists(res.error.code)) {
+        } else if (mode === 'signup' && code.startsWith('USER_ALREADY_EXISTS')) {
           setError(t('auth.accountExists'))
           setSuggestMode('signin')
         } else {
-          setError(res.error.message ?? t('auth.somethingWentWrong'))
+          setError(authErrorMessage(res.error, t('auth.somethingWentWrong'), t('auth.unreachable')))
         }
       } else if (res.data?.user) {
         /* signup with verification required: the account exists but there is

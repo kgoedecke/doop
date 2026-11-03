@@ -1,5 +1,6 @@
 import { bool, cleanEnv, EnvMissingError, makeExactValidator, port, str } from 'envalid'
 import type { ReporterOptions } from 'envalid'
+import { createHash } from 'node:crypto'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENROUTER_MODEL } from '../shared/modelMenu.ts'
 import { FALLBACK_LOCALE, LOCALES } from '../shared/locales.ts'
 
@@ -49,6 +50,37 @@ const list = makeExactValidator<string[]>((input) =>
     .filter(Boolean),
 )
 
+export interface SecretKey {
+  id: string
+  key: Buffer
+}
+
+/** `id:base64,id:base64` — 32-byte AES keys, the first one active, the rest
+ *  kept only to open values sealed before a rotation (server/secretBox.ts). */
+const secretKeys = makeExactValidator<SecretKey[]>((input) => {
+  const keys = input
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [id = '', encoded = ''] = entry.split(':')
+      if (!/^[a-z0-9-]+$/i.test(id)) throw new TypeError(`Invalid key id (letters, digits, -): "${id}"`)
+      const key = Buffer.from(encoded, 'base64')
+      if (key.length !== 32) throw new TypeError(`Key "${id}" must be 32 bytes of base64 (openssl rand -base64 32)`)
+      return { id, key }
+    })
+  /* a set but empty-looking value (`,`) is a typo, not a request for plaintext */
+  if (keys.length === 0) throw new TypeError('At least one encryption key must be supplied')
+  if (new Set(keys.map((k) => k.id)).size !== keys.length) throw new TypeError('Key ids must be unique')
+  return keys
+})
+
+/* development and tests seal with a fixed key, so the encrypted path is the
+   one every local run exercises */
+const DEV_SECRET_KEYS: SecretKey[] = [
+  { id: 'dev', key: createHash('sha256').update('doop-dev-secrets-key-not-for-production').digest() },
+]
+
 const int = (minimum: number) =>
   makeExactValidator<number>((input) => {
     const n = Number(input)
@@ -81,6 +113,8 @@ const schema = {
     devDefault: 'http://localhost:4300',
     desc: 'The public origin, e.g. https://doop.app; must be set in production',
   }),
+  /* unset in production = user credentials stored unencrypted (boot warns) */
+  SECRETS_ENCRYPTION_KEYS: secretKeys({ default: [], devDefault: DEV_SECRET_KEYS }),
   TRUSTED_ORIGINS: list({ default: [] }),
   SIGNUP_EMAIL_DOMAINS: list({ default: [] }),
   ADMIN_EMAILS: list({ default: [] }),
@@ -175,8 +209,11 @@ const schema = {
   GITHUB_APP_CLIENT_ID: str({ default: undefined }),
   GITHUB_APP_CLIENT_SECRET: str({ default: undefined }),
   GITHUB_APP_PRIVATE_KEY: str({ default: undefined }),
+  GITHUB_API_URL: origin({ default: 'https://api.github.com' }),
+  GITHUB_OAUTH_TOKEN_URL: str({ default: 'https://github.com/login/oauth/access_token' }),
   PEXELS_API_KEY: str({ default: undefined }),
   BRANDFETCH_CLIENT_ID: str({ default: undefined }),
+  ONEPAGELOVE_API_KEY: str({ default: undefined }),
   CONTEXT_DEV_API_KEY: str({ default: undefined }),
 
   /* ------------------------------------------------- object storage */

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { DRAFT_OPTIONS, DRAFTS_STORAGE_KEY, isDraftCount, readStoredDrafts, type DraftCount } from '../lib/homePrompt'
+import { setPromptBoxHidden, usePromptBoxHidden } from '../lib/homePreferences'
 import { DoopMark } from './Logo'
 import { ModelPicker } from './ModelPicker'
 import { BrandMark } from './ui/brand-mark'
@@ -8,6 +9,8 @@ import { Chip } from './ui/chip'
 import { MenuButton } from './ui/menu-button'
 import { Pressable } from './ui/pressable'
 import { Textarea } from './ui/textarea'
+import { Button } from './ui/button'
+import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -28,6 +31,7 @@ import {
   LayoutTemplateIcon,
   MessageSquareIcon,
   UploadIcon,
+  XIcon,
 } from './ui/icons'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 
@@ -124,6 +128,9 @@ export function HomeHero({
   /** a timestamp — the rail's "Ask Doop" and ⌘/ ask for the keyboard */
   focusAt: number
 }) {
+  const hidden = usePromptBoxHidden()
+  const [confirmHide, setConfirmHide] = useState(false)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const [text, setText] = useState('')
   const [drafts, setDrafts] = useState<DraftCount>(() =>
     readStoredDrafts(typeof localStorage === 'undefined' ? undefined : localStorage),
@@ -142,10 +149,10 @@ export function HomeHero({
   }, [focusAt])
 
   useEffect(() => {
-    if (hovered !== null) return
+    if (hidden || hovered !== null) return
     const timer = window.setInterval(() => setBeamAt((i) => (i + 1) % CHIPS.length), BEAM_STEP_MS)
     return () => window.clearInterval(timer)
-  }, [hovered])
+  }, [hidden, hovered])
 
   function pickDrafts(n: DraftCount) {
     setDrafts(n)
@@ -179,8 +186,45 @@ export function HomeHero({
 
   const beamOn = hovered ?? beamAt
 
+  if (hidden) return null
+
   return (
     <section className="relative overflow-hidden" data-slot="home-hero">
+      <IconButton
+        aria-label={t('home.hidePromptBox')}
+        className="absolute right-4 top-0 z-10 text-ink-faint md:right-8"
+        disabled={busy}
+        onClick={() => setConfirmHide(true)}
+      >
+        <XIcon className="size-4" />
+      </IconButton>
+      {confirmHide && (
+        <Modal
+          size="sm"
+          onClose={() => setConfirmHide(false)}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            cancelRef.current?.focus()
+          }}
+        >
+          <ModalTitle>{t('home.hidePromptBoxTitle')}</ModalTitle>
+          <ModalLede>{t('home.hidePromptBoxLede')}</ModalLede>
+          <ModalActions>
+            <Button ref={cancelRef} onClick={() => setConfirmHide(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setConfirmHide(false)
+                setPromptBoxHidden(true)
+              }}
+            >
+              {t('home.hidePromptBox')}
+            </Button>
+          </ModalActions>
+        </Modal>
+      )}
       {/* the wave: 2 copies of 28 bars, blurred, fading in from the top. It is
           sized to the section, not to pixels, so it ends faded inside the hero
           on a phone as it does on desktop instead of being cut at the edge */}

@@ -44,11 +44,12 @@ export const DESIGN_QUALITY = `- Commit to ONE clear aesthetic direction per fra
 export const DESIGN_BRIEF = `Before creating frames on a canvas whose style is not already established, commit to a
 brief. It is part of the deliverable, not private scratch work:
 
-1. **Look at real pages first.** Call search_inspiration with the page archetype plus
-   the register you are aiming for — "B2B SaaS landing page, editorial", "dark fintech
-   dashboard", "consumer app landing, playful" — not the product noun on its own
-   ("AI meeting notes" matches on "AI" and returns noise). You SEE real, curated live
-   pages as thumbnails, each with its mood line, palette and fonts. Read them like a
+1. **Look at real pages first.** Call search_inspiration with the genre plus the look
+   you are aiming for, in the words the catalog is tagged with — "saas landing page,
+   editorial", "finance, dark minimal", "app, illustrative" — not the product noun on
+   its own ("AI meeting notes" matches nothing useful). You SEE real, curated live
+   pages as thumbnails, each tagged with its style, colour, fonts and sections; read
+   the palette off the thumbnail. Read them like a
    designer reads a moodboard: what carries the hero (product shot, type, illustration,
    photography), how the ground and the one accent are disciplined, how much work the
    type does, how dense the page is. If the set all looks alike, run a second query in a
@@ -223,6 +224,9 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   assign an implementation job — follow the human's request.
 - A frame renders a complete HTML document in a sandboxed iframe. Inline <style> and
   <script> work; Google Fonts via <link> work.
+- Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
+  family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
+  rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
 - Always reset: * { margin: 0; box-sizing: border-box; } and design to the exact frame size.
 - Size frames to their content: mobile screen 390×844, desktop page 1280×800, card or
   component 480×360, square social post 640×640. Set width/height on create_frame, or
@@ -381,7 +385,7 @@ commit to directions, then deliver a choice:
   "Direction B — further out": same product, same real copy and facts, but freer —
   reinterpret the palette and push the aesthetic somewhere genuinely different.
   Direction B must NOT be invented from vibes: retrieve category inspiration with
-  search_inspiration (live exemplars with their mood, palette and fonts), pick ONE
+  search_inspiration (live exemplars with their style, colour and fonts), pick ONE
   exemplar and follow it, and name it in the redesign doc so the direction is traceable.
 - Deliver TWO new frames side by side, named "<source> — A (on-brand)" and
   "<source> — B (departure)", each executing its direction precisely; screenshot both.

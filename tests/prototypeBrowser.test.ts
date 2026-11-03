@@ -196,6 +196,8 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await page.waitForFunction(() => !document.querySelector('[data-proto-menu]'))
       /* the menu's keys stayed with the menu: the player is still up */
       expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
+      /* and the keys are the screen's again: a keyboard user is not left nowhere */
+      await page.waitForFunction(() => document.activeElement?.matches('iframe[data-doop-proto-frame="home"]'))
       await page.waitForFunction(
         () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 400,
       )
@@ -470,6 +472,24 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
     }
     const focusedScreen = () =>
       page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame)
+    /* a wait that, when it never comes true, says where the focus and the overlays are */
+    async function waitFor(label: string, check: () => boolean) {
+      try {
+        await page.waitForFunction(check)
+      } catch (error) {
+        const state = await page
+          .evaluate(() => ({
+            active: (document.activeElement as HTMLElement | null)?.outerHTML.slice(0, 120),
+            overlays: [...document.querySelectorAll('[data-proto-overlay]')].map((el) =>
+              el.getAttribute('data-proto-overlay'),
+            ),
+            current: document.querySelector('[data-proto-current]')?.textContent,
+            messages: (window as unknown as Fixture).messages.map((m) => m.type).slice(-40),
+          }))
+          .catch(() => 'unavailable')
+        throw new Error(`${label}: ${String(error)}\n${JSON.stringify(state)}`, { cause: error })
+      }
+    }
 
     it('runs only the top screen’s delays and keys while an overlay is open', async () => {
       await page.evaluate((canvas) => (window as unknown as Fixture).seed(canvas), COVERED)
@@ -498,19 +518,21 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await home.$eval('#help', (el) => (el as HTMLElement).focus())
       await clickUntil(home, '#help', async () => !!(await page.$('[data-proto-overlay="menu"]')))
       const menu = await screen('menu')
-      await page.waitForFunction(
+      await waitFor(
+        'menu focused',
         () => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame === 'menu',
       )
       await clickUntil(menu, '#more', async () => !!(await page.$('[data-proto-overlay="sheet"]')))
       await screen('sheet')
-      await page.waitForFunction(
+      await waitFor(
+        'sheet focused',
         () => (document.activeElement as HTMLElement | null)?.dataset.doopProtoFrame === 'sheet',
       )
       await page.keyboard.press('k')
-      await page.waitForFunction(() => !document.querySelector('[data-proto-overlay="sheet"]'))
+      await waitFor('sheet closed', () => !document.querySelector('[data-proto-overlay="sheet"]'))
       await expect.poll(focusedScreen).toBe('menu')
       await page.keyboard.press('k')
-      await page.waitForFunction(() => !document.querySelector('[data-proto-overlay]'))
+      await waitFor('menu closed', () => !document.querySelector('[data-proto-overlay]'))
       await expect.poll(focusedScreen).toBe('home')
       expect(await current()).toBe('HOME')
     })

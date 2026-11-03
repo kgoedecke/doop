@@ -1,6 +1,8 @@
 import { env } from './env.ts'
 import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
+import { fontsForCanvas } from './fonts.ts'
+import { libraryBrief } from '../shared/fonts.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
@@ -16,7 +18,14 @@ import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
 import { DESIGN_BRIEF, DESIGN_QUALITY, PROTOTYPES } from './guide.ts'
 import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
-import { describeInspiration, INSPIRATION_USAGE_NOTE, searchInspiration } from './inspiration.ts'
+import {
+  describeInspiration,
+  INSPIRATION_NO_MATCH_NOTE,
+  INSPIRATION_UNAVAILABLE_NOTE,
+  INSPIRATION_USAGE_NOTE,
+  inspirationSearchEnabled,
+  searchInspiration,
+} from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
 import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
@@ -24,6 +33,8 @@ import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
 import { runRepoCards } from './githubRecon.ts'
 import { retryModelTurn } from './modelTurnRetry.ts'
+import { recordAgentFeedback } from './agentFeedback.ts'
+import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCategory } from '../shared/agentFeedback.ts'
 
 /**
  * The resident design team: a server-side Claude tool loop, run once per
@@ -259,7 +270,7 @@ function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.g
   const redesignNote = isRedesign
     ? ' For the redesign itself, work audit-first and deliver TWO drafts:' +
       ' (1) Audit the source — inspect_frame on a source frame for its computed palette, type, spacing, radii and shadows (import_webpage first for a live site), plus a screenshot for layout.' +
-      ' (2) Persist the audit with set_guidelines as a doc named "redesign-<source>" (e.g. "redesign-pipefile-com"): a "Source baseline" recording the old system (palette hexes, type, spacing/radii, and the section map — each section\'s purpose and one-line message) as a descriptive record of what you are redesigning away from, NOT rules to follow; then two binding directions. "Direction A — closer to home": the brand stays recognizable — logo, name, core brand colors (re-weighted freely, with new neutrals and tints) — while every detail is redesigned: typography, spacing rhythm, radii, shadows, patterns, background treatments, button and component styling, section layout. "Direction B — further out": same product, same real copy and facts, but freer — reinterpret the palette and push the aesthetic somewhere genuinely different; do not invent it from vibes — retrieve category inspiration with search_inspiration (live exemplars with mood, palette and fonts), pick ONE exemplar and follow it, and name it in the redesign doc.' +
+      ' (2) Persist the audit with set_guidelines as a doc named "redesign-<source>" (e.g. "redesign-pipefile-com"): a "Source baseline" recording the old system (palette hexes, type, spacing/radii, and the section map — each section\'s purpose and one-line message) as a descriptive record of what you are redesigning away from, NOT rules to follow; then two binding directions. "Direction A — closer to home": the brand stays recognizable — logo, name, core brand colors (re-weighted freely, with new neutrals and tints) — while every detail is redesigned: typography, spacing rhythm, radii, shadows, patterns, background treatments, button and component styling, section layout. "Direction B — further out": same product, same real copy and facts, but freer — reinterpret the palette and push the aesthetic somewhere genuinely different; do not invent it from vibes — retrieve category inspiration with search_inspiration (live exemplars with their style, colour and fonts), pick ONE exemplar and follow it, and name it in the redesign doc.' +
       ' (3) Deliver TWO new frames side by side, named "<source> — A (on-brand)" and "<source> — B (departure)", each executing its direction precisely; screenshot both. Both frames together are this card\'s deliverable. In both: keep the source\'s real copy and product facts, restructure sections when it strengthens the page\'s argument, and give details a genuinely new treatment rather than reordering the old elements.' +
       ' Exception: if the request already fixes the scope ("keep it subtle", "same style", "go wild", "rebrand"), deliver ONE draft at that scope instead.' +
       ' If your canvas guidelines already include a redesign doc for this source, skip (1)-(2) and follow its directions.'
@@ -583,6 +594,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             },
           ]
         : []
+      /* the canvas's custom fonts: which families exist, and that naming one
+         is enough (the server adds the @font-face) */
+      const canvas = store.getCanvas(canvasId)
+      const fontsText = canvas ? libraryBrief(fontsForCanvas(canvas)) : ''
+      const fontsBlock = fontsText ? [{ text: `# Custom fonts\n${fontsText}` }] : []
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       const noVisionBlock = runState.vision
@@ -597,7 +613,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         const result = await model.runHarness({
           canvasId,
           prompt: kickoff,
-          system: [systemFor(role), ...guidelinesBlock.map((b) => b.text)].join('\n\n'),
+          system: [systemFor(role), ...guidelinesBlock.map((b) => b.text), ...fontsBlock.map((b) => b.text)].join(
+            '\n\n',
+          ),
           // Image generation uses a separate paid model account; the local CLI
           // connection must never imply that the user's subscription covers it.
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
@@ -637,7 +655,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             () =>
               model.run({
                 maxTokens: 16000,
-                system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...noVisionBlock],
+                system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...fontsBlock, ...noVisionBlock],
                 tools: TOOLS,
                 messages,
                 signal: abort.signal,
@@ -1121,14 +1139,14 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'search_inspiration',
     description:
-      'Search a curated gallery of real, well-designed live websites by category and SEE thumbnails with pre-distilled style facts (one-line mood north star, named palette, fonts). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages: query the page archetype plus the register you want ("law firm landing page, editorial", "dark fintech dashboard"), not just the product noun. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
+      'Search One Page Love\'s hand-curated gallery of real, well-designed live websites and SEE thumbnails of each, with their tags (style, colour, fonts, genre, sections). Call it FIRST when writing a design brief — it is the required inspiration step, especially for landing pages. Query the genre plus the look you want in the words the catalog is tagged with ("saas landing page, dark minimal", "finance, editorial", "portfolio, typographic", "pricing, illustrative"), not the product noun alone. The catalog is landing pages and one-page sites, not app screens: for a dashboard or app UI, query the product\'s register ("saas, minimal") and take the type, colour and density from it. Study the thumbnails, pick the ONE exemplar that fits the brief best and follow it — do not blend several — and name it in the brief. Do not embed these screenshots in a frame.',
     input_schema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
           description:
-            'Page archetype + register, e.g. "grocery delivery landing page, warm", "dark fintech dashboard"',
+            'Genre + look, e.g. "saas landing page, dark minimal", "restaurant, retro", "finance, editorial"',
         },
         count: { type: 'number', description: 'Exemplars to return, default 4, max 6' },
       },
@@ -1149,6 +1167,37 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['decision'],
+    },
+  },
+  {
+    name: 'report_issue',
+    description:
+      'Tell the Doop team where Doop itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It never reaches the humans on the canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: [...AGENT_ISSUE_CATEGORIES] },
+        message: { type: 'string', description: 'What you tried, what happened, and what you expected or needed.' },
+        tool: { type: 'string', description: 'The tool involved, if any' },
+      },
+      required: ['category', 'message'],
+    },
+  },
+  {
+    name: 'share_feedback',
+    description:
+      'Tell the Doop team how Doop could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It never reaches the humans on the canvas. Never include secrets.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: [...AGENT_IDEA_CATEGORIES] },
+        message: {
+          type: 'string',
+          description: 'What you were doing and what would have helped, or what worked well.',
+        },
+        tool: { type: 'string', description: 'The tool involved, if any' },
+      },
+      required: ['category', 'message'],
     },
   },
   {
@@ -1658,8 +1707,9 @@ async function execTool(
         const raw = block.input as { query?: string; count?: number }
         const query = String(raw.query || '').trim()
         if (!query) return fail('query must be a non-empty string')
+        if (!inspirationSearchEnabled()) return ok(INSPIRATION_UNAVAILABLE_NOTE)
         const results = await searchInspiration(query, Number(raw.count) || 4)
-        if (results.length === 0) return ok(`no inspiration for "${query}" — try a broader category`)
+        if (results.length === 0) return ok(`no inspiration for "${query}" — ${INSPIRATION_NO_MATCH_NOTE}`)
         const thumbs = await Promise.all(results.map((r) => imageSearch.fetchThumb(r.thumb_url)))
         const blocks: NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>> = [
           {
@@ -1694,6 +1744,24 @@ async function execTool(
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid decision')
         }
+      }
+      case 'report_issue':
+      case 'share_feedback': {
+        const issue = block.name === 'report_issue'
+        const categories: readonly string[] = issue ? AGENT_ISSUE_CATEGORIES : AGENT_IDEA_CATEGORIES
+        const picked = String(input.category ?? '')
+        const category = categories.includes(picked) ? (picked as AgentFeedbackCategory) : 'other'
+        const saved = await recordAgentFeedback({
+          kind: issue ? 'issue' : 'feedback',
+          source: 'resident',
+          category,
+          message: String(input.message ?? ''),
+          tool: typeof input.tool === 'string' ? input.tool : undefined,
+          agentName: actor.name,
+          canvasId,
+          userId: runState.payerId ?? store.getCanvas(canvasId)?.ownerId,
+        })
+        return saved.ok ? ok('sent to the Doop team — carry on with the task') : fail(saved.error)
       }
       case 'set_guidelines': {
         const raw = block.input as { name?: string; markdown?: string; title?: string }

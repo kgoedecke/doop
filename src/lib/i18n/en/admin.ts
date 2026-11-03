@@ -1,5 +1,6 @@
 /** The instance admin index. */
 export const admin = {
+  searchFeedback: 'Search agent feedback',
   notFound: 'Not found',
   notFoundBody: 'This page does not exist for this account.',
   back: 'Back',
@@ -38,4 +39,22 @@ export const admin = {
   banTitle: 'Ban {name} ({email})?',
   unbanTitle: 'Unban {name} ({email})?',
   banDescription: 'They are signed out everywhere and cannot sign in or use MCP until unbanned.',
+
+  feedbackNav: 'Agent feedback',
+  feedbackTab: 'Feedback · {count}',
+  feedbackEmpty:
+    'No agent has sent anything yet. Agents call report_issue when Doop gets in their way and share_feedback with ideas.',
+  feedbackKind: 'Kind',
+  feedbackAll: 'All · {count}',
+  feedbackIssues: 'Issues · {count}',
+  feedbackIdeas: 'Ideas · {count}',
+  feedbackIssue: 'issue',
+  feedbackIdea: 'idea',
+  unnamedAgent: 'unnamed agent',
+  feedbackNoMatch: 'Nothing matches this search.',
+  feedbackLoadFailed: 'Could not load agent feedback.',
+  tryAgain: 'Try again',
+  loading: 'Loading…',
+  showingNewest: 'Showing the newest {shown} of {total}',
+  loadOlder: 'Load older',
 } as const

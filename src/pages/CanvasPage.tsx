@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
-import { MOD_KEY, isHideUiShortcut, isTypingTarget } from '../lib/keys'
+import { MOD_KEY, PRESENT_SHORTCUT_HINT, isHideUiShortcut, isPresentShortcut, isTypingTarget } from '../lib/keys'
+import { presentStartFrame } from '../lib/present'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
 import { connect, disconnect, sendWs } from '../lib/ws'
 import {
@@ -40,8 +41,7 @@ import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
 import { ExportModal } from '../components/ExportModal'
-import { canvasPages, pageFrames } from '../../shared/pages'
-import { flowStartFrame } from '../../shared/prototype'
+import { pageFrames } from '../../shared/pages'
 import type { Frame } from '../../shared/types'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
@@ -107,6 +107,7 @@ import { createCenteredFrame } from '../lib/framePlacement'
 import { RULER_PX } from '../components/Rulers'
 import { NO_CANVAS, onViewCommand, syncViewMenu } from '../lib/viewMenu'
 import { AGENTS_MIN, LAYERS_MIN, fitPanelWidths } from '../lib/panelWidths'
+import { loadCanvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 import { NO_INSETS, type StageInsets } from '../lib/viewFit'
 import { usePanelLayout } from '../lib/panelLayout'
@@ -255,11 +256,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const hideUiActive = canHideUi({ view: 'canvas', presenting: !!presenting })
   const activePageId = useStore((s) => s.activePageId)
   /* Play starts on the selected frame, or on the page's flow start */
-  const playFrom = useMemo(() => {
-    if (selectedId) return selectedId
-    if (!canvas) return null
-    return flowStartFrame(canvas, activePageId ?? canvasPages(canvas)[0]!.id)?.id ?? null
-  }, [selectedId, canvas, activePageId])
+  const playFrom = useMemo(
+    () => presentStartFrame(canvas, selectedId, activePageId),
+    [selectedId, canvas, activePageId],
+  )
   /* returning from a GitHub App install: the setup redirect appends a signed
      pass — pull it off the URL and open the import modal on the repo picker */
   const [ghInstallPass, setGhInstallPass] = useState<string | null>(() => {
@@ -317,6 +317,21 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     }
   }, [canvasId, select])
 
+  /* the font library, again when the canvas moves between workspaces (its
+     library is the workspace's) and on return to the tab, so a font
+     uploaded in Settings in another tab shows up without a reload */
+  const loadedCanvasId = canvas?.id === canvasId ? canvasId : null
+  const fontScope = canvas?.workspaceId ?? null
+  useEffect(() => {
+    if (!loadedCanvasId) return
+    loadCanvasFonts(loadedCanvasId)
+    const refresh = () => {
+      if (document.visibilityState === 'visible') loadCanvasFonts(loadedCanvasId)
+    }
+    document.addEventListener('visibilitychange', refresh)
+    return () => document.removeEventListener('visibilitychange', refresh)
+  }, [loadedCanvasId, fontScope])
+
   /* broadcast which frame I'm focused on */
   useEffect(() => {
     sendWs({ type: 'editing', frameId: selectedId })
@@ -341,9 +356,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       /* a picked element (from the canvas or the layers tree) is what ⌫
          removes — the frame it lives in only goes when nothing inside it is
          selected. Auto-repeat is ignored: a held key must not take the
-         element and then, on the next repeat, the frame under it. */
+         element and then, on the next repeat, the frame under it. The key is
+         always claimed, deleted something or not: an unhandled Backspace is
+         "back" to some engines (WebKitGTK, the Linux desktop app), and a
+         canvas must never leave the page for it. */
       const canEdit = canEditOpenCanvas(useStore.getState())
-      if (canEdit && (e.key === 'Delete' || e.key === 'Backspace') && !e.repeat && deleteSelection()) e.preventDefault()
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        if (canEdit && !e.repeat) deleteSelection()
+      }
       const nudge = ARROW_NUDGE[e.key]
       if (canEdit && nudge && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const step = e.shiftKey ? 10 : 1
@@ -359,6 +380,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (isHideUiShortcut(e) && hideUiActive) {
         e.preventDefault()
         toggleHideUi()
+        return
+      }
+      /* ⌘⌥↩ presents from the selected frame (else the page's flow start),
+         as the Play button does; while presenting the player owns the keys */
+      if (isPresentShortcut(e) && !presenting) {
+        e.preventDefault()
+        const state = useStore.getState()
+        const from = presentStartFrame(state.canvas, state.selectedId, state.activePageId)
+        if (from) setPresenting(from)
         return
       }
       /* undo, redo, hide, lock and duplicate all change the canvas */
@@ -398,7 +428,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canvasId, hideUiActive]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canvasId, hideUiActive, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Native copy/paste events let us write the selection's token and read
      clipboard images without asking for clipboard-read permission. */
@@ -778,9 +808,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             <Tooltip
               label={
                 selectedId
-                  ? t('canvas.presentFromFrame')
+                  ? `${t('canvas.presentFromFrame')} · ${PRESENT_SHORTCUT_HINT}`
                   : playFrom
-                    ? t('canvas.presentPrototype')
+                    ? `${t('canvas.presentPrototype')} · ${PRESENT_SHORTCUT_HINT}`
                     : t('canvas.addFrameToPresent')
               }
               side="bottom"
@@ -1935,7 +1965,7 @@ function GithubSection({
       .catch(() => setAppEnabled(false))
   }, [canvasId])
 
-  /* back from GitHub's install screen: swap the pass for the repo list */
+  /* back from GitHub: swap the pass for the repo list */
   useEffect(() => {
     if (!installPass) return
     api
@@ -1969,7 +1999,6 @@ function GithubSection({
     try {
       const conn = await api.connectGithub(canvasId, { repo: fullName, pass: installPass })
       setConnections((c) => [conn, ...(c ?? [])])
-      setPickerRepos((r) => r?.filter((x) => x.fullName !== fullName) ?? null)
       setBusy(null)
       posthog.capture('github_repo_connected', { via: 'app' })
     } catch (e) {
@@ -2018,6 +2047,11 @@ function GithubSection({
     setConnections((c) => c?.filter((x) => x.id !== connId) ?? null)
   }
 
+  /* the picker offers what this canvas has not connected yet */
+  const unconnectedRepos = pickerRepos?.filter(
+    (r) => !connections?.some((conn) => conn.repo.toLowerCase() === r.fullName.toLowerCase()),
+  )
+
   if (forbidden) {
     return (
       <>
@@ -2058,10 +2092,10 @@ function GithubSection({
             </div>
           </div>
         ))}
-        {pickerRepos && (
+        {unconnectedRepos && (
           <div className="flex flex-col gap-1.5 rounded-[11px] border border-line bg-paper p-2.5">
             <b className="text-[12px] text-ink-soft">{t('canvas.pickRepo')}</b>
-            {pickerRepos.map((r) => (
+            {unconnectedRepos.map((r) => (
               <div key={r.fullName} className="flex items-center gap-2 text-[13px]">
                 <GithubIcon width={13} height={13} className="shrink-0 text-ink-faint" />
                 <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px]">
@@ -2078,7 +2112,19 @@ function GithubSection({
                 </Button>
               </div>
             ))}
-            {!pickerRepos.length && <Note>{t('canvas.allConnected')}</Note>}
+            {!unconnectedRepos.length && <Note>{t('canvas.allConnected')}</Note>}
+            <div className="flex items-center gap-3 pt-1">
+              <Button variant="bare" size="inline" className="text-ink-faint" asChild>
+                <a href={`/api/canvases/${canvasId}/github/app/install`} target="_blank" rel="noreferrer">
+                  {t('canvas.addRepos')}
+                </a>
+              </Button>
+              {/* asks GitHub again rather than re-reading the pass: an
+                  installation made in the other tab is only in a new one */}
+              <Button variant="bare" size="inline" className="text-ink-faint" disabled={!!busy} onClick={startInstall}>
+                {t('canvas.refreshRepos')}
+              </Button>
+            </div>
           </div>
         )}
         {appEnabled && !pickerRepos && (

@@ -9,9 +9,21 @@ import {
   uniqueIndex,
   primaryKey,
   jsonb,
+  customType,
 } from 'drizzle-orm/pg-core'
+import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, FrameApproval } from '../../shared/types.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
+
+/** A credential kept on a user's behalf: sealed on write and opened on read
+ *  (server/secretBox.ts), so call sites see plaintext and the row does not.
+ *  Never filter on one: every write seals with a fresh IV, so equal secrets
+ *  store as different strings. */
+const sealedText = customType<{ data: string; driverData: string }>({
+  dataType: () => 'text',
+  toDriver: (value) => seal(value),
+  fromDriver: (value) => open(value),
+})
 
 /** ActivityKit tokens are delivery secrets: never return them through read APIs. */
 export const liveActivities = pgTable('live_activities', {
@@ -293,7 +305,7 @@ export const githubConnections = pgTable(
     /** "owner/name" */
     repo: text('repo').notNull(),
     branch: text('branch').notNull(),
-    token: text('token'),
+    token: sealedText('token'),
     installationId: text('installation_id'),
     /** live deployment of this repo; enables the capture lane */
     deployUrl: text('deploy_url'),
@@ -426,6 +438,33 @@ export const assetRefs = pgTable(
   (t) => [primaryKey({ columns: [t.assetId, t.frameId] }), index('asset_refs_frame_idx').on(t.frameId)],
 )
 
+/** Font libraries (shared/fonts.ts): one row per uploaded font file. A row
+ *  with a workspace_id is that workspace's; one without is owner_id's own,
+ *  used on their personal canvases. The bytes are an ordinary /a/ asset, so
+ *  deleting a row leaves every frame that already loads it rendering. */
+export const fonts = pgTable(
+  'fonts',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id'),
+    ownerId: text('owner_id'),
+    family: text('family').notNull(),
+    /** a CSS font-weight: '400', or '100 900' for a variable font */
+    weight: text('weight').notNull(),
+    /** 'normal' | 'italic' */
+    style: text('style').notNull(),
+    /** the @font-face format(): 'woff2' | 'woff' | 'truetype' | 'opentype' */
+    format: text('format').notNull(),
+    assetId: text('asset_id').notNull(),
+    ext: text('ext').notNull(),
+    fileName: text('file_name').notNull(),
+    size: integer('size').notNull(),
+    uploadedBy: text('uploaded_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('fonts_workspace_idx').on(t.workspaceId), index('fonts_owner_idx').on(t.ownerId)],
+)
+
 /** Named design docs per canvas (brand rules, style recipes) — markdown
  *  written mostly for agents. Small and cold-path; hydrated with the canvas. */
 export const guidelines = pgTable(
@@ -554,11 +593,11 @@ export const modelAccounts = pgTable('model_accounts', {
   /** display only — whose subscription this is, and which plan */
   email: text('email'),
   plan: text('plan'),
-  accessToken: text('access_token'),
-  refreshToken: text('refresh_token'),
+  accessToken: sealedText('access_token'),
+  refreshToken: sealedText('refresh_token'),
   /** epoch ms the access token expires; refreshed ahead of this */
   expiresAt: bigint('expires_at', { mode: 'number' }),
-  apiKey: text('api_key'),
+  apiKey: sealedText('api_key'),
   /** the model tier this user picked; null = the server default */
   model: text('model'),
   /** OpenAI reasoning effort this user picked; null = the server default */
@@ -601,7 +640,7 @@ export const integrations = pgTable(
     userId: text('user_id').notNull(),
     /** 'meta' */
     provider: text('provider').notNull(),
-    accessToken: text('access_token').notNull(),
+    accessToken: sealedText('access_token').notNull(),
     /** epoch ms the token expires; null = the provider said it doesn't */
     expiresAt: bigint('expires_at', { mode: 'number' }),
     /** the provider-side identity the token belongs to — display only */
@@ -697,7 +736,7 @@ export const webhooks = pgTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull(),
     url: text('url').notNull(),
-    secret: text('secret').notNull(),
+    secret: sealedText('secret').notNull(),
     /** subscribed event names (shared/webhooks.ts WEBHOOK_EVENTS) */
     events: jsonb('events').$type<string[]>().notNull(),
     enabled: boolean('enabled').notNull().default(true),
@@ -726,8 +765,8 @@ export const linearInstallations = pgTable('linear_installations', {
   userId: text('user_id').notNull().unique(),
   appUserId: text('app_user_id').notNull(),
   name: text('name').notNull(),
-  accessToken: text('access_token').notNull(),
-  refreshToken: text('refresh_token').notNull(),
+  accessToken: sealedText('access_token').notNull(),
+  refreshToken: sealedText('refresh_token').notNull(),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
   connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
 })
@@ -771,7 +810,7 @@ export const slackInstallations = pgTable('slack_installations', {
   userId: text('user_id').notNull().unique(),
   botUserId: text('bot_user_id').notNull(),
   name: text('name').notNull(),
-  botToken: text('bot_token').notNull(),
+  botToken: sealedText('bot_token').notNull(),
   connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
 })
 
@@ -817,4 +856,25 @@ export const slackSessions = pgTable(
     index('slack_sessions_status_idx').on(t.status),
     index('slack_sessions_thread_idx').on(t.teamId, t.channelId, t.threadTs),
   ],
+)
+
+/** Agents' own reports about Doop: problems (report_issue, kind 'issue') and
+ *  ideas or praise (share_feedback, kind 'feedback'). Read by instance admins,
+ *  not shown on any canvas. */
+export const agentFeedback = pgTable(
+  'agent_feedback',
+  {
+    id: text('id').primaryKey(),
+    at: bigint('at', { mode: 'number' }).notNull(),
+    kind: text('kind').notNull(),
+    source: text('source').notNull(),
+    category: text('category').notNull(),
+    message: text('message').notNull(),
+    tool: text('tool'),
+    agentName: text('agent_name'),
+    client: text('client'),
+    canvasId: text('canvas_id'),
+    userId: text('user_id'),
+  },
+  (t) => [index('agent_feedback_at_idx').on(t.at)],
 )

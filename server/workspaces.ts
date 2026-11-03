@@ -8,6 +8,7 @@ import * as authSchema from './db/auth-schema.ts'
 import { store } from './store.ts'
 import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
+import { dropWorkspaceFonts } from './fonts.ts'
 import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
 import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
 import { isWorkspaceRole } from '../shared/types.ts'
@@ -236,6 +237,7 @@ export async function deleteWorkspace(id: string): Promise<void> {
     await tx.delete(t.workspaceInvites).where(eq(t.workspaceInvites.workspaceId, id))
     await tx.delete(t.workspaces).where(eq(t.workspaces.id, id))
   })
+  await dropWorkspaceFonts(id)
 }
 
 /** Mirror a Stripe subscription onto the row. The one place billing state

@@ -175,6 +175,7 @@ layers of that frame, so agents read and edit them like any other markup.
 | ⌘0 / ⌘+ / ⌘−     | Zoom to 100%, in, out                                  |
 | ⇧R               | Toggle rulers                                          |
 | ⌘.               | Hide or show all UI                                    |
+| ⌘⌥↩              | Present from the selected frame (Ctrl+Alt+↩ elsewhere) |
 | ⌘K               | Open the Agents composer (on Home: the search palette) |
 | Esc              | Deselect, stop following                               |
 
@@ -836,7 +837,7 @@ tools; `tests/agentToolParity.test.ts` lists the MCP tools it does not have yet.
 
 ### MCP tools
 
-40 tools: 38 built in ([`server/mcp.ts`](server/mcp.ts)) plus the two Linear tools its extension
+42 tools: 40 built in ([`server/mcp.ts`](server/mcp.ts)) plus the two Linear tools its extension
 registers ([`server/linear/extension.ts`](server/linear/extension.ts)). Every tool carries
 read-only / destructive / idempotent annotations; the server registers no MCP prompts.
 
@@ -870,6 +871,8 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `get_comments`           | Read element and canvas comments with their replies, optionally filtered by frame or resolution state, no claiming  |
 | `reply_to_comment`       | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment             |
 | `resolve_comment`        | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory             |
+| `report_issue`           | Report a tool failure or missing capability to the instance admins                                                  |
+| `share_feedback`         | Share suggestions and feedback with the instance admins                                                             |
 | **Design memory**        |                                                                                                                     |
 | `list_guidelines`        | List a canvas's style guides (brand rules, style recipes) with one-line summaries                                   |
 | `get_guidelines`         | Read one style guide in full — the rules every frame on the canvas must follow                                      |
@@ -881,7 +884,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `search_icons`           | 200,000+ open-source icons (Iconify) as hotlinkable SVGs                                                            |
 | `search_logos`           | Real company logos by brand name or domain (Brandfetch, vector marks)                                               |
 | `list_backgrounds`       | Curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly) as thumbnails                      |
-| `search_inspiration`     | Curated real landing pages with palette, fonts and a mood line (Refero Styles)                                      |
+| `search_inspiration`     | Curated live landing pages with style, colour, fonts and sections (One Page Love)                                   |
 | `generate_image`         | Generate an image with the model the user picked in Settings (GPT Image, Nano Banana or Seedream) → asset URL       |
 | `upload_asset`           | Store your own file — from a URL, a one-time local-file upload URL, or inline base64                                |
 | **Web**                  |                                                                                                                     |

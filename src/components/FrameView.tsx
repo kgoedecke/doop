@@ -1,8 +1,9 @@
-import { memo, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ElementComment, Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { isCanvasElement } from '../lib/drawing'
+import { isLayerLocked, standaloneSelector } from '../lib/layerEdits'
 import { drawingDropFrame, moveDrawing, type DrawingHit } from '../lib/drawingMove'
 import { useElementMove } from './ElementMove'
 import { FrameLabelLayer } from './FrameLabelLayer'
@@ -36,17 +37,7 @@ import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import {
-  CheckIcon,
-  CodeIcon,
-  CommentIcon,
-  EditIcon,
-  EyeClosedIcon,
-  GithubIcon,
-  LockIcon,
-  SyncIcon,
-  SparkIcon,
-} from './ui/icons'
+import { CodeIcon, CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
@@ -54,6 +45,8 @@ import { ElementResizeHandles } from './ElementResizeHandles'
 import { FrameResizeHandles } from './FrameResizeHandles'
 import { keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
+import { withFontFaces } from '../../shared/fonts'
+import { canvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 
 /** ?comment=<rootId> — the link in a comment email. The thread opens once
@@ -702,10 +695,14 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   const hoverKey = useRef<string | null>(null)
 
   const hoverLast = useRef(0)
-  function sendHover(x: number, y: number) {
+  /* where the pointer last was over this frame, in design px, while it is
+     still over it: the document under it can change without it moving */
+  const hoverAt = useRef<{ x: number; y: number } | null>(null)
+  function sendHover(x: number, y: number, force = false) {
+    hoverAt.current = { x, y }
     /* pointermove fires every frame — one probe per ~40ms is plenty */
     const now = Date.now()
-    if (now - hoverLast.current < 40) return
+    if (!force && now - hoverLast.current < 40) return
     hoverLast.current = now
     hoverReq.current += 1
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:hover', reqId: hoverReq.current, x, y }, '*')
@@ -716,6 +713,29 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     hoverKey.current = null
     setHover(null)
   }
+
+  function leaveHover() {
+    hoverAt.current = null
+    clearHover()
+  }
+
+  /* the document changed under a still pointer (⌫ took the hovered layer,
+     a save landed): the outline drawn for the old document is stale, so ask
+     again at the same point once the runtime shows the new one — the
+     element now under the pointer is outlined, or nothing is */
+  useEffect(() => {
+    if (!runtimeDocument) return
+    const at = hoverAt.current
+    if (!at) return
+    /* the old outline's key must match no answer, not even "nothing here",
+       so the reply always redraws */
+    hoverKey.current = 'stale'
+    if (editing || pathEdit || dragging || elementMove.moving || resizing || frame.locked || tool === 'hand') {
+      clearHover()
+      return
+    }
+    sendHover(at.x, at.y, true)
+  }, [runtimeDocument]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* a Layers row under the pointer outlines its element here, the same as a
      hover over the frame: ask the runtime where the element is, and draw the
@@ -812,13 +832,24 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     )
   }, [runtimeReady, html, layerHover])
 
+  /* Resets of the probe are queued from layout effects, not made during
+     render as other derived state is: the runtime's replies refresh the
+     probe through updater functions, and when React has skipped a queued
+     updater for a lower-priority lane it later replays it from the state
+     before it. A reset made during render is not in that queue, so the
+     replay brought the stale probe back and the effect below re-picked the
+     element a link or a deselect had just cleared (pageCanvasBrowser). An
+     update queued from an effect is replayed in order, after the refresh. */
   /* deselecting the frame drops its element selection too, so a stale
      outline never reappears when the frame is picked again */
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
+    if (!selected) setProbe(null)
+  }, [selected])
   const [wasSelected, setWasSelected] = useState(selected)
   if (wasSelected !== selected) {
     setWasSelected(selected)
-    if (!selected) setProbe(null)
-    else if (linkedThread) {
+    if (selected && linkedThread) {
       /* the emailed thread, now that selection will not close it again */
       setOpenThread(linkedThread)
       setLinkedThread(null)
@@ -870,13 +901,22 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     }
   }, [probeSel, frame.id])
   const wantedSel = useStore((s) => (s.selectedElement?.frameId === frame.id ? s.selectedElement.selector : null))
-  const [seenWantedSel, setSeenWantedSel] = useState(wantedSel)
-  if (seenWantedSel !== wantedSel) {
-    setSeenWantedSel(wantedSel)
-    /* Returning to a frame-only link (or closing the element panel) also
-       removes the previous element's toolbar and outline. */
+  /* a standalone element is one thing on the canvas, its shape filling its
+     shell: picking that shape (a click, its Layers row) keeps the shell's
+     ring, grips and size badge, which size the shape with it, and never
+     dresses the shape in a second outline and grips of its own, which would
+     size it inside a shell that stays put */
+  const shellSel = useMemo(() => standaloneSelector(frame), [frame])
+  const shellPicked = !!wantedSel && wantedSel === shellSel
+  /* the shape's own layer lock holds the shell's grips too: a resize of the
+     shell is a resize of the locked shape */
+  const shellLocked = useMemo(() => !!shellSel && isLayerLocked(frame, shellSel), [frame, shellSel])
+  /* Returning to a frame-only link (or closing the element panel) also
+     removes the previous element's toolbar and outline. */
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- queued on purpose, see above
     if (!wantedSel) setProbe((p) => (p?.selector === FRAME_COMMENT_SELECTOR ? p : null))
-  }
+  }, [wantedSel])
   /* the rest of a multi-element pick: each is outlined like the primary,
      re-located whenever the document changes. A string key keeps the
      selection identity-stable, so memo holds. */
@@ -1104,21 +1144,25 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       )
     }
     setEditing(true)
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: true }, '*')
+    /* the point goes along so the runtime edits the text under it straight
+       away, all of it selected, as a double-click does in Figma */
+    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: true, x: at?.x, y: at?.y }, '*')
   }
-  function finishEdit() {
-    // Keyboard events inside the sandbox never reach the canvas shortcuts.
-    if (document.activeElement === iframeRef.current) iframeRef.current?.blur()
+  /* focus held by the frame's document (a text edit) comes back to the page,
+     so the canvas's keyboard shortcuts hear the next key */
+  function reclaimFocus() {
+    const iframe = iframeRef.current
+    if (iframe && document.activeElement === iframe) iframe.blur()
+  }
+  function exitEdit() {
+    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: false }, '*')
+    reclaimFocus()
     setEditing(false)
     setActiveHit(null)
     setComposing(false)
     activeSelRef.current = null
     setSuspendPost(true)
     window.setTimeout(() => setSuspendPost(false), 500)
-  }
-  function exitEdit() {
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: false }, '*')
-    finishEdit()
   }
 
   /* switching to Hand or Comment ends a text-edit session: both put the
@@ -1140,14 +1184,24 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         localHtml.current = ev.data.html
         setRuntimeDocument({ html: ev.data.html, request: ++htmlRequest.current })
         noteFrameDocument(frame.id, ev.data.html)
+        /* a newly used library font brings its @font-face along; the saved
+           document then differs from the runtime's, so the post effect sends
+           it back in and the face loads at once */
+        const html = withFontFaces(ev.data.html, canvasFonts())
         const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
-        useStore.getState().patchFrameLocal(frame.id, { html: ev.data.html })
-        trackSave(api.updateFrame(frame.id, { html: ev.data.html }).catch(console.error))
-        if (before !== undefined)
-          recordUpdate(frame.id, { html: before }, { html: ev.data.html }, ev.data.discrete === true)
+        useStore.getState().patchFrameLocal(frame.id, { html })
+        trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
+        if (before !== undefined) recordUpdate(frame.id, { html: before }, { html }, ev.data.discrete === true)
       }
       if (ev.data?.type === 'doop:edit-esc') {
-        finishEdit()
+        setEditing(false)
+        /* the keyboard was in the frame's document while the text was being
+           edited; it stays there after Escape unless the frame lets go, and
+           the canvas's own shortcuts (⌫ on the still-selected element, a
+           tool letter) listen on this window */
+        reclaimFocus()
+        setSuspendPost(true)
+        window.setTimeout(() => setSuspendPost(false), 500)
       }
       if (ev.data?.type === 'doop:context-menu') {
         const { x, y } = ev.data as { x: number; y: number }
@@ -1177,13 +1231,13 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
      store and the iframe has to be told, so this is a sync with an external
      system rather than derived state. */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- see above
+    // eslint-disable-next-line react/set-state-in-effect -- exitEdit syncs the iframe's edit mode
     if (!selected && editing) exitEdit()
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
   /* so does a lock arriving from a collaborator (or an agent) mid-session:
      what was typed so far is flushed by the exit, nothing more lands */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- external-system sync, as above
+    // eslint-disable-next-line react/set-state-in-effect -- exitEdit syncs the iframe's edit mode
     if ((frame.locked || readOnly) && editing) exitEdit()
   }, [frame.locked, readOnly]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1264,7 +1318,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             selected &&
             !editing &&
             !pathEdit &&
-            !wantedSel &&
+            (!wantedSel || shellPicked) &&
             createPortal(
               <div
                 data-frame-size=""
@@ -1393,7 +1447,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               elementMove.moving ? 'cursor-move' : 'cursor-default',
               !isCanvasElement(frame.html) && (dragging ? 'shadow-pop' : 'shadow-card'),
               selected && !pathEdit && 'outline-2 outline-offset-1 outline-brand',
-              editing && 'cursor-text outline-2 outline-offset-1 outline-dashed outline-brand',
+              editing && 'cursor-text',
               !stream &&
                 remoteEditor &&
                 'outline-2 outline-offset-1 outline-solid outline-[var(--editing-color,var(--brand))]',
@@ -1412,6 +1466,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               void enterElementEdit(designPoint(e, e.currentTarget))
             }}
             onPointerMove={(e) => {
+              /* where the pointer is stays current through a drag or a resize
+                 too: once the gesture's save lands, the hover is probed again
+                 at the pointer's spot, which the gesture has moved */
+              const at = designPoint(e, e.currentTarget)
+              hoverAt.current = at
               /* the Hand only pans, and a locked frame has nothing to pick: no
                  element outlines in either case */
               if (
@@ -1426,10 +1485,9 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 tool === 'hand'
               )
                 return
-              const at = designPoint(e, e.currentTarget)
               sendHover(at.x, at.y)
             }}
-            onPointerLeave={clearHover}
+            onPointerLeave={leaveHover}
           >
             <iframe
               ref={iframeRef}
@@ -1470,10 +1528,22 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             lifted while editing so clicks land in the editable document,
             but not under a file drag, whose drop belongs to the canvas */}
             {(!editing || panMode || fileDragging || tool !== 'select') && <div className="absolute inset-0" />}
+          </div>
+          {/* the element's hover and selection furniture: outlines, grips and
+              the size badge sit outside the surface, whose overflow clips the
+              document to the frame, so a layer wider or taller than its frame
+              is outlined in full while its content stays clipped. The layer is
+              inset by the surface's border, where the document starts, so a
+              rect in design px lands on the element it measures */}
+          <div
+            data-element-furniture=""
+            className={cn('pointer-events-none absolute', isCanvasElement(frame.html) ? 'inset-0' : 'inset-px')}
+          >
             {/* above the selection outline (z-[3]), or that outline covers the
-            hovered element's tag */}
+              hovered element's tag */}
             {hover && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
               <div
+                data-hover-outline=""
                 className="pointer-events-none absolute z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
                 style={{ left: hover.rect.x, top: hover.rect.y, width: hover.rect.width, height: hover.rect.height }}
               >
@@ -1489,11 +1559,32 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 </span>
               </div>
             )}
-            {probe && probe.selector !== FRAME_COMMENT_SELECTOR && selected && !editing && !pathEdit && !dragging && (
+            {probe &&
+              probe.selector !== FRAME_COMMENT_SELECTOR &&
+              probe.selector !== shellSel &&
+              selected &&
+              !editing &&
+              !pathEdit &&
+              !dragging && (
+                <div
+                  data-element-outline=""
+                  /* a one-pixel hairline, the way Paper outlines a selection */
+                  className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                  style={{ left: probe.rect.x, top: probe.rect.y, width: probe.rect.width, height: probe.rect.height }}
+                />
+              )}
+            {/* the text being edited wears the same hairline, grips aside: one
+              look for a selected element, in or out of a text edit */}
+            {editing && activeHit && (
               <div
-                /* a one-pixel hairline, the way Paper outlines a selection */
+                data-editing-outline=""
                 className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                style={{ left: probe.rect.x, top: probe.rect.y, width: probe.rect.width, height: probe.rect.height }}
+                style={{
+                  left: activeHit.rect.x,
+                  top: activeHit.rect.y,
+                  width: activeHit.rect.width,
+                  height: activeHit.rect.height,
+                }}
               />
             )}
             {selected &&
@@ -1516,9 +1607,10 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   )
                 })}
             {/* the grips: only where a drag can change the box, and never on
-                a locked layer or frame, or under the Comment tool — nor on a
-                multi-element pick, where a drag would size only one */}
+              a locked layer or frame, or under the Comment tool — nor on a
+              multi-element pick, where a drag would size only one */}
             {probe &&
+              probe.selector !== shellSel &&
               !multiPick &&
               selected &&
               !editing &&
@@ -1557,27 +1649,6 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 } as React.CSSProperties
               }
             />
-          )}
-
-          {editing && (
-            <div
-              className={cn(
-                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center whitespace-nowrap rounded-full bg-ink p-1 text-[11px] font-semibold text-paper shadow-card',
-                COUNTER_SCALE,
-              )}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <Button
-                variant="primary"
-                size="pill"
-                className="border-transparent px-2.5 shadow-none hover:translate-x-0 hover:translate-y-0 hover:brightness-110 hover:shadow-none"
-                onClick={exitEdit}
-                title={t('stage.saveAndFinish')}
-              >
-                <CheckIcon size={12} />
-                {t('stage.done')}
-              </Button>
-            </div>
           )}
 
           {/* element comments: pins + element toolbar + composer, all in frame
@@ -1744,9 +1815,10 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               element's own grips, which sit under this layer */}
           {selected &&
             tool === 'select' &&
-            !wantedSel &&
+            (!wantedSel || shellPicked) &&
             !elementMove.moving &&
             !frame.locked &&
+            !shellLocked &&
             !readOnly &&
             !pathEdit &&
             !editing && (

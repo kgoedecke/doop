@@ -39,6 +39,8 @@ it('upgrades an existing OSS database without the deferred Figma migration', asy
         'linear_installations',
         'linear_oauth_states',
         'linear_sessions',
+        'agent_feedback',
+        'fonts',
       ]),
     )
     const deferred = await client.query(
