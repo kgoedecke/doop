@@ -2,6 +2,7 @@ import type { Frame } from '../../shared/types'
 import { copyElementLink } from '../lib/elementLink'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { writeCanvasClipboard } from '../lib/canvasClipboard'
+import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
 import { elementHtml, isElementHidden, isElementLocked } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
@@ -33,6 +34,9 @@ function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: st
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
   const locked = !!frame.locked || (selector ? isElementLocked(frame.html, selector) : false)
   const t = useT()
+  /* a copied standalone shape is a frame on the clipboard: its paste lands
+     a second element on the canvas, as ⌘V does, not a layer in this frame */
+  const frameClip = hasFrameClip()
   return (
     <>
       <ContextMenuItem
@@ -45,8 +49,11 @@ function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: st
         <MenuHint>{MOD_KEY}C</MenuHint>
       </ContextMenuItem>
       <ContextMenuItem
-        disabled={locked || !hasElementClip() || (!!selector && !exists)}
-        onSelect={() => pasteLayer(frame, selector)}
+        disabled={frameClip ? false : locked || !hasElementClip() || (!!selector && !exists)}
+        onSelect={() => {
+          if (frameClip) pasteFrameCentered(frame.canvasId)
+          else pasteLayer(frame, selector)
+        }}
       >
         {t('stage.paste')}
         <MenuHint>{MOD_KEY}V</MenuHint>
