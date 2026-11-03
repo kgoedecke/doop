@@ -179,7 +179,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function deactivate() {
     if (!activeEl) return
-    var normalized = normalizeTextParagraph(activeEl, getComputedStyle(activeEl))
+    var normalized = normalizeTextParagraph(activeEl, paragraphStyleDiff(activeEl))
     if (normalized !== activeEl) {
       activeEl = normalized
       postActive() // keep the selected layer's selector in sync with its new tag
@@ -1073,6 +1073,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         if (restoredStyle === null) el.removeAttribute('style')
         else el.setAttribute('style', restoredStyle)
       }
+    } else if (edit.range) {
+      // The preview was outside the undo history: put it back and apply the
+      // gesture's final styles through the undoable path, as one entry.
+      restoreTextRuns(edit)
+      if (selectedTextRange(el)) styleTextRange(el, edit.styles)
+      postEdited(true)
+      postTextState()
     } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
   }
@@ -1088,13 +1095,18 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
           styleEdit.created.indexOf(run.el) === -1) styleEdit.runs.push(run)
       })
       change.created.forEach(function (run) { styleEdit.created.push(run) })
+      if (change.nodes) styleEdit.nodes = change.nodes
       if (change.renamed) change.renamed.forEach(function (run) { styleEdit.renamed.push(run) })
     }
     if (textPatch && selectedTextRange(el)) {
       // Part of the text is selected: the edit belongs to that run alone. A
-      // scrub previews here and saves (or restores) when the gesture ends.
-      noteRuns(styleTextRange(el, styles))
-      if (!gesture) {
+      // scrub previews in place and lands once, undoably, when it commits.
+      if (gesture) {
+        Object.assign(styleEdit.styles, styles)
+        styleEdit.range = true
+        noteRuns(previewTextRange(el, styles))
+      } else {
+        styleTextRange(el, styles)
         if (styleTimer) clearTimeout(styleTimer)
         styleTimer = setTimeout(function () { styleTimer = null; postEdited() }, 250)
       }

@@ -381,6 +381,62 @@ describe.skipIf(!findBrowserPath())('rich text editing', () => {
     expect(await frame.$$eval('div', (divs) => divs.map((d) => d.textContent))).toEqual(['One', 'Two'])
   })
 
+  it('puts a Design panel edit on selected words into the native undo history', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
+    await select(0, 5)
+    await style({ color: 'rgb(255, 0, 0)' })
+    expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe(
+      '<span style="color: rgb(255, 0, 0);">Hello</span> world',
+    )
+    await frame.evaluate(() => document.execCommand('undo'))
+    expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe('Hello world')
+    await frame.evaluate(() => document.execCommand('redo'))
+    expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe(
+      '<span style="color: rgb(255, 0, 0);">Hello</span> world',
+    )
+  })
+
+  it('keeps what a paragraph owed to its rules when a list turns it into a div', async () => {
+    await send({
+      type: 'doop:html',
+      html:
+        '<style>p.card{padding:10px;background:rgb(0, 128, 0);border:2px solid rgb(0, 0, 255)}</style>' +
+        '<p id="text" class="card" style="font:24px Arial">One</p>',
+      reqId: 'render',
+    })
+    await frame.waitForSelector('#text')
+    const at = await frame.$eval('#text', (el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    })
+    await send({ type: 'doop:edit', on: true, x: at.x, y: at.y })
+    await frame.waitForSelector('#text[contenteditable]')
+    await format('insertUnorderedList')
+    await send({ type: 'doop:edit', on: false })
+    await frame.waitForSelector('div#text')
+    const styles = await frame.$eval('div#text', (el) => {
+      const cs = getComputedStyle(el)
+      return [cs.paddingLeft, cs.backgroundColor, cs.borderTopWidth, cs.marginTop, cs.fontSize]
+    })
+    expect(styles).toEqual(['10px', 'rgb(0, 128, 0)', '2px', '24px', '24px'])
+    const inline = (await savedHtml()).match(/<div id="text"[^>]*style="([^"]*)"/)?.[1]
+    expect(inline).not.toMatch(/(^|;\s*)(width|height|transform-origin):/)
+  })
+
+  it('formats an existing list layer whole and shows its text in the panel', async () => {
+    await send({ type: 'doop:html', html: '<ul id="text"><li>One</li><li>Two</li></ul>', reqId: 'render' })
+    await frame.waitForSelector('#text')
+    expect(await inspect()).toMatchObject({ hasText: true, textMixed: {} })
+    const reqId = 'list-layer'
+    await send({ type: 'doop:text-format', selectors: ['#text'], command: 'bold', reqId })
+    await page.waitForFunction(
+      (reqId) => (window as unknown as Fixture).messages.some((m) => m.reqId === reqId),
+      {},
+      reqId,
+    )
+    expect(await frame.$$eval('#text li b', (runs) => runs.map((r) => r.textContent))).toEqual(['One', 'Two'])
+  })
+
   it('ignores commands after editing ends and on locked text', async () => {
     await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
     await send({ type: 'doop:edit', on: false })
