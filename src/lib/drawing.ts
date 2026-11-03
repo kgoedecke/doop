@@ -3,6 +3,7 @@ import { api, errorMessage } from './api'
 import { recordCreate, recordUpdates, trackSave } from './history'
 import { currentPageCanvas } from './pages'
 import { useStore } from './store'
+import { getTheme, resolveTheme, type ResolvedTheme } from './theme'
 import type { DrawingTool } from './tools'
 
 export interface Point {
@@ -50,6 +51,15 @@ export interface DrawingTarget {
 
 export const DRAWING_FILL = '#d9d9d9'
 export const DRAWING_INK = '#202124'
+/** The dark theme's `--ink`, so text on bare canvas reads against its paper. */
+export const DRAWING_INK_ON_DARK = '#f2f2f2'
+
+/** A standalone element sits on the canvas paper, so its ink inverts with the
+ *  theme. Inside a frame the document's own background applies, and the frame
+ *  cannot know the viewer's theme, so it keeps the dark ink. */
+export function drawingInk(target: DrawingTarget, theme: ResolvedTheme): string {
+  return !target.frameId && theme === 'dark' ? DRAWING_INK_ON_DARK : DRAWING_INK
+}
 const names: Record<DrawingTool, string> = {
   rectangle: 'Rectangle',
   circle: 'Circle',
@@ -174,7 +184,7 @@ function round(value: number): number {
 }
 
 /** DOM creation keeps typed text literal, including HTML-looking strings. */
-export function drawingElement(doc: Document, drawing: Drawing, standalone: boolean): Element {
+export function drawingElement(doc: Document, drawing: Drawing, standalone: boolean, ink = DRAWING_INK): Element {
   const el =
     drawing.tool === 'path'
       ? doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -193,7 +203,7 @@ export function drawingElement(doc: Document, drawing: Drawing, standalone: bool
     const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path')
     path.setAttribute('d', pathData(drawing))
     path.setAttribute('fill', 'none')
-    path.setAttribute('stroke', DRAWING_INK)
+    path.setAttribute('stroke', ink)
     path.setAttribute('stroke-width', '2')
     path.setAttribute('stroke-linecap', 'round')
     path.setAttribute('stroke-linejoin', 'round')
@@ -201,7 +211,7 @@ export function drawingElement(doc: Document, drawing: Drawing, standalone: bool
   } else {
     const style = (el as HTMLElement).style
     if (drawing.tool === 'text') {
-      style.cssText += `font:24px/1.4 Arial,sans-serif;color:${DRAWING_INK};white-space:pre-wrap;overflow-wrap:anywhere;`
+      style.cssText += `font:24px/1.4 Arial,sans-serif;color:${ink};white-space:pre-wrap;overflow-wrap:anywhere;`
       el.textContent = drawing.text ?? ''
     } else {
       style.background = DRAWING_FILL
@@ -211,14 +221,14 @@ export function drawingElement(doc: Document, drawing: Drawing, standalone: bool
   return el
 }
 
-export function drawingDocument(drawing: Drawing): string {
+export function drawingDocument(drawing: Drawing, ink = DRAWING_INK): string {
   const doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
   doc.documentElement.style.cssText = 'width:100%;height:100%;margin:0;'
   doc.body.style.cssText = 'width:100%;height:100%;margin:0;'
   if (drawing.tool === 'frame') doc.body.style.background = '#ffffff'
   else {
     doc.body.setAttribute('data-doop-canvas-element', 'true')
-    doc.body.append(drawingElement(doc, drawing, true))
+    doc.body.append(drawingElement(doc, drawing, true, ink))
   }
   return '<!doctype html>\n' + doc.documentElement.outerHTML
 }
@@ -226,6 +236,8 @@ export function drawingDocument(drawing: Drawing): string {
 /** Read the current document when committing, so edits received during the
  *  gesture survive. Use the normal API for collaboration and tracked history. */
 export function saveDrawing(drawing: Drawing, target: DrawingTarget): Promise<void> {
+  // Read now, not when the queue reaches this save: the ink matches the paper the person drew on.
+  const ink = drawingInk(target, resolveTheme(getTheme()))
   const save = async () => {
     const s = useStore.getState()
     // This gesture is complete. Navigation only cancels drafts; queued saves
@@ -262,7 +274,7 @@ export function saveDrawing(drawing: Drawing, target: DrawingTarget): Promise<vo
         y: round(drawing.y),
         width: Math.max(1, round(drawing.width)),
         height: Math.max(1, round(drawing.height)),
-        html: drawingDocument(drawing),
+        html: drawingDocument(drawing, ink),
       })
       if (useStore.getState().canvas?.id !== target.canvasId) return
       recordCreate(frame)
