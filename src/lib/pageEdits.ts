@@ -4,7 +4,15 @@ import { stackOf } from '../../shared/frameStack'
 import { api, ApiError } from './api'
 import { useStore } from './store'
 import { pageBackground } from '../../shared/pageBackground'
-import { guidesLeaving, recordPageBackground, recordPageCopy, recordPages, recordUpdates, trackSave } from './history'
+import {
+  guidesLeaving,
+  historyEpoch,
+  recordPageBackground,
+  recordPageCopy,
+  recordPages,
+  recordUpdates,
+  trackSave,
+} from './history'
 
 export function savePages(canvas: Canvas, next: CanvasPageInfo[], selectId?: string) {
   const task = savePagesAndRecord(canvas, next, selectId)
@@ -97,24 +105,48 @@ export function moveFramesToPage(canvas: Canvas, ids: string[], pageId: string) 
   return task
 }
 
+/* One page's colour writes in flight, run one after another so they land in
+   the order they were made. `saved` is what the server last accepted, which
+   a failed write puts back when no newer edit of the page is queued. */
+type BackgroundWrites = { tail: Promise<unknown>; latest: number; saved: string | null }
+const backgroundWrites = new Map<string, BackgroundWrites>()
+
 /** Paint a page's canvas (`#rrggbb`) or put the theme paper back (null):
- *  shown at once, saved through the API, one undo step. A failed save puts
- *  the previous colour back. */
+ *  shown at once, saved through the API, one undo step per save that lands.
+ *  A failed save puts back what the server holds, unless the page has been
+ *  painted again since; a save finishing after the canvas was left (or
+ *  revisited, under a fresh history) touches nothing. */
 export function setPageBackground(canvas: Canvas, pageId: string, color: string | null) {
-  const task = (async () => {
-    const before = pageBackground(canvasPages(canvas).find((page) => page.id === pageId))
-    if (before === color) return
-    const state = useStore.getState()
-    if (state.canvas?.id !== canvas.id) return
-    state.setPageBackgroundLocal(pageId, color)
-    try {
-      await api.setPageBackground(canvas.id, pageId, color)
-    } catch (error) {
-      if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setPageBackgroundLocal(pageId, before)
-      throw error
-    }
-    if (useStore.getState().canvas?.id === canvas.id) recordPageBackground(canvas.id, pageId, before, color)
-  })()
+  const state = useStore.getState()
+  if (state.canvas?.id !== canvas.id) return Promise.resolve()
+  const before = pageBackground(canvasPages(state.canvas).find((page) => page.id === pageId))
+  if (before === color) return Promise.resolve()
+  state.setPageBackgroundLocal(pageId, color)
+  const key = `${canvas.id}:${pageId}`
+  const queue = backgroundWrites.get(key) ?? { tail: Promise.resolve(), latest: 0, saved: before }
+  backgroundWrites.set(key, queue)
+  const seq = ++queue.latest
+  const epoch = historyEpoch()
+  /* the canvas this save was made on is still open, under the same history */
+  const current = () => useStore.getState().canvas?.id === canvas.id && historyEpoch() === epoch
+  const task = queue.tail
+    .then(() => api.setPageBackground(canvas.id, pageId, color))
+    .then(
+      () => {
+        const from = queue.saved
+        queue.saved = color
+        if (current()) recordPageBackground(canvas.id, pageId, from, color)
+      },
+      (error: unknown) => {
+        if (current() && queue.latest === seq) useStore.getState().setPageBackgroundLocal(pageId, queue.saved)
+        throw error
+      },
+    )
+    .finally(() => {
+      if (queue.latest === seq) backgroundWrites.delete(key)
+    })
   trackSave(task)
+  /* the queue carries on past a failed write; the caller still hears of it */
+  queue.tail = task.catch(() => undefined)
   return task
 }

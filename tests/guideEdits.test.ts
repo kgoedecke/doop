@@ -184,3 +184,70 @@ it('puts the previous colour back when the save fails', async () => {
   await undo()
   expect(api.setPageBackground).toHaveBeenCalledTimes(1)
 })
+
+it('brings a deleted painted page back with its colour on undo, and a duplicated one on redo', async () => {
+  api.setPageBackground.mockImplementation(async () => [])
+  useStore.getState().setPageBackgroundLocal('second', '#1e1e1e')
+  await savePages(useStore.getState().canvas!, [pages[0]!])
+  expect(background('second')).toBeUndefined()
+  api.setPageBackground.mockClear()
+  await undo()
+  expect(api.setPageBackground).toHaveBeenCalledWith('c', 'second', '#1e1e1e')
+  expect(background('second')).toBe('#1e1e1e')
+
+  api.duplicatePage.mockResolvedValue({
+    page: { id: 'twin', name: 'Exploration copy', background: '#1e1e1e' },
+    pages: [...pages, { id: 'twin', name: 'Exploration copy', background: '#1e1e1e' }],
+    frames: [],
+  })
+  await duplicatePage(useStore.getState().canvas!, 'second')
+  await undo()
+  expect(background('twin')).toBeUndefined()
+  api.setPageBackground.mockClear()
+  await redo()
+  expect(api.setPageBackground).toHaveBeenCalledWith('c', 'twin', '#1e1e1e')
+  expect(background('twin')).toBe('#1e1e1e')
+})
+
+it('runs quick colour changes in order and keeps the newest when an older save fails', async () => {
+  const first = deferred<never>()
+  api.setPageBackground.mockReturnValueOnce(first.promise).mockResolvedValue([])
+  const canvas = useStore.getState().canvas!
+  const one = setPageBackground(canvas, 'first', '#111111')
+  const two = setPageBackground(useStore.getState().canvas!, 'first', '#222222')
+  expect(background('first')).toBe('#222222')
+  /* the second write waits for the first */
+  await vi.waitFor(() => expect(api.setPageBackground).toHaveBeenCalledTimes(1))
+  first.reject(new Error('offline'))
+  await expect(one).rejects.toThrow('offline')
+  await two
+  expect(api.setPageBackground).toHaveBeenNthCalledWith(2, 'c', 'first', '#222222')
+  expect(background('first')).toBe('#222222')
+  /* the one save that landed is the one undo step, back to the colour before both */
+  await undo()
+  expect(api.setPageBackground).toHaveBeenLastCalledWith('c', 'first', null)
+  expect(background('first')).toBeUndefined()
+})
+
+it('leaves a fresh visit alone when a colour save from before it finishes', async () => {
+  const pending = deferred<never>()
+  api.setPageBackground.mockReturnValueOnce(pending.promise)
+  const task = setPageBackground(useStore.getState().canvas!, 'second', '#1e1e1e')
+  await vi.waitFor(() => expect(api.setPageBackground).toHaveBeenCalledTimes(1))
+  /* the person leaves and comes back: a new history, the page unpainted */
+  clearHistory()
+  useStore.getState().setCanvas(structuredClone(canvas))
+  pending.reject(new Error('offline'))
+  await expect(task).rejects.toThrow('offline')
+  expect(background('second')).toBeUndefined()
+  const landed = deferred<unknown[]>()
+  api.setPageBackground.mockReturnValueOnce(landed.promise)
+  const late = setPageBackground(useStore.getState().canvas!, 'second', '#2e2e2e')
+  await vi.waitFor(() => expect(api.setPageBackground).toHaveBeenCalledTimes(2))
+  clearHistory()
+  landed.resolve([])
+  await late
+  await undo()
+  /* nothing to undo: no further request */
+  expect(api.setPageBackground).toHaveBeenCalledTimes(2)
+})

@@ -205,6 +205,29 @@ function rememberGuides(kept: CanvasGuide[] = [], departing: string[], now: Canv
   return [...kept.filter((g) => !departing.includes(g.pageId)), ...now]
 }
 
+/* A page comes back from the page route without its colour (page-list saves
+   never carry one): paint the pages that just came back the colour the
+   entry remembers for them. Each is its own request; one that fails does not
+   hold the page change back. */
+async function restoreBackgrounds(canvasId: string, remembered: CanvasPageInfo[], restored: CanvasPageInfo[]) {
+  const painted = restored.flatMap((page) => {
+    const background = pageBackground(remembered.find((p) => p.id === page.id))
+    return background ? [{ id: page.id, background }] : []
+  })
+  await Promise.all(
+    painted.map(async ({ id, background }) => {
+      try {
+        await api.setPageBackground(canvasId, id, background)
+      } catch (err) {
+        console.error(err)
+        return
+      }
+      const s = useStore.getState()
+      if (s.canvas?.id === canvasId) s.setPageBackgroundLocal(id, background)
+    }),
+  )
+}
+
 /* Put back the remembered guides of pages that just came back, those not
    already there. Each guide is its own request; one that fails (the canvas
    reached its guide limit meanwhile) does not hold the page change back. */
@@ -480,7 +503,10 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
       if (active) current.setActivePage(active)
     }
     const restored = saved.filter((page) => !expected.some((p) => p.id === page.id))
-    if (e.guides?.length && restored.length) await restoreGuides(canvas.id, e.guides, restored)
+    if (restored.length) {
+      await restoreBackgrounds(canvas.id, forward ? e.after : e.before, restored)
+      if (e.guides?.length) await restoreGuides(canvas.id, e.guides, restored)
+    }
   } else if (e.type === 'guide') {
     await applyGuide(e, forward ? e.after : e.before)
   } else if (e.type === 'page-background') {
