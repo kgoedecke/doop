@@ -78,47 +78,35 @@ export function SignInSettings() {
           <CardTitle>{t('admin.methodsTitle')}</CardTitle>
           <CardDescription>{t('admin.methodsDescription')}</CardDescription>
         </CardHeader>
-        <CardRow
-          label={<label htmlFor="email-password-signup">{t('admin.providerEmail')}</label>}
-          action={
-            <Switch
-              id="email-password-signup"
-              checked={settings.emailPasswordSignup}
-              disabled={busy}
-              onCheckedChange={(checked) => void save({ emailPasswordSignup: checked })}
-            />
-          }
-        >
-          <span className="text-body text-ink-soft">
-            {t('admin.emailPasswordSignup')}
-            <span className="block text-ink-faint">{t('admin.emailPasswordSignupHint')}</span>
-          </span>
+        <CardRow label={t('admin.providerEmail')}>
+          <Setting
+            id="email-password-signup"
+            checked={settings.emailPasswordSignup}
+            disabled={busy}
+            onChange={(checked) => void save({ emailPasswordSignup: checked })}
+            label={t('admin.emailPasswordSignup')}
+            hint={t('admin.emailPasswordSignupHint')}
+          />
         </CardRow>
         {social.map((name) => (
           <CardRow key={name} label={name}>
             <span className="text-body text-ink-soft">{t('admin.providerSocialHint')}</span>
           </CardRow>
         ))}
-        <CardRow
-          label={<label htmlFor="sso-auto-redirect">{t('admin.providerSso', { provider: sso })}</label>}
-          action={
-            providers.enabled && (
-              <Switch
-                id="sso-auto-redirect"
-                checked={settings.ssoAutoRedirect}
-                disabled={busy || !!redirectBlocker}
-                onCheckedChange={(checked) => void save({ ssoAutoRedirect: checked })}
-              />
-            )
-          }
-        >
-          <span className="text-body text-ink-soft">
-            {providers.enabled ? t('admin.ssoAutoRedirect') : t('admin.ssoNotConfigured')}
-            <span className="block text-ink-faint">
-              {providers.enabled && `${t('admin.ssoAutoRedirectHint')} ${t('admin.ssoAutoRedirectEscape')} `}
-              {redirectBlocker}
-            </span>
-          </span>
+        <CardRow label={t('admin.providerSso', { provider: sso })}>
+          {providers.enabled ? (
+            <Setting
+              id="sso-auto-redirect"
+              checked={settings.ssoAutoRedirect}
+              disabled={busy || !!redirectBlocker}
+              onChange={(checked) => void save({ ssoAutoRedirect: checked })}
+              label={t('admin.ssoAutoRedirect')}
+              hint={`${t('admin.ssoAutoRedirectHint')} ${t('admin.ssoAutoRedirectEscape')}`}
+              blocker={redirectBlocker}
+            />
+          ) : (
+            <span className="text-body text-ink-soft">{t('admin.ssoNotConfigured')}</span>
+          )}
         </CardRow>
       </SettingsCard>
 
@@ -152,6 +140,43 @@ export function SignInSettings() {
           <span className="text-body text-ink-soft">{t('admin.defaultWorkspaceHint')}</span>
         </CardRow>
       </SettingsCard>
+    </div>
+  )
+}
+
+/** One method's own setting: the switch beside the words that say what it
+ *  does, so each row carries a different control rather than a shared
+ *  column of toggles that all look like "method on or off". */
+function Setting({
+  id,
+  checked,
+  disabled,
+  onChange,
+  label,
+  hint,
+  blocker,
+}: {
+  id: string
+  checked: boolean
+  disabled: boolean
+  onChange: (checked: boolean) => void
+  label: string
+  hint: string
+  /** why the switch cannot be turned on right now, if it cannot */
+  blocker?: string | null
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2.5">
+        <Switch id={id} size="sm" checked={checked} disabled={disabled} onCheckedChange={onChange} />
+        <label htmlFor={id} className="text-body text-ink">
+          {label}
+        </label>
+      </div>
+      <span className="text-caption text-ink-faint">
+        {hint}
+        {blocker && <span className="block text-warning-ink">{blocker}</span>}
+      </span>
     </div>
   )
 }
