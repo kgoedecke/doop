@@ -71,7 +71,7 @@
             React.createElement(
               FrameLabelLayer.Provider,
               { value: labelLayer },
-              frames.map((f) => React.createElement(FrameView, { key: f.id, frame: f, layoutZoom: k })),
+              frames.map((f) => React.createElement(FrameView, { key: f.id, frame: f, layoutZoom: k, lod: 'live' })),
             ),
           ),
           selected && React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),

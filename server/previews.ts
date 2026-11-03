@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import type { Frame } from '../shared/types.ts'
+import { withRenderSlot } from './renderLimit.ts'
 import * as thumbs from './thumbs.ts'
 
 /**
@@ -70,9 +71,10 @@ export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageRe
     pending = preview
       ? /* renders AND persists — the next cold start serves from storage */
         thumbs.create(frame)
-      : loadScreenshot().then(({ renderFrame }) =>
-          renderFrame(frame, req.scale, { type: req.ext === 'jpg' ? 'jpeg' : 'png', quality: req.quality }),
-        )
+      : withRenderSlot(async () => {
+          const { renderFrame } = await loadScreenshot()
+          return renderFrame(frame, req.scale, { type: req.ext === 'jpg' ? 'jpeg' : 'png', quality: req.quality })
+        })
     remember(key, pending, frame.updatedAt)
   }
 
