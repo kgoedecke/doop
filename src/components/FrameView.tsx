@@ -193,6 +193,8 @@ type DragRect = { id: string; x: number; y: number; width: number; height: numbe
 
 interface HoverHit {
   tag: string
+  /** the runtime's positional path to the element, the same language the picked element's `probe` speaks */
+  selector: string
   rect: { x: number; y: number; width: number; height: number }
 }
 
@@ -939,6 +941,14 @@ export const FrameView = memo(function FrameView({
   )
   const picked = JSON.parse(pickedKey) as string[]
   const multiPick = picked.length > 1
+  /* the hover outline is for what the pointer could pick: an element already
+     picked wears its selection hairline, and the hover's blue wash on top of
+     it would tint a picked root wrapper's whole frame. A standalone element's
+     shape is its shell's selection, so a selected shell hides it too. */
+  const hoverOnSelected =
+    !!hover &&
+    selected &&
+    (picked.includes(hover.selector) || probe?.selector === hover.selector || hover.selector === shellSel)
   const [pickRects, setPickRects] = useState<Record<string, ProbeHit['rect'] | null>>({})
   useEffect(() => {
     if (!runtimeReady) return
@@ -1025,7 +1035,7 @@ export const FrameView = memo(function FrameView({
       if (ev.data?.type === 'doop:hover-result' && ev.data.reqId === hoverReq.current) {
         const hit = (ev.data.hit ?? null) as HoverHit | null
         /* only re-render when the outlined element actually changes */
-        const key = hit ? hit.tag + JSON.stringify(hit.rect) : null
+        const key = hit ? hit.selector + JSON.stringify(hit.rect) : null
         if (key !== hoverKey.current) {
           hoverKey.current = key
           setHover(hit)
@@ -1060,7 +1070,7 @@ export const FrameView = memo(function FrameView({
           /* the tag of the selector's last step: "section:nth-of-type(2)" → "section" */
           const tag = (selector.split('>').at(-1) ?? '').trim().split(/[:.#[]/)[0] ?? ''
           hoverKey.current = null
-          setHover(rect ? { tag, rect } : null)
+          setHover(rect ? { tag, selector, rect } : null)
           return
         }
         if (ev.data.reqId.startsWith(PICK_REQ)) {
@@ -1583,23 +1593,47 @@ export const FrameView = memo(function FrameView({
             >
               {/* above the selection outline (z-[3]), or that outline covers the
               hovered element's tag */}
-              {hover && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
-                <div
-                  data-hover-outline=""
-                  className="pointer-events-none absolute z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                  style={{ left: hover.rect.x, top: hover.rect.y, width: hover.rect.width, height: hover.rect.height }}
-                >
-                  <span
-                    className={cn(
-                      'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-bold leading-none text-white [font-family:ui-monospace,monospace]',
-                      hover.rect.y < 18
-                        ? 'origin-top-left rounded-[0_0_4px_0] [transform:translateY(0)_scale(min(calc(1/var(--zoom,1)),2.4))]'
-                        : 'origin-bottom-left rounded-[4px_4px_4px_0] [transform:translateY(-100%)_scale(min(calc(1/var(--zoom,1)),2.4))]',
-                    )}
+              {hover && !hoverOnSelected && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
+                <>
+                  {/* the wash stays inside the frame: a root element taller or
+                    wider than its frame (a page whose content runs past the
+                    artboard) would otherwise tint the canvas around it, which
+                    reads as the whole canvas being selected. The hairline and
+                    tag below stay unclipped like the selection outline */}
+                  <div className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
+                    <div
+                      data-hover-wash=""
+                      className="absolute bg-[rgba(60,130,246,0.06)]"
+                      style={{
+                        left: hover.rect.x,
+                        top: hover.rect.y,
+                        width: hover.rect.width,
+                        height: hover.rect.height,
+                      }}
+                    />
+                  </div>
+                  <div
+                    data-hover-outline=""
+                    className="pointer-events-none absolute z-[4] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                    style={{
+                      left: hover.rect.x,
+                      top: hover.rect.y,
+                      width: hover.rect.width,
+                      height: hover.rect.height,
+                    }}
                   >
-                    {hover.tag}
-                  </span>
-                </div>
+                    <span
+                      className={cn(
+                        'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-bold leading-none text-white [font-family:ui-monospace,monospace]',
+                        hover.rect.y < 18
+                          ? 'origin-top-left rounded-[0_0_4px_0] [transform:translateY(0)_scale(min(calc(1/var(--zoom,1)),2.4))]'
+                          : 'origin-bottom-left rounded-[4px_4px_4px_0] [transform:translateY(-100%)_scale(min(calc(1/var(--zoom,1)),2.4))]',
+                      )}
+                    >
+                      {hover.tag}
+                    </span>
+                  </div>
+                </>
               )}
               {probe &&
                 probe.selector !== FRAME_COMMENT_SELECTOR &&
