@@ -265,8 +265,8 @@ function hrefOf(el: Element): string | null {
 /** `<use>` becomes the element it points at, in place, with the use's
  *  position and inherited paint, so the walk sees ordinary shapes; a
  *  symbol becomes a nested svg sized by the use. */
-function expandUses(root: Element) {
-  let budget = MAX_ELEMENTS
+function expandUses(root: Element, maxElements = MAX_ELEMENTS) {
+  let budget = maxElements
   const stack: Element[] = []
   const expand = (use: Element, depth: number) => {
     const id = hrefOf(use)?.trim()
@@ -784,7 +784,7 @@ export function importSvgMarkup(markup: string, name: string, options: ImportOpt
   const root = parseSvgMarkup(markup)
   if (!root) return null
   sanitize(root)
-  expandUses(root)
+  expandUses(root, options.maxElements)
   return importSvg(root, name, options)
 }
 
@@ -794,7 +794,7 @@ export function importSvgInBrowser(markup: string, name: string, options: Import
   const parsed = parseSvgMarkup(markup)
   if (!parsed) return null
   sanitize(parsed)
-  expandUses(parsed)
+  expandUses(parsed, options.maxElements)
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
   /* out of sight without `visibility`, which would inherit into the file and hide every shape */

@@ -556,23 +556,26 @@ function isCmykJpeg(bytes: Uint8Array): boolean {
 
 /** The SVG's pictures in a form browsers show. MuPDF writes a JPEG stream
  *  as it is, so a CMYK one is decoded through the page instead (which
- *  applies the PDF's decode array too) and re-encoded as RGB JPEG; the
- *  pixel size pairs the two. */
+ *  applies the PDF's decode array too) and re-encoded as RGB JPEG. The
+ *  writer and the page device paint pictures in the same order, so the
+ *  n-th CMYK picture of a size in the markup is the n-th four-component
+ *  one of that size the page draws. */
 function rgbPictures(mupdf: typeof import('mupdf'), page: PDFPage, svg: string): string {
   const pattern =
     /(<image\b[^>]*\bwidth="(\d+)"\s+height="(\d+)"[^>]*href=")data:image\/jpeg;base64,([A-Za-z0-9+/=\s]+)"/g
-  const cmyk = new Set<string>()
+  const cmyk = (data: string) => isCmykJpeg(fromBase64(data.replace(/\s/g, '')))
+  const wanted = new Map<string, number>()
   for (const m of svg.matchAll(pattern))
-    if (isCmykJpeg(fromBase64(m[4]!.replace(/\s/g, '')))) cmyk.add(`${m[2]}x${m[3]}`)
-  if (!cmyk.size) return svg
-  const decoded = new Map<string, string>()
+    if (cmyk(m[4]!)) wanted.set(`${m[2]}x${m[3]}`, (wanted.get(`${m[2]}x${m[3]}`) ?? 0) + 1)
+  if (!wanted.size) return svg
+  const decoded = new Map<string, string[]>()
   const device = new mupdf.Device({
     fillImage(image) {
       const key = `${image.getWidth()}x${image.getHeight()}`
-      if (!cmyk.has(key) || decoded.has(key)) return
+      if (!wanted.get(key) || image.getColorSpace()?.getNumberOfComponents() !== 4) return
       try {
         const pixmap = image.toPixmap().convertToColorSpace(mupdf.ColorSpace.DeviceRGB)
-        decoded.set(key, `data:image/jpeg;base64,${toBase64(pixmap.asJPEG(85, false))}`)
+        decoded.set(key, [...(decoded.get(key) ?? []), `data:image/jpeg;base64,${toBase64(pixmap.asJPEG(85, false))}`])
         pixmap.destroy()
       } catch {
         /* left as it is */
@@ -584,8 +587,9 @@ function rgbPictures(mupdf: typeof import('mupdf'), page: PDFPage, svg: string):
   } finally {
     device.destroy()
   }
-  return svg.replace(pattern, (whole, prefix: string, w: string, h: string) => {
-    const url = decoded.get(`${w}x${h}`)
+  return svg.replace(pattern, (whole, prefix: string, w: string, h: string, data: string) => {
+    if (!cmyk(data)) return whole
+    const url = decoded.get(`${w}x${h}`)?.shift()
     return url ? `${prefix}${url}"` : whole
   })
 }

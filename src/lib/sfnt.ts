@@ -442,13 +442,16 @@ function cmapTable(map: Map<number, number>, numGlyphs: number): Uint8Array {
   new DataView(f4bytes.buffer).setUint16(2, f4bytes.length)
   const subtables: Uint8Array[] = [f4bytes]
   if (wide.length) {
+    /* a browser that finds a format 12 table reads that one alone, so it
+       carries every character, not only those past the BMP */
+    const all = [...bmp, ...wide]
     const f12 = new Writer()
     f12.u16(12)
     f12.u16(0)
-    f12.u32(16 + wide.length * 12)
+    f12.u32(16 + all.length * 12)
     f12.u32(0)
-    f12.u32(wide.length)
-    for (const [code, gid] of wide) {
+    f12.u32(all.length)
+    for (const [code, gid] of all) {
       f12.u32(code)
       f12.u32(code)
       f12.u32(gid)

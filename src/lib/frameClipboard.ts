@@ -328,19 +328,21 @@ async function importIncoming(
   })
   if (sources.length && !vectors.length && !images.length) throw new Error('The SVG has no shapes to import.')
   /* a PDF is one frame per page, at the page's printed size */
-  const pages: Prepared[] = (
-    await Promise.all(
-      incoming.pdfs.map(async (file) =>
-        importPdf(new Uint8Array(await file.arrayBuffer()), fileStem(file.name) || 'PDF', {
-          importSvg: importSvgInBrowser,
-          /* pictures become assets, so a photo-heavy page stays under the frame's size cap */
-          storeImage: async (bytes, mime) =>
-            (await api.uploadAsset(canvasId, new Blob([bytes as BlobPart], { type: mime }))).url,
-        }),
-      ),
-    )
+  /* a PDF that cannot be read drops out on its own; its siblings still land */
+  const read = await Promise.allSettled(
+    incoming.pdfs.map(async (file) =>
+      importPdf(new Uint8Array(await file.arrayBuffer()), fileStem(file.name) || 'PDF', {
+        importSvg: importSvgInBrowser,
+        /* pictures become assets, so a photo-heavy page stays under the frame's size cap */
+        storeImage: async (bytes, mime) =>
+          (await api.uploadAsset(canvasId, new Blob([bytes as BlobPart], { type: mime }))).url,
+      }),
+    ),
   )
-    .flat()
+  const unreadable = read.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (unreadable) console.error('PDF import failed', unreadable.reason)
+  const pages: Prepared[] = read
+    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
     .map((page) => ({
       kind: 'page' as const,
       name: page.name,
@@ -348,7 +350,7 @@ async function importIncoming(
       html: () => Promise.resolve(page.html),
     }))
   if (incoming.pdfs.length && !pages.length && !vectors.length && !images.length)
-    throw new Error('The PDF has no pages to import.')
+    throw unreadable ? new Error('The PDF could not be read.') : new Error('The PDF has no pages to import.')
   const prepared = [...vectors, ...pages, ...images]
   const placed = rowSlots(
     prepared.map((p) => p.size),
