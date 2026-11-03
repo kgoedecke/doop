@@ -261,3 +261,28 @@ it('serializes concurrent duplicates so names stay unique and the page limit hol
   expect(full.pages).toHaveLength(100)
   expect((await owner.post(url)).status).toBe(400)
 })
+
+it('paints a page for editors only, as a hex colour or back to the theme paper', async () => {
+  const canvas = await (await owner.post('/api/canvases', { name: 'Painted pages' })).json()
+  const page = canvas.pages[0]
+  const paint = (color: unknown, client = owner, pageId = page.id) =>
+    client.req(`/api/canvases/${canvas.id}/pages/${pageId}/background`, {
+      method: 'PUT',
+      body: JSON.stringify({ color }),
+    })
+  expect((await paint('#1e1e1e', outsider)).status).toBe(403)
+  expect((await paint('red')).status).toBe(400)
+  expect((await paint(undefined)).status).toBe(400)
+  expect((await paint('#1e1e1e', owner, 'missing')).status).toBe(404)
+  const painted = await paint('1E1E1E')
+  expect(painted.status).toBe(200)
+  expect(await painted.json()).toEqual([{ ...page, background: '#1e1e1e' }])
+  /* a rename keeps the colour */
+  const current = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
+  const renamed = await owner.req(`/api/canvases/${canvas.id}/pages`, {
+    method: 'PUT',
+    body: JSON.stringify({ pages: [{ id: page.id, name: 'Dark' }], expectedPages: current.pages }),
+  })
+  expect(await renamed.json()).toEqual([{ id: page.id, name: 'Dark', background: '#1e1e1e' }])
+  expect(await (await paint(null)).json()).toEqual([{ id: page.id, name: 'Dark' }])
+})

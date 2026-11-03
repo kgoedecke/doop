@@ -3,6 +3,7 @@ import type { Canvas, CanvasGuide } from '../shared/types'
 
 const api = vi.hoisted(() => ({
   setPages: vi.fn(),
+  setPageBackground: vi.fn(),
   putGuide: vi.fn(),
   deleteGuide: vi.fn(),
   duplicatePage: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock('../src/lib/api', () => ({ api, ApiError: class extends Error {} }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 const { useStore } = await import('../src/lib/store')
 const { commitGuide, visibleGuides } = await import('../src/lib/guides')
-const { savePages, duplicatePage } = await import('../src/lib/pageEdits')
+const { savePages, duplicatePage, setPageBackground } = await import('../src/lib/pageEdits')
 const { clearHistory, undo, redo } = await import('../src/lib/history')
 
 const pages = [
@@ -157,4 +158,29 @@ it('hides guides on a phone and lets go of the selection when guides are hidden'
   useStore.getState().toggleUiHidden()
   expect(useStore.getState().selectedGuideId).toBeNull()
   useStore.getState().toggleUiHidden()
+})
+
+const background = (id: string) => useStore.getState().canvas?.pages?.find((p) => p.id === id)?.background
+
+it('paints a page at once, saves it, and takes the colour back and forth through undo and redo', async () => {
+  api.setPageBackground.mockImplementation(async () => [])
+  await setPageBackground(useStore.getState().canvas!, 'first', '#1e1e1e')
+  expect(api.setPageBackground).toHaveBeenCalledWith('c', 'first', '#1e1e1e')
+  expect(background('first')).toBe('#1e1e1e')
+  await undo()
+  expect(api.setPageBackground).toHaveBeenLastCalledWith('c', 'first', null)
+  expect(background('first')).toBeUndefined()
+  await redo()
+  expect(background('first')).toBe('#1e1e1e')
+  /* the same colour again is no edit and no undo step */
+  await setPageBackground(useStore.getState().canvas!, 'first', '#1e1e1e')
+  expect(api.setPageBackground).toHaveBeenCalledTimes(3)
+})
+
+it('puts the previous colour back when the save fails', async () => {
+  api.setPageBackground.mockRejectedValue(new Error('offline'))
+  await expect(setPageBackground(useStore.getState().canvas!, 'first', '#1e1e1e')).rejects.toThrow('offline')
+  expect(background('first')).toBeUndefined()
+  await undo()
+  expect(api.setPageBackground).toHaveBeenCalledTimes(1)
 })

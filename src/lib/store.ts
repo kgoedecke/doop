@@ -155,6 +155,8 @@ interface State {
   activePageId: string | null
   setActivePage(id: string): void
   setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
+  /** paint one page locally (this client's own edit, before or after its save) */
+  setPageBackgroundLocal(pageId: string, background: string | null): void
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
@@ -345,6 +347,16 @@ export const useStore = create<State>((set, get) => ({
         selectedGuideId: null,
         viewport: { x: 0, y: 0, zoom: 1 },
       }
+    }),
+  setPageBackgroundLocal: (pageId, background) =>
+    set((s) => {
+      if (!s.canvas) return {}
+      const pages = canvasPages(s.canvas).map((page) => {
+        if (page.id !== pageId) return page
+        const { background: _previous, ...rest } = page
+        return background ? { ...rest, background } : rest
+      })
+      return { canvas: { ...s.canvas, pages } }
     }),
   setPages: (pages, canvasId) =>
     set((s) => {

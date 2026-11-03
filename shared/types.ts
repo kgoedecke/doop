@@ -127,6 +127,11 @@ export interface CanvasPageInfo {
    *  Set only through the flow-start route or MCP tool; page-list saves keep
    *  whatever the server already has. */
   startFrameId?: string
+  /** the page's own canvas colour (`#rrggbb`, shared/pageBackground.ts),
+   *  shown in place of the viewer's theme paper. Set only through the
+   *  background route or MCP tool; page-list saves keep it, as they keep
+   *  the flow start. */
+  background?: string
 }
 
 /** A ruler guide: an infinite line on one page of a canvas, in world px.

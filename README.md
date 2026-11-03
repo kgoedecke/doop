@@ -37,7 +37,9 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
-  `expectedPages` to protect collaborators), and target frames with `pageId`.
+  `expectedPages` to protect collaborators), and target frames with `pageId`. Each page can wear
+  a canvas colour of its own, as in Figma: the Background swatch under the page list (agents:
+  `set_page_background`); cleared, the page shows the theme paper again.
 - **Clickable prototypes** — wire elements to other frames (click, hover, press, key or delay;
   navigate, overlay, back, scroll or link, with transitions) in Prototype mode or straight in the
   HTML, then click through the flow with Play or share `/c/<id>/proto`. Agents use the same
@@ -851,6 +853,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `create_canvas`          | Create a canvas (optionally in a workspace), returns its shareable id                                               |
 | `get_canvas`             | Canvas layout: every frame's position/size/meta                                                                     |
 | `set_canvas_pages`       | Create, rename, reorder or delete canvas pages                                                                      |
+| `set_page_background`    | Paint one page's canvas a colour of its own, or clear it back to the theme paper                                    |
 | **Frames**               |                                                                                                                     |
 | `create_frame`           | Add a frame with HTML (auto-placed if no x/y)                                                                       |
 | `get_frame`              | Read a frame including its HTML                                                                                     |

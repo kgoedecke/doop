@@ -3,7 +3,8 @@ import { canvasPages, framePageId, samePages } from '../../shared/pages'
 import { stackOf } from '../../shared/frameStack'
 import { api, ApiError } from './api'
 import { useStore } from './store'
-import { guidesLeaving, recordPageCopy, recordPages, recordUpdates, trackSave } from './history'
+import { pageBackground } from '../../shared/pageBackground'
+import { guidesLeaving, recordPageBackground, recordPageCopy, recordPages, recordUpdates, trackSave } from './history'
 
 export function savePages(canvas: Canvas, next: CanvasPageInfo[], selectId?: string) {
   const task = savePagesAndRecord(canvas, next, selectId)
@@ -91,6 +92,28 @@ export function moveFramesToPage(canvas: Canvas, ids: string[], pageId: string) 
     } finally {
       if (useStore.getState().canvas?.id === canvas.id) recordUpdates(moved)
     }
+  })()
+  trackSave(task)
+  return task
+}
+
+/** Paint a page's canvas (`#rrggbb`) or put the theme paper back (null):
+ *  shown at once, saved through the API, one undo step. A failed save puts
+ *  the previous colour back. */
+export function setPageBackground(canvas: Canvas, pageId: string, color: string | null) {
+  const task = (async () => {
+    const before = pageBackground(canvasPages(canvas).find((page) => page.id === pageId))
+    if (before === color) return
+    const state = useStore.getState()
+    if (state.canvas?.id !== canvas.id) return
+    state.setPageBackgroundLocal(pageId, color)
+    try {
+      await api.setPageBackground(canvas.id, pageId, color)
+    } catch (error) {
+      if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setPageBackgroundLocal(pageId, before)
+      throw error
+    }
+    if (useStore.getState().canvas?.id === canvas.id) recordPageBackground(canvas.id, pageId, before, color)
   })()
   trackSave(task)
   return task

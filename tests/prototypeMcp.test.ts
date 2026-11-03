@@ -130,3 +130,33 @@ it('sets the flow start, validating the frame and its page', async () => {
   })
   expect(canvas.pages![0]).toEqual({ id: 'one', name: 'Renamed' })
 })
+
+it('paints a page through set_page_background and clears it again', async () => {
+  const bad = await client.callTool({
+    name: 'set_page_background',
+    arguments: { canvas_id: canvas.id, page_id: 'two', color: 'red', agent_name: 'A' },
+  })
+  expect(bad.isError).toBe(true)
+  const missing = await client.callTool({
+    name: 'set_page_background',
+    arguments: { canvas_id: canvas.id, page_id: 'nope', color: '#1e1e1e', agent_name: 'A' },
+  })
+  expect(missing.isError).toBe(true)
+  const painted = await client.callTool({
+    name: 'set_page_background',
+    arguments: { canvas_id: canvas.id, page_id: 'two', color: '#1E1E1E', agent_name: 'A' },
+  })
+  expect(payload(painted).pages).toEqual([
+    { id: 'one', name: 'One' },
+    { id: 'two', name: 'Two', background: '#1e1e1e' },
+  ])
+  const cleared = await client.callTool({
+    name: 'set_page_background',
+    arguments: { canvas_id: canvas.id, color: null, agent_name: 'A' },
+  })
+  /* no page_id means the first page, which had no colour: a no-op there */
+  expect(payload(cleared).pages).toEqual([
+    { id: 'one', name: 'One' },
+    { id: 'two', name: 'Two', background: '#1e1e1e' },
+  ])
+})

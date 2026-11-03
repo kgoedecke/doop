@@ -1,5 +1,6 @@
 import { stackOf, type StackWrite } from '../../shared/frameStack'
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
+import { pageBackground } from '../../shared/pageBackground'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
 import { settleFrames } from './frameBridge'
@@ -37,6 +38,8 @@ type Entry =
   | { type: 'stack'; canvasId: string; before: StackWrite[]; after: StackWrite[] }
   /* a ruler guide added (before null), moved, or removed (after null) */
   | { type: 'guide'; canvasId: string; before: CanvasGuide | null; after: CanvasGuide | null }
+  /* a page's canvas colour set (after), changed or cleared (after null) */
+  | { type: 'page-background'; canvasId: string; pageId: string; before: string | null; after: string | null }
   | { type: 'delete'; frameId: string; snapshot: Snapshot }
   /* Destination first, then source removal; reverse that order on undo so
      a failed request can never remove the only copy of a drawing. */
@@ -230,6 +233,11 @@ export function recordGuide(canvasId: string, before: CanvasGuide | null, after:
   push({ type: 'guide', canvasId, before, after })
 }
 
+export function recordPageBackground(canvasId: string, pageId: string, before: string | null, after: string | null) {
+  if (before === after) return
+  push({ type: 'page-background', canvasId, pageId, before, after })
+}
+
 export type HistoryEntry = Entry
 
 export function recordCreate(frame: Frame): HistoryEntry {
@@ -334,7 +342,8 @@ function remapId(oldId: string, newId: string) {
     if (e.type === 'group' || e.type === 'transfer') e.entries.forEach(visit)
     else if (e.type === 'stack') {
       for (const w of [...e.before, ...e.after]) if (w.id === oldId) w.id = newId
-    } else if (e.type !== 'pages' && e.type !== 'guide' && e.frameId === oldId) e.frameId = newId
+    } else if (e.type !== 'pages' && e.type !== 'guide' && e.type !== 'page-background' && e.frameId === oldId)
+      e.frameId = newId
   }
   for (const e of [...undoStack, ...redoStack]) visit(e)
 }
@@ -355,7 +364,7 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
    so undo/redo displays the page where the affected designs now live. */
 function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
   if (e.type === 'group' || e.type === 'transfer') return e.entries.flatMap((child) => selectionIds(child, direction))
-  if (e.type === 'pages' || e.type === 'guide' || e.type === 'stack') return []
+  if (e.type === 'pages' || e.type === 'guide' || e.type === 'page-background' || e.type === 'stack') return []
   if (e.type === 'update' && 'pageId' in (direction === 'redo' ? e.after : e.before)) return [e.frameId]
   const recreated = e.type === (direction === 'redo' ? 'create' : 'delete')
   return recreated ? [e.frameId] : []
@@ -474,6 +483,8 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     if (e.guides?.length && restored.length) await restoreGuides(canvas.id, e.guides, restored)
   } else if (e.type === 'guide') {
     await applyGuide(e, forward ? e.after : e.before)
+  } else if (e.type === 'page-background') {
+    await applyPageBackground(e, forward ? e.after : e.before)
   } else if (e.type === 'stack') {
     if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
@@ -526,6 +537,22 @@ async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGu
     else await api.deleteGuide(canvas.id, id)
   } catch (err) {
     if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setGuideLocal(id, current)
+    throw err
+  }
+}
+
+/* Paint the page the colour the entry says, keeping the local copy in step
+   with the server either way. A page that is gone has nothing to paint. */
+async function applyPageBackground(e: Extract<Entry, { type: 'page-background' }>, target: string | null) {
+  const canvas = useStore.getState().canvas
+  if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+  if (!canvasPages(canvas).some((page) => page.id === e.pageId)) throw new Error('Page removed')
+  const current = pageBackground(canvasPages(canvas).find((page) => page.id === e.pageId))
+  useStore.getState().setPageBackgroundLocal(e.pageId, target)
+  try {
+    await api.setPageBackground(canvas.id, e.pageId, target)
+  } catch (err) {
+    if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setPageBackgroundLocal(e.pageId, current)
     throw err
   }
 }

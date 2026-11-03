@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
@@ -1718,6 +1719,20 @@ app.put('/api/canvases/:id/pages', (req, res) => {
   const clean = pages.map((p) => ({ id: p.id, name: p.name.trim() }))
   const actor = userActor(req)
   res.json(actions.setCanvasPages(canvas.id, clean, actor))
+})
+
+/* a page's own canvas colour (`#rrggbb`); null puts the theme paper back */
+app.put('/api/canvases/:id/pages/:pageId/background', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const color: unknown = req.body?.color
+  const background = color === null ? null : normalizePageBackground(color)
+  if (color !== null && !background)
+    return res.status(400).json({ error: 'color must be a hex colour such as #f5f5f5, or null' })
+  if (!canvasPages(canvas).some((p) => p.id === req.params.pageId))
+    return res.status(404).json({ error: 'page not found' })
+  const actor = userActor(req)
+  res.json(actions.setPageBackground(canvas.id, req.params.pageId, background, actor))
 })
 
 /* the frame a page's prototype flow starts on; null clears it */
