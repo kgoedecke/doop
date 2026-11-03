@@ -23,8 +23,18 @@
         * { margin: 0 }
         body { background: #fff }
         .made { position: absolute; left: 0; top: 100px; width: 100px; height: 100px; background: rgb(0, 128, 0) }
-      </style></head><body><script>document.body.appendChild(Object.assign(document.createElement('div'), { className: 'made' }))</scr` +
-        `ipt></body></html>`
+        .chart { position: absolute; left: 100px; top: 100px; width: 100px; height: 100px }
+        .adopted { position: absolute; left: 200px; top: 100px; width: 100px; height: 100px }
+        .picked { position: absolute; left: 100px; top: 0; width: 100px; height: 100px; display: block }
+      </style></head><body><img class="picked" srcset="/tests/fixtures/raster/blue.svg 1x"><script>
+        document.body.appendChild(Object.assign(document.createElement('div'), { className: 'made' }))
+        var chart = Object.assign(document.createElement('canvas'), { className: 'chart', width: 10, height: 10 })
+        var ctx = chart.getContext('2d'); ctx.fillStyle = 'rgb(128, 0, 128)'; ctx.fillRect(0, 0, 10, 10)
+        document.body.appendChild(chart)
+        var sheet = new CSSStyleSheet(); sheet.replaceSync('.adopted { background: rgb(255, 128, 0) }')
+        document.adoptedStyleSheets = document.adoptedStyleSheets.concat(sheet)
+        document.body.appendChild(Object.assign(document.createElement('div'), { className: 'adopted' }))
+      </scr` + `ipt></body></html>`
 
       /* mount the runtime the way FrameView does and hand it the document */
       async function mountLive() {
@@ -80,6 +90,9 @@
           pic: at(250 * scale, 50 * scale),
           paper: at(150 * scale, 150 * scale),
           made: at(50 * scale, 150 * scale),
+          chart: at(150 * scale, 150 * scale),
+          adopted: at(250 * scale, 150 * scale),
+          picked: at(150 * scale, 50 * scale),
         }
       }
     </script>

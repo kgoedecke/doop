@@ -84,6 +84,34 @@ it('resolves relative URLs against the document base', async () => {
   expect(calls).toEqual(['https://cdn.example/site/img/a.png'])
 })
 
+it("inlines string-form imports and keeps a stylesheet link's media condition", async () => {
+  serve({
+    'https://cdn.example/print.css': { body: '@import "theme.css"; p{color:red}', type: 'text/css' },
+    'https://cdn.example/theme.css': { body: 'b{color:blue}', type: 'text/css' },
+  })
+  const svg = await inlineDocument(
+    '<html><head><link rel="stylesheet" href="https://cdn.example/print.css" media="print"></head><body></body></html>',
+    opts(),
+  )
+  expect(svg).toContain('<style media="print">@import url("data:text/css;base64,')
+  expect(svg).not.toContain('@import "theme.css"')
+  expect(svg).toContain('p{color:red}')
+  expect(atob(/data:text\/css;base64,([A-Za-z0-9+/=]+)/.exec(svg)![1]!)).toBe('b{color:blue}')
+})
+
+it('ends an import cycle where it started instead of spinning', async () => {
+  const calls = serve({
+    'https://cdn.example/a.css': { body: '@import url(b.css); a{}', type: 'text/css' },
+    'https://cdn.example/b.css': { body: '@import url(a.css); b{}', type: 'text/css' },
+  })
+  const svg = await inlineDocument(
+    '<html><head><style>@import url("https://cdn.example/a.css");</style></head><body></body></html>',
+    opts(),
+  )
+  expect(svg).toContain('@import url("data:text/css;base64,')
+  expect(calls.filter((url) => url.endsWith('a.css'))).toHaveLength(1)
+})
+
 it('rejects when a resource cannot be fetched, so the server renders instead', async () => {
   serve({})
   await expect(

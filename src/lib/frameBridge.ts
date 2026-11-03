@@ -243,12 +243,19 @@ export function requestFrame(
   })
 }
 
-/** The frame's live document, serialized the way the runtime saves it
- *  (its own markers removed, script-made elements kept), or null when the
- *  frame is not mounted. */
-export async function snapshotFrame(frameId: string): Promise<string | null> {
+export interface FrameSnapshot {
+  /** the live document with what an image export needs captured in (canvas
+   *  pixels, picked image sources, CSSOM rules); null when the runtime
+   *  could not read it all (a tainted canvas) */
+  html: string | null
+}
+
+/** The frame's document as the runtime shows it, or null when the frame
+ *  is not mounted. */
+export async function snapshotFrame(frameId: string): Promise<FrameSnapshot | null> {
   const reply = await requestFrame(frameId, 'doop:snapshot', {})
-  return typeof reply?.html === 'string' ? reply.html : null
+  if (!reply) return null
+  return { html: typeof reply.html === 'string' ? reply.html : null }
 }
 
 /* the runtime's replies carry the element summary under `info` */

@@ -29,7 +29,11 @@ const RESOURCE_FETCH_MS = 15_000
 
 export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise<Blob> {
   const signal = opts.signal ?? AbortSignal.timeout(RESOURCE_FETCH_MS)
-  const html = (await snapshotFrame(frame.id)) ?? frame.html
+  const snapshot = await snapshotFrame(frame.id)
+  /* an unmounted frame renders from its saved HTML; a mounted one whose
+     pixels cannot all be read is for the server */
+  if (snapshot && snapshot.html === null) throw new Error('the frame cannot be drawn here')
+  const html = snapshot?.html ?? frame.html
   const svg = await inlineDocument(html, { width: frame.width, height: frame.height, signal })
   return drawSvg(svg, { width: frame.width, height: frame.height, ...opts })
 }
@@ -60,6 +64,8 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
         const href = new URL(link.getAttribute('href') ?? '', base).href
         const css = await resources.text(href)
         const style = doc.createElement('style')
+        const media = link.getAttribute('media')
+        if (media) style.setAttribute('media', media)
         style.textContent = await inlineCssUrls(css, href, resources)
         link.replaceWith(style)
       })(),
@@ -112,17 +118,28 @@ async function inlineAttr(el: Element, attr: string, base: string, resources: Re
 }
 
 const CSS_URL = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi
+/* `@import "x.css"` is `@import url("x.css")` without the function */
+const CSS_IMPORT_STRING = /@import\s+(['"])([^'"]+)\1/gi
 
 /** Every `url(...)` in `css` that points off the document becomes a data:
- *  URL; a stylesheet it imports is inlined the same way, recursively. */
-async function inlineCssUrls(css: string, base: string, resources: ResourceCache): Promise<string> {
+ *  URL; a stylesheet it imports is inlined the same way, recursively.
+ *  `chain` is the stylesheets being inlined on the way here: one that
+ *  imports itself again, however indirectly, is left empty at that point. */
+async function inlineCssUrls(
+  css: string,
+  base: string,
+  resources: ResourceCache,
+  chain: ReadonlySet<string> = new Set(),
+): Promise<string> {
+  resources.signal.throwIfAborted()
+  css = css.replace(CSS_IMPORT_STRING, '@import url("$2")')
   const refs = [...css.matchAll(CSS_URL)].map((m) => m[2]?.trim() ?? '').filter((ref) => ref && !isInlineUrl(ref))
   if (refs.length === 0) return css
   const replacements = new Map<string, string>()
   await Promise.all(
     [...new Set(refs)].map(async (ref) => {
       const url = new URL(ref, base).href
-      replacements.set(ref, await resources.dataUrl(url))
+      replacements.set(ref, await resources.dataUrl(url, chain))
     }),
   )
   return css.replace(CSS_URL, (whole, _quote: string, ref: string) => {
@@ -141,7 +158,7 @@ function isInlineUrl(ref: string): boolean {
  *  export, and the server's renderer can still load it. */
 class ResourceCache {
   private readonly pending = new Map<string, Promise<Blob>>()
-  constructor(private readonly signal: AbortSignal) {}
+  constructor(readonly signal: AbortSignal) {}
 
   private blob(url: string): Promise<Blob> {
     let pending = this.pending.get(url)
@@ -159,11 +176,13 @@ class ResourceCache {
     return (await this.blob(url)).text()
   }
 
-  async dataUrl(url: string): Promise<string> {
+  async dataUrl(url: string, chain: ReadonlySet<string> = new Set()): Promise<string> {
     const blob = await this.blob(url)
     if (blob.type.startsWith('text/css')) {
-      /* a stylesheet imported by another: its own url()s resolve against it */
-      const css = await inlineCssUrls(await blob.text(), url, this)
+      /* a stylesheet imported by another: its own url()s resolve against
+         it, and an import cycle ends where it started */
+      if (chain.has(url)) return 'data:text/css,'
+      const css = await inlineCssUrls(await blob.text(), url, this, new Set(chain).add(url))
       return toDataUrl(new Blob([css], { type: 'text/css' }))
     }
     return toDataUrl(blob)

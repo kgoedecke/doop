@@ -145,10 +145,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `canvasShares.test.ts`, `userEventsHttp.test.ts`.
 - Frame image export (`src/lib/frameRaster.ts`, `src/lib/frameExport.ts`): the PNG / JPG download
   and Copy as PNG are drawn by the browser showing the frame, not by the server's Chromium. The
-  runtime answers `doop:snapshot` with its live document (`snapshotFrame` in `frameBridge.ts`;
-  the store's HTML when the frame is not mounted), `inlineDocument` turns it into one SVG sized
-  to the frame, every image, stylesheet and font fetched and inlined as a data: URL (an SVG
-  drawn as an image loads nothing itself; scripts, nested documents and `srcset` are dropped),
+  runtime answers `doop:snapshot` with its live document (`exportSnapshot`: what an HTML copy
+  loses is captured first, every `<canvas>` as its pixels, each `<img>` at the source the
+  browser picked, every stylesheet as the CSSOM holds it, adopted sheets included; `html: null`
+  when a canvas is tainted, and the export goes to the server; `snapshotFrame` in
+  `frameBridge.ts`, the store's HTML when the frame is not mounted), `inlineDocument` turns it
+  into one SVG sized to the frame, every image, stylesheet (both `@import` forms, cycles cut)
+  and font fetched and inlined as a data: URL (an SVG drawn as an image loads nothing itself;
+  scripts, nested documents and `srcset` are dropped, a link's `media` kept),
   and the SVG is drawn onto a canvas at 2x from a data: URL (a blob: URL taints the canvas in
   Chromium) and encoded. A resource the browser cannot fetch (an image host without CORS)
   rejects the whole render and the export falls back to `/i/<id>.<ext>` as before, so what the

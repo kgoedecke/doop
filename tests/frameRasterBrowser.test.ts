@@ -11,6 +11,9 @@ interface Rendered {
   pic: number[]
   paper: number[]
   made: number[]
+  chart: number[]
+  adopted: number[]
+  picked: number[]
 }
 
 /* the user-triggered export is drawn by the browser showing the frame:
@@ -61,9 +64,12 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
     expect(out.paper).toEqual([255, 255, 255, 255])
   })
 
-  it('exports what the runtime shows, script-made elements included', async () => {
+  it('exports what the runtime shows: script-made elements, canvas pixels, adopted sheets, picked sources', async () => {
     const out = await render({ live: true, html: '<html><body></body></html>' })
     expect(out.made).toEqual([0, 128, 0, 255])
+    expect(out.chart).toEqual([128, 0, 128, 255])
+    expect(out.adopted).toEqual([255, 128, 0, 255])
+    expect(out.picked).toEqual([0, 0, 255, 255])
   })
 
   it('rejects a frame with an image the browser cannot fetch, for the server to render', async () => {
