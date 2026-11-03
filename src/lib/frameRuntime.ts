@@ -161,7 +161,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         // Inline formatting belongs to its surrounding text block on re-entry.
         while (el.parentElement && el.parentElement !== document.body &&
           getComputedStyle(el).display === 'inline' && !el.parentElement.querySelector(LOCKED)) el = el.parentElement
-        if (el.tagName === 'LI') return el.closest('ul,ol') || el
+        if (el.tagName === 'LI') {
+          var list = el.closest('ul,ol')
+          return list && !list.querySelector(LOCKED) ? list : el
+        }
         return el
       }
       el = el.parentElement
@@ -1042,7 +1045,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       styleTimer = null
       postEdited()
     }
-    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [] }
+    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [] }
     return true
   }
   function endStyleEdit(selector, cancel) {
@@ -1052,7 +1055,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var el = styleTarget(selector)
     if (!el) return false
     if (cancel) {
-      edit.runs.forEach(function (run) { run.el.style.cssText = run.cssText })
+      restoreTextRuns(edit)
       var original = document.createElement('div').style
       original.cssText = edit.original
       for (var name in edit.touched) {
@@ -1070,29 +1073,35 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         if (restoredStyle === null) el.removeAttribute('style')
         else el.setAttribute('style', restoredStyle)
       }
-    } else if (Object.keys(edit.touched).length || edit.runs.length) postEdited(true)
+    } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
   }
   function applyStyle(selector, styles) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     var textPatch = isTextPatch(styles)
+    var gesture = styleEdit && styleEdit.selector === selector
+    function noteRuns(change) {
+      if (!gesture) return
+      change.before.forEach(function (run) {
+        if (!styleEdit.runs.some(function (known) { return known.el === run.el }) &&
+          styleEdit.created.indexOf(run.el) === -1) styleEdit.runs.push(run)
+      })
+      change.created.forEach(function (run) { styleEdit.created.push(run) })
+      if (change.renamed) change.renamed.forEach(function (run) { styleEdit.renamed.push(run) })
+    }
     if (textPatch && selectedTextRange(el)) {
-      // Part of the text is selected: the edit belongs to that run alone.
-      styleTextRange(el, styles)
-      if (styleTimer) clearTimeout(styleTimer)
-      styleTimer = setTimeout(function () { styleTimer = null; postEdited() }, 250)
+      // Part of the text is selected: the edit belongs to that run alone. A
+      // scrub previews here and saves (or restores) when the gesture ends.
+      noteRuns(styleTextRange(el, styles))
+      if (!gesture) {
+        if (styleTimer) clearTimeout(styleTimer)
+        styleTimer = setTimeout(function () { styleTimer = null; postEdited() }, 250)
+      }
       postTextState()
       return true
     }
-    if (textPatch) {
-      var cleared = clearTextRuns(el, styles)
-      if (styleEdit && styleEdit.selector === selector) {
-        cleared.forEach(function (run) {
-          if (!styleEdit.runs.some(function (known) { return known.el === run.el })) styleEdit.runs.push(run)
-        })
-      }
-    }
+    if (textPatch) noteRuns(clearTextRuns(el, styles))
     if (styleEdit && styleEdit.selector === selector) {
       Object.assign(styleEdit.styles, styles)
       previewStyle(el, styles)

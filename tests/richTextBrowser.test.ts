@@ -282,6 +282,105 @@ describe.skipIf(!findBrowserPath())('rich text editing', () => {
     expect(await frame.$('#text b')).toBeNull()
   })
 
+  it("keeps a run's own font when another text property changes on it", async () => {
+    await render(
+      '<p id="text" style="margin:0;font:24px Arial"><span style="font-family: Georgia">Hello</span> world</p>',
+    )
+    await page.evaluate(() => {
+      ;(window as unknown as Fixture).messages = []
+    })
+    await frame.evaluate(() => {
+      const text = document.querySelector('#text span')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 0, text, 5)
+    })
+    await page.waitForFunction(() => (window as unknown as Fixture).messages.some((m) => m.type === 'doop:text-state'))
+    await style({ 'font-size': '32px' })
+    expect(await frame.$$eval('#text span', (runs) => runs.map((r) => r.getAttribute('style')))).toEqual([
+      'font-family: Georgia; font-size: 32px;',
+    ])
+  })
+
+  it('takes the boldness of <b> runs along when a weight is set on the whole layer', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">Hello <b data-doop-id="w">world</b></p>')
+    expect((await inspect())?.textMixed).toEqual({ fontWeight: true })
+    await style({ 'font-weight': '400' })
+    expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe('Hello <span data-doop-id="w">world</span>')
+    expect((await inspect())?.textMixed).toEqual({})
+  })
+
+  it('restores a cancelled size scrub on selected words and saves a committed one once', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
+    await select(0, 5)
+    const gesture = (phase: 'begin' | 'commit' | 'cancel') =>
+      ask('doop:style-gesture' as 'doop:style', { selector: '#text', phase })
+    await gesture('begin')
+    await style({ 'font-size': '30px' })
+    await style({ 'font-size': '36px' })
+    expect(await frame.$eval('#text span', (el) => el.getAttribute('style'))).toBe('font-size: 36px;')
+    await page.evaluate(() => {
+      ;(window as unknown as Fixture).messages = []
+    })
+    await gesture('cancel')
+    expect(await frame.$eval('#text', (el) => el.innerHTML)).toBe('Hello world')
+    await send({ type: 'doop:settle', reqId: 'settled' })
+    await page.waitForFunction(() => (window as unknown as Fixture).messages.some((m) => m.reqId === 'settled'))
+    expect(
+      await page.evaluate(() => (window as unknown as Fixture).messages.filter((m) => m.type === 'doop:edited')),
+    ).toEqual([])
+    await select(0, 5)
+    await gesture('begin')
+    await style({ 'font-size': '40px' })
+    await gesture('commit')
+    await expect.poll(savedHtml).toContain('<span style="font-size: 40px;">Hello</span> world')
+  })
+
+  it('keeps editing scoped to the item when a list holds a locked item', async () => {
+    await send({
+      type: 'doop:html',
+      html: '<ul><li id="text">Editable</li><li data-doop-locked>Locked</li></ul>',
+      reqId: 'render',
+    })
+    await frame.waitForSelector('#text')
+    const item = await frame.$eval('#text', (el) => {
+      const r = el.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    })
+    await send({ type: 'doop:edit', on: true, x: item.x, y: item.y })
+    await frame.waitForSelector('[contenteditable]')
+    expect(await frame.$eval('[contenteditable]', (el) => el.id)).toBe('text')
+  })
+
+  it('answers every selector afresh when a retagged layer shifts its neighbours', async () => {
+    await send({
+      type: 'doop:html',
+      html: '<p style="margin:0">One</p><div style="margin:0">Two</div>',
+      reqId: 'render',
+    })
+    await frame.waitForSelector('div')
+    const reqId = 'shift'
+    await send({
+      type: 'doop:text-format',
+      selectors: ['body > p:nth-of-type(1)', 'body > div:nth-of-type(1)'],
+      command: 'insertUnorderedList',
+      reqId,
+    })
+    await page.waitForFunction(
+      (reqId) => (window as unknown as Fixture).messages.some((m) => m.reqId === reqId),
+      {},
+      reqId,
+    )
+    const reply = await page.evaluate(
+      (reqId) =>
+        (window as unknown as Fixture).messages.find((m) => m.reqId === reqId) as unknown as { selectors: string[] },
+      reqId,
+    )
+    expect(reply.selectors).toEqual([
+      'body:nth-of-type(1) > div:nth-of-type(1)',
+      'body:nth-of-type(1) > div:nth-of-type(2)',
+    ])
+    expect(await frame.$$eval('div', (divs) => divs.map((d) => d.textContent))).toEqual(['One', 'Two'])
+  })
+
   it('ignores commands after editing ends and on locked text', async () => {
     await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
     await send({ type: 'doop:edit', on: false })

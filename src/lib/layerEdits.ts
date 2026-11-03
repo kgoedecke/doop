@@ -326,6 +326,9 @@ export function formatSelectionText(command: TextFormatCommand): boolean {
   const s = useStore.getState()
   const picked = s.selectedElement
   if (!picked) return false
+  const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
+  if (!frame) return false
+  if (frame.locked) return true
   const selectors = pickedSelectors(s)
   formatElementText(picked.frameId, selectors, command)
     .then((after) => {
@@ -333,10 +336,12 @@ export function formatSelectionText(command: TextFormatCommand): boolean {
       const active = document.activeElement
       if (active instanceof HTMLIFrameElement) active.blur()
       const primary = after?.[selectors.indexOf(picked.selector)]
-      const current = useStore.getState().selectedElement
-      if (!primary || primary === picked.selector || current?.selector !== picked.selector) return
-      if (current.frameId === picked.frameId)
-        useStore.getState().setSelectedElement({ frameId: picked.frameId, selector: primary })
+      const now = useStore.getState()
+      const unchanged =
+        now.selectedElement?.frameId === picked.frameId && pickedSelectors(now).join() === selectors.join()
+      if (!after || !primary || after.join() === selectors.join() || !unchanged) return
+      /* the whole picked set follows its layers' new selectors, the primary staying primary */
+      useStore.setState({ selectedElement: { frameId: picked.frameId, selector: primary }, selectedElements: after })
     })
     .catch(console.error)
   return true

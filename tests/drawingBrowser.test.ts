@@ -1414,6 +1414,16 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     )
   })
 
+  it('leaves a layer inside a locked frame alone on a format shortcut', async () => {
+    const source = { ...layerFrame('<p id="text" style="margin:80px">Hello</p>'), locked: true }
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#text' }))
+    await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#text')
+    expect(await page.evaluate(() => window.drawingHarness.formatText('bold'))).toBe(true)
+    await new Promise((r) => setTimeout(r, 400))
+    expect(saved[0]?.html).toBe(source.html)
+  })
+
   it('still enters text editing on double-click and moves the whole frame from its title', async () => {
     const source = layerFrame('<p id="text" style="width:100px;height:80px;margin:50px">Edit me</p>')
     await seedFrames([source])

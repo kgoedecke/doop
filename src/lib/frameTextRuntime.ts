@@ -91,50 +91,92 @@ export const FRAME_TEXT_RUNTIME = `
     return Object.keys(styles).every(function (key) { return textProps.indexOf(key) !== -1 })
   }
 
-  /* Style only the selected text: the browser splits the runs for us
-     (styleWithCSS fontName marks exactly the selection), then the mark gives
-     way to the requested properties. The selection then covers the new runs
-     so a second edit lands on the same text. */
+  /* Style only the selected text. The boundary text nodes are split so the
+     selected part stands alone, then each selected text node is styled on its
+     own inline parent (a span wrapping only it, made here if needed), so a
+     run's other inline styles survive. The selection then covers the styled
+     text, so a second edit lands on the same runs. Returns what a cancelled
+     gesture must undo: the runs' former styles and the spans made here. */
   function styleTextRange(el, styles) {
-    var selection = getSelection()
-    selection.removeAllRanges()
-    selection.addRange(textRange)
-    document.execCommand('styleWithCSS', false, true)
-    document.execCommand('fontName', false, TEXT_RUN_MARK)
-    document.execCommand('styleWithCSS', false, false)
-    var marked = function (node) { return node.style && node.style.fontFamily.replace(/["']/g, '') === TEXT_RUN_MARK }
-    var runs = Array.prototype.filter.call(el.querySelectorAll('[style]'), marked)
-    if (marked(el)) runs.unshift(el)
-    runs.forEach(function (run) {
-      run.style.removeProperty('font-family')
+    var range = textRange
+    var start = range.startContainer
+    var end = range.endContainer
+    if (end.nodeType === 3 && range.endOffset < end.nodeValue.length) {
+      end.splitText(range.endOffset)
+      range.setEnd(end, end.nodeValue.length)
+    }
+    if (start.nodeType === 3 && range.startOffset > 0) {
+      var tail = start.splitText(range.startOffset)
+      range.setStart(tail, 0)
+      if (end === start) range.setEnd(tail, tail.nodeValue.length)
+    }
+    var nodes = textNodesIn(el, range)
+    var before = []
+    var created = []
+    nodes.forEach(function (node) {
+      var run = node.parentElement
+      if (run === el || run.childNodes.length !== 1 || getComputedStyle(run).display !== 'inline') {
+        run = document.createElement('span')
+        node.parentNode.insertBefore(run, node)
+        run.appendChild(node)
+        created.push(run)
+      } else before.push({ el: run, cssText: run.style.cssText })
       patchStyle(run.style, styles)
       if (!run.getAttribute('style')) run.removeAttribute('style')
     })
     if (editTimer) { clearTimeout(editTimer); editTimer = null }
-    if (!runs.length) return
-    var range = document.createRange()
-    if (runs[0] === el) range.selectNodeContents(el)
-    else { range.setStartBefore(runs[0]); range.setEndAfter(runs[runs.length - 1]) }
-    selection.removeAllRanges()
-    selection.addRange(range)
-    textRange = range.cloneRange()
+    if (nodes.length) {
+      var selected = document.createRange()
+      selected.setStart(nodes[0], 0)
+      selected.setEnd(nodes[nodes.length - 1], nodes[nodes.length - 1].nodeValue.length)
+      var selection = getSelection()
+      selection.removeAllRanges()
+      selection.addRange(selected)
+      textRange = selected.cloneRange()
+    }
     el.setAttribute('data-doop-text', '')
+    return { before: before, created: created }
+  }
+
+  function unwrapRun(run) {
+    while (run.firstChild) run.parentNode.insertBefore(run.firstChild, run)
+    run.remove()
   }
 
   /* A value set on the whole layer makes it uniform: the inline runs under it
-     drop their own copy of the property, as Figma applies a layer-wide value
-     over its mixed runs. Returns the runs' former styles for a cancelled gesture. */
+     drop their own copy of the property, and a weight set over <b> / <strong>
+     runs takes their boldness with it (the tag becomes a span with the same
+     attributes), as Figma applies a layer-wide value over its mixed runs.
+     Returns what a cancelled gesture must undo. */
   function clearTextRuns(el, styles) {
     var before = []
-    Array.prototype.forEach.call(el.querySelectorAll('[style]'), function (run) {
+    var renamed = []
+    Array.prototype.forEach.call(el.querySelectorAll('*'), function (run) {
       if (isLocked(run) || getComputedStyle(run).display !== 'inline') return
       var cssText = run.style.cssText
       for (var key in styles) if (Object.prototype.hasOwnProperty.call(styles, key)) run.style.removeProperty(key)
-      if (run.style.cssText === cssText) return
-      before.push({ el: run, cssText: cssText })
-      if (!run.getAttribute('style')) run.removeAttribute('style')
+      if (run.style.cssText !== cssText) {
+        before.push({ el: run, cssText: cssText })
+        if (!run.getAttribute('style')) run.removeAttribute('style')
+      }
+      if (!Object.prototype.hasOwnProperty.call(styles, 'font-weight') || !/^(B|STRONG)$/.test(run.tagName)) return
+      var span = document.createElement('span')
+      Array.prototype.forEach.call(run.attributes, function (attr) { span.setAttribute(attr.name, attr.value) })
+      while (run.firstChild) span.appendChild(run.firstChild)
+      run.replaceWith(span)
+      renamed.push({ el: run, span: span })
     })
-    return before
+    return { before: before, created: [], renamed: renamed }
+  }
+
+  /* Put back what clearTextRuns and styleTextRange did during a cancelled gesture. */
+  function restoreTextRuns(edit) {
+    edit.runs.forEach(function (run) { run.el.style.cssText = run.cssText; if (!run.el.getAttribute('style')) run.el.removeAttribute('style') })
+    edit.created.forEach(unwrapRun)
+    edit.renamed.forEach(function (change) {
+      while (change.span.firstChild) change.el.appendChild(change.span.firstChild)
+      change.span.replaceWith(change.el)
+    })
   }
 
   function formatText(command) {
@@ -170,12 +212,12 @@ export const FRAME_TEXT_RUNTIME = `
   function formatLayers(selectors, command) {
     if (editing || textCommands.indexOf(command) === -1) return null
     var changed = false
+    var retagged = false
     // Positional selectors shift once a layer changes tag: resolve them all first.
     var layers = selectors.map(function (selector) { return { selector: selector, el: styleTarget(selector) } })
-    var result = layers.map(function (layer) {
-      var selector = layer.selector
+    layers.forEach(function (layer) {
       var el = layer.el
-      if (!el || isLocked(el) || !isTextBlock(el) || el.querySelector(LOCKED)) return selector
+      if (!el || isLocked(el) || !isTextBlock(el) || el.querySelector(LOCKED)) return
       var editable = el.getAttribute('contenteditable')
       prepareText(el)
       el.setAttribute('contenteditable', 'true')
@@ -196,10 +238,12 @@ export const FRAME_TEXT_RUNTIME = `
       el.setAttribute('data-doop-text', '')
       changed = true
       var normalized = normalizeTextParagraph(el, getComputedStyle(el))
-      return normalized === el ? selector : cssPath(normalized)
+      if (normalized !== el) retagged = true
+      layer.el = normalized
     })
     if (changed) postEdited(true)
-    return result
+    // A retagged layer shifts its positional neighbours too: every selector is re-read then.
+    return layers.map(function (layer) { return retagged && layer.el ? cssPath(layer.el) : layer.selector })
   }
 
   document.addEventListener('selectionchange', postTextState)
