@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
-import { MOD_KEY, PRESENT_SHORTCUT_HINT, isHideUiShortcut, isPresentShortcut } from '../lib/keys'
+import { MOD_KEY, PRESENT_SHORTCUT_HINT, isHideUiShortcut, isPresentShortcut, isTypingTarget } from '../lib/keys'
 import { presentStartFrame } from '../lib/present'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
 import { connect, disconnect, sendWs } from '../lib/ws'
@@ -392,7 +392,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       }
       /* ⌘⌥↩ presents from the selected frame (else the page's flow start),
          as the Play button does; while presenting the player owns the keys */
-      if (isPresentShortcut(e) && !presenting) {
+      if (isPresentShortcut(e) && !presenting && !isTypingTarget(target)) {
         e.preventDefault()
         const state = useStore.getState()
         const from = presentStartFrame(state.canvas, state.selectedId, state.activePageId)
