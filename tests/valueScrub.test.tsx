@@ -64,6 +64,17 @@ describe('useValueScrub', () => {
     expect(alt.changes).toEqual(['10.2'])
   })
 
+  it('adds up fractional pointer moves instead of rounding each away', () => {
+    const { unit, changes } = mount('10')
+    act(() => {
+      unit.dispatchEvent(pointer('pointerdown', 100))
+      unit.dispatchEvent(pointer('pointermove', 103))
+      for (let i = 1; i <= 10; i++) unit.dispatchEvent(pointer('pointermove', 103 + i * 0.4))
+      unit.dispatchEvent(pointer('pointerup', 107))
+    })
+    expect(changes).toEqual(['13', '14', '15', '16', '17'])
+  })
+
   it('leaves a whole start alone until the pointer moves', () => {
     const { unit, changes } = mount('12')
     drag(unit, 2)
