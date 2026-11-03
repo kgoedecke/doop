@@ -46,6 +46,7 @@ import { FrameResizeHandles } from './FrameResizeHandles'
 import { keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 import { withFontFaces } from '../../shared/fonts'
+import { withWebFontLinks } from '../../shared/webFonts'
 import { canvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 
@@ -1184,10 +1185,12 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
         localHtml.current = ev.data.html
         setRuntimeDocument({ html: ev.data.html, request: ++htmlRequest.current })
         noteFrameDocument(frame.id, ev.data.html)
-        /* a newly used library font brings its @font-face along; the saved
+        /* a newly used library font brings its @font-face along, a hosted one
+           its stylesheet link; the saved
            document then differs from the runtime's, so the post effect sends
            it back in and the face loads at once */
-        const html = withFontFaces(ev.data.html, canvasFonts())
+        const library = canvasFonts()
+        const html = withWebFontLinks(withFontFaces(ev.data.html, library), library)
         const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
         useStore.getState().patchFrameLocal(frame.id, { html })
         trackSave(api.updateFrame(frame.id, { html }).catch(console.error))

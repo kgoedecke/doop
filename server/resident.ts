@@ -3,6 +3,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief } from '../shared/fonts.ts'
+import { webFontsBrief } from '../shared/webFonts.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
@@ -597,8 +598,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       /* the canvas's custom fonts: which families exist, and that naming one
          is enough (the server adds the @font-face) */
       const canvas = store.getCanvas(canvasId)
-      const fontsText = canvas ? libraryBrief(fontsForCanvas(canvas)) : ''
-      const fontsBlock = fontsText ? [{ text: `# Custom fonts\n${fontsText}` }] : []
+      const fontsText = [canvas ? libraryBrief(fontsForCanvas(canvas)) : '', webFontsBrief()]
+        .filter(Boolean)
+        .join('\n\n')
+      const fontsBlock = [{ text: `# Fonts\n${fontsText}` }]
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       const noVisionBlock = runState.vision

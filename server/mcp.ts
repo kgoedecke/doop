@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
+import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
 import * as actions from './actions.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
@@ -532,6 +533,7 @@ export function buildMcpServer(
             ]
           : []),
         ...(library.length ? [libraryBrief(library)] : []),
+        webFontsBrief(),
         ...(refs.length
           ? [
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
@@ -564,6 +566,7 @@ export function buildMcpServer(
               pinnedBy: r.pinnedBy,
             })),
             ...(library.length ? { fonts: describeLibrary(library) } : {}),
+            webFonts: webFontFamilies(),
             ...(flow.length ? { flow } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),
