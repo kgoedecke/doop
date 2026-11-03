@@ -53,7 +53,9 @@ describe('seal / open', () => {
   it('refuses a value whose key is gone, or that was tampered with', () => {
     stubEnv('SECRETS_ENCRYPTION_KEYS', KEY_A)
     const sealed = seal('sk-live-123')
-    const flipped = sealed.slice(0, -2) + (sealed.endsWith('A') ? 'B' : 'A') + sealed.slice(-1)
+    /* swap the second-to-last character for a different one (judging by the
+       last character instead left it unchanged whenever it was already 'A') */
+    const flipped = sealed.slice(0, -2) + (sealed.at(-2) === 'A' ? 'B' : 'A') + sealed.slice(-1)
     expect(() => open(flipped)).toThrow()
     stubEnv('SECRETS_ENCRYPTION_KEYS', KEY_B)
     expect(() => open(sealed)).toThrow(/key "a"/)
