@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { store } from './store.ts'
+import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
@@ -1667,6 +1667,17 @@ export function setCanvasPages(canvasId: string, pages: import('../shared/types.
   broadcast(canvasId, { type: 'canvas:pages', pages: next, actor })
   for (const guide of saved?.dropped ?? []) broadcast(canvasId, { type: 'guide', id: guide.id, guide: null, actor })
   return next
+}
+
+/** Add one page at the end of the canvas, named `name`, with a fresh id; peers
+ *  get the page list. Returns the new page and the whole list. */
+export function createCanvasPage(canvasId: string, name: string, actor: Actor) {
+  const canvas = store.canvases.get(canvasId)
+  if (!canvas) return undefined
+  const pages = canvasPages(canvas)
+  if (pages.length >= MAX_PAGES) throw new PageLimitError()
+  const page = { id: nanoid(10), name }
+  return { page, pages: setCanvasPages(canvasId, [...pages, page], actor) }
 }
 
 /** Point a page's prototype flow at a frame (or clear it); peers get the page list. */

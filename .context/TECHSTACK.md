@@ -89,6 +89,12 @@
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+- Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
+  every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
+  empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
+  and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
+  rename, reorder and delete; `update_frame` moves a frame between pages. The guide's "Frames
+  and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one

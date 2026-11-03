@@ -231,6 +231,11 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - Size frames to their content: mobile screen 390×844, desktop page 1280×800, card or
   component 480×360, square social post 640×640. Set width/height on create_frame, or
   adjust later with update_frame.
+- Pages: a canvas is a set of pages, each its own board, listed by get_canvas with every
+  frame's pageId. Put one screen in a frame and a body of work on a page: a second product
+  surface, a platform (web vs. mobile), a round of explorations. create_canvas_page adds one
+  and returns its id for create_frame's pageId; get_canvas with page_id reads one page; a
+  frame moves between pages with update_frame; set_canvas_pages renames, reorders or deletes.
 
 ## GitHub-imported frames — the repo is the source of truth
 
