@@ -44,6 +44,14 @@ export interface ImportOptions {
   /** Prefix for the file's ids, so two imports in one document never share a gradient. */
   key?: string
   styles?: StyleReader
+  /** `root` takes the file's own box (its width and height) as the element's
+   *  box, the way an artboard is: a PDF page whose clipped backgrounds reach
+   *  past its edges. Unset, the box is the union of what the file draws. */
+  box?: 'content' | 'root'
+  /** How many layers and how many elements to read before stopping (a PDF
+   *  page's chart runs past the defaults an icon file never nears). */
+  maxLayers?: number
+  maxElements?: number
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -257,8 +265,8 @@ function hrefOf(el: Element): string | null {
 /** `<use>` becomes the element it points at, in place, with the use's
  *  position and inherited paint, so the walk sees ordinary shapes; a
  *  symbol becomes a nested svg sized by the use. */
-function expandUses(root: Element) {
-  let budget = MAX_ELEMENTS
+function expandUses(root: Element, maxElements = MAX_ELEMENTS) {
+  let budget = maxElements
   const stack: Element[] = []
   const expand = (use: Element, depth: number) => {
     const id = hrefOf(use)?.trim()
@@ -373,10 +381,12 @@ class Walker {
     private readonly read: StyleReader,
     /** The viewport a shape's percentages refer to: the nearest svg's viewBox. */
     private viewport: Viewport,
+    private readonly maxLayers = MAX_LAYERS,
+    private readonly maxElements = MAX_ELEMENTS,
   ) {}
 
   visit(el: Element, parentCtm: Matrix): Node | null {
-    if (++this.visited > MAX_ELEMENTS || this.layers >= MAX_LAYERS) return null
+    if (++this.visited > this.maxElements || this.layers >= this.maxLayers) return null
     const tag = el.localName
     if (el.namespaceURI !== SVG_NS || SKIP_TAGS.has(tag)) return null
     if (this.read(el, 'display') === 'none') return null
@@ -757,13 +767,13 @@ export function importSvg(root: SVGSVGElement, name: string, options: ImportOpti
   const viewBox = viewBoxOf(root) ?? { x: 0, y: 0, ...size }
   const rootCtm = viewBoxFit(viewBox, { x: 0, y: 0, ...size }, root.getAttribute('preserveAspectRatio'))
   if (read(root, 'display') === 'none') return null
-  const walker = new Walker(read, viewBox)
+  const walker = new Walker(read, viewBox, options.maxLayers, options.maxElements)
   /* the root's own effects (an opacity, a clip, a transform) belong to the
      whole: it is walked as the group it is */
   const whole = walker.group(root, multiply(walker['transformOf'](root), rootCtm))
   if (!whole) return null
   const unwrapped = unwrap([whole])
-  const content = contentBox(unwrapped, { x: 0, y: 0, ...size })
+  const content = options.box === 'root' ? { x: 0, y: 0, ...size } : contentBox(unwrapped, { x: 0, y: 0, ...size })
   if (!content || content.width <= 0 || content.height <= 0) return null
   const html = new Writer(root, content, key, read).document(unwrapped, name)
   return { html, width: content.width, height: content.height, layers: walker.layers }
@@ -774,7 +784,7 @@ export function importSvgMarkup(markup: string, name: string, options: ImportOpt
   const root = parseSvgMarkup(markup)
   if (!root) return null
   sanitize(root)
-  expandUses(root)
+  expandUses(root, options.maxElements)
   return importSvg(root, name, options)
 }
 
@@ -784,7 +794,7 @@ export function importSvgInBrowser(markup: string, name: string, options: Import
   const parsed = parseSvgMarkup(markup)
   if (!parsed) return null
   sanitize(parsed)
-  expandUses(parsed)
+  expandUses(parsed, options.maxElements)
   const host = document.createElement('div')
   host.setAttribute('aria-hidden', 'true')
   /* out of sight without `visibility`, which would inherit into the file and hide every shape */
