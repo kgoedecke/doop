@@ -1455,6 +1455,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               void enterElementEdit(designPoint(e, e.currentTarget))
             }}
             onPointerMove={(e) => {
+              /* where the pointer is stays current through a drag or a resize
+                 too: once the gesture's save lands, the hover is probed again
+                 at the pointer's spot, which the gesture has moved */
+              const at = designPoint(e, e.currentTarget)
+              hoverAt.current = at
               /* the Hand only pans, and a locked frame has nothing to pick: no
                  element outlines in either case */
               if (
@@ -1469,7 +1474,6 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 tool === 'hand'
               )
                 return
-              const at = designPoint(e, e.currentTarget)
               sendHover(at.x, at.y)
             }}
             onPointerLeave={leaveHover}
