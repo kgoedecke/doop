@@ -11,10 +11,16 @@ vi.mock('../src/lib/api', () => ({
   errorMessage: (_err: unknown, fallback: string) => fallback,
 }))
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
+vi.mock('../src/lib/frameBridge', () => ({
+  requestFrame: () => Promise.resolve(null),
+  inspectElement: () => Promise.resolve(null),
+  settleFrames: () => Promise.resolve(),
+}))
 
 const { useStore } = await import('../src/lib/store')
 const { clearHistory, undo } = await import('../src/lib/history')
 const { PagePanel } = await import('../src/components/PagePanel')
+const { LayersPanel } = await import('../src/components/LayersPanel')
 const { TooltipProvider } = await import('../src/components/ui/tooltip')
 
 const canvas: Canvas = {
@@ -88,4 +94,24 @@ it('closes from its header', async () => {
   await render()
   await act(async () => host.querySelector<HTMLButtonElement>('header button')!.click())
   expect(useStore.getState().pagePanelOpen).toBe(false)
+})
+
+it('offers the background in the phone’s Layers sheet, where no rail opens the Page panel', async () => {
+  useStore.getState().setActivePage('p1')
+  await act(() =>
+    root.render(
+      <TooltipProvider>
+        <LayersPanel onAddFrame={() => {}} surface="inline" />
+      </TooltipProvider>,
+    ),
+  )
+  expect(field().value).toBe('#1e1e1e')
+  await act(() =>
+    root.render(
+      <TooltipProvider>
+        <LayersPanel onAddFrame={() => {}} />
+      </TooltipProvider>,
+    ),
+  )
+  expect(host.querySelector('input[aria-label="Background"]')).toBeNull()
 })

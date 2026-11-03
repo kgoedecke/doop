@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react'
 import { canvasPages } from '../../shared/pages'
 import { pageBackground } from '../../shared/pageBackground'
+import type { Canvas, CanvasPageInfo } from '../../shared/types'
 import { useStore } from '../lib/store'
 import { setPageBackground } from '../lib/pageEdits'
 import { cn } from '../lib/utils'
@@ -21,23 +22,13 @@ export function PagePanel({
   className?: string
   style?: CSSProperties
 }) {
-  const t = useT()
   const canvas = useStore((s) => s.canvas)
   const activePageId = useStore((s) => s.activePageId)
   const setOpen = useStore((s) => s.setPagePanelOpen)
+  const paintPage = usePaintPage()
   if (!canvas) return null
   const pages = canvasPages(canvas)
   const page = pages.find((p) => p.id === activePageId) ?? pages[0]!
-
-  async function paint(color: string | null) {
-    if (!canvas) return
-    try {
-      await setPageBackground(canvas, page.id, color)
-    } catch {
-      if (useStore.getState().canvas?.id === canvas.id)
-        useStore.getState().pushNotice(t('inspector.pageBackgroundFailed'))
-    }
-  }
 
   return (
     <Panel
@@ -56,20 +47,50 @@ export function PagePanel({
         </span>
         <PanelClose onClick={() => setOpen(false)} />
       </PanelHeader>
-      <section className="border-b border-line-soft px-3 py-2">
-        <h3 className="mb-1.5 flex h-5 items-center text-label font-normal text-ink-soft">
-          {t('inspector.pageBackground')}
-        </h3>
-        {/* the field's keys stay out of the canvas shortcuts */}
-        <div className="flex" onKeyDown={(e) => e.stopPropagation()}>
-          <ColorField
-            key={page.id}
-            label={t('inspector.pageBackground')}
-            value={pageBackground(page)}
-            onCommit={(color) => void paint(color)}
-          />
-        </div>
-      </section>
+      <PageBackgroundField page={page} onCommit={(color) => void paintPage(canvas, page.id, color)} />
     </Panel>
   )
+}
+
+/** The "Background" section: a heading over a full-width swatch and hex
+ *  field, as Figma lays its fills out. The Page panel shows it on desktop;
+ *  the phone's Layers sheet shows it under the page list, since a phone has
+ *  no rail to open the panel from. */
+export function PageBackgroundField({
+  page,
+  onCommit,
+}: {
+  page: CanvasPageInfo
+  onCommit: (color: string | null) => void
+}) {
+  const t = useT()
+  return (
+    <section className="border-b border-line-soft px-3 py-2">
+      <h3 className="mb-1.5 flex h-5 items-center text-label font-normal text-ink-soft">
+        {t('inspector.pageBackground')}
+      </h3>
+      {/* the field's keys stay out of the canvas shortcuts */}
+      <div className="flex" onKeyDown={(e) => e.stopPropagation()}>
+        <ColorField
+          key={page.id}
+          label={t('inspector.pageBackground')}
+          value={pageBackground(page)}
+          onCommit={onCommit}
+        />
+      </div>
+    </section>
+  )
+}
+
+/** Paint a page, telling the person when the save fails. */
+export function usePaintPage() {
+  const t = useT()
+  return async (canvas: Canvas, pageId: string, color: string | null) => {
+    try {
+      await setPageBackground(canvas, pageId, color)
+    } catch {
+      if (useStore.getState().canvas?.id === canvas.id)
+        useStore.getState().pushNotice(t('inspector.pageBackgroundFailed'))
+    }
+  }
 }

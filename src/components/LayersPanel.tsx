@@ -13,6 +13,8 @@ import type { Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
 import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
+import { PageBackgroundField, usePaintPage } from './PagePanel'
+import { canvasPages } from '../../shared/pages'
 import { getIdentity } from '../lib/identity'
 import { deleteFramesTracked } from '../lib/history'
 import {
@@ -530,6 +532,7 @@ export function LayersPanel({
       {/* Figma's order: the pages at the top, the frames of the active page
           under them, the search at the bottom within thumb's reach */}
       <PagesPanel />
+      {surface === 'inline' && <PhonePageBackground />}
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span data-slot="frame-section-heading" className={sectionHeading}>
           {t('panels.layersTitle')}
@@ -1036,4 +1039,17 @@ function RowToggle({
 function Caret({ open, present }: { open: boolean; present: boolean }) {
   if (!present) return null
   return open ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />
+}
+
+/* A phone has no rail to open the Page panel from, so its Layers sheet
+   carries the page's background under the page list, for editors. */
+function PhonePageBackground() {
+  const canvas = useStore((s) => s.canvas)
+  const activePageId = useStore((s) => s.activePageId)
+  const readOnly = useStore((s) => !canEditOpenCanvas(s))
+  const paintPage = usePaintPage()
+  if (!canvas || readOnly) return null
+  const pages = canvasPages(canvas)
+  const page = pages.find((p) => p.id === activePageId) ?? pages[0]!
+  return <PageBackgroundField page={page} onCommit={(color) => void paintPage(canvas, page.id, color)} />
 }
