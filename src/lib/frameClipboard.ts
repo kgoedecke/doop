@@ -65,6 +65,12 @@ function clipBounds(frames: ClipFrame[]) {
  *  failing must not orphan its siblings: whatever landed is still recorded
  *  in history (undoable as a group) and becomes the selection. */
 async function createFrames(requests: { canvasId: string; frame: Parameters<typeof api.createFrame>[1] }[]) {
+  return (await settleFrames(requests)).flatMap((frame) => (frame ? [frame] : []))
+}
+
+/** Like `createFrames`, but says which request each frame came from: a
+ *  `null` where that request failed. */
+async function settleFrames(requests: { canvasId: string; frame: Parameters<typeof api.createFrame>[1] }[]) {
   const results = await Promise.allSettled(requests.map((r) => api.createFrame(r.canvasId, r.frame)))
   const created = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
   const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -73,7 +79,7 @@ async function createFrames(requests: { canvasId: string; frame: Parameters<type
     recordCreates(created)
     useStore.getState().selectMany(created.map((f) => f.id))
   }
-  return created
+  return results.map((r) => (r.status === 'fulfilled' ? r.value : null))
 }
 
 /** Create the copied frames with the group's top-left at a world point. */
@@ -269,18 +275,25 @@ export function hasIncoming({ images, vectors, markup }: IncomingFiles): boolean
 }
 
 /** One frame to create, sized and named, with its markup ready. */
-type Prepared = { name: string; size: Slot; html: () => Promise<string> }
+type Prepared = { kind: 'image' | 'vector'; name: string; size: Slot; html: () => Promise<string> }
+
+/** What a paste or drop landed, by kind. */
+interface Landed {
+  images: number
+  vectors: number
+}
 
 /** Place everything a paste or drop brought as one row, bitmaps and vectors
  *  alike, centered on `at`. Whatever lands is recorded as one undo step and
- *  becomes the selection, even when a sibling request fails. */
+ *  becomes the selection, even when a sibling's upload or request fails. */
 async function importIncoming(
   canvasId: string,
   incoming: IncomingFiles,
   { fallbackName, at }: { fallbackName: string; at?: { x: number; y: number } },
-): Promise<Frame[]> {
+): Promise<Landed> {
   const images: Prepared[] = await Promise.all(
     incoming.images.map(async (file) => ({
+      kind: 'image' as const,
       name: fileStem(file.name) || fallbackName,
       size: await imageSize(file),
       html: async () => {
@@ -299,6 +312,7 @@ async function importIncoming(
     if (!result) return []
     return [
       {
+        kind: 'vector' as const,
         name,
         size: { width: result.width, height: result.height, uniform: true },
         html: () => Promise.resolve(result.html),
@@ -311,29 +325,42 @@ async function importIncoming(
     prepared.map((p) => p.size),
     at,
   )
-  const requests = await Promise.all(
+  /* a bitmap whose upload fails (too large, say) drops out on its own; the
+     others keep their slots */
+  const ready = await Promise.allSettled(
     prepared.map(async (p, i) => {
       const slot = placed[i]!
       return {
+        kind: p.kind,
         canvasId,
         frame: { name: p.name, html: await p.html(), width: slot.width, height: slot.height, x: slot.x, y: slot.y },
       }
     }),
   )
-  const created = await createFrames(requests)
-  if (!created.length && requests.length) throw new Error('Couldn’t add the files.')
-  return created
+  const requests = ready.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+  const upload = ready.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (upload) console.error(`${ready.length - requests.length} of ${ready.length} file(s) failed`, upload.reason)
+  const frames = await settleFrames(requests)
+  const landed: Landed = { images: 0, vectors: 0 }
+  frames.forEach((frame, i) => {
+    if (frame) landed[requests[i]!.kind === 'image' ? 'images' : 'vectors']++
+  })
+  if (!landed.images && !landed.vectors && prepared.length) {
+    if (upload) throw upload.reason instanceof Error ? upload.reason : new Error(String(upload.reason))
+    throw new Error('Couldn’t add the files.')
+  }
+  return landed
 }
 
 export async function pasteFilesCentered(canvasId: string, incoming: IncomingFiles) {
-  const frames = await importIncoming(canvasId, incoming, { fallbackName: 'Pasted image' })
-  posthog.capture('files_pasted', { images: incoming.images.length, vectors: frames.length - incoming.images.length })
+  const landed = await importIncoming(canvasId, incoming, { fallbackName: 'Pasted image' })
+  posthog.capture('files_pasted', landed)
 }
 
 /** Files dragged in from the desktop land centered on the drop point. */
 export async function dropFiles(canvasId: string, incoming: IncomingFiles, at: { x: number; y: number }) {
-  const frames = await importIncoming(canvasId, incoming, { fallbackName: 'Dropped image', at })
-  posthog.capture('files_dropped', { images: incoming.images.length, vectors: frames.length - incoming.images.length })
+  const landed = await importIncoming(canvasId, incoming, { fallbackName: 'Dropped image', at })
+  posthog.capture('files_dropped', landed)
 }
 
 /** Duplicate frames 40px down-right of the originals, keeping their layout;

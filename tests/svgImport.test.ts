@@ -114,6 +114,8 @@ describe('importing an SVG file', () => {
     expect(clipped).toBeTruthy()
     const clip = d.querySelector('clipPath[id^="k-c-clip-"]')!
     expect(clip.getAttribute('transform')).toMatch(/^matrix\(/)
+    /* the copy's own transform rides in the attribute alone: an inline one would win over it */
+    expect(clip.getAttribute('style') ?? '').not.toContain('transform')
     const baked = d.querySelector('linearGradient[id^="k-u-baked-"]')!
     expect(baked.getAttribute('gradientTransform')).toBe('matrix(2 0 0 2 2 0)')
     expect(html).toContain(`fill="url(#${baked.getAttribute('id')})"`)
@@ -228,6 +230,17 @@ describe('importing an SVG file', () => {
     const [shape] = shapes(result.html)
     expect(shapePath(shape!)!.getAttribute('d')).toBe('M 20 0 L 30 0 L 30 10 L 20 10 Z')
     expect(doc(result.html).querySelector('stop')!.getAttribute('style')).toContain('stop-color:rgb(255, 0, 0)')
+  })
+
+  it('folds a clip’s own transform into its copy without an inline value shadowing it', () => {
+    const result = imported(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
+        <defs><clipPath id="c" transform="translate(1 0)"><rect width="5" height="5"/></clipPath></defs>
+        <rect clip-path="url(#c)" width="10" height="10" transform="scale(2)"/>
+      </svg>`)
+    const clip = doc(result.html).querySelector('clipPath[id^="k-c-clip-"]')!
+    expect(clip.getAttribute('transform')).toBe('matrix(2 0 0 2 2 0)')
+    expect(clip.getAttribute('style') ?? '').not.toContain('transform')
   })
 
   it('centres a nested svg’s viewBox in its box by default', () => {

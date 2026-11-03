@@ -720,7 +720,13 @@ class Writer {
     const clone = clip.cloneNode(true) as Element
     clone.setAttribute('id', copy)
     this.ids.add(copy)
-    const existing = parseTransform(clip.getAttribute('transform')) ?? IDENTITY
+    /* the clip's own transform, as the styles resolved it (baked inline on the
+       copy) or as its attribute says; the combined one goes on the attribute
+       alone, since an inline value would win over it */
+    const style = (clone as HTMLElement).style
+    const existing = parseTransform(style.transform || clip.getAttribute('transform')) ?? IDENTITY
+    style.removeProperty('transform')
+    if (!clone.getAttribute('style')) clone.removeAttribute('style')
     clone.setAttribute('transform', `matrix(${multiply(ctm, existing).map(round).join(' ')})`)
     this.defs.append(clone)
     return copy

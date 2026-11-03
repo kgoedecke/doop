@@ -10,7 +10,8 @@ const api = {
   createFrame: vi.fn(async (canvasId: string, rest: Partial<Frame>) => ({ ...rest, canvasId, id: 'f1' }) as Frame),
 }
 vi.mock('../src/lib/api', () => ({ api }))
-vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
+const posthog = { capture: vi.fn() }
+vi.mock('../src/lib/posthog', () => ({ posthog }))
 
 const sizes = new Map<string, { width: number; height: number }>()
 vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: (f: File) => f.name, revokeObjectURL: () => {} }))
@@ -111,5 +112,17 @@ describe('files pasted together', () => {
     await expect(pasteFilesCentered('c1', splitIncoming([icon(), image('photo.png', 40, 40)]))).resolves.toBeUndefined()
     expect(api.createFrame).toHaveBeenCalledTimes(2)
     expect(useStore.getState().selectedIds).toEqual(['f1'])
+    /* what landed is counted by kind, never by what was asked for */
+    expect(posthog.capture).toHaveBeenCalledWith('files_pasted', { images: 1, vectors: 0 })
+  })
+
+  it('still lands the vector when a bitmap’s upload fails, and reports that failure when nothing lands', async () => {
+    api.uploadAsset.mockRejectedValueOnce(new Error('Image is larger than 5 MB'))
+    await pasteFilesCentered('c1', splitIncoming([image('huge.png', 40, 40), icon()]))
+    expect(api.createFrame).toHaveBeenCalledTimes(1)
+    expect(api.createFrame.mock.calls[0]![1].name).toBe('icon')
+    expect(posthog.capture).toHaveBeenLastCalledWith('files_pasted', { images: 0, vectors: 1 })
+    api.uploadAsset.mockRejectedValueOnce(new Error('Image is larger than 5 MB'))
+    await expect(pasteFilesCentered('c1', splitIncoming([image('huge.png', 40, 40)]))).rejects.toThrow('5 MB')
   })
 })
