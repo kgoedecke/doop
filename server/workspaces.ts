@@ -232,7 +232,9 @@ export async function deleteWorkspace(id: string): Promise<void> {
   if (billing.billingEnabled()) await billing.cancelSubscription(ws)
   store.detachWorkspace(id)
   records.delete(id)
+  const former = [...(members.get(id)?.keys() ?? [])]
   members.delete(id)
+  notifyUsers(former, { type: 'canvases' })
   await db.transaction(async (tx) => {
     await tx.delete(t.workspaceMembers).where(eq(t.workspaceMembers.workspaceId, id))
     await tx.delete(t.workspaceInvites).where(eq(t.workspaceInvites.workspaceId, id))
@@ -337,6 +339,7 @@ export function addMember(workspaceId: string, userId: string, role: WorkspaceRo
   map.set(userId, { role, addedAt })
   swallow(db.insert(t.workspaceMembers).values({ workspaceId, userId, role, addedBy, addedAt }).onConflictDoNothing())
   reconcileSeats(ws)
+  notifyUsers([userId], { type: 'canvases' })
   return true
 }
 
@@ -365,6 +368,7 @@ export async function removeMember(workspaceId: string, userId: string): Promise
     .where(and(eq(t.workspaceMembers.workspaceId, workspaceId), eq(t.workspaceMembers.userId, userId)))
   map.delete(userId)
   reconcileSeats(ws)
+  notifyUsers([userId], { type: 'canvases' })
   return true
 }
 
@@ -427,6 +431,7 @@ async function acceptInvite(
   if (!map.has(userId)) {
     map.set(userId, { role, addedAt })
     reconcileSeats(ws)
+    notifyUsers([userId], { type: 'canvases' })
   }
 }
 
@@ -588,7 +593,6 @@ workspacesRouter.post('/:id/members', async (req, res) => {
     .where(eq(authSchema.user.email, email))
   if (row) {
     if (!addMember(ws.id, row.id, role, req.user!.id)) return res.status(400).json({ error: 'already a member' })
-    notifyUsers([row.id], { type: 'canvases' })
     const member: WorkspaceMember = { userId: row.id, name: row.name, email: row.email, role, addedAt: Date.now() }
     return res.json({ member })
   }
@@ -635,7 +639,6 @@ workspacesRouter.delete('/:id/members/:userId', async (req, res) => {
       .json({ error: self ? 'delete the workspace instead of leaving it' : 'the owner cannot be removed' })
   try {
     if (!(await removeMember(ws.id, target))) return res.status(404).json({ error: 'not a member' })
-    notifyUsers([target], { type: 'canvases' })
   } catch (err) {
     console.error('[workspaces] remove member failed', err)
     return res.status(500).json({ error: 'could not remove the member' })

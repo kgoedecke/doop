@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Canvas, CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
@@ -256,10 +256,19 @@ export function Home() {
     if (!openCanvasTab(id, title)) navigate(`/c/${id}`)
   }
 
+  /* pings can start overlapping reloads; a response older than one already
+     shown is dropped, or an invite's slow answer would bring back a canvas
+     removed after it */
+  const reloadSeq = useRef(0)
+  const shown = useRef({ canvases: 0, workspaces: 0 })
+
   function reload() {
+    const seq = ++reloadSeq.current
     api
       .listCanvases()
       .then((list) => {
+        if (seq < shown.current.canvases) return
+        shown.current.canvases = seq
         setCanvases(list)
         /* every fresh list is a chance to drop tabs for canvases that are
            gone — deleted here, in another session, or by someone else */
@@ -268,7 +277,11 @@ export function Home() {
       .catch(console.error)
     api
       .listWorkspaces()
-      .then((res) => setWorkspaces(res.workspaces))
+      .then((res) => {
+        if (seq < shown.current.workspaces) return
+        shown.current.workspaces = seq
+        setWorkspaces(res.workspaces)
+      })
       .catch(console.error)
   }
 
