@@ -244,24 +244,25 @@ export async function userInstallationIds(code: string): Promise<string[] | unde
 
 /** What the OAuth code's user may reach: every installation of theirs (or
  *  only those in `only`, for a fresh install naming one), each with the
- *  repos GitHub lets THIS user see through it. Undefined when GitHub would
- *  not identify the user or refused any listing; empty when the user has no
- *  installation (or none of `only`). The callback's ownership proof — an
- *  installation the user cannot see never becomes a grant — and the only
- *  source of what a pass may list or bind. */
+ *  repos GitHub lets THIS user see through it. An installation whose listing
+ *  fails (removed since the installations were listed, a passing GitHub
+ *  error) drops out so the others still open the picker; undefined when
+ *  GitHub would not identify the user or no listing succeeded; empty when
+ *  the user has no installation (or none of `only`). The callback's
+ *  ownership proof — an installation the user cannot see never becomes a
+ *  grant — and the only source of what a pass may list or bind. */
 export async function userAccess(code: string, only?: string[]): Promise<InstallationGrant[] | undefined> {
   const token = await userToken(code)
   if (!token) return undefined
   const ids = await installationIdsOf(token)
   if (!ids) return undefined
   const chosen = (only ? ids.filter((id) => only.includes(id)) : ids).slice(0, MAX_PASS_INSTALLATIONS)
-  const grants: InstallationGrant[] = []
-  for (const installationId of chosen) {
-    const repos = await userReposIn(token, installationId)
-    if (!repos) return undefined
-    grants.push({ installationId, repos })
-  }
-  return grants
+  const listed = await Promise.allSettled(chosen.map((id) => userReposIn(token, id)))
+  const grants = chosen.flatMap((installationId, i) => {
+    const r = listed[i]
+    return r?.status === 'fulfilled' && r.value ? [{ installationId, repos: r.value }] : []
+  })
+  return chosen.length && !grants.length ? undefined : grants
 }
 
 /* ------------------------------------------------------------------ */

@@ -176,7 +176,19 @@ describe('finding the installations a user already has', () => {
     expect(await userAccess('code1', ['999'])).toEqual([])
   })
 
-  it('reports an unidentified user or a refused listing as undefined', async () => {
+  it('keeps the healthy installations when another one fails to list', async () => {
+    /* 302 was removed since the installations were listed: its repos 404 */
+    stubGithub({
+      '/login/oauth/access_token': () => ({ access_token: 'ghu_user' }),
+      '/user/installations': () => ({ installations: [{ id: 301 }, { id: 302 }] }),
+      '/user/installations/301/repositories': () => repoPage(['me/site']),
+    })
+    expect(await userAccess('code1')).toEqual([grant('301', 'me/site')])
+    /* the one installation a fresh install named is the one that failed */
+    expect(await userAccess('code1', ['302'])).toBeUndefined()
+  })
+
+  it('reports an unidentified user, or no listing succeeding, as undefined', async () => {
     stubGithub({
       '/login/oauth/access_token': () => ({ access_token: 'ghu_user' }),
       '/user/installations': () => ({ installations: [{ id: 301 }] }),
