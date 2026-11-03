@@ -2,6 +2,13 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { ApiError, api, errorMessage } from '../lib/api'
 import { useT } from '../lib/i18n'
 import { posthog } from '../lib/posthog'
+import {
+  canAddLocalFonts,
+  pickLocalFonts,
+  readLocalFont,
+  type PickedLocalFont,
+  type SkippedLocalFont,
+} from '../lib/localFonts'
 import { MAX_FONT_BYTES, faceLabel, libraryFamilies, type CustomFont } from '../../shared/fonts'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { Button } from './ui/button'
@@ -11,7 +18,7 @@ import { Note } from './ui/note'
 import { EmptyState } from './ui/empty-state'
 import { cn } from '../lib/utils'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
-import { TrashIcon, UploadIcon } from './ui/icons'
+import { DesktopIcon, TrashIcon, UploadIcon } from './ui/icons'
 
 const ACCEPT = '.ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2'
 
@@ -53,6 +60,9 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
   /* one face, or a whole family (every face it has), awaiting confirmation */
   const [removing, setRemoving] = useState<{ family: string; faces: CustomFont[] } | null>(null)
   const [dragging, setDragging] = useState(false)
+  /* fonts picked from this computer in the desktop shell, awaiting the
+     licence word before they are read and uploaded */
+  const [localPick, setLocalPick] = useState<PickedLocalFont[] | null>(null)
   const input = useRef<HTMLInputElement>(null)
   const t = useT()
 
@@ -116,6 +126,48 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
     }
   }
 
+  /** The desktop shell's native panel, opened in the fonts folder; what it
+   *  lets through that is not a single font file is named in the error line. */
+  async function chooseLocal() {
+    setError('')
+    try {
+      const { picked, skipped } = await pickLocalFonts()
+      const names = (reason: SkippedLocalFont['reason']) =>
+        skipped.filter((file) => file.reason === reason).map((file) => file.name)
+      const kind = names('kind')
+      const size = names('size')
+      setError(
+        [
+          kind.length ? t('fonts.localSkipped', { names: kind.join(', '), count: kind.length }) : '',
+          size.length ? t('fonts.localTooLarge', { names: size.join(', '), count: size.length }) : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      )
+      if (picked.length) setLocalPick(picked)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('fonts.uploadFailed'))
+    }
+  }
+
+  /** Reads each pick through the shell, then uploads like dropped files. */
+  async function uploadLocal(picked: PickedLocalFont[]) {
+    const files: File[] = []
+    const problems: string[] = []
+    for (const font of picked) {
+      try {
+        files.push(await readLocalFont(font))
+      } catch {
+        problems.push(t('fonts.localReadFailed', { name: font.name }))
+      }
+    }
+    if (files.length) {
+      posthog.capture('custom_font_added_from_computer', { count: files.length, workspace: !!workspaceId })
+      await upload(files)
+    }
+    if (problems.length) setError((current) => [current, ...problems].filter(Boolean).join(' · '))
+  }
+
   const families = libraryFamilies(fonts ?? [])
     .sort((a, b) => a.localeCompare(b))
     .map((family) => ({
@@ -127,9 +179,16 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
 
   const busy = fonts === null || uploading > 0
   const uploadButton = (
-    <Button size="sm" disabled={busy} onClick={() => input.current?.click()}>
-      <UploadIcon /> {uploading > 0 ? t('fonts.uploading') : t('fonts.uploadButton')}
-    </Button>
+    <div className="flex flex-wrap justify-end gap-2">
+      {canAddLocalFonts() && (
+        <Button size="sm" variant="bare" disabled={busy} onClick={() => void chooseLocal()}>
+          <DesktopIcon /> {t('fonts.addLocal')}
+        </Button>
+      )}
+      <Button size="sm" disabled={busy} onClick={() => input.current?.click()}>
+        <UploadIcon /> {uploading > 0 ? t('fonts.uploading') : t('fonts.uploadButton')}
+      </Button>
+    </div>
   )
   const isFontFile = (file: File) => /\.(ttf|otf|woff2?)$/i.test(file.name)
   const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes('Files')
@@ -257,6 +316,18 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
           </CardRow>
         )
       })}
+
+      <ConfirmDialog
+        open={localPick !== null}
+        onOpenChange={(open) => !open && setLocalPick(null)}
+        title={localPick ? t('fonts.addLocalTitle', { count: localPick.length, name: localPick[0]?.name ?? '' }) : ''}
+        description={t('fonts.addLocalDescription')}
+        confirmLabel={t('fonts.addLocalConfirm')}
+        onConfirm={() => {
+          if (localPick) void uploadLocal(localPick)
+          setLocalPick(null)
+        }}
+      />
 
       <ConfirmDialog
         open={removing !== null}

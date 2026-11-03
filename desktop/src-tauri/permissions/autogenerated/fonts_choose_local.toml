@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-fonts-choose-local"
+description = "Enables the fonts_choose_local command without any pre-configured scope."
+commands.allow = ["fonts_choose_local"]
+
+[[permission]]
+identifier = "deny-fonts-choose-local"
+description = "Denies the fonts_choose_local command without any pre-configured scope."
+commands.deny = ["fonts_choose_local"]

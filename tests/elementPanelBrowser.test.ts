@@ -126,11 +126,12 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     ).toBe(1)
     expect(await page.$eval('[aria-label="Align left"]', (el) => el.getAttribute('data-state'))).toBe('on')
 
-    await page.select(selector, 'Georgia, serif')
-    await frame.waitForFunction(
-      () => getComputedStyle(document.querySelector('#text')!).fontFamily === 'Georgia, serif',
-    )
-    await expect.poll(() => saved.html).toContain('font-family: Georgia, serif')
+    await page.select(selector, '"Lora", serif')
+    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#text')!).fontFamily === 'Lora, serif')
+    await expect.poll(() => saved.html).toContain('font-family: Lora, serif')
+    /* a hosted font rides along as its stylesheet link */
+    await expect.poll(() => saved.html).toContain('data-doop-webfonts')
+    expect(saved.html).toContain('family=Lora:')
     await page.evaluate(() => window.elementPanelHarness.undo())
     await page.waitForFunction(
       (value) => document.querySelector<HTMLSelectElement>('select[aria-label="Font family"]')?.value === value,
@@ -148,7 +149,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await frame.waitForFunction(() =>
       getComputedStyle(document.querySelector('#text')!).fontFamily.includes('Display Face'),
     )
-    await page.select(selector, 'Georgia, serif')
+    await page.select(selector, '"Lora", serif')
     await page.click('[aria-label="Align center"]')
     await frame.waitForFunction(() => getComputedStyle(document.querySelector('#text')!).textAlign === 'center')
     await page.keyboard.press('ArrowRight')

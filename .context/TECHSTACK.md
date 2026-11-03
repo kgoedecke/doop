@@ -112,6 +112,30 @@
   never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
   healed document, so a cut-off script never runs).
+- Hosted fonts (`shared/webFonts.ts`): the Design panel's font menu offers the "Fonts" group, a
+  curated roster of open families on Google Fonts (`WEB_FONTS`, each with its css2 axes), plus
+  two "Device fonts" (system UI, system monospace) labelled as varying by viewer; the OS stacks
+  (Georgia, Verdana, Trebuchet, Helvetica, Arial, Times, Courier) were dropped from the menu since
+  the server's renderer has none of them and exports disagreed with the editor. Naming a roster
+  family in CSS is all it takes: `withWebFontLinks` adds one `<link rel="stylesheet"
+data-doop-webfonts>` for the roster families the frame names and does not load itself (a
+  library family of the same name wins, and leaves the link when uploaded later), run wherever
+  `withFontFaces` runs (`actions` on every write, `FrameView`'s save path). The screenshot and
+  PDF renderers already admit the two Google Fonts origins. Agents get the roster as `webFonts`
+  plus a note in `get_canvas` and in the resident agent's `# Fonts` block (`webFontsBrief`).
+  Self-hosted instances without outbound internet render roster fonts as their generic in
+  exports. Tests: `webFonts.test.ts`, the hosted case in `fontFrameWrites.test.ts`, the font pick in
+  `elementPanelBrowser.test.ts`.
+- Fonts from this computer (`src/lib/localFonts.ts`, `desktop/src-tauri/src/fonts.rs`): in the
+  desktop shell the font library card has "Add from this computer" (shells advertise it with
+  `__DOOP_LOCAL_FONTS__`). `fonts_choose_local` opens the native file panel in the platform's
+  fonts folder (the person's own first) and remembers the picks; `fonts_read_local` hands the
+  page one picked file's bytes once, by that path and no other, and the page uploads it through
+  the ordinary `POST /api/fonts`, so a local font becomes a library font rather than a
+  device-only reference. Collections (`.ttc`, `.dfont`) and files over 10 MB are left out by
+  name. A confirm dialog before the upload says the fonts are shared with the library and that
+  OS fonts are often licensed for one person; Doop checks no licences (Figma's posture for shared
+  fonts). Tests: the Rust unit tests in `fonts.rs`, `localFonts.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size, pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed

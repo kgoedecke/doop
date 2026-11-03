@@ -12,6 +12,7 @@ import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { withFontFaces } from '../shared/fonts.ts'
+import { withWebFontLinks } from '../shared/webFonts.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
@@ -1603,10 +1604,13 @@ setInterval(() => {
 }, TICK_MS)
 
 /** A finished document with the @font-face rules for the canvas's library
- *  fonts it uses (shared/fonts.ts), so naming a family is all it takes. */
+ *  fonts it uses (shared/fonts.ts) and the stylesheet link for the hosted
+ *  fonts it names (shared/webFonts.ts), so naming a family is all it takes. */
 function withLibraryFaces(canvasId: string, html: string): string {
   const canvas = store.getCanvas(canvasId)
-  return canvas ? withFontFaces(html, fontsForCanvas(canvas)) : html
+  if (!canvas) return html
+  const library = fontsForCanvas(canvas)
+  return withWebFontLinks(withFontFaces(html, library), library)
 }
 
 export function appendFrameHtml(

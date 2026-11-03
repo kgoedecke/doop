@@ -44,6 +44,7 @@ import { ImageFill } from './ImageFill'
 import { InteractionsPanel } from './InteractionsPanel'
 import { Tooltip } from './ui/tooltip'
 import { familyWeights, fontStack, libraryFamilies } from '../../shared/fonts'
+import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { useCanvasFonts } from '../lib/customFonts'
 import {
   AlignCenterIcon,
@@ -367,16 +368,11 @@ const BORDER_SIDES: Record<string, PlainMessageKey> = {
   bottom: 'inspector.sideBottom',
   left: 'inspector.sideLeft',
 }
-const SYSTEM_FONTS = [
-  { value: 'system-ui, sans-serif', label: 'System UI' },
-  { value: 'Arial, sans-serif', label: 'Arial' },
-  { value: 'Helvetica, sans-serif', label: 'Helvetica' },
-  { value: 'Verdana, sans-serif', label: 'Verdana' },
-  { value: 'Trebuchet MS, sans-serif', label: 'Trebuchet MS' },
-  { value: 'Georgia, serif', label: 'Georgia' },
-  { value: 'Times New Roman, serif', label: 'Times New Roman' },
-  { value: 'Courier New, monospace', label: 'Courier New' },
-  { value: 'ui-monospace, monospace', label: 'Monospace' },
+/* the viewer's own fonts: the one place a design asks for the device's
+   look on purpose, and so renders differently on each machine */
+const DEVICE_FONTS: { value: string; label: PlainMessageKey }[] = [
+  { value: 'system-ui, sans-serif', label: 'inspector.fontSystemUi' },
+  { value: 'ui-monospace, monospace', label: 'inspector.fontSystemMono' },
 ]
 
 function fontName(value: string) {
@@ -396,7 +392,8 @@ function fontName(value: string) {
 function fontOptions(
   info: ElementInfo,
   custom: readonly string[],
-  groups: { custom: string; frame: string; system: string },
+  groups: { custom: string; frame: string; web: string; device: string },
+  deviceLabel: (key: PlainMessageKey) => string,
 ) {
   const current = fontName(info.fontFamily).toLowerCase()
   const library = custom.map((family) => ({
@@ -405,14 +402,19 @@ function fontOptions(
     label: family,
     group: groups.custom,
   }))
-  const frame = [info.fontFamily, ...info.fontFamilies].map((value) => ({ value, label: fontName(value) }))
-  const grouped = library.length > 0
+  const frame = [info.fontFamily, ...info.fontFamilies].map((value) => ({
+    value,
+    label: fontName(value),
+    group: groups.frame,
+  }))
+  const web = WEB_FONTS.map((font) => ({
+    value: font.family.toLowerCase() === current ? info.fontFamily : webFontStack(font),
+    label: font.family,
+    group: groups.web,
+  }))
+  const device = DEVICE_FONTS.map((o) => ({ value: o.value, label: deviceLabel(o.label), group: groups.device }))
   const seen = new Set<string>()
-  return [
-    ...library,
-    ...frame.map((o) => ({ ...o, group: grouped ? groups.frame : undefined })),
-    ...SYSTEM_FONTS.map((o) => ({ ...o, group: grouped ? groups.system : undefined })),
-  ].filter(({ value }) => {
+  return [...library, ...frame, ...web, ...device].filter(({ value }) => {
     const family = fontName(value).toLowerCase()
     if (seen.has(family)) return false
     seen.add(family)
@@ -836,11 +838,17 @@ function DesignTab({
             <SelectField
               label={t('inspector.fontFamily')}
               value={info.fontFamily}
-              options={fontOptions(info, customFamilies, {
-                custom: t('inspector.fontGroupCustom'),
-                frame: t('inspector.fontGroupFrame'),
-                system: t('inspector.fontGroupSystem'),
-              })}
+              options={fontOptions(
+                info,
+                customFamilies,
+                {
+                  custom: t('inspector.fontGroupCustom'),
+                  frame: t('inspector.fontGroupFrame'),
+                  web: t('inspector.fontGroupWeb'),
+                  device: t('inspector.fontGroupDevice'),
+                },
+                t,
+              )}
               onChange={(v) => apply({ 'font-family': v })}
             />
           </PropertyRow>
