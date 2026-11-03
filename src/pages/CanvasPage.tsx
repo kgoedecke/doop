@@ -92,7 +92,7 @@ import {
   WebIcon,
   XIcon,
 } from '../components/ui/icons'
-import { Badge } from '../components/ui/badge'
+import { Badge, badgeVariants } from '../components/ui/badge'
 import { Pressable } from '../components/ui/pressable'
 import {
   DropdownMenu,
@@ -2209,16 +2209,17 @@ function CanvasIdMenu({ canvasId, onCopied }: { canvasId: string; onCopied: (msg
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Badge
-          asChild
-          interactive
-          className="max-md:hidden data-[state=open]:bg-current/10"
+        {/* Pressable forwards the trigger's ref (Badge does not), so the menu
+            anchors to the badge and focus returns to it on close */}
+        <Pressable
+          layout="inline"
+          focus="ring"
+          aria-label={t('canvas.canvasIdMenu')}
           title={t('canvas.canvasIdTitle')}
+          className={cn(badgeVariants({ interactive: true }), 'max-md:hidden data-[state=open]:bg-current/10')}
         >
-          <Pressable layout="inline" focus="ring" aria-label={t('canvas.canvasIdMenu')}>
-            {canvasId}
-          </Pressable>
-        </Badge>
+          {canvasId}
+        </Pressable>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="bottom" align="start" width="sm">
         <DropdownMenuItem onSelect={() => void copy(canvasId, t('canvas.idCopied'))}>
