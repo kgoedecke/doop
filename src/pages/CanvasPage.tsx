@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
-import { MOD_KEY, isHideUiShortcut } from '../lib/keys'
+import { MOD_KEY, PRESENT_SHORTCUT_HINT, isHideUiShortcut, isPresentShortcut, isTypingTarget } from '../lib/keys'
+import { presentStartFrame } from '../lib/present'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
 import { connect, disconnect, sendWs } from '../lib/ws'
 import {
@@ -40,8 +41,7 @@ import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
 import { ExportModal } from '../components/ExportModal'
-import { canvasPages, pageFrames } from '../../shared/pages'
-import { flowStartFrame } from '../../shared/prototype'
+import { pageFrames } from '../../shared/pages'
 import type { Frame } from '../../shared/types'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
@@ -255,11 +255,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const hideUiActive = canHideUi({ view: 'canvas', presenting: !!presenting })
   const activePageId = useStore((s) => s.activePageId)
   /* Play starts on the selected frame, or on the page's flow start */
-  const playFrom = useMemo(() => {
-    if (selectedId) return selectedId
-    if (!canvas) return null
-    return flowStartFrame(canvas, activePageId ?? canvasPages(canvas)[0]!.id)?.id ?? null
-  }, [selectedId, canvas, activePageId])
+  const playFrom = useMemo(
+    () => presentStartFrame(canvas, selectedId, activePageId),
+    [selectedId, canvas, activePageId],
+  )
   /* returning from a GitHub App install: the setup redirect appends a signed
      pass — pull it off the URL and open the import modal on the repo picker */
   const [ghInstallPass, setGhInstallPass] = useState<string | null>(() => {
@@ -391,6 +390,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
         toggleHideUi()
         return
       }
+      /* ⌘⌥↩ presents from the selected frame (else the page's flow start),
+         as the Play button does; while presenting the player owns the keys */
+      if (isPresentShortcut(e) && !presenting && !isTypingTarget(target)) {
+        e.preventDefault()
+        const state = useStore.getState()
+        const from = presentStartFrame(state.canvas, state.selectedId, state.activePageId)
+        if (from) setPresenting(from)
+        return
+      }
       /* undo, redo, hide, lock and duplicate all change the canvas; ⌘C does not */
       if (canEdit && (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -435,7 +443,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canvasId, hideUiActive]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canvasId, hideUiActive, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ⌘V lands here as a real paste event: clipboard images upload and drop in
      as frames; otherwise a copied frame (⌘C) pastes centered. Handled on
@@ -797,9 +805,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             <Tooltip
               label={
                 selectedId
-                  ? t('canvas.presentFromFrame')
+                  ? `${t('canvas.presentFromFrame')} · ${PRESENT_SHORTCUT_HINT}`
                   : playFrom
-                    ? t('canvas.presentPrototype')
+                    ? `${t('canvas.presentPrototype')} · ${PRESENT_SHORTCUT_HINT}`
                     : t('canvas.addFrameToPresent')
               }
               side="bottom"
