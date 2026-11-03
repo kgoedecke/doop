@@ -362,8 +362,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   units and percentages (`parseLength`, against the nearest `viewBox`); transforms come from the
   style reader (a stylesheet's `transform` wins) about `transform-origin`; the root's own
   opacity, clip, mask and filter stay on the root group, a group's mask and filter on its row, and
-  copied definitions (gradient stops, clip shapes) keep the styles they resolved. Tests: `svgPath.test.ts`, `svgImport.test.ts`,
-  `svgImportBrowser.test.ts`.
+  copied definitions (gradient stops, clip shapes) keep the styles they resolved. A clip or mask
+  drawn in user units gets a copy carrying the transform baked into the shape it clips (`bakedClip`
+  / `bakedMask`; a mask's content rides in a `<g>`, since `<mask>` takes no transform); one in
+  bounding-box units is used as it is. A text or image layer keeps the `clip-path`, `mask` and
+  `filter` its stylesheet gave it, and its own opacity goes on the layer's svg alone. Tests:
+  `svgPath.test.ts`, `svgImport.test.ts`, `svgImportBrowser.test.ts`.
 - PDF import (`src/lib/pdfImport.ts`, `src/lib/sfnt.ts`, proof of concept): a PDF dropped or pasted
   on the canvas lands as one frame per page at the page's printed size (points × 96/72). MuPDF's
   WebAssembly build (`mupdf`, AGPL, a lazy 10 MB chunk excluded from Vite's pre-bundling so it finds

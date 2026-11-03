@@ -104,6 +104,37 @@ describe.skipIf(!findBrowserPath())('importing SVG files', { timeout: 30_000 }, 
     ).toBe(false)
   })
 
+  it('keeps the effects a style block gives shapes, text and images, as the browser computes them', async () => {
+    const result = await page.evaluate(() =>
+      window.drawingHarness.importSvg(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+          <style>.cut{clip-path:url(#c)} .veil{mask:url(#m)} .soft{filter:url(#f)}</style>
+          <defs>
+            <clipPath id="c"><rect width="10" height="10"/></clipPath>
+            <mask id="m"><rect width="5" height="10" fill="white"/></mask>
+            <filter id="f"><feGaussianBlur stdDeviation="1"/></filter>
+          </defs>
+          <g transform="translate(20 0)"><rect class="veil" width="10" height="10"/></g>
+          <text class="soft" x="2" y="30" opacity="0.5">Hi</text>
+          <image class="cut" href="data:image/png;base64,AAAA" width="20" height="20"/>
+        </svg>`,
+        'effects',
+      ),
+    )
+    expect(result).not.toBeNull()
+    const [rect] = await inspect(result!.html, 'svg[data-doop-drawing="path"] > path')
+    expect(rect!.attrs['mask']).toMatch(/^url\(#k-m-mask-\d+\)$/)
+    const [copy] = await inspect(result!.html, 'mask[id^="k-m-mask-"] > g')
+    expect(copy!.attrs['transform']).toBe('matrix(1 0 0 1 20 0)')
+    const [text, image] = await inspect(result!.html, '[data-doop-drawing="svg"]')
+    expect(text!.attrs['opacity']).toBe('0.5')
+    const [inner, img] = await inspect(result!.html, '[data-doop-drawing="svg"] text, [data-doop-drawing="svg"] image')
+    expect(inner!.attrs['opacity']).toBeUndefined()
+    expect(inner!.attrs['style']).toContain('filter:url(#k-f)')
+    expect(image!.attrs['opacity']).toBeUndefined()
+    expect(img!.attrs['style']).toContain('clip-path:url(#k-c)')
+  })
+
   it('opens the path editor on a shape inside an imported group, keeps its percentage layout and adds points on the outline', async () => {
     const result = (await page.evaluate(() =>
       window.drawingHarness.importSvg(

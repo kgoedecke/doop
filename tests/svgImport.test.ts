@@ -200,7 +200,7 @@ describe('importing an SVG file', () => {
     const root = d.querySelector<HTMLElement>('body > [data-doop-drawing="group"]')!
     expect(root.getAttribute('style')).toContain('opacity:0.5')
     const masked = [...d.querySelectorAll<HTMLElement>('[data-doop-drawing="group"]')].find((el) =>
-      el.getAttribute('style')!.includes('mask:url(#k-m)'),
+      el.getAttribute('style')!.includes('mask:url(#k-m-mask-'),
     )!
     expect(masked.getAttribute('style')).toContain('filter:url(#k-f)')
     expect(
@@ -230,6 +230,61 @@ describe('importing an SVG file', () => {
     const [shape] = shapes(result.html)
     expect(shapePath(shape!)!.getAttribute('d')).toBe('M 20 0 L 30 0 L 30 10 L 20 10 Z')
     expect(doc(result.html).querySelector('stop')!.getAttribute('style')).toContain('stop-color:rgb(255, 0, 0)')
+  })
+
+  it('moves a user-space mask along with the shape it masks, and leaves a bounding-box one alone', () => {
+    const result = imported(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+        <defs>
+          <mask id="m"><rect width="5" height="10" fill="white"/></mask>
+          <mask id="b" maskContentUnits="objectBoundingBox"><rect width="0.5" height="1" fill="white"/></mask>
+        </defs>
+        <g transform="translate(20 0)">
+          <rect mask="url(#m)" width="10" height="10" transform="scale(2)"/>
+          <rect mask="url(#b)" width="10" height="10"/>
+        </g>
+      </svg>`)
+    const d = doc(result.html)
+    const [moved, boxed] = shapes(result.html).map((svg) => shapePath(svg)!.getAttribute('mask'))
+    expect(moved).toMatch(/^url\(#k-m-mask-\d+\)$/)
+    /* the copy's content wears the shape's whole transform, since the shape's points do too */
+    const copy = d.querySelector(`mask[id="${moved!.slice(5, -1)}"]`)!
+    expect(copy.firstElementChild!.localName).toBe('g')
+    expect(copy.firstElementChild!.getAttribute('transform')).toBe('matrix(2 0 0 2 20 0)')
+    expect(copy.querySelector('rect')!.getAttribute('width')).toBe('5')
+    expect(boxed).toBe('url(#k-b)')
+    /* the original stays for anything else that names it */
+    expect(d.querySelector('mask[id="k-m"]')).toBeTruthy()
+  })
+
+  it('keeps the effects a stylesheet gives text and images, and does not apply their opacity twice', () => {
+    const styled: StyleReader = (el, property) => {
+      if (property === 'clip-path' && el.getAttribute('class') === 'cut') return 'url("#c")'
+      if (property === 'filter' && el.localName === 'text') return 'url("#f")'
+      return attributeStyles(el, property)
+    }
+    const result = importSvgMarkup(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+        <defs>
+          <clipPath id="c"><rect width="10" height="10"/></clipPath>
+          <filter id="f"><feGaussianBlur stdDeviation="1"/></filter>
+          <mask id="m"><rect width="10" height="10" fill="white"/></mask>
+        </defs>
+        <text x="10" y="30" opacity="0.5">Hello</text>
+        <image class="cut" href="data:image/png;base64,AAAA" width="20" height="20" style="opacity:0.5;mask:url(#m)"/>
+      </svg>`,
+      'effects',
+      { key: 'k', styles: styled },
+    )!
+    const [text, image] = [...doc(result.html).querySelectorAll('[data-doop-drawing="svg"]')]
+    expect(text!.getAttribute('opacity')).toBe('0.5')
+    expect(text!.querySelector('text')!.hasAttribute('opacity')).toBe(false)
+    expect(text!.querySelector('text')!.getAttribute('style')).toContain('filter:url(#k-f)')
+    expect(image!.getAttribute('opacity')).toBe('0.5')
+    const img = image!.querySelector('image')!
+    expect(img.getAttribute('style')).not.toContain('opacity')
+    expect(img.getAttribute('style')).toContain('clip-path:url(#k-c)')
+    expect(img.getAttribute('style')).toContain('mask:url(#k-m)')
   })
 
   it('folds a clip’s own transform into its copy without an inline value shadowing it', () => {

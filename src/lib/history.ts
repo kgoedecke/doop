@@ -590,11 +590,13 @@ async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGu
   if (target && !canvasPages(canvas).some((page) => page.id === target.pageId)) throw new Error('Page removed')
   const current = canvas.guides?.find((guide) => guide.id === id) ?? null
   useStore.getState().setGuideLocal(id, target)
+  const started = epoch
   try {
     if (target) await api.putGuide(canvas.id, target)
     else await api.deleteGuide(canvas.id, id)
   } catch (err) {
-    if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setGuideLocal(id, current)
+    if (useStore.getState().canvas?.id === canvas.id && epoch === started)
+      useStore.getState().setGuideLocal(id, current)
     throw err
   }
 }
@@ -607,10 +609,15 @@ async function applyPageBackground(e: Extract<Entry, { type: 'page-background' }
   if (!canvasPages(canvas).some((page) => page.id === e.pageId)) throw new Error('Page removed')
   const current = pageBackground(canvasPages(canvas).find((page) => page.id === e.pageId))
   useStore.getState().setPageBackgroundLocal(e.pageId, target)
+  const started = epoch
   try {
     await api.setPageBackground(canvas.id, e.pageId, target)
   } catch (err) {
-    if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setPageBackgroundLocal(e.pageId, current)
+    /* the colour goes back only where this step's is still showing: a
+       teammate's newer one, or a fresh visit's, is theirs to keep */
+    const s = useStore.getState()
+    const page = s.canvas?.id === canvas.id && epoch === started && canvasPages(s.canvas).find((p) => p.id === e.pageId)
+    if (page && pageBackground(page) === target) s.setPageBackgroundLocal(e.pageId, current)
     throw err
   }
 }

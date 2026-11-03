@@ -106,10 +106,18 @@ function loadsFamily(html: string, family: string): boolean {
   return inUrl.test(html) || inFace.test(html)
 }
 
-/** The roster families the link tag loads, from its href. */
+/** The roster families the link tag loads, from its href. A family that is
+ *  not valid URL text (a hand-edited link with a broken escape) is no roster
+ *  family, not a reason to refuse the document. */
 function linkedFamilies(link: string): WebFont[] {
   const href = /href\s*=\s*["']([^"']*)["']/i.exec(link)?.[1] ?? ''
-  const names = [...href.matchAll(/family=([^:&]+)/g)].map((m) => decodeURIComponent(m[1]!.replace(/\+/g, ' ')))
+  const names = [...href.matchAll(/family=([^:&]+)/g)].flatMap((m) => {
+    try {
+      return [decodeURIComponent(m[1]!.replace(/\+/g, ' '))]
+    } catch {
+      return []
+    }
+  })
   return names.map(webFontByFamily).filter((font): font is WebFont => font !== undefined)
 }
 

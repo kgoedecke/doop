@@ -115,6 +115,17 @@ describe('withWebFontLinks', () => {
     expect(withWebFontLinks(dropped)).toBe(dropped)
   })
 
+  it('does not refuse a document whose link carries a broken escape', () => {
+    const damaged = DESIGN.replace(
+      '<title>x</title>',
+      `<title>x</title><link rel="stylesheet" ${WEB_FONT_LINK_ATTR} href="https://fonts.googleapis.com/css2?family=Inter%&family=Lora:wght@400">`,
+    )
+    const html = withWebFontLinks(damaged)
+    expect(linkOf(html)).toContain('family=Inter:')
+    expect(linkOf(html)).toContain('family=Lora:')
+    expect(linkOf(html)).not.toContain('Inter%')
+  })
+
   it('places the link in a document without a head', () => {
     const html = withWebFontLinks('<p style="font-family:Inter">x</p>')
     expect(html.startsWith('<link rel="stylesheet"')).toBe(true)
