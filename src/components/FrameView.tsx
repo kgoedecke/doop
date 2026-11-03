@@ -84,6 +84,10 @@ const POPOVER_SCALE = '[transform:scale(calc(1/var(--zoom,1)))_translateY(calc(-
 
 /* screen px between a frame's name and its top edge, at every zoom */
 const LABEL_GAP = 6
+/* a selected frame's outline, grips and toolbar paint above every frame on
+   the page (whose z-indexes are their ranks in the paint order), so a layer
+   in front never covers the selection being worked on */
+const SELECTION_CHROME_Z = 1_000_000
 const EDITOR_CHIP =
   'inline-flex items-center gap-1 rounded-full px-[7px] py-0.5 text-[10px] font-bold text-white animate-[chip-in_0.25s_ease] @max-[180px]/title:px-[4px] @max-[180px]/title:py-[3px]'
 /* a frame narrower on screen than a chip's words keeps only its icon, so
@@ -1288,7 +1292,9 @@ export const FrameView = memo(function FrameView({
               top: frame.y,
               width: frame.width,
               height: frame.height,
-              zIndex: stack,
+              /* selected, the frame's parts take its place in the stack one by
+                 one, so its selection chrome can rise above the whole page */
+              zIndex: selected ? undefined : stack,
               '--editing-color': stream?.color ?? remoteEditor?.color ?? flash?.color,
             } as React.CSSProperties
           }
@@ -1368,6 +1374,8 @@ export const FrameView = memo(function FrameView({
                 width: 'calc(100% * var(--zoom, 1))',
                 transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
                 cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
+                /* the frame's place in the stack, while its wrapper gives it up */
+                zIndex: selected ? stack : undefined,
               }}
               onPointerDown={(e) => startDrag(e, 'move', false, true)}
             >
@@ -1459,20 +1467,22 @@ export const FrameView = memo(function FrameView({
                  cursor under it. */
               elementMove.moving ? 'cursor-move' : 'cursor-default',
               !isCanvasElement(frame.html) && (dragging ? 'shadow-pop' : 'shadow-card'),
-              selected && !pathEdit && 'outline-2 outline-offset-1 outline-brand',
               editing && 'cursor-text',
               !stream &&
                 remoteEditor &&
                 'outline-2 outline-offset-1 outline-solid outline-[var(--editing-color,var(--brand))]',
               stream && 'border-transparent outline-none',
             )}
-            /* the selection ring is screen px like the grips: two pixels
-               straddling the frame's edge at every zoom, so on the pixel grid
-               it runs down the middle of the edge's line, never beside it */
+            /* a remote editor's ring has the selection ring's geometry: two
+               screen pixels straddling the frame's edge at every zoom */
             style={{
               outlineWidth: 'calc(2px / var(--zoom, 1))',
               outlineOffset: 'calc(-1px / var(--zoom, 1))',
               cursor: duping || (dupKeyHeld && !editing) ? DUP_CURSOR : undefined,
+              /* only while selected, when the wrapper gives up its place: inside
+                 an unselected frame's own stacking context a z-index here would
+                 cover the frame's pins and hover outlines */
+              zIndex: selected ? stack : undefined,
             }}
             onPointerDown={(e) => startDrag(e, 'move', true)}
             onDoubleClick={(e) => {
@@ -1542,306 +1552,333 @@ export const FrameView = memo(function FrameView({
             but not under a file drag, whose drop belongs to the canvas */}
             {(!editing || panMode || fileDragging || tool !== 'select') && <div className="absolute inset-0" />}
           </div>
-          {/* the element's hover and selection furniture: outlines, grips and
+          {/* everything drawn over the frame rather than in it: selection ring,
+              element outlines, grips, comments and the element toolbar. While
+              the frame is selected the layer stacks above every frame, so a
+              layer in front of this one never hides what is being worked on */}
+          <div
+            data-frame-chrome=""
+            className="pointer-events-none absolute inset-0"
+            style={{ zIndex: selected ? SELECTION_CHROME_Z : undefined }}
+          >
+            {/* the frame's selection ring (not over an agent's stream, which has
+              its own): two screen pixels straddling its edge, so on the pixel
+              grid it runs down the middle of the edge's line */}
+            {selected && !pathEdit && !stream && (
+              <div
+                data-frame-selection=""
+                className="pointer-events-none absolute inset-0 outline-solid outline-brand"
+                style={{ outlineWidth: 'calc(2px / var(--zoom, 1))', outlineOffset: 'calc(-1px / var(--zoom, 1))' }}
+              />
+            )}
+            {/* the element's hover and selection furniture: outlines, grips and
               the size badge sit outside the surface, whose overflow clips the
               document to the frame, so a layer wider or taller than its frame
               is outlined in full while its content stays clipped. The layer is
               inset by the surface's border, where the document starts, so a
               rect in design px lands on the element it measures */}
-          <div
-            data-element-furniture=""
-            className={cn('pointer-events-none absolute', isCanvasElement(frame.html) ? 'inset-0' : 'inset-px')}
-          >
-            {/* above the selection outline (z-[3]), or that outline covers the
+            <div
+              data-element-furniture=""
+              className={cn('pointer-events-none absolute', isCanvasElement(frame.html) ? 'inset-0' : 'inset-px')}
+            >
+              {/* above the selection outline (z-[3]), or that outline covers the
               hovered element's tag */}
-            {hover && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
-              <div
-                data-hover-outline=""
-                className="pointer-events-none absolute z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                style={{ left: hover.rect.x, top: hover.rect.y, width: hover.rect.width, height: hover.rect.height }}
-              >
-                <span
-                  className={cn(
-                    'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-bold leading-none text-white [font-family:ui-monospace,monospace]',
-                    hover.rect.y < 18
-                      ? 'origin-top-left rounded-[0_0_4px_0] [transform:translateY(0)_scale(min(calc(1/var(--zoom,1)),2.4))]'
-                      : 'origin-bottom-left rounded-[4px_4px_4px_0] [transform:translateY(-100%)_scale(min(calc(1/var(--zoom,1)),2.4))]',
-                  )}
-                >
-                  {hover.tag}
-                </span>
-              </div>
-            )}
-            {probe &&
-              probe.selector !== FRAME_COMMENT_SELECTOR &&
-              probe.selector !== shellSel &&
-              selected &&
-              !editing &&
-              !pathEdit &&
-              !dragging && (
+              {hover && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
                 <div
-                  data-element-outline=""
-                  /* a one-pixel hairline, the way Paper outlines a selection */
-                  className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                  style={{ left: probe.rect.x, top: probe.rect.y, width: probe.rect.width, height: probe.rect.height }}
-                />
+                  data-hover-outline=""
+                  className="pointer-events-none absolute z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                  style={{ left: hover.rect.x, top: hover.rect.y, width: hover.rect.width, height: hover.rect.height }}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-bold leading-none text-white [font-family:ui-monospace,monospace]',
+                      hover.rect.y < 18
+                        ? 'origin-top-left rounded-[0_0_4px_0] [transform:translateY(0)_scale(min(calc(1/var(--zoom,1)),2.4))]'
+                        : 'origin-bottom-left rounded-[4px_4px_4px_0] [transform:translateY(-100%)_scale(min(calc(1/var(--zoom,1)),2.4))]',
+                    )}
+                  >
+                    {hover.tag}
+                  </span>
+                </div>
               )}
-            {/* the text being edited wears the same hairline, grips aside: one
+              {probe &&
+                probe.selector !== FRAME_COMMENT_SELECTOR &&
+                probe.selector !== shellSel &&
+                selected &&
+                !editing &&
+                !pathEdit &&
+                !dragging && (
+                  <div
+                    data-element-outline=""
+                    /* a one-pixel hairline, the way Paper outlines a selection */
+                    className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                    style={{
+                      left: probe.rect.x,
+                      top: probe.rect.y,
+                      width: probe.rect.width,
+                      height: probe.rect.height,
+                    }}
+                  />
+                )}
+              {/* the text being edited wears the same hairline, grips aside: one
               look for a selected element, in or out of a text edit */}
-            {editing && activeHit && (
-              <div
-                data-editing-outline=""
-                className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                style={{
-                  left: activeHit.rect.x,
-                  top: activeHit.rect.y,
-                  width: activeHit.rect.width,
-                  height: activeHit.rect.height,
-                }}
-              />
-            )}
-            {selected &&
-              !editing &&
-              !pathEdit &&
-              !dragging &&
-              picked
-                .filter((selector) => selector !== probe?.selector)
-                .map((selector) => {
-                  const rect = pickRects[selector]
-                  return (
-                    rect && (
-                      <div
-                        key={selector}
-                        data-picked-element=""
-                        className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
-                        style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
-                      />
-                    )
-                  )
-                })}
-            {/* the grips: only where a drag can change the box, and never on
-              a locked layer or frame, or under the Comment tool — nor on a
-              multi-element pick, where a drag would size only one */}
-            {probe &&
-              probe.selector !== shellSel &&
-              !multiPick &&
-              selected &&
-              !editing &&
-              !pathEdit &&
-              !dragging &&
-              !elementMove.moving &&
-              tool === 'select' &&
-              probe.sizable &&
-              !probe.locked &&
-              !frame.locked &&
-              !readOnly && (
-                <ElementResizeHandles
-                  frame={frame}
-                  selector={probe.selector}
-                  rect={probe.rect}
-                  onRect={(rect) => setProbe((p) => (p && p.selector === probe.selector ? { ...p, rect } : p))}
-                  onResizing={(on) => {
-                    if (on) clearHover()
-                    setResizing(on)
+              {editing && activeHit && (
+                <div
+                  data-editing-outline=""
+                  className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                  style={{
+                    left: activeHit.rect.x,
+                    top: activeHit.rect.y,
+                    width: activeHit.rect.width,
+                    height: activeHit.rect.height,
                   }}
                 />
               )}
-          </div>
-          {/* someone else just changed this frame: their highlight, the remote
+              {selected &&
+                !editing &&
+                !pathEdit &&
+                !dragging &&
+                picked
+                  .filter((selector) => selector !== probe?.selector)
+                  .map((selector) => {
+                    const rect = pickRects[selector]
+                    return (
+                      rect && (
+                        <div
+                          key={selector}
+                          data-picked-element=""
+                          className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                          style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+                        />
+                      )
+                    )
+                  })}
+              {/* the grips: only where a drag can change the box, and never on
+              a locked layer or frame, or under the Comment tool — nor on a
+              multi-element pick, where a drag would size only one */}
+              {probe &&
+                probe.selector !== shellSel &&
+                !multiPick &&
+                selected &&
+                !editing &&
+                !pathEdit &&
+                !dragging &&
+                !elementMove.moving &&
+                tool === 'select' &&
+                probe.sizable &&
+                !probe.locked &&
+                !frame.locked &&
+                !readOnly && (
+                  <ElementResizeHandles
+                    frame={frame}
+                    selector={probe.selector}
+                    rect={probe.rect}
+                    onRect={(rect) => setProbe((p) => (p && p.selector === probe.selector ? { ...p, rect } : p))}
+                    onResizing={(on) => {
+                      if (on) clearHover()
+                      setResizing(on)
+                    }}
+                  />
+                )}
+            </div>
+            {/* someone else just changed this frame: their highlight, the remote
               editor's outline in their colour, fading out. Outside the body,
               whose overflow would clip an outline. */}
-          {flash && (
-            <div
-              /* the selection ring's own geometry, in the editor's colour */
-              className="pointer-events-none absolute inset-0 outline-solid outline-[var(--editing-color)] animate-[fade-out_1.2s_ease-out_forwards]"
-              style={
-                {
-                  '--editing-color': flash.color,
-                  outlineWidth: 'calc(2px / var(--zoom, 1))',
-                  outlineOffset: 'calc(-1px / var(--zoom, 1))',
-                } as React.CSSProperties
-              }
-            />
-          )}
+            {flash && (
+              <div
+                /* the selection ring's own geometry, in the editor's colour */
+                className="pointer-events-none absolute inset-0 outline-solid outline-[var(--editing-color)] animate-[fade-out_1.2s_ease-out_forwards]"
+                style={
+                  {
+                    '--editing-color': flash.color,
+                    outlineWidth: 'calc(2px / var(--zoom, 1))',
+                    outlineOffset: 'calc(-1px / var(--zoom, 1))',
+                  } as React.CSSProperties
+                }
+              />
+            )}
 
-          {/* element comments: pins + element toolbar + composer, all in frame
+            {/* element comments: pins + element toolbar + composer, all in frame
           coords. The toolbar anchors to the probed element normally, and to
           the actively edited element in edit mode. `data-comment-ui`: the
           Comment tool's cursor is forced over the whole stage except inside
           the comment UI, which keeps its own cursors. */}
-          {(() => {
-            const anchor = editing ? activeHit : probe
-            return (
-              <div data-comment-ui className="pointer-events-none absolute inset-0">
-                {comments.map((c) => {
-                  const pos = isFrameComment(c) ? { x: c.x, y: c.y } : elementCommentPosition(c, pinPos[c.id])
-                  if (!pos) return null
-                  const open = openThread === c.id
-                  const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
-                  const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
-                  return (
-                    <CommentPin
-                      key={c.id}
-                      thread={thread}
-                      open={open}
-                      left={pos.x}
-                      top={pos.y}
-                      onToggle={() => {
-                        setProbe(null)
-                        setComposing(false)
-                        setOpenThread(open ? null : c.id)
-                      }}
-                    >
-                      <CommentThread
+            {(() => {
+              const anchor = editing ? activeHit : probe
+              return (
+                <div data-comment-ui className="pointer-events-none absolute inset-0">
+                  {comments.map((c) => {
+                    const pos = isFrameComment(c) ? { x: c.x, y: c.y } : elementCommentPosition(c, pinPos[c.id])
+                    if (!pos) return null
+                    const open = openThread === c.id
+                    const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
+                    const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
+                    return (
+                      <CommentPin
+                        key={c.id}
                         thread={thread}
-                        onReply={(text) =>
-                          api
-                            .replyComment(c.id, text)
-                            .then(() => posthog.capture('element_comment_replied'))
-                            .catch((err) => {
-                              /* the wall explains a hit limit; anything else
-                                 surfaces in the thread so the draft survives */
-                              if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
-                              throw err
-                            })
-                        }
-                        onResolve={() => {
-                          api
-                            .resolveComment(c.id)
-                            .then(() => posthog.capture('element_comment_resolved'))
-                            .catch(console.error)
-                          setOpenThread(null)
+                        open={open}
+                        left={pos.x}
+                        top={pos.y}
+                        onToggle={() => {
+                          setProbe(null)
+                          setComposing(false)
+                          setOpenThread(open ? null : c.id)
                         }}
-                        onRetry={(id) =>
-                          api.retryComment(id).catch((err) => {
-                            if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
-                            else console.error(err)
-                          })
-                        }
-                      />
-                    </CommentPin>
-                  )
-                })}
+                      >
+                        <CommentThread
+                          thread={thread}
+                          onReply={(text) =>
+                            api
+                              .replyComment(c.id, text)
+                              .then(() => posthog.capture('element_comment_replied'))
+                              .catch((err) => {
+                                /* the wall explains a hit limit; anything else
+                                 surfaces in the thread so the draft survives */
+                                if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
+                                throw err
+                              })
+                          }
+                          onResolve={() => {
+                            api
+                              .resolveComment(c.id)
+                              .then(() => posthog.capture('element_comment_resolved'))
+                              .catch(console.error)
+                            setOpenThread(null)
+                          }}
+                          onRetry={(id) =>
+                            api.retryComment(id).catch((err) => {
+                              if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
+                              else console.error(err)
+                            })
+                          }
+                        />
+                      </CommentPin>
+                    )
+                  })}
 
-                {anchor && (editing || !multiPick) && selected && !contextMenuOpen && !elementMove.moving && (
-                  <div
-                    className={cn('pointer-events-auto absolute z-[7] origin-top-left', POPOVER_SCALE)}
-                    style={{
-                      left: Math.min(
-                        Math.max(composing ? (anchor.point?.x ?? anchor.rect.x) : anchor.rect.x, 4),
-                        Math.max(4, frame.width - 60),
-                      ),
-                      top: Math.max(composing ? (anchor.point?.y ?? anchor.rect.y) : anchor.rect.y, 2),
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
-                    {!composing ? (
-                      <>
-                        <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop">
-                          <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px text-[11px] font-bold text-paper [font-family:ui-monospace,monospace]">
-                            {anchor.tag}
-                          </span>
-                          <Button
-                            variant="inverse"
-                            className={EL_TOOLBAR_BTN}
-                            onClick={() => {
-                              setComposePrefill('')
-                              setComposing(true)
-                            }}
-                          >
-                            <CommentIcon size="rail" /> {t('stage.elementComment')}
-                          </Button>
-                          <Button
-                            variant="inverse"
-                            className={EL_TOOLBAR_BTN}
-                            onClick={() => {
-                              /* pre-mentioned → the comment dispatches as an agent
-                             job scoped to this element's selector + snippet */
-                              setComposePrefill(`@${DEFAULT_ROLE_ID} `)
-                              setComposing(true)
-                            }}
-                          >
-                            <SparkIcon size="rail" /> {t('stage.askAi')}
-                          </Button>
-                          <Button
-                            variant="inverse"
-                            className={EL_TOOLBAR_BTN}
-                            onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
-                          >
-                            <CodeIcon size="button" /> {t('stage.code')}
-                          </Button>
-                          <Button
-                            variant="inverse"
-                            className={EL_TOOLBAR_BTN}
-                            aria-label={t('stage.copyLinkToElement')}
-                            onClick={() => void copyElementLink(frame, anchor)}
-                          >
-                            {t('stage.copyLink')}
-                          </Button>
-                          {!editing && canEdit && anchor.text !== '' && (
+                  {anchor && (editing || !multiPick) && selected && !contextMenuOpen && !elementMove.moving && (
+                    <div
+                      className={cn('pointer-events-auto absolute z-[7] origin-top-left', POPOVER_SCALE)}
+                      style={{
+                        left: Math.min(
+                          Math.max(composing ? (anchor.point?.x ?? anchor.rect.x) : anchor.rect.x, 4),
+                          Math.max(4, frame.width - 60),
+                        ),
+                        top: Math.max(composing ? (anchor.point?.y ?? anchor.rect.y) : anchor.rect.y, 2),
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      {!composing ? (
+                        <>
+                          <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop">
+                            <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px text-[11px] font-bold text-paper [font-family:ui-monospace,monospace]">
+                              {anchor.tag}
+                            </span>
                             <Button
                               variant="inverse"
                               className={EL_TOOLBAR_BTN}
                               onClick={() => {
-                                enterEdit()
+                                setComposePrefill('')
+                                setComposing(true)
                               }}
                             >
-                              <EditIcon size="rail" /> {t('stage.editText')}
+                              <CommentIcon size="rail" /> {t('stage.elementComment')}
                             </Button>
-                          )}
-                        </div>
-                        {codeView !== null && <CodePanel key={anchor.selector} code={codeView} />}
-                      </>
-                    ) : (
-                      <CommentComposer
-                        initialText={composePrefill}
-                        placeholder={anchor.selector === FRAME_COMMENT_SELECTOR ? t('stage.commentOnFrame') : undefined}
-                        onSubmit={(text) => {
-                          /* Keep the clicked point until the element moves. If the
+                            <Button
+                              variant="inverse"
+                              className={EL_TOOLBAR_BTN}
+                              onClick={() => {
+                                /* pre-mentioned → the comment dispatches as an agent
+                             job scoped to this element's selector + snippet */
+                                setComposePrefill(`@${DEFAULT_ROLE_ID} `)
+                                setComposing(true)
+                              }}
+                            >
+                              <SparkIcon size="rail" /> {t('stage.askAi')}
+                            </Button>
+                            <Button
+                              variant="inverse"
+                              className={EL_TOOLBAR_BTN}
+                              onClick={() => (codeView === null ? requestCode(anchor.selector) : setCodeView(null))}
+                            >
+                              <CodeIcon size="button" /> {t('stage.code')}
+                            </Button>
+                            <Button
+                              variant="inverse"
+                              className={EL_TOOLBAR_BTN}
+                              aria-label={t('stage.copyLinkToElement')}
+                              onClick={() => void copyElementLink(frame, anchor)}
+                            >
+                              {t('stage.copyLink')}
+                            </Button>
+                            {!editing && canEdit && anchor.text !== '' && (
+                              <Button
+                                variant="inverse"
+                                className={EL_TOOLBAR_BTN}
+                                onClick={() => {
+                                  enterEdit()
+                                }}
+                              >
+                                <EditIcon size="rail" /> {t('stage.editText')}
+                              </Button>
+                            )}
+                          </div>
+                          {codeView !== null && <CodePanel key={anchor.selector} code={codeView} />}
+                        </>
+                      ) : (
+                        <CommentComposer
+                          initialText={composePrefill}
+                          placeholder={
+                            anchor.selector === FRAME_COMMENT_SELECTOR ? t('stage.commentOnFrame') : undefined
+                          }
+                          onSubmit={(text) => {
+                            /* Keep the clicked point until the element moves. If the
                              element cannot be found in saved HTML, use a frame pin. */
-                          api
-                            .addComment(frame.id, {
-                              selector: anchor.selector,
-                              ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
-                              snippet: anchor.snippet,
-                              text,
-                              x: anchor.point?.x ?? anchor.rect.x,
-                              y: anchor.point?.y ?? anchor.rect.y,
-                              elementOrigin: { x: anchor.rect.x, y: anchor.rect.y },
-                            })
-                            .then(() => posthog.capture('element_comment_created'))
-                            .catch((err) => {
-                              /* an @mention past the free tier raises the wall */
-                              if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
-                              else console.error(err)
-                            })
-                          if (editing) setComposing(false)
-                          else closePopovers()
-                        }}
-                        onCancel={() => (editing ? setComposing(false) : closePopovers())}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })()}
+                            api
+                              .addComment(frame.id, {
+                                selector: anchor.selector,
+                                ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
+                                snippet: anchor.snippet,
+                                text,
+                                x: anchor.point?.x ?? anchor.rect.x,
+                                y: anchor.point?.y ?? anchor.rect.y,
+                                elementOrigin: { x: anchor.rect.x, y: anchor.rect.y },
+                              })
+                              .then(() => posthog.capture('element_comment_created'))
+                              .catch((err) => {
+                                /* an @mention past the free tier raises the wall */
+                                if (isResidentLimit(err)) useStore.getState().setLimitWall(true)
+                                else console.error(err)
+                              })
+                            if (editing) setComposing(false)
+                            else closePopovers()
+                          }}
+                          onCancel={() => (editing ? setComposing(false) : closePopovers())}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
-          {/* the frame's grips: only with Select, and never over a picked
+            {/* the frame's grips: only with Select, and never over a picked
               element's own grips, which sit under this layer */}
-          {selected &&
-            tool === 'select' &&
-            (!wantedSel || shellPicked) &&
-            !elementMove.moving &&
-            !frame.locked &&
-            !shellLocked &&
-            !readOnly &&
-            !pathEdit &&
-            !editing && (
-              <FrameResizeHandles onStart={(e, handle) => startDrag(e, 'resize', false, false, false, handle)} />
-            )}
-          {elementMove.preview}
-          {pathEdit && <PathEditor frame={frame} initial={pathEdit} onClose={closePathEdit} />}
+            {selected &&
+              tool === 'select' &&
+              (!wantedSel || shellPicked) &&
+              !elementMove.moving &&
+              !frame.locked &&
+              !shellLocked &&
+              !readOnly &&
+              !pathEdit &&
+              !editing && (
+                <FrameResizeHandles onStart={(e, handle) => startDrag(e, 'resize', false, false, false, handle)} />
+              )}
+            {elementMove.preview}
+            {pathEdit && <PathEditor frame={frame} initial={pathEdit} onClose={closePathEdit} />}
+          </div>
         </div>
       </ContextMenuTrigger>
       {menuTarget === 'frame' ? (
