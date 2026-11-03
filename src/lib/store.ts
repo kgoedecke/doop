@@ -74,6 +74,9 @@ interface State {
   /** the Inspector panel is showing — opened by clicking a frame's name, not
    *  by mere selection, so clicking around a frame doesn't slide the panel in */
   inspectorOpen: boolean
+  /** the Page panel (the page's own settings) has the properties slot while
+   *  nothing is selected; opened from the rail, it stays until closed */
+  pagePanelOpen: boolean
   /** open frame context menu; deferPanel hides the Inspector until it closes
    *  (right-click selecting a frame must not slide a panel in under the menu) */
   ctxMenu: { frameId: string; deferPanel: boolean } | null
@@ -223,6 +226,7 @@ interface State {
   setPanMode(v: boolean): void
   setFileDragging(v: boolean): void
   setInspectorOpen(v: boolean): void
+  setPagePanelOpen(v: boolean): void
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
   setSelectedElement(el: { frameId: string; selector: string } | null): void
@@ -297,6 +301,7 @@ export const useStore = create<State>((set, get) => ({
   panMode: false,
   fileDragging: false,
   inspectorOpen: false,
+  pagePanelOpen: false,
   ctxMenu: null,
   selectedElement: null,
   selectedElements: [],
@@ -626,6 +631,7 @@ export const useStore = create<State>((set, get) => ({
   setPanMode: (panMode) => set({ panMode }),
   setFileDragging: (fileDragging) => set({ fileDragging }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
+  setPagePanelOpen: (pagePanelOpen) => set({ pagePanelOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
   closeCtxMenu: () => set({ ctxMenu: null }),
   setCommentDrag: (commentDrag) => set({ commentDrag }),

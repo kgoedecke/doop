@@ -3,15 +3,13 @@ import { nanoid } from 'nanoid'
 import { canvasPages } from '../../shared/pages'
 import type { CanvasPageInfo } from '../../shared/types'
 import { canEditOpenCanvas, useStore } from '../lib/store'
-import { savePages, duplicatePage, moveFramesToPage, setPageBackground } from '../lib/pageEdits'
-import { pageBackground } from '../../shared/pageBackground'
+import { savePages, duplicatePage, moveFramesToPage } from '../lib/pageEdits'
 import { ApiError } from '../lib/api'
 import { Button } from './ui/button'
 import { PageIcon, PlusIcon } from './ui/icons'
 import { cn } from '../lib/utils'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { ColorField } from './ui/property-field'
 import { useT } from '@/lib/i18n'
 
 /** The small grey sub-heading over a section of the Layers panel, shared with
@@ -36,7 +34,6 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   const t = useT()
   if (!canvas) return null
   const pages = canvasPages(canvas)
-  const activePage = pages.find((page) => page.id === activePageId) ?? pages[0]
   const movableIds = canvas.frames.filter((f) => selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
 
   async function moveSelection(pageId: string) {
@@ -119,17 +116,6 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
       { signal: controller.signal },
     )
     window.addEventListener('pointercancel', cleanup, { signal: controller.signal })
-  }
-
-  /* the active page's own colour; cleared, the theme paper shows again */
-  async function paint(pageId: string, color: string | null) {
-    if (!canvas) return
-    try {
-      await setPageBackground(canvas, pageId, color)
-    } catch {
-      if (useStore.getState().canvas?.id === canvas.id)
-        useStore.getState().pushNotice(t('panels.pagesBackgroundFailed'))
-    }
   }
 
   async function duplicate(pageId: string) {
@@ -281,22 +267,6 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
         {!readOnly && addPage}
       </div>
       <div className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}>{list}</div>
-      {!readOnly && activePage && (
-        /* the page's canvas colour, as Figma's Design panel shows it with
-           nothing selected; the field's keys stay out of the canvas shortcuts */
-        <div
-          className="flex items-center gap-2 px-3.5 pb-2 text-[11px] text-ink-faint"
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <span className="flex-none">{t('panels.pagesBackground')}</span>
-          <ColorField
-            key={activePage.id}
-            label={t('panels.pagesBackground')}
-            value={pageBackground(activePage)}
-            onCommit={(color) => void paint(activePage.id, color)}
-          />
-        </div>
-      )}
       {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's

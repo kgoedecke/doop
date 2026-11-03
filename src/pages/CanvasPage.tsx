@@ -31,6 +31,7 @@ import { LivePresence } from '../components/LivePresence'
 import { ensureTab } from '../lib/desktop'
 import { Stage } from '../components/Stage'
 import { Inspector } from '../components/Inspector'
+import { PagePanel } from '../components/PagePanel'
 import { ElementPanel } from '../components/ElementPanel'
 import { ActivityPanel } from '../components/ActivityPanel'
 import { ConnectModal } from '../components/ConnectModal'
@@ -617,8 +618,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const selectedElement = useStore((s) => s.selectedElement)
   const elementPanelOpen = useStore((s) => s.elementPanelOpen)
   const panelElement = elementPanelOpen && selectedElement?.frameId === selectedFrame?.id ? selectedElement : null
-  /* the frame Inspector or the element panel, whichever has the slot */
-  const propertiesShown = !readOnly && !!selectedFrame && !deferPanel && (!!panelElement || inspectorOpen)
+  /* with nothing selected the slot is the page's own settings, once opened
+     from the rail, until closed */
+  const pagePanelOpen = useStore((s) => s.pagePanelOpen)
+  const pageShown = !readOnly && !selectedFrame && pagePanelOpen && !deferPanel
+  /* the frame Inspector, the element panel or the Page panel, whichever has the slot */
+  const propertiesShown =
+    (!readOnly && !!selectedFrame && !deferPanel && (!!panelElement || inspectorOpen)) || pageShown
   /* ⇧R docks the rulers on the canvas's top and left edges; the bar and the
      floating chrome step in past them (the same test Stage draws them by) */
   const rulers = useStore((s) => s.rulers)
@@ -982,6 +988,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           {!isMobile && !readOnly && selectedFrame && inspectorOpen && !panelElement && !deferPanel && (
             <Inspector frame={selectedFrame} surface={panelSurface} style={{ right: chrome.properties }} />
           )}
+          {!isMobile && pageShown && <PagePanel surface={panelSurface} style={{ right: chrome.properties }} />}
           {!isMobile && showActivity && (
             <ActivityPanel
               canvasId={canvasId}
@@ -1006,9 +1013,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               agentsOpen={showActivity}
               onToggleAgents={() => setShowActivity((open) => !open)}
               inspectorOpen={propertiesShown}
-              inspectorAvailable={!!selectedFrame && !readOnly}
+              inspectorAvailable={!readOnly}
+              inspectTarget={selectedFrame ? 'frame' : 'page'}
               onToggleInspector={() => {
                 const s = useStore.getState()
+                if (!selectedFrame) {
+                  s.setPagePanelOpen(!s.pagePanelOpen)
+                  return
+                }
                 if (propertiesShown) {
                   /* the element panel and the inspector share the slot —
                      hiding it closes whichever is showing */

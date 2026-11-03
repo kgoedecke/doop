@@ -38,8 +38,9 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
   `expectedPages` to protect collaborators), and target frames with `pageId`. Each page can wear
-  a canvas colour of its own, as in Figma: the Background swatch under the page list (agents:
-  `set_page_background`); cleared, the page shows the theme paper again.
+  a canvas colour of its own, as in Figma: with nothing selected, the sliders icon on the right
+  opens the Page panel with its Background swatch (agents: `set_page_background`); cleared, the
+  page shows the theme paper again.
 - **Clickable prototypes** — wire elements to other frames (click, hover, press, key or delay;
   navigate, overlay, back, scroll or link, with transitions) in Prototype mode or straight in the
   HTML, then click through the flow with Play or share `/c/<id>/proto`. Agents use the same

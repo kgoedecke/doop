@@ -29,8 +29,6 @@ export const panels = {
   pagesMoveFailed: 'Could not move all selected frames to the page',
   pagesSaveFailed: 'Could not save pages',
   pagesDuplicateFailed: 'Could not duplicate the page',
-  pagesBackground: 'Background',
-  pagesBackgroundFailed: 'Could not save the page background',
 
   memoryIntro: 'Memory is how this canvas remembers your taste — and how every agent designs with it.',
   memoryReferences: 'References',
