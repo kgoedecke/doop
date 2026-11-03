@@ -249,7 +249,7 @@ export function AuthPage() {
         return
       }
       const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
-      if (res.error) setError(authErrorMessage(res.error, startFailed))
+      if (res.error) setError(authErrorMessage(res.error, startFailed, t('auth.unreachable')))
     } catch {
       setError(t(NETWORK_ERROR))
     } finally {
@@ -297,7 +297,7 @@ export function AuthPage() {
         const res = await authClient.resetPassword({ newPassword: password, token: resetToken ?? '' })
         if (res.error) {
           /* a platform error must not be reported as an expired link */
-          setError(authErrorMessage(res.error, t('auth.resetLinkInvalid')))
+          setError(authErrorMessage(res.error, t('auth.resetLinkInvalid'), t('auth.unreachable')))
         } else {
           history.replaceState(null, '', '/auth')
           switchMode('signin')
@@ -330,7 +330,7 @@ export function AuthPage() {
           setError(t('auth.accountExists'))
           setSuggestMode('signin')
         } else {
-          setError(authErrorMessage(res.error, t('auth.somethingWentWrong')))
+          setError(authErrorMessage(res.error, t('auth.somethingWentWrong'), t('auth.unreachable')))
         }
       } else if (res.data?.user) {
         /* signup with verification required: the account exists but there is

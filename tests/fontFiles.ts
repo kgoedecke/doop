@@ -158,3 +158,22 @@ export function woffClaiming(spec: FaceSpec, origLength: number): Buffer {
   }
   return file
 }
+
+/** A WOFF whose directory lists its `name` table `times` over, every entry
+ *  pointing at the same compressed bytes — the shape that would make a reader
+ *  inflate one table once per entry. */
+export function woffRepeating(spec: FaceSpec, times: number): Buffer {
+  const file = woff(spec)
+  const count = file.readUInt16BE(12)
+  const entries: Buffer[] = []
+  for (let i = 0; i < count; i++) {
+    const entry = Buffer.from(file.subarray(44 + i * 20, 64 + i * 20))
+    entries.push(entry)
+    if (entry.toString('latin1', 0, 4) === 'name') for (let n = 1; n < times; n++) entries.push(Buffer.from(entry))
+  }
+  const grown = (entries.length - count) * 20
+  for (const entry of entries) entry.writeUInt32BE(entry.readUInt32BE(4) + grown, 4)
+  const header = Buffer.from(file.subarray(0, 44))
+  header.writeUInt16BE(entries.length, 12)
+  return Buffer.concat([header, ...entries, file.subarray(44 + count * 20)])
+}

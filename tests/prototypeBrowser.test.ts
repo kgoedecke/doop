@@ -196,6 +196,8 @@ describe.skipIf(!findBrowserPath())('prototype player', { timeout: 30_000 }, () 
       await page.waitForFunction(() => !document.querySelector('[data-proto-menu]'))
       /* the menu's keys stayed with the menu: the player is still up */
       expect(await page.evaluate(() => (window as unknown as Fixture).playerClosed)).toBe(false)
+      /* and the keys are the screen's again: a keyboard user is not left nowhere */
+      await page.waitForFunction(() => document.activeElement?.matches('iframe[data-doop-proto-frame="home"]'))
       await page.waitForFunction(
         () => document.querySelector('[data-proto-screen="home"] > div')?.getBoundingClientRect().width === 400,
       )

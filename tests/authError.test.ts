@@ -30,18 +30,16 @@ describe('authErrorCode', () => {
 
 describe('authErrorMessage', () => {
   it('passes the message our API sent through', () => {
-    expect(authErrorMessage({ code: 'PASSWORD_TOO_SHORT', message: 'Password too short' }, 'fallback')).toBe(
-      'Password too short',
-    )
+    expect(
+      authErrorMessage({ code: 'PASSWORD_TOO_SHORT', message: 'Password too short' }, 'fallback', 'unreachable'),
+    ).toBe('Password too short')
   })
 
   it('replaces infrastructure wording a person cannot act on', () => {
-    expect(authErrorMessage(EDGE_ERROR, 'fallback')).toBe(
-      'doop could not be reached — it may be restarting. Try again in a moment.',
-    )
+    expect(authErrorMessage(EDGE_ERROR, 'fallback', 'doop could not be reached')).toBe('doop could not be reached')
   })
 
   it('falls back when there is no message', () => {
-    expect(authErrorMessage({}, 'Something went wrong')).toBe('Something went wrong')
+    expect(authErrorMessage({}, 'Something went wrong', 'unreachable')).toBe('Something went wrong')
   })
 })

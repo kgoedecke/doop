@@ -559,7 +559,14 @@ function ScalingMenu({ scaling, onChange }: { scaling: ProtoScaling; onChange: (
         className="z-[90]"
         data-proto-menu=""
         onKeyDown={(e) => e.stopPropagation()}
-        onCloseAutoFocus={(e) => e.preventDefault()}
+        /* a closed menu hands the keys back to the prototype: the screen that
+           takes them gets the focus; with none up, the button keeps it */
+        onCloseAutoFocus={(e) => {
+          const screen = interactiveScreen()
+          if (!screen) return
+          e.preventDefault()
+          screen.focus()
+        }}
       >
         <DropdownMenuRadioGroup value={scaling} onValueChange={pick}>
           <DropdownMenuCaption>{t('panels.protoScalingRecommended')}</DropdownMenuCaption>
@@ -580,6 +587,18 @@ function readState(): Record<string, unknown> {
   const state: unknown = history.state
   return state && typeof state === 'object' ? (state as Record<string, unknown>) : {}
 }
+/** The screen whose turn it is to take the keys: the topmost overlay, else
+ *  the base screen that is not on its way out. */
+function interactiveScreen(): HTMLIFrameElement | null {
+  const overlays = document.querySelectorAll<HTMLIFrameElement>('[data-prototype-player] [data-proto-overlay] iframe')
+  return (
+    overlays[overlays.length - 1] ??
+    document.querySelector<HTMLIFrameElement>(
+      '[data-prototype-player] [data-proto-screen]:not([data-proto-role="from"]) iframe',
+    )
+  )
+}
+
 /** Whether one of the player's screens holds the keyboard focus. */
 function screenHasFocus(): boolean {
   const focused = document.activeElement

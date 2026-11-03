@@ -11,7 +11,7 @@ import {
   withFontFaces,
   type CustomFont,
 } from '../shared/fonts.ts'
-import { ttf, woff, woff2, woffClaiming } from './fontFiles.ts'
+import { ttf, woff, woff2, woffClaiming, woffRepeating } from './fontFiles.ts'
 
 function font(family: string, over: Partial<CustomFont> = {}): CustomFont {
   const id = over.id ?? `${family.replace(/\W/g, '')}${over.weight ?? '400'}${over.style ?? ''}`
@@ -71,6 +71,12 @@ describe('readFontFile', () => {
     /* a stream that inflates past what its directory declares stops at the declaration */
     expect(() => readFontFile(woff2({ family: 'Liar', padName: 300, declare: 4 }))).toThrow(/could not be read/)
     expect(() => readFontFile(woffClaiming({ family: 'Bomb' }, 64 * 1024 * 1024))).toThrow(/malformed/)
+  })
+
+  it('refuses a directory that names a table twice, before inflating it again', () => {
+    /* 65,535 entries over one 1 MB table would otherwise be 64 GB of inflate work */
+    expect(() => readFontFile(woffRepeating({ family: 'Echo' }, 2))).toThrow(/malformed/)
+    expect(() => readFontFile(woffRepeating({ family: 'Echo' }, 5000))).toThrow(/malformed/)
   })
 
   it('refuses what is not a single font', () => {
