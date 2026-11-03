@@ -11,7 +11,7 @@
  * gains no network dependency it did not ask for.
  */
 
-import { usesFamily, type CustomFont } from './fonts.ts'
+import { decodeQuotes, usesFamily, type CustomFont } from './fonts.ts'
 
 export const WEB_FONT_LINK_ATTR = 'data-doop-webfonts'
 
@@ -117,8 +117,8 @@ function linkedFamilies(link: string): WebFont[] {
  * The HTML with a stylesheet link for every roster family it names in CSS and
  * does not load itself, keeping the families the existing link already
  * carries. A family in the canvas's own library wins over the roster entry of
- * the same name. Only ever adds, like `withFontFaces`, and returns the input
- * string itself when nothing is missing.
+ * the same name, so the link drops a family the library gains, and goes when
+ * none is left. Returns the input string itself when nothing changes.
  */
 export function withWebFontLinks(
   html: string,
@@ -126,7 +126,8 @@ export function withWebFontLinks(
   roster: readonly WebFont[] = WEB_FONTS,
 ): string {
   const existing = LINK_RE.exec(html)
-  const design = existing ? html.replace(LINK_RE, '') : html
+  /* a style attribute carries a quoted family as &quot;…&quot; */
+  const design = decodeQuotes(existing ? html.replace(LINK_RE, '') : html)
   const uploaded = new Set(library.map((font) => font.family.toLowerCase()))
   const linked = existing ? linkedFamilies(existing[0]) : []
   const wanted = roster.filter(
@@ -134,7 +135,7 @@ export function withWebFontLinks(
       !uploaded.has(font.family.toLowerCase()) &&
       (linked.includes(font) || (usesFamily(design, font.family) && !loadsFamily(design, font.family))),
   )
-  if (!wanted.length) return html
+  if (!wanted.length) return existing ? html.replace(LINK_RE, '') : html
   if (wanted.length === linked.length && wanted.every((font) => linked.includes(font))) return html
   const href = webFontsUrl(wanted).replace(/&/g, '&amp;')
   const tag = `<link rel="stylesheet" ${WEB_FONT_LINK_ATTR} href="${href}">`

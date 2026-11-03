@@ -119,7 +119,7 @@
   the server's renderer has none of them and exports disagreed with the editor. Naming a roster
   family in CSS is all it takes: `withWebFontLinks` adds one `<link rel="stylesheet"
 data-doop-webfonts>` for the roster families the frame names and does not load itself (a
-  library family of the same name wins; only ever adds, never removes), run wherever
+  library family of the same name wins, and leaves the link when uploaded later), run wherever
   `withFontFaces` runs (`actions` on every write, `FrameView`'s save path). The screenshot and
   PDF renderers already admit the two Google Fonts origins. Agents get the roster as `webFonts`
   plus a note in `get_canvas` and in the resident agent's `# Fonts` block (`webFontsBrief`).

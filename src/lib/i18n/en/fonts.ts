@@ -43,5 +43,9 @@ export const fonts = {
     one: '{names} is not a single font file (TTF, OTF, WOFF or WOFF2) and was left out.',
     other: '{names} are not single font files (TTF, OTF, WOFF or WOFF2) and were left out.',
   },
+  localTooLarge: {
+    one: '{names} is over the 10 MB limit and was left out.',
+    other: '{names} are over the 10 MB limit and were left out.',
+  },
   localReadFailed: '{name} could not be read from this computer',
 } as const

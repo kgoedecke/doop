@@ -13,10 +13,15 @@ export interface PickedLocalFont {
   size: number
 }
 
+export interface SkippedLocalFont {
+  name: string
+  /** not a single font file (a collection, or what the panel let through), or over the 10 MB limit */
+  reason: 'kind' | 'size'
+}
+
 export interface LocalFontPick {
   picked: PickedLocalFont[]
-  /** files the panel let through that are not single font files, by name */
-  skipped: string[]
+  skipped: SkippedLocalFont[]
 }
 
 type Bridge = {

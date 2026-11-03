@@ -60,8 +60,8 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/* entity-encoded quotes are how a style attribute carries a quoted family */
-function decodeQuotes(html: string): string {
+/** Entity-encoded quotes are how a style attribute carries a quoted family. */
+export function decodeQuotes(html: string): string {
   return html.replace(/&quot;|&#34;|&#x22;/gi, '"').replace(/&#39;|&#x27;|&apos;/gi, "'")
 }
 

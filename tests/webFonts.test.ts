@@ -85,8 +85,24 @@ describe('withWebFontLinks', () => {
     expect(linkOf(withWebFontLinks(own))).toContain('family=Geist:')
   })
 
-  it('leaves a family to the canvas library when both have it', () => {
+  it('leaves a family to the canvas library when both have it, and drops it from a link already there', () => {
     expect(withWebFontLinks(DESIGN, [uploaded])).toBe(DESIGN)
+    /* a frame saved with hosted Inter, then the team uploads an Inter of its own */
+    const linked = withWebFontLinks(DESIGN)
+    expect(withWebFontLinks(linked, [uploaded])).toBe(DESIGN)
+    const two = withWebFontLinks(DESIGN.replace('Hi</h1>', 'Hi</h1><p style="font-family:Lora">x</p>'))
+    const link = linkOf(withWebFontLinks(two, [uploaded]))
+    expect(link).toContain('family=Lora:')
+    expect(link).not.toContain('family=Inter:')
+  })
+
+  it('finds a family the editor saved with entity-encoded quotes', () => {
+    const saved = DESIGN.replace(
+      'font-family: Inter, sans-serif',
+      'font-family: &quot;Plus Jakarta Sans&quot;, sans-serif',
+    )
+    expect(linkOf(withWebFontLinks(saved))).toContain('family=Plus+Jakarta+Sans:')
+    expect(withWebFontLinks(saved)).toContain('&quot;Plus Jakarta Sans&quot;')
   })
 
   it('grows the one link when another family comes into use, and keeps families that left', () => {

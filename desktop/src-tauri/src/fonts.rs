@@ -69,24 +69,42 @@ fn is_font_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Why a picked file was left out: not a single font file (a collection, or
+/// something the panel let through), or a font file over the server's limit.
+#[derive(Debug, PartialEq)]
+enum Skip {
+    Kind,
+    Size,
+}
+
+impl Skip {
+    fn reason(&self) -> &'static str {
+        match self {
+            Skip::Kind => "kind",
+            Skip::Size => "size",
+        }
+    }
+}
+
 /// The file's name and size when it is a single font file the server accepts;
-/// collections (.ttc, .dfont) and oversized files are left out, by name.
-fn describe(path: &Path) -> Result<(String, u64), String> {
+/// otherwise its name and why it is left out.
+fn describe(path: &Path) -> Result<(String, u64), (String, Skip)> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
     if !is_font_file(path) {
-        return Err(name);
+        return Err((name, Skip::Kind));
     }
     match std::fs::metadata(path) {
-        Ok(meta) if meta.is_file() && meta.len() <= MAX_FONT_BYTES => Ok((name, meta.len())),
-        _ => Err(name),
+        Ok(meta) if meta.is_file() && meta.len() > MAX_FONT_BYTES => Err((name, Skip::Size)),
+        Ok(meta) if meta.is_file() => Ok((name, meta.len())),
+        _ => Err((name, Skip::Kind)),
     }
 }
 
 /// Opens the native file panel in the fonts folder and remembers the picks.
-/// Answers `{ picked: [{ path, name, size }], skipped: [name] }`.
+/// Answers `{ picked: [{ path, name, size }], skipped: [{ name, reason: "kind" | "size" }] }`.
 #[tauri::command]
 pub async fn fonts_choose_local(app: AppHandle) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -123,7 +141,7 @@ pub async fn fonts_choose_local(app: AppHandle) -> Result<Value, String> {
                     );
                     allowed.insert(path);
                 }
-                Err(name) => skipped.push(Value::String(name)),
+                Err((name, why)) => skipped.push(json!({ "name": name, "reason": why.reason() })),
             }
         }
         Ok(json!({ "picked": picked, "skipped": skipped }))
@@ -180,20 +198,26 @@ mod tests {
         assert_eq!(describe(&font), Ok(("Brand.ttf".to_string(), 4)));
         let collection = dir.path().join("Helvetica.ttc");
         std::fs::write(&collection, b"ttcf").unwrap();
-        assert_eq!(describe(&collection), Err("Helvetica.ttc".to_string()));
+        assert_eq!(
+            describe(&collection),
+            Err(("Helvetica.ttc".to_string(), Skip::Kind))
+        );
         assert_eq!(
             describe(&dir.path().join("missing.otf")),
-            Err("missing.otf".to_string())
+            Err(("missing.otf".to_string(), Skip::Kind))
         );
-        assert_eq!(
-            describe(dir.path()),
-            Err(dir
-                .path()
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned())
-        );
+        let dir_name = dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(describe(dir.path()), Err((dir_name, Skip::Kind)));
+        // a real font file over the limit is named for its size, not its kind
+        let big = dir.path().join("Huge.otf");
+        let file = std::fs::File::create(&big).unwrap();
+        file.set_len(MAX_FONT_BYTES + 1).unwrap();
+        assert_eq!(describe(&big), Err(("Huge.otf".to_string(), Skip::Size)));
     }
 
     #[test]

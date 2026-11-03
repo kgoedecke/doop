@@ -2,7 +2,13 @@ import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { ApiError, api, errorMessage } from '../lib/api'
 import { useT } from '../lib/i18n'
 import { posthog } from '../lib/posthog'
-import { canAddLocalFonts, pickLocalFonts, readLocalFont, type PickedLocalFont } from '../lib/localFonts'
+import {
+  canAddLocalFonts,
+  pickLocalFonts,
+  readLocalFont,
+  type PickedLocalFont,
+  type SkippedLocalFont,
+} from '../lib/localFonts'
 import { MAX_FONT_BYTES, faceLabel, libraryFamilies, type CustomFont } from '../../shared/fonts'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { Button } from './ui/button'
@@ -126,7 +132,18 @@ export function FontLibrary({ workspaceId }: { workspaceId?: string }) {
     setError('')
     try {
       const { picked, skipped } = await pickLocalFonts()
-      if (skipped.length) setError(t('fonts.localSkipped', { names: skipped.join(', '), count: skipped.length }))
+      const names = (reason: SkippedLocalFont['reason']) =>
+        skipped.filter((file) => file.reason === reason).map((file) => file.name)
+      const kind = names('kind')
+      const size = names('size')
+      setError(
+        [
+          kind.length ? t('fonts.localSkipped', { names: kind.join(', '), count: kind.length }) : '',
+          size.length ? t('fonts.localTooLarge', { names: size.join(', '), count: size.length }) : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      )
       if (picked.length) setLocalPick(picked)
     } catch (e) {
       setError(e instanceof Error ? e.message : t('fonts.uploadFailed'))

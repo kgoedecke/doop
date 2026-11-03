@@ -44,5 +44,9 @@ export const fonts: Catalog['fonts'] = {
     one: '{names} não é um arquivo de fonte único (TTF, OTF, WOFF ou WOFF2) e ficou de fora.',
     other: '{names} não são arquivos de fonte únicos (TTF, OTF, WOFF ou WOFF2) e ficaram de fora.',
   },
+  localTooLarge: {
+    one: '{names} passa do limite de 10 MB e ficou de fora.',
+    other: '{names} passam do limite de 10 MB e ficaram de fora.',
+  },
   localReadFailed: 'Não foi possível ler {name} deste computador',
 }
