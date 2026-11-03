@@ -81,6 +81,7 @@ import {
   GithubIcon,
   ImportIcon,
   LayersIcon,
+  LinkIcon,
   MoreHorizontalIcon,
   PlayIcon,
   PlusIcon,
@@ -92,6 +93,13 @@ import {
   XIcon,
 } from '../components/ui/icons'
 import { Badge } from '../components/ui/badge'
+import { Pressable } from '../components/ui/pressable'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu'
 import { SelectionBar, SelectionBarAction } from '../components/ui/selection-bar'
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
@@ -752,9 +760,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 {role === 'comment' ? t('canvas.canComment') : t('canvas.viewOnly')}
               </Badge>
             )}
-            <Badge className="max-md:hidden" title={t('canvas.canvasIdTitle')}>
-              {canvasId}
-            </Badge>
+            <CanvasIdMenu canvasId={canvasId} onCopied={showToast} />
             {connected ? (
               <span className="ml-1 whitespace-nowrap text-ink-faint max-lg:hidden">{t('canvas.autoSaved')}</span>
             ) : (
@@ -2185,6 +2191,46 @@ function GithubSection({
         backDisabled={!!busy}
       />
     </>
+  )
+}
+
+/* The id badge in the bar opens a menu that copies the id (what agents hand
+   the MCP tools) or the canvas link. */
+function CanvasIdMenu({ canvasId, onCopied }: { canvasId: string; onCopied: (msg: string) => void }) {
+  const t = useT()
+  async function copy(text: string, msg: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      onCopied(msg)
+    } catch {
+      onCopied(t('canvas.copyFailed'))
+    }
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Badge
+          asChild
+          interactive
+          className="max-md:hidden data-[state=open]:bg-current/10"
+          title={t('canvas.canvasIdTitle')}
+        >
+          <Pressable layout="inline" focus="ring" aria-label={t('canvas.canvasIdMenu')}>
+            {canvasId}
+          </Pressable>
+        </Badge>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="bottom" align="start" width="sm">
+        <DropdownMenuItem onSelect={() => void copy(canvasId, t('canvas.idCopied'))}>
+          <CopyIcon size="rail" />
+          {t('canvas.copyId')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void copy(`${location.origin}/c/${canvasId}`, t('canvas.linkCopied'))}>
+          <LinkIcon size="rail" />
+          {t('canvas.copyLink')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
