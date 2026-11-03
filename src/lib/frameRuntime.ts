@@ -1039,10 +1039,17 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     if (styleEdit) endStyleEdit(styleEdit.selector, false)
-    // Save a previous typed/slider edit before opening this separate action.
+    // Save a previous typed/slider edit before opening this separate action:
+    // a save landing mid-gesture would carry the preview, which a cancel
+    // then has nothing to replace.
     if (styleTimer) {
       clearTimeout(styleTimer)
       styleTimer = null
+      postEdited()
+    }
+    if (editTimer) {
+      clearTimeout(editTimer)
+      editTimer = null
       postEdited()
     }
     styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [] }

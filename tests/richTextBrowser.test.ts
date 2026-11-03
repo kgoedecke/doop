@@ -334,6 +334,25 @@ describe.skipIf(!findBrowserPath())('rich text editing', () => {
     await expect.poll(savedHtml).toContain('<span style="font-size: 40px;">Hello</span> world')
   })
 
+  it('saves pending typing before a scrub on selected words, so a cancel leaves nothing of the preview', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
+    await frame.evaluate(() => {
+      const text = document.querySelector('#text')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 11, text, 11)
+    })
+    await page.keyboard.type('!')
+    await select(0, 5)
+    await ask('doop:style-gesture' as 'doop:style', { selector: '#text', phase: 'begin' })
+    await style({ 'font-size': '36px' })
+    await ask('doop:style-gesture' as 'doop:style', { selector: '#text', phase: 'cancel' })
+    await send({ type: 'doop:settle', reqId: 'settled' })
+    await page.waitForFunction(() => (window as unknown as Fixture).messages.some((m) => m.reqId === 'settled'))
+    await new Promise((r) => setTimeout(r, 500))
+    const html = await savedHtml()
+    expect(html).toContain('Hello world!')
+    expect(html).not.toContain('36px')
+  })
+
   it('keeps editing scoped to the item when a list holds a locked item', async () => {
     await send({
       type: 'doop:html',
