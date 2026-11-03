@@ -6,7 +6,11 @@ import type { Frame } from '../shared/types'
 
 /* the elementPanel fixture's harness, as far as this file uses it (the full
    declaration lives in elementResizeBrowser.test.ts) */
-type Harness = { seed: (frames: Frame | Frame[]) => void; setZoom: (zoom: number) => void }
+type Harness = {
+  seed: (frames: Frame | Frame[]) => void
+  setZoom: (zoom: number) => void
+  selectFrame: () => void
+}
 type HarnessWindow = { elementPanelHarness: Harness }
 
 const HTML = '<!doctype html><html><body style="margin:0;background:#ddd"></body></html>'
@@ -75,6 +79,46 @@ describe.skipIf(!findBrowserPath())('frame name stacking', () => {
   it("lets a later frame cover an earlier frame's name", async () => {
     await seed([frame('small', 200, 200, 200, 200), frame('big', 40, 60, 600, 500)])
     expect(await nameOnTop('small')).toBeNull()
+  })
+
+  it("draws a selected frame's ring and grips over a frame in front of it, and only while selected", async () => {
+    // `f` (the frame the harness selects) behind a later frame covering its bottom-right corner
+    await seed([frame('f', 40, 60, 400, 300), frame('cover', 240, 200, 400, 300)])
+    /** What is on top at `f`'s bottom-right corner, and on its right edge, inside the cover. */
+    const onTop = () =>
+      page.evaluate(() => {
+        const title = [...document.querySelectorAll<HTMLElement>('[data-frame-title]')].find((t) =>
+          t.textContent?.includes('f'),
+        )!
+        const box = title.parentElement!.getBoundingClientRect()
+        const corner = document.elementFromPoint(box.right - 1, box.bottom - 1)
+        /* the ring takes no pointer events and the edge grips sit over it:
+           let it take them, and set the grips aside, just for the hit test */
+        const ring = title.parentElement!.querySelector<HTMLElement>('[data-frame-selection]')
+        const grips = title.parentElement!.querySelector<HTMLElement>('[data-frame-resize-handles]')
+        if (ring) ring.style.pointerEvents = 'auto'
+        if (grips) grips.style.display = 'none'
+        const edge = document.elementFromPoint(box.right - 0.5, box.bottom - 40)
+        if (ring) ring.style.pointerEvents = ''
+        if (grips) grips.style.display = ''
+        const owner = (el: Element | null) =>
+          el?.closest('[data-frame-resize-handles]')
+            ? 'grip'
+            : el?.hasAttribute('data-frame-selection')
+              ? 'ring'
+              : (el?.closest('[data-frame-surface]')?.querySelector('iframe')?.title ?? null)
+        return { corner: owner(corner), edge: owner(edge) }
+      })
+    expect(await onTop()).toEqual({ corner: 'cover', edge: 'cover' })
+    await page.evaluate(() => (window as unknown as HarnessWindow).elementPanelHarness.selectFrame())
+    await page.waitForSelector('[data-frame-resize-handles]')
+    expect(await onTop()).toEqual({ corner: 'grip', edge: 'ring' })
+    // the frame itself keeps its place: the cover still hides its content
+    const content = await page.evaluate(() => {
+      const hit = document.elementFromPoint(400, 300)
+      return hit?.closest('[data-frame-surface]')?.querySelector('iframe')?.title ?? null
+    })
+    expect(content).toBe('cover')
   })
 
   it('keeps the name 12px type a fixed gap above the frame at every zoom', async () => {

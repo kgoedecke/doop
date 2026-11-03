@@ -71,7 +71,10 @@
             React.createElement(
               FrameLabelLayer.Provider,
               { value: labelLayer },
-              frames.map((f) => React.createElement(FrameView, { key: f.id, frame: f, layoutZoom: k })),
+              /* ranked in paint order, the way the Stage's FrameStack stacks them */
+              frames.map((f, i) =>
+                React.createElement(FrameView, { key: f.id, frame: f, stack: i + 1, layoutZoom: k }),
+              ),
             ),
           ),
           selected && React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
