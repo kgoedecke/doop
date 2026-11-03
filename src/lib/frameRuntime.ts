@@ -536,7 +536,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      so it skips the outerHTML/selector work and returns just tag + rect */
   function hoverProbe(x, y) {
     var el = elementAt(x, y)
-    return el ? { tag: el.tagName.toLowerCase(), rect: designRect(el) } : null
+    return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
   }
 
   /* full source of one element, with runtime markers stripped */
