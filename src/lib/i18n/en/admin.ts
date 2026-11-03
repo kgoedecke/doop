@@ -4,6 +4,7 @@ export const admin = {
   notFound: 'Not found',
   notFoundBody: 'This page does not exist for this account.',
   back: 'Back',
+  backToCanvases: 'Back to canvases',
   instance: 'Instance',
   canvases: 'Canvases',
   accounts: 'Accounts',

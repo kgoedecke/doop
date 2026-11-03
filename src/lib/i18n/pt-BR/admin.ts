@@ -5,6 +5,7 @@ export const admin: Catalog['admin'] = {
   notFound: 'Não encontrado',
   notFoundBody: 'Esta página não existe para esta conta.',
   back: 'Voltar',
+  backToCanvases: 'Voltar aos canvases',
   instance: 'Instância',
   canvases: 'Canvases',
   accounts: 'Contas',

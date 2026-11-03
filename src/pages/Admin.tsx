@@ -9,8 +9,16 @@ import {
 } from '../lib/api'
 import { navigate } from '../App'
 import { timeAgo } from '../lib/time'
-import { AppRail, railLayout } from '../components/AppRail'
-import { ChevronRightIcon, GridIcon, LockIcon, MessageSquareIcon, UsersIcon } from '../components/ui/icons'
+import { railLayout } from '../components/AppRail'
+import { AccountMenu } from '../components/DashShell'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  GridIcon,
+  LockIcon,
+  MessageSquareIcon,
+  UsersIcon,
+} from '../components/ui/icons'
 import { SignInSettings } from '../components/SignInSettings'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
@@ -29,6 +37,8 @@ import {
   DashMain,
   DashNavItem,
   DashSectionLabel,
+  DashSidebar,
+  DashSidebarBrand,
   DashSubtitle,
   DashTitle,
 } from '../components/ui/dash'
@@ -65,7 +75,8 @@ const SEARCH_LABEL: Partial<Record<Tab, PlainMessageKey>> = {
  * read-only, 15-minute) session as its owner rather than granting admins a
  * privileged read path through the canvas gate.
  *
- * Same shell as home and settings; the rail's middle carries the two indexes.
+ * Its own screen, like Settings: a rail of its panes and the way back,
+ * rather than the app rail with the instance tacked on under everything else.
  */
 export function Admin() {
   const t = useT()
@@ -140,8 +151,13 @@ export function Admin() {
 
   return (
     <DashLayout className={railLayout}>
-      {/* the app rail, with the two indexes as the page's group */}
-      <AppRail active={null}>
+      <DashSidebar variant="rail">
+        <DashSidebarBrand />
+        <nav className="flex flex-col gap-0.5">
+          <DashNavItem density="rail" icon={<ChevronLeftIcon size="rail" />} onClick={() => navigate('/')}>
+            {t('admin.backToCanvases')}
+          </DashNavItem>
+        </nav>
         <DashSectionLabel density="rail">{t('admin.instance')}</DashSectionLabel>
         <nav className="flex flex-col gap-0.5">
           <DashNavItem
@@ -180,7 +196,10 @@ export function Admin() {
             {t('admin.signInNav')}
           </DashNavItem>
         </nav>
-      </AppRail>
+        <div className="mt-auto flex items-center gap-2.5 px-1 pt-4">
+          <AccountMenu face side="top" align="start" />
+        </div>
+      </DashSidebar>
 
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare" className="max-md:min-h-[104px]">
