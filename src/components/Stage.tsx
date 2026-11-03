@@ -61,6 +61,13 @@ const MAX_ZOOM = 16
    included, like the Hand tool's grab — except inside the comment UI itself
    (pins, composer, threads: `data-comment-ui`), which keeps its own cursors. */
 const COMMENT_CURSOR = 'cursor-comment! [&_:not([data-comment-ui]_*)]:cursor-comment!'
+/* The Path tool's pen, forced over the frames the same way; the badge follows
+   what a press would do (src/styles.css draws them) */
+const PEN_CURSOR = {
+  pen: 'cursor-pen! [&_:not([data-comment-ui]_*)]:cursor-pen!',
+  'pen-close': 'cursor-pen-close! [&_:not([data-comment-ui]_*)]:cursor-pen-close!',
+  'pen-anchor': 'cursor-pen-anchor! [&_:not([data-comment-ui]_*)]:cursor-pen-anchor!',
+} as const
 
 /* The world is laid out at CSS zoom k, the settled camera zoom, and its
    transform carries only what the camera has moved since. WebKit rasterizes a
@@ -907,7 +914,9 @@ export function Stage({
                     : isDrawingTool(tool)
                       ? tool === 'text'
                         ? 'cursor-text! [&_:not([data-comment-ui]_*)]:cursor-text!'
-                        : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
+                        : tool === 'path'
+                          ? PEN_CURSOR[drawing.penCursor]
+                          : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
                       : 'cursor-default',
             )}
             style={bounds}

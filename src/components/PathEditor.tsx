@@ -362,7 +362,7 @@ export function PathEditor({
                 <path
                   key={`${s}-${i}`}
                   data-path-segment={`${s}-${i}`}
-                  className="pointer-events-auto cursor-copy"
+                  className="pointer-events-auto cursor-pen-add"
                   d={segmentData(segment)}
                   fill="none"
                   stroke="transparent"
@@ -398,7 +398,7 @@ export function PathEditor({
                         aria-label={t(handle === 'handleIn' ? 'stage.pathHandleIncoming' : 'stage.pathHandleOutgoing', {
                           n: flat + 1,
                         })}
-                        className="pointer-events-auto cursor-move"
+                        className="pointer-events-auto cursor-handle"
                         cx={end.x}
                         cy={end.y}
                         r={9 / zoom}
@@ -419,7 +419,7 @@ export function PathEditor({
                 <circle
                   data-path-edit-anchor={flat}
                   aria-label={t('stage.pathPoint', { n: flat + 1 })}
-                  className="pointer-events-auto cursor-move"
+                  className="pointer-events-auto cursor-node"
                   cx={at.x}
                   cy={at.y}
                   r={9 / zoom}

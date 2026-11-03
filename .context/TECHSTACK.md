@@ -333,7 +333,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `doop:path` probe finds a shape inside an imported group (no standalone-root collapse) and
   reports `parentBox`; `updatePathFrame` keeps a grouped shape in percentages of its group and
   grows the group (the standalone's frame, or the root's px box inside a frame) around a point
-  dragged past its edge, re-placing the sibling shapes.
+  dragged past its edge, re-placing the sibling shapes. Cursors follow Figma's (`cursor-pen*`,
+  `cursor-node`, `cursor-handle` utilities in `src/styles.css`, each SVG tagged `data-cursor`): the
+  Path tool wears the nib, with a ring over the first anchor (close) and a square over one it
+  already placed (`penCursor` from `useCanvasDrawing`, forced over frames by `Stage`); the editor
+  shows a node badge on anchors, a dot badge on handles and the pen with + on the outline.
 - `tests/drawing.test.ts` covers geometry, serialization and persistence; `drawingBrowser.test.ts`
   exercises the toolbar and gestures in Chromium, including Bézier paths, frame transfers,
   cancellation, mobile input, and coexistence with canvas comment pins and reply fields.

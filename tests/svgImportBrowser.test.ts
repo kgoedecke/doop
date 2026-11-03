@@ -135,6 +135,11 @@ describe.skipIf(!findBrowserPath())('importing SVG files', { timeout: 30_000 }, 
     await page.mouse.click(...screen(frame.x + 22, frame.y + 22), { count: 2, delay: 60 })
     await page.waitForSelector('[data-path-edit-anchor="3"]')
     expect(await page.$$('[data-path-edit-anchor]')).toHaveLength(4)
+    /* Figma's editing cursors: a node badge on anchors, a pen with + on the outline */
+    const cursorOf = (selector: string) =>
+      page.$eval(selector, (el) => decodeURIComponent(getComputedStyle(el).cursor).match(/data-cursor='([^']+)'/)?.[1])
+    expect(await cursorOf('[data-path-edit-anchor="0"]')).toBe('node')
+    expect(await cursorOf('[data-path-segment="0-0"]')).toBe('pen-add')
 
     /* drag the top-left anchor inward: the shape re-places itself in the group */
     const anchor = await page.$eval('[data-path-edit-anchor="0"]', (el) => {

@@ -278,8 +278,18 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       onFinish={() => finish()}
     />
   )
+  const penZoom = useStore((s) => s.viewport.zoom)
+  /* what the pen's badge says a press would do: close the path, land on an
+     anchor it already placed, or just add the next point */
+  const penCursor = (() => {
+    const points = draft?.drawing.tool === 'path' ? (draft.drawing.points ?? []) : []
+    const snapped = hover && !hover.unsnapped && points.length ? nearestPathAnchor(points, hover, penZoom) : null
+    if (snapped === null) return 'pen' as const
+    return snapped === 0 && points.length >= 2 ? ('pen-close' as const) : ('pen-anchor' as const)
+  })()
   return {
     preview,
+    penCursor,
     pathActive: draft?.drawing.tool === 'path',
     canFinishPath: (draft?.drawing.points?.length ?? 0) >= 2,
     finish: () => finish(),
