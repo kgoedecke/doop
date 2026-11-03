@@ -175,6 +175,7 @@ layers of that frame, so agents read and edit them like any other markup.
 | ⌘0 / ⌘+ / ⌘−     | Zoom to 100%, in, out                                  |
 | ⇧R               | Toggle rulers                                          |
 | ⌘.               | Hide or show all UI                                    |
+| ⌘⌥↩              | Present from the selected frame (Ctrl+Alt+↩ elsewhere) |
 | ⌘K               | Open the Agents composer (on Home: the search palette) |
 | Esc              | Deselect, stop following                               |
 

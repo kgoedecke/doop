@@ -23,3 +23,16 @@ export function isComposingEnter(e: {
 }): boolean {
   return e.key === 'Enter' && (e.nativeEvent?.isComposing === true || e.keyCode === 229)
 }
+
+/** ⌥ on Mac, Alt elsewhere — for the shortcut hints in menus. */
+export const ALT_KEY = /mac/i.test(navigator.platform) ? '⌥' : 'Alt+'
+
+/** The hint for ⌘⌥↩ / Ctrl+Alt+Enter, as a tooltip shows it. */
+export const PRESENT_SHORTCUT_HINT = `${MOD_KEY}${ALT_KEY}↩`
+
+/** ⌘⌥↩ (Ctrl+Alt+Enter elsewhere): Figma's "present from this frame" — the
+ *  player opens on the selected frame, else on the page's flow start. Shift
+ *  is left out so the chord stays one thing. */
+export function isPresentShortcut(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>) {
+  return e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.altKey && !e.shiftKey
+}
