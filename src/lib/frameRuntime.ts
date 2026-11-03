@@ -534,8 +534,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   /* hover inspection: like probe but fired on every (throttled) pointer move,
      so it skips the outerHTML/selector work and returns just tag + rect */
+  /* outlines what a click there would pick: a drawing is hovered as a
+     whole, the way probe() picks it, so the hover and the pick agree */
   function hoverProbe(x, y) {
     var el = elementAt(x, y)
+    if (el) el = el.closest('[data-doop-drawing]') || el
     return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
   }
 

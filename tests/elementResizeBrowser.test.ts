@@ -716,6 +716,11 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     expect(hover.right).toBeCloseTo(outline.right, 0)
     expect(hover.right).toBeGreaterThan(surface.right + 250)
     expect(await clipper('[data-hover-outline]')).toBeNull()
+    /* its blue wash, though, stops at the frame: spilling onto the canvas
+       around it read as the whole canvas being selected */
+    const wash = await box('[data-hover-wash]')
+    expect(wash.right).toBeCloseTo(hover.right, 0)
+    expect(await clipper('[data-hover-wash]')).not.toBeNull()
 
     /* leaving the frame clears the hover */
     await page.mouse.move(surface.left - 20, surface.top - 20)
