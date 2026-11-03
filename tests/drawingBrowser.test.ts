@@ -523,6 +523,54 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     },
   )
 
+  it("resizes an edited standalone path through its shell's grips", async () => {
+    /* a standalone path's root fills its shell and wears only the shell's
+       grips: an edit must leave it filling the shell, or the grips would
+       grow the frame around a path that stays put */
+    const frame: Frame = {
+      id: 'pen',
+      updatedBy: 'User',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'Pen',
+      x: 30,
+      y: 30,
+      width: 140,
+      height: 100,
+      createdAt: 0,
+      updatedAt: 0,
+      html: '<body data-doop-canvas-element="true" style="margin:0"><svg id="pen" data-doop-drawing="path" viewBox="0 0 140 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;margin:0"><path d="M 10 50 C 30 0 80 100 120 50" stroke="black" fill="none" stroke-width="2" /></svg></body>',
+    }
+    await seedFrames([frame])
+    const rect = await visibleDrawing('Pen')
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { count: 2, delay: 60 })
+    const first = await editorPoint(0)
+    await drag(first, [first[0] - 30, first[1] + 40])
+    await page.waitForFunction((before) => window.drawingHarness.state().frames[0]!.html !== before, {}, frame.html)
+    await page.waitForFunction(() => !document.body.textContent?.includes('Saving path…'))
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[data-path-editor]'))
+    const edited = saved[0]!
+    expect(edited.html).toMatch(/width:\s*100%;\s*height:\s*100%/)
+    expect(edited.html).not.toContain('matrix(')
+    await page.evaluate(() => window.drawingHarness.selectFrames(['pen']))
+    const grip = await page.waitForSelector('[data-frame-resize-handle="se"]')
+    const box = (await grip!.boundingBox())!
+    await drag(
+      [box.x + box.width / 2, box.y + box.height / 2],
+      [box.x + box.width / 2 + 100, box.y + box.height / 2 + 60],
+    )
+    await page.waitForFunction((before) => window.drawingHarness.state().frames[0]!.width !== before, {}, edited.width)
+    const grown = await page.evaluate(() => window.drawingHarness.state().frames[0]!)
+    expect(grown.width).toBeGreaterThan(edited.width)
+    expect(grown.height).toBeGreaterThan(edited.height)
+    /* the rendered path follows the shell: no empty band, no clipping */
+    const after = await visibleDrawing('Pen', 'svg')
+    const shell = (await (await page.$('iframe[title="Pen"]'))!.boundingBox())!
+    expect(after.width).toBeCloseTo(shell.width, 0)
+    expect(after.height).toBeCloseTo(shell.height, 0)
+  })
+
   it('keeps a Layers pick when a save refreshes the element being text-edited', async () => {
     await seedFrames([
       {
