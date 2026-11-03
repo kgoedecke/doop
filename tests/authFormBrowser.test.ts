@@ -166,9 +166,13 @@ describe.skipIf(!findBrowserPath())('sign-in policy', { timeout: 30_000 }, () =>
     await page.evaluate(() => {
       ;[...document.querySelectorAll('button')].find((b) => b.textContent?.includes('Sign in another way'))?.click()
     })
-    await page.waitForFunction(() => new URLSearchParams(location.search).get('manual') === '1')
+    /* a full navigation: wait for the card the new page draws, not the URL */
+    await page.waitForFunction(
+      () => [...document.querySelectorAll('button')].some((b) => b.textContent?.includes('Sign in with Zitadel')),
+      { timeout: 15_000 },
+    )
+    expect(await page.evaluate(() => new URLSearchParams(location.search).get('manual'))).toBe('1')
     expect(await page.evaluate(() => new URLSearchParams(location.search).get('redirect_to'))).toBe('/c/abc')
-    expect(await buttonLabels()).toContain('Sign in with Zitadel')
   })
 
   it('shows the card instead when asked for it, or after the provider failed', async () => {
