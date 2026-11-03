@@ -11,8 +11,19 @@ const { api } = await import('../src/lib/api')
 const { buildLayerTree, layerName } = await import('../src/lib/layers')
 const { useStore } = await import('../src/lib/store')
 const { undo, redo, clearHistory } = await import('../src/lib/history')
-const { drawingBounds, drawingDocument, drawingTarget, isCanvasElement, pathData, pathDrawing, saveDrawing } =
-  await import('../src/lib/drawing')
+const {
+  DRAWING_INK,
+  DRAWING_INK_ON_DARK,
+  drawingBounds,
+  drawingDocument,
+  drawingInk,
+  drawingTarget,
+  isCanvasElement,
+  pathData,
+  pathDrawing,
+  saveDrawing,
+} = await import('../src/lib/drawing')
+const { setTheme } = await import('../src/lib/theme')
 const doc = (html: string) => new DOMParser().parseFromString(html, 'text/html')
 const frame: Frame = {
   id: 'f',
@@ -98,6 +109,43 @@ describe('drawing geometry and markup', () => {
     expect(doc(html).querySelector('p')?.textContent).toBe('<img src=x onerror=alert(1)>\n& hello')
     expect(isCanvasElement(html)).toBe(true)
     expect(isCanvasElement(drawingDocument({ ...box, tool: 'frame' }))).toBe(false)
+  })
+
+  it('inverts the ink of text and strokes on bare canvas in the dark theme, never inside a frame', async () => {
+    expect(drawingInk(target, 'light')).toBe(DRAWING_INK)
+    expect(drawingInk(target, 'dark')).toBe(DRAWING_INK_ON_DARK)
+    expect(drawingInk({ ...target, frameId: 'f' }, 'dark')).toBe(DRAWING_INK)
+    const text = { ...box, tool: 'text' as const, text: 'hi' }
+    const inkOf = (html: string) =>
+      doc(html)
+        .querySelector('p')
+        ?.getAttribute('style')
+        ?.match(/color:([^;]+)/)?.[1]
+        ?.trim()
+    expect(inkOf(drawingDocument(text))).toBe(DRAWING_INK)
+    expect(inkOf(drawingDocument(text, DRAWING_INK_ON_DARK))).toBe(DRAWING_INK_ON_DARK)
+    const stroke = doc(
+      drawingDocument(
+        pathDrawing([
+          { x: 0, y: 0 },
+          { x: 10, y: 10 },
+        ]),
+        DRAWING_INK_ON_DARK,
+      ),
+    )
+    expect(stroke.querySelector('path')?.getAttribute('stroke')).toBe(DRAWING_INK_ON_DARK)
+
+    setTheme('dark')
+    try {
+      vi.mocked(api.createFrame).mockImplementation(async (_id, input) => ({ ...frame, id: 'dark', ...input }))
+      vi.mocked(api.updateFrame).mockImplementation(async (_id, input) => ({ ...frame, ...input }))
+      await saveDrawing(text, target)
+      await saveDrawing(text, { ...target, frameId: 'f' })
+    } finally {
+      setTheme('light')
+    }
+    expect(inkOf(vi.mocked(api.createFrame).mock.calls[0]?.[1]?.html ?? '')).toBe(DRAWING_INK_ON_DARK)
+    expect(inkOf(vi.mocked(api.updateFrame).mock.calls[0]?.[1]?.html ?? '')).toBe(DRAWING_INK)
   })
 
   it('bounds cubic curves by their extrema and includes curved closing segments', () => {
