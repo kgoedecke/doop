@@ -304,6 +304,40 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   guides join `snapFrame` (frame move/resize, element moves), element resize and drawing points
   at the same 8-screen-px tolerance; Alt bypasses. Tests: `rulers.test.ts`, `snapGuides.test.ts`,
   `guides.test.ts`, `guideEdits.test.ts`, `rulersBrowser.test.ts`.
+- SVG import (`src/lib/svgPath.ts`, `src/lib/svgImport.ts`): an SVG pasted, dropped or pasted as
+  markup lands as editable vector layers, not an `<img>`, the way Figma imports one. Every
+  `path`/`rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon` is baked (transforms, nested
+  `viewBox`es, `<use>` and `<symbol>` expanded, the whole `d` grammar including arcs and
+  quadratics turned into absolute cubics) into one `svg[data-doop-drawing="path"]` with a single
+  `path` child; `<g>` nesting becomes `div[data-doop-drawing="group"]` rows; text and images stay
+  as `svg[data-doop-drawing="svg"]` layers; gradients, clips, masks and filters ride in a
+  `[data-doop-defs]` host with the import's id prefix, user-space gradients and clips copied with
+  the shape's transform folded in. Paint comes from the browser's computed styles
+  (`importSvgInBrowser` mounts the file in a closed shadow root, so `<style>` rules, classes and
+  `currentColor` resolve and leak nowhere); `importSvgMarkup` reads attributes alone for tests.
+  Scripts, handlers and `foreignObject` are dropped. The element's shell is the ink's box; layers
+  sit in it by percentage so the shell's grips scale them. A one-shape file is a bare pen-style
+  path. Entry points: `splitIncoming` / `pasteFilesCentered` / `dropFiles` in
+  `src/lib/frameClipboard.ts`, wired in `CanvasPage`'s paste and drop: bitmaps and vectors brought
+  together land in one row (a vector keeps its proportions, a bitmap gets at least a 40px box) and
+  whatever lands is one undo step even when a sibling request fails. Shape lengths resolve their
+  units and percentages (`parseLength`, against the nearest `viewBox`); transforms come from the
+  style reader (a stylesheet's `transform` wins) about `transform-origin`; the root's own
+  opacity, clip, mask and filter stay on the root group, a group's mask and filter on its row, and
+  copied definitions (gradient stops, clip shapes) keep the styles they resolved. Tests: `svgPath.test.ts`, `svgImport.test.ts`,
+  `svgImportBrowser.test.ts`.
+- The path editor (`PathEditor.tsx`, `src/lib/pathEditing.ts`) edits any `d` the parser reads,
+  compound paths included (`EditablePath.subpaths`; anchors are numbered flat across strokes);
+  clicking the outline splits the segment there (`splitSegment`, a line stays linear in `t`);
+  deleting the last-but-one anchor of a stroke removes the stroke when others remain. The runtime's
+  `doop:path` probe finds a shape inside an imported group (no standalone-root collapse) and
+  reports `parentBox`; `updatePathFrame` keeps a grouped shape in percentages of its group and
+  grows the group (the standalone's frame, or the root's px box inside a frame) around a point
+  dragged past its edge, re-placing the sibling shapes. Cursors follow Figma's (`cursor-pen*`,
+  `cursor-node`, `cursor-handle` utilities in `src/styles.css`, each SVG tagged `data-cursor`): the
+  Path tool wears the nib, with a ring over the first anchor (close) and a square over one it
+  already placed (`penCursor` from `useCanvasDrawing`, forced over frames by `Stage`); the editor
+  shows a node badge on anchors, a dot badge on handles and the pen with + on the outline.
 - `tests/drawing.test.ts` covers geometry, serialization and persistence; `drawingBrowser.test.ts`
   exercises the toolbar and gestures in Chromium, including Bézier paths, frame transfers,
   cancellation, mobile input, and coexistence with canvas comment pins and reply fields.

@@ -165,7 +165,8 @@ function toNode(el: Element): LayerNode {
 function layerChildren(el: Element): LayerNode[] {
   const out: LayerNode[] = []
   for (const child of el.children) {
-    if (!HIDDEN_TAGS.has(child.tagName)) out.push(toNode(child))
+    /* an imported file's gradients and clips ride in a hidden defs host */
+    if (!HIDDEN_TAGS.has(child.tagName) && !child.hasAttribute('data-doop-defs')) out.push(toNode(child))
   }
   return out
 }

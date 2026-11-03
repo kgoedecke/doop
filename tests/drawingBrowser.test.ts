@@ -3,6 +3,7 @@ import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, ElementComment, Frame } from '../shared/types'
+import type { ImportedSvg } from '../src/lib/svgImport'
 
 declare global {
   interface Window {
@@ -23,6 +24,8 @@ declare global {
       undo: () => Promise<void>
       redo: () => Promise<void>
       pick: (el: { frameId: string; selector: string } | null) => void
+      /** an SVG file read the way a paste reads it, with the browser's computed styles */
+      importSvg: (markup: string, name: string) => ImportedSvg | null
     }
     delayedLayerProbe: MessageEvent | null
     heldMoveHits: MessageEvent[] | null
@@ -367,11 +370,23 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(await page.$('[data-path-preview]')).toBeNull()
   })
 
+  /** Which of the pen cursors the stage wears (each SVG names itself). */
+  const stageCursor = () =>
+    page.$eval('.stage', (el) => decodeURIComponent(getComputedStyle(el).cursor).match(/data-cursor='([^']+)'/)?.[1])
+
   it('snaps to intermediate anchors and lets Alt place a point freely', async () => {
     await page.click('[aria-label="Vector path"]')
+    expect(await stageCursor()).toBe('pen')
     await page.mouse.click(220, 250)
     await page.mouse.click(420, 250)
     await page.mouse.click(420, 450)
+    await page.mouse.move(426, 250)
+    await page.waitForSelector('[data-path-anchor="1"][data-snapped="true"]')
+    /* the pen's badge says what a press does: land on that anchor, or close on the first */
+    expect(await stageCursor()).toBe('pen-anchor')
+    await page.mouse.move(222, 250)
+    await page.waitForSelector('[data-path-snap="close"]')
+    expect(await stageCursor()).toBe('pen-close')
     await page.mouse.move(426, 250)
     await page.waitForSelector('[data-path-anchor="1"][data-snapped="true"]')
     await page.mouse.click(426, 250)

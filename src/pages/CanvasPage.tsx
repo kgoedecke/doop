@@ -49,11 +49,14 @@ import { PresentMode } from '../components/PresentMode'
 import { getIdentity, setName } from '../lib/identity'
 import {
   copyFrames,
-  dropImages,
+  dropFiles,
   duplicateFrames,
   hasFrameClip,
+  hasIncoming,
   pasteFrameCentered,
-  pasteImagesCentered,
+  pasteFilesCentered,
+  splitIncoming,
+  svgMarkupOf,
 } from '../lib/frameClipboard'
 import { clearHistory, redo, undo } from '../lib/history'
 import {
@@ -462,10 +465,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (isTypingTarget(e.target)) return
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
-      const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
-      if (images.length) {
+      /* bitmaps land as pictures and SVGs as editable shapes, in one row */
+      const incoming = splitIncoming([...(e.clipboardData?.files ?? [])], svgMarkupOf(e.clipboardData))
+      if (hasIncoming(incoming)) {
         e.preventDefault()
-        pasteImagesCentered(canvasId, images).catch((err: Error) => {
+        pasteFilesCentered(canvasId, incoming).catch((err: Error) => {
           setToast(translate('canvas.pasteImageFailed', { error: err.message }))
           window.setTimeout(() => setToast(null), 4000)
         })
@@ -523,9 +527,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (!carriesFiles(e) || e.defaultPrevented) return
       e.preventDefault()
       if (!canEditOpenCanvas(useStore.getState())) return
-      const images = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/'))
-      if (!images.length) return
-      dropImages(canvasId, images, { x: e.clientX, y: e.clientY }).catch((err: Error) => {
+      const incoming = splitIncoming([...(e.dataTransfer?.files ?? [])])
+      if (!hasIncoming(incoming)) return
+      dropFiles(canvasId, incoming, { x: e.clientX, y: e.clientY }).catch((err: Error) => {
         setToast(translate('canvas.dropImageFailed', { error: err.message }))
         window.setTimeout(() => setToast(null), 4000)
       })

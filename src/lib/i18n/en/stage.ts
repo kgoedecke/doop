@@ -22,7 +22,7 @@ export const stage = {
   pathHandleOutgoing: 'Point {n} outgoing handle',
   pathPoint: 'Path point {n}',
   savingPath: 'Saving path…',
-  pathHint: 'Drag points or handles · Alt to release snapping',
+  pathHint: 'Drag points or handles · click the outline to add a point · Alt to release snapping',
   makeCorner: 'Make corner',
   makeCurve: 'Make curve',
   deletePoint: 'Delete point',
