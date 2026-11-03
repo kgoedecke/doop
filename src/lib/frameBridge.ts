@@ -243,6 +243,14 @@ export function requestFrame(
   })
 }
 
+/** The frame's live document, serialized the way the runtime saves it
+ *  (its own markers removed, script-made elements kept), or null when the
+ *  frame is not mounted. */
+export async function snapshotFrame(frameId: string): Promise<string | null> {
+  const reply = await requestFrame(frameId, 'doop:snapshot', {})
+  return typeof reply?.html === 'string' ? reply.html : null
+}
+
 /* the runtime's replies carry the element summary under `info` */
 function infoOf(reply: Record<string, unknown> | null): ElementInfo | null {
   return reply && typeof reply.info === 'object' ? (reply.info as ElementInfo | null) : null

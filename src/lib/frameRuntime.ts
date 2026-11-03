@@ -1097,6 +1097,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (d.type === 'doop:code') {
       parent.postMessage({ type: 'doop:code-result', reqId: d.reqId, html: elementCode(d.selector) }, '*')
     }
+    if (d.type === 'doop:snapshot') {
+      /* the document as it stands, script-made elements included, for an
+         export of what the person sees */
+      parent.postMessage({ type: 'doop:snapshot-result', reqId: d.reqId, html: serialize() }, '*')
+    }
     if (d.type === 'doop:locate') {
       var found = null
       try {
