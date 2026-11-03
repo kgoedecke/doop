@@ -125,11 +125,22 @@ export function deleteLayer(frame: Frame, selector: string): boolean {
 }
 
 /** Remove the elements together, as one undo step; as for one element, a
- *  locked one keeps the whole set (and the pick) in place. */
+ *  locked one keeps the whole set (and the pick) in place. A standalone
+ *  element's shell was only ever that one layer: deleting the layer deletes
+ *  the shell frame with it, whichever surface asked (the canvas's ⌫, the
+ *  element's context menu, the Layers rail), rather than leaving an empty,
+ *  invisible frame on the canvas. */
 export function deleteLayers(frame: Frame, selectors: string[]): boolean {
   if (selectors.some((selector) => isLayerLocked(frame, selector))) return false
-  const html = removeElements(frame.html, selectors)
   const store = useStore.getState()
+  const standalone = standaloneSelector(frame)
+  if (standalone && selectors.includes(standalone)) {
+    store.setSelectedElement(null)
+    store.setElementPanelOpen(false)
+    deleteFramesTracked([frame])
+    return true
+  }
+  const html = removeElements(frame.html, selectors)
   store.setSelectedElement(null)
   store.setElementPanelOpen(false)
   if (html === null) return false

@@ -407,12 +407,10 @@ export function LayersPanel({
         /* a held key repeats: once the element is gone the frame row would
            be next, so only the first press deletes */
         if (e.repeat || readOnly) break
-        /* a locked frame stays (deleteLayers refuses a locked element itself);
-           a standalone element goes with its frame */
-        if (row?.kind === 'frame' || row?.standalone) {
-          /* a standalone element locked as an element (⌘⇧L) stays too */
-          const locked = row.frame.locked || (row.kind === 'node' && row.node.locked)
-          if (!locked) deleteFramesTracked([row.frame])
+        /* a locked frame stays; deleteLayers refuses a locked element itself
+           and takes a standalone element's shell frame along with its layer */
+        if (row?.kind === 'frame') {
+          if (!row.frame.locked) deleteFramesTracked([row.frame])
         } else if (row) deleteLayers(row.frame, pickedSelectors(useStore.getState()))
         break
       default:
