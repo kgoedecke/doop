@@ -27,6 +27,8 @@ import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import { ElementContextMenu, type LiveHit } from './ElementContextMenu'
 import { CodePanel } from './CodePanel'
+import { TextFormatToolbar } from './TextFormatToolbar'
+import type { TextFormatState } from '../lib/richText'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
 import { DEFAULT_ROLE_ID } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
@@ -691,6 +693,7 @@ export const FrameView = memo(function FrameView({
   }, [menuProbe, runtimeDocument, frame.html, frame.id])
   /* element selected for text editing inside the iframe (edit mode only) */
   const [activeHit, setActiveHit] = useState<ProbeHit | null>(null)
+  const [textFormat, setTextFormat] = useState<TextFormatState>({})
   const [composing, setComposing] = useState(false)
   const [openThread, setOpenThread] = useState<string | null>(null)
   const [linkedThread, setLinkedThread] = useState<string | null>(deepLinkedThread)
@@ -1041,12 +1044,16 @@ export const FrameView = memo(function FrameView({
           setHover(hit)
         }
       }
+      if (ev.data?.type === 'doop:text-state') setTextFormat(ev.data.state ?? {})
       if (ev.data?.type === 'doop:active') {
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         /* rect refreshes for the same element keep the composer open;
            switching elements (or deselecting) closes it */
         const moved = (hit?.selector ?? null) !== activeSelRef.current
-        if (moved) setComposing(false)
+        if (moved) {
+          setComposing(false)
+          setTextFormat({})
+        }
         activeSelRef.current = hit?.selector ?? null
         setActiveHit(hit)
         /* Editing retains an element selection for its Design/HTML panel.
@@ -1805,6 +1812,19 @@ export const FrameView = memo(function FrameView({
                     >
                       {!composing ? (
                         <>
+                          {editing && (
+                            <div className="mb-1 flex w-fit rounded-control bg-ink p-1 shadow-pop">
+                              <TextFormatToolbar
+                                state={textFormat}
+                                onFormat={(command) =>
+                                  iframeRef.current?.contentWindow?.postMessage(
+                                    { type: 'doop:text-format', command },
+                                    '*',
+                                  )
+                                }
+                              />
+                            </div>
+                          )}
                           <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop">
                             <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px text-[11px] font-bold text-paper [font-family:ui-monospace,monospace]">
                               {anchor.tag}

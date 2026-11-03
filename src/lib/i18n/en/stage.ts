@@ -48,6 +48,13 @@ export const stage = {
   askAi: 'Ask AI',
   code: 'Code',
   editText: 'Edit text',
+  textFormatting: 'Text formatting',
+  textBold: 'Bold',
+  textItalic: 'Italic',
+  textUnderline: 'Underline',
+  textStrikethrough: 'Strikethrough',
+  textBulletList: 'Bulleted list',
+  textNumberedList: 'Numbered list',
   frameChanged: 'Frame changed. Right-click again.',
   findingElement: 'Finding element…',
 

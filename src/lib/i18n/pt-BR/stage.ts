@@ -48,6 +48,13 @@ export const stage: Catalog['stage'] = {
   askAi: 'Pedir à IA',
   code: 'Código',
   editText: 'Editar texto',
+  textFormatting: 'Formatação de texto',
+  textBold: 'Negrito',
+  textItalic: 'Itálico',
+  textUnderline: 'Sublinhado',
+  textStrikethrough: 'Tachado',
+  textBulletList: 'Lista com marcadores',
+  textNumberedList: 'Lista numerada',
   frameChanged: 'O frame mudou. Clique com o botão direito de novo.',
   findingElement: 'Procurando elemento…',
 

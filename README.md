@@ -152,6 +152,14 @@ layers of that frame, so agents read and edit them like any other markup.
   alignment), opacity, corner radius, rotation, position, flex layout (direction, gap, padding,
   wrap, alignment) and image fills; **HTML** shows its source; **Prototype** wires interactions. The
   floating toolbar adds Comment, **Ask AI** (pre-fills an `@mention`), Code, Edit text and Copy link.
+- **Rich text** — double-click text to edit it. Select words and use the formatting toolbar for
+  bold, italic, underline, strikethrough, bulleted lists or numbered lists. ⌘/Ctrl+B, I and U toggle
+  inline formatting; ⌘/Ctrl+⇧+7 or 8 toggles numbered or bulleted lists. Enter continues a list;
+  Enter on an empty item leaves it. With a text layer selected on the canvas, ⌘/Ctrl+B, I, U and
+  ⌘/Ctrl+⇧+X toggle the whole layer and ⌘/Ctrl+⇧+7 or 8 make it a list, as in Figma. Esc finishes editing; formatting saves with the frame and
+  supports undo/redo. With words selected, the Design panel's font, size, weight and colour edit
+  that run alone; selecting the whole layer shows **Mixed** where its runs differ, and a value set
+  there applies to all of them, as in Figma.
 - **Path editing** — double-click a path to drag its anchors and Bézier handles, switch points
   between corner and curve, or delete them. Alt moves one handle on its own; ⇧ constrains its angle.
 - **Layers** — a searchable tree of pages, frames and elements: drag to reorder or reparent, hide,

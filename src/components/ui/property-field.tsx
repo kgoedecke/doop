@@ -254,13 +254,16 @@ export function SelectField<T extends string>({
   value,
   options,
   label,
+  placeholder,
   className,
   onChange,
 }: {
-  value: T
+  /** null shows `placeholder` (a mixed value) until an option is picked */
+  value: T | null
   /* consecutive options sharing a `group` render under one <optgroup> */
   options: { value: T; label: string; group?: string }[]
   label?: string
+  placeholder?: string
   className?: string
   onChange: (v: T) => void
 }) {
@@ -281,10 +284,15 @@ export function SelectField<T extends string>({
       <select
         aria-label={label}
         className="w-full min-w-0 appearance-none bg-transparent pr-3 text-ink outline-none"
-        value={value}
+        value={value ?? ''}
         /* a native select only ever reports one of the options it was given */
-        onChange={(e) => onChange(e.target.value as T)}
+        onChange={(e) => e.target.value !== '' && onChange(e.target.value as T)}
       >
+        {value === null && (
+          <option value="" disabled>
+            {placeholder}
+          </option>
+        )}
         {runs.map((run, i) =>
           run.group ? (
             <optgroup key={`${run.group}-${i}`} label={run.group}>
@@ -305,11 +313,14 @@ export function SelectField<T extends string>({
 export function ColorField({
   value,
   label,
+  placeholder,
   className,
   onCommit,
 }: {
   value: string | null
   label?: string
+  /** shown for a null value in place of "none" (a mixed colour) */
+  placeholder?: string
   className?: string
   onCommit: (v: string | null) => void
 }) {
@@ -348,7 +359,7 @@ export function ColorField({
         aria-label={label}
         className="w-full min-w-0 bg-transparent font-mono text-[11px] uppercase text-ink outline-none placeholder:normal-case placeholder:text-ink-faint"
         value={draft}
-        placeholder={t('inspector.colorNone')}
+        placeholder={placeholder ?? t('inspector.colorNone')}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}

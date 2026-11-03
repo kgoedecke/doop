@@ -12,6 +12,12 @@
 
 import type { ComponentType, SVGProps } from 'react'
 import {
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  List,
+  ListOrdered,
   Activity,
   AlignStartVertical,
   AlignCenterVertical,
@@ -158,6 +164,13 @@ function icon(Base: ComponentType<SvgProps>) {
     return <Base strokeWidth={ICON_STROKE} aria-hidden {...sized(props)} />
   }
 }
+
+export const BoldIcon = icon(Bold)
+export const ItalicIcon = icon(Italic)
+export const UnderlineIcon = icon(Underline)
+export const StrikethroughIcon = icon(Strikethrough)
+export const BulletListIcon = icon(List)
+export const OrderedListIcon = icon(ListOrdered)
 
 export const XIcon = icon(X)
 export const ArrowDownIcon = icon(ArrowDown)
