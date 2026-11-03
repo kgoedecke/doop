@@ -31,6 +31,7 @@ import { LivePresence } from '../components/LivePresence'
 import { ensureTab } from '../lib/desktop'
 import { Stage } from '../components/Stage'
 import { Inspector } from '../components/Inspector'
+import { PagePanel } from '../components/PagePanel'
 import { ElementPanel } from '../components/ElementPanel'
 import { ActivityPanel } from '../components/ActivityPanel'
 import { ConnectModal } from '../components/ConnectModal'
@@ -49,11 +50,14 @@ import { PresentMode } from '../components/PresentMode'
 import { getIdentity, setName } from '../lib/identity'
 import {
   copyFrames,
-  dropImages,
+  dropFiles,
   duplicateFrames,
   hasFrameClip,
+  hasIncoming,
   pasteFrameCentered,
-  pasteImagesCentered,
+  pasteFilesCentered,
+  splitIncoming,
+  svgMarkupOf,
 } from '../lib/frameClipboard'
 import { clearHistory, redo, undo } from '../lib/history'
 import {
@@ -63,9 +67,10 @@ import {
   toggleLockSelection,
   toggleSelectionHidden,
 } from '../lib/layerEdits'
-import { copyLayers, hasElementClip, pasteLayer } from '../lib/elementClipboard'
+import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
+import { avatarUrl } from '../../shared/avatar'
 import { posthog } from '../lib/posthog'
 import { useIsMobile } from '../hooks/use-mobile'
 import { cn } from '@/lib/utils'
@@ -450,7 +455,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (picked) {
         if (!frame) return
         const selectors = pickedSelectors(state)
-        copy = () => copyLayers(frame, selectors)
+        copy = () => copyPicked(frame, selectors)
       } else {
         const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
         if (!frames.length) return
@@ -462,10 +467,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (isTypingTarget(e.target)) return
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
-      const images = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
-      if (images.length) {
+      /* bitmaps land as pictures, SVGs as editable shapes and PDFs as pages, in one row */
+      const incoming = splitIncoming([...(e.clipboardData?.files ?? [])], svgMarkupOf(e.clipboardData))
+      if (hasIncoming(incoming)) {
         e.preventDefault()
-        pasteImagesCentered(canvasId, images).catch((err: Error) => {
+        pasteFilesCentered(canvasId, incoming).catch((err: Error) => {
           setToast(translate('canvas.pasteImageFailed', { error: err.message }))
           window.setTimeout(() => setToast(null), 4000)
         })
@@ -488,9 +494,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     }
   }, [canvasId])
 
-  /* Image files dragged in from the desktop land as frames centered on the
-     drop point. Every file drag is claimed, so a drop the canvas cannot take
-     (a viewer, a PDF) is refused instead of the browser opening the file in
+  /* Image, SVG and PDF files dragged in from the desktop land as frames
+     centered on the drop point. Every file drag is claimed, so a drop the
+     canvas cannot take (a viewer, a spreadsheet) is refused instead of the browser opening the file in
      place of the canvas; a drop the composer already took is left to it.
      While a file is over the page every frame keeps its shield up, or a
      frame being edited would swallow the drop in its iframe. Enter and leave
@@ -523,9 +529,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (!carriesFiles(e) || e.defaultPrevented) return
       e.preventDefault()
       if (!canEditOpenCanvas(useStore.getState())) return
-      const images = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/'))
-      if (!images.length) return
-      dropImages(canvasId, images, { x: e.clientX, y: e.clientY }).catch((err: Error) => {
+      const incoming = splitIncoming([...(e.dataTransfer?.files ?? [])])
+      if (!hasIncoming(incoming)) return
+      dropFiles(canvasId, incoming, { x: e.clientX, y: e.clientY }).catch((err: Error) => {
         setToast(translate('canvas.dropImageFailed', { error: err.message }))
         window.setTimeout(() => setToast(null), 4000)
       })
@@ -597,6 +603,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   }
 
   const me = getIdentity()
+  /* the face's photo comes from the account, not the room: our own presence
+     is never in the roster */
+  const { data: session } = authClient.useSession()
   const others = useMemo(
     () => Object.values(presences).filter((p) => p.clientId !== me.clientId),
     [presences, me.clientId],
@@ -617,8 +626,13 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const selectedElement = useStore((s) => s.selectedElement)
   const elementPanelOpen = useStore((s) => s.elementPanelOpen)
   const panelElement = elementPanelOpen && selectedElement?.frameId === selectedFrame?.id ? selectedElement : null
-  /* the frame Inspector or the element panel, whichever has the slot */
-  const propertiesShown = !readOnly && !!selectedFrame && !deferPanel && (!!panelElement || inspectorOpen)
+  /* with nothing selected the slot is the page's own settings, once opened
+     from the rail, until closed */
+  const pagePanelOpen = useStore((s) => s.pagePanelOpen)
+  const pageShown = !readOnly && !selectedFrame && pagePanelOpen && !deferPanel
+  /* the frame Inspector, the element panel or the Page panel, whichever has the slot */
+  const propertiesShown =
+    (!readOnly && !!selectedFrame && !deferPanel && (!!panelElement || inspectorOpen)) || pageShown
   /* ⇧R docks the rulers on the canvas's top and left edges; the bar and the
      floating chrome step in past them (the same test Stage draws them by) */
   const rulers = useStore((s) => s.rulers)
@@ -702,7 +716,11 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
      it the whole window back */
   const stageBounds: StageInsets | undefined =
     docked && !uiHidden ? { top: DOCKED_BAR_H, right: chrome.right, bottom: 0, left: chrome.left } : undefined
-  const meFace = { name: me.name, color: presences[me.clientId]?.color ?? 'var(--brand)' }
+  const meFace = {
+    name: me.name,
+    image: avatarUrl(session?.user.image),
+    color: presences[me.clientId]?.color ?? 'var(--brand)',
+  }
 
   function openConnect() {
     posthog.capture('agent_connection_opened')
@@ -781,7 +799,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             className="mr-1 flex items-center min-[1181px]:hidden"
             title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
           >
-            <PresenceFace name={meFace.name} color={meFace.color} kind="user" />
+            <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
             <span className="-ml-[7px] flex items-center">
               <PeerAvatars others={others} />
             </span>
@@ -850,7 +868,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             className="mr-1 flex items-center max-sm:hidden"
             title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
           >
-            <PresenceFace name={meFace.name} color={meFace.color} kind="user" />
+            <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
             <span className="-ml-[7px] flex items-center">
               <PeerAvatars others={others} />
             </span>
@@ -982,6 +1000,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           {!isMobile && !readOnly && selectedFrame && inspectorOpen && !panelElement && !deferPanel && (
             <Inspector frame={selectedFrame} surface={panelSurface} style={{ right: chrome.properties }} />
           )}
+          {!isMobile && pageShown && <PagePanel surface={panelSurface} style={{ right: chrome.properties }} />}
           {!isMobile && showActivity && (
             <ActivityPanel
               canvasId={canvasId}
@@ -1006,9 +1025,14 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               agentsOpen={showActivity}
               onToggleAgents={() => setShowActivity((open) => !open)}
               inspectorOpen={propertiesShown}
-              inspectorAvailable={!!selectedFrame && !readOnly}
+              inspectorAvailable={!readOnly}
+              inspectTarget={selectedFrame ? 'frame' : 'page'}
               onToggleInspector={() => {
                 const s = useStore.getState()
+                if (!selectedFrame) {
+                  s.setPagePanelOpen(!s.pagePanelOpen)
+                  return
+                }
                 if (propertiesShown) {
                   /* the element panel and the inspector share the slot —
                      hiding it closes whichever is showing */

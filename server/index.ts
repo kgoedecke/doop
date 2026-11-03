@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
@@ -27,6 +28,8 @@ import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
 import { fontsRouter } from './fontRoutes.ts'
+import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
+import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
 import {
   canEditCanvas,
@@ -189,6 +192,17 @@ const conns = new Map<WebSocket, Conn>()
 
 function room(canvasId: string): Conn[] {
   return [...conns.values()].filter((c) => c.canvasId === canvasId)
+}
+
+/** A changed profile photo reaches every room the person is in: their
+ *  presence is re-announced with the new face (a join for a known clientId
+ *  is an update on the client). */
+function refreshPresenceImage(userId: string, image: string | undefined): void {
+  for (const conn of conns.values()) {
+    if (conn.userId !== userId || conn.silent) continue
+    conn.presence = { ...conn.presence, image }
+    broadcast(conn.canvasId, { type: 'presence:join', presence: conn.presence }, conn.presence.clientId)
+  }
 }
 
 /** The live role of one room connection (null once access is gone). */
@@ -650,6 +664,8 @@ interface SessionUser {
   id: string
   name: string
   email: string
+  /** the profile photo's URL; shown only when avatarUrl() admits it */
+  image?: string | null
   role?: string | null
 }
 declare global {
@@ -690,11 +706,12 @@ app.use('/api', async (req, res, next) => {
 app.get('/api/me/events', userEvents.subscribe)
 
 app.get('/api/me', async (req, res) => {
-  const { id, name, email } = req.user!
+  const { id, name, email, image } = req.user!
   res.json({
     id,
     name,
     email,
+    image: avatarUrl(image),
     admin: isAdmin(req.user),
     /* 'team' while a member of a live paid workspace — the account menu's plan line */
     plan: workspaces.planFor(id),
@@ -703,6 +720,33 @@ app.get('/api/me', async (req, res) => {
        being viewed, not the admin doing the viewing */
     impersonating: req.impersonatedBy ? { byName: (await getUserName(req.impersonatedBy)) ?? 'an admin' } : undefined,
   })
+})
+
+/* The profile photo: raw image bytes in, the face's URL out. Rooms the
+   person is in see the new face at once; the session the browser holds is
+   re-read by the page, since better-auth serves it from the row. */
+app.post('/api/me/avatar', express.raw({ type: () => true, limit: MAX_AVATAR_BYTES + 1024 }), async (req, res) => {
+  try {
+    const image = await setAvatar(req.user!.id, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0))
+    refreshPresenceImage(req.user!.id, image)
+    res.json({ image })
+  } catch (e) {
+    if (e instanceof AvatarInputError) res.status(400).json({ error: e.message })
+    else {
+      console.error('[avatar] upload failed', e)
+      res.status(500).json({ error: 'the photo could not be saved — try again' })
+    }
+  }
+})
+
+app.delete('/api/me/avatar', async (req, res, next) => {
+  try {
+    await clearAvatar(req.user!.id)
+    refreshPresenceImage(req.user!.id, undefined)
+    res.json({ ok: true })
+  } catch (e) {
+    next(e)
+  }
 })
 
 /* Resolve the application from the consent code itself, never a client name or
@@ -1085,13 +1129,13 @@ app.get('/api/canvases', async (req, res) => {
      to names in one query — the home tiles wear them as an avatar stack */
   const peopleIds = new Set<string>()
   for (const c of list) for (const id of canvasPeopleIds(c.id)) peopleIds.add(id)
-  const names = new Map<string, string>()
+  const users = new Map<string, { name: string; image: string | null }>()
   if (peopleIds.size) {
     const rows = await db
-      .select({ id: authSchema.user.id, name: authSchema.user.name })
+      .select({ id: authSchema.user.id, name: authSchema.user.name, image: authSchema.user.image })
       .from(authSchema.user)
       .where(inArray(authSchema.user.id, [...peopleIds]))
-    for (const r of rows) names.set(r.id, r.name)
+    for (const r of rows) users.set(r.id, r)
   }
   res.json(
     list.map((c) => {
@@ -1104,7 +1148,11 @@ app.get('/api/canvases', async (req, res) => {
       }
       return {
         ...c,
-        people: canvasPeopleIds(c.id).map((id) => ({ id, name: names.get(id) ?? 'Unknown' })),
+        people: canvasPeopleIds(c.id).map((id) => ({
+          id,
+          name: users.get(id)?.name ?? 'Unknown',
+          image: avatarUrl(users.get(id)?.image),
+        })),
         agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })),
         activeTasks: activeAgentTasks(actions.getTasks(c.id)),
       }
@@ -1276,7 +1324,12 @@ app.get('/api/canvases/:id/members', async (req, res) => {
   const ids = [...(c.ownerId ? [c.ownerId] : []), ...(c.memberIds ?? [])]
   const rows = ids.length
     ? await db
-        .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+        .select({
+          id: authSchema.user.id,
+          name: authSchema.user.name,
+          email: authSchema.user.email,
+          image: authSchema.user.image,
+        })
         .from(authSchema.user)
         .where(inArray(authSchema.user.id, ids))
     : []
@@ -1286,6 +1339,7 @@ app.get('/api/canvases/:id/members', async (req, res) => {
       userId: id,
       name: byId.get(id)?.name ?? 'Unknown',
       email: byId.get(id)?.email ?? '',
+      image: avatarUrl(byId.get(id)?.image),
       owner: id === c.ownerId,
     })),
   )
@@ -1298,7 +1352,12 @@ app.post('/api/canvases/:id/members', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
   if (!email) return res.status(400).json({ error: 'email required' })
   const [row] = await db
-    .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+    .select({
+      id: authSchema.user.id,
+      name: authSchema.user.name,
+      email: authSchema.user.email,
+      image: authSchema.user.image,
+    })
     .from(authSchema.user)
     .where(eq(authSchema.user.email, email))
   if (!row) return res.status(404).json({ error: 'no doop account with that email — ask them to sign up first' })
@@ -1309,7 +1368,7 @@ app.post('/api/canvases/:id/members', async (req, res) => {
     void emailShare(req.user!, row.id, c)
     userEvents.notifyUsers([row.id], { type: 'canvases' })
   }
-  res.json({ userId: row.id, name: row.name, email: row.email, owner: false })
+  res.json({ userId: row.id, name: row.name, email: row.email, image: avatarUrl(row.image), owner: false })
 })
 
 app.delete('/api/canvases/:id/members/:userId', (req, res) => {
@@ -1718,6 +1777,20 @@ app.put('/api/canvases/:id/pages', (req, res) => {
   const clean = pages.map((p) => ({ id: p.id, name: p.name.trim() }))
   const actor = userActor(req)
   res.json(actions.setCanvasPages(canvas.id, clean, actor))
+})
+
+/* a page's own canvas colour (`#rrggbb`); null puts the theme paper back */
+app.put('/api/canvases/:id/pages/:pageId/background', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const color: unknown = req.body?.color
+  const background = color === null ? null : normalizePageBackground(color)
+  if (color !== null && !background)
+    return res.status(400).json({ error: 'color must be a hex colour such as #f5f5f5, or null' })
+  if (!canvasPages(canvas).some((p) => p.id === req.params.pageId))
+    return res.status(404).json({ error: 'page not found' })
+  const actor = userActor(req)
+  res.json(actions.setPageBackground(canvas.id, req.params.pageId, background, actor))
 })
 
 /* the frame a page's prototype flow starts on; null clears it */
@@ -2409,6 +2482,7 @@ wss.on('connection', (ws, upgradeReq) => {
         clientId: msg.clientId,
         userId: session.user.id,
         name: session.user.name, // session identity, not whatever the client claims
+        image: avatarUrl(session.user.image),
         color: colorFor(msg.clientId),
         kind: 'user',
         activeFrameId: null,

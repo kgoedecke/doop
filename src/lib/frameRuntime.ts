@@ -231,8 +231,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return !!s && !s.isCollapsed && el.contains(s.anchorNode) && el.contains(s.focusNode)
   }
 
-  function serialize() {
-    var root = document.documentElement.cloneNode(true)
+  /* strip the runtime's own marks from a clone of the document */
+  function cleanClone(root) {
     // Remove only our pending loader's clone, preserving design-owned attributes.
     if (replayScript && replayScript.parentNode === document.documentElement) {
       var replayIndex = Array.prototype.indexOf.call(document.documentElement.childNodes, replayScript)
@@ -254,7 +254,107 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     root.querySelectorAll('[data-v-proto-flash]').forEach(function (el) { el.removeAttribute('data-v-proto-flash') })
     root.style.removeProperty('zoom') // crisp-render zoom is ours, not the design's
     if (!root.getAttribute('style')) root.removeAttribute('style')
-    return '<!doctype html>\\n' + root.outerHTML
+    return root
+  }
+
+  function serialize() {
+    return '<!doctype html>\\n' + cleanClone(document.documentElement.cloneNode(true)).outerHTML
+  }
+
+  function rulesText(sheet) {
+    try {
+      var out = []
+      for (var r = 0; r < sheet.cssRules.length; r++) out.push(sheet.cssRules[r].cssText)
+      return out.join('\\n')
+    } catch (e) {
+      return null // a cross-origin sheet keeps its rules to itself
+    }
+  }
+
+  /* The document for an image export: what the engine shows that a copy of
+     the HTML loses is captured onto the clone first — the pixels of every
+     <canvas>, the source the browser picked for each <img>, and the rules
+     of every stylesheet as the CSSOM holds them (insertRule, adopted
+     sheets), and an image at an object URL as its bytes, which only this
+     document can read. Resolves null when a canvas will not give up its
+     pixels (tainted) or a blob cannot be read, so the parent lets the
+     server render instead. Live and clone are walked by the same
+     selectors, so they pair by index. */
+  function exportSnapshot() {
+    var live = document.documentElement
+    var root = live.cloneNode(true)
+    var reads = []
+    var imgs = live.querySelectorAll('img'), imgClones = root.querySelectorAll('img')
+    for (var i = 0; i < imgs.length; i++) {
+      var src = imgs[i].currentSrc
+      if (src) imgClones[i].setAttribute('src', src)
+      imgClones[i].removeAttribute('srcset')
+      imgClones[i].removeAttribute('sizes')
+      /* an object URL names bytes only this document can reach */
+      if (src && src.indexOf('blob:') === 0) reads.push(readBlobUrl(src, imgClones[i]))
+    }
+    root.querySelectorAll('picture > source').forEach(function (source) { source.remove() })
+    var canvases = live.querySelectorAll('canvas'), canvasClones = root.querySelectorAll('canvas')
+    for (var c = 0; c < canvases.length; c++) {
+      var painted = document.createElement('img')
+      try {
+        painted.setAttribute('src', canvases[c].toDataURL())
+      } catch (e) {
+        return Promise.resolve(null)
+      }
+      var attrs = canvasClones[c].attributes
+      for (var a = 0; a < attrs.length; a++) painted.setAttribute(attrs[a].name, attrs[a].value)
+      canvasClones[c].replaceWith(painted)
+    }
+    var styles = live.querySelectorAll('style'), styleClones = root.querySelectorAll('style')
+    var links = live.querySelectorAll('link'), linkClones = root.querySelectorAll('link')
+    for (var s = 0; s < document.styleSheets.length; s++) {
+      var sheet = document.styleSheets[s]
+      var owner = sheet.ownerNode
+      var text = owner ? rulesText(sheet) : null
+      if (text === null) continue
+      if (owner.nodeName === 'STYLE') {
+        var styleClone = styleClones[Array.prototype.indexOf.call(styles, owner)]
+        if (styleClone) styleClone.textContent = text
+      } else if (owner.nodeName === 'LINK') {
+        var linkClone = linkClones[Array.prototype.indexOf.call(links, owner)]
+        if (!linkClone) continue
+        var inlined = document.createElement('style')
+        if (owner.media) inlined.setAttribute('media', owner.media)
+        inlined.textContent = text
+        linkClone.replaceWith(inlined)
+      }
+    }
+    var adopted = document.adoptedStyleSheets || []
+    for (var t = 0; t < adopted.length; t++) {
+      if (adopted[t] === vSheet) continue // the runtime's own
+      var adoptedText = rulesText(adopted[t])
+      if (adoptedText === null) continue
+      var adoptedStyle = document.createElement('style')
+      adoptedStyle.textContent = adoptedText
+      ;(root.querySelector('head') || root).appendChild(adoptedStyle)
+    }
+    /* cleaned now, while live and clone still match (a replay retry could
+       add its loader to the live document during the reads); the reads only
+       set src on image clones the cleaning leaves alone */
+    cleanClone(root)
+    return Promise.all(reads).then(
+      function () { return '<!doctype html>\\n' + root.outerHTML },
+      function () { return null },
+    )
+  }
+
+  function readBlobUrl(src, clone) {
+    return fetch(src)
+      .then(function (res) { return res.blob() })
+      .then(function (blob) {
+        return new Promise(function (resolve, reject) {
+          var reader = new FileReader()
+          reader.onload = function () { clone.setAttribute('src', reader.result); resolve() }
+          reader.onerror = function () { reject(reader.error) }
+          reader.readAsDataURL(blob)
+        })
+      })
   }
 
   function postEdited(discrete) {
@@ -449,29 +549,54 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (pathSvg) pathSvg.setAttribute('data-v-path-hidden', '')
     }
   }
+  /* the topmost unlocked element under a point, a standalone's root included:
+     a double-click on a shape inside an imported group edits that shape */
+  function vectorAt(x, y) {
+    var stack = document.elementsFromPoint(x, y)
+    for (var i = 0; i < stack.length; i++) {
+      var el = stack[i]
+      if (el === document.documentElement || el === document.body) return null
+      if (!isLocked(el)) return el
+    }
+    return null
+  }
+  /* the one path a pen or imported shape's SVG draws: its direct path child
+     (a defs block beside it, for a gradient or clip, is fine) */
+  function shapePath(svg) {
+    var paths = []
+    for (var i = 0; i < svg.children.length; i++) if (svg.children[i].localName === 'path') paths.push(svg.children[i])
+    return paths.length === 1 ? paths[0] : null
+  }
   function pathInfo(d) {
-    var hit = d.selector ? document.querySelector(d.selector) : d.standalone ? document.body.firstElementChild : elementAt(d.x, d.y)
+    var hit = d.selector ? document.querySelector(d.selector) : vectorAt(d.x, d.y)
     var svg = hit && hit.closest('svg[data-doop-drawing="path"]')
-    var path = svg && svg.querySelector('path')
-    // Native pen paths have one direct path child. Other SVG artwork keeps its normal editor.
-    if (!svg || svg.parentElement !== document.body || !path || path.parentElement !== svg || svg.querySelectorAll('path').length !== 1 || isLocked(svg)) return null
+    var path = svg && shapePath(svg)
+    // Native pen paths and imported shapes have one direct path child. Other SVG artwork keeps its normal editor.
+    if (!svg || !path || (svg.parentElement && svg.parentElement.closest('svg')) || isLocked(svg)) return null
     var matrix = path.getScreenCTM()
     if (!matrix || Math.abs(matrix.a * matrix.d - matrix.b * matrix.c) < 1e-9) return null
     var probe = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
     probe.setAttribute('viewBox', '0 0 1 1')
     probe.style.cssText = 'position:fixed!important;left:0!important;top:0!important;width:1px!important;height:1px!important;margin:0!important;padding:0!important;border:0!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;visibility:hidden!important'
-    var layout
+    var layout, page
     try {
       document.body.appendChild(probe)
-      layout = probe.getScreenCTM().inverse().multiply(matrix)
+      page = probe.getScreenCTM()
+      layout = page.inverse().multiply(matrix)
     } finally { probe.remove() }
     var css = getComputedStyle(path)
-    return {
+    var info = {
       selector: cssPath(svg), data: path.getAttribute('d'),
       matrix: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
       layoutMatrix: [layout.a, layout.b, layout.c, layout.d, layout.e, layout.f],
       paint: { fill: css.fill, stroke: css.stroke, strokeWidth: css.strokeWidth },
     }
+    /* a shape inside a group: where the group's box is, in the same layout px */
+    if (svg.parentElement && svg.parentElement !== document.body) {
+      var box = svg.parentElement.getBoundingClientRect()
+      info.parentBox = { x: box.left / page.a, y: box.top / page.d, width: box.width / page.a, height: box.height / page.d }
+    }
+    return info
   }
 
   /* the topmost unlocked element under a design-space point: a click on a
@@ -534,9 +659,12 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   /* hover inspection: like probe but fired on every (throttled) pointer move,
      so it skips the outerHTML/selector work and returns just tag + rect */
+  /* outlines what a click there would pick: a drawing is hovered as a
+     whole, the way probe() picks it, so the hover and the pick agree */
   function hoverProbe(x, y) {
     var el = elementAt(x, y)
-    return el ? { tag: el.tagName.toLowerCase(), rect: designRect(el) } : null
+    if (el) el = el.closest('[data-doop-drawing]') || el
+    return el ? { tag: el.tagName.toLowerCase(), selector: cssPath(el), rect: designRect(el) } : null
   }
 
   /* full source of one element, with runtime markers stripped */
@@ -1068,6 +1196,18 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
     if (d.type === 'doop:code') {
       parent.postMessage({ type: 'doop:code-result', reqId: d.reqId, html: elementCode(d.selector) }, '*')
+    }
+    if (d.type === 'doop:snapshot') {
+      /* the document as it stands, script-made elements included, for an
+         export of what the person sees */
+      var answer = function (html) {
+        parent.postMessage({ type: 'doop:snapshot-result', reqId: d.reqId, html: html }, '*')
+      }
+      try {
+        exportSnapshot().then(answer, function () { answer(null) })
+      } catch (e) {
+        answer(null)
+      }
     }
     if (d.type === 'doop:locate') {
       var found = null

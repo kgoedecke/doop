@@ -227,6 +227,7 @@ export function requestFrame(
   frameId: string,
   type: `doop:${string}`,
   payload: Record<string, unknown>,
+  timeoutMs = REPLY_TIMEOUT_MS,
 ): Promise<Record<string, unknown> | null> {
   const win = windows.get(frameId)
   if (!win) return Promise.resolve(null)
@@ -239,8 +240,29 @@ export function requestFrame(
     /* a frame that unloads mid-request would leave the promise hanging */
     window.setTimeout(() => {
       if (pending.delete(reqId)) resolve(null)
-    }, REPLY_TIMEOUT_MS)
+    }, timeoutMs)
   })
+}
+
+/* a snapshot reads every canvas and blob image; a big one takes longer than
+   a hit test */
+const SNAPSHOT_TIMEOUT_MS = 15_000
+
+export interface FrameSnapshot {
+  /** the live document with what an image export needs captured in (canvas
+   *  pixels, picked image sources, CSSOM rules); null when the runtime
+   *  could not read it all (a tainted canvas) */
+  html: string | null
+}
+
+/** The frame's document as the runtime shows it, or null when the frame
+ *  is not mounted. A mounted frame that does not answer in time counts as
+ *  one that could not be read, never as unmounted: its saved HTML would
+ *  render without what the runtime shows. */
+export async function snapshotFrame(frameId: string): Promise<FrameSnapshot | null> {
+  if (!windows.has(frameId)) return null
+  const reply = await requestFrame(frameId, 'doop:snapshot', {}, SNAPSHOT_TIMEOUT_MS)
+  return { html: typeof reply?.html === 'string' ? reply.html : null }
 }
 
 /* the runtime's replies carry the element summary under `info` */

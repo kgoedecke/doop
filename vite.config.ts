@@ -38,6 +38,9 @@ export default defineConfig({
      each bundle. The source is public (AGPL), so the maps are too; browsers
      only fetch them when devtools open. */
   build: { sourcemap: true },
+  /* mupdf finds its .wasm next to its own module through `import.meta.url`;
+     pre-bundling would move the module and lose the file */
+  optimizeDeps: { exclude: ['mupdf'] },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

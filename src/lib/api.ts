@@ -34,6 +34,8 @@ export interface CanvasMember {
   userId: string
   name: string
   email: string
+  /** the profile photo's URL when the person uploaded one */
+  image?: string
   owner: boolean
 }
 
@@ -299,6 +301,14 @@ export const api = {
       body: file,
     }),
   deleteFont: (id: string) => req<{ ok: boolean }>(`/api/fonts/${id}`, { method: 'DELETE' }),
+  /* the profile photo: raw bytes in, the face's URL out */
+  uploadAvatar: (file: File) =>
+    req<{ image: string }>('/api/me/avatar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    }),
+  removeAvatar: () => req<{ ok: boolean }>('/api/me/avatar', { method: 'DELETE' }),
   canvasFonts: (canvasId: string) => req<CustomFont[]>(`/api/canvases/${canvasId}/fonts`),
   rotateWebhookSecret: (id: string) => req<{ secret: string }>(`/api/webhooks/${id}/rotate`, { method: 'POST' }),
   testWebhook: (id: string) => req<WebhookDeliveryResult>(`/api/webhooks/${id}/test`, { method: 'POST' }),
@@ -430,6 +440,11 @@ export const api = {
     req<import('../../shared/types').CanvasPageInfo[]>(
       `/api/canvases/${canvasId}/pages/${encodeURIComponent(pageId)}/flow-start`,
       { method: 'PUT', body: JSON.stringify({ frameId }) },
+    ),
+  setPageBackground: (canvasId: string, pageId: string, color: string | null) =>
+    req<import('../../shared/types').CanvasPageInfo[]>(
+      `/api/canvases/${canvasId}/pages/${encodeURIComponent(pageId)}/background`,
+      { method: 'PUT', body: JSON.stringify({ color }) },
     ),
   putGuide: (canvasId: string, guide: import('../../shared/types').CanvasGuide) =>
     req<import('../../shared/types').CanvasGuide>(`/api/canvases/${canvasId}/guides/${guide.id}`, {

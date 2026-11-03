@@ -74,6 +74,9 @@ interface State {
   /** the Inspector panel is showing — opened by clicking a frame's name, not
    *  by mere selection, so clicking around a frame doesn't slide the panel in */
   inspectorOpen: boolean
+  /** the Page panel (the page's own settings) has the properties slot while
+   *  nothing is selected; opened from the rail, it stays until closed */
+  pagePanelOpen: boolean
   /** open frame context menu; deferPanel hides the Inspector until it closes
    *  (right-click selecting a frame must not slide a panel in under the menu) */
   ctxMenu: { frameId: string; deferPanel: boolean } | null
@@ -155,6 +158,8 @@ interface State {
   activePageId: string | null
   setActivePage(id: string): void
   setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
+  /** paint one page locally (this client's own edit, before or after its save) */
+  setPageBackgroundLocal(pageId: string, background: string | null): void
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
@@ -221,6 +226,7 @@ interface State {
   setPanMode(v: boolean): void
   setFileDragging(v: boolean): void
   setInspectorOpen(v: boolean): void
+  setPagePanelOpen(v: boolean): void
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
   setSelectedElement(el: { frameId: string; selector: string } | null): void
@@ -295,6 +301,7 @@ export const useStore = create<State>((set, get) => ({
   panMode: false,
   fileDragging: false,
   inspectorOpen: false,
+  pagePanelOpen: false,
   ctxMenu: null,
   selectedElement: null,
   selectedElements: [],
@@ -345,6 +352,16 @@ export const useStore = create<State>((set, get) => ({
         selectedGuideId: null,
         viewport: { x: 0, y: 0, zoom: 1 },
       }
+    }),
+  setPageBackgroundLocal: (pageId, background) =>
+    set((s) => {
+      if (!s.canvas) return {}
+      const pages = canvasPages(s.canvas).map((page) => {
+        if (page.id !== pageId) return page
+        const { background: _previous, ...rest } = page
+        return background ? { ...rest, background } : rest
+      })
+      return { canvas: { ...s.canvas, pages } }
     }),
   setPages: (pages, canvasId) =>
     set((s) => {
@@ -614,6 +631,7 @@ export const useStore = create<State>((set, get) => ({
   setPanMode: (panMode) => set({ panMode }),
   setFileDragging: (fileDragging) => set({ fileDragging }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
+  setPagePanelOpen: (pagePanelOpen) => set({ pagePanelOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
   closeCtxMenu: () => set({ ctxMenu: null }),
   setCommentDrag: (commentDrag) => set({ commentDrag }),

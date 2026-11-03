@@ -1,6 +1,7 @@
 import { pdfRenderBudgetMs } from '../../shared/pdfLimits'
 import type { Frame } from '../../shared/types'
 import { isDesktopShell } from './shell'
+import { rasterizeFrame } from './frameRaster'
 import { useStore } from './store'
 import { t } from './i18n'
 
@@ -66,6 +67,10 @@ function trySave(blob: Blob, fileName: string): boolean {
    this is stuck, and must not leave the spinner up forever. */
 const EXPORT_TIMEOUT_MS = 2 * 60_000
 
+/* A local render is fetches plus one paint; past this the server is the
+   better bet. */
+const RASTER_TIMEOUT_MS = 20_000
+
 /* Exports share the one canvas toast, so an outcome must not claim the
    spinner while another export is still rendering. */
 let inFlight = 0
@@ -86,8 +91,37 @@ function report(outcome: string | null) {
 
 type Fetched = { ok: true; blob: Blob; fileName: string } | { ok: false; message: string }
 
+/* the server's export density and JPEG quality, so both paths agree */
+const EXPORT_SCALE = 2
+const JPG_QUALITY = 0.9
+
+/** The frame drawn by this browser (what the person sees, no server
+ *  round trip), or null when it cannot be: an image its host refuses to
+ *  share, a document the serializer cannot round-trip. */
+async function rasterExport(frame: Frame, format: FrameExportFormat): Promise<Blob | null> {
+  try {
+    return await rasterizeFrame(frame, {
+      scale: EXPORT_SCALE,
+      type: format === 'jpg' ? 'jpeg' : 'png',
+      quality: JPG_QUALITY,
+      signal: AbortSignal.timeout(RASTER_TIMEOUT_MS),
+    })
+  } catch {
+    return null
+  }
+}
+
+/** Render here first; the server's Chromium is the fallback. */
 async function fetchExport(frame: Frame, format: FrameExportFormat): Promise<Fetched> {
-  return fetchFile(frameExportUrl(frame, format), FORMAT_LABEL[format], `${frame.name || 'frame'}.${format}`)
+  const fileName = `${exportName(frame)}.${format}`
+  const local = await rasterExport(frame, format)
+  if (local) return { ok: true, blob: local, fileName }
+  return fetchFile(frameExportUrl(frame, format), FORMAT_LABEL[format], fileName)
+}
+
+/* the server's file naming (server/index.ts, /i/:id.:ext?download) */
+function exportName(frame: Frame): string {
+  return frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
 }
 
 async function fetchFile(
@@ -173,6 +207,8 @@ export async function copyFramePng(frame: Frame): Promise<void> {
      the render's reason is kept here rather than read off the error */
   let failure = t('panels.copyPngFailed')
   const png = (async () => {
+    const local = await rasterExport(frame, 'png')
+    if (local) return local
     try {
       const res = await fetch(frameExportUrl(frame, 'png'), { signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS) })
       if (res.ok) return await res.blob()

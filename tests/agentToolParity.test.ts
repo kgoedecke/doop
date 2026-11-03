@@ -39,6 +39,7 @@ const MISSING = [
   'restore_frame_version',
   'set_canvas_pages',
   'create_canvas_page',
+  'set_page_background',
   'reply_to_comment',
   'resolve_comment',
   'export_frame',

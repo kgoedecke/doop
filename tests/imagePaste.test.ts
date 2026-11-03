@@ -10,7 +10,8 @@ const api = {
   createFrame: vi.fn(async (canvasId: string, rest: Partial<Frame>) => ({ ...rest, canvasId, id: 'f1' }) as Frame),
 }
 vi.mock('../src/lib/api', () => ({ api }))
-vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
+const posthog = { capture: vi.fn() }
+vi.mock('../src/lib/posthog', () => ({ posthog }))
 
 const sizes = new Map<string, { width: number; height: number }>()
 vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: (f: File) => f.name, revokeObjectURL: () => {} }))
@@ -29,7 +30,8 @@ vi.stubGlobal(
   },
 )
 
-const { uploadImageFrames } = await import('../src/lib/frameClipboard')
+const { uploadImageFrames, pasteFilesCentered, splitIncoming } = await import('../src/lib/frameClipboard')
+const { useStore } = await import('../src/lib/store')
 const { isCanvasElement } = await import('../src/lib/drawing')
 const { buildLayerTree } = await import('../src/lib/layers')
 
@@ -79,5 +81,48 @@ describe('pasted images', () => {
     expect(img?.getAttribute('data-name')).toBe('"a" <b>')
     expect(img?.getAttribute('alt')).toBe('"a" <b>')
     expect(doc.querySelector('b')).toBeNull()
+  })
+})
+
+describe('files pasted together', () => {
+  const icon = () =>
+    new File(
+      ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 12"><rect width="24" height="12"/></svg>'],
+      'icon.svg',
+      {
+        type: 'image/svg+xml',
+      },
+    )
+
+  it('lays bitmaps and vectors out in one row, and a vector keeps its proportions', async () => {
+    await pasteFilesCentered('c1', splitIncoming([image('photo.png', 400, 300), icon()]))
+    const created = api.createFrame.mock.calls.map(([, frame]) => frame)
+    expect(created).toHaveLength(2)
+    const [vector, photo] = created
+    /* a 24×12 icon does not become a 40×40 box the way a tiny bitmap's shell would */
+    expect({ width: vector!.width, height: vector!.height }).toEqual({ width: 28, height: 16 })
+    expect(vector!.x! + vector!.width!).toBeLessThan(photo!.x!)
+    expect(api.uploadAsset).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the frames that landed when a sibling request fails', async () => {
+    api.createFrame.mockImplementationOnce(async () => {
+      throw new Error('offline')
+    })
+    await expect(pasteFilesCentered('c1', splitIncoming([icon(), image('photo.png', 40, 40)]))).resolves.toBeUndefined()
+    expect(api.createFrame).toHaveBeenCalledTimes(2)
+    expect(useStore.getState().selectedIds).toEqual(['f1'])
+    /* what landed is counted by kind, never by what was asked for */
+    expect(posthog.capture).toHaveBeenCalledWith('files_pasted', { images: 1, vectors: 0, pages: 0 })
+  })
+
+  it('still lands the vector when a bitmap’s upload fails, and reports that failure when nothing lands', async () => {
+    api.uploadAsset.mockRejectedValueOnce(new Error('Image is larger than 5 MB'))
+    await pasteFilesCentered('c1', splitIncoming([image('huge.png', 40, 40), icon()]))
+    expect(api.createFrame).toHaveBeenCalledTimes(1)
+    expect(api.createFrame.mock.calls[0]![1].name).toBe('icon')
+    expect(posthog.capture).toHaveBeenLastCalledWith('files_pasted', { images: 0, vectors: 1, pages: 0 })
+    api.uploadAsset.mockRejectedValueOnce(new Error('Image is larger than 5 MB'))
+    await expect(pasteFilesCentered('c1', splitIncoming([image('huge.png', 40, 40)]))).rejects.toThrow('5 MB')
   })
 })

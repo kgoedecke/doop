@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
 import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
+import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -1076,6 +1077,34 @@ export function buildMcpServer(
         if (e instanceof PageLimitError) return err(e.message)
         throw e
       }
+    },
+  )
+
+  server.registerTool(
+    'set_page_background',
+    {
+      title: 'Set a page background colour',
+      description:
+        "Paint one page's canvas a colour of its own, as Figma's page background does: everyone viewing that page sees frames on that colour instead of the theme paper. Pass color null to go back to the theme paper. Pages report it as `background` in get_canvas.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string().optional().describe('Page ID from get_canvas; defaults to the first page'),
+        color: z.string().nullable().describe('A hex colour such as #1e1e1e, or null to clear'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, color, agent_name }) => {
+      const canvas = canvasFor(canvas_id, 'edit')
+      if (!canvas) return noCanvas(canvas_id)
+      const pages = canvasPages(canvas)
+      const pageId = page_id ?? pages[0]!.id
+      if (!pages.some((p) => p.id === pageId)) return err(`no page ${pageId} on canvas ${canvas_id}`)
+      const background = color === null ? null : normalizePageBackground(color)
+      if (color !== null && !background) return err('color must be a hex colour such as #f5f5f5, or null')
+      const saved = actions.setPageBackground(canvas_id, pageId, background, actorFrom(agent_name))
+      if (!saved) return noCanvas(canvas_id)
+      return text({ ok: true, pages: saved })
     },
   )
 

@@ -77,8 +77,9 @@ export interface CanvasMeta {
   previewFrameId?: string
   /** agents that have worked on this canvas (most recent first) */
   agents?: { name: string; owner?: string; lastAt?: number }[]
-  /** the owner first, then everyone invited — the home tile's avatar stack */
-  people?: { id: string; name: string }[]
+  /** the owner first, then everyone invited — the home tile's avatar stack;
+   *  `image` is a profile photo's URL when the person uploaded one */
+  people?: { id: string; name: string; image?: string }[]
 }
 
 /** The dashboard/gallery preview render (`/i/<id>.jpg?preview`) clips a
@@ -127,6 +128,11 @@ export interface CanvasPageInfo {
    *  Set only through the flow-start route or MCP tool; page-list saves keep
    *  whatever the server already has. */
   startFrameId?: string
+  /** the page's own canvas colour (`#rrggbb`, shared/pageBackground.ts),
+   *  shown in place of the viewer's theme paper. Set only through the
+   *  background route or MCP tool; page-list saves keep it, as they keep
+   *  the flow start. */
+  background?: string
 }
 
 /** A ruler guide: an infinite line on one page of a canvas, in world px.
@@ -215,6 +221,8 @@ export interface WorkspaceMember {
   userId: string
   name: string
   email: string
+  /** the profile photo's URL when the person uploaded one */
+  image?: string
   role: WorkspaceRole
   addedAt: number
 }
@@ -333,6 +341,8 @@ export interface Presence {
   /** Authenticated identity for people, shared across their connections. */
   userId?: string
   name: string
+  /** a person's profile photo (shared/avatar.ts), else initials */
+  image?: string
   color: string
   kind: ActorKind
   cursor?: { x: number; y: number }

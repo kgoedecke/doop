@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { authClient } from '../lib/auth'
 import { api } from '../lib/api'
 import type { NotificationSettings } from '../../shared/notifications'
+import { AVATAR_ACCEPT, MAX_AVATAR_BYTES, avatarUrl } from '../../shared/avatar'
+import { colorFor } from '../../shared/types'
 import { posthog } from '../lib/posthog'
 import { useT, type PlainMessageKey, type Translate } from '../lib/i18n'
+import { Avatar } from './ui/avatar'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
@@ -31,8 +34,16 @@ function errorNotice(message: string | undefined, fallback: PlainMessageKey): No
  *  no endpoints of ours. */
 export function AccountSettings() {
   const t = useT()
-  const { data: session } = authClient.useSession()
+  const { data: session, refetch: refetchSession } = authClient.useSession()
   const user = session?.user
+  const photo = avatarUrl(user?.image)
+
+  /* the photo: bytes go to /api/me/avatar, then the session is re-read so
+     every face on the page (the account menu included) turns at once */
+  const photoInput = useRef<HTMLInputElement>(null)
+  const [savingPhoto, setSavingPhoto] = useState(false)
+  const [photoNote, setPhotoNote] = useState<Notice | null>(null)
+  const [photoError, setPhotoError] = useState<Notice | null>(null)
 
   /* null while untouched, so the field tracks the session until you type */
   const [draft, setDraft] = useState<string | null>(null)
@@ -60,6 +71,39 @@ export function AccountSettings() {
     api.notificationSettings().then(setNotify, () => {})
   }, [])
   useEffect(refreshNotify, [refreshNotify])
+
+  async function uploadPhoto(file: File) {
+    setPhotoNote(null)
+    setPhotoError(null)
+    if (file.size > MAX_AVATAR_BYTES) return setPhotoError({ key: 'account.photoTooLarge' })
+    setSavingPhoto(true)
+    try {
+      await api.uploadAvatar(file)
+      await refetchSession()
+      posthog.capture('account_photo_changed')
+      setPhotoNote({ key: 'account.photoSaved' })
+    } catch (e) {
+      setPhotoError(errorNotice(e instanceof Error ? e.message : undefined, 'account.photoSaveFailed'))
+    } finally {
+      setSavingPhoto(false)
+    }
+  }
+
+  async function removePhoto() {
+    setPhotoNote(null)
+    setPhotoError(null)
+    setSavingPhoto(true)
+    try {
+      await api.removeAvatar()
+      await refetchSession()
+      posthog.capture('account_photo_removed')
+      setPhotoNote({ key: 'account.photoRemoved' })
+    } catch (e) {
+      setPhotoError(errorNotice(e instanceof Error ? e.message : undefined, 'account.photoSaveFailed'))
+    } finally {
+      setSavingPhoto(false)
+    }
+  }
 
   async function saveName() {
     setSavingName(true)
@@ -124,6 +168,47 @@ export function AccountSettings() {
           <CardTitle>{t('account.profileTitle')}</CardTitle>
           <CardDescription>{t('account.profileDescription')}</CardDescription>
         </CardHeader>
+
+        <CardRow
+          label={t('account.photoRow')}
+          action={
+            <>
+              <Button size="sm" disabled={savingPhoto} onClick={() => photoInput.current?.click()}>
+                {savingPhoto
+                  ? t('account.uploadingPhoto')
+                  : photo
+                    ? t('account.changePhoto')
+                    : t('account.uploadPhoto')}
+              </Button>
+              {photo && (
+                <Button size="sm" variant="ghost" disabled={savingPhoto} onClick={removePhoto}>
+                  {t('account.removePhoto')}
+                </Button>
+              )}
+            </>
+          }
+        >
+          <Avatar name={user?.name ?? ''} image={photo} color={colorFor(user?.id ?? '')} size={48} />
+          <Input
+            ref={photoInput}
+            type="file"
+            accept={AVATAR_ACCEPT}
+            aria-label={t('account.choosePhotoAria')}
+            className="hidden"
+            onChange={(event) => {
+              const [file] = event.currentTarget.files ?? []
+              event.currentTarget.value = ''
+              if (file) void uploadPhoto(file)
+            }}
+          />
+          {photoError ? (
+            <Note tone="error">{noticeText(t, photoError)}</Note>
+          ) : photoNote ? (
+            <Note tone="success">{noticeText(t, photoNote)}</Note>
+          ) : (
+            <Note>{t('account.photoHint')}</Note>
+          )}
+        </CardRow>
 
         <CardRow
           label={t('account.nameRow')}

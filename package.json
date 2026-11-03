@@ -57,6 +57,7 @@
     "jose": "6.2.10",
     "jszip": "^3.10.2",
     "lucide-react": "^1.59.0",
+    "mupdf": "^1.28.1",
     "nanoid": "^5.0.7",
     "nodemailer": "^9.0.5",
     "parse5": "^8.0.1",

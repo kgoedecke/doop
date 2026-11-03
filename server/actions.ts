@@ -1687,6 +1687,13 @@ export function setFlowStart(canvasId: string, pageId: string, frameId: string |
   return pages
 }
 
+/** Paint a page's canvas a colour of its own (or clear it); peers get the page list. */
+export function setPageBackground(canvasId: string, pageId: string, background: string | null, actor: Actor) {
+  const pages = store.setPageBackground(canvasId, pageId, background)
+  if (pages) broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+  return pages
+}
+
 /** Add or move a ruler guide; peers see it at once. Guides are view
  *  furniture, not design content, so the canvas stays as recently edited
  *  as it was and no activity is logged. */
