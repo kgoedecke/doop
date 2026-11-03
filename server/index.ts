@@ -1881,7 +1881,7 @@ app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
 app.post('/api/frames/:id/comments', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
   if (!frame) return
-  const { selector, elementId, snippet, text, x, y } = req.body ?? {}
+  const { selector, elementId, snippet, text, x, y, elementOrigin } = req.body ?? {}
   if (refuseAgentMention(req, res, frame.canvasId, String(text ?? ''))) return
   /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
@@ -1893,7 +1893,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   }
   const comment = await actions.addElementComment(
     req.params.id,
-    { selector, elementId, snippet, text: String(text ?? ''), x, y },
+    { selector, elementId, snippet, text: String(text ?? ''), x, y, elementOrigin },
     req.user!.name,
     req.user!.id,
   )
@@ -2001,7 +2001,7 @@ app.patch('/api/comments/:id/anchor', async (req, res) => {
   const found = actions.findComment(req.params.id)
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId, 'comment')) return
-  const { frameId, selector, elementId, snippet, pageId, x, y } = req.body ?? {}
+  const { frameId, selector, elementId, snippet, pageId, x, y, elementOrigin } = req.body ?? {}
   let anchor: CommentAnchorInput
   if (typeof frameId === 'string') {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
@@ -2009,6 +2009,7 @@ app.patch('/api/comments/:id/anchor', async (req, res) => {
       frameId,
       ...(typeof selector === 'string' ? { selector } : {}),
       ...(typeof elementId === 'string' ? { elementId } : {}),
+      elementOrigin,
       snippet: String(snippet ?? ''),
       x: Number(x),
       y: Number(y),

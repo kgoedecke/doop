@@ -676,6 +676,7 @@ async function writeComment(c: ElementComment): Promise<void> {
     canvasId: c.canvasId,
     frameId: c.frameId ?? null,
     elementId: c.elementId ?? null,
+    elementOrigin: c.elementOrigin ?? null,
     /* the pre-element-id anchor is spent once the comment is saved again */
     selector: null,
     snippet: c.snippet,
@@ -705,6 +706,7 @@ async function writeComment(c: ElementComment): Promise<void> {
         /* a moved thread keeps its id and takes a new anchor */
         frameId: row.frameId,
         elementId: row.elementId,
+        elementOrigin: row.elementOrigin,
         selector: row.selector,
         snippet: row.snippet,
         pageId: row.pageId,
@@ -950,6 +952,7 @@ export async function hydrate(): Promise<Hydrated> {
       canvasId: row.canvasId,
       ...(row.frameId != null ? { frameId: row.frameId } : {}),
       ...(row.elementId != null ? { elementId: row.elementId } : {}),
+      ...(row.elementOrigin != null ? { elementOrigin: row.elementOrigin } : {}),
       snippet: row.snippet,
       ...(row.pageId != null ? { pageId: row.pageId } : {}),
       ...(row.x != null ? { x: row.x } : {}),

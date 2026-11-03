@@ -465,9 +465,11 @@ export interface ElementComment {
   snippet: string
   /** canvas comment: the page it sits on … */
   pageId?: string
-  /** … and its world point on that page */
+  /** Clicked point: frame design coordinates, or world coordinates on a canvas page. */
   x?: number
   y?: number
+  /** Element top-left at placement time; a moved element uses its current top-left. */
+  elementOrigin?: { x: number; y: number }
   from: string
   /** account id of the human who left it — decides which model credential runs it */
   fromUserId?: string

@@ -1,0 +1,1 @@
+ALTER TABLE "comments" ADD COLUMN "element_origin" jsonb;

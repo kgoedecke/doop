@@ -160,11 +160,11 @@ describe('POST /api/frames/:id/comments on the frame as a whole', () => {
         text: 'Here',
         x: 5,
         y: 5,
+        elementOrigin: { x: 0, y: 0 },
       })
     ).json()
     expect(comment.elementId).toMatch(/^[a-z0-9]{6}$/)
-    expect(comment.x).toBeUndefined()
-    expect(comment.y).toBeUndefined()
+    expect(comment).toMatchObject({ x: 5, y: 5, elementOrigin: { x: 0, y: 0 } })
     const stamped = await frameNow(frame.id)
     expect(stamped.html).toBe(`<p data-doop-id="${comment.elementId}">Hi</p>`)
     /* an annotation, not a design change: the reviewer's sign-off stands */
@@ -285,7 +285,14 @@ describe('PATCH /api/comments/:id/anchor', () => {
       })
     ).json()
     const root = await (
-      await owner.post(`/api/frames/${frame.id}/comments`, { selector: 'p', snippet: '<p>Hi</p>', text: 'Move me' })
+      await owner.post(`/api/frames/${frame.id}/comments`, {
+        selector: 'p',
+        snippet: '<p>Hi</p>',
+        text: 'Move me',
+        x: 20,
+        y: 30,
+        elementOrigin: { x: 0, y: 0 },
+      })
     ).json()
     const reply = await (await owner.post(`/api/comments/${root.id}/replies`, { text: 'Along' })).json()
 
@@ -297,6 +304,7 @@ describe('PATCH /api/comments/:id/anchor', () => {
     expect(moved).toMatchObject({ id: root.id, pageId, x: 10, y: 20, snippet: '' })
     expect(moved.elementId).toBeUndefined()
     expect(moved.frameId).toBeUndefined()
+    expect(moved.elementOrigin).toBeUndefined()
     await until(() => room.messages.filter((m) => m.type === 'comment').length >= 2)
     room.close()
     const broadcast = room.messages.filter((m) => m.type === 'comment').map((m) => m.comment as ElementComment)
@@ -322,24 +330,31 @@ describe('PATCH /api/comments/:id/anchor', () => {
     expect(moved.elementId).toBeUndefined()
     expect(moved.pageId).toBeUndefined()
 
-    /* onto an element: stamped on the way, and no point on an element comment */
+    /* onto an element: stamped on the way, retaining the exact drop point */
     res = await owner.patch(`/api/comments/${root.id}/anchor`, {
       frameId: frame.id,
       selector: 'button',
       snippet: '<button>Go</button>',
       x: 1,
       y: 2,
+      elementOrigin: { x: 0, y: 0 },
     })
     moved = await res.json()
     expect(moved).toMatchObject({ frameId: frame.id, snippet: '<button>Go</button>' })
     expect(moved.elementId).toMatch(/^[a-z0-9]{6}$/)
-    expect(moved.x).toBeUndefined()
-    expect(moved.y).toBeUndefined()
+    expect(moved).toMatchObject({ x: 1, y: 2, elementOrigin: { x: 0, y: 0 } })
     expect(moved.pageId).toBeUndefined()
     expect((await frameNow(frame.id)).html).toContain(`<button data-doop-id="${moved.elementId}">Go</button>`)
     /* a later reply inherits the new anchor */
     const later = await (await owner.post(`/api/comments/${root.id}/replies`, { text: 'Still here' })).json()
-    expect(later).toMatchObject({ frameId: frame.id, elementId: moved.elementId, parentId: root.id })
+    expect(later).toMatchObject({
+      frameId: frame.id,
+      elementId: moved.elementId,
+      parentId: root.id,
+      x: 1,
+      y: 2,
+      elementOrigin: { x: 0, y: 0 },
+    })
   })
 
   it('refuses a bad anchor, a frame of another canvas, a missing page and strangers', async () => {
@@ -368,3 +383,29 @@ describe('PATCH /api/comments/:id/anchor', () => {
     expect(reply.pageId).toBeUndefined()
   })
 })
+
+it('retains the element placement across a server restart', async () => {
+  const frame = await (
+    await owner.post(`/api/canvases/${canvasId}/frames`, {
+      name: 'Persisted',
+      width: 400,
+      height: 300,
+      html: '<p>Hi</p>',
+    })
+  ).json()
+  const root = await (
+    await owner.post(`/api/frames/${frame.id}/comments`, {
+      selector: 'p',
+      text: 'Saved point',
+      x: 45,
+      y: 67,
+      elementOrigin: { x: 10, y: 20 },
+    })
+  ).json()
+  const { dataDir, port } = server
+  server.stop({ keepData: true })
+  await server.stopped
+  server = await startServer({ PORT: String(port), RESIDENT_TASK_LIMIT: '0' }, dataDir)
+  const reply = await (await owner.post(`/api/comments/${root.id}/replies`, { text: 'After restart' })).json()
+  expect(reply).toMatchObject({ elementId: root.elementId, x: 45, y: 67, elementOrigin: { x: 10, y: 20 } })
+}, 70_000)
