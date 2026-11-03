@@ -229,4 +229,35 @@ describe.skipIf(!findBrowserPath())('page list controls and keyboard history', (
     )
     await page.waitForSelector('iframe[data-doop-frame]')
   }, 20_000)
+
+  it('claims Backspace on the canvas: deletes the selection, never leaves the page', async () => {
+    await page.keyboard.press('Escape')
+    const before = (await page.$$('iframe[data-doop-frame]')).length
+    const url = page.url()
+    await page.evaluate(() => {
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace') (window as unknown as { prevented: boolean[] }).prevented.push(e.defaultPrevented)
+      })
+      ;(window as unknown as { prevented: boolean[] }).prevented = []
+    })
+    /* nothing selected: the key does nothing, and the browser never sees an
+       unhandled Backspace (some engines take one as "back") */
+    await page.keyboard.press('Backspace')
+    expect(await page.$$('iframe[data-doop-frame]')).toHaveLength(before)
+    expect(page.url()).toBe(url)
+    expect(await page.evaluate(() => (window as unknown as { prevented: boolean[] }).prevented)).toEqual([true])
+    /* a selected frame goes */
+    await page.click('button[aria-label="New frame"]')
+    await page.waitForSelector('[aria-label="Move selection to page"]:not([disabled])')
+    expect(await page.$$('iframe[data-doop-frame]')).toHaveLength(before + 1)
+    const deleted = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'DELETE' && /^\/api\/frames\//.test(new URL(response.url()).pathname),
+    )
+    await page.keyboard.press('Backspace')
+    expect((await deleted).ok()).toBe(true)
+    await page.waitForFunction((n) => document.querySelectorAll('iframe[data-doop-frame]').length === n, {}, before)
+    expect(page.url()).toBe(url)
+    expect(await page.evaluate(() => (window as unknown as { prevented: boolean[] }).prevented)).toEqual([true, true])
+  }, 20_000)
 })

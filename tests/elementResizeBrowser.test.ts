@@ -612,4 +612,77 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     await page.waitForFunction(() => document.querySelectorAll('[data-picked-element]').length === 0)
     await page.waitForFunction(() => !!document.querySelector('[data-resize-handles]'))
   }, 20_000)
+
+  it('outlines a layer wider than its frame in full, hovered and selected, while the frame clips its content', async () => {
+    /* the seeded frame is 600px wide: this box runs 300px past its right edge */
+    await reset(HTML.replace('#box { width: 200px;', '#box { width: 900px;'))
+    const surface = await page.$eval('[data-frame-surface]', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
+    const box = async (selector: string) => page.$eval(selector, (el) => el.getBoundingClientRect().toJSON() as DOMRect)
+    /* a box is clipped when an ancestor that hides its overflow is smaller
+       than it; its own rect reports the full size either way */
+    const clipper = (selector: string) =>
+      page.$eval(selector, (el) => {
+        const r = el.getBoundingClientRect()
+        for (let a = el.parentElement; a; a = a.parentElement) {
+          if (getComputedStyle(a).overflow === 'visible') continue
+          const c = a.getBoundingClientRect()
+          if (r.left < c.left || r.right > c.right || r.top < c.top || r.bottom > c.bottom)
+            return a.outerHTML.slice(0, 60)
+        }
+        return null
+      })
+    /* the grips the pointer finds at a point (under the fixture's floating
+       panels): a clipped grip is not hit-testable at all */
+    const under = (x: number, y: number) =>
+      page.evaluate(
+        (px, py) =>
+          document
+            .elementsFromPoint(px, py)
+            .map((e) => e.getAttribute('data-resize-handle'))
+            .filter((name) => name !== null),
+        x,
+        y,
+      )
+
+    await select('#box')
+    /* the document starts inside the surface's border: the outline sits on
+       the element's own box, as it does when the element fits the frame */
+    const doc = await box('iframe')
+    const outline = await box('[data-element-outline]')
+    expect(outline.left).toBeCloseTo(doc.left + 20, 0)
+    expect(outline.right).toBeCloseTo(doc.left + 920, 0)
+    expect(outline.right).toBeGreaterThan(surface.right + 250)
+    expect(await clipper('[data-element-outline]')).toBeNull()
+    expect(await clipper('[data-resize-handles]')).toBeNull()
+    /* the east grips and the badge paint at the element's far edge, well
+       outside the frame box */
+    const east = await handle('e')
+    expect(east.x).toBeGreaterThan(surface.right)
+    expect(await under(east.x, east.y)).toEqual(['e'])
+    const corner = await handle('ne')
+    expect(await under(corner.x, corner.y)).toContain('ne')
+    const badge = await box('[data-element-size]')
+    expect(badge.left + badge.width / 2).toBeCloseTo(outline.left + outline.width / 2, 0)
+    expect(await clipper('[data-element-size]')).toBeNull()
+    /* the element itself is still clipped to the frame */
+    expect(await page.$eval('[data-frame-surface]', (el) => getComputedStyle(el).overflow)).toBe('hidden')
+
+    /* a hover over the element (clear of the absolutely placed fixture
+       elements at its left end) draws its outline unclipped too */
+    await page.mouse.move(surface.left + 300, surface.top + 70)
+    await page.mouse.move(surface.left + 310, surface.top + 70, { steps: 3 })
+    /* the runtime answers the move: an outline left by an earlier hover is
+       not the one looked at */
+    await page.waitForFunction(
+      () => document.querySelector<HTMLElement>('[data-hover-outline]')?.style.width === '900px',
+    )
+    const hover = await box('[data-hover-outline]')
+    expect(hover.right).toBeCloseTo(outline.right, 0)
+    expect(hover.right).toBeGreaterThan(surface.right + 250)
+    expect(await clipper('[data-hover-outline]')).toBeNull()
+
+    /* leaving the frame clears the hover */
+    await page.mouse.move(surface.left - 20, surface.top - 20)
+    await page.waitForFunction(() => !document.querySelector('[data-hover-outline]'))
+  }, 20_000)
 })

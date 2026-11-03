@@ -319,7 +319,9 @@ function DrawingPreview({
         value={d.text ?? ''}
         onChange={(e) => onText(e.target.value, Math.max(d.height, e.target.scrollHeight))}
         onBlur={onFinish}
-        className="absolute z-30 resize-none border-0 bg-white/90 p-0 text-[#202124] outline-2 outline-brand"
+        /* the box is see-through, like the text it becomes: the ring and the
+           placeholder are all that mark it on the canvas */
+        className="absolute z-30 resize-none border-0 bg-transparent p-0 text-[#202124] outline-2 outline-brand placeholder:text-ink-faint"
         style={{
           left: d.x,
           top: d.y,
