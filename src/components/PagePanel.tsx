@@ -58,11 +58,10 @@ export function PagePanel({
       </PanelHeader>
       <section className="border-b border-line-soft px-3 py-2">
         <h3 className="mb-1.5 flex h-5 items-center text-label font-normal text-ink-soft">
-          {t('inspector.pageTitle')}
+          {t('inspector.pageBackground')}
         </h3>
         {/* the field's keys stay out of the canvas shortcuts */}
-        <div className="flex items-center gap-2" onKeyDown={(e) => e.stopPropagation()}>
-          <span className="w-16 flex-none text-label text-ink-faint">{t('inspector.pageBackground')}</span>
+        <div className="flex" onKeyDown={(e) => e.stopPropagation()}>
           <ColorField
             key={page.id}
             label={t('inspector.pageBackground')}
