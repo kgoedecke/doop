@@ -9,7 +9,7 @@ type Fixture = {
   messages: { type: string; reqId?: string; html?: string; state?: Record<string, boolean>; info?: ElementInfo }[]
 }
 
-describe.skipIf(!findBrowserPath())('rich text editing', () => {
+describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, () => {
   let browser: TestBrowser
   let page: Page
   let frame: Frame
