@@ -25,6 +25,9 @@ export interface Frame {
    *  deleted from the stage until it is unlocked (Layers panel, Inspector,
    *  ⌘⇧L, or an agent via update_frame) */
   locked?: boolean
+  /** Stacking order on its page (back to front; see shared/frameStack.ts).
+   *  Unset on frames made before stacking existed: they stack by createdAt. */
+  z?: number
   /** Human sign-off for implementation. Missing/null means draft. Design
    * edits retain the attribution but change the status to needs_review. */
   approval?: FrameApproval | null

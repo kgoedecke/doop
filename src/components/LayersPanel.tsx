@@ -11,7 +11,7 @@ import {
 } from 'react'
 import type { Frame } from '../../shared/types'
 import { canEditOpenCanvas, pickedSelectors, useStore } from '../lib/store'
-import { usePageCanvas } from '../lib/pages'
+import { currentPageCanvas, usePageCanvas } from '../lib/pages'
 import { PagesPanel, sectionHeading } from './PagesPanel'
 import { getIdentity } from '../lib/identity'
 import { deleteFramesTracked } from '../lib/history'
@@ -32,6 +32,10 @@ import {
   setLayerHidden,
   setLayerLocked,
   detachLayer,
+  isStackLocked,
+  restackFrame,
+  stackRoom,
+  shiftFrame,
   shiftLayer,
   standaloneSelector,
   takesLayers,
@@ -109,8 +113,15 @@ type VisibleRow =
     }
 type NodeVisibleRow = Extract<VisibleRow, { kind: 'node' }>
 
+/** A row at the top level of the tree: a frame, or a standalone element. */
+function isRoot(row: VisibleRow): boolean {
+  return row.kind === 'frame' || !!row.standalone
+}
+
 /** Where a dragged layer would land: next to or into a row, or at the
- *  root — out of every frame, as a standalone element on the canvas. */
+ *  root — out of every frame, as a standalone element on the canvas. A
+ *  `root` drop on a row is the line above that top-level row: in front of
+ *  it on the canvas, since the list runs front to back as Figma's does. */
 type Drop = { key: string; place: DropPlace | 'root' }
 /* the key of the root drop shown under the last row */
 const ROOT_KEY = ''
@@ -142,9 +153,11 @@ function targetOf(row: VisibleRow, place: DropPlace): DropTarget {
   return { selector: row.kind === 'frame' ? 'body' : row.node.selector, place }
 }
 
+/** The tree's lines. `frames` is the page's paint order, back to front; the
+ *  list runs the other way, so the frame in front is at the top. */
 function visibleRows(frames: Frame[], query: string, expanded: Set<string>): VisibleRow[] {
   const rows: VisibleRow[] = []
-  for (const frame of frames) {
+  for (const frame of [...frames].reverse()) {
     const tree = query ? filterLayers(frameTree(frame), query) : null
     if (query && !frame.name.toLowerCase().includes(query) && tree?.length === 0) continue
     const walk = (list: LayerNode[], depth: number, parentKey: string, dim: boolean) => {
@@ -224,7 +237,7 @@ export function LayersPanel({
   /* the row being dragged and where it would land; the pointer handlers are
      bound to the window for the length of the press, so they read the rows
      through a ref rather than a stale closure */
-  const [drag, setDrag] = useState<NodeVisibleRow | null>(null)
+  const [drag, setDrag] = useState<VisibleRow | null>(null)
   const [drop, setDrop] = useState<Drop | null>(null)
   const rowsRef = useRef<VisibleRow[]>([])
   const didDrag = useRef(false)
@@ -283,30 +296,76 @@ export function LayersPanel({
     s.pickElement(row.kind === 'node' ? { frameId: row.frame.id, selector: row.node.selector } : null, true)
   }
 
+  /* the root drop just past `root`: the line above the next top-level row,
+     or the list's tail */
+  function rootDropAfter(root: VisibleRow): Drop {
+    const roots = rowsRef.current.filter(isRoot)
+    const next = roots[roots.indexOf(root) + 1]
+    return { key: next?.key ?? ROOT_KEY, place: 'root' }
+  }
+
+  /* where a dragged frame, or a standalone element, would go among the
+     top-level rows: above the row under the pointer, or below it (above
+     the next one) from its lower half or anywhere inside an open frame.
+     A spot that leaves it where it is draws no line. */
+  function restackAt(dragged: VisibleRow, row: VisibleRow | undefined, fraction: number): Drop | null {
+    const roots = rowsRef.current.filter(isRoot)
+    const own = roots.find((r) => r.frame.id === dragged.frame.id)
+    const root = row && roots.find((r) => r.frame.id === row.frame.id)
+    const drop: Drop = !root
+      ? { key: ROOT_KEY, place: 'root' }
+      : row === root && fraction < 0.5
+        ? { key: root.key, place: 'root' }
+        : rootDropAfter(root)
+    /* the line just above or just below its own row */
+    if (own && (drop.key === own.key || drop.key === rootDropAfter(own).key)) return null
+    return drop
+  }
+
   /* the drop under the pointer: a row that is neither the element itself
      nor inside it. A row of another frame takes the element too, unless that
      frame is locked or a standalone drawing still holding its shape
      (transferLayer refuses those, so the line must not promise them); a
      standalone whose shape was dragged out stays behind empty and takes a
-     layer back */
-  function dropAt(dragged: NodeVisibleRow, x: number, y: number): Drop | null {
+     layer back. A frame row only changes places with the rows around it. */
+  function dropAt(dragged: VisibleRow, x: number, y: number): Drop | null {
     const under = document.elementFromPoint(x, y)
     const el = under?.closest<HTMLElement>('[data-row-key]')
     const row = el ? rowsRef.current.find((r) => r.key === el.dataset.rowKey) : undefined
-    /* the list's empty tail is the root: out of every frame, onto the canvas */
-    if (!row || !el) return under?.closest('[data-slot="panel-body"]') ? { key: ROOT_KEY, place: 'root' } : null
+    const inList = !!under?.closest('[data-slot="panel-body"]')
+    const fraction = el ? (y - el.getBoundingClientRect().top) / el.getBoundingClientRect().height : 0
+    if (dragged.kind === 'frame') return row || inList ? restackAt(dragged, row, fraction) : null
+    /* the list's empty tail is the root: out of every frame, onto the canvas, at the back */
+    if (!row || !el) {
+      if (!inList) return null
+      return dragged.standalone ? restackAt(dragged, undefined, 0) : { key: ROOT_KEY, place: 'root' }
+    }
     if (row.key === dragged.key) return null
-    const rect = el.getBoundingClientRect()
-    const fraction = (y - rect.top) / rect.height
-    /* the band above a root row means "beside it, at the root" */
     const standalone = row.kind === 'node' && !!row.standalone
-    if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND && row.frame.id !== dragged.frame.id)
+    if (dragged.standalone) {
+      /* a standalone element changes places with the top-level rows, or
+         goes into a frame from the middle of its row or one of its layers */
+      if (standalone || row.frame.id === dragged.frame.id) return restackAt(dragged, row, fraction)
+      if (row.kind === 'frame' && fraction < EDGE_BAND) return restackAt(dragged, row, 0)
+      if (row.kind === 'frame' && !row.open && fraction > 1 - EDGE_BAND) return restackAt(dragged, row, 1)
+    } else if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND && row.frame.id !== dragged.frame.id)
+      /* the band above a top-level row means "beside it, at the root" */
       return { key: row.key, place: 'root' }
     /* a standalone element is one shape, not a box for others */
     if (standalone) return null
     if (row.frame.id !== dragged.frame.id && !takesLayers(row.frame, frameTree(row.frame).length > 0)) return null
     if (row.kind === 'node' && row.frame.id === dragged.frame.id && holds(dragged.node, row.node.selector)) return null
     return { key: row.key, place: dropOver(row, fraction) }
+  }
+
+  /* the index in `list` (back to front) a root drop puts a frame at: just
+     in front of the row it is drawn above, or behind the last listed row
+     for the tail */
+  function stackSlot(target: Drop, list: Frame[]): number {
+    const roots = rowsRef.current.filter(isRoot)
+    const index = (row: VisibleRow | undefined) => (row ? list.findIndex((f) => f.id === row.frame.id) : -1)
+    if (target.key === ROOT_KEY) return Math.max(0, index(roots[roots.length - 1]))
+    return index(roots.find((r) => r.key === target.key)) + 1
   }
 
   /* a press on a layer row turns into a drag once it travels; the row is
@@ -317,8 +376,10 @@ export function LayersPanel({
      collaborator may have edited one during the drag), and a cancelled
      gesture drops nothing. A drop on another frame's row carries the
      element over into that frame. */
-  function onRowPointerDown(e: ReactPointerEvent<HTMLDivElement>, row: NodeVisibleRow) {
+  function onRowPointerDown(e: ReactPointerEvent<HTMLDivElement>, row: VisibleRow) {
     if (e.button !== 0 || readOnly) return
+    /* a locked frame or shape keeps its place in the stack */
+    if (isRoot(row) && isStackLocked(row.frame)) return
     const start = { x: e.clientX, y: e.clientY }
     const body = e.currentTarget.closest<HTMLElement>('[data-slot="panel-body"]')
     let active = false
@@ -351,11 +412,21 @@ export function LayersPanel({
       const over = target && rowsRef.current.find((r) => r.key === target.key)
       if (!target) return
       if (target.place === 'root') {
-        /* a standalone element is at the root already */
-        if (!row.standalone) void detachLayer(row.frame, row.node.selector)
+        /* a frame or a standalone element changes places; an element
+           comes out of its frame onto the canvas, at that place */
+        const stacked = currentPageCanvas()?.frames ?? []
+        if (isRoot(row)) {
+          const others = stacked.filter((f) => f.id !== row.frame.id)
+          restackFrame(stacked, row.frame.id, stackSlot(target, others))
+        } else if (row.kind === 'node') {
+          const slot = stackSlot(target, stacked)
+          void stackRoom(stacked, slot).then((room) => {
+            if (room) return detachLayer(row.frame, row.node.selector, room)
+          })
+        }
         return
       }
-      if (!over) return
+      if (!over || row.kind !== 'node') return
       if (over.frame.id === row.frame.id) dropLayer(row.frame, row.node.selector, targetOf(over, target.place))
       else transferLayer(row.frame, row.node.selector, over.frame, targetOf(over, target.place))
     }
@@ -377,7 +448,10 @@ export function LayersPanel({
       if (next) activate(next)
     }
     const shift = (dir: 1 | -1) => {
-      if (row?.kind === 'node' && !readOnly) shiftLayer(row.frame, row.node.selector, dir)
+      if (!row || readOnly) return
+      /* a top-level row moves through the stack; the list runs front to back */
+      if (isRoot(row)) shiftFrame(frames, row.frame.id, dir)
+      else if (row.kind === 'node') shiftLayer(row.frame, row.node.selector, dir)
     }
     switch (e.key) {
       case 'ArrowDown':
@@ -513,9 +587,11 @@ export function LayersPanel({
               row={row}
               selected={row.frame.id === selectedId && !selectedElement}
               current={row.frame.id === selectedId}
+              dragging={drag?.key === row.key}
               drop={drop?.key === row.key ? drop.place : undefined}
               onToggle={() => setOpen(row.key, !row.open)}
               onActivate={() => activate(row)}
+              onPointerDown={(e) => onRowPointerDown(e, row)}
             />
           ) : (
             <NodeRow
@@ -582,17 +658,21 @@ function FrameRow({
   row,
   selected,
   current,
+  dragging,
   drop,
   onToggle,
   onActivate,
+  onPointerDown,
 }: {
   row: Extract<VisibleRow, { kind: 'frame' }>
   selected: boolean
   /** the frame is selected, whether or not an element inside it is */
   current: boolean
+  dragging: boolean
   drop?: Drop['place']
   onToggle: () => void
   onActivate: () => void
+  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
 }) {
   const { frame } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
@@ -618,7 +698,7 @@ function FrameRow({
             onCaret={onToggle}
             icon={<FrameIcon className="size-3.5" />}
             label={frame.name}
-            className={cn(current && !selected && 'text-ink')}
+            className={cn(current && !selected && 'text-ink', dragging && 'opacity-40')}
             selected={selected}
             hidden={!!frame.hidden}
             dimmed={!!frame.hidden}
@@ -631,6 +711,7 @@ function FrameRow({
               pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
               if (!useStore.getState().selectedIds.includes(frame.id)) onActivate()
             }}
+            onPointerDown={onPointerDown}
             trailing={
               <>
                 <FrameApprovalBadge frame={frame} compact />

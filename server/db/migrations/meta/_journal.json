@@ -295,6 +295,13 @@
       "when": 1793692495440,
       "tag": "0042_comment_element_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793693135674,
+      "tag": "0043_frame_stack",
+      "breakpoints": true
     }
   ]
 }

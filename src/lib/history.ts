@@ -1,3 +1,4 @@
+import { stackOf, type StackWrite } from '../../shared/frameStack'
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
@@ -9,10 +10,12 @@ import { posthog } from './posthog'
  *  inverse through the normal API, so every collaborator sees it live —
  *  remote actors' work is never undone from here. */
 
-type Patch = Partial<Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked'>>
+type Patch = Partial<
+  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'>
+>
 type Snapshot = Pick<
   Frame,
-  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked'
+  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'
 >
 
 type Entry =
@@ -29,6 +32,9 @@ type Entry =
     }
   | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean }
   | { type: 'create'; frameId: string; snapshot: Snapshot }
+  /* frames restacked together (the Layers panel renumbering a page): saved
+     as one request, so undo and redo change the order whole or not at all */
+  | { type: 'stack'; canvasId: string; before: StackWrite[]; after: StackWrite[] }
   /* a ruler guide added (before null), moved, or removed (after null) */
   | { type: 'guide'; canvasId: string; before: CanvasGuide | null; after: CanvasGuide | null }
   | { type: 'delete'; frameId: string; snapshot: Snapshot }
@@ -90,6 +96,8 @@ function snapshot(f: Frame): Snapshot {
     /* a hidden or locked frame comes back as it was when its deletion is undone */
     hidden: f.hidden,
     locked: f.locked,
+    /* and back to its place in the stack */
+    z: stackOf(f),
   }
 }
 
@@ -128,6 +136,29 @@ export function recordUpdate(frameId: string, before: Patch, after: Patch, discr
     return
   }
   push(entry)
+}
+
+/** Frames restacked together: one undo step, saved as one request. */
+export function recordStack(canvasId: string, before: StackWrite[], after: StackWrite[]) {
+  if (after.length) push({ type: 'stack', canvasId, before, after })
+}
+
+/** Write a stacking order: locally at once, then to the server as one
+ *  request; a refusal puts every frame back, so the order is never half
+ *  changed. Rejects with the server's error after rolling back. */
+export async function saveStack(canvasId: string, before: StackWrite[], after: StackWrite[]) {
+  const set = (writes: StackWrite[]) => {
+    const s = useStore.getState()
+    if (s.canvas?.id !== canvasId) return
+    for (const { id, z } of writes) s.patchFrameLocal(id, { z })
+  }
+  set(after)
+  try {
+    await api.restackFrames(canvasId, after)
+  } catch (err) {
+    set(before)
+    throw err
+  }
 }
 
 /** Several frames moved together (a group drag): one undo step. */
@@ -220,12 +251,16 @@ export function dropEntry(entry: HistoryEntry) {
  *  was saved rather than writing the pre-move source over it. The entry
  *  keeps its place among the edits around it. */
 export function keepTransferDestination(entry: HistoryEntry) {
-  if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, 1)
+  if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, -1)
 }
 
 export function recordDrawingTransfer(
   destination: { before: Frame | null; after: Frame },
   source: { before: Frame; after: Frame | null },
+  /** a restack the move needed first (a page renumbered to make room for
+   *  the destination): undone after the destination goes, redone before
+   *  it comes back */
+  stack?: { before: StackWrite[]; after: StackWrite[] },
 ): HistoryEntry {
   const added: Entry = destination.before
     ? updateEntry(destination.after.id, { html: destination.before.html }, { html: destination.after.html })!
@@ -233,7 +268,10 @@ export function recordDrawingTransfer(
   const removed: Entry = source.after
     ? updateEntry(source.before.id, { html: source.before.html }, { html: source.after.html })!
     : { type: 'delete', frameId: source.before.id, snapshot: snapshot(source.before) }
-  const entry: Entry = { type: 'transfer', canvasId: source.before.canvasId, entries: [added, removed] }
+  const canvasId = source.before.canvasId
+  const entries: Entry[] = [added, removed]
+  if (stack?.after.length) entries.unshift({ type: 'stack', canvasId, before: stack.before, after: stack.after })
+  const entry: Entry = { type: 'transfer', canvasId, entries }
   push(entry)
   return entry
 }
@@ -294,7 +332,9 @@ export function deleteFramesTracked(frames: Frame[]) {
 function remapId(oldId: string, newId: string) {
   const visit = (e: Entry) => {
     if (e.type === 'group' || e.type === 'transfer') e.entries.forEach(visit)
-    else if (e.type !== 'pages' && e.type !== 'guide' && e.frameId === oldId) e.frameId = newId
+    else if (e.type === 'stack') {
+      for (const w of [...e.before, ...e.after]) if (w.id === oldId) w.id = newId
+    } else if (e.type !== 'pages' && e.type !== 'guide' && e.frameId === oldId) e.frameId = newId
   }
   for (const e of [...undoStack, ...redoStack]) visit(e)
 }
@@ -315,7 +355,7 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
    so undo/redo displays the page where the affected designs now live. */
 function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
   if (e.type === 'group' || e.type === 'transfer') return e.entries.flatMap((child) => selectionIds(child, direction))
-  if (e.type === 'pages' || e.type === 'guide') return []
+  if (e.type === 'pages' || e.type === 'guide' || e.type === 'stack') return []
   if (e.type === 'update' && 'pageId' in (direction === 'redo' ? e.after : e.before)) return [e.frameId]
   const recreated = e.type === (direction === 'redo' ? 'create' : 'delete')
   return recreated ? [e.frameId] : []
@@ -434,6 +474,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     if (e.guides?.length && restored.length) await restoreGuides(canvas.id, e.guides, restored)
   } else if (e.type === 'guide') {
     await applyGuide(e, forward ? e.after : e.before)
+  } else if (e.type === 'stack') {
+    if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
     const canvas = useStore.getState().canvas

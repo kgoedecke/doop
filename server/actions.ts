@@ -3,6 +3,7 @@ import { store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
+import type { StackWrite } from '../shared/frameStack.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
 import { canvasPages } from '../shared/pages.ts'
 import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
@@ -1712,6 +1713,7 @@ export function createFrame(
     demo?: boolean
     hidden?: boolean
     locked?: boolean
+    z?: number
   },
   actor: Actor,
 ): Frame | undefined {
@@ -1739,7 +1741,7 @@ export function createFrame(
  *  based. Without it a write is judged by how much it changed. */
 export function updateFrame(
   frameId: string,
-  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked'>>,
+  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z'>>,
   actor: Actor,
   opts: { replace?: boolean } = {},
 ): Frame | undefined {
@@ -1802,6 +1804,18 @@ export function updateFrame(
 
   touch(frame.canvasId, actor, frame.id)
   return frame
+}
+
+/** Several frames' places in the stack at once (the Layers panel renumbering
+ *  a page, or undoing that): every frame is checked before any is written,
+ *  so the order changes whole or not at all. Undefined when a frame is
+ *  gone or on another canvas. Not a design edit: no activity line. */
+export function restackFrames(canvasId: string, writes: StackWrite[], actor: Actor): Frame[] | undefined {
+  if (writes.some((w) => store.getFrame(w.id)?.canvasId !== canvasId)) return undefined
+  const frames = writes.map((w) => store.updateFrame(w.id, { z: w.z }, actor.name)!)
+  for (const frame of frames) broadcast(canvasId, { type: 'frame:updated', frame, actor })
+  touch(canvasId, actor, frames[0]?.id)
+  return frames
 }
 
 /** Sign-off is a human action, separate from ordinary frame editing. */

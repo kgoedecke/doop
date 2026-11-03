@@ -1,5 +1,6 @@
 import { useStore } from './store'
 import { beginFrameSave } from './frameSaves'
+import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
@@ -464,6 +465,9 @@ export const api = {
       finish()
     }
   },
+  /* several frames' stacking order at once, all or nothing */
+  restackFrames: (canvasId: string, frames: StackWrite[]) =>
+    req<Frame[]>(`/api/canvases/${canvasId}/stack`, { method: 'PUT', body: JSON.stringify({ frames }) }),
   deleteFrame: (frameId: string, expectedUpdatedAt?: number) =>
     req('/api/frames/' + frameId, { method: 'DELETE', body: JSON.stringify({ expectedUpdatedAt, actor: actor() }) }),
   setFrameApproval: (frameId: string, status: 'ready_for_dev' | 'draft', expectedUpdatedAt: number) =>

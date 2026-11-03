@@ -1,5 +1,6 @@
 import type { Canvas, CanvasPageInfo } from '../../shared/types'
 import { canvasPages, framePageId, samePages } from '../../shared/pages'
+import { stackOf } from '../../shared/frameStack'
 import { api, ApiError } from './api'
 import { useStore } from './store'
 import { guidesLeaving, recordPageCopy, recordPages, recordUpdates, trackSave } from './history'
@@ -78,7 +79,13 @@ export function moveFramesToPage(canvas: Canvas, ids: string[], pageId: string) 
         const frame = await api.updateFrame(id, { pageId })
         if (useStore.getState().canvas?.id !== canvas.id) return
         useStore.getState().upsertFrame(frame)
-        moved.push({ frameId: id, before: { pageId: framePageId(canvas, before) }, after: { pageId } })
+        /* the server puts it in front on its new page; undo puts it back
+           where it was in the old page's stack, not in front there */
+        moved.push({
+          frameId: id,
+          before: { pageId: framePageId(canvas, before), z: stackOf(before) },
+          after: { pageId, z: stackOf(frame) },
+        })
       }
       if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setActivePage(pageId)
     } finally {

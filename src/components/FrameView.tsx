@@ -95,13 +95,13 @@ const EL_TOOLBAR_BTN = 'rounded-[7px] px-2 py-1 text-xs'
  *  then a dashed box with its name, so a pick from the Layers panel still
  *  shows where the frame sits. It takes no pointer events: there is nothing
  *  to drag, and the eye in the Layers panel is the way back. */
-export function HiddenFrameView({ frame }: { frame: Frame }) {
+export function HiddenFrameView({ frame, stack }: { frame: Frame; stack?: number }) {
   const selected = useStore((s) => s.selectedIds.includes(frame.id))
   if (!selected) return null
   return (
     <div
       className="pointer-events-none absolute"
-      style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }}
+      style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height, zIndex: stack }}
     >
       <div
         className={cn(
@@ -194,7 +194,16 @@ interface HoverHit {
 /* Counter-scaled overlays (labels, pins, popovers) get their scale from the
    `--zoom` CSS variable the Stage sets, so a viewport change never re-renders
    this component — memo holds as long as the frame and layout zoom are unchanged. */
-export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame: Frame; layoutZoom: number }) {
+export const FrameView = memo(function FrameView({
+  frame,
+  stack,
+  layoutZoom,
+}: {
+  frame: Frame
+  /** its place in the page's paint order (the Stage's z-index), front highest */
+  stack?: number
+  layoutZoom: number
+}) {
   const t = useT()
   const [menuTarget, setMenuTarget] = useState<
     'frame' | 'loading' | { selector: string | null; html: string; hit?: LiveHit }
@@ -1276,6 +1285,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               top: frame.y,
               width: frame.width,
               height: frame.height,
+              zIndex: stack,
               '--editing-color': stream?.color ?? remoteEditor?.color ?? flash?.color,
             } as React.CSSProperties
           }

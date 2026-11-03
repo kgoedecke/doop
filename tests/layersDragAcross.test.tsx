@@ -13,6 +13,8 @@ vi.mock('../src/lib/api', () => ({
   api: {
     updateFrame: () => updateFrame(),
     deleteFrame: () => deleteFrame(),
+    /* the test frames tie in the stack, so a drop between them renumbers first */
+    restackFrames: () => Promise.resolve([]),
     createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) => createFrame(canvasId, input),
   },
   errorMessage: (_err: unknown, fallback: string) => fallback,

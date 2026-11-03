@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
+import { sortByStack } from '../../shared/frameStack'
 import type {
   ActivityItem,
   AgentTask,
@@ -316,7 +317,8 @@ export const useStore = create<State>((set, get) => ({
 
   setCanvas: (canvas) =>
     set((s) => ({
-      canvas,
+      /* the stage paints frames in array order: back to front */
+      canvas: canvas && { ...canvas, frames: sortByStack(canvas.frames) },
       /* leaving a canvas (CanvasPage unmounts or its id changes) ends ⌘.
          hide-UI, so the next canvas never opens with its chrome gone; a
          re-join of the same canvas keeps it */
@@ -448,9 +450,11 @@ export const useStore = create<State>((set, get) => ({
   upsertFrame: (f) =>
     set((s) => {
       if (!s.canvas || f.canvasId !== s.canvas.id) return {}
-      const frames = s.canvas.frames.some((x) => x.id === f.id)
-        ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
-        : [...s.canvas.frames, f]
+      const frames = sortByStack(
+        s.canvas.frames.some((x) => x.id === f.id)
+          ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
+          : [...s.canvas.frames, f],
+      )
       const hidden = s.selectedIds.includes(f.id) && framePageId(s.canvas, f) !== s.activePageId
       return {
         canvas: { ...s.canvas, frames },
@@ -468,12 +472,8 @@ export const useStore = create<State>((set, get) => ({
   patchFrameLocal: (frameId, patch) =>
     set((s) => {
       if (!s.canvas) return {}
-      return {
-        canvas: {
-          ...s.canvas,
-          frames: s.canvas.frames.map((f) => (f.id === frameId ? { ...f, ...patch } : f)),
-        },
-      }
+      const frames = s.canvas.frames.map((f) => (f.id === frameId ? { ...f, ...patch } : f))
+      return { canvas: { ...s.canvas, frames: 'z' in patch ? sortByStack(frames) : frames } }
     }),
   removeFrame: (frameId) =>
     set((s) => {

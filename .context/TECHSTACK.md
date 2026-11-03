@@ -170,6 +170,20 @@
   rulers sit on its own edges and fits need no insets. Phones and ⌘. ignore it. `chromeLayout` in
   `CanvasPage.tsx` holds both geometries; docked panels keep the stage at least 320px wide as far as their minimums allow, and ⌘V / image drops centre on the stage (`stageViewportSize`), not the window. Tests: `panelLayout.test.ts`, the docked case in
   `fitSelectionBrowser.test.ts`.
+- Stacking (`shared/frameStack.ts`): frames and standalone elements stack per page by `frames.z`
+  (nullable double, migration `0043_frame_stack`; unset stacks by `createdAt`), and `canvas.frames` is kept in that order, back
+  to front, on the server and in the client store, so "topmost under a point" walks it backwards.
+  A new frame lands in front of its page (a frame moved to another page too; undoing a delete
+  passes its old `z`). The Layers panel lists the page front first, as Figma does: dragging a
+  frame or standalone row between top-level rows (or onto the list's tail, the back) and ⌥↑/⌥↓
+  restack it through `restackFrame` (`PATCH /api/frames/:id { z }`, one undo step), with a `z`
+  halfway between the new neighbours, renumbering the page when doubles run out of room. An
+  element dropped between root rows is lifted out through `stackRoom` + `detachLayer`: a
+  renumbering the drop needed is saved first and rides in the detach's own undo step (a
+  `stack` entry leading the `transfer`), or stands as its own step when the lift is called off.
+  `Stage.tsx` mounts frames in creation order and paints them by `z-index` inside an isolated
+  layer, since moving an iframe in the DOM reloads it. Tests: `frameStack.test.ts`,
+  `frameStackStore.test.ts`, `layersStack.test.tsx`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
