@@ -1,5 +1,5 @@
 import type { Frame } from '../../shared/types'
-import { restack, roomAt, stackOf } from '../../shared/frameStack'
+import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
 import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
 import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
@@ -230,18 +230,24 @@ export function restackFrame(frames: Frame[], frameId: string, index: number) {
   )
 }
 
-/** The `z` that puts a new frame at `index` of the page's back-to-front
- *  order (`frames`): when its neighbours leave no room, the page is
- *  renumbered first, keeping its order, so the frame lands where it was
- *  dropped rather than in front. Undefined on an empty page (the server
- *  then puts it in front) and null when the renumbering was refused. */
-export async function stackRoom(frames: Frame[], index: number): Promise<number | undefined | null> {
+/** Room for a new frame at `index` of a page's back-to-front order: the
+ *  `z` that puts it there (undefined on an empty page, where the server
+ *  puts it in front), and the renumbering the page needed first when its
+ *  neighbours left none, which is saved already and belongs in the undo
+ *  step of whatever the room was made for. */
+export type StackRoom = { z: number | undefined; stack: { before: StackWrite[]; after: StackWrite[] } | null }
+
+/** Make room for a new frame at `index` of the page's back-to-front order
+ *  (`frames`): when its neighbours leave none, the page is renumbered
+ *  first, keeping its order, so the frame lands where it was dropped
+ *  rather than in front. Null when the renumbering was refused. */
+export async function stackRoom(frames: Frame[], index: number): Promise<StackRoom | null> {
   const { z, renumber } = roomAt(frames, index)
-  if (!renumber.length) return z
+  if (!renumber.length) return { z, stack: null }
   const before = renumber.map(({ id }) => ({ id, z: stackOf(frames.find((f) => f.id === id)!) }))
   try {
     await saveStack(frames[0]!.canvasId, before, renumber)
-    return z
+    return { z, stack: { before, after: renumber } }
   } catch (err) {
     useStore.getState().pushNotice(errorMessage(err, 'Couldn’t change the layer order'))
     return null
@@ -485,9 +491,18 @@ function sizedToShell(outerHtml: string, shell: Frame): string {
  *  document measures it; a frame not rendered yet places it at the frame's
  *  corner). The new frame is created first and the source emptied only
  *  once that landed; one undo step removes the element and puts the source
- *  back. False when the element is locked, already standalone, or its
- *  frame changed since the press. */
-export async function detachLayer(pressed: Frame, selector: string, z?: number): Promise<boolean> {
+ *  back, and takes back the renumbering `room` (where it was dropped in the
+ *  Layers list; in front when unset) may have saved first. False when the
+ *  element is locked, already standalone, or its frame changed since the
+ *  press; a renumbering already saved then stands as an undo step of its
+ *  own. */
+export async function detachLayer(pressed: Frame, selector: string, room?: StackRoom): Promise<boolean> {
+  const lifted = await lift(pressed, selector, room)
+  if (!lifted && room?.stack) recordStack(pressed.canvasId, room.stack.before, room.stack.after)
+  return lifted
+}
+
+async function lift(pressed: Frame, selector: string, room?: StackRoom): Promise<boolean> {
   const source = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
   if (!source || source.html !== pressed.html) return false
   if (isLayerLocked(source, selector) || standaloneSelector(source) === selector) return false
@@ -517,8 +532,7 @@ export async function detachLayer(pressed: Frame, selector: string, z?: number):
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
       html,
-      /* where it was dropped in the Layers list; in front when unset */
-      z,
+      z: room?.z,
     })
   } catch (err) {
     useStore.getState().pushNotice(errorMessage(err, 'Couldn’t move the layer onto the canvas'))
@@ -547,6 +561,7 @@ export async function detachLayer(pressed: Frame, selector: string, z?: number):
   const entry = recordDrawingTransfer(
     { before: null, after: created },
     { before: source, after: { ...source, html: emptied } },
+    room?.stack ?? undefined,
   )
   trackSave(
     api.updateFrame(source.id, { html: emptied }, source.updatedAt).catch(async (err: unknown) => {
@@ -560,6 +575,8 @@ export async function detachLayer(pressed: Frame, selector: string, z?: number):
         return
       }
       dropEntry(entry)
+      /* the lift is off, but the room made for it was saved: undoable alone */
+      if (room?.stack) recordStack(source.canvasId, room.stack.before, room.stack.after)
       s.patchFrameLocal(source.id, { html: source.html })
       if (remote?.id === source.id) s.upsertFrame(remote)
       s.pushNotice(errorMessage(err, `Couldn’t take the layer out of “${source.name}”`))

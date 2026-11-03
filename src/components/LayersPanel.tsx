@@ -420,8 +420,8 @@ export function LayersPanel({
           restackFrame(stacked, row.frame.id, stackSlot(target, others))
         } else if (row.kind === 'node') {
           const slot = stackSlot(target, stacked)
-          void stackRoom(stacked, slot).then((z) => {
-            if (z !== null) return detachLayer(row.frame, row.node.selector, z)
+          void stackRoom(stacked, slot).then((room) => {
+            if (room) return detachLayer(row.frame, row.node.selector, room)
           })
         }
         return

@@ -251,12 +251,16 @@ export function dropEntry(entry: HistoryEntry) {
  *  was saved rather than writing the pre-move source over it. The entry
  *  keeps its place among the edits around it. */
 export function keepTransferDestination(entry: HistoryEntry) {
-  if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, 1)
+  if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, -1)
 }
 
 export function recordDrawingTransfer(
   destination: { before: Frame | null; after: Frame },
   source: { before: Frame; after: Frame | null },
+  /** a restack the move needed first (a page renumbered to make room for
+   *  the destination): undone after the destination goes, redone before
+   *  it comes back */
+  stack?: { before: StackWrite[]; after: StackWrite[] },
 ): HistoryEntry {
   const added: Entry = destination.before
     ? updateEntry(destination.after.id, { html: destination.before.html }, { html: destination.after.html })!
@@ -264,7 +268,10 @@ export function recordDrawingTransfer(
   const removed: Entry = source.after
     ? updateEntry(source.before.id, { html: source.before.html }, { html: source.after.html })!
     : { type: 'delete', frameId: source.before.id, snapshot: snapshot(source.before) }
-  const entry: Entry = { type: 'transfer', canvasId: source.before.canvasId, entries: [added, removed] }
+  const canvasId = source.before.canvasId
+  const entries: Entry[] = [added, removed]
+  if (stack?.after.length) entries.unshift({ type: 'stack', canvasId, before: stack.before, after: stack.after })
+  const entry: Entry = { type: 'transfer', canvasId, entries }
   push(entry)
   return entry
 }

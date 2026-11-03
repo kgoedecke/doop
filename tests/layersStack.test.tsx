@@ -215,5 +215,17 @@ describe('LayersPanel stacking', () => {
     /* the element comes out where the line was: between f1 and f2 */
     expect(stack()).toEqual(['f1', 'new', 'f2', 's1'])
     expect(createFrame.mock.calls[0]?.[1].z).toBe(0.5)
+    /* one undo takes the element back in and the renumbering with it, so
+       every frame has the `z` it had before the drop */
+    await act(async () => {
+      await undo()
+    })
+    expect(stack()).toEqual(['f1', 'f2', 's1'])
+    expect(useStore.getState().canvas?.frames.map((f) => [f.id, f.z])).toEqual([
+      ['f1', 1_700_000_000_000],
+      ['f2', 1_700_000_000_000 + 2 ** -12],
+      ['s1', 1_700_000_000_001],
+    ])
+    expect(restackFrames).toHaveBeenCalledTimes(2)
   })
 })
