@@ -12,6 +12,7 @@ import {
   lengthScale,
   multiply,
   paddedBounds,
+  parseLength,
   parseTransform,
   scaling,
   shapeToSubpaths,
@@ -22,6 +23,7 @@ import {
   type Box,
   type Matrix,
   type Subpath,
+  type Viewport,
 } from './svgPath'
 
 export interface ImportedSvg {
@@ -105,7 +107,25 @@ const DEFAULTS: Record<string, string> = {
   visibility: 'visible',
   display: 'inline',
   color: 'black',
+  'stop-color': 'black',
+  'stop-opacity': '1',
+  'flood-color': 'black',
+  'flood-opacity': '1',
+  'lighting-color': 'white',
+  transform: 'none',
+  'transform-origin': '0 0',
 }
+/** What a copied definition (a gradient stop, a clip's shape) keeps of its styles. */
+const DEF_PROPS = [
+  ...PAINT_PROPS,
+  'stop-color',
+  'stop-opacity',
+  'flood-color',
+  'flood-opacity',
+  'lighting-color',
+  'opacity',
+  'transform',
+] as const
 
 /** The element's own declared value, from its `style` attribute or its presentation attribute. */
 function declared(el: Element, property: string): string | null {
@@ -183,7 +203,7 @@ function viewBoxOf(el: Element): Box | null {
 
 /** The matrix that fits a viewBox into a viewport, honouring `preserveAspectRatio`. */
 function viewBoxFit(viewBox: Box, viewport: Box, preserveAspectRatio: string | null): Matrix {
-  const [align = 'xMidYMid', meetOrSlice = 'meet'] = (preserveAspectRatio ?? '').trim().split(/\s+/)
+  const [align = 'xMidYMid', meetOrSlice = 'meet'] = (preserveAspectRatio?.trim() || 'xMidYMid').split(/\s+/)
   let sx = viewport.width / viewBox.width
   let sy = viewport.height / viewBox.height
   let tx = viewport.x
@@ -292,7 +312,15 @@ interface Paint {
 }
 
 type Node =
-  | { kind: 'group'; name: string; opacity: number; clip: Reference | null; mask: string | null; children: Node[] }
+  | {
+      kind: 'group'
+      name: string
+      opacity: number
+      clip: Reference | null
+      mask: string | null
+      filter: string | null
+      children: Node[]
+    }
   | {
       kind: 'shape'
       name: string
@@ -341,23 +369,25 @@ function nameOf(el: Element): string {
 class Walker {
   layers = 0
   visited = 0
-  constructor(private readonly read: StyleReader) {}
+  constructor(
+    private readonly read: StyleReader,
+    /** The viewport a shape's percentages refer to: the nearest svg's viewBox. */
+    private viewport: Viewport,
+  ) {}
 
   visit(el: Element, parentCtm: Matrix): Node | null {
     if (++this.visited > MAX_ELEMENTS || this.layers >= MAX_LAYERS) return null
     const tag = el.localName
     if (el.namespaceURI !== SVG_NS || SKIP_TAGS.has(tag)) return null
     if (this.read(el, 'display') === 'none') return null
-    const own = parseTransform(el.getAttribute('transform')) ?? IDENTITY
-    const cssTransform = declared(el, 'transform')
-    const ctm = multiply(
-      parentCtm,
-      multiply(
-        own,
-        cssTransform && !el.hasAttribute('transform') ? (parseTransform(cssTransform) ?? IDENTITY) : IDENTITY,
-      ),
-    )
-    if (tag === 'svg') return this.group(el, this.nestedSvg(el, ctm))
+    const ctm = multiply(parentCtm, this.transformOf(el))
+    if (tag === 'svg') {
+      const outer = this.viewport
+      this.viewport = viewBoxOf(el) ?? this.viewport
+      const node = this.group(el, this.nestedSvg(el, ctm))
+      this.viewport = outer
+      return node
+    }
     if (GROUP_TAGS.has(tag)) return this.group(el, ctm)
     if (SHAPE_TAGS.has(tag)) return this.shape(el, ctm)
     if (RAW_TAGS.has(tag)) return this.raw(el, ctm)
@@ -374,26 +404,41 @@ class Walker {
     return multiply(ctm, viewBoxFit(viewBox, { x, y, width, height }, el.getAttribute('preserveAspectRatio')))
   }
 
-  private group(el: Element, ctm: Matrix): Node | null {
+  /** The element's own transform as the styles resolve it (a stylesheet's
+   *  `transform` overrides the attribute), about its `transform-origin`. */
+  private transformOf(el: Element): Matrix {
+    const resolved =
+      parseTransform(this.read(el, 'transform')) ?? parseTransform(el.getAttribute('transform')) ?? IDENTITY
+    const [ox = 0, oy = 0] = (this.read(el, 'transform-origin') || '0 0')
+      .split(/\s+/)
+      .map((part) => parseLength(part) ?? 0)
+    if (!ox && !oy) return resolved
+    return multiply(multiply(translation(ox, oy), resolved), translation(-ox, -oy))
+  }
+
+  /** A group's own effects, which the written group carries as a whole. */
+  private effects(el: Element, ctm: Matrix) {
+    const clip = referenceId(this.read(el, 'clip-path'))
+    return {
+      opacity: opacityOf(this.read(el, 'opacity')),
+      clip: clip ? { id: clip, ctm } : null,
+      mask: referenceId(this.read(el, 'mask')),
+      filter: referenceId(this.read(el, 'filter')),
+    }
+  }
+
+  group(el: Element, ctm: Matrix): Node | null {
     const children: Node[] = []
     for (const child of el.children) {
       const node = this.visit(child, ctm)
       if (node) children.push(node)
     }
     if (!children.length) return null
-    const clip = referenceId(this.read(el, 'clip-path'))
-    return {
-      kind: 'group',
-      name: nameOf(el),
-      opacity: opacityOf(this.read(el, 'opacity')),
-      clip: clip ? { id: clip, ctm } : null,
-      mask: referenceId(this.read(el, 'mask')),
-      children,
-    }
+    return { kind: 'group', name: nameOf(el), ...this.effects(el, ctm), children }
   }
 
   private shape(el: Element, ctm: Matrix): Node | null {
-    const local = shapeToSubpaths(el)
+    const local = shapeToSubpaths(el, this.viewport)
     if (!local || this.read(el, 'visibility') === 'hidden') return null
     const subpaths = transformSubpaths(local, ctm)
     const scale = lengthScale(ctm)
@@ -432,26 +477,27 @@ class Walker {
     const element = el.cloneNode(true) as Element
     element.removeAttribute('transform')
     element.removeAttribute('id')
-    this.bake(element, el)
+    bakeStyles(element, el, this.read, [...PAINT_PROPS, ...TEXT_PROPS])
     this.layers++
     return { kind: 'raw', name: nameOf(el), element, ctm, opacity: opacityOf(this.read(el, 'opacity')) }
   }
+}
 
-  /** Text keeps the paint and font it computed, written onto the clone so a
-   *  class rule or inherited fill survives leaving the file's tree. */
-  private bake(clone: Element, original: Element) {
-    const style: string[] = []
-    for (const property of [...PAINT_PROPS, ...TEXT_PROPS]) {
-      const value = this.read(original, property)
-      if (value && value !== DEFAULTS[property]) style.push(`${property}:${value}`)
-    }
-    if (style.length) clone.setAttribute('style', style.join(';'))
-    const originals = [...original.children]
-    ;[...clone.children].forEach((child, index) => {
-      const source = originals[index]
-      if (source) this.bake(child, source)
-    })
+/** A clone keeps the styles its original resolved, written inline, so a
+ *  class rule or inherited fill survives leaving the file's tree; children
+ *  are paired by position. */
+function bakeStyles(clone: Element, original: Element, read: StyleReader, properties: readonly string[]) {
+  const style: string[] = []
+  for (const property of properties) {
+    const value = read(original, property)
+    if (value && value !== DEFAULTS[property]) style.push(`${property}:${value}`)
   }
+  if (style.length) clone.setAttribute('style', style.join(';'))
+  const originals = [...original.children]
+  ;[...clone.children].forEach((child, index) => {
+    const source = originals[index]
+    if (source) bakeStyles(child, source, read, properties)
+  })
 }
 
 function opacityOf(value: string): number {
@@ -495,7 +541,7 @@ function unwrap(nodes: Node[]): Node[] {
     if (node.kind !== 'group') return node
     const children = unwrap(node.children)
     const only = children[0]
-    if (children.length === 1 && only && node.opacity === 1 && !node.clip && !node.mask) return only
+    if (children.length === 1 && only && node.opacity === 1 && !node.clip && !node.mask && !node.filter) return only
     return { ...node, children }
   })
 }
@@ -514,12 +560,16 @@ class Writer {
     private readonly source: Element,
     private readonly content: Box,
     private readonly key: string,
+    read: StyleReader,
   ) {
     this.doc = new DOMParser().parseFromString('<!doctype html><html><head></head><body></body></html>', 'text/html')
     this.defs = this.doc.createElementNS(SVG_NS, 'defs')
     for (const el of source.querySelectorAll([...DEF_TAGS].join(','))) {
       if (el.parentElement && DEF_TAGS.has(el.parentElement.localName)) continue
-      this.defs.append(this.doc.importNode(el, true))
+      /* a stop coloured by a class keeps that colour once the stylesheet is gone */
+      const copy = this.doc.importNode(el, true)
+      bakeStyles(copy, el, read, DEF_PROPS)
+      this.defs.append(copy)
     }
     for (const el of source.querySelectorAll('[id]')) this.ids.add(el.getAttribute('id')!)
   }
@@ -540,7 +590,7 @@ class Writer {
       const root = this.group(
         nodes.length === 1 && only?.kind === 'group'
           ? { ...only, name }
-          : { kind: 'group', name, opacity: 1, clip: null, mask: null, children: nodes },
+          : { kind: 'group', name, opacity: 1, clip: null, mask: null, filter: null, children: nodes },
       )
       if (this.defs.childElementCount) {
         const host = doc.createElementNS(SVG_NS, 'svg')
@@ -572,6 +622,8 @@ class Writer {
       const id = this.bakedClip(node.clip, multiply(translation(-this.content.x, -this.content.y), node.clip.ctm))
       if (id) style += `clip-path:url(#${id});`
     }
+    if (node.mask) style += `mask:url(#${node.mask});`
+    if (node.filter) style += `filter:url(#${node.filter});`
     div.setAttribute('style', style)
     for (const child of node.children) div.append(this.node(child))
     return div
@@ -698,16 +750,16 @@ export function importSvg(root: SVGSVGElement, name: string, options: ImportOpti
   const size = rootSize(root)
   const viewBox = viewBoxOf(root) ?? { x: 0, y: 0, ...size }
   const rootCtm = viewBoxFit(viewBox, { x: 0, y: 0, ...size }, root.getAttribute('preserveAspectRatio'))
-  const walker = new Walker(read)
-  const nodes: Node[] = []
-  for (const child of root.children) {
-    const node = walker.visit(child, rootCtm)
-    if (node) nodes.push(node)
-  }
-  const unwrapped = unwrap(nodes)
+  if (read(root, 'display') === 'none') return null
+  const walker = new Walker(read, viewBox)
+  /* the root's own effects (an opacity, a clip, a transform) belong to the
+     whole: it is walked as the group it is */
+  const whole = walker.group(root, multiply(walker['transformOf'](root), rootCtm))
+  if (!whole) return null
+  const unwrapped = unwrap([whole])
   const content = contentBox(unwrapped, { x: 0, y: 0, ...size })
   if (!content || content.width <= 0 || content.height <= 0) return null
-  const html = new Writer(root, content, key).document(unwrapped, name)
+  const html = new Writer(root, content, key, read).document(unwrapped, name)
   return { html, width: content.width, height: content.height, layers: walker.layers }
 }
 

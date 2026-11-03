@@ -2,7 +2,7 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { recordCreate, recordCreates } from './history'
+import { recordCreates } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
@@ -170,11 +170,20 @@ function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
 /** Horizontal breathing room between images dropped together. */
 const IMAGE_ROW_GAP = 40
 
+interface Slot {
+  width: number
+  height: number
+  /** A vector keeps its proportions; a bitmap sits in a box it fits inside. */
+  uniform?: boolean
+}
+
 /** Lay sizes out in a row centered as a group on `at` (a screen point, the
  *  middle of the view when left out; one lands dead-center), in world px. */
-function rowSlots(sizes: { width: number; height: number }[], at?: { x: number; y: number }) {
+function rowSlots(sizes: Slot[], at?: { x: number; y: number }) {
   const scaled = sizes.map((d) => {
     const scale = Math.min(1, MAX_PASTE_DIM / Math.max(d.width, d.height))
+    if (d.uniform)
+      return { width: Math.max(1, Math.round(d.width * scale)), height: Math.max(1, Math.round(d.height * scale)) }
     return { width: Math.max(40, Math.round(d.width * scale)), height: Math.max(40, Math.round(d.height * scale)) }
   })
   const vp = useStore.getState().viewport
@@ -225,7 +234,7 @@ function fileStem(name: string): string {
   return name.replace(/\.[a-z0-9]+$/i, '').trim()
 }
 
-/* ---- SVG: a file's shapes become editable vector layers, not a picture ---- */
+/* ---- files from the clipboard or a drop: bitmaps become pictures, SVGs editable shapes ---- */
 
 /** An SVG on the clipboard or in a drop, by type or by name. */
 export function isSvgFile(file: File): boolean {
@@ -239,74 +248,92 @@ export function svgMarkupOf(data: DataTransfer | null): string | null {
   return looksLikeSvg(text) ? text : null
 }
 
-export interface VectorSource {
-  name: string
-  markup: string
+/** What a paste or drop brought: image files, SVG files, or SVG source text. */
+export interface IncomingFiles {
+  images: File[]
+  vectors: File[]
+  markup?: string | null
 }
 
-export async function vectorSources(files: File[]): Promise<VectorSource[]> {
-  return Promise.all(files.map(async (file) => ({ name: fileStem(file.name) || 'Vector', markup: await file.text() })))
+export function splitIncoming(files: File[], markup: string | null = null): IncomingFiles {
+  const vectors = files.filter(isSvgFile)
+  return {
+    vectors,
+    images: files.filter((f) => f.type.startsWith('image/') && !isSvgFile(f)),
+    markup: files.length ? null : markup,
+  }
 }
 
-/** Import SVG sources as standalone vector elements in a row centered on `at`.
- *  Nothing is uploaded: the shapes live in the element's own HTML. */
-export async function importVectorFrames(
+export function hasIncoming({ images, vectors, markup }: IncomingFiles): boolean {
+  return images.length > 0 || vectors.length > 0 || !!markup
+}
+
+/** One frame to create, sized and named, with its markup ready. */
+type Prepared = { name: string; size: Slot; html: () => Promise<string> }
+
+/** Place everything a paste or drop brought as one row, bitmaps and vectors
+ *  alike, centered on `at`. Whatever lands is recorded as one undo step and
+ *  becomes the selection, even when a sibling request fails. */
+async function importIncoming(
   canvasId: string,
-  sources: VectorSource[],
-  at?: { x: number; y: number },
+  incoming: IncomingFiles,
+  { fallbackName, at }: { fallbackName: string; at?: { x: number; y: number } },
 ): Promise<Frame[]> {
-  const imported = sources.map((source) => importSvgInBrowser(source.markup, source.name))
-  const usable = imported.flatMap((result, i) => (result ? [{ result, name: sources[i]!.name }] : []))
-  if (!usable.length) throw new Error('The SVG has no shapes to import.')
+  const images: Prepared[] = await Promise.all(
+    incoming.images.map(async (file) => ({
+      name: fileStem(file.name) || fallbackName,
+      size: await imageSize(file),
+      html: async () => {
+        const { url } = await api.uploadAsset(canvasId, file)
+        return imageElementHtml(url, fileStem(file.name) || fallbackName)
+      },
+    })),
+  )
+  const sources = incoming.markup
+    ? [{ name: 'Vector', markup: incoming.markup }]
+    : await Promise.all(
+        incoming.vectors.map(async (file) => ({ name: fileStem(file.name) || 'Vector', markup: await file.text() })),
+      )
+  const vectors: Prepared[] = sources.flatMap(({ name, markup }) => {
+    const result = importSvgInBrowser(markup, name)
+    if (!result) return []
+    return [
+      {
+        name,
+        size: { width: result.width, height: result.height, uniform: true },
+        html: () => Promise.resolve(result.html),
+      },
+    ]
+  })
+  if (sources.length && !vectors.length && !images.length) throw new Error('The SVG has no shapes to import.')
+  const prepared = [...vectors, ...images]
   const placed = rowSlots(
-    usable.map(({ result }) => ({ width: result.width, height: result.height })),
+    prepared.map((p) => p.size),
     at,
   )
-  return Promise.all(
-    usable.map(({ result, name }, i) => {
+  const requests = await Promise.all(
+    prepared.map(async (p, i) => {
       const slot = placed[i]!
-      return api.createFrame(canvasId, {
-        name,
-        html: result.html,
-        width: slot.width,
-        height: slot.height,
-        x: slot.x,
-        y: slot.y,
-      })
+      return {
+        canvasId,
+        frame: { name: p.name, html: await p.html(), width: slot.width, height: slot.height, x: slot.x, y: slot.y },
+      }
     }),
   )
+  const created = await createFrames(requests)
+  if (!created.length && requests.length) throw new Error('Couldn’t add the files.')
+  return created
 }
 
-export async function pasteVectorsCentered(canvasId: string, sources: VectorSource[]) {
-  const frames = await importVectorFrames(canvasId, sources)
-  posthog.capture('svg_pasted', { count: frames.length })
-  adoptImageFrames(frames)
+export async function pasteFilesCentered(canvasId: string, incoming: IncomingFiles) {
+  const frames = await importIncoming(canvasId, incoming, { fallbackName: 'Pasted image' })
+  posthog.capture('files_pasted', { images: incoming.images.length, vectors: frames.length - incoming.images.length })
 }
 
-export async function dropVectors(canvasId: string, sources: VectorSource[], at: { x: number; y: number }) {
-  const frames = await importVectorFrames(canvasId, sources, at)
-  posthog.capture('svg_dropped', { count: frames.length })
-  adoptImageFrames(frames)
-}
-
-export async function pasteImagesCentered(canvasId: string, files: File[]) {
-  const frames = await uploadImageFrames(canvasId, files)
-  posthog.capture('image_pasted', { count: frames.length })
-  adoptImageFrames(frames)
-}
-
-/** Images dragged in from the desktop land centered on the drop point. */
-export async function dropImages(canvasId: string, files: File[], at: { x: number; y: number }) {
-  const frames = await uploadImageFrames(canvasId, files, { fallbackName: 'Dropped image', at })
-  posthog.capture('image_dropped', { count: frames.length })
-  adoptImageFrames(frames)
-}
-
-/** New image frames are undoable and the last one becomes the selection. */
-function adoptImageFrames(frames: Frame[]) {
-  frames.forEach(recordCreate)
-  const last = frames[frames.length - 1]
-  if (last) useStore.getState().select(last.id)
+/** Files dragged in from the desktop land centered on the drop point. */
+export async function dropFiles(canvasId: string, incoming: IncomingFiles, at: { x: number; y: number }) {
+  const frames = await importIncoming(canvasId, incoming, { fallbackName: 'Dropped image', at })
+  posthog.capture('files_dropped', { images: incoming.images.length, vectors: frames.length - incoming.images.length })
 }
 
 /** Duplicate frames 40px down-right of the originals, keeping their layout;

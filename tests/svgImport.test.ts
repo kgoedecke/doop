@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { importSvgMarkup, looksLikeSvg } from '../src/lib/svgImport'
+import { attributeStyles, importSvgMarkup, looksLikeSvg, type StyleReader } from '../src/lib/svgImport'
 import { parseEditablePath, shapePath } from '../src/lib/pathEditing'
 import { isCanvasElement } from '../src/lib/drawing'
 import { buildLayerTree } from '../src/lib/layers'
@@ -186,6 +186,59 @@ describe('importing an SVG file', () => {
     expect(shapePath(first!)!.getAttribute('stroke-width')).toBe('2')
     expect(shapePath(first!)!.getAttribute('stroke-dasharray')).toBe('2 4')
     expect(second!.getAttribute('opacity')).toBe('0.4')
+  })
+
+  it('keeps the root’s own effects and a group’s mask and filter', () => {
+    const result = imported(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" opacity="0.5">
+        <defs><mask id="m"><rect width="5" height="10" fill="white"/></mask><filter id="f"><feGaussianBlur stdDeviation="1"/></filter></defs>
+        <g mask="url(#m)" filter="url(#f)"><rect width="10" height="10"/><rect width="2" height="2"/></g>
+      </svg>`)
+    const d = doc(result.html)
+    const root = d.querySelector<HTMLElement>('body > [data-doop-drawing="group"]')!
+    expect(root.getAttribute('style')).toContain('opacity:0.5')
+    const masked = [...d.querySelectorAll<HTMLElement>('[data-doop-drawing="group"]')].find((el) =>
+      el.getAttribute('style')!.includes('mask:url(#k-m)'),
+    )!
+    expect(masked.getAttribute('style')).toContain('filter:url(#k-f)')
+    expect(
+      importSvgMarkup(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" display="none"><rect width="1" height="1"/></svg>',
+        'x',
+      ),
+    ).toBeNull()
+  })
+
+  it('takes transforms and gradient stop colours from the style reader, as a stylesheet sets them', () => {
+    /* a reader standing in for the browser's computed styles: `.part` moves
+       and `.warm` stops are red, as a <style> block would say */
+    const styled: StyleReader = (el, property) => {
+      if (property === 'transform' && el.getAttribute('class') === 'part') return 'translate(20px, 0px)'
+      if (property === 'stop-color' && el.getAttribute('class') === 'warm') return 'rgb(255, 0, 0)'
+      return attributeStyles(el, property)
+    }
+    const result = importSvgMarkup(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <defs><linearGradient id="g"><stop class="warm" offset="0"/><stop offset="1" stop-color="blue"/></linearGradient></defs>
+        <rect class="part" width="10" height="10" fill="url(#g)"/>
+      </svg>`,
+      'styled',
+      { key: 'k', styles: styled },
+    )!
+    const [shape] = shapes(result.html)
+    expect(shapePath(shape!)!.getAttribute('d')).toBe('M 20 0 L 30 0 L 30 10 L 20 10 Z')
+    expect(doc(result.html).querySelector('stop')!.getAttribute('style')).toContain('stop-color:rgb(255, 0, 0)')
+  })
+
+  it('centres a nested svg’s viewBox in its box by default', () => {
+    const result = imported(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+        <rect width="100" height="50" fill="none" stroke="black"/>
+        <svg x="0" y="0" width="100" height="50" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>
+      </svg>`)
+    const inner = shapes(result.html)[1]!
+    /* a square viewBox in a 2:1 box: scaled to 50 and centred, 25 to 75 */
+    expect(shapePath(inner)!.getAttribute('d')).toBe('M 25 0 L 75 0 L 75 50 L 25 50 Z')
   })
 
   it('returns null for markup that is not SVG or draws nothing', () => {

@@ -6,6 +6,7 @@ import {
   multiply,
   nearestT,
   paddedBounds,
+  parseLength,
   parsePathData,
   parseTransform,
   pointOnSegment,
@@ -58,6 +59,11 @@ describe('path data', () => {
     const mid = pointOnSegment(from!, to!, 0.5)
     expect(Math.hypot(mid.x - 10, mid.y)).toBeCloseTo(10, 2)
   })
+  it('starts a smooth curve after an arc with a straight handle, not the arc’s own', () => {
+    const data = parsePathData('M 0 0 A 5 5 0 0 1 10 0 S 20 10 20 0')!
+    const joint = data[0]!.points.at(-2)!
+    expect(joint.handleOut).toBeUndefined()
+  })
   it('starts a new stroke after a closepath from the closed stroke’s start', () => {
     const data = parsePathData('M 0 0 L 10 0 L 10 10 Z L 5 5')!
     expect(data).toHaveLength(2)
@@ -89,6 +95,19 @@ describe('basic shapes', () => {
     expect(bounds.width).toBeCloseTo(8)
     expect(bounds.height).toBeCloseTo(4)
   })
+  it('resolves units and percentages against the viewport', () => {
+    const viewport = { width: 200, height: 100 }
+    expect(subpathsBounds(shapeToSubpaths(svg('<rect width="100%" height="50%"/>'), viewport)!)).toEqual({
+      x: 0,
+      y: 0,
+      width: 200,
+      height: 50,
+    })
+    const circle = subpathsBounds(shapeToSubpaths(svg('<circle r="10mm"/>'), viewport)!)!
+    expect(circle.width).toBeCloseTo(75.59, 1)
+    expect(parseLength('1in')).toBe(96)
+    expect(parseLength('50%')).toBeNull()
+  })
   it('reads lines, polylines and polygons', () => {
     expect(shapeToSubpaths(svg('<line x1="0" y1="0" x2="5" y2="5"/>'))![0]!.points).toHaveLength(2)
     const polyline = shapeToSubpaths(svg('<polyline points="0,0 10,0 10,10"/>'))!
@@ -112,6 +131,8 @@ describe('transforms', () => {
     expect(parseTransform('translateX(5px) rotate(0.25turn)')).not.toBeNull()
     expect(parseTransform('none')).toEqual([1, 0, 0, 1, 0, 0])
     expect(parseTransform('skewX(45)')![2]).toBeCloseTo(1)
+    /* gradians are not radians */
+    expect(apply(parseTransform('rotate(100grad)')!, { x: 1, y: 0 }).y).toBeCloseTo(1)
   })
   it.each(['rotate()', 'matrix(1 2 3)', 'scale(1) junk', 'spin(4)'])('rejects %s', (value) =>
     expect(parseTransform(value)).toBeNull(),

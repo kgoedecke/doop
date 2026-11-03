@@ -317,8 +317,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `currentColor` resolve and leak nowhere); `importSvgMarkup` reads attributes alone for tests.
   Scripts, handlers and `foreignObject` are dropped. The element's shell is the ink's box; layers
   sit in it by percentage so the shell's grips scale them. A one-shape file is a bare pen-style
-  path. Entry points: `isSvgFile` / `svgMarkupOf` in `src/lib/frameClipboard.ts`, wired in
-  `CanvasPage`'s paste and drop. Tests: `svgPath.test.ts`, `svgImport.test.ts`,
+  path. Entry points: `splitIncoming` / `pasteFilesCentered` / `dropFiles` in
+  `src/lib/frameClipboard.ts`, wired in `CanvasPage`'s paste and drop: bitmaps and vectors brought
+  together land in one row (a vector keeps its proportions, a bitmap gets at least a 40px box) and
+  whatever lands is one undo step even when a sibling request fails. Shape lengths resolve their
+  units and percentages (`parseLength`, against the nearest `viewBox`); transforms come from the
+  style reader (a stylesheet's `transform` wins) about `transform-origin`; the root's own
+  opacity, clip, mask and filter stay on the root group, a group's mask and filter on its row, and
+  copied definitions (gradient stops, clip shapes) keep the styles they resolved. Tests: `svgPath.test.ts`, `svgImport.test.ts`,
   `svgImportBrowser.test.ts`.
 - The path editor (`PathEditor.tsx`, `src/lib/pathEditing.ts`) edits any `d` the parser reads,
   compound paths included (`EditablePath.subpaths`; anchors are numbered flat across strokes);

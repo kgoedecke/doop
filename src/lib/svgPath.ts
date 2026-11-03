@@ -85,8 +85,8 @@ export function parseTransform(value: string | null | undefined): Matrix | null 
 /** Angles in CSS units become degrees; plain numbers stay as they are. */
 function angle(token: string): number {
   const value = parseFloat(token)
-  if (token.endsWith('rad')) return (value * 180) / Math.PI
   if (token.endsWith('grad')) return value * 0.9
+  if (token.endsWith('rad')) return (value * 180) / Math.PI
   if (token.endsWith('turn')) return value * 360
   return value
 }
@@ -340,6 +340,9 @@ export function parsePathData(data: string): Subpath[] | null {
         if (rx === null || ry === null || rotation === null || large === null || sweep === null || !to) return null
         const from = cursor
         for (const [a, b, end] of arcToCubics(from, rx, ry, rotation, !!large, !!sweep, to)) cubicTo(a, b, end)
+        /* a smooth curve after an arc starts straight: the arc's generated
+           handles are nothing to reflect */
+        last.cubic = last.quad = null
         break
       }
       default:
@@ -432,38 +435,81 @@ export function arcToCubics(
   return curves
 }
 
+/* ---- lengths ---- */
+
+const UNITS: Record<string, number> = {
+  px: 1,
+  pt: 4 / 3,
+  pc: 16,
+  mm: 96 / 25.4,
+  cm: 96 / 2.54,
+  in: 96,
+  em: 16,
+  rem: 16,
+}
+
+/** A length with its unit resolved to px; a percentage against `reference`
+ *  (the viewport's width, height or diagonal), or null without one. */
+export function parseLength(value: string | null | undefined, reference?: number): number | null {
+  if (!value) return null
+  const match = /^\s*([-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?)\s*([a-z%]*)\s*$/i.exec(value)
+  if (!match) return null
+  const number = Number(match[1])
+  if (!Number.isFinite(number)) return null
+  const unit = (match[2] ?? '').toLowerCase()
+  if (unit === '%') return reference === undefined ? null : (number / 100) * reference
+  return number * (UNITS[unit] ?? 1)
+}
+
 /* ---- the basic shapes ---- */
 
-function attribute(el: Element, name: string, fallback = 0): number {
+/** The viewport a shape's percentages refer to. */
+export interface Viewport {
+  width: number
+  height: number
+}
+
+/** Percent references by axis: x-ish lengths against the width, y-ish
+ *  against the height, a radius against the normalised diagonal. */
+function reference(name: string, viewport?: Viewport): number | undefined {
+  if (!viewport) return undefined
+  if (/^(x\d?|cx|width|rx)$/.test(name)) return viewport.width
+  if (/^(y\d?|cy|height|ry)$/.test(name)) return viewport.height
+  return Math.sqrt((viewport.width ** 2 + viewport.height ** 2) / 2)
+}
+
+function attribute(el: Element, name: string, viewport?: Viewport, fallback = 0): number {
   const raw = el.getAttribute(name)
   if (raw === null || raw.trim() === '') return fallback
-  const value = parseFloat(raw)
-  return Number.isFinite(value) ? value : fallback
+  return parseLength(raw, reference(name, viewport)) ?? fallback
 }
 
 /** A basic shape or path element as subpaths in its own user space, or null
- *  when the element is not a shape or its geometry is unreadable. */
-export function shapeToSubpaths(el: Element): Subpath[] | null {
+ *  when the element is not a shape or its geometry is unreadable. Lengths
+ *  with units become px; percentages resolve against `viewport`. */
+export function shapeToSubpaths(el: Element, viewport?: Viewport): Subpath[] | null {
   switch (el.localName) {
     case 'path':
       return parsePathData(el.getAttribute('d') ?? '')
     case 'rect':
-      return rectSubpaths(el)
+      return rectSubpaths(el, viewport)
     case 'circle': {
-      const r = attribute(el, 'r')
-      return r > 0 ? [ellipseSubpath(attribute(el, 'cx'), attribute(el, 'cy'), r, r)] : null
+      const r = attribute(el, 'r', viewport)
+      return r > 0 ? [ellipseSubpath(attribute(el, 'cx', viewport), attribute(el, 'cy', viewport), r, r)] : null
     }
     case 'ellipse': {
-      const rx = attribute(el, 'rx')
-      const ry = attribute(el, 'ry')
-      return rx > 0 && ry > 0 ? [ellipseSubpath(attribute(el, 'cx'), attribute(el, 'cy'), rx, ry)] : null
+      const rx = attribute(el, 'rx', viewport)
+      const ry = attribute(el, 'ry', viewport)
+      return rx > 0 && ry > 0
+        ? [ellipseSubpath(attribute(el, 'cx', viewport), attribute(el, 'cy', viewport), rx, ry)]
+        : null
     }
     case 'line':
       return [
         {
           points: [
-            { x: attribute(el, 'x1'), y: attribute(el, 'y1') },
-            { x: attribute(el, 'x2'), y: attribute(el, 'y2') },
+            { x: attribute(el, 'x1', viewport), y: attribute(el, 'y1', viewport) },
+            { x: attribute(el, 'x2', viewport), y: attribute(el, 'y2', viewport) },
           ],
           closed: false,
         },
@@ -481,14 +527,14 @@ export function shapeToSubpaths(el: Element): Subpath[] | null {
   }
 }
 
-function rectSubpaths(el: Element): Subpath[] | null {
-  const x = attribute(el, 'x')
-  const y = attribute(el, 'y')
-  const width = attribute(el, 'width')
-  const height = attribute(el, 'height')
+function rectSubpaths(el: Element, viewport?: Viewport): Subpath[] | null {
+  const x = attribute(el, 'x', viewport)
+  const y = attribute(el, 'y', viewport)
+  const width = attribute(el, 'width', viewport)
+  const height = attribute(el, 'height', viewport)
   if (width <= 0 || height <= 0) return null
-  let rx = el.hasAttribute('rx') ? attribute(el, 'rx', -1) : -1
-  let ry = el.hasAttribute('ry') ? attribute(el, 'ry', -1) : -1
+  let rx = el.hasAttribute('rx') ? attribute(el, 'rx', viewport, -1) : -1
+  let ry = el.hasAttribute('ry') ? attribute(el, 'ry', viewport, -1) : -1
   if (rx < 0 && ry < 0) rx = ry = 0
   else if (rx < 0) rx = ry
   else if (ry < 0) ry = rx
