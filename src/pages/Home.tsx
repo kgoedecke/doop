@@ -77,6 +77,8 @@ function workspaceOf(scope: Scope): string | undefined {
 export function Home() {
   const [canvases, setCanvases] = useState<CanvasMeta[] | null>(null)
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
+  /* an empty list is an answer too: someone removed from their last workspace */
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false)
   const [scope, setScope] = useState<Scope>(() => {
     const wanted = new URLSearchParams(location.search).get('scope')
     return wanted === 'mine' || wanted === 'shared' || wanted?.startsWith('ws:') ? (wanted as Scope) : 'all'
@@ -281,6 +283,7 @@ export function Home() {
         if (seq < shown.current.workspaces) return
         shown.current.workspaces = seq
         setWorkspaces(res.workspaces)
+        setWorkspacesLoaded(true)
       })
       .catch(console.error)
   }
@@ -289,7 +292,7 @@ export function Home() {
   const scopedWorkspace = workspaceOf(scope)
   const currentWorkspace = scopedWorkspace ? workspaces.find((w) => w.id === scopedWorkspace) : undefined
   /* a workspace that vanished (deleted, or left) drops the view back to all */
-  const scopeGone = !!scopedWorkspace && workspaces.length > 0 && !currentWorkspace
+  const scopeGone = !!scopedWorkspace && workspacesLoaded && !currentWorkspace
   const [seenScopeGone, setSeenScopeGone] = useState(false)
   if (scopeGone !== seenScopeGone) {
     setSeenScopeGone(scopeGone)
