@@ -357,9 +357,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       /* a picked element (from the canvas or the layers tree) is what ⌫
          removes — the frame it lives in only goes when nothing inside it is
          selected. Auto-repeat is ignored: a held key must not take the
-         element and then, on the next repeat, the frame under it. */
+         element and then, on the next repeat, the frame under it. The key is
+         always claimed, deleted something or not: an unhandled Backspace is
+         "back" to some engines (WebKitGTK, the Linux desktop app), and a
+         canvas must never leave the page for it. */
       const canEdit = canEditOpenCanvas(useStore.getState())
-      if (canEdit && (e.key === 'Delete' || e.key === 'Backspace') && !e.repeat && deleteSelection()) e.preventDefault()
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        if (canEdit && !e.repeat) deleteSelection()
+      }
       const nudge = ARROW_NUDGE[e.key]
       if (
         canEdit &&

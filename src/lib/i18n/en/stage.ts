@@ -44,7 +44,6 @@ export const stage = {
   githubImportedTip: 'Imported from a GitHub repo',
   isDesigning: '{name} is designing',
   isOnIt: '{name} is on it',
-  saveAndFinish: 'Save and finish editing (Esc)',
   elementComment: 'Comment',
   askAi: 'Ask AI',
   code: 'Code',

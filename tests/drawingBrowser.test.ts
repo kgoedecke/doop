@@ -1273,6 +1273,25 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(saved[0]?.html).toContain('left:400px;top:60px;width:100px;height:80px;background:coral"></div>')
   })
 
+  it('drops the hover outline of a layer the document no longer has, without the pointer moving', async () => {
+    const box =
+      '<div id="box" style="position:absolute;left:50px;top:50px;width:100px;height:80px;background:teal"></div>'
+    await seedFrames([layerFrame(box)])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    const target = await visibleDrawing('Layers', '#box')
+    await page.mouse.move(target.x + 20, target.y + 20)
+    await page.waitForSelector('[data-hover-outline]')
+    /* the layer goes (⌫, a collaborator's save): the pointer has not moved,
+       and the outline it was wearing must not outlive it */
+    await seedFrames([layerFrame('')])
+    await page.waitForFunction(() => !document.querySelector('[data-hover-outline]'))
+    /* and what is under the pointer now gets the outline instead */
+    await seedFrames([
+      layerFrame('<p id="under" style="position:absolute;left:0;top:0;width:300px;height:200px">Under</p>'),
+    ])
+    await page.waitForFunction(() => document.querySelector('[data-hover-outline]')?.textContent === 'p')
+  })
+
   it('still enters text editing on double-click and moves the whole frame from its title', async () => {
     const source = layerFrame('<p id="text" style="width:100px;height:80px;margin:50px">Edit me</p>')
     await seedFrames([source])
@@ -1281,10 +1300,27 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.mouse.click(text.x + 20, text.y + 10, { count: 2, delay: 60 })
     const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
     await iframe.waitForSelector('style[data-v-edit]')
-    await iframe.click('#text')
+    /* the double-click itself opens the text with every character selected
+       (no second click to place a caret), outlined by the page's hairline
+       with no grips and no badge to dismiss */
     await iframe.waitForSelector('#text[contenteditable]')
+    expect(await iframe.evaluate(() => getSelection()?.toString())).toBe('Edit me')
+    await page.waitForSelector('[data-editing-outline]')
+    expect(await page.$('[data-element-outline]')).toBeNull()
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+    expect(await page.$$eval('button', (buttons) => buttons.some((b) => b.textContent?.trim() === 'Done'))).toBe(false)
     await page.keyboard.press('Escape')
     await iframe.waitForFunction(() => !document.querySelector('style[data-v-edit]'))
+    /* the edit's text selection does not outlive it */
+    expect(await iframe.evaluate(() => getSelection()?.toString() ?? '')).toBe('')
+    /* Escape hands the keyboard back to the page: the next key (⌫ on the
+       still-selected element) must reach the canvas's window, not the frame */
+    await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME')
+    const heard = page.evaluate(
+      () => new Promise<string>((resolve) => window.addEventListener('keydown', (e) => resolve(e.key), { once: true })),
+    )
+    await page.keyboard.press('Backspace')
+    expect(await heard).toBe('Backspace')
     const before = await page.$eval('iframe[title="Layers"]', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
     await drag([before.x + 20, before.y - 14], [before.x + 80, before.y + 16])
     await expect.poll(() => saved[0]?.x).toBe(source.x + 60)

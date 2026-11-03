@@ -36,17 +36,7 @@ import { elementIdSelector } from '../../shared/elementId'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { Tooltip } from './ui/tooltip'
-import {
-  CheckIcon,
-  CodeIcon,
-  CommentIcon,
-  EditIcon,
-  EyeClosedIcon,
-  GithubIcon,
-  LockIcon,
-  SyncIcon,
-  SparkIcon,
-} from './ui/icons'
+import { CodeIcon, CommentIcon, EditIcon, EyeClosedIcon, GithubIcon, LockIcon, SyncIcon, SparkIcon } from './ui/icons'
 import { isSyncedFrame } from '../lib/sync'
 import { isGithubFrame, isGithubPlaceholder } from '../lib/github'
 import { AgentIcon } from './AgentIcon'
@@ -704,10 +694,14 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
   const hoverKey = useRef<string | null>(null)
 
   const hoverLast = useRef(0)
-  function sendHover(x: number, y: number) {
+  /* where the pointer last was over this frame, in design px, while it is
+     still over it: the document under it can change without it moving */
+  const hoverAt = useRef<{ x: number; y: number } | null>(null)
+  function sendHover(x: number, y: number, force = false) {
+    hoverAt.current = { x, y }
     /* pointermove fires every frame — one probe per ~40ms is plenty */
     const now = Date.now()
-    if (now - hoverLast.current < 40) return
+    if (!force && now - hoverLast.current < 40) return
     hoverLast.current = now
     hoverReq.current += 1
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:hover', reqId: hoverReq.current, x, y }, '*')
@@ -718,6 +712,29 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
     hoverKey.current = null
     setHover(null)
   }
+
+  function leaveHover() {
+    hoverAt.current = null
+    clearHover()
+  }
+
+  /* the document changed under a still pointer (⌫ took the hovered layer,
+     a save landed): the outline drawn for the old document is stale, so ask
+     again at the same point once the runtime shows the new one — the
+     element now under the pointer is outlined, or nothing is */
+  useEffect(() => {
+    if (!runtimeDocument) return
+    const at = hoverAt.current
+    if (!at) return
+    /* the old outline's key must match no answer, not even "nothing here",
+       so the reply always redraws */
+    hoverKey.current = 'stale'
+    if (editing || pathEdit || dragging || elementMove.moving || resizing || frame.locked || tool === 'hand') {
+      clearHover()
+      return
+    }
+    sendHover(at.x, at.y, true)
+  }, [runtimeDocument]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* a Layers row under the pointer outlines its element here, the same as a
      hover over the frame: ask the runtime where the element is, and draw the
@@ -1116,10 +1133,19 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       )
     }
     setEditing(true)
-    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: true }, '*')
+    /* the point goes along so the runtime edits the text under it straight
+       away, all of it selected, as a double-click does in Figma */
+    iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: true, x: at?.x, y: at?.y }, '*')
+  }
+  /* focus held by the frame's document (a text edit) comes back to the page,
+     so the canvas's keyboard shortcuts hear the next key */
+  function reclaimFocus() {
+    const iframe = iframeRef.current
+    if (iframe && document.activeElement === iframe) iframe.blur()
   }
   function exitEdit() {
     iframeRef.current?.contentWindow?.postMessage({ type: 'doop:edit', on: false }, '*')
+    reclaimFocus()
     setEditing(false)
     setActiveHit(null)
     setComposing(false)
@@ -1158,6 +1184,11 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
       }
       if (ev.data?.type === 'doop:edit-esc') {
         setEditing(false)
+        /* the keyboard was in the frame's document while the text was being
+           edited; it stays there after Escape unless the frame lets go, and
+           the canvas's own shortcuts (⌫ on the still-selected element, a
+           tool letter) listen on this window */
+        reclaimFocus()
         setSuspendPost(true)
         window.setTimeout(() => setSuspendPost(false), 500)
       }
@@ -1405,7 +1436,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               elementMove.moving ? 'cursor-move' : 'cursor-default',
               !isCanvasElement(frame.html) && (dragging ? 'shadow-pop' : 'shadow-card'),
               selected && !pathEdit && 'outline-2 outline-offset-1 outline-brand',
-              editing && 'cursor-text outline-2 outline-offset-1 outline-dashed outline-brand',
+              editing && 'cursor-text',
               !stream &&
                 remoteEditor &&
                 'outline-2 outline-offset-1 outline-solid outline-[var(--editing-color,var(--brand))]',
@@ -1441,7 +1472,7 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
               const at = designPoint(e, e.currentTarget)
               sendHover(at.x, at.y)
             }}
-            onPointerLeave={clearHover}
+            onPointerLeave={leaveHover}
           >
             <iframe
               ref={iframeRef}
@@ -1482,10 +1513,22 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             lifted while editing so clicks land in the editable document,
             but not under a file drag, whose drop belongs to the canvas */}
             {(!editing || panMode || fileDragging || tool !== 'select') && <div className="absolute inset-0" />}
+          </div>
+          {/* the element's hover and selection furniture: outlines, grips and
+              the size badge sit outside the surface, whose overflow clips the
+              document to the frame, so a layer wider or taller than its frame
+              is outlined in full while its content stays clipped. The layer is
+              inset by the surface's border, where the document starts, so a
+              rect in design px lands on the element it measures */}
+          <div
+            data-element-furniture=""
+            className={cn('pointer-events-none absolute', isCanvasElement(frame.html) ? 'inset-0' : 'inset-px')}
+          >
             {/* above the selection outline (z-[3]), or that outline covers the
-            hovered element's tag */}
+              hovered element's tag */}
             {hover && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
               <div
+                data-hover-outline=""
                 className="pointer-events-none absolute z-[4] bg-[rgba(60,130,246,0.06)] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
                 style={{ left: hover.rect.x, top: hover.rect.y, width: hover.rect.width, height: hover.rect.height }}
               >
@@ -1503,9 +1546,24 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
             )}
             {probe && probe.selector !== FRAME_COMMENT_SELECTOR && selected && !editing && !pathEdit && !dragging && (
               <div
+                data-element-outline=""
                 /* a one-pixel hairline, the way Paper outlines a selection */
                 className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
                 style={{ left: probe.rect.x, top: probe.rect.y, width: probe.rect.width, height: probe.rect.height }}
+              />
+            )}
+            {/* the text being edited wears the same hairline, grips aside: one
+              look for a selected element, in or out of a text edit */}
+            {editing && activeHit && (
+              <div
+                data-editing-outline=""
+                className="pointer-events-none absolute z-[3] shadow-[inset_0_0_0_calc(1px/var(--zoom,1))_#3c82f6]"
+                style={{
+                  left: activeHit.rect.x,
+                  top: activeHit.rect.y,
+                  width: activeHit.rect.width,
+                  height: activeHit.rect.height,
+                }}
               />
             )}
             {selected &&
@@ -1528,8 +1586,8 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                   )
                 })}
             {/* the grips: only where a drag can change the box, and never on
-                a locked layer or frame, or under the Comment tool — nor on a
-                multi-element pick, where a drag would size only one */}
+              a locked layer or frame, or under the Comment tool — nor on a
+              multi-element pick, where a drag would size only one */}
             {probe &&
               !multiPick &&
               selected &&
@@ -1569,27 +1627,6 @@ export const FrameView = memo(function FrameView({ frame, layoutZoom }: { frame:
                 } as React.CSSProperties
               }
             />
-          )}
-
-          {editing && (
-            <div
-              className={cn(
-                'absolute top-[calc(100%_+_10px)] left-0 flex origin-top-left items-center whitespace-nowrap rounded-full bg-ink p-1 text-[11px] font-semibold text-paper shadow-card',
-                COUNTER_SCALE,
-              )}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <Button
-                variant="primary"
-                size="pill"
-                className="border-transparent px-2.5 shadow-none hover:translate-x-0 hover:translate-y-0 hover:brightness-110 hover:shadow-none"
-                onClick={exitEdit}
-                title={t('stage.saveAndFinish')}
-              >
-                <CheckIcon size={12} />
-                {t('stage.done')}
-              </Button>
-            </div>
           )}
 
           {/* element comments: pins + element toolbar + composer, all in frame

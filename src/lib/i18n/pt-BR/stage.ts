@@ -44,7 +44,6 @@ export const stage: Catalog['stage'] = {
   githubImportedTip: 'Importado de um repositório do GitHub',
   isDesigning: '{name} está desenhando',
   isOnIt: '{name} está cuidando disso',
-  saveAndFinish: 'Salvar e concluir a edição (Esc)',
   elementComment: 'Comentar',
   askAi: 'Pedir à IA',
   code: 'Código',
