@@ -10,6 +10,7 @@ type Harness = {
   seed: (frames: Frame | Frame[]) => void
   setZoom: (zoom: number) => void
   selectFrame: () => void
+  deselectFrame: () => void
 }
 type HarnessWindow = { elementPanelHarness: Harness }
 
@@ -119,6 +120,42 @@ describe.skipIf(!findBrowserPath())('frame name stacking', () => {
       return hit?.closest('[data-frame-surface]')?.querySelector('iframe')?.title ?? null
     })
     expect(content).toBe('cover')
+  })
+
+  it("keeps an unselected frame's hover outline over its own document, however far back it ranks", async () => {
+    const BOX =
+      '<!doctype html><html><body style="margin:0"><div id="box" style="width:80px;height:60px"></div></body></html>'
+    // four frames off to the side, so `f` ranks fifth
+    const others = ['a', 'b', 'c', 'd'].map((id, i) => frame(id, 700, 20 + i * 120, 100, 100))
+    await seed([...others, { ...frame('f', 40, 60, 400, 300), html: BOX }])
+    await page.evaluate(() => (window as unknown as HarnessWindow).elementPanelHarness.deselectFrame())
+    const iframe = (await page.waitForSelector('iframe[title="f"]'))!
+    await (await iframe.contentFrame())!.waitForSelector('#box')
+    const r = (await iframe.boundingBox())!
+    // the runtime reports the hover once it is ready: keep moving until it does
+    await page.mouse.move(r.x + 40, r.y + 30)
+    await page.waitForFunction(
+      (x, y) => {
+        const target = document.elementFromPoint(x, y)
+        target?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
+        return !!document.querySelector('[data-hover-outline]')
+      },
+      { polling: 100 },
+      r.x + 40,
+      r.y + 30,
+    )
+    const onTop = await page.evaluate(
+      (x, y) => {
+        const outline = document.querySelector<HTMLElement>('[data-hover-outline]')!
+        outline.style.pointerEvents = 'auto'
+        const hit = document.elementFromPoint(x, y)
+        outline.style.pointerEvents = ''
+        return !!hit?.closest('[data-hover-outline]')
+      },
+      r.x + 40,
+      r.y + 30,
+    )
+    expect(onTop).toBe(true)
   })
 
   it('keeps the name 12px type a fixed gap above the frame at every zoom', async () => {

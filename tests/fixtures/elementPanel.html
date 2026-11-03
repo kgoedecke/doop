@@ -36,6 +36,7 @@
         select: (selector) => useStore.getState().setSelectedElement({ frameId: 'f', selector }),
         geometry: (selector, edit) => editElementGeometry('f', selector, edit),
         selectFrame: () => useStore.getState().select('f'),
+        deselectFrame: () => useStore.getState().select(null),
         deselect: () => useStore.getState().setSelectedElement(null),
         picked: () => pickedSelectors(useStore.getState()),
         pickAlso: (selector) => useStore.getState().toggleElement({ frameId: 'f', selector }),

@@ -1374,7 +1374,8 @@ export const FrameView = memo(function FrameView({
                 width: 'calc(100% * var(--zoom, 1))',
                 transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,
                 cursor: duping || dupKeyHeld ? DUP_CURSOR : undefined,
-                zIndex: stack,
+                /* the frame's place in the stack, while its wrapper gives it up */
+                zIndex: selected ? stack : undefined,
               }}
               onPointerDown={(e) => startDrag(e, 'move', false, true)}
             >
@@ -1478,7 +1479,10 @@ export const FrameView = memo(function FrameView({
               outlineWidth: 'calc(2px / var(--zoom, 1))',
               outlineOffset: 'calc(-1px / var(--zoom, 1))',
               cursor: duping || (dupKeyHeld && !editing) ? DUP_CURSOR : undefined,
-              zIndex: stack,
+              /* only while selected, when the wrapper gives up its place: inside
+                 an unselected frame's own stacking context a z-index here would
+                 cover the frame's pins and hover outlines */
+              zIndex: selected ? stack : undefined,
             }}
             onPointerDown={(e) => startDrag(e, 'move', true)}
             onDoubleClick={(e) => {
