@@ -645,7 +645,12 @@ function AgentStack({ canvas }: { canvas: CanvasMeta }) {
 /** the people on a canvas — owner first — as overlapping initial discs */
 function PeopleStack({ canvas }: { canvas: CanvasMeta }) {
   const people = canvas.people ?? []
-  return <AvatarStack size={18} people={people.map((p) => ({ id: p.id, name: p.name, color: colorFor(p.id) }))} />
+  return (
+    <AvatarStack
+      size={18}
+      people={people.map((p) => ({ id: p.id, name: p.name, image: p.image, color: colorFor(p.id) }))}
+    />
+  )
 }
 
 function Meta({ canvas: c, onClaim, workspace }: { canvas: CanvasMeta; onClaim: () => void; workspace?: string }) {

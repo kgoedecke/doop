@@ -136,6 +136,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   name. A confirm dialog before the upload says the fonts are shared with the library and that
   OS fonts are often licensed for one person; Doop checks no licences (Figma's posture for shared
   fonts). Tests: the Rust unit tests in `fonts.rs`, `localFonts.test.ts`.
+- Profile photos (`shared/avatar.ts`, `server/avatars.ts`): Settings → Your account → Photo uploads a
+  PNG/JPG/WebP/GIF under 2 MB as raw bytes to `POST /api/me/avatar`, which stores it as an ordinary
+  immutable `/a/` asset and points better-auth's `user.image` at it; `DELETE /api/me/avatar` puts the
+  initials back. `avatarUrl` is the one rule for what a face may load: only such `/a/` uploads, never
+  a social provider's picture or a URL set through the raw update-user call, so no account can make
+  every viewer fetch an address it chose. The `Avatar` primitive takes `image` (a photo that fails to
+  load falls back to the initials); it rides `Presence` (set at `join`, re-announced to the person's
+  rooms on a change), `/api/me`, the session, canvas `people`, the share list and workspace members.
+  Tests: `avatar.test.ts`, `avatarFace.test.tsx`.
 - Outside a canvas room, `GET /api/me/events` (`server/userEvents.ts`, Server-Sent Events, one
   stream per tab) pings a user's open pages with `{ type: 'canvases' }` when a canvas or workspace
   membership adds or removes them (the workspace pings come from `addMember`, `removeMember`,

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
 import { AgentIcon } from '../AgentIcon'
@@ -26,6 +26,9 @@ function labelClass(size: number) {
 
 export interface AvatarProps extends Omit<React.ComponentProps<'span'>, 'color' | 'children'> {
   name: string
+  /** the person's profile photo, filling the disc in place of the initials;
+   *  one that fails to load falls back to them */
+  image?: string
   /** the person's presence colour; their disc is a 22% tint of it */
   color?: string
   kind?: 'user' | 'agent'
@@ -45,11 +48,13 @@ export interface AvatarProps extends Omit<React.ComponentProps<'span'>, 'color' 
 }
 
 /** Who is here, as one face: a disc on a 2px surface collar. A person is
- *  their initials on a tint of their colour; an agent is its brand mark on
- *  the surface. The same face everywhere — the canvas's presence pill, the
- *  account menu, a card's people row, the share list. */
+ *  their initials on a tint of their colour, or the photo they uploaded; an
+ *  agent is its brand mark on the surface. The same face everywhere — the
+ *  canvas's presence pill, the account menu, a card's people row, the share
+ *  list. */
 function Avatar({
   name,
+  image,
   color = 'var(--ink)',
   kind = 'user',
   tone = 'tint',
@@ -62,6 +67,10 @@ function Avatar({
   children,
   ...props
 }: AvatarProps) {
+  /* a photo that cannot load (removed asset, offline) is shown as initials;
+     a new photo gets its own try */
+  const [failed, setFailed] = useState<string | null>(null)
+  const photo = image && failed !== image && kind === 'user' && !children ? image : undefined
   return (
     <span
       data-slot="avatar"
@@ -81,7 +90,7 @@ function Avatar({
         /* inline, so a text-size class (labelClass, a caller's) cannot merge it away;
            a line box no taller than the type keeps the letter centred in the disc */
         lineHeight: 1,
-        ...(kind === 'user' && tone === 'tint'
+        ...(kind === 'user' && tone === 'tint' && !photo
           ? { background: `color-mix(in srgb, ${color} 22%, var(--surface))` }
           : {}),
         ...(glaze ? ({ '--glaze-delay': `${glazeDelay}s` } as CSSProperties) : {}),
@@ -89,7 +98,11 @@ function Avatar({
       }}
       {...props}
     >
-      {children ?? (kind === 'agent' ? <AgentIcon name={name} size={Math.round(size * 0.58)} /> : initials(name))}
+      {photo ? (
+        <img src={photo} alt="" draggable={false} className="size-full object-cover" onError={() => setFailed(photo)} />
+      ) : (
+        (children ?? (kind === 'agent' ? <AgentIcon name={name} size={Math.round(size * 0.58)} /> : initials(name)))
+      )}
     </span>
   )
 }
@@ -98,6 +111,7 @@ export interface AvatarPerson {
   id: string
   name: string
   color?: string
+  image?: string
 }
 
 /** A row of overlapping faces, the first `max` of them and a "+N" disc for
@@ -120,7 +134,7 @@ function AvatarStack({
       {...props}
     >
       {shown.map((p) => (
-        <Avatar key={p.id} size={size} stacked name={p.name} color={p.color} title={p.name} />
+        <Avatar key={p.id} size={size} stacked name={p.name} image={p.image} color={p.color} title={p.name} />
       ))}
       {extra > 0 && (
         <Avatar size={size} stacked name={`${extra} more`} color="var(--ink-faint)" title={`${extra} more`}>

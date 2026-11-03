@@ -432,7 +432,7 @@ function MembersPane({
             >
               <PersonRow
                 className="flex-1"
-                avatar={<Avatar name={m.name} size={32} />}
+                avatar={<Avatar name={m.name} image={m.image} size={32} />}
                 name={self ? t('workspace.you', { name: m.name }) : m.name}
                 detail={t('workspace.emailJoined', { email: m.email, time: timeAgo(m.addedAt) })}
               />

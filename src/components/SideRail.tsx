@@ -45,7 +45,7 @@ export function SideRail({
   /** what the slot would open: the selected frame, or the page's settings */
   inspectTarget?: 'frame' | 'page'
   onToggleInspector: () => void
-  me: { name: string; color: string }
+  me: { name: string; image?: string; color: string }
   onRenameSelf: () => void
 }) {
   const t = useT()
@@ -115,7 +115,14 @@ export function SideRail({
             className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
             onClick={onRenameSelf}
           >
-            <PresenceFace name={me.name} color={me.color} kind="user" size={26} className="text-[10px] shadow-none" />
+            <PresenceFace
+              name={me.name}
+              image={me.image}
+              color={me.color}
+              kind="user"
+              size={26}
+              className="text-[10px] shadow-none"
+            />
           </button>
         </Tooltip>
       </Toolbar>
