@@ -1,7 +1,7 @@
 /** The "Webhooks" pane of /settings: registering, testing and rotating hooks. */
 export const webhooks = {
-  healthOff: 'off — nothing is sent',
-  healthNoDeliveries: 'no deliveries yet — send a test',
+  healthOff: 'off, so nothing is sent',
+  healthNoDeliveries: 'no deliveries yet',
   healthFailing: {
     one: '{count} failed in a row · last {when}: {error}',
     other: '{count} failed in a row · last {when}: {error}',
@@ -28,7 +28,7 @@ export const webhooks = {
 
   title: 'Webhooks',
   descriptionBefore:
-    'doop POSTs a signed JSON event to each URL below when something happens on a canvas you own, were invited to, or that lives in one of your workspaces — route it to Slack, n8n, an issue tracker, anything with an HTTP endpoint. Each delivery carries an ',
+    'doop POSTs a signed JSON event to each URL below when something happens on a canvas you own, were invited to, or that lives in one of your workspaces. Route it to Slack, n8n, an issue tracker, anything with an HTTP endpoint. Each delivery carries an ',
   descriptionAfter:
     ' header (HMAC-SHA256 with the webhook’s secret) so the receiver can trust it. Failed deliveries are retried three times; a hook that keeps failing pauses itself.',
   newWebhookRow: 'New webhook',
@@ -37,7 +37,7 @@ export const webhooks = {
   urlAria: 'Webhook URL',
 
   signingSecretRow: 'Signing secret',
-  copyNow: 'Copy it now — it is shown once. Verify deliveries with it on your side.',
+  copyNow: 'Copy it now: it is shown once. Verify deliveries with it on your side.',
   signatureFormula:
     'signature = “sha256=” + HMAC-SHA256(secret, X-Doop-Timestamp + “.” + raw body). The docs have a ready-made check.',
 
@@ -48,7 +48,7 @@ export const webhooks = {
   removeAria: 'Remove webhook for {host}',
   remove: 'Remove',
   noWebhooksRow: 'No webhooks yet',
-  noWebhooksNote: 'Add one above — a quick way to try it is an n8n Webhook node or a request bin.',
+  noWebhooksNote: 'Add one above. A quick way to try it is an n8n Webhook node or a request bin.',
 
   rotateConfirmTitle: 'Rotate the secret for {host}?',
   removeConfirmTitle: 'Remove the webhook for {host}?',

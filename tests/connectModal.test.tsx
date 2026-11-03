@@ -152,7 +152,7 @@ it('opens Claude directly in a capable shell and waits for Claude’s confirmati
   expect(mocks.addToDesktop).toHaveBeenCalledExactlyOnceWith('http://localhost:4301/mcp')
   await act(async () => finish())
   expect(text()).toContain('Confirm the installation in Claude')
-  expect(text()).not.toContain('is here — it worked')
+  expect(text()).not.toContain('is here. It worked')
 })
 
 it('shows native handoff errors and allows retry', async () => {

@@ -55,7 +55,7 @@ export const automations = {
   exampleNightlyPolishBlurb: 'Visual Polish tidies spacing and alignment every evening.',
 
   /* agent roles' one-liners */
-  roleBlurbDoop: 'Generalist designer — makes the thing',
+  roleBlurbDoop: 'Generalist designer who makes the thing',
   roleBlurbUx: 'Flow, hierarchy, states, affordances',
   roleBlurbCopy: 'Headlines, microcopy, labels, CTAs',
   roleBlurbBrand: 'Palette, type, logo, tone of voice',
@@ -201,8 +201,8 @@ export const automations = {
   notUsedYet: 'Not used by an automation yet',
   metaDisconnectCopy:
     'Automations that pull from Meta will fail until you connect again. Frames already on your canvases stay.',
-  metaExpiresSoon: 'Meta’s access expires soon — reconnect to keep pulls running.',
-  metaNotConfigured: 'Not configured on this server — set META_APP_ID and META_APP_SECRET.',
+  metaExpiresSoon: 'Meta’s access expires soon. Reconnect to keep pulls running.',
+  metaNotConfigured: 'Not configured on this server. Set META_APP_ID and META_APP_SECRET.',
   disconnectTitle: 'Disconnect {name}?',
 
   /* Linear */
