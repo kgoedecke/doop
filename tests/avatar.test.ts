@@ -92,6 +92,14 @@ it('stores a photo and shows it on every face', async () => {
   /* the people on a canvas, for the home tiles and the share list */
   const canvas = await (await alice.post('/api/canvases', { name: 'Faces' })).json()
   expect((await alice.post(`/api/canvases/${canvas.id}/members`, { email: 'bob-avatar@test.dev' })).status).toBe(200)
+  /* the share list appends the invite's answer as a row, so it carries the face too */
+  const carol = await new Client(server).signUp('carol-avatar@test.dev', 'Carol Avatar')
+  const { image: carolImage } = await (await upload(carol, JPG)).json()
+  const invited = await (
+    await alice.post(`/api/canvases/${canvas.id}/members`, { email: 'carol-avatar@test.dev' })
+  ).json()
+  expect(invited).toMatchObject({ name: 'Carol Avatar', image: carolImage })
+  expect((await alice.delete(`/api/canvases/${canvas.id}/members/${invited.userId}`)).status).toBe(200)
   const tiles = await (await bob.get('/api/canvases')).json()
   const tile = tiles.find((c: { id: string }) => c.id === canvas.id)
   expect(tile.people).toEqual([

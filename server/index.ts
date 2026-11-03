@@ -1352,7 +1352,12 @@ app.post('/api/canvases/:id/members', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
   if (!email) return res.status(400).json({ error: 'email required' })
   const [row] = await db
-    .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+    .select({
+      id: authSchema.user.id,
+      name: authSchema.user.name,
+      email: authSchema.user.email,
+      image: authSchema.user.image,
+    })
     .from(authSchema.user)
     .where(eq(authSchema.user.email, email))
   if (!row) return res.status(404).json({ error: 'no doop account with that email — ask them to sign up first' })
@@ -1363,7 +1368,7 @@ app.post('/api/canvases/:id/members', async (req, res) => {
     void emailShare(req.user!, row.id, c)
     userEvents.notifyUsers([row.id], { type: 'canvases' })
   }
-  res.json({ userId: row.id, name: row.name, email: row.email, owner: false })
+  res.json({ userId: row.id, name: row.name, email: row.email, image: avatarUrl(row.image), owner: false })
 })
 
 app.delete('/api/canvases/:id/members/:userId', (req, res) => {
