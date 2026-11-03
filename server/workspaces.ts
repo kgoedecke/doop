@@ -9,6 +9,7 @@ import { store } from './store.ts'
 import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { dropWorkspaceFonts } from './fonts.ts'
+import { notifyUsers } from './userEvents.ts'
 import { isBillingInterval, isWorkspaceActive } from '../shared/billing.ts'
 import type { BillingInterval, WorkspaceStatus } from '../shared/billing.ts'
 import { isWorkspaceRole } from '../shared/types.ts'
@@ -231,7 +232,9 @@ export async function deleteWorkspace(id: string): Promise<void> {
   if (billing.billingEnabled()) await billing.cancelSubscription(ws)
   store.detachWorkspace(id)
   records.delete(id)
+  const former = [...(members.get(id)?.keys() ?? [])]
   members.delete(id)
+  notifyUsers(former, { type: 'canvases' })
   await db.transaction(async (tx) => {
     await tx.delete(t.workspaceMembers).where(eq(t.workspaceMembers.workspaceId, id))
     await tx.delete(t.workspaceInvites).where(eq(t.workspaceInvites.workspaceId, id))
@@ -336,6 +339,7 @@ export function addMember(workspaceId: string, userId: string, role: WorkspaceRo
   map.set(userId, { role, addedAt })
   swallow(db.insert(t.workspaceMembers).values({ workspaceId, userId, role, addedBy, addedAt }).onConflictDoNothing())
   reconcileSeats(ws)
+  notifyUsers([userId], { type: 'canvases' })
   return true
 }
 
@@ -364,6 +368,7 @@ export async function removeMember(workspaceId: string, userId: string): Promise
     .where(and(eq(t.workspaceMembers.workspaceId, workspaceId), eq(t.workspaceMembers.userId, userId)))
   map.delete(userId)
   reconcileSeats(ws)
+  notifyUsers([userId], { type: 'canvases' })
   return true
 }
 
@@ -426,6 +431,7 @@ async function acceptInvite(
   if (!map.has(userId)) {
     map.set(userId, { role, addedAt })
     reconcileSeats(ws)
+    notifyUsers([userId], { type: 'canvases' })
   }
 }
 
