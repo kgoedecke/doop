@@ -466,7 +466,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (isTypingTarget(e.target)) return
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
-      /* bitmaps land as pictures and SVGs as editable shapes, in one row */
+      /* bitmaps land as pictures, SVGs as editable shapes and PDFs as pages, in one row */
       const incoming = splitIncoming([...(e.clipboardData?.files ?? [])], svgMarkupOf(e.clipboardData))
       if (hasIncoming(incoming)) {
         e.preventDefault()
@@ -493,9 +493,9 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
     }
   }, [canvasId])
 
-  /* Image files dragged in from the desktop land as frames centered on the
-     drop point. Every file drag is claimed, so a drop the canvas cannot take
-     (a viewer, a PDF) is refused instead of the browser opening the file in
+  /* Image, SVG and PDF files dragged in from the desktop land as frames
+     centered on the drop point. Every file drag is claimed, so a drop the
+     canvas cannot take (a viewer, a spreadsheet) is refused instead of the browser opening the file in
      place of the canvas; a drop the composer already took is left to it.
      While a file is over the page every frame keeps its shield up, or a
      frame being edited would swallow the drop in its iframe. Enter and leave

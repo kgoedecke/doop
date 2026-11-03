@@ -6,6 +6,7 @@ import { recordCreates } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
+import { importPdf, isPdfFile } from './pdfImport'
 
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
@@ -181,12 +182,15 @@ interface Slot {
   height: number
   /** A vector keeps its proportions; a bitmap sits in a box it fits inside. */
   uniform?: boolean
+  /** A page keeps its size: its markup is laid out in those px. */
+  exact?: boolean
 }
 
 /** Lay sizes out in a row centered as a group on `at` (a screen point, the
  *  middle of the view when left out; one lands dead-center), in world px. */
 function rowSlots(sizes: Slot[], at?: { x: number; y: number }) {
   const scaled = sizes.map((d) => {
+    if (d.exact) return { width: d.width, height: d.height }
     const scale = Math.min(1, MAX_PASTE_DIM / Math.max(d.width, d.height))
     if (d.uniform)
       return { width: Math.max(1, Math.round(d.width * scale)), height: Math.max(1, Math.round(d.height * scale)) }
@@ -254,10 +258,11 @@ export function svgMarkupOf(data: DataTransfer | null): string | null {
   return looksLikeSvg(text) ? text : null
 }
 
-/** What a paste or drop brought: image files, SVG files, or SVG source text. */
+/** What a paste or drop brought: image files, SVG files, PDFs, or SVG source text. */
 export interface IncomingFiles {
   images: File[]
   vectors: File[]
+  pdfs: File[]
   markup?: string | null
 }
 
@@ -265,22 +270,24 @@ export function splitIncoming(files: File[], markup: string | null = null): Inco
   const vectors = files.filter(isSvgFile)
   return {
     vectors,
+    pdfs: files.filter(isPdfFile),
     images: files.filter((f) => f.type.startsWith('image/') && !isSvgFile(f)),
     markup: files.length ? null : markup,
   }
 }
 
-export function hasIncoming({ images, vectors, markup }: IncomingFiles): boolean {
-  return images.length > 0 || vectors.length > 0 || !!markup
+export function hasIncoming({ images, vectors, pdfs, markup }: IncomingFiles): boolean {
+  return images.length > 0 || vectors.length > 0 || pdfs.length > 0 || !!markup
 }
 
 /** One frame to create, sized and named, with its markup ready. */
-type Prepared = { kind: 'image' | 'vector'; name: string; size: Slot; html: () => Promise<string> }
+type Prepared = { kind: 'image' | 'vector' | 'page'; name: string; size: Slot; html: () => Promise<string> }
 
 /** What a paste or drop landed, by kind. */
 interface Landed {
   images: number
   vectors: number
+  pages: number
 }
 
 /** Place everything a paste or drop brought as one row, bitmaps and vectors
@@ -320,7 +327,29 @@ async function importIncoming(
     ]
   })
   if (sources.length && !vectors.length && !images.length) throw new Error('The SVG has no shapes to import.')
-  const prepared = [...vectors, ...images]
+  /* a PDF is one frame per page, at the page's printed size */
+  const pages: Prepared[] = (
+    await Promise.all(
+      incoming.pdfs.map(async (file) =>
+        importPdf(new Uint8Array(await file.arrayBuffer()), fileStem(file.name) || 'PDF', {
+          importSvg: importSvgInBrowser,
+          /* pictures become assets, so a photo-heavy page stays under the frame's size cap */
+          storeImage: async (bytes, mime) =>
+            (await api.uploadAsset(canvasId, new Blob([bytes as BlobPart], { type: mime }))).url,
+        }),
+      ),
+    )
+  )
+    .flat()
+    .map((page) => ({
+      kind: 'page' as const,
+      name: page.name,
+      size: { width: page.width, height: page.height, exact: true },
+      html: () => Promise.resolve(page.html),
+    }))
+  if (incoming.pdfs.length && !pages.length && !vectors.length && !images.length)
+    throw new Error('The PDF has no pages to import.')
+  const prepared = [...vectors, ...pages, ...images]
   const placed = rowSlots(
     prepared.map((p) => p.size),
     at,
@@ -341,11 +370,12 @@ async function importIncoming(
   const upload = ready.find((r): r is PromiseRejectedResult => r.status === 'rejected')
   if (upload) console.error(`${ready.length - requests.length} of ${ready.length} file(s) failed`, upload.reason)
   const frames = await settleFrames(requests)
-  const landed: Landed = { images: 0, vectors: 0 }
+  const landed: Landed = { images: 0, vectors: 0, pages: 0 }
+  const counted = { image: 'images', vector: 'vectors', page: 'pages' } as const
   frames.forEach((frame, i) => {
-    if (frame) landed[requests[i]!.kind === 'image' ? 'images' : 'vectors']++
+    if (frame) landed[counted[requests[i]!.kind]]++
   })
-  if (!landed.images && !landed.vectors && prepared.length) {
+  if (!landed.images && !landed.vectors && !landed.pages && prepared.length) {
     if (upload) throw upload.reason instanceof Error ? upload.reason : new Error(String(upload.reason))
     throw new Error('Couldn’t add the files.')
   }

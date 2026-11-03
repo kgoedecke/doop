@@ -338,6 +338,30 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   opacity, clip, mask and filter stay on the root group, a group's mask and filter on its row, and
   copied definitions (gradient stops, clip shapes) keep the styles they resolved. Tests: `svgPath.test.ts`, `svgImport.test.ts`,
   `svgImportBrowser.test.ts`.
+- PDF import (`src/lib/pdfImport.ts`, `src/lib/sfnt.ts`, proof of concept): a PDF dropped or pasted
+  on the canvas lands as one frame per page at the page's printed size (points × 96/72). MuPDF's
+  WebAssembly build (`mupdf`, AGPL, a lazy 10 MB chunk excluded from Vite's pre-bundling so it finds
+  its `.wasm` by `import.meta.url`) reads the file in the browser. Each page is rendered to SVG in
+  CSS px with its text stripped and run through `importSvgInBrowser` with `box: 'root'` (the page is
+  the box, since clipped backgrounds reach past it) and a raised layer budget, so paths, gradients,
+  clips and images become the same editable layers an SVG gives; a CMYK JPEG is decoded through the
+  page and re-encoded as RGB, and in the browser every picture becomes an `/a/` asset. The text comes
+  from MuPDF's structured text (ligatures kept), one `<p data-doop-drawing="text">` per run of one
+  font, size and colour, placed by the glyph box, rotated runs turned about their first glyph.
+  Fonts are keyed by font object, not name: a producer embeds several subsets under one name
+  (InDesign, per page), so a page's font resources (Form XObjects included) are paired with each
+  object by name and, where several programs share it, by comparing FreeType's advances for the
+  glyphs shown. The program is then completed into a loadable OpenType file: `sfnt.ts` adds the
+  `OS/2`, `name`, `post` and Unicode `cmap` tables a PDF subset drops (the cmap from the glyphs the
+  page drew, ligature glyphs voted out of the plain letters), wraps a bare CFF program (`Type1C`,
+  CID-keyed charsets inverted) with synthesised `head`/`hhea`/`hmtx`/`maxp`, and the browser's own
+  `FontFace` check drops anything it still refuses. Faces ride in the frame as `@font-face` data
+  URIs named `pdf-<BaseFont>`; Type1 programs and unembedded fonts fall back to the spaced family
+  name over a generic from the descriptor flags, with weight and style synthesised. Not yet:
+  paragraphs (every run is its own line), fonts as library assets instead of data URIs, an
+  Import-picker card, a static-image fallback for scans and a progress indicator. Tests:
+  `pdfImport.test.ts` (fixture `tests/fixtures/pdf/report.pdf`, a Chrome-printed page with five
+  embedded subsets), the page count in `imagePaste.test.ts`.
 - The path editor (`PathEditor.tsx`, `src/lib/pathEditing.ts`) edits any `d` the parser reads,
   compound paths included (`EditablePath.subpaths`; anchors are numbered flat across strokes);
   clicking the outline splits the segment there (`splitSegment`, a line stays linear in `t`);
