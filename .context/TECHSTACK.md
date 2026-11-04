@@ -83,6 +83,15 @@
   family filter for reasoning chat models with tools, images and a 16k output window; a picked id
   only has to be shaped like the provider's, and the run is the final check. OpenRouter stays on
   its curated roster (the run-time vision check knows only the roster's flags).
+- Custom inference profiles (`server/customModelProfiles.ts`, `server/customInference.ts`): users
+  save OpenAI-compatible Chat Completions endpoints in `custom_model_profiles`; the active
+  `model_accounts` row carries only `kind = 'custom-key'` and `profile_id`. Keys use `sealedText`
+  and never enter a browser response. `server/customInference.ts` normalizes the URL, requires
+  public HTTPS, permits loopback/LAN only with `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS`, re-resolves
+  and pins DNS per request, refuses redirects, and bounds time/response size. The catalog loader
+  asks the profile's `/models` without a vendor-family filter; the Chat Completions transport
+  reuses the shared translation and is the only path that touches `fetchCustomJson`. Settings UI:
+  `src/components/CustomModelProfiles.tsx`; user/operator guide: `docs/custom-inference.md`.
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
   high / xhigh), set through `PATCH /api/model-account { effort }`, read by `effortFor` in

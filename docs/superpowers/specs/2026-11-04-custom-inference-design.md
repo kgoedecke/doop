@@ -6,12 +6,12 @@
 
 ## Architecture
 
-Doop's resident agent is written against Anthropic-shaped message/tool structures. `server/chatCompletionsAgent.ts` already translates those into OpenAI-compatible **Chat Completions** and back — it currently only ever speaks to fixed endpoint constants (OpenRouter, Gemini), because a user-supplied URL is a server-side fetch target (SSRF). This feature makes that transport accept a *validated* user endpoint and adds the storage/profile surface to manage it.
+Doop's resident agent is written against Anthropic-shaped message/tool structures. `server/chatCompletionsAgent.ts` already translates those into OpenAI-compatible **Chat Completions** and back — it currently only ever speaks to fixed endpoint constants (OpenRouter, Gemini), because a user-supplied URL is a server-side fetch target (SSRF). This feature makes that transport accept a _validated_ user endpoint and adds the storage/profile surface to manage it.
 
 Two storage concepts stay separate:
 
 - **`custom_model_profiles`** (new table) — the saved address book. Many per user: `id`, `user_id`, `name`, normalized `base_url`, sealed `api_key` (nullable — local servers take no key), `model`, `supports_vision`, timestamps. Profiles are edited here; the key is never duplicated elsewhere.
-- **`model_accounts`** (existing, one row per user) — remains the *active* account the resident agent runs on. Activating a custom profile writes a row with `kind = 'custom-key'` and a `profile_id` pointing at the profile. A custom account resolves its URL/key/model/vision **from the profile row at run time** — editing the profile changes the live account with no second write.
+- **`model_accounts`** (existing, one row per user) — remains the _active_ account the resident agent runs on. Activating a custom profile writes a row with `kind = 'custom-key'` and a `profile_id` pointing at the profile. A custom account resolves its URL/key/model/vision **from the profile row at run time** — editing the profile changes the live account with no second write.
 
 `pickModel(payerId)` is unchanged in shape. `byoModel` gains a `custom-key` branch that loads the profile and builds a `ChatCompletionsConfig`: `url = {base}/chat/completions`, `Authorization: Bearer <key>` only when a key is present, `label = profile.name`, `vision = profile.supportsVision`. `runChatCompletionsTurn` then does the turn as today — so every tool, image-strip-on-no-vision, and stop-reason mapping is shared with OpenRouter/Gemini.
 
@@ -21,7 +21,7 @@ A custom model id is a free-form validated string (non-empty, sane charset/lengt
 
 The server makes every request; the browser never calls the model endpoint and never receives the key. Redirects are disabled, timeouts and response sizes are bounded, keys go only in `Authorization: Bearer`, and `sealedText` encrypts the key at rest (never returned by any profile/status endpoint, never logged).
 
-**URL validation** on create/edit *and re-validated on every request* (DNS answers can change): normalize; no credentials, query, or fragment; HTTPS required for public endpoints; `base_url` may carry a path (`/v1`) to which `/chat/completions` and `/models` are appended.
+**URL validation** on create/edit _and re-validated on every request_ (DNS answers can change): normalize; no credentials, query, or fragment; HTTPS required for public endpoints; `base_url` may carry a path (`/v1`) to which `/chat/completions` and `/models` are appended.
 
 **SSRF.** Default deployment blocks loopback, private, link-local, multicast, unspecified, and cloud-metadata ranges — hostname resolved before each fetch, any blocked answer refuses, numeric-IP tricks and non-HTTP(S) schemes rejected.
 
