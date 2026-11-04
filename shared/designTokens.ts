@@ -175,8 +175,15 @@ export function normalizeTokenValue(value: unknown): string | null {
   return trimmed
 }
 
-/** Resolve a value through its aliases; null when a link is missing or circular. */
-export function resolveToken(tokens: readonly DesignToken[], name: string): string | null {
+/** A token's value under a theme: its override there, else its default. */
+export function effectiveValue(token: Pick<DesignToken, 'value' | 'themes'>, theme?: string): string {
+  const override = theme ? token.themes?.[theme] : undefined
+  return override === undefined ? token.value : override
+}
+
+/** Resolve a value through its aliases, under a theme when given; null when
+ *  a link is missing or circular. */
+export function resolveToken(tokens: readonly DesignToken[], name: string, theme?: string): string | null {
   const seen = new Set<string>()
   let current = name
   for (;;) {
@@ -184,8 +191,9 @@ export function resolveToken(tokens: readonly DesignToken[], name: string): stri
     seen.add(current)
     const token = tokens.find((t) => t.name === current)
     if (!token) return null
-    const next = aliasOf(token.value)
-    if (next === null) return token.value
+    const value = effectiveValue(token, theme)
+    const next = aliasOf(value)
+    if (next === null) return value
     current = next
   }
 }
@@ -240,9 +248,12 @@ export function tokensCss(tokens: readonly DesignToken[], themeOrder: readonly s
   const sorted = sortTokens(tokens)
   const blocks = [`:root{${declarations(sorted.map((t) => [t.name, t.value]))}}`]
   for (const theme of themesOf(sorted, themeOrder)) {
+    /* a theme block carries its overrides and, again, every alias: a custom
+       property's var() is substituted where it is declared, so an alias left
+       on :root would keep pointing at the default value under a themed subtree */
     const pairs = sorted.flatMap((t) => {
-      const value = t.themes?.[theme]
-      return value === undefined ? [] : [[t.name, value] as const]
+      const value = effectiveValue(t, theme)
+      return t.themes?.[theme] !== undefined || aliasOf(value) ? [[t.name, value] as const] : []
     })
     blocks.push(`:root[${THEME_ATTR}="${theme}"],[${THEME_ATTR}="${theme}"]{${declarations(pairs)}}`)
   }
@@ -275,6 +286,33 @@ export function withTokenBlock(
   const htmlOpen = /<html\b[^>]*>/i.exec(html) ?? /<!doctype[^>]*>/i.exec(html)
   const at = htmlOpen ? htmlOpen.index + htmlOpen[0].length : 0
   return `${html.slice(0, at)}${tag}${html.slice(at)}`
+}
+
+/** The HTML with every `data-doop-theme="from"` switched to `to`. */
+export function renameThemeAttrs(html: string, from: string, to: string): string {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return html.replace(new RegExp(`(${THEME_ATTR}\\s*=\\s*)(["'])${escaped}\\2`, 'g'), `$1$2${to}$2`)
+}
+
+const ROOT_TAG_RE = /<(html|body)\b([^>]*)>/i
+const THEME_ATTR_RE = new RegExp(`\\s*${THEME_ATTR}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i')
+
+/** The theme a frame's root switches to, or null for the default. */
+export function frameTheme(html: string): string | null {
+  const root = ROOT_TAG_RE.exec(html)
+  const m = root ? THEME_ATTR_RE.exec(root[2]!) : null
+  return m ? (m[1] ?? m[2] ?? null) : null
+}
+
+/** The HTML with its root switched to a theme (null: the default). The
+ *  attribute goes on `<html>`, else `<body>`; a document with neither is
+ *  returned as is. */
+export function withFrameTheme(html: string, theme: string | null): string {
+  const root = ROOT_TAG_RE.exec(html)
+  if (!root) return html
+  const attrs = root[2]!.replace(THEME_ATTR_RE, '')
+  const tag = `<${root[1]}${attrs}${theme ? ` ${THEME_ATTR}="${theme}"` : ''}>`
+  return `${html.slice(0, root.index)}${tag}${html.slice(root.index + root[0].length)}`
 }
 
 /** A name under its type's Tailwind namespace: `--primary` as a colour is

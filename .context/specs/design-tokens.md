@@ -25,16 +25,23 @@ fontSize | lineHeight | letterSpacing` (`TOKEN_TYPES`, grouped for menus by `TOK
   slug other than `default`, at most `MAX_TOKEN_THEMES` 8). A theme is declared the first time a
   token names it, and `set_token_themes` / `PUT /token-themes` replaces the list, applying any
   `renames` (`{ from, to }`, every token's value follows) first; a theme that leaves takes its
-  values with it.
+  values with it. Every check runs before anything is written, so a bad request changes
+  nothing; a theme rename also rewrites `data-doop-theme` in frames. `frameTheme` /
+  `withFrameTheme` read and set a frame root's theme: the Tokens tab's themes dropdown shows the
+  selected frames' theme and switches it (one undo step per frame).
 - Storage: `design_tokens` (migration 0044, PK canvas + name, `themes` jsonb) and
   `canvases.token_themes` jsonb. Hydrated with the canvas like guidelines; duplicates copy both.
 
 ## Frames stay self-contained
 
-`withTokenBlock(html, tokens, themeOrder)` writes the values of the tokens a document names
+`withTokenBlock(html, tokens, themeOrder)` runs before the font injection, so a family named only
+through a font token is seen by the font scan. It writes the values of the tokens a document names
 (`var(--name)` or `var(--name,` outside the block itself, alias targets included) into one
 managed `<style data-doop-tokens>` at the top of `<head>`: a `:root{…}` block, then
-`:root[data-doop-theme="x"],[data-doop-theme="x"]{…}` per theme with overrides. The block is
+`:root[data-doop-theme="x"],[data-doop-theme="x"]{…}` per theme with its overrides and, again,
+every alias (a custom property's `var()` is substituted where it is declared, so an alias left on
+`:root` would keep the default under a themed subtree). Alias chains are checked per theme, and a
+delete is refused while any value, default or themed, aliases the token. The block is
 replaced when the values differ and removed when the document names no token; the function
 returns the input string itself when nothing changes. It runs wherever `withFontFaces` runs:
 `withLibraryFaces` in `server/actions.ts` on every frame write (create, update, the final append
@@ -43,11 +50,13 @@ chunk, an idle stream close) and `FrameView`'s browser save path. A frame switch
 
 ## Propagation
 
-A token change (`actions.setTokens`, `setTokenThemes`) rewrites the block in every frame on the
+A token change (`actions.createTokens` for frames already naming the token, `setTokens`,
+`setTokenThemes`) rewrites the block in every frame on the
 canvas whose block no longer matches (`restyleTokenFrames`), as an annotation write
 (`store.updateFrame`'s `annotation` option): `ready_for_dev` sign-off stands, no version is
 filed, one activity line names the token and how many frames were restyled. Frames with an open
-append stream are skipped (their done chunk brings the block); a frame mid-reveal is updated and
+append stream are skipped and any rename is queued for the stream's close (their done chunk, or
+the idle sweep, brings the block and the rename); a frame mid-reveal is updated and
 its playback rewound to where the documents diverge. A rename rewrites `var(--old` references
 in every frame and in aliasing tokens.
 

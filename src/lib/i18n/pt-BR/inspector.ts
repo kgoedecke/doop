@@ -120,6 +120,7 @@ export const inspector: Catalog['inspector'] = {
   tokenBound: 'Vinculado a {name}',
   tokenDetach: 'Desvincular de {name}',
   tokenNone: 'Ainda não há tokens deste tipo — adicione um na aba Tokens do painel de camadas.',
+  tokenNoneCreate: 'Ainda não há tokens deste tipo — pressione + para criar um a partir deste valor.',
   fontGroupFrame: 'Neste frame',
   fontGroupWeb: 'Fontes',
   fontGroupDevice: 'Fontes do dispositivo (variam por pessoa)',

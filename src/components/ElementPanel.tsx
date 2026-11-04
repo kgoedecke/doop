@@ -557,24 +557,78 @@ function TokenMenu({
           <BracesIcon size={placement === 'beside' ? 12 : 11} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[220px] overflow-visible p-1.5">
+      <PopoverContent align="end" className="w-[220px] p-1.5">
         <div className="flex h-6 items-center justify-between pr-0.5 pl-2">
           <span className="text-[11px] text-ink-faint">{t('inspector.tokenHeading')}</span>
           {literal !== null && (
-            <button
-              type="button"
-              aria-label={t('inspector.tokenCreate')}
-              title={t('inspector.tokenCreate')}
-              aria-pressed={creating}
-              className="grid size-5 place-items-center rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink aria-pressed:bg-paper-deep aria-pressed:text-ink"
-              onClick={() => (creating ? setCreating(false) : startCreating())}
-            >
-              <PlusIcon size={12} />
-            </button>
+            <Popover open={creating} onOpenChange={(next) => (next ? startCreating() : setCreating(false))}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('inspector.tokenCreate')}
+                  title={t('inspector.tokenCreate')}
+                  className="grid size-5 place-items-center rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink data-[state=open]:bg-paper-deep data-[state=open]:text-ink"
+                >
+                  <PlusIcon size={12} />
+                </button>
+              </PopoverTrigger>
+              {/* beside the list, Figma's "create variable" sheet; a nested
+                  popover so it stays inside the viewport like the list does */}
+              <PopoverContent side="left" align="start" sideOffset={14} className="w-[220px] p-2.5">
+                <form
+                  className="flex flex-col gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    void create()
+                  }}
+                >
+                  <span className="px-0.5 text-[11px] text-ink-faint">
+                    {t('inspector.tokenNewTitle', { type: t(TOKEN_TYPE_LABEL[type]).toLowerCase() })}
+                  </span>
+                  <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
+                    <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenName')}</span>
+                    <input
+                      aria-label={t('inspector.tokenNewName')}
+                      autoFocus
+                      className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
+                      value={name}
+                      disabled={busy}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </label>
+                  <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
+                    <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenValue')}</span>
+                    {swatch && (
+                      <span
+                        className="size-3 flex-none rounded-[3px] border border-line"
+                        style={{ background: value }}
+                      />
+                    )}
+                    <input
+                      aria-label={t('inspector.tokenValue')}
+                      className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
+                      value={value}
+                      disabled={busy}
+                      onChange={(e) => setValue(e.target.value)}
+                    />
+                  </label>
+                  {error && <p className="px-0.5 text-[10.5px] text-accent-ink">{error}</p>}
+                  <button
+                    type="submit"
+                    disabled={!canCreate}
+                    className="h-7 rounded-[7px] bg-ink text-[11.5px] font-medium text-paper disabled:opacity-30"
+                  >
+                    {busy ? t('inspector.tokenCreating') : t('inspector.tokenCreateButton')}
+                  </button>
+                </form>
+              </PopoverContent>
+            </Popover>
           )}
         </div>
         {options.length === 0 ? (
-          <p className="px-2 py-1.5 text-[11px] leading-[1.4] text-ink-faint">{t('inspector.tokenNone')}</p>
+          <p className="px-2 py-1.5 text-[11px] leading-[1.4] text-ink-faint">
+            {literal === null ? t('inspector.tokenNone') : t('inspector.tokenNoneCreate')}
+          </p>
         ) : (
           <div
             role="listbox"
@@ -601,52 +655,6 @@ function TokenMenu({
               </button>
             ))}
           </div>
-        )}
-        {creating && (
-          /* the card beside the list, Figma's "create variable" sheet */
-          <form
-            className="absolute top-0 right-full mr-1.5 flex w-[220px] flex-col gap-2 rounded-panel bg-surface p-2.5 shadow-pop"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void create()
-            }}
-          >
-            <span className="px-0.5 text-[11px] text-ink-faint">
-              {t('inspector.tokenNewTitle', { type: t(TOKEN_TYPE_LABEL[type]).toLowerCase() })}
-            </span>
-            <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
-              <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenName')}</span>
-              <input
-                aria-label={t('inspector.tokenNewName')}
-                autoFocus
-                className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
-                value={name}
-                disabled={busy}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
-              <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenValue')}</span>
-              {swatch && (
-                <span className="size-3 flex-none rounded-[3px] border border-line" style={{ background: value }} />
-              )}
-              <input
-                aria-label={t('inspector.tokenValue')}
-                className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
-                value={value}
-                disabled={busy}
-                onChange={(e) => setValue(e.target.value)}
-              />
-            </label>
-            {error && <p className="px-0.5 text-[10.5px] text-accent-ink">{error}</p>}
-            <button
-              type="submit"
-              disabled={!canCreate}
-              className="h-7 rounded-[7px] bg-ink text-[11.5px] font-medium text-paper disabled:opacity-30"
-            >
-              {busy ? t('inspector.tokenCreating') : t('inspector.tokenCreateButton')}
-            </button>
-          </form>
         )}
       </PopoverContent>
     </Popover>
@@ -678,6 +686,8 @@ function DesignTab({
     types: readonly TokenType[],
     literal: string | null,
     placement: 'inline' | 'beside' = 'inline',
+    /** written with the binding: the side effects the literal control has */
+    extra: StylePatch = {},
   ) => (
     <TokenMenu
       canvasId={frame.canvasId}
@@ -685,9 +695,10 @@ function DesignTab({
       tokens={tokens}
       literal={literal}
       placement={placement}
-      onPick={(name) => apply({ [property]: `var(${name})` })}
+      onPick={(name) => apply({ [property]: `var(${name})`, ...extra })}
     />
   )
+
   /* a library family offers only the weights it was uploaded with; picking
      one it lacks would just show the browser's faux bold */
   const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
@@ -699,6 +710,9 @@ function DesignTab({
   const fill = rgbToHex(info.backgroundColor, true)
   const fillAlpha = colorAlpha(info.backgroundColor)
   const borderColor = rgbToHex(info.borderColor)
+  /* the fill as the document has it: a translucent one keeps its alpha */
+  const fillLiteral = fill && fillAlpha < 1 ? info.backgroundColor : fill
+  const strokeOn: StylePatch = info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}
   const isFlex = info.display === 'flex' || info.display === 'inline-flex'
   const border = borderSummary(info.borderWidths)
   const textAlign =
@@ -1015,8 +1029,8 @@ function DesignTab({
           <ColorField
             label={t('inspector.fillColor')}
             value={fillAlpha === 0 && fill === '#000000' ? null : fill}
-            token={chip('background-color', fill)}
-            trailing={menu('background-color', ['color'], fill)}
+            token={chip('background-color', fillLiteral)}
+            trailing={menu('background-color', ['color'], fillLiteral)}
             onCommit={(v) =>
               apply({
                 'background-color': v
@@ -1040,7 +1054,7 @@ function DesignTab({
             label={t('inspector.borderColor')}
             value={borderColor}
             token={chip('border-color', borderColor)}
-            trailing={menu('border-color', ['color'], borderColor)}
+            trailing={menu('border-color', ['color'], borderColor, 'inline', strokeOn)}
             onCommit={(v) =>
               apply({ 'border-color': v, ...(v && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}) })
             }

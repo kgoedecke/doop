@@ -121,6 +121,7 @@ export const inspector = {
   tokenBound: 'Bound to {name}',
   tokenDetach: 'Detach from {name}',
   tokenNone: 'No tokens of this kind yet — add one in the Tokens tab of the Layers panel.',
+  tokenNoneCreate: 'No tokens of this kind yet — press + to make one from this value.',
   fontGroupFrame: 'In this frame',
   fontGroupWeb: 'Fonts',
   fontGroupDevice: 'Device fonts (vary by viewer)',

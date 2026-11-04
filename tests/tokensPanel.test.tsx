@@ -120,13 +120,8 @@ describe('TokensSection', () => {
       button('Save').click()
       await Promise.resolve()
     })
-    expect(setToken).toHaveBeenCalledWith('c1', '--color-ink', {
-      newName: '--color-text',
-      type: 'color',
-      value: '#111',
-      description: 'text',
-      themes: { dark: null },
-    })
+    /* only what changed: the rename and the cleared theme value */
+    expect(setToken).toHaveBeenCalledWith('c1', '--color-ink', { newName: '--color-text', themes: { dark: null } })
   })
 
   it('creates a token from the type menu', async () => {

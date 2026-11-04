@@ -62,6 +62,15 @@ export const panels = {
   tokensThemesLede:
     'Every token has a default value; a theme (dark, compact…) gives it another. A frame switches with data-doop-theme on its <html>.',
   tokensThemePlaceholder: 'dark',
+  tokensTheme: 'Theme',
+  tokensMixed: 'mixed',
+  tokensShowTheme: 'Show {theme} on the selected frames',
+  tokensSelectHint: 'Select a frame to switch its theme',
+  tokensThemesSelectedLede: {
+    one: 'Pick the theme the selected frame shows.',
+    other: 'Pick the theme the {count} selected frames show.',
+  },
+  tokensThemeValues: 'Values per theme (empty: same as default)',
   tokensDefaultTheme: 'the value itself',
   tokensRenameTheme: 'Rename {theme}',
   tokensThemeInvalid: 'A theme is a lowercase slug, unique on the canvas, and not “default”.',

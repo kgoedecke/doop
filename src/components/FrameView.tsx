@@ -1201,11 +1201,9 @@ export const FrameView = memo(function FrameView({
            it back in and the face loads at once */
         const library = canvasFonts()
         const canvas = useStore.getState().canvas
-        const html = withTokenBlock(
-          withWebFontLinks(withFontFaces(ev.data.html, library), library),
-          canvas?.tokens ?? [],
-          canvas?.tokenThemes ?? [],
-        )
+        /* tokens first, so a family named through a font token is seen by the font scan */
+        const withTokens = withTokenBlock(ev.data.html, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
+        const html = withWebFontLinks(withFontFaces(withTokens, library), library)
         const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
         useStore.getState().patchFrameLocal(frame.id, { html })
         trackSave(api.updateFrame(frame.id, { html }).catch(console.error))

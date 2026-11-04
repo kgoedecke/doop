@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   TOKEN_BLOCK_ATTR,
   aliasOf,
+  frameTheme,
   normalizeTokenName,
   normalizeTokenValue,
+  renameThemeAttrs,
   resolveToken,
   tailwindName,
   tokensCss,
@@ -12,6 +14,7 @@ import {
   tokenLabel,
   tokensUsedBy,
   usesToken,
+  withFrameTheme,
   withTokenBlock,
   type DesignToken,
 } from '../shared/designTokens.ts'
@@ -22,8 +25,14 @@ import {
  * exports as CSS, Tailwind and markdown.
  */
 
-function token(name: string, type: DesignToken['type'], value: string, order = 0): DesignToken {
-  return { name, type, value, order, updatedAt: 0, updatedBy: 'test' }
+function token(
+  name: string,
+  type: DesignToken['type'],
+  value: string,
+  order = 0,
+  extra: Partial<DesignToken> = {},
+): DesignToken {
+  return { name, type, value, order, updatedAt: 0, updatedBy: 'test', ...extra }
 }
 
 const TOKENS = [
@@ -102,6 +111,36 @@ describe('values and aliases', () => {
     const loop = [token('--a', 'color', 'var(--b)'), token('--b', 'color', 'var(--a)')]
     expect(resolveToken(loop, '--a')).toBeNull()
     expect(resolveToken(TOKENS, '--missing')).toBeNull()
+  })
+})
+
+describe('themes', () => {
+  const themed = [
+    token('--ink', 'color', '#111', 1, { themes: { dark: '#eee' } }),
+    token('--brand', 'color', 'var(--ink)', 2),
+    token('--spacing-4', 'spacing', '16px', 3),
+  ]
+
+  it('redeclares every alias in a theme block, so a themed subtree resolves it there', () => {
+    const css = tokensCss(themed, ['dark'])
+    expect(css).toBe(
+      ':root{--ink:#111;--brand:var(--ink);--spacing-4:16px}\n' +
+        ':root[data-doop-theme="dark"],[data-doop-theme="dark"]{--ink:#eee;--brand:var(--ink)}',
+    )
+    expect(resolveToken(themed, '--brand', 'dark')).toBe('#eee')
+  })
+
+  it('moves a frame between themes and reads which one it is on', () => {
+    const html = '<!doctype html><html lang="en"><head></head><body></body></html>'
+    const dark = withFrameTheme(html, 'dark')
+    expect(dark).toContain('<html lang="en" data-doop-theme="dark">')
+    expect(frameTheme(dark)).toBe('dark')
+    expect(frameTheme(html)).toBeNull()
+    expect(withFrameTheme(dark, null)).toBe(html)
+    expect(withFrameTheme(dark, 'dim')).toContain('<html lang="en" data-doop-theme="dim">')
+    expect(renameThemeAttrs(dark, 'dark', 'night')).toContain('data-doop-theme="night"')
+    expect(renameThemeAttrs("<div data-doop-theme='dark'>", 'dark', 'night')).toBe("<div data-doop-theme='night'>")
+    expect(withFrameTheme('<p>no root</p>', 'dark')).toBe('<p>no root</p>')
   })
 })
 

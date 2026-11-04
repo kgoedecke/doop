@@ -62,6 +62,15 @@ export const panels: Catalog['panels'] = {
   tokensThemesLede:
     'Todo token tem um valor padrão; um modo (dark, compact…) dá a ele outro. Um frame alterna com data-doop-theme no seu <html>.',
   tokensThemePlaceholder: 'dark',
+  tokensTheme: 'Tema',
+  tokensMixed: 'misto',
+  tokensShowTheme: 'Mostrar {theme} nos frames selecionados',
+  tokensSelectHint: 'Selecione um frame para trocar seu tema',
+  tokensThemesSelectedLede: {
+    one: 'Escolha o tema que o frame selecionado mostra.',
+    other: 'Escolha o tema que os {count} frames selecionados mostram.',
+  },
+  tokensThemeValues: 'Valores por tema (vazio: igual ao padrão)',
   tokensDefaultTheme: 'o próprio valor',
   tokensRenameTheme: 'Renomear {theme}',
   tokensThemeInvalid: 'Um modo é um slug em minúsculas, único no canvas, e não “default”.',

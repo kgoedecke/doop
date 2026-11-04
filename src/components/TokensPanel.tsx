@@ -3,6 +3,8 @@ import {
   DEFAULT_THEME,
   MAX_TOKEN_THEMES,
   aliasOf,
+  frameTheme,
+  withFrameTheme,
   TOKEN_GROUPS,
   isThemeName,
   isTokenName,
@@ -21,6 +23,7 @@ import { DEVICE_FONTS } from '../lib/deviceFonts'
 import { fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { api } from '../lib/api'
+import { recordUpdate } from '../lib/history'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Input } from './ui/input'
@@ -39,7 +42,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { PlusIcon, XIcon } from './ui/icons'
+import { CheckIcon, EyeIcon, PlusIcon, XIcon } from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
 
 /** The i18n label of each token type, in the add menu's wording. */
@@ -174,11 +177,27 @@ export function TokenSwatch({
 
 type Draft = { name: string; type: TokenType; value: string; description: string; themes: Record<string, string> }
 
+/** What a new token of a type starts as, so the form never opens empty. */
+const DEFAULT_VALUE: Record<TokenType, string> = {
+  color: '#111111',
+  opacity: '1',
+  radius: '8px',
+  spacing: '8px',
+  container: '1200px',
+  breakpoint: '768px',
+  fontFamily: 'Inter, sans-serif',
+  fontWeight: '400',
+  fontSize: '16px',
+  lineHeight: '1.5',
+  letterSpacing: '0em',
+}
+
 function draftOf(token: DesignToken | null, createType: TokenType | null, initialValue = ''): Draft {
+  const type = token?.type ?? createType ?? 'color'
   return {
     name: token ? tokenLabel(token.name) : '',
-    type: token?.type ?? createType ?? 'color',
-    value: token?.value ?? initialValue,
+    type,
+    value: token?.value ?? (initialValue || DEFAULT_VALUE[type]),
     description: token?.description ?? '',
     themes: { ...(token?.themes ?? {}) },
   }
@@ -244,12 +263,17 @@ export function TokenModal({
         if (result?.result === 'error') throw new Error(result.message)
         onCreated?.(typedName)
       } else {
-        await api.setToken(canvasId, token!.name, {
-          ...(typedName !== token!.name ? { newName: typedName } : {}),
-          type: draft.type,
-          value: draft.value.trim(),
-          description: draft.description.trim(),
-          themes: modeValues,
+        /* only the fields that changed, so a concurrent edit elsewhere is kept */
+        const was = token!
+        const changedThemes = Object.fromEntries(
+          Object.entries(modeValues).filter(([theme, value]) => (was.themes?.[theme] ?? null) !== value),
+        )
+        await api.setToken(canvasId, was.name, {
+          ...(typedName !== was.name ? { newName: typedName } : {}),
+          ...(draft.type !== was.type ? { type: draft.type } : {}),
+          ...(draft.value.trim() !== was.value ? { value: draft.value.trim() } : {}),
+          ...(draft.description.trim() !== (was.description ?? '') ? { description: draft.description.trim() } : {}),
+          ...(Object.keys(changedThemes).length ? { themes: changedThemes } : {}),
         })
       }
       onClose()
@@ -299,36 +323,48 @@ export function TokenModal({
           </Badge>
         )}
       </div>
-      <div className="mt-4 flex flex-col gap-3">
-        <Field label={t('panels.tokensName')}>
-          <Input
-            variant="well"
-            className="font-mono"
-            autoFocus={creating}
-            placeholder={t('panels.tokensNamePlaceholder')}
-            value={draft.name}
-            disabled={busy || readOnly}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          />
-        </Field>
-        <Field label={t('panels.tokensType')}>
-          <Select
-            value={draft.type}
-            onValueChange={(v) => setDraft({ ...draft, type: v as TokenType })}
-            disabled={busy || readOnly}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TOKEN_GROUPS.flat().map((type) => (
-                <SelectItem key={type} value={type}>
-                  {t(TOKEN_TYPE_LABEL[type])}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+      <form
+        className="mt-4 flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void save()
+        }}
+      >
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+          <Field label={t('panels.tokensName')}>
+            <Input
+              variant="well"
+              className="font-mono"
+              autoFocus={creating}
+              placeholder={t('panels.tokensNamePlaceholder')}
+              value={draft.name}
+              disabled={busy || readOnly}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            />
+          </Field>
+          <Field label={t('panels.tokensType')}>
+            <Select
+              value={draft.type}
+              onValueChange={(v) => {
+                const type = v as TokenType
+                /* a type change the value cannot carry over starts from the type's default */
+                setDraft({ ...draft, type, value: creating ? DEFAULT_VALUE[type] : draft.value })
+              }}
+              disabled={busy || readOnly}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TOKEN_GROUPS.flat().map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {t(TOKEN_TYPE_LABEL[type])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
         <Field label={t('panels.tokensValue')}>
           <ValueInput
             type={draft.type}
@@ -340,6 +376,7 @@ export function TokenModal({
             onChange={(value) => setDraft({ ...draft, value })}
           />
         </Field>
+        {themes.length > 0 && <p className="mt-1 text-caption text-ink-faint">{t('panels.tokensThemeValues')}</p>}
         {themes.map((theme) => (
           <Field key={theme} label={t('panels.tokensValueIn', { theme })}>
             <ValueInput
@@ -362,7 +399,9 @@ export function TokenModal({
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
           />
         </Field>
-      </div>
+        {/* Enter anywhere in the form saves */}
+        <Button type="submit" className="hidden" aria-hidden tabIndex={-1} disabled={!canSave} />
+      </form>
       {error && <p className="mt-2.5 text-copy text-accent-ink">{error}</p>}
       <ModalActions>
         {token && !readOnly && (
@@ -671,26 +710,71 @@ function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: 
     )
   }
 
-  const row = 'flex h-7 items-center gap-2 rounded-row px-2 hover:bg-sub'
+  /* the selected frames: picking a theme switches their root to it */
+  const selected = useStore((s) => {
+    const ids = new Set(s.selectedIds.length ? s.selectedIds : s.selectedId ? [s.selectedId] : [])
+    return (s.canvas?.frames ?? []).filter((f) => ids.has(f.id))
+  })
+  const current = selected.length ? frameTheme(selected[0]!.html) : null
+  const mixed = selected.some((f) => frameTheme(f.html) !== current)
+
+  function show(theme: string | null) {
+    for (const frame of selected) {
+      const before = frame.html
+      const html = withFrameTheme(before, theme)
+      if (html === before) continue
+      useStore.getState().patchFrameLocal(frame.id, { html })
+      recordUpdate(frame.id, { html: before }, { html }, true)
+      api.updateFrame(frame.id, { html }).catch(console.error)
+    }
+  }
+
+  const row = 'flex h-7 items-center gap-1 rounded-row pl-1 pr-0.5 hover:bg-sub'
+  const pick = (theme: string | null) => (
+    <IconButton
+      size="sm"
+      aria-label={t('panels.tokensShowTheme', { theme: theme ?? DEFAULT_THEME })}
+      title={
+        selected.length ? t('panels.tokensShowTheme', { theme: theme ?? DEFAULT_THEME }) : t('panels.tokensSelectHint')
+      }
+      on={selected.length > 0 && !mixed && current === theme}
+      disabled={readOnly || !selected.length}
+      onClick={() => show(theme)}
+    >
+      {selected.length > 0 && !mixed && current === theme ? <CheckIcon size="rail" /> : <EyeIcon size="rail" />}
+    </IconButton>
+  )
   return (
     <Popover>
       <PopoverTrigger asChild>
         <MenuButton variant="quiet" aria-label={t('panels.tokensThemes')}>
-          <span className="text-ink-faint">{t('panels.tokensThemes')}</span>
-          <span className="min-w-0 truncate font-mono text-ink">{[DEFAULT_THEME, ...themes].join(', ')}</span>
+          <span className="text-ink-faint">{selected.length ? t('panels.tokensTheme') : t('panels.tokensThemes')}</span>
+          <span className="min-w-0 truncate font-mono text-ink">
+            {selected.length
+              ? mixed
+                ? t('panels.tokensMixed')
+                : (current ?? DEFAULT_THEME)
+              : [DEFAULT_THEME, ...themes].join(', ')}
+          </span>
         </MenuButton>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[220px] p-1.5">
-        <p className="px-2 pt-1 pb-1.5 text-caption text-ink-faint">{t('panels.tokensThemesLede')}</p>
+      <PopoverContent align="start" className="w-[240px] p-1.5">
+        <p className="px-2 pt-1 pb-1.5 text-caption text-ink-faint">
+          {selected.length
+            ? t('panels.tokensThemesSelectedLede', { count: selected.length })
+            : t('panels.tokensThemesLede')}
+        </p>
         <div className={row}>
-          <span className="min-w-0 flex-1 truncate font-mono text-label text-ink">{DEFAULT_THEME}</span>
-          <span className="text-caption text-ink-faint">{t('panels.tokensDefaultTheme')}</span>
+          {pick(null)}
+          <span className="min-w-0 flex-1 truncate px-1 font-mono text-label text-ink">{DEFAULT_THEME}</span>
+          <span className="pr-1.5 text-caption text-ink-faint">{t('panels.tokensDefaultTheme')}</span>
         </div>
         {themes.map((theme) => (
           <ThemeRow
             key={theme}
             theme={theme}
             readOnly={readOnly || busy}
+            lead={pick(theme)}
             onRename={(name) => rename(theme, name)}
             onRemove={() => void save(themes.filter((m) => m !== theme))}
           />
@@ -734,11 +818,14 @@ function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: 
 function ThemeRow({
   theme,
   readOnly,
+  lead,
   onRename,
   onRemove,
 }: {
   theme: string
   readOnly: boolean
+  /** the show-on-selection control at the row's start */
+  lead?: ReactNode
   onRename: (name: string) => void
   onRemove: () => void
 }) {
@@ -751,6 +838,7 @@ function ThemeRow({
   }
   return (
     <div className="flex h-7 items-center gap-1 rounded-row pl-1 pr-0.5 hover:bg-sub">
+      {lead}
       <Input
         variant="bare"
         inputSize="auto"

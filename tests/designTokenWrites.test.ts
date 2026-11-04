@@ -124,6 +124,61 @@ describe('design tokens on frame writes', () => {
     expect(() => actions.setTokenThemes(canvasId, ['night'], human, [{ from: 'nope', to: 'x' }])).toThrow(/no theme/)
   })
 
+  it('moves a theme rename into frame attributes, and writes nothing on a bad request', () => {
+    const canvasId = setup()
+    actions.setTokens(canvasId, [{ name: '--color-ink', themes: { dark: '#eee' } }], human)
+    const frame = actions.createFrame(
+      canvasId,
+      {
+        name: 'Dark',
+        html: '<html data-doop-theme="dark"><head></head><body style="color:var(--color-ink)"></body></html>',
+      },
+      human,
+    )!
+    expect(() => actions.setTokenThemes(canvasId, ['default'], human, [{ from: 'dark', to: 'night' }])).toThrow()
+    /* the failed request left the rename unapplied */
+    expect(store.getTokenThemes(canvasId)).toEqual(['dark'])
+    actions.setTokenThemes(canvasId, ['night'], human, [{ from: 'dark', to: 'night' }])
+    const html = store.getFrame(frame.id)!.html
+    expect(html).toContain('<html data-doop-theme="night">')
+    expect(html).toContain('[data-doop-theme="night"]{--color-ink:#eee}')
+  })
+
+  it('refuses alias loops that only close under a theme, and deletes an aliased-by-theme token', () => {
+    const canvasId = setup()
+    actions.createTokens(canvasId, [{ name: '--a', type: 'color', value: '#000' }], human)
+    actions.createTokens(canvasId, [{ name: '--b', type: 'color', value: '#fff', themes: { dark: 'var(--a)' } }], human)
+    const [loop] = actions.setTokens(canvasId, [{ name: '--a', themes: { dark: 'var(--b)' } }], human)!
+    expect(loop).toMatchObject({ result: 'error', message: expect.stringContaining('loop in dark') })
+    const [deletion] = actions.setTokens(canvasId, [{ name: '--a', delete: true }], human)!
+    expect(deletion).toMatchObject({ result: 'error', message: expect.stringContaining('--b aliases') })
+  })
+
+  it('restyles frames that already name a token when it is created', () => {
+    const canvasId = setup()
+    const frame = actions.createFrame(
+      canvasId,
+      { name: 'Early', html: '<html><head></head><body style="gap:var(--spacing-8)"></body></html>' },
+      human,
+    )!
+    expect(store.getFrame(frame.id)!.html).not.toContain('--spacing-8:')
+    actions.createTokens(canvasId, [{ name: '--spacing-8', type: 'spacing', value: '32px' }], human)
+    expect(store.getFrame(frame.id)!.html).toContain(':root{--spacing-8:32px}')
+  })
+
+  it('applies a rename to a streaming frame when its stream closes', () => {
+    const canvasId = setup()
+    const frame = actions.createFrame(canvasId, { name: 'Stream' }, agent)!
+    actions.appendFrameHtml(frame.id, '<html><head></head><body style="gap:var(--spacing-4)">', agent, { start: true })
+    actions.setTokens(canvasId, [{ name: '--spacing-4', newName: '--space-4' }], human)
+    /* mid-stream the document is left alone */
+    expect(store.getFrame(frame.id)!.html).toContain('var(--spacing-4)')
+    actions.appendFrameHtml(frame.id, '</body></html>', agent, { done: true })
+    const html = store.getFrame(frame.id)!.html
+    expect(html).toContain('gap:var(--space-4)')
+    expect(html).toContain(':root{--space-4:16px}')
+  })
+
   it('follows a rename into frames and aliases', () => {
     const canvasId = setup()
     const frame = actions.createFrame(
