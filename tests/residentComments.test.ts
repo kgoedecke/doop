@@ -89,6 +89,14 @@ describe('the resident agent replying in a thread', () => {
     expect(actions.takeAgentCommentsFor(CANVAS, AGENT, 'alice')).toEqual([])
   })
 
+  it('strips a stacked @@mention too, so a quote cannot slip through as a request', async () => {
+    const c = await ask()
+    const posted = replyInThread(CANVAS, c.id, `Seen "@@${DEFAULT_ROLE_ID} now" — on it.`, actor(), run())
+    expect(posted.ok).toBe(true)
+    expect(texts(c.id)[1]).toBe(`${AGENT}: Seen "${DEFAULT_ROLE_ID} now" — on it.`)
+    expect(actions.takeAgentCommentsFor(CANVAS, AGENT, 'alice')).toEqual([])
+  })
+
   it('stays on its own canvas', async () => {
     const c = await ask()
     const posted = replyInThread('canvas-2', c.id, 'Done', actor(), run())
@@ -176,7 +184,7 @@ describe('settling the comments a run was about', () => {
     expect(texts(c.id)).toHaveLength(2)
     expect(root.resolvedAt).toBeUndefined()
     expect(root.claimedBy).toBeUndefined()
-    expect(root.forAgent).toBe(false)
+    expect(root.forAgent).toBeUndefined()
     /* the thread takes their answer, and an @mention in it is new work with the whole conversation */
     const answer = actions.replyToComment(c.id, `@${DEFAULT_ROLE_ID} the heading`, 'alice', 'alice')!
     expect(actions.takeAgentCommentsFor(CANVAS, AGENT, 'alice').map((x) => x.id)).toEqual([answer.id])

@@ -433,7 +433,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `withoutMentions` so it cannot queue itself); a thread the agent answered itself gets no
   second reply from the summary. A question the agent needs answered first is
   `reply_to_comment` with `awaiting_answer`: when the run ends the request is handed back
-  (`actions.handBackComment`: unclaimed, no longer an agent item, the thread open), so the
+  (`actions.handBackComment`: unclaimed, no longer an agent item in memory and in its row, the thread open), so the
   person's `@mention` answer queues fresh work carrying the whole conversation. MCP agents have
   had the same two tools all along. Tests: `residentComments.test.ts`, `agentToolParity.test.ts`.
 - Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may

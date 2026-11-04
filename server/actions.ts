@@ -970,7 +970,8 @@ export function handBackComment(commentId: string, by: string): ElementComment |
     delete comment.claimedAt
     delete comment.failedAt
     delete comment.failureReason
-    comment.forAgent = false
+    delete comment.forAgent
+    delete comment.targetAgent
     persist.saveComment(comment)
     broadcast(canvasId, { type: 'comment', comment })
     logActivity(canvasId, resolveActor({ name: by, kind: 'agent' }), 'asked a question in a comment', comment.frameId)

@@ -152,6 +152,6 @@ export function mentionedRole(text: string): AgentRole | undefined {
 export function withoutMentions(text: string): string {
   let out = text
   for (const role of AGENT_ROLES)
-    for (const mention of mentionsFor(role)) out = out.replace(new RegExp(`@(${mention})\\b`, 'gi'), '$1')
+    for (const mention of mentionsFor(role)) out = out.replace(new RegExp(`@+(${mention})\\b`, 'gi'), '$1')
   return out
 }
