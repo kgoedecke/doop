@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { frameDesignPoint, rotateVector } from '../../shared/frameRotation'
+import { frameDesignPoint, frameWorldPoint, rotateVector } from '../../shared/frameRotation'
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
@@ -89,8 +89,18 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       return { x: (clientX - box.left - vp.x) / vp.zoom, y: (clientY - box.top - vp.y) / vp.zoom }
     }
     const origin = toWorld(e.clientX, e.clientY)
-    const contentBox = surface.querySelector('iframe')?.getBoundingClientRect()
-    const contentOrigin = contentBox ? toWorld(contentBox.left, contentBox.top) : { x: frame.x, y: frame.y }
+    /* where the document sits inside the frame, in design px: the frame's
+       border. Read off the iframe's centre, which a turned frame's bounds
+       still share, rather than its top-left, which a turn moves */
+    const iframe = surface.querySelector('iframe')
+    const contentOffset = (() => {
+      if (!iframe) return { x: 0, y: 0 }
+      const b = iframe.getBoundingClientRect()
+      const centre = frameDesignPoint(toWorld(b.left + b.width / 2, b.top + b.height / 2), frame)
+      return { x: centre.x - iframe.offsetWidth / 2, y: centre.y - iframe.offsetHeight / 2 }
+    })()
+    /* the document's top-left corner on the canvas, for the layout drop marks */
+    const contentOrigin = frameWorldPoint(contentOffset, frame)
     const press: Press = {
       ...e,
       currentTarget: surface,
@@ -254,8 +264,8 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         layerPoint = {
           x: layer.rect.x + travel.x,
           y: layer.rect.y + travel.y,
-          pointerX: pointer.x - (contentOrigin.x - frame.x),
-          pointerY: pointer.y - (contentOrigin.y - frame.y),
+          pointerX: pointer.x - contentOffset.x,
+          pointerY: pointer.y - contentOffset.y,
         }
         previewLayer()
         return
