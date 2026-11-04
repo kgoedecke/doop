@@ -59,6 +59,28 @@ export const People: Story = {
   ),
 }
 
+/* a stand-in for an uploaded photo: a gradient disc, so the story needs no asset */
+const PHOTO =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6b26b"/><stop offset="1" stop-color="#6b5bf6"/></linearGradient></defs><rect width="64" height="64" fill="url(#g)"/><circle cx="32" cy="26" r="11" fill="#fff" opacity=".9"/><path d="M12 60c2-14 10-20 20-20s18 6 20 20z" fill="#fff" opacity=".9"/></svg>',
+  )
+
+/** A photo from Settings → Your account fills the disc in place of the initials, at every size and in a stack. */
+export const Photo: Story = {
+  render: () => (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center gap-5">
+        {[18, 24, 28, 32].map((size) => (
+          <Avatar key={size} name="Kevin Goedecke" image={PHOTO} color={colorFor('kevin')} size={size} />
+        ))}
+        <Avatar tone="ink" name="Kevin Goedecke" image={PHOTO} size={34} />
+      </div>
+      <AvatarStack people={PEOPLE.map((p, i) => (i === 1 ? { ...p, image: PHOTO } : p))} />
+    </div>
+  ),
+}
+
 /** Agents: the brand mark on the surface; a glazed face is one that is working right now. */
 export const Agents: Story = {
   render: () => (

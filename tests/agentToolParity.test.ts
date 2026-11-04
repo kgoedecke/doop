@@ -38,8 +38,8 @@ const MISSING = [
   'list_frame_versions',
   'restore_frame_version',
   'set_canvas_pages',
-  'reply_to_comment',
-  'resolve_comment',
+  'create_canvas_page',
+  'set_page_background',
   'export_frame',
   'upload_asset',
   'list_linear_issues', // integration tools, registered by their connections

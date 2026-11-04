@@ -28,6 +28,7 @@ export function SideRail({
   onToggleAgents,
   inspectorOpen,
   inspectorAvailable,
+  inspectTarget = 'frame',
   onToggleInspector,
   me,
   onRenameSelf,
@@ -39,10 +40,12 @@ export function SideRail({
   agentsOpen: boolean
   onToggleAgents: () => void
   inspectorOpen: boolean
-  /** a frame is selected — there is something to inspect */
+  /** the properties slot has something to show: a frame, or the page itself */
   inspectorAvailable: boolean
+  /** what the slot would open: the selected frame, or the page's settings */
+  inspectTarget?: 'frame' | 'page'
   onToggleInspector: () => void
-  me: { name: string; color: string }
+  me: { name: string; image?: string; color: string }
   onRenameSelf: () => void
 }) {
   const t = useT()
@@ -64,7 +67,10 @@ export function SideRail({
           style={islandStyle}
         >
           {showInspector && (
-            <ToolbarControl label={t('canvas.inspectFrame')} onClick={onToggleInspector}>
+            <ToolbarControl
+              label={inspectTarget === 'frame' ? t('canvas.inspectFrame') : t('canvas.pageSettings')}
+              onClick={onToggleInspector}
+            >
               <SlidersIcon />
             </ToolbarControl>
           )}
@@ -109,7 +115,14 @@ export function SideRail({
             className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
             onClick={onRenameSelf}
           >
-            <PresenceFace name={me.name} color={me.color} kind="user" size={26} className="text-[10px] shadow-none" />
+            <PresenceFace
+              name={me.name}
+              image={me.image}
+              color={me.color}
+              kind="user"
+              size={26}
+              className="text-[10px] shadow-none"
+            />
           </button>
         </Tooltip>
       </Toolbar>

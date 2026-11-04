@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { roleOf, toolAllowed, useStore, type Viewport } from '../lib/store'
+import { usePaper, type Paper } from '../lib/paper'
 import { roleAllows } from '../../shared/canvasRole'
 import { onViewCommand } from '../lib/viewMenu'
 import type { Frame } from '../../shared/types'
@@ -61,6 +62,13 @@ const MAX_ZOOM = 16
    included, like the Hand tool's grab — except inside the comment UI itself
    (pins, composer, threads: `data-comment-ui`), which keeps its own cursors. */
 const COMMENT_CURSOR = 'cursor-comment! [&_:not([data-comment-ui]_*)]:cursor-comment!'
+/* The Path tool's pen, forced over the frames the same way; the badge follows
+   what a press would do (src/styles.css draws them) */
+const PEN_CURSOR = {
+  pen: 'cursor-pen! [&_:not([data-comment-ui]_*)]:cursor-pen!',
+  'pen-close': 'cursor-pen-close! [&_:not([data-comment-ui]_*)]:cursor-pen-close!',
+  'pen-anchor': 'cursor-pen-anchor! [&_:not([data-comment-ui]_*)]:cursor-pen-anchor!',
+} as const
 
 /* The world is laid out at CSS zoom k, the settled camera zoom, and its
    transform carries only what the camera has moved since. WebKit rasterizes a
@@ -130,6 +138,16 @@ const sendViewport = throttle(
   50,
 )
 
+/** The stage's own paint when the page has a colour: the colour, and a dot
+ *  grid that reads on it (the theme's dots are tuned to the theme paper). */
+function paperStyle(paper: Paper): CSSProperties {
+  if (!paper.background) return {}
+  return {
+    background: paper.background,
+    ['--dot' as string]: paper.tone === 'dark' ? 'rgba(255, 255, 255, 0.09)' : 'rgba(0, 0, 0, 0.09)',
+  }
+}
+
 export function Stage({
   onAddFrame,
   insets = NO_INSETS,
@@ -186,6 +204,8 @@ export function Stage({
   const setViewport = useStore((s) => s.setViewport)
   const canvas = usePageCanvas()
   const activePageId = useStore((s) => s.activePageId)
+  /* a page with a colour of its own paints the stage, dots in its contrast */
+  const paper = usePaper()
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
   /* ⌘. — the tool pill and the zoom pill go with the rest of the chrome */
@@ -907,10 +927,12 @@ export function Stage({
                     : isDrawingTool(tool)
                       ? tool === 'text'
                         ? 'cursor-text! [&_:not([data-comment-ui]_*)]:cursor-text!'
-                        : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
+                        : tool === 'path'
+                          ? PEN_CURSOR[drawing.penCursor]
+                          : 'cursor-crosshair! [&_:not([data-comment-ui]_*)]:cursor-crosshair!'
                       : 'cursor-default',
             )}
-            style={bounds}
+            style={{ ...bounds, ...paperStyle(paper) }}
             onPointerDownCapture={drawing.onPointerDown}
             onDoubleClickCapture={drawing.onDoubleClick}
             onTouchStartCapture={drawing.onTouchStart}

@@ -5,6 +5,7 @@ import {
   editElementGeometry,
   inspectElement,
   onFrameChange,
+  onTextSelection,
   styleElement,
   styleGesture,
   type ElementInfo,
@@ -186,9 +187,11 @@ export function ElementPanel({
     if (inspected.current.ready) refresh()
     else read()
     const off = onFrameChange(frame.id, refresh)
+    const offSelection = onTextSelection(frame.id, refresh)
     return () => {
       live = false
       off()
+      offSelection()
       if (timer) window.clearTimeout(timer)
     }
   }, [frame.id, frame.html, selector])
@@ -222,8 +225,10 @@ export function ElementPanel({
     }
   }
 
+  /* closing the panel is only that: the element stays picked, its outline
+     and grips in place, and a second click on it opens the panel again */
   function close() {
-    useStore.getState().pickElement(null)
+    useStore.getState().setElementPanelOpen(false)
   }
 
   const name = node ? layerName(node) : selector.split(' > ').at(-1)
@@ -702,6 +707,8 @@ function DesignTab({
   /* a library family offers only the weights it was uploaded with; picking
      one it lacks would just show the browser's faux bold */
   const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
+  /* runs that disagree show "Mixed", as Figma does for a text layer */
+  const mixed = info.textMixed ?? {}
   const t = useT()
   const sizeModes = SIZE_MODES.map(({ value, label }) => ({ value, label: t(label) }))
   const ratio = aspectRatio(info.aspectRatio, info.naturalAspectRatio)
@@ -1091,7 +1098,8 @@ function DesignTab({
             <span className="group flex min-w-0 flex-1 items-center gap-1.5">
               <SelectField
                 label={t('inspector.fontFamily')}
-                value={bound('font-family') ? info.inline['font-family']! : info.fontFamily}
+                value={bound('font-family') ? info.inline['font-family']! : mixed.fontFamily ? null : info.fontFamily}
+                placeholder={t('inspector.mixed')}
                 options={[
                   ...sortTokens(tokens.filter((token) => token.type === 'fontFamily')).map((token) => ({
                     value: `var(${token.name})`,
@@ -1118,7 +1126,8 @@ function DesignTab({
           <PropertyRow label={t('inspector.rowSize')}>
             <NumberField
               label={t('inspector.fontSize')}
-              value={info.fontSize}
+              value={mixed.fontSize ? null : info.fontSize}
+              placeholder={t('inspector.mixed')}
               unit="px"
               token={chip('font-size', info.fontSize === null ? null : `${info.fontSize}px`)}
               trailing={menu('font-size', ['fontSize'], info.fontSize === null ? null : `${info.fontSize}px`)}
@@ -1129,7 +1138,8 @@ function DesignTab({
             <span className="group flex min-w-0 flex-1 items-center gap-1.5">
               <SelectField
                 label={t('inspector.fontWeight')}
-                value={bound('font-weight') ? info.inline['font-weight']! : info.fontWeight}
+                value={bound('font-weight') ? info.inline['font-weight']! : mixed.fontWeight ? null : info.fontWeight}
+                placeholder={t('inspector.mixed')}
                 options={[
                   ...sortTokens(tokens.filter((token) => token.type === 'fontWeight')).map((token) => ({
                     value: `var(${token.name})`,
@@ -1147,7 +1157,8 @@ function DesignTab({
           </PropertyRow>
           <PropertyRow label={t('inspector.rowColor')}>
             <ColorField
-              value={rgbToHex(info.color)}
+              value={mixed.color ? null : rgbToHex(info.color)}
+              placeholder={t('inspector.mixed')}
               token={chip('color', rgbToHex(info.color))}
               trailing={menu('color', ['color'], rgbToHex(info.color))}
               onCommit={(v) => apply({ color: v })}

@@ -106,11 +106,22 @@ function loadsFamily(html: string, family: string): boolean {
   return inUrl.test(html) || inFace.test(html)
 }
 
-/** The roster families the link tag loads, from its href. */
-function linkedFamilies(link: string): WebFont[] {
+/** The roster families the link tag loads, from its href. A family that is
+ *  not valid URL text (a hand-edited link with a broken escape) is no roster
+ *  family, not a reason to refuse the document; the link is `damaged` and
+ *  gets rewritten. */
+function linkedFamilies(link: string): { fonts: WebFont[]; damaged: boolean } {
   const href = /href\s*=\s*["']([^"']*)["']/i.exec(link)?.[1] ?? ''
-  const names = [...href.matchAll(/family=([^:&]+)/g)].map((m) => decodeURIComponent(m[1]!.replace(/\+/g, ' ')))
-  return names.map(webFontByFamily).filter((font): font is WebFont => font !== undefined)
+  let damaged = false
+  const names = [...href.matchAll(/family=([^:&]+)/g)].flatMap((m) => {
+    try {
+      return [decodeURIComponent(m[1]!.replace(/\+/g, ' '))]
+    } catch {
+      damaged = true
+      return []
+    }
+  })
+  return { fonts: names.map(webFontByFamily).filter((font): font is WebFont => font !== undefined), damaged }
 }
 
 /**
@@ -129,14 +140,14 @@ export function withWebFontLinks(
   /* a style attribute carries a quoted family as &quot;…&quot; */
   const design = decodeQuotes(existing ? html.replace(LINK_RE, '') : html)
   const uploaded = new Set(library.map((font) => font.family.toLowerCase()))
-  const linked = existing ? linkedFamilies(existing[0]) : []
+  const { fonts: linked, damaged } = existing ? linkedFamilies(existing[0]) : { fonts: [], damaged: false }
   const wanted = roster.filter(
     (font) =>
       !uploaded.has(font.family.toLowerCase()) &&
       (linked.includes(font) || (usesFamily(design, font.family) && !loadsFamily(design, font.family))),
   )
   if (!wanted.length) return existing ? html.replace(LINK_RE, '') : html
-  if (wanted.length === linked.length && wanted.every((font) => linked.includes(font))) return html
+  if (!damaged && wanted.length === linked.length && wanted.every((font) => linked.includes(font))) return html
   const href = webFontsUrl(wanted).replace(/&/g, '&amp;')
   const tag = `<link rel="stylesheet" ${WEB_FONT_LINK_ATTR} href="${href}">`
   if (existing) return `${html.slice(0, existing.index)}${tag}${html.slice(existing.index + existing[0].length)}`

@@ -9,7 +9,7 @@ import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickMod
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
-import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName } from '../shared/agents.ts'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole } from '../shared/agents.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
@@ -139,6 +139,7 @@ Rules:
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
 - Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. When the design needs a visual that stock cannot supply — a full-bleed hero background in the frame's exact palette (a monochrome mountain range behind the product window, say), brand-specific illustration, a product render, a mascot — or the card asks for a generated image, call generate_image with ONE considered prompt (subject, style, composition, palette hexes, lighting, exclusions; for a hero background: aspect landscape, low contrast, and name the empty region where the copy or product window will sit) and embed the returned url with object-fit: cover and a legibility scrim over the copy; it spends the requester's quota or money, so refine a near miss by prompt rather than regenerating blind. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
 - If a request is unclear or impossible (missing frame, contradictory ask), do the closest reasonable thing and say what you did in your final message.
+- A comment is a conversation. Each comment in the request carries its id: when the ask needs a decision only the person can make, ask with reply_to_comment (awaiting_answer: true) in that thread instead of guessing, then finish without changing the frame — the thread is handed back to them and stays open for their answer; resolve_comment closes a thread you have fully dealt with. When you finish, your final message is posted into every thread you worked on as your reply, so write it to the person who asked — what you changed and where, in a sentence or two, plain prose and no @mentions.
 - Your final message should be one or two sentences: what you changed and where.
 
 Design quality — the bar for anything you originate or restyle (canvas guidelines and pinned style references outrank it; a frame you are only editing keeps its established direction):
@@ -186,6 +187,12 @@ interface RunState {
   /** where a new frame goes unless the model says otherwise: the page (and,
    *  for a canvas comment, the point) of the comment this run is about */
   placement?: FramePlacement
+  /** root ids of the threads the agent answered itself through reply_to_comment,
+   *  so the run's closing summary is not posted on top of its own words */
+  repliedThreads: Set<string>
+  /** root ids of the threads where the agent asked something and stopped:
+   *  handed back to the person instead of resolved when the run ends */
+  awaitingThreads: Set<string>
 }
 
 export interface FramePlacement {
@@ -515,7 +522,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 .map((x) => `    ${x.from}: "${x.text}"`)
                 .join('\n')
               const thread = earlier ? `\n  earlier in this thread:\n${earlier}` : ''
-              return `- ${c.from} ${describeCommentAnchor(c, canvas)}${thread}\n  comment: "${c.text}"`
+              return `- comment ${c.id} from ${c.from}, ${describeCommentAnchor(c, canvas)}${thread}\n  comment: "${c.text}"`
             })
             .join('\n'),
       )
@@ -569,6 +576,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
       ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
+      repliedThreads: new Set(),
+      awaitingThreads: new Set(),
     }
     let refused = false
     let crashed = false
@@ -859,7 +868,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (canceled()) return 'ran'
     if (finished && !blockedWebsiteAccess && !noMutation && !unverifiedMutation) {
       for (const f of claimed) actions.completeTaskFeedback(f.id)
-      for (const c of comments) actions.resolveComment(c.id, role.name)
+      settleComments(canvasId, comments, actor, { ok: true, summary }, runState)
       /* a card moves to the next agent in its pipeline, or finishes here */
       for (const c of cards) actions.advanceCard(canvasId, c.id, actor)
     } else {
@@ -884,7 +893,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         reason = `${role.name} changed a frame but could not verify it. Retry when you are ready.`
       }
       for (const f of claimed) actions.failTaskFeedback(f.id, reason)
-      for (const c of comments) actions.failComment(c.id, reason)
+      settleComments(canvasId, comments, actor, { ok: false, reason }, runState)
       for (const c of cards) {
         actions.failCard(canvasId, c.id, reason)
       }
@@ -897,6 +906,70 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     actions.setAgentStatus(canvasId, actor, '')
   }
   return 'ran'
+}
+
+/**
+ * Post the agent's words into a thread on this canvas. Never metered: the
+ * resident is the one working, so a reply from it is not a new request. An
+ * @mention in the text is turned into a plain name rather than queued, since
+ * the agent would otherwise be commanding itself (or a colleague) through
+ * its own reply. `awaiting` marks the thread as waiting on the person.
+ */
+export function replyInThread(
+  canvasId: string,
+  commentId: string,
+  text: string,
+  actor: Actor,
+  runState: Pick<RunState, 'repliedThreads' | 'awaitingThreads'>,
+  awaiting = false,
+): { ok: true; reply: ElementComment } | { ok: false; error: string } {
+  const clean = withoutMentions(text).trim()
+  if (!clean) return { ok: false, error: 'empty reply' }
+  const found = actions.findComment(commentId)
+  if (!found || found.canvasId !== canvasId) return { ok: false, error: 'no such comment on this canvas' }
+  const open = actions.openThread(commentId)
+  if (!open) return { ok: false, error: 'thread resolved, or its frame is gone' }
+  const reply = actions.replyToComment(commentId, clean, actor.name, undefined, 'agent')
+  if (!reply) return { ok: false, error: 'thread resolved meanwhile' }
+  runState.repliedThreads.add(open.root.id)
+  if (awaiting) runState.awaitingThreads.add(open.root.id)
+  return { ok: true, reply }
+}
+
+export type CommentOutcome = { ok: true; summary: string } | { ok: false; reason: string }
+
+/**
+ * Close the comments a run was about, telling their threads what happened,
+ * one message per thread: a finished run resolves each thread after posting
+ * its closing summary as the reply (unless the agent already answered there
+ * itself), a failed one leaves the reason in the thread and marks the
+ * comment failed for a retry. A thread the agent is waiting on an answer in
+ * is handed back to the person instead, open and unclaimed.
+ */
+export function settleComments(
+  canvasId: string,
+  comments: ElementComment[],
+  actor: Actor,
+  outcome: CommentOutcome,
+  runState: Pick<RunState, 'repliedThreads' | 'awaitingThreads'>,
+) {
+  const words = (outcome.ok ? outcome.summary : outcome.reason).trim()
+  const told = new Set<string>()
+  for (const c of comments) {
+    const rootId = c.parentId ?? c.id
+    if (outcome.ok && runState.awaitingThreads.has(rootId)) {
+      actions.handBackComment(c.id, actor.name)
+      continue
+    }
+    const answered = outcome.ok && runState.repliedThreads.has(rootId)
+    if (words && !answered && !told.has(rootId)) {
+      told.add(rootId)
+      const posted = replyInThread(canvasId, c.id, words, actor, runState)
+      if (!posted.ok) console.warn(`[resident] could not reply in thread ${rootId}: ${posted.error}`)
+    }
+    if (outcome.ok) actions.resolveComment(c.id, actor.name)
+    else actions.failComment(c.id, outcome.reason)
+  }
 }
 
 /** What the agent's panel entry currently says, or '' when nothing is open. */
@@ -1186,6 +1259,39 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['decision'],
+    },
+  },
+  {
+    name: 'reply_to_comment',
+    description:
+      'Answer inside a comment thread on this canvas — the person who left the comment sees it under their pin. Use it when a request needs a decision only they can make, or deserves a word mid-task; your final message is posted into every thread you worked on automatically, so do not repeat it here. Plain prose, no @mentions. Replying does not resolve the thread.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        comment_id: {
+          type: 'string',
+          description: 'The comment id given in the request (any comment in the thread works)',
+        },
+        text: { type: 'string', description: 'The reply, written to the person who asked' },
+        awaiting_answer: {
+          type: 'boolean',
+          description:
+            'true when you are asking something you need answered before you can do the work: the request is handed back to the person, the thread stays open for their reply, and you should finish without changing a frame.',
+        },
+      },
+      required: ['comment_id', 'text'],
+    },
+  },
+  {
+    name: 'resolve_comment',
+    description:
+      'Close a comment thread you have fully dealt with, before finishing. Resolving the root closes the whole thread. Threads you were asked to work on are resolved for you when the run finishes, so call this only to close one early, or one you answered without changing a frame.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        comment_id: { type: 'string', description: 'The comment id given in the request' },
+      },
+      required: ['comment_id'],
     },
   },
   {
@@ -1853,6 +1959,31 @@ async function execTool(
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid decision')
         }
+      }
+      case 'reply_to_comment': {
+        const awaiting = (block.input as { awaiting_answer?: unknown }).awaiting_answer === true
+        const posted = replyInThread(
+          canvasId,
+          String(input.comment_id ?? ''),
+          String(input.text ?? ''),
+          actor,
+          runState,
+          awaiting,
+        )
+        if (!posted.ok) return fail(posted.error)
+        return ok(
+          awaiting
+            ? `replied (${posted.reply.id}); the thread is handed back to the person when you finish — stop here`
+            : `replied in the thread (${posted.reply.id})`,
+        )
+      }
+      case 'resolve_comment': {
+        const id = String(input.comment_id ?? '')
+        const found = actions.findComment(id)
+        if (!found || found.canvasId !== canvasId) return fail('no such comment on this canvas')
+        const already = found.resolvedAt !== undefined
+        actions.resolveComment(id, actor.name)
+        return ok(already ? 'that thread was already resolved' : 'resolved')
       }
       case 'report_issue':
       case 'share_feedback': {

@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { store } from './store.ts'
+import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
@@ -975,6 +975,30 @@ export function retryComment(commentId: string, by: string): ElementComment | un
   return undefined
 }
 
+/**
+ * The agent answered a request with a question: the request is handed back
+ * to the person as an ordinary open thread (no claim, no agent status), so
+ * their answer — an @mention reply — queues fresh work with the whole
+ * conversation, and nothing is resolved behind their back.
+ */
+export function handBackComment(commentId: string, by: string): ElementComment | undefined {
+  for (const [canvasId, list] of commentLog) {
+    const comment = list.find((c) => c.id === commentId)
+    if (!comment || comment.resolvedAt) continue
+    delete comment.claimedBy
+    delete comment.claimedAt
+    delete comment.failedAt
+    delete comment.failureReason
+    delete comment.forAgent
+    delete comment.targetAgent
+    persist.saveComment(comment)
+    broadcast(canvasId, { type: 'comment', comment })
+    logActivity(canvasId, resolveActor({ name: by, kind: 'agent' }), 'asked a question in a comment', comment.frameId)
+    return comment
+  }
+  return undefined
+}
+
 export function resolveComment(commentId: string, by: string): ElementComment | undefined {
   for (const [canvasId, list] of commentLog) {
     const c = list.find((x) => x.id === commentId)
@@ -1694,9 +1718,27 @@ export function setCanvasPages(canvasId: string, pages: import('../shared/types.
   return next
 }
 
+/** Add one page at the end of the canvas, named `name`, with a fresh id; peers
+ *  get the page list. Returns the new page and the whole list. */
+export function createCanvasPage(canvasId: string, name: string, actor: Actor) {
+  const canvas = store.canvases.get(canvasId)
+  if (!canvas) return undefined
+  const pages = canvasPages(canvas)
+  if (pages.length >= MAX_PAGES) throw new PageLimitError()
+  const page = { id: nanoid(10), name }
+  return { page, pages: setCanvasPages(canvasId, [...pages, page], actor) }
+}
+
 /** Point a page's prototype flow at a frame (or clear it); peers get the page list. */
 export function setFlowStart(canvasId: string, pageId: string, frameId: string | null, actor: Actor) {
   const pages = store.setFlowStart(canvasId, pageId, frameId)
+  if (pages) broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+  return pages
+}
+
+/** Paint a page's canvas a colour of its own (or clear it); peers get the page list. */
+export function setPageBackground(canvasId: string, pageId: string, background: string | null, actor: Actor) {
+  const pages = store.setPageBackground(canvasId, pageId, background)
   if (pages) broadcast(canvasId, { type: 'canvas:pages', pages, actor })
   return pages
 }

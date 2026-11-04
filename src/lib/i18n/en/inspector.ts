@@ -270,4 +270,6 @@ export const inspector = {
   pickLabel: 'Pick {label}',
   pickColour: 'Pick colour',
   colorNone: 'none',
+  pageBackground: 'Background',
+  pageBackgroundFailed: 'Could not save the page background',
 } as const

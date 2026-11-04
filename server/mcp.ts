@@ -3,14 +3,15 @@ import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
-import { canvasPages, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
+import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
-import { store } from './store.ts'
+import { PageLimitError, store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import {
@@ -517,18 +518,30 @@ export function buildMcpServer(
       title: 'Get a canvas and its frames',
       _meta: previewToolMeta('Reading the canvas…', 'Canvas loaded'),
       description:
-        'Get a canvas: its name and frames with position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so the result can tell you when human feedback is waiting (claim it with get_feedback).',
+        "Get a canvas: its name, its pages (id, name, prototype start frame) and its frames with pageId, position, size, approvalStatus and human approval attribution (not the HTML — use get_frame for that). Pass page_id to see one page's frames only; filter approval_status to ready_for_dev to find screens approved for implementation. Use this to see the current layout before adding or editing frames. Pass your agent_name so the result can tell you when human feedback is waiting (claim it with get_feedback).",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         agent_name: agentName.optional(),
+        page_id: z.string().optional().describe("Only this page's frames (a page id from a previous get_canvas)"),
         approval_status: z.enum(['draft', 'ready_for_dev', 'needs_review']).optional(),
       },
     },
-    async ({ canvas_id, agent_name, approval_status }) => {
+    async ({ canvas_id, agent_name, page_id, approval_status }) => {
       const c = canvasFor(canvas_id, 'view')
       if (!c) return noCanvas(canvas_id)
+      if (page_id && !canvasPages(c).some((page) => page.id === page_id))
+        return err(`No page ${page_id} on this canvas. Its pages are listed by get_canvas without page_id.`)
       arrive(canvas_id, agent_name)
+      /* demo frames (the Doop welcome show, seeded examples) are product
+         content, not user work — hidden so agents never mistake them for
+         the canvas's established style */
+      const shown = c.frames.filter(
+        (f) =>
+          !f.demo &&
+          (!page_id || framePageId(c, f) === page_id) &&
+          (!approval_status || (f.approval?.status ?? 'draft') === approval_status),
+      )
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
       const library = fontsForCanvas(c)
@@ -562,13 +575,8 @@ export function buildMcpServer(
           text({
             id: c.id,
             name: c.name,
-            pages: c.pages,
-            /* demo frames (the Doop welcome show, seeded examples) are product
-             content, not user work — hidden so agents never mistake them for
-             the canvas's established style */
-            frames: c.frames
-              .filter((f) => !f.demo && (!approval_status || (f.approval?.status ?? 'draft') === approval_status))
-              .map(frameSummary),
+            pages: canvasPages(c),
+            frames: shown.map(frameSummary),
             guidelines: docs.map((d) => ({
               name: d.name,
               title: actions.guidelineTitle(d),
@@ -593,7 +601,7 @@ export function buildMcpServer(
           agent_name ? actorFrom(agent_name) : undefined,
         ),
         canvas_id,
-        c.frames.filter((f) => !f.demo && (!approval_status || (f.approval?.status ?? 'draft') === approval_status)),
+        shown,
       )
     },
   )
@@ -1198,7 +1206,7 @@ export function buildMcpServer(
     {
       title: 'Set canvas pages',
       description:
-        'Create, rename, reorder or delete canvas pages. Send the complete ordered page list with stable IDs (read get_canvas first). A page containing frames cannot be deleted: move its frames with update_frame first.',
+        'Rename, reorder or delete canvas pages by sending the complete ordered page list back (read get_canvas first; keep the ids it returned). To add a page, call create_canvas_page instead. A page containing frames cannot be deleted: move its frames with update_frame first.',
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1222,7 +1230,66 @@ export function buildMcpServer(
       if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId))))
         return err('Move frames before deleting their page')
       const actor = actorFrom(agent_name)
-      return text({ ok: true, pages: actions.setCanvasPages(canvas_id, pages, actor) })
+      return withFeedback(text({ ok: true, pages: actions.setCanvasPages(canvas_id, pages, actor) }), canvas_id, actor)
+    },
+  )
+
+  server.registerTool(
+    'create_canvas_page',
+    {
+      title: 'Create a canvas page',
+      description:
+        'Add a new, empty page at the end of a canvas and get its id back. Use a page when a body of work deserves its own board — a second product surface, a platform (web vs. mobile), a round of explorations — and a frame when it is one screen. Then pass the returned page id as pageId to create_frame; get_canvas with page_id shows what is on it.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        name: z.string().trim().min(1).max(MAX_PAGE_NAME).describe('The page name shown in the Pages panel'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, name, agent_name }) => {
+      const canvas = canvasFor(canvas_id, 'edit')
+      if (!canvas) return noCanvas(canvas_id)
+      try {
+        const created = actions.createCanvasPage(canvas_id, name, actorFrom(agent_name))
+        if (!created) return noCanvas(canvas_id)
+        return withFeedback(
+          text({ ok: true, page: created.page, pages: created.pages }),
+          canvas_id,
+          actorFrom(agent_name),
+        )
+      } catch (e) {
+        if (e instanceof PageLimitError) return err(e.message)
+        throw e
+      }
+    },
+  )
+
+  server.registerTool(
+    'set_page_background',
+    {
+      title: 'Set a page background colour',
+      description:
+        "Paint one page's canvas a colour of its own, as Figma's page background does: everyone viewing that page sees frames on that colour instead of the theme paper. Pass color null to go back to the theme paper. Pages report it as `background` in get_canvas.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string().optional().describe('Page ID from get_canvas; defaults to the first page'),
+        color: z.string().nullable().describe('A hex colour such as #1e1e1e, or null to clear'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, color, agent_name }) => {
+      const canvas = canvasFor(canvas_id, 'edit')
+      if (!canvas) return noCanvas(canvas_id)
+      const pages = canvasPages(canvas)
+      const pageId = page_id ?? pages[0]!.id
+      if (!pages.some((p) => p.id === pageId)) return err(`no page ${pageId} on canvas ${canvas_id}`)
+      const background = color === null ? null : normalizePageBackground(color)
+      if (color !== null && !background) return err('color must be a hex colour such as #f5f5f5, or null')
+      const saved = actions.setPageBackground(canvas_id, pageId, background, actorFrom(agent_name))
+      if (!saved) return noCanvas(canvas_id)
+      return withFeedback(text({ ok: true, pages: saved }), canvas_id, actorFrom(agent_name))
     },
   )
 
@@ -1262,7 +1329,11 @@ export function buildMcpServer(
       if (!canvas) return noCanvas(canvas_id)
       const result = setPrototypeStart(canvas, pageId, frame_id, actorFrom(agent_name))
       if (!result.ok) return err(result.error)
-      return text({ ok: true, pages: result.pages, prototype_url: prototypeUrl(canvas.id) })
+      return withFeedback(
+        text({ ok: true, pages: result.pages, prototype_url: prototypeUrl(canvas.id) }),
+        canvas_id,
+        actorFrom(agent_name),
+      )
     },
   )
 

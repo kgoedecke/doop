@@ -26,6 +26,8 @@ import {
 } from '../lib/layers'
 import {
   deleteLayers,
+  renameFrame,
+  renameLayer,
   dropLayer,
   setFrameHidden,
   setFramesLocked,
@@ -33,6 +35,7 @@ import {
   setLayerLocked,
   detachLayer,
   isStackLocked,
+  isLayerLocked,
   restackFrame,
   stackRoom,
   shiftFrame,
@@ -362,8 +365,10 @@ export function LayersPanel({
       if (standalone || row.frame.id === dragged.frame.id) return restackAt(dragged, row, fraction)
       if (row.kind === 'frame' && fraction < EDGE_BAND) return restackAt(dragged, row, 0)
       if (row.kind === 'frame' && !row.open && fraction > 1 - EDGE_BAND) return restackAt(dragged, row, 1)
-    } else if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND && row.frame.id !== dragged.frame.id)
-      /* the band above a top-level row means "beside it, at the root" */
+    } else if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND)
+      /* the band above a top-level row means "beside it, at the root"; the
+         layer's own frame counts, since nothing else lies in front of the
+         first frame in the list */
       return { key: row.key, place: 'root' }
     /* a standalone element is one shape, not a box for others */
     if (standalone) return null
@@ -683,6 +688,61 @@ export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
   )
 }
 
+/** The editor owns its keys and pointer gestures while a name is being typed. */
+function ItemNameInput({
+  name,
+  onCommit,
+  onDone,
+}: {
+  name: string
+  onCommit: (value: string) => void
+  onDone: () => void
+}) {
+  const t = useT()
+  const finished = useRef(false)
+  function finish(input: HTMLInputElement, save: boolean) {
+    if (finished.current) return
+    finished.current = true
+    if (save && input.value.trim() !== name) onCommit(input.value)
+    onDone()
+  }
+  return (
+    <Input
+      autoFocus
+      aria-label={t('panels.layersName')}
+      variant="bare"
+      inputSize="auto"
+      className="h-5 w-full bg-surface px-1 text-ink shadow-elevation-1-focus md:text-body"
+      defaultValue={name}
+      onFocus={(e) => e.target.select()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onBlur={(e) => finish(e.currentTarget, true)}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.nativeEvent.isComposing || (e.key !== 'Enter' && e.key !== 'Escape')) return
+        e.preventDefault()
+        const tree = e.currentTarget.closest<HTMLElement>('[role="tree"]')
+        finish(e.currentTarget, e.key === 'Enter')
+        tree?.focus()
+      }}
+    />
+  )
+}
+
+function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
+  const [renaming, setRenaming] = useState(false)
+  return {
+    label:
+      renaming && allowed ? <ItemNameInput name={name} onCommit={onCommit} onDone={() => setRenaming(false)} /> : name,
+    startRename: () => {
+      if (allowed) setRenaming(true)
+    },
+  }
+}
+
 function FrameRow({
   row,
   selected,
@@ -705,6 +765,9 @@ function FrameRow({
 }) {
   const { frame } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
+  const { label, startRename } = useItemRename(frame.name, !readOnly && !frame.locked, (value) =>
+    renameFrame(frame.id, value),
+  )
   const stream = useStore((s) => s.streams[frame.id])
   const presences = useStore((s) => s.presences)
   const me = getIdentity().clientId
@@ -722,11 +785,13 @@ function FrameRow({
           <Row
             data-row-key={row.key}
             depth={0}
-            drop={drop}
+            /* an open, empty frame shows the drop as the line its first
+               layer would sit on, under the caption, not as a box */
+            drop={row.empty && drop === 'inside' ? undefined : drop}
             caret={<Caret open={row.open} present />}
             onCaret={onToggle}
             icon={<FrameIcon className="size-3.5" />}
-            label={frame.name}
+            label={label}
             className={cn(current && !selected && 'text-ink', dragging && 'opacity-40')}
             selected={selected}
             hidden={!!frame.hidden}
@@ -735,7 +800,7 @@ function FrameRow({
             locked={!!frame.locked}
             onToggleLocked={readOnly ? undefined : () => setFramesLocked([frame], !frame.locked)}
             onClick={onActivate}
-            onDoubleClick={() => useStore.getState().requestFlyTo(frame.id)}
+            onDoubleClick={startRename}
             onContextMenu={() => {
               pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
               if (!useStore.getState().selectedIds.includes(frame.id)) onActivate()
@@ -764,18 +829,21 @@ function FrameRow({
             }
           />
         </ContextMenuTrigger>
-        <FrameContextMenu frame={frame} at={pasteAt} />
+        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
       </ContextMenu>
       {/* the caption stands in for the frame's body, so a layer dragged
-          onto it lands in the frame as a drop on the frame row would */}
+          onto it lands in the frame as a drop on the frame row would; the
+          drop is drawn as one line between the row and the caption, at the
+          indent the layer will take */}
       {row.empty && (
-        <div
-          data-row-key={row.key}
-          className={cn(
-            'rounded-[7px] py-1 pl-[46px] text-[11px] text-ink-faint',
-            drop === 'inside' && 'shadow-[inset_0_0_0_1.5px_var(--brand)]',
+        <div data-row-key={row.key} className="relative rounded-[7px] py-1 pl-[46px] text-[11px] text-ink-faint">
+          {drop === 'inside' && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute -top-px right-1 z-[1] h-0.5 rounded-full bg-brand"
+              style={{ left: 6 + INDENT }}
+            />
           )}
-        >
           {t('panels.layersEmptyFrame')}
         </div>
       )}
@@ -803,9 +871,14 @@ function NodeRow({
   const { frame, node } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const hasChildren = node.children.length > 0
-  /* a standalone element is its frame: the eye, the lock and the menu are
-     the frame's, and a double-click flies to it */
+  /* a standalone element is its frame: its name, eye, lock and menu all
+     belong to the frame */
   const standalone = !!row.standalone
+  const { label, startRename } = useItemRename(
+    standalone ? frame.name : node.label,
+    !readOnly && !frame.locked && !node.locked,
+    (value) => (standalone ? renameFrame(frame.id, value) : renameLayer(frame.id, node.selector, value)),
+  )
   const pasteAt = useRef({ x: 0, y: 0 })
   return (
     <ContextMenu>
@@ -817,7 +890,7 @@ function NodeRow({
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
           icon={<LayerKindIcon kind={node.kind} />}
-          label={standalone ? frame.name : node.label}
+          label={label}
           detail={standalone ? undefined : node.detail}
           selected={selected}
           /* a standalone element is hidden by its frame or by its own
@@ -855,7 +928,9 @@ function NodeRow({
           }
           className={cn(dragging && 'opacity-40')}
           onClick={(e) => onActivate(e.shiftKey || e.metaKey || e.ctrlKey)}
-          onDoubleClick={standalone ? () => useStore.getState().requestFlyTo(frame.id) : undefined}
+          onDoubleClick={() => {
+            if (!isLayerLocked(frame, node.selector)) startRename()
+          }}
           onContextMenu={() => {
             pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
             onActivate(false)
@@ -872,9 +947,9 @@ function NodeRow({
         />
       </ContextMenuTrigger>
       {standalone ? (
-        <FrameContextMenu frame={frame} at={pasteAt} />
+        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
       ) : (
-        <ElementContextMenu frame={frame} selector={node.selector} />
+        <ElementContextMenu frame={frame} selector={node.selector} onRename={startRename} />
       )}
     </ContextMenu>
   )
@@ -888,7 +963,7 @@ type RowProps = Omit<HTMLAttributes<HTMLDivElement>, 'onClick'> & {
   caret: ReactNode
   onCaret?: () => void
   icon: ReactNode
-  label: string
+  label: ReactNode
   detail?: string
   selected: boolean
   /** where a dragged layer would land on this row; `root` is a line above
@@ -942,9 +1017,11 @@ function Row({
       className={cn(
         'group relative flex h-7 cursor-default select-none items-center gap-[5px] whitespace-nowrap rounded-[7px] pr-1.5 text-[12px] text-ink-soft hover:bg-sub',
         selected && 'bg-paper-deep font-medium text-ink hover:bg-paper-deep [&_[data-icon]]:text-ink',
-        /* room under the floating eye and lock, so the name never runs beneath them */
+        /* room under the floating eye and lock, the strip's whole width, so
+           neither the name nor a trailing badge runs beneath them: the strip
+           paints the row's own background over whatever it covers */
         (onToggleHidden || onToggleLocked) &&
-          (hidden || locked ? 'pr-[50px]' : 'focus-within:pr-[50px] hover:pr-[50px]'),
+          (hidden || locked ? 'pr-[56px]' : 'focus-within:pr-[56px] hover:pr-[56px]'),
         drop === 'inside' && 'shadow-[inset_0_0_0_1.5px_var(--brand)]',
         className,
       )}
@@ -964,6 +1041,7 @@ function Row({
       <span
         data-icon
         className={cn('grid size-3 flex-none place-items-center text-ink-faint', onCaret && 'cursor-pointer')}
+        onDoubleClick={(e) => e.stopPropagation()}
         onClick={(e) => {
           if (!onCaret) return
           e.stopPropagation()
@@ -991,7 +1069,8 @@ function Row({
            a hidden or locked row keeps its mark showing. */
         <span
           className={cn(
-            'absolute top-0 right-0 flex h-full flex-none items-center gap-0.5 rounded-r-[7px] bg-inherit pr-1.5 pl-1',
+            /* 56px: 8 + 20 + 2 + 20 + 6, the row's reserved padding above */
+            'absolute top-0 right-0 flex h-full flex-none items-center gap-0.5 rounded-r-[7px] bg-inherit pr-1.5 pl-2',
             !hidden && !locked && 'invisible group-focus-within:visible group-hover:visible',
           )}
         >

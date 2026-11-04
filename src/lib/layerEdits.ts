@@ -1,19 +1,26 @@
+import type { TextFormatCommand } from './richText'
 import type { Frame } from '../../shared/types'
+import type { ReorderMove } from './keys'
 import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
-import { pickedSelectors, useStore } from './store'
+import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
+import { t } from './i18n'
 import { api, ApiError, errorMessage } from './api'
-import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
+import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
+import { duplicateFrames } from './frameClipboard'
 import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
 import {
   deleteFramesTracked,
   dropEntry,
+  historyEpoch,
   keepTransferDestination,
   recordDrawingTransfer,
+  recordLayerName,
   recordStack,
   recordUpdate,
   recordUpdates,
   saveStack,
+  saveLayerName,
   trackSave,
 } from './history'
 import {
@@ -21,6 +28,8 @@ import {
   duplicateElements,
   elementFate,
   elementHtml,
+  elementName,
+  htmlWithoutLayerNames,
   isElementHidden,
   isElementLocked,
   moveElement,
@@ -29,6 +38,7 @@ import {
   replaceElement,
   setElementLocked,
   setElementsHidden,
+  reorderElements,
   shiftElement,
   type DropTarget,
   type FlowPlacement,
@@ -36,6 +46,78 @@ import {
 } from './layers'
 
 /* ---- element edits shared by the Layers rail and the element panel ---- */
+
+/* Serializing renames gives each save a confirmed predecessor. A second
+   failed rename must never roll back to the first failed, optimistic name. */
+const pendingRenames = new Map<string, Promise<void>>()
+function queueRename(frameId: string, edit: (frame: Frame) => Promise<void>) {
+  const canvasId = useStore.getState().canvas?.id
+  const started = historyEpoch()
+  const run = async () => {
+    const s = useStore.getState()
+    if (s.canvas?.id !== canvasId || historyEpoch() !== started || !canEditOpenCanvas(s)) return
+    const frame = s.canvas?.frames.find((f) => f.id === frameId)
+    if (frame) await edit(frame)
+  }
+  const prior = pendingRenames.get(frameId)
+  const pending = (prior ? prior.then(run) : run()).finally(() => {
+    if (pendingRenames.get(frameId) === pending) pendingRenames.delete(frameId)
+  })
+  pendingRenames.set(frameId, pending)
+  trackSave(pending)
+}
+
+export function renameFrame(frameId: string, value: string) {
+  const name = value.trim()
+  if (!name) return
+  queueRename(frameId, async (frame) => {
+    if (isStackLocked(frame) || name === frame.name) return
+    const entry = recordUpdate(frame.id, { name: frame.name }, { name }, true)
+    const started = historyEpoch()
+    useStore.getState().patchFrameLocal(frame.id, { name })
+    try {
+      await api.updateFrame(frame.id, { name })
+    } catch (err) {
+      if (entry) dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id !== frame.canvasId || historyEpoch() !== started) return
+      // A failed save must not overwrite a newer name from another edit.
+      if (s.canvas.frames.find((f) => f.id === frame.id)?.name === name) {
+        s.patchFrameLocal(frame.id, { name: frame.name })
+      }
+      s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name: frame.name })))
+    }
+  })
+}
+
+export function renameLayer(frameId: string, selector: string, value: string) {
+  const name = value.trim()
+  const original = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
+  if (!name || !original) return
+  const expected = htmlWithoutLayerNames(original.html)
+  queueRename(frameId, async (frame) => {
+    // A positional selector can now name a different sibling. Fail closed
+    // when anything except another rename changed while this edit waited.
+    if (htmlWithoutLayerNames(frame.html) !== expected) {
+      useStore.getState().pushNotice(t('panels.layersRenameChanged'))
+      return
+    }
+    if (isLayerLocked(frame, selector)) return
+    const before = elementName(frame.html, selector)
+    if (before === name) return
+    const entry = recordLayerName(frame.id, selector, before, name)
+    const started = historyEpoch()
+    try {
+      await saveLayerName(frame.id, selector, name)
+    } catch (err) {
+      dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id === frame.canvasId && historyEpoch() === started) {
+        s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name })))
+      }
+    }
+  })
+}
 
 export function saveFrameHtml(frame: Frame, html: string) {
   // Layer commands each need their own undo step, even when invoked rapidly.
@@ -192,6 +274,12 @@ export function duplicateLayer(frame: Frame, selector: string) {
  *  originals' positional paths would now point at shifted elements. */
 export function duplicateLayers(frame: Frame, selectors: string[]) {
   if (frame.locked || selectors.some((selector) => isLayerLocked(frame, selector))) return
+  /* a standalone element's shape is the element: its copy is a second
+     element on the canvas, not a second shape inside its shell */
+  if (isStandalonePick(frame, selectors)) {
+    duplicateFrames([frame])
+    return
+  }
   const duplicated = duplicateElements(frame.html, selectors)
   if (!duplicated) return
   saveFrameHtml(frame, duplicated.html)
@@ -311,6 +399,34 @@ export function setLayersHidden(frame: Frame, selectors: string[], hidden: boole
 /** ⌘⇧H: picked elements move together — all shown when every one is
  *  hidden, hidden otherwise; with nothing picked the selected frames do the
  *  same. False when the key had nothing to act on. */
+/** ⌘B, ⌘I, ⌘U, ⌘⇧X and ⌘⇧7 / ⌘⇧8 on picked text layers: the format toggles
+ *  over each whole layer. True when an element was picked, whether or not it
+ *  held text; the selection follows a layer whose tag changed. */
+export function formatSelectionText(command: TextFormatCommand): boolean {
+  const s = useStore.getState()
+  const picked = s.selectedElement
+  if (!picked) return false
+  const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
+  if (!frame) return false
+  if (frame.locked) return true
+  const selectors = pickedSelectors(s)
+  formatElementText(picked.frameId, selectors, command)
+    .then((after) => {
+      /* the frame focused its layer for the command; the canvas's shortcuts listen on this window */
+      const active = document.activeElement
+      if (active instanceof HTMLIFrameElement) active.blur()
+      const primary = after?.[selectors.indexOf(picked.selector)]
+      const now = useStore.getState()
+      const unchanged =
+        now.selectedElement?.frameId === picked.frameId && pickedSelectors(now).join() === selectors.join()
+      if (!after || !primary || after.join() === selectors.join() || !unchanged) return
+      /* the whole picked set follows its layers' new selectors, the primary staying primary */
+      useStore.setState({ selectedElement: { frameId: picked.frameId, selector: primary }, selectedElements: after })
+    })
+    .catch(console.error)
+  return true
+}
+
 export function toggleSelectionHidden(): boolean {
   const s = useStore.getState()
   const frames = s.canvas?.frames ?? []
@@ -381,6 +497,12 @@ export function standaloneSelector(frame: Frame): string | null {
   if (!isCanvasElement(frame.html)) return null
   const [only, ...more] = buildLayerTree(frame.html)
   return only && !more.length ? only.selector : null
+}
+
+/** The pick is a standalone element's one shape, and nothing else. */
+export function isStandalonePick(frame: Frame, selectors: string[]): boolean {
+  const shape = standaloneSelector(frame)
+  return !!shape && selectors.length === 1 && selectors[0] === shape
 }
 
 /** Move the element out of `source` and next to, or into, a layer of
@@ -631,4 +753,18 @@ function standaloneDocument(markup: string): string {
 export function shiftLayer(frame: Frame, selector: string, dir: -1 | 1): boolean {
   if (isLayerLocked(frame, selector)) return false
   return commitMove(frame, shiftElement(frame.html, selector, dir))
+}
+
+/** ⌘] / ⌘[ / ⌘⌥] / ⌘⌥[: restack the picked elements together among their
+ *  siblings, one undo step; the pick follows them. False when any is
+ *  locked or nothing could move. */
+export function reorderLayers(frame: Frame, selectors: string[], move: ReorderMove): boolean {
+  if (!selectors.length || selectors.some((sel) => isLayerLocked(frame, sel))) return false
+  const moved = reorderElements(frame.html, selectors, move)
+  if (!moved) return false
+  saveFrameHtml(frame, moved.html)
+  const store = useStore.getState()
+  store.select(frame.id)
+  store.pickElements(frame.id, moved.selectors)
+  return true
 }

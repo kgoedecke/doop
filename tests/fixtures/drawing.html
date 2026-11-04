@@ -12,7 +12,9 @@
       import { Stage } from '/src/components/Stage.tsx'
       import { useStore } from '/src/lib/store.ts'
       import { undo, redo } from '/src/lib/history.ts'
+      import { formatSelectionText } from '/src/lib/layerEdits.ts'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import { importSvgInBrowser } from '/src/lib/svgImport.ts'
       import '/src/styles.css'
       window.drawingHarness = {
         seed: (canvas) => useStore.getState().setCanvas(canvas),
@@ -37,6 +39,9 @@
         redo,
         /* a Layers row pick */
         pick: (el) => useStore.getState().pickElement(el),
+        formatText: (command) => formatSelectionText(command),
+        /* an SVG file read the way a paste reads it, with the browser's computed styles */
+        importSvg: (markup, name) => importSvgInBrowser(markup, name, { key: 'k' }),
       }
       createRoot(document.getElementById('root')).render(
         React.createElement(

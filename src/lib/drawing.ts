@@ -3,8 +3,10 @@ import { api, errorMessage } from './api'
 import { recordCreate, recordUpdates, trackSave } from './history'
 import { currentPageCanvas } from './pages'
 import { useStore } from './store'
-import { getTheme, resolveTheme, type ResolvedTheme } from './theme'
+import { currentPaper } from './paper'
+import type { ResolvedTheme } from './theme'
 import type { DrawingTool } from './tools'
+import { paddedBounds, subpathsData } from './svgPath'
 
 export interface Point {
   x: number
@@ -55,10 +57,11 @@ export const DRAWING_INK = '#202124'
 export const DRAWING_INK_ON_DARK = '#f2f2f2'
 
 /** A standalone element sits on the canvas paper, so its ink inverts with the
- *  theme. Inside a frame the document's own background applies, and the frame
- *  cannot know the viewer's theme, so it keeps the dark ink. */
-export function drawingInk(target: DrawingTarget, theme: ResolvedTheme): string {
-  return !target.frameId && theme === 'dark' ? DRAWING_INK_ON_DARK : DRAWING_INK
+ *  paper's tone (the theme, or the page's own colour). Inside a frame the
+ *  document's own background applies, and the frame cannot know the viewer's
+ *  theme, so it keeps the dark ink. */
+export function drawingInk(target: DrawingTarget, tone: ResolvedTheme): string {
+  return !target.frameId && tone === 'dark' ? DRAWING_INK_ON_DARK : DRAWING_INK
 }
 const names: Record<DrawingTool, string> = {
   rectangle: 'Rectangle',
@@ -112,71 +115,13 @@ export function defaultDrawing(tool: DrawingTool, at: Point): Drawing {
 
 /** A little padding keeps horizontal/vertical paths and their stroke visible. */
 export function pathDrawing(points: PathPoint[], closed = false): Drawing {
-  const bounds: Point[] = [...points]
-  for (let i = 1; i < points.length + (closed ? 1 : 0); i++) {
-    const from = points[i - 1]!
-    const to = points[i % points.length]!
-    const [a, b] = controls(from, to)
-    for (const axis of ['x', 'y'] as const) {
-      // Extrema of the cubic, rather than its handles, define its visible bounds.
-      const p = -from[axis] + 3 * a[axis] - 3 * b[axis] + to[axis]
-      const q = 2 * (from[axis] - 2 * a[axis] + b[axis])
-      const r = a[axis] - from[axis]
-      const discriminant = q * q - 4 * p * r
-      const roots =
-        Math.abs(p) < 1e-9
-          ? Math.abs(q) < 1e-9
-            ? []
-            : [-r / q]
-          : discriminant < 0
-            ? []
-            : [(-q + Math.sqrt(discriminant)) / (2 * p), (-q - Math.sqrt(discriminant)) / (2 * p)]
-      for (const t of roots) {
-        if (t <= 0 || t >= 1) continue
-        const u = 1 - t
-        bounds.push({
-          x: u ** 3 * from.x + 3 * u * u * t * a.x + 3 * u * t * t * b.x + t ** 3 * to.x,
-          y: u ** 3 * from.y + 3 * u * u * t * a.y + 3 * u * t * t * b.y + t ** 3 * to.y,
-        })
-      }
-    }
-  }
-  const x = Math.min(...bounds.map((p) => p.x)) - 2
-  const y = Math.min(...bounds.map((p) => p.y)) - 2
-  return {
-    tool: 'path',
-    x,
-    y,
-    width: Math.max(...bounds.map((p) => p.x)) - x + 2,
-    height: Math.max(...bounds.map((p) => p.y)) - y + 2,
-    points,
-    closed,
-  }
+  return { tool: 'path', ...paddedBounds([{ points, closed }], 2), points, closed }
 }
 
 export function pathData(drawing: Drawing): string {
   const points = drawing.points ?? []
-  const first = points[0]
-  if (!first) return ''
-  const at = (p: Point) => `${round(p.x - drawing.x)} ${round(p.y - drawing.y)}`
-  const commands = [`M ${at(first)}`]
-  for (let i = 1; i < points.length + (drawing.closed ? 1 : 0); i++) {
-    const from = points[i - 1]!
-    const to = points[i % points.length]!
-    if (from.handle || to.handle || from.handleOut || to.handleIn) {
-      const [a, b] = controls(from, to)
-      commands.push(`C ${at(a)} ${at(b)} ${at(to)}`)
-    } else if (i < points.length) commands.push(`L ${at(to)}`)
-  }
-  if (drawing.closed) commands.push('Z')
-  return commands.join(' ')
-}
-
-function controls(from: PathPoint, to: PathPoint): [Point, Point] {
-  return [
-    { x: from.x + (from.handleOut?.x ?? from.handle?.x ?? 0), y: from.y + (from.handleOut?.y ?? from.handle?.y ?? 0) },
-    { x: to.x + (to.handleIn?.x ?? -(to.handle?.x ?? 0)), y: to.y + (to.handleIn?.y ?? -(to.handle?.y ?? 0)) },
-  ]
+  if (!points.length) return ''
+  return subpathsData([{ points, closed: !!drawing.closed }], drawing)
 }
 
 function round(value: number): number {
@@ -237,7 +182,7 @@ export function drawingDocument(drawing: Drawing, ink = DRAWING_INK): string {
  *  gesture survive. Use the normal API for collaboration and tracked history. */
 export function saveDrawing(drawing: Drawing, target: DrawingTarget): Promise<void> {
   // Read now, not when the queue reaches this save: the ink matches the paper the person drew on.
-  const ink = drawingInk(target, resolveTheme(getTheme()))
+  const ink = drawingInk(target, currentPaper(target.pageId).tone)
   const save = async () => {
     const s = useStore.getState()
     // This gesture is complete. Navigation only cancels drafts; queued saves

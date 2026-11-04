@@ -270,4 +270,6 @@ export const inspector: Catalog['inspector'] = {
   pickLabel: 'Escolher {label}',
   pickColour: 'Escolher cor',
   colorNone: 'nenhuma',
+  pageBackground: 'Fundo',
+  pageBackgroundFailed: 'Não foi possível salvar o fundo da página',
 }

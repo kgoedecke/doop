@@ -89,6 +89,12 @@
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+- Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
+  every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
+  empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
+  and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
+  rename, reorder and delete; `update_frame` moves a frame between pages. The guide's "Frames
+  and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
@@ -149,6 +155,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   name. A confirm dialog before the upload says the fonts are shared with the library and that
   OS fonts are often licensed for one person; Doop checks no licences (Figma's posture for shared
   fonts). Tests: the Rust unit tests in `fonts.rs`, `localFonts.test.ts`.
+- Profile photos (`shared/avatar.ts`, `server/avatars.ts`): Settings → Your account → Photo uploads a
+  PNG/JPG/WebP/GIF under 2 MB as raw bytes to `POST /api/me/avatar`, which stores it as an ordinary
+  immutable `/a/` asset and points better-auth's `user.image` at it; `DELETE /api/me/avatar` puts the
+  initials back. `avatarUrl` is the one rule for what a face may load: only such `/a/` uploads, never
+  a social provider's picture or a URL set through the raw update-user call, so no account can make
+  every viewer fetch an address it chose. The `Avatar` primitive takes `image` (a photo that fails to
+  load falls back to the initials); it rides `Presence` (set at `join`, re-announced to the person's
+  rooms on a change), `/api/me`, the session, canvas `people`, the share list and workspace members.
+  Tests: `avatar.test.ts`, `avatarFace.test.tsx`.
 - Outside a canvas room, `GET /api/me/events` (`server/userEvents.ts`, Server-Sent Events, one
   stream per tab) pings a user's open pages with `{ type: 'canvases' }` when a canvas or workspace
   membership adds or removes them (the workspace pings come from `addMember`, `removeMember`,
@@ -156,6 +171,23 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   on each ping and every time the stream opens, dropping a response older than one already shown.
   Inviting someone to a canvas also emails them once (`server/canvasShares.ts`, SMTP only). Tests:
   `canvasShares.test.ts`, `userEventsHttp.test.ts`.
+- Frame image export (`src/lib/frameRaster.ts`, `src/lib/frameExport.ts`): the PNG / JPG download
+  and Copy as PNG are drawn by the browser showing the frame, not by the server's Chromium. The
+  runtime answers `doop:snapshot` with its live document (`exportSnapshot`: what an HTML copy
+  loses is captured first, every `<canvas>` as its pixels, each `<img>` at the source the
+  browser picked, a `blob:` image as its bytes, every stylesheet as the CSSOM holds it, adopted
+  sheets included; `html: null` when a canvas is tainted, and the export goes to the server; `snapshotFrame` in
+  `frameBridge.ts`, the store's HTML only when the frame is not mounted: a mounted frame that
+  does not answer within its 15s is unreadable, and the server renders), `inlineDocument` turns it
+  into one SVG sized to the frame, every image, stylesheet (both `@import` forms, cycles cut)
+  and font fetched and inlined as a data: URL (an SVG drawn as an image loads nothing itself;
+  scripts, nested documents and `srcset` are dropped, a link's `media` kept),
+  and the SVG is drawn onto a canvas at 2x from a data: URL (a blob: URL taints the canvas in
+  Chromium) and encoded. A resource the browser cannot fetch (an image host without CORS)
+  rejects the whole render and the export falls back to `/i/<id>.<ext>` as before, so what the
+  person sees on the canvas is never the export's blocker. Tests: `frameRaster.test.ts`,
+  `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
+  `frameExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size, pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
@@ -228,6 +260,29 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `Stage.tsx` mounts frames in creation order and paints them by `z-index` inside an isolated
   layer, since moving an iframe in the DOM reloads it. Tests: `frameStack.test.ts`,
   `frameStackStore.test.ts`, `layersStack.test.tsx`.
+- Page background (`shared/pageBackground.ts`): a page may carry `background` (`#rrggbb`),
+  kept across page-list saves the way `startFrameId` is and copied with the page and the
+  canvas; `PUT /api/canvases/:id/pages/:pageId/background { color | null }` (edit role) and MCP
+  `set_page_background` set it, peers get the page list. `PagePanel.tsx` is the page's own
+  settings in the properties slot: with nothing selected, the rail's sliders icon opens it
+  (`pagePanelOpen`, kept until closed) in place of the frame Inspector, as Figma's Design panel
+  shows "Page" then; its Background `ColorField` edits the active page, one undo step
+  (`page-background` history entry).
+  `src/lib/paper.ts` resolves the paper a page shows (its colour, else the theme) and its tone;
+  `Stage` paints it with contrast dots and a standalone drawing takes its ink from that tone.
+  Tests: `pageBackground.test.ts`, the background cases in `storePages.test.ts`, `pages.test.ts`
+  and `guideEdits.test.ts`.
+- Selection keys (`src/lib/selectionKeys.ts`, chords in `src/lib/keys.ts`), as Figma binds them: ↩
+  goes into the selected frame or element (its first layer), ⇧↩ back out to the parent (a root
+  layer's parent is the frame; a standalone shape has none), Tab / ⇧Tab to the next or previous
+  sibling (frames walk the page's stack the way the Layers panel lists it, wrapping), ⌘A takes
+  every unlocked frame on the page or every unlocked sibling of the picked element
+  (`store.pickElements`), and ⌘] / ⌘[ step the picked elements, together, or the selected frame
+  forward or backward, ⌘⌥] / ⌘⌥[ to the front or back (`reorderElements` / `reorderLayers`,
+  `restackFrame`), one undo step each. A picked standalone shape is its page's row: Tab, ⌘A and
+  the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
+  something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
+  read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
@@ -303,6 +358,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   dragged edges snap to neighbours and guides (`snapFrame` takes the handle). Frames go down to
   1×1 (`MIN_FRAME_SIZE`, also the Inspector's floor). `tests/frameResize.test.ts` covers the
   geometry, `tests/frameResizeBrowser.test.ts` drags the grips in Chromium.
+  The frame Inspector's X / Y / W / H are the same `NumberField` the element panel uses
+  (`src/components/ui/property-field.tsx`): the `px` unit is the drag handle (`useValueScrub`,
+  Shift ×10, Alt ×0.1, Esc cancels) and ↑/↓ nudge. A drag previews every step through
+  `patchFrameLocal` and, through `PropertyScrubContext`, commits once on release as one discrete
+  undo step and one PATCH; Esc puts the frame's box back and saves nothing. Tests:
+  `inspectorScrub.test.tsx`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
   chrome step in by `RULER_PX`) (remembered under
@@ -317,6 +378,68 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   guides join `snapFrame` (frame move/resize, element moves), element resize and drawing points
   at the same 8-screen-px tolerance; Alt bypasses. Tests: `rulers.test.ts`, `snapGuides.test.ts`,
   `guides.test.ts`, `guideEdits.test.ts`, `rulersBrowser.test.ts`.
+- SVG import (`src/lib/svgPath.ts`, `src/lib/svgImport.ts`): an SVG pasted, dropped or pasted as
+  markup lands as editable vector layers, not an `<img>`, the way Figma imports one. Every
+  `path`/`rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon` is baked (transforms, nested
+  `viewBox`es, `<use>` and `<symbol>` expanded, the whole `d` grammar including arcs and
+  quadratics turned into absolute cubics) into one `svg[data-doop-drawing="path"]` with a single
+  `path` child; `<g>` nesting becomes `div[data-doop-drawing="group"]` rows; text and images stay
+  as `svg[data-doop-drawing="svg"]` layers; gradients, clips, masks and filters ride in a
+  `[data-doop-defs]` host with the import's id prefix, user-space gradients and clips copied with
+  the shape's transform folded in. Paint comes from the browser's computed styles
+  (`importSvgInBrowser` mounts the file in a closed shadow root, so `<style>` rules, classes and
+  `currentColor` resolve and leak nowhere); `importSvgMarkup` reads attributes alone for tests.
+  Scripts, handlers and `foreignObject` are dropped. The element's shell is the ink's box; layers
+  sit in it by percentage so the shell's grips scale them. A one-shape file is a bare pen-style
+  path. Entry points: `splitIncoming` / `pasteFilesCentered` / `dropFiles` in
+  `src/lib/frameClipboard.ts`, wired in `CanvasPage`'s paste and drop: bitmaps and vectors brought
+  together land in one row (a vector keeps its proportions, a bitmap gets at least a 40px box) and
+  whatever lands is one undo step even when a sibling request fails. Shape lengths resolve their
+  units and percentages (`parseLength`, against the nearest `viewBox`); transforms come from the
+  style reader (a stylesheet's `transform` wins) about `transform-origin`; the root's own
+  opacity, clip, mask and filter stay on the root group, a group's mask and filter on its row, and
+  copied definitions (gradient stops, clip shapes) keep the styles they resolved. A clip or mask
+  drawn in user units gets a copy carrying the transform baked into the shape it clips (`bakedClip`
+  / `bakedMask`; a mask's content rides in a `<g>`, since `<mask>` takes no transform); one in
+  bounding-box units is used as it is. A text or image layer keeps the `clip-path`, `mask` and
+  `filter` its stylesheet gave it, and its own opacity goes on the layer's svg alone. Tests:
+  `svgPath.test.ts`, `svgImport.test.ts`, `svgImportBrowser.test.ts`.
+- PDF import (`src/lib/pdfImport.ts`, `src/lib/sfnt.ts`, proof of concept): a PDF dropped or pasted
+  on the canvas lands as one frame per page at the page's printed size (points × 96/72). MuPDF's
+  WebAssembly build (`mupdf`, AGPL, a lazy 10 MB chunk excluded from Vite's pre-bundling so it finds
+  its `.wasm` by `import.meta.url`) reads the file in the browser. Each page is rendered to SVG in
+  CSS px with its text stripped and run through `importSvgInBrowser` with `box: 'root'` (the page is
+  the box, since clipped backgrounds reach past it) and a raised layer budget, so paths, gradients,
+  clips and images become the same editable layers an SVG gives; a CMYK JPEG is decoded through the
+  page and re-encoded as RGB, and in the browser every picture becomes an `/a/` asset. The text comes
+  from MuPDF's structured text (ligatures kept), one `<p data-doop-drawing="text">` per run of one
+  font, size and colour, placed by the glyph box, rotated runs turned about their first glyph.
+  Fonts are keyed by font object, not name: a producer embeds several subsets under one name
+  (InDesign, per page), so a page's font resources (Form XObjects included) are paired with each
+  object by name and, where several programs share it, by comparing FreeType's advances for the
+  glyphs shown. The program is then completed into a loadable OpenType file: `sfnt.ts` adds the
+  `OS/2`, `name`, `post` and Unicode `cmap` tables a PDF subset drops (the cmap from the glyphs the
+  page drew, ligature glyphs voted out of the plain letters), wraps a bare CFF program (`Type1C`,
+  CID-keyed charsets inverted) with synthesised `head`/`hhea`/`hmtx`/`maxp`, and the browser's own
+  `FontFace` check drops anything it still refuses. Faces ride in the frame as `@font-face` data
+  URIs named `pdf-<BaseFont>`; Type1 programs and unembedded fonts fall back to the spaced family
+  name over a generic from the descriptor flags, with weight and style synthesised. Not yet:
+  paragraphs (every run is its own line), fonts as library assets instead of data URIs, an
+  Import-picker card, a static-image fallback for scans and a progress indicator. Tests:
+  `pdfImport.test.ts` (fixture `tests/fixtures/pdf/report.pdf`, a Chrome-printed page with five
+  embedded subsets), the page count in `imagePaste.test.ts`.
+- The path editor (`PathEditor.tsx`, `src/lib/pathEditing.ts`) edits any `d` the parser reads,
+  compound paths included (`EditablePath.subpaths`; anchors are numbered flat across strokes);
+  clicking the outline splits the segment there (`splitSegment`, a line stays linear in `t`);
+  deleting the last-but-one anchor of a stroke removes the stroke when others remain. The runtime's
+  `doop:path` probe finds a shape inside an imported group (no standalone-root collapse) and
+  reports `parentBox`; `updatePathFrame` keeps a grouped shape in percentages of its group and
+  grows the group (the standalone's frame, or the root's px box inside a frame) around a point
+  dragged past its edge, re-placing the sibling shapes. Cursors follow Figma's (`cursor-pen*`,
+  `cursor-node`, `cursor-handle` utilities in `src/styles.css`, each SVG tagged `data-cursor`): the
+  Path tool wears the nib, with a ring over the first anchor (close) and a square over one it
+  already placed (`penCursor` from `useCanvasDrawing`, forced over frames by `Stage`); the editor
+  shows a node badge on anchors, a dot badge on handles and the pen with + on the outline.
 - `tests/drawing.test.ts` covers geometry, serialization and persistence; `drawingBrowser.test.ts`
   exercises the toolbar and gestures in Chromium, including Bézier paths, frame transfers,
   cancellation, mobile input, and coexistence with canvas comment pins and reply fields.
@@ -335,6 +458,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   server starts listening, frame by frame with awaited, ordered writes (the stamped frame, then
   the comments naming its ids); unresolvable paths become lost anchors, a row that throws or a
   frame write that fails is logged and left for the next boot. Tests: `elementIdBackfill.test.ts`.
+- Agents answer in the thread (`server/resident.ts`): a resident run about `@mentioned` comments
+  posts its closing summary as the agent's reply in each thread (one message per thread) before
+  resolving it, and a failed run posts the reason and marks the comment failed for a retry
+  (`settleComments`). The kickoff lists each comment's id, and the resident has
+  `reply_to_comment` and `resolve_comment` as tools (`replyInThread`: this canvas only, never
+  metered, a resident `@mention` in the agent's words becomes a plain name through
+  `withoutMentions` so it cannot queue itself); a thread the agent answered itself gets no
+  second reply from the summary. A question the agent needs answered first is
+  `reply_to_comment` with `awaiting_answer`: when the run ends the request is handed back
+  (`actions.handBackComment`: unclaimed, no longer an agent item in memory and in its row, the thread open), so the
+  person's `@mention` answer queues fresh work carrying the whole conversation. MCP agents have
+  had the same two tools all along. Tests: `residentComments.test.ts`, `agentToolParity.test.ts`.
 - Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may
   comment drags a thread's root pin; a ghost rides the pointer in the world layer
   (`CanvasComments`), above every frame, since the pin itself sits inside a clipped frame surface.

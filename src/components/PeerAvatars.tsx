@@ -15,6 +15,7 @@ export function isActiveAgent(p: Presence): boolean {
  *  canvas chrome has always called it. */
 export function PresenceFace(props: {
   name: string
+  image?: string
   color: string
   kind: Presence['kind']
   glaze?: boolean
@@ -76,6 +77,7 @@ function FollowAvatar({ presence: p }: { presence: Presence }) {
     >
       <PresenceFace
         name={p.name}
+        image={p.image}
         color={p.color}
         kind={p.kind}
         /* a halo in their colour marks who we are following */

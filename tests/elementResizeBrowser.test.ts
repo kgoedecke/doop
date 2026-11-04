@@ -15,6 +15,7 @@ declare global {
       select: (selector: string) => void
       selectFrame: () => void
       deselect: () => void
+      panelOpen: () => boolean
       picked: () => string[]
       pickAlso: (selector: string) => void
       nudge: (dx: number, dy: number) => boolean
@@ -696,10 +697,17 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     /* the element itself is still clipped to the frame */
     expect(await page.$eval('[data-frame-surface]', (el) => getComputedStyle(el).overflow)).toBe('hidden')
 
-    /* a hover over the element (clear of the absolutely placed fixture
-       elements at its left end) draws its outline unclipped too */
+    /* a hover over the picked element adds nothing: its selection hairline
+       is already there, and the hover's wash would tint it */
     await page.mouse.move(surface.left + 300, surface.top + 70)
     await page.mouse.move(surface.left + 310, surface.top + 70, { steps: 3 })
+    await new Promise((r) => setTimeout(r, 200))
+    expect(await page.$('[data-hover-outline]')).toBeNull()
+
+    /* a hover over the element (clear of the absolutely placed fixture
+       elements at its left end) draws its outline unclipped too */
+    await page.evaluate(() => window.elementPanelHarness.deselect())
+    await page.mouse.move(surface.left + 320, surface.top + 70, { steps: 3 })
     /* the runtime answers the move: an outline left by an earlier hover is
        not the one looked at */
     await page.waitForFunction(
@@ -709,6 +717,11 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     expect(hover.right).toBeCloseTo(outline.right, 0)
     expect(hover.right).toBeGreaterThan(surface.right + 250)
     expect(await clipper('[data-hover-outline]')).toBeNull()
+    /* its blue wash, though, stops at the frame: spilling onto the canvas
+       around it read as the whole canvas being selected */
+    const wash = await box('[data-hover-wash]')
+    expect(wash.right).toBeCloseTo(hover.right, 0)
+    expect(await clipper('[data-hover-wash]')).not.toBeNull()
 
     /* leaving the frame clears the hover */
     await page.mouse.move(surface.left - 20, surface.top - 20)

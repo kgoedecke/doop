@@ -93,7 +93,7 @@ in every frame and in aliasing tokens.
   (`TokenMenu`) listing the canvas's tokens of that type; picking one writes `var(--name)`
   inline. Its "+" opens a card beside the list with the field's current value and a name;
   Enter creates the token and binds the field, Figma's "create variable" from a fill. A bound
-  field shows the token name as a read-only chip with the resolved swatch, and a broken-chain
+  field wins over a mixed multi-selection reading, and shows the token name as a read-only chip with the resolved swatch, and a broken-chain
   button (`UnlinkIcon`, Lucide's `Unlink`) beside it detaches the field to the literal (`FieldToken`). The runtime's `inline` map also reports the shorthands the panel
   edits (`border-radius`, `border-color`, …), since a `var()` on a shorthand is invisible
   through its longhands. The unit span of a `NumberField` / `TextField` carries `data-unit`,

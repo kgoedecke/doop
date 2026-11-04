@@ -6,6 +6,7 @@
  */
 import type { DropTarget, FlowPlacement } from './layers'
 import type { Interaction } from '../../shared/prototype'
+import type { TextFormatCommand } from './richText'
 
 export interface LayoutDrop {
   target: DropTarget
@@ -90,6 +91,9 @@ export interface ElementInfo {
   fontSize: number | null
   fontWeight: string
   fontFamily: string
+  /** Text properties whose runs disagree (the selected run's while editing,
+   *  else the whole layer's); the Design panel shows "Mixed" for them. */
+  textMixed?: Partial<Record<'fontFamily' | 'fontSize' | 'fontWeight' | 'color', boolean>>
   /** Font faces declared by this frame, including linked web fonts. */
   fontFamilies: string[]
   textAlign: string
@@ -136,6 +140,7 @@ const REPLY_TIMEOUT_MS = 2000
 
 const windows = new Map<string, Window>()
 const changeListeners = new Map<string, Set<() => void>>()
+const selectionListeners = new Map<string, Set<() => void>>()
 const pending = new Map<number, PendingAsk>()
 let nextReq = 0
 let listening = false
@@ -145,9 +150,10 @@ function listen() {
   listening = true
   window.addEventListener('message', (ev: MessageEvent) => {
     const data = ev.data as { type?: string; reqId?: number } | null
-    if (data?.type === 'doop:frame-updated') {
+    if (data?.type === 'doop:frame-updated' || data?.type === 'doop:text-selection') {
+      const listeners = data.type === 'doop:frame-updated' ? changeListeners : selectionListeners
       for (const [frameId, win] of windows) {
-        if (ev.source === win) changeListeners.get(frameId)?.forEach((cb) => cb())
+        if (ev.source === win) listeners.get(frameId)?.forEach((cb) => cb())
       }
       return
     }
@@ -211,13 +217,23 @@ export function frameShows(frameId: string, html: string): Promise<boolean> {
 /** Re-read after the runtime registers, renders HTML, or loads font faces.
  *  Store updates can precede the frame's throttled render. */
 export function onFrameChange(frameId: string, cb: () => void): () => void {
+  return subscribe(changeListeners, frameId, cb)
+}
+
+/** Re-read when the text selected inside an edited element changes: the
+ *  Design panel's text fields show and edit the selected run. */
+export function onTextSelection(frameId: string, cb: () => void): () => void {
+  return subscribe(selectionListeners, frameId, cb)
+}
+
+function subscribe(listeners: Map<string, Set<() => void>>, frameId: string, cb: () => void): () => void {
   listen()
-  const set = changeListeners.get(frameId) ?? new Set()
+  const set = listeners.get(frameId) ?? new Set()
   set.add(cb)
-  changeListeners.set(frameId, set)
+  listeners.set(frameId, set)
   return () => {
     set.delete(cb)
-    if (set.size === 0) changeListeners.delete(frameId)
+    if (set.size === 0) listeners.delete(frameId)
   }
 }
 
@@ -227,6 +243,7 @@ export function requestFrame(
   frameId: string,
   type: `doop:${string}`,
   payload: Record<string, unknown>,
+  timeoutMs = REPLY_TIMEOUT_MS,
 ): Promise<Record<string, unknown> | null> {
   const win = windows.get(frameId)
   if (!win) return Promise.resolve(null)
@@ -239,8 +256,29 @@ export function requestFrame(
     /* a frame that unloads mid-request would leave the promise hanging */
     window.setTimeout(() => {
       if (pending.delete(reqId)) resolve(null)
-    }, REPLY_TIMEOUT_MS)
+    }, timeoutMs)
   })
+}
+
+/* a snapshot reads every canvas and blob image; a big one takes longer than
+   a hit test */
+const SNAPSHOT_TIMEOUT_MS = 15_000
+
+export interface FrameSnapshot {
+  /** the live document with what an image export needs captured in (canvas
+   *  pixels, picked image sources, CSSOM rules); null when the runtime
+   *  could not read it all (a tainted canvas) */
+  html: string | null
+}
+
+/** The frame's document as the runtime shows it, or null when the frame
+ *  is not mounted. A mounted frame that does not answer in time counts as
+ *  one that could not be read, never as unmounted: its saved HTML would
+ *  render without what the runtime shows. */
+export async function snapshotFrame(frameId: string): Promise<FrameSnapshot | null> {
+  if (!windows.has(frameId)) return null
+  const reply = await requestFrame(frameId, 'doop:snapshot', {}, SNAPSHOT_TIMEOUT_MS)
+  return { html: typeof reply?.html === 'string' ? reply.html : null }
 }
 
 /* the runtime's replies carry the element summary under `info` */
@@ -291,4 +329,16 @@ export async function styleGesture(
   phase: 'begin' | 'commit' | 'cancel',
 ): Promise<ElementInfo | null> {
   return infoOf(await requestFrame(frameId, 'doop:style-gesture', { selector, phase }))
+}
+
+/** Toggle a text format over whole layers, as ⌘B does with a text layer
+ *  selected. Resolves with the layers' selectors afterwards (a paragraph
+ *  turned list changes tag), or null when the frame did not format. */
+export async function formatElementText(
+  frameId: string,
+  selectors: string[],
+  command: TextFormatCommand,
+): Promise<string[] | null> {
+  const reply = await requestFrame(frameId, 'doop:text-format', { selectors, command })
+  return Array.isArray(reply?.selectors) ? (reply.selectors as string[]) : null
 }

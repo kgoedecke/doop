@@ -72,6 +72,7 @@ export const canvas: Catalog['canvas'] = {
 
   canvasPanels: 'Painéis do canvas',
   inspectFrame: 'Inspecionar frame',
+  pageSettings: 'Configurações da página',
   help: 'Ajuda',
   docs: 'Documentação',
   contactSupport: 'Falar com o suporte',

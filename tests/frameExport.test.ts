@@ -2,7 +2,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types'
 import { copyFramePng, downloadFrameExport, downloadFramesPdf } from '../src/lib/frameExport'
+import { rasterizeFrame } from '../src/lib/frameRaster'
 import { useStore } from '../src/lib/store'
+
+/* the browser's own render comes first; these tests are about the server
+   fallback unless they make it succeed */
+vi.mock('../src/lib/frameRaster', () => ({ rasterizeFrame: vi.fn(async () => Promise.reject(new Error('no'))) }))
 
 const frame: Frame = {
   id: 'export-frame',
@@ -29,6 +34,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.mocked(rasterizeFrame).mockImplementation(async () => Promise.reject(new Error('no')))
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   delete (globalThis as { __DOOP_DESKTOP__?: string }).__DOOP_DESKTOP__
@@ -43,8 +49,9 @@ it('shows a busy toast while rendering, then saves through a download link named
   )
 
   const done = downloadFrameExport(frame, 'jpg')
-  expect(fetch).toHaveBeenCalledWith('/i/export-frame.jpg?scale=2&download', expect.anything())
   expect(useStore.getState().notice).toMatchObject({ text: 'Exporting JPG…', busy: true })
+  /* the browser's own render is tried first; the server request follows it */
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/i/export-frame.jpg?scale=2&download', expect.anything()))
 
   respond(new Response('jpg-bytes', { headers: { 'Content-Disposition': 'attachment; filename="Poster.jpg"' } }))
   await done
@@ -81,6 +88,45 @@ it('requests PNG and JPG at 2x', async () => {
   expect(clicked.map((a) => a.download)).toEqual(['Poster.png', 'Poster.jpg'])
 })
 
+it("saves the browser's own render without asking the server", async () => {
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['png'], { type: 'image/png' }))
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadFrameExport({ ...frame, name: 'Poster: v2/final' }, 'png')
+
+  expect(rasterizeFrame).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'export-frame' }),
+    expect.objectContaining({ scale: 2, type: 'png' }),
+  )
+  expect(fetch).not.toHaveBeenCalled()
+  expect(clicked.map((a) => a.download)).toEqual(['Poster v2final.png'])
+  expect(useStore.getState().notice).toMatchObject({ text: '“Poster v2final.png” is ready', busy: false })
+})
+
+it("copies the browser's own render", async () => {
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['png'], { type: 'image/png' }))
+  vi.stubGlobal('fetch', vi.fn())
+  const write = vi.fn(async (items: ClipboardItem[]) => {
+    await items[0]!.getType('image/png')
+  })
+  vi.stubGlobal('navigator', { clipboard: { write } })
+  vi.stubGlobal(
+    'ClipboardItem',
+    class {
+      constructor(private readonly items: Record<string, Promise<Blob>>) {}
+      getType(type: string) {
+        return this.items[type]
+      }
+    },
+  )
+
+  await copyFramePng(frame)
+
+  expect(rasterizeFrame).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'png' }))
+  expect(fetch).not.toHaveBeenCalled()
+  expect(useStore.getState().notice).toMatchObject({ text: 'PNG copied', busy: false })
+})
+
 it('keeps the spinner up while another export is still rendering', async () => {
   const pending: ((res: Response) => void)[] = []
   vi.stubGlobal(
@@ -90,6 +136,7 @@ it('keeps the spinner up while another export is still rendering', async () => {
 
   const png = downloadFrameExport(frame, 'png')
   const jpg = downloadFrameExport(frame, 'jpg')
+  await vi.waitFor(() => expect(pending).toHaveLength(2))
   pending[0]!(new Response('img', { headers: { 'Content-Disposition': 'attachment; filename="Poster.png"' } }))
   await png
   expect(useStore.getState().notice).toMatchObject({
@@ -188,9 +235,11 @@ it('copies the PNG, handing the clipboard the pending render so the click still 
   const { written, write } = stubClipboard()
 
   const done = copyFramePng(frame)
-  expect(fetch).toHaveBeenCalledWith('/i/export-frame.png?scale=2&download', expect.anything())
   expect(write).toHaveBeenCalledTimes(1)
   expect(useStore.getState().notice).toMatchObject({ text: 'Copying PNG…', busy: true })
+  /* the clipboard already holds the pending blob; behind it the browser's
+     own render is tried first, then the server */
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/i/export-frame.png?scale=2&download', expect.anything()))
 
   respond(new Response('png-bytes'))
   await done

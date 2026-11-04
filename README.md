@@ -37,7 +37,10 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
-  `expectedPages` to protect collaborators), and target frames with `pageId`.
+  `expectedPages` to protect collaborators), and target frames with `pageId`. Each page can wear
+  a canvas colour of its own, as in Figma: with nothing selected, the sliders icon on the right
+  opens the Page panel with its Background swatch (agents: `set_page_background`); cleared, the
+  page shows the theme paper again.
 - **Clickable prototypes** — wire elements to other frames (click, hover, press, key or delay;
   navigate, overlay, back, scroll or link, with transitions) in Prototype mode or straight in the
   HTML, then click through the flow with Play or share `/c/<id>/proto`. Agents use the same
@@ -149,6 +152,14 @@ layers of that frame, so agents read and edit them like any other markup.
   alignment), opacity, corner radius, rotation, position, flex layout (direction, gap, padding,
   wrap, alignment) and image fills; **HTML** shows its source; **Prototype** wires interactions. The
   floating toolbar adds Comment, **Ask AI** (pre-fills an `@mention`), Code, Edit text and Copy link.
+- **Rich text** — double-click text to edit it. Select words and use the formatting toolbar for
+  bold, italic, underline, strikethrough, bulleted lists or numbered lists. ⌘/Ctrl+B, I and U toggle
+  inline formatting; ⌘/Ctrl+⇧+7 or 8 toggles numbered or bulleted lists. Enter continues a list;
+  Enter on an empty item leaves it. With a text layer selected on the canvas, ⌘/Ctrl+B, I, U and
+  ⌘/Ctrl+⇧+X toggle the whole layer and ⌘/Ctrl+⇧+7 or 8 make it a list, as in Figma. Esc finishes editing; formatting saves with the frame and
+  supports undo/redo. With words selected, the Design panel's font, size, weight and colour edit
+  that run alone; selecting the whole layer shows **Mixed** where its runs differ, and a value set
+  there applies to all of them, as in Figma.
 - **Path editing** — double-click a path to drag its anchors and Bézier handles, switch points
   between corner and curve, or delete them. Alt moves one handle on its own; ⇧ constrains its angle.
 - **Layers** — a searchable tree of pages, frames and elements: drag to reorder or reparent, hide,
@@ -851,6 +862,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `create_canvas`          | Create a canvas (optionally in a workspace), returns its shareable id                                               |
 | `get_canvas`             | Canvas layout: every frame's position/size/meta                                                                     |
 | `set_canvas_pages`       | Create, rename, reorder or delete canvas pages                                                                      |
+| `set_page_background`    | Paint one page's canvas a colour of its own, or clear it back to the theme paper                                    |
 | **Frames**               |                                                                                                                     |
 | `create_frame`           | Add a frame with HTML (auto-placed if no x/y)                                                                       |
 | `get_frame`              | Read a frame including its HTML                                                                                     |

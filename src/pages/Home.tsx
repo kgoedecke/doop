@@ -554,8 +554,10 @@ export function Home() {
             /* listed before it is picked, or the vanished-scope check would
                send the view back to all until the reload lands */
             setWorkspaces((list) => (list.some((w) => w.id === ws.id) ? list : [...list, ws]))
-            shown.current.workspaces = reloadSeq.current // a list asked for before this one is stale
             reload()
+            /* only the list just asked for counts: one still in flight from
+               before predates the workspace and would take it away again */
+            shown.current.workspaces = reloadSeq.current
             setScope(`ws:${ws.id}`)
             /* a workspace that cannot grow yet goes straight to the plan picker */
             if (!ws.active)
@@ -645,7 +647,12 @@ function AgentStack({ canvas }: { canvas: CanvasMeta }) {
 /** the people on a canvas — owner first — as overlapping initial discs */
 function PeopleStack({ canvas }: { canvas: CanvasMeta }) {
   const people = canvas.people ?? []
-  return <AvatarStack size={18} people={people.map((p) => ({ id: p.id, name: p.name, color: colorFor(p.id) }))} />
+  return (
+    <AvatarStack
+      size={18}
+      people={people.map((p) => ({ id: p.id, name: p.name, image: p.image, color: colorFor(p.id) }))}
+    />
+  )
 }
 
 function Meta({ canvas: c, onClaim, workspace }: { canvas: CanvasMeta; onClaim: () => void; workspace?: string }) {

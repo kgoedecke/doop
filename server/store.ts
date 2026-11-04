@@ -247,6 +247,7 @@ class Store {
       id: nanoid(10),
       name: copyPageName(source.name, names(pages)),
       ...(start ? { startFrameId: start } : {}),
+      ...(source.background ? { background: source.background } : {}),
     }
     /* links within the page follow the copy; links to other pages stay */
     const frames: Frame[] = sourceFrames.map((frame) => ({
@@ -311,11 +312,16 @@ class Store {
       }
     }
     /* a page-list save renames, reorders, adds or deletes pages — it never
-       moves a flow start, which only setFlowStart changes */
+       moves a flow start or recolours a page, which only setFlowStart and
+       setPageBackground change */
     const current = canvasPages(canvas)
-    const merged = pages.map(({ startFrameId: _ignored, ...page }) => {
-      const startFrameId = current.find((p) => p.id === page.id)?.startFrameId
-      return startFrameId ? { ...page, startFrameId } : page
+    const merged = pages.map(({ startFrameId: _start, background: _background, ...page }) => {
+      const kept = current.find((p) => p.id === page.id)
+      return {
+        ...page,
+        ...(kept?.startFrameId ? { startFrameId: kept.startFrameId } : {}),
+        ...(kept?.background ? { background: kept.background } : {}),
+      }
     })
     canvas.pages = merged
     /* a deleted page takes its guides with it */
@@ -337,6 +343,22 @@ class Store {
       if (page.id !== pageId) return page
       const { startFrameId: _previous, ...rest } = page
       return frameId ? { ...rest, startFrameId: frameId } : rest
+    })
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return canvas.pages
+  }
+
+  /** Set (a `#rrggbb`) or clear (null) a page's own canvas colour. */
+  setPageBackground(canvasId: string, pageId: string, background: string | null) {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return undefined
+    const pages = canvasPages(canvas)
+    if (!pages.some((p) => p.id === pageId)) return undefined
+    canvas.pages = pages.map((page) => {
+      if (page.id !== pageId) return page
+      const { background: _previous, ...rest } = page
+      return background ? { ...rest, background } : rest
     })
     canvas.updatedAt = Date.now()
     persist.saveCanvas(canvas)

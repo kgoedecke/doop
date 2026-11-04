@@ -12,6 +12,12 @@
 
 import type { ComponentType, SVGProps } from 'react'
 import {
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  List,
+  ListOrdered,
   Activity,
   AlignStartVertical,
   AlignCenterVertical,
@@ -95,6 +101,7 @@ import {
   RefreshCw,
   RotateCcw,
   Route,
+  Scaling,
   Search,
   Settings,
   Share,
@@ -159,6 +166,13 @@ function icon(Base: ComponentType<SvgProps>) {
     return <Base strokeWidth={ICON_STROKE} aria-hidden {...sized(props)} />
   }
 }
+
+export const BoldIcon = icon(Bold)
+export const ItalicIcon = icon(Italic)
+export const UnderlineIcon = icon(Underline)
+export const StrikethroughIcon = icon(Strikethrough)
+export const BulletListIcon = icon(List)
+export const OrderedListIcon = icon(ListOrdered)
 
 export const XIcon = icon(X)
 export const ArrowDownIcon = icon(ArrowDown)
@@ -270,6 +284,8 @@ export const MoonIcon = icon(Moon)
 export const FolderIcon = icon(Folder)
 export const BookOpenIcon = icon(BookOpen)
 export const SlidersIcon = icon(SlidersHorizontal)
+/** How a prototype screen is scaled to the viewer (the player's scaling menu). */
+export const ScalingIcon = icon(Scaling)
 export const PointerIcon = icon(MousePointer2)
 export const HandIcon = icon(Hand)
 /** the select tool's arrow — the same glyph as PointerIcon */
