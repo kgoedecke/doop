@@ -107,7 +107,7 @@ beforeAll(async () => {
   ;[server, restricted, verifying] = await Promise.all([
     startServer(oidcEnv),
     startServer({ ...oidcEnv, SIGNUP_EMAIL_DOMAINS: 'jointhetroops.com' }),
-    startServer({ ...oidcEnv, SMTP_HOST: '127.0.0.1', SMTP_PORT: '9' }),
+    startServer({ ...oidcEnv, SMTP_HOST: '127.0.0.1', SMTP_PORT: '9', REQUIRE_EMAIL_VERIFICATION: 'true' }),
   ])
 }, 70_000)
 
