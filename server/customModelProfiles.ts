@@ -70,6 +70,8 @@ const KEY_MAX = 4096
 
 export { isCustomModelId }
 
+export const MAX_DISCOVERED_MODELS = 500
+
 function normalizeName(value: unknown): string {
   if (typeof value !== 'string') throw new CustomModelProfileInvalidError('Give the custom endpoint a name.')
   const name = value.trim()
@@ -217,9 +219,10 @@ export async function testCustomEndpoint(
     for (const entry of data) {
       if (!entry || typeof entry !== 'object') continue
       const id = (entry as { id?: unknown }).id
-      if (typeof id !== 'string' || !id || seen.has(id)) continue
+      if (typeof id !== 'string' || !isCustomModelId(id) || seen.has(id)) continue
       seen.add(id)
       models.push(id)
+      if (models.length >= MAX_DISCOVERED_MODELS) break
     }
     return { reachable: true, models }
   } catch (error) {

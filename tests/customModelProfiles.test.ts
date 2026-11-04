@@ -9,6 +9,7 @@ import { customModelProfiles, modelAccounts } from '../server/db/schema.ts'
 import { resealSecrets } from '../server/secretBackfill.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import {
+  MAX_DISCOVERED_MODELS,
   activeCustomProfileId,
   createProfile,
   deleteProfile,
@@ -16,6 +17,7 @@ import {
   listProfiles,
   listProfileViews,
   profileView,
+  testCustomEndpoint,
   updateProfile,
 } from '../server/customModelProfiles.ts'
 import {
@@ -265,6 +267,77 @@ describe('custom model profiles', () => {
     const after = await storedKey('legacy-profile')
     expect(after).toMatch(/^enc:v1:/)
     expect(after).not.toContain('legacy-plaintext-key')
+  })
+
+  interface ModelFixture {
+    status?: number
+    body?: unknown
+    contentType?: string
+  }
+
+  async function withModelFixture(body: ModelFixture, run: (baseUrl: string) => Promise<void>) {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(body.status ?? 200, { 'content-type': body.contentType ?? 'application/json' })
+      res.end(body.body === undefined ? '' : String(body.body))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`)
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    }
+  }
+
+  it('returns deduplicated model ids and no key echo', async () => {
+    await withModelFixture(
+      { body: JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }, { id: 'a' }] }) },
+      async (baseUrl) => {
+        const result = await testCustomEndpoint('alice', { baseUrl, apiKey: 'sk-never-returned' })
+        expect(result).toEqual({ reachable: true, models: ['a', 'b'] })
+        expect(JSON.stringify(result)).not.toContain('sk-never-returned')
+      },
+    )
+  })
+
+  it('caps parsed model ids at a bounded limit', async () => {
+    const entries = Array.from({ length: 600 }, (_, i) => ({ id: `m-${i}` }))
+    await withModelFixture({ body: JSON.stringify({ data: entries }) }, async (baseUrl) => {
+      const result = await testCustomEndpoint('alice', { baseUrl })
+      expect(result.models?.length).toBe(MAX_DISCOVERED_MODELS)
+    })
+  })
+
+  it('maps malformed models JSON to not_compatible', async () => {
+    await withModelFixture({ body: 'not-json' }, async (baseUrl) => {
+      await expect(testCustomEndpoint('alice', { baseUrl })).resolves.toMatchObject({
+        reachable: false,
+        errorCode: 'not_compatible',
+      })
+    })
+  })
+
+  it('does not send chat requests while testing models', async () => {
+    const paths: string[] = []
+    const server = http.createServer((req, res) => {
+      paths.push(req.url ?? '')
+      if ((req.url ?? '').endsWith('/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'm' }] }))
+        return
+      }
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'no chat here' }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`
+      const result = await testCustomEndpoint('alice', { baseUrl })
+      expect(result).toMatchObject({ reachable: true, models: ['m'] })
+      expect(paths).toHaveLength(1)
+      expect(paths[0]).toMatch(/\/models$/)
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    }
   })
 })
 
