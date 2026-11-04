@@ -56,16 +56,15 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const localEnabled = localPreference?.enabled ?? false
   const activeTarget = activeModelTarget(localEnabled, account)
   const kind = activeTarget === 'claude-local' ? undefined : (activeTarget ?? undefined)
-  const catalogMenu = catalog && (catalog.live || kind === 'custom-key') ? catalog.models : undefined
+  const catalogMenu = catalog && kind && (catalog.live || kind === 'custom-key') ? catalog.models : undefined
   const menu = catalogMenu ?? (kind && account?.menus?.[kind]) ?? []
+  const isMissingModel =
+    kind === 'custom-key' && Boolean(account?.model) && !menu.some((model) => model.id === account?.model)
   /* a custom endpoint's saved model stays selectable while its live catalog
      is still loading — the picker must never open on an empty list */
   const items =
-    kind === 'custom-key' && account?.model && !menu.some((m) => m.id === account.model)
-      ? [...menu, { id: account.model, name: account.model, blurb: '' }]
-      : menu
+    isMissingModel && account?.model ? [...menu, { id: account.model, name: account.model, blurb: '' }] : menu
   const current = items.find((m) => m.id === account?.model)
-  const missingModel = kind === 'custom-key' && Boolean(account?.model) && !menu.some((m) => m.id === account?.model)
   const label =
     activeTarget === 'claude-local'
       ? `Claude CLI (${localPreference?.model ?? 'default'})`
@@ -138,7 +137,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
                 {t('models.customCatalogFallback')}
               </DropdownMenuCaption>
             )}
-            {kind === 'custom-key' && missingModel && (
+            {isMissingModel && catalog?.live !== false && (
               <DropdownMenuCaption className="pb-2 text-ink-faint">
                 {t('models.customModelMissing', { model: account?.model ?? '' })}
               </DropdownMenuCaption>
