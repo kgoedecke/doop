@@ -8,6 +8,7 @@ import {
   type ModelAccountStatus,
 } from '../lib/api'
 import { useT } from '../lib/i18n'
+import { authClient } from '../lib/auth'
 import { useLocalAgent, refreshLocalAgent } from '../lib/localAgent'
 import { activeModelTarget } from '../lib/activeModelTarget'
 import { isCustomModelId } from '../../shared/customModel'
@@ -96,6 +97,8 @@ export function CustomModelProfiles({
   onAccountChange?: (next: ModelAccountStatus) => void
 }) {
   const t = useT()
+  const { data: session } = authClient.useSession()
+  const userId = session?.user.id
   const localPreference = useLocalAgent((state) => state.preference)
   const localEnabled = localPreference?.enabled ?? false
   const customActive = activeModelTarget(localEnabled, account) === 'custom-key'
@@ -305,7 +308,7 @@ export function CustomModelProfiles({
       const next = await api.activateModelProfile(profile.id)
       onAccountChange?.(next)
       await load()
-      await refreshLocalAgent()
+      if (userId) await refreshLocalAgent(userId)
       onChange?.()
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))
@@ -320,7 +323,7 @@ export function CustomModelProfiles({
     try {
       await api.disconnectModelAccount()
       await refreshAll()
-      await refreshLocalAgent()
+      if (userId) await refreshLocalAgent(userId)
       onChange?.()
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))

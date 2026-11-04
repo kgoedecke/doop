@@ -34,6 +34,8 @@ vi.mock('../src/lib/api', () => ({
 
 const localMode = vi.hoisted(() => ({ preference: { enabled: true, model: 'default' as string } }))
 
+vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
+
 vi.mock('../src/lib/localAgent', () => ({
   useLocalAgent: (selector: (state: { preference: typeof localMode.preference }) => unknown) =>
     selector({ preference: localMode.preference }),
