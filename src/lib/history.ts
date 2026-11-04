@@ -4,7 +4,8 @@ import { pageBackground } from '../../shared/pageBackground'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
 import { requestFrame, settleFrames } from './frameBridge'
-import { elementName, setElementName } from './layers'
+import { clearElementId, elementIdAt, elementName, setElementName } from './layers'
+import { elementIdSelector } from '../../shared/elementId'
 import { useStore } from './store'
 import { posthog } from './posthog'
 
@@ -33,7 +34,16 @@ type Entry =
       guides?: CanvasGuide[]
     }
   | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean }
-  | { type: 'layer-name'; frameId: string; selector: string; before: string | null; after: string | null }
+  /* a layer's caption: `elementId` is the `data-doop-id` the rename stamped,
+     what undo and redo find the element by once a sibling moves it */
+  | {
+      type: 'layer-name'
+      frameId: string
+      selector: string
+      elementId?: string
+      before: string | null
+      after: string | null
+    }
   | { type: 'create'; frameId: string; snapshot: Snapshot }
   /* frames restacked together (the Layers panel renumbering a page): saved
      as one request, so undo and redo change the order whole or not at all */
@@ -144,40 +154,47 @@ export function recordUpdate(frameId: string, before: Patch, after: Patch, discr
   return entry
 }
 
-export function recordLayerName(frameId: string, selector: string, before: string | null, after: string): HistoryEntry {
-  const entry: Entry = { type: 'layer-name', frameId, selector, before, after }
+export function recordLayerName(
+  frameId: string,
+  selector: string,
+  before: string | null,
+  after: string,
+  elementId?: string,
+): HistoryEntry {
+  const entry: Entry = { type: 'layer-name', frameId, selector, before, after, ...(elementId ? { elementId } : {}) }
   push(entry)
   return entry
 }
 
 /** A name is metadata, not an HTML snapshot. Undo and rollback must update
  *  the live attribute even while the frame is being text-edited. */
-export async function saveLayerName(frameId: string, selector: string, name: string | null) {
+export async function saveLayerName(frameId: string, selector: string, name: string | null, elementId?: string) {
   const store = useStore.getState()
   const frame = store.canvas?.frames.find((f) => f.id === frameId)
   if (!frame) throw new Error('Frame removed')
-  const before = elementName(frame.html, selector)
-  const html = setElementName(frame.html, selector, name)
+  /* once the element wears its id, that is how it is found; the first
+     rename reaches it by position and stamps the id in the same write */
+  const byId = elementId ? elementIdSelector(elementId) : null
+  const where = byId && elementIdAt(frame.html, byId) === elementId ? byId : selector
+  const before = elementName(frame.html, where)
+  const stamping = !!elementId && elementIdAt(frame.html, where) === null
+  const html = setElementName(frame.html, where, name, elementId)
   if (html === null) throw new Error('Layer removed')
   const started = epoch
   store.patchFrameLocal(frameId, { html })
-  const mirrored = requestFrame(frameId, 'doop:rename', { selector, name })
+  const mirrored = requestFrame(frameId, 'doop:rename', { selector: where, name, ...(elementId ? { elementId } : {}) })
   try {
     await api.updateFrame(frameId, { html })
     await mirrored
   } catch (err) {
     const s = useStore.getState()
     const current = s.canvas?.frames.find((f) => f.id === frameId)
-    if (
-      s.canvas?.id === frame.canvasId &&
-      epoch === started &&
-      current &&
-      elementName(current.html, selector) === name
-    ) {
-      const rollback = setElementName(current.html, selector, before)
+    if (s.canvas?.id === frame.canvasId && epoch === started && current && elementName(current.html, where) === name) {
+      const named = setElementName(current.html, where, before)
+      const rollback = named !== null && stamping ? clearElementId(named, where) : named
       if (rollback !== null) {
         s.patchFrameLocal(frameId, { html: rollback })
-        await requestFrame(frameId, 'doop:rename', { selector, name: before })
+        await requestFrame(frameId, 'doop:rename', { selector: where, name: before })
       }
     }
     throw err
@@ -590,7 +607,7 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'layer-name') {
-    await saveLayerName(e.frameId, e.selector, forward ? e.after : e.before)
+    await saveLayerName(e.frameId, e.selector, forward ? e.after : e.before, e.elementId)
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
     const canvas = useStore.getState().canvas

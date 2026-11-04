@@ -1,4 +1,4 @@
-import { ELEMENT_ID_ATTR } from '../../shared/elementId'
+import { ELEMENT_ID_ATTR, newElementId } from '../../shared/elementId'
 
 /**
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
@@ -225,20 +225,47 @@ export function elementName(html: string, selector: string): string | null {
 }
 
 /** Compare a queued rename's document while allowing earlier renames to
- *  finish or roll back. Any other change can invalidate positional paths. */
+ *  finish or roll back (a rename stamps the element's id too). Any other
+ *  change can invalidate positional paths. */
 export function htmlWithoutLayerNames(html: string): string {
   const doc = parse(html)
   for (const el of doc.querySelectorAll(`[${NAME_ATTR}]`)) el.removeAttribute(NAME_ATTR)
+  for (const el of doc.querySelectorAll(`[${ELEMENT_ID_ATTR}]`)) el.removeAttribute(ELEMENT_ID_ATTR)
   return serialize(doc)
 }
 
-/** Store a layer caption without changing its text, alt text, id or styles. */
-export function setElementName(html: string, selector: string, name: string | null): string | null {
+/** The `data-doop-id` the element at `selector` carries, or null. */
+export function elementIdAt(html: string, selector: string): string | null {
+  return find(parse(html), selector)?.getAttribute(ELEMENT_ID_ATTR) ?? null
+}
+
+/** An element id no element in `html` carries yet. */
+export function freshElementId(html: string): string {
+  let id = newElementId()
+  while (html.includes(`${ELEMENT_ID_ATTR}="${id}"`)) id = newElementId()
+  return id
+}
+
+/** The frame's HTML with the element's `data-doop-id` taken off again: a
+ *  stamp rolled back with the write that made it. */
+export function clearElementId(html: string, selector: string): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  el.removeAttribute(ELEMENT_ID_ATTR)
+  return serialize(doc)
+}
+
+/** Store a layer caption without changing its text, alt text, id or styles.
+ *  `stamp` is the `data-doop-id` the element gets if it has none yet, so a
+ *  later undo or redo finds it by identity rather than by position. */
+export function setElementName(html: string, selector: string, name: string | null, stamp?: string): string | null {
   const doc = parse(html)
   const el = find(doc, selector)
   if (!el) return null
   if (name === null) el.removeAttribute(NAME_ATTR)
   else el.setAttribute(NAME_ATTR, name)
+  if (stamp && !el.hasAttribute(ELEMENT_ID_ATTR)) el.setAttribute(ELEMENT_ID_ATTR, stamp)
   return serialize(doc)
 }
 

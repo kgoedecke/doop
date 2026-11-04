@@ -18,7 +18,7 @@
 - Zustand 4.5.4 - client-side state management.
 - Element ids (`shared/elementId.ts`): anything outside a frame that points at an element
   inside it uses the element's `data-doop-id` attribute, stamped into the frame HTML the first
-  time something needs it (a comment, an element link) and kept by agents like every other
+  time something needs it (a comment, an element link, a layer rename, whose undo and redo find the element by it) and kept by agents like every other
   `data-doop-*` attribute. The server stamps (`server/elementIds.ts`, parse5 by source offset,
   so nothing else is re-serialized; `actions.ensureElementId`, exposed as
   `POST /api/frames/:id/element-id` to the comment role) as an annotation: `store.updateFrame`'s
