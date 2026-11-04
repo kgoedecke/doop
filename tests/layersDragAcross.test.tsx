@@ -226,8 +226,18 @@ describe('LayersPanel drag between frames', () => {
     expect(html('f1')).not.toContain('<p>')
     expect(row(`new|${P}`).textContent).toContain('only')
   })
-  it('lifts a layer onto the canvas in front of its own frame, the first in the list', async () => {
+  it('lifts a layer onto the canvas in front of its own frame, the frontmost in the list', async () => {
     const P = 'body:nth-of-type(1) > p:nth-of-type(1)'
+    /* the list runs front first: put f1 at the front of the stack, so its
+       row is the first in the panel and nothing lies above it */
+    const canvas = useStore.getState().canvas!
+    act(() =>
+      useStore
+        .getState()
+        .setCanvas({ ...canvas, frames: [...canvas.frames.filter((f) => f.id !== 'f1'), canvas.frames[0]!] }),
+    )
+    const rootKeys = () => [...container.querySelectorAll<HTMLElement>('[data-row-key]')].map((r) => r.dataset.rowKey!)
+    expect(rootKeys()[0]).toBe('f1')
     act(() => row('f1').querySelector<HTMLElement>('[data-icon]')!.click())
     /* the band above the layer's own frame row is the root too */
     dragRow(`f1|${P}`, 'f1', 2)
@@ -236,8 +246,9 @@ describe('LayersPanel drag between frames', () => {
     expect(createFrame).toHaveBeenCalledTimes(1)
     expect(createFrame.mock.calls[0]![1]).toMatchObject({ name: 'only', x: 5, y: 5, width: 40, height: 20 })
     expect(html('f1')).not.toContain('<p>')
+    expect(rootKeys()[0]).toBe(`new|${P}`)
     expect(row(`new|${P}`).textContent).toContain('only')
     const order = useStore.getState().canvas!.frames.map((f) => f.id)
-    expect(order.indexOf('new')).toBeGreaterThan(order.indexOf('f1'))
+    expect(order[order.length - 1]).toBe('new')
   })
 })
