@@ -278,11 +278,10 @@ export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req:
           method: 'POST',
           headers: { ...config.headers, 'Content-Type': 'application/json' },
           body,
-          signal: req.signal,
         },
         /* a design turn can legitimately take minutes; the request signal is
            still the hard stop, this is only the outer safety bound */
-        { timeoutMs: 10 * 60_000 },
+        { timeoutMs: 10 * 60_000, signal: req.signal },
       )) as CompletionBody
     } catch (error) {
       if (error instanceof CustomInferenceError) {

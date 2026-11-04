@@ -69,15 +69,29 @@ interface ResolvedCustomUrl {
 
 /** Resolve and apply the network policy again on every call. A save-time
  *  check is not enough: a hostname can point somewhere else a minute later. */
-async function resolveWithPolicy(url: URL, allowPrivate: boolean): Promise<ResolvedCustomUrl> {
+async function lookupWithDeadline(host: string, timeoutMs: number): Promise<PublicAddress[]> {
+  const started = Date.now()
+  const remaining = Math.max(1, timeoutMs - (Date.now() - started))
+  return Promise.race([
+    dns.lookup(host, { all: true, verbatim: true }) as Promise<PublicAddress[]>,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('DNS lookup timed out')), remaining)),
+  ]) as Promise<PublicAddress[]>
+}
+
+async function resolveWithPolicy(
+  url: URL,
+  allowPrivate: boolean,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<ResolvedCustomUrl> {
   const host = url.hostname.replace(/^\[|\]$/g, '')
   const literal = net.isIP(host)
   let addresses: PublicAddress[]
   try {
-    addresses = literal
-      ? [{ address: host, family: literal as 4 | 6 }]
-      : ((await dns.lookup(host, { all: true, verbatim: true })) as PublicAddress[])
+    if (signal?.aborted) throw signal.reason ?? new Error('aborted')
+    addresses = literal ? [{ address: host, family: literal as 4 | 6 }] : await lookupWithDeadline(host, timeoutMs)
   } catch {
+    if (signal?.aborted) throw signal.reason ?? new Error('aborted')
     throw new CustomInferenceError('unreachable', UNREACHABLE_MESSAGE)
   }
   if (!addresses.length) throw new CustomInferenceError('unreachable', UNREACHABLE_MESSAGE)
@@ -87,14 +101,23 @@ async function resolveWithPolicy(url: URL, allowPrivate: boolean): Promise<Resol
   return { url, addresses, allowPrivate }
 }
 
-async function resolveCustomUrl(raw: URL): Promise<ResolvedCustomUrl> {
-  return resolveWithPolicy(normalizeCustomBaseUrl(raw.href), env.CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS)
+async function resolveCustomUrl(
+  raw: URL,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<ResolvedCustomUrl> {
+  return resolveWithPolicy(normalizeCustomBaseUrl(raw.href), env.CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS, timeoutMs, signal)
 }
 
 /** Normalize a base URL and verify it may be contacted from this server. */
-export async function validateCustomBaseUrl(raw: string, allowPrivate: boolean): Promise<URL> {
+export async function validateCustomBaseUrl(
+  raw: string,
+  allowPrivate: boolean,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  signal?: AbortSignal,
+): Promise<URL> {
   const url = normalizeCustomBaseUrl(raw)
-  await resolveWithPolicy(url, allowPrivate)
+  await resolveWithPolicy(url, allowPrivate, timeoutMs, signal)
   return url
 }
 
@@ -145,7 +168,8 @@ export async function fetchCustomJson(
   init: RequestInit,
   options: { maxBytes?: number; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<unknown> {
-  const resolved = await resolveCustomUrl(url)
+  if (options.signal?.aborted) throw options.signal.reason ?? new Error('aborted')
+  const resolved = await resolveCustomUrl(url, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.signal)
   const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
   /* caller cancellation must stay a caller cancellation: the transport hands

@@ -220,4 +220,16 @@ describe('fetchCustomJson', () => {
     const url = customEndpointUrl(new URL(`${base}/slow`), 'models')
     expect(await asyncCode(() => fetchCustomJson(url, { method: 'GET' }, { timeoutMs: 20 }))).toBe('unreachable')
   })
+
+  it('does not let DNS resolution bypass the request timeout', async () => {
+    dnsMocks.lookup.mockReturnValue(new Promise(() => {}))
+    const promise = fetchCustomJson(
+      new URL('https://provider.example/v1/models'),
+      {
+        method: 'GET',
+      },
+      { timeoutMs: 10 },
+    )
+    await expect(promise).rejects.toMatchObject({ code: 'unreachable' })
+  })
 })

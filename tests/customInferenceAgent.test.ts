@@ -216,3 +216,75 @@ describe('custom model catalog', () => {
     await expect(customModels(profile(), AbortSignal.timeout(5_000))).rejects.toThrow()
   })
 })
+
+describe('custom abort cancellation', () => {
+  let abortProvider: http.Server
+  let abortBase: string
+  let sawRequestClose = false
+  let requestReceived = false
+  let releaseResponse: (() => void) | undefined
+  const releaseGate = new Promise<void>((resolve) => {
+    releaseResponse = resolve
+  })
+
+  beforeAll(async () => {
+    abortProvider = http.createServer((req, res) => {
+      if (req.url === '/v1/chat/completions' && req.method === 'POST') {
+        requestReceived = true
+        req.on('close', () => {
+          sawRequestClose = true
+        })
+        res.writeHead(200, { 'content-type': 'application/json' })
+        void releaseGate.then(() => {
+          res.end(JSON.stringify({ choices: [{ message: { content: 'done' } }] }))
+        })
+      } else {
+        res.writeHead(404).end()
+      }
+    })
+    await new Promise<void>((resolve) => abortProvider.listen(0, '127.0.0.1', resolve))
+    abortBase = `http://127.0.0.1:${(abortProvider.address() as AddressInfo).port}`
+  })
+
+  afterAll(() => new Promise<void>((resolve) => abortProvider.close(() => resolve())))
+
+  beforeEach(() => {
+    sawRequestClose = false
+    requestReceived = false
+    stubEnv('CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS', '1')
+  })
+
+  afterEach(unstubAllEnvs)
+
+  function waitFor(predicate: () => boolean): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const check = () => {
+        if (predicate()) resolve()
+        else setTimeout(check, 5)
+      }
+      check()
+    })
+  }
+
+  it('forwards abort cancellation into the custom undici request', async () => {
+    const controller = new AbortController()
+    const promise = runChatCompletionsTurn(
+      customConfig(new URL(`${abortBase}/v1`), 'test-key', 'model-a', false, 'Example'),
+      {
+        system: 'sys',
+        tools: [],
+        messages: [],
+        maxTokens: 10,
+        signal: controller.signal,
+      },
+    )
+
+    await waitFor(() => requestReceived)
+    const reqClosed = waitFor(() => sawRequestClose === true)
+    controller.abort()
+    releaseResponse?.()
+
+    await expect(promise).rejects.toThrow(/aborted|cancel/i)
+    await expect(reqClosed).resolves.toBeUndefined()
+  }, 15000)
+})
