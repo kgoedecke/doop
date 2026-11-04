@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
+import type { TextFormatCommand } from '../src/lib/richText'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, ElementComment, Frame } from '../shared/types'
@@ -24,6 +25,7 @@ declare global {
       undo: () => Promise<void>
       redo: () => Promise<void>
       pick: (el: { frameId: string; selector: string } | null) => void
+      formatText: (command: TextFormatCommand) => boolean
       /** an SVG file read the way a paste reads it, with the browser's computed styles */
       importSvg: (markup: string, name: string) => ImportedSvg | null
     }
@@ -1359,6 +1361,67 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       layerFrame('<p id="under" style="position:absolute;left:0;top:0;width:300px;height:200px">Under</p>'),
     ])
     await page.waitForFunction(() => document.querySelector('[data-hover-outline]')?.textContent === 'p')
+  })
+
+  it('formats selected text from the toolbar, saves it, and supports canvas undo after editing', async () => {
+    const source = layerFrame('<p id="text" style="width:200px;height:80px;margin:80px">Hello world</p>')
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 80, zoom: 1 }))
+    const text = await visibleDrawing('Layers', '#text')
+    await page.mouse.click(text.x + 20, text.y + 10, { count: 2, delay: 60 })
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    await iframe.waitForSelector('#text[contenteditable]')
+    await iframe.evaluate(() => {
+      const text = document.querySelector('#text')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 0, text, 5)
+    })
+    await page.waitForSelector('[aria-label="Text formatting"]')
+    await page.click('button[aria-label="Bold"]')
+    await iframe.waitForSelector('#text b')
+    expect(await iframe.$eval('#text b', (el) => el.textContent)).toBe('Hello')
+    expect(await iframe.evaluate(() => getSelection()!.toString())).toBe('Hello')
+    await page.waitForSelector('button[aria-label="Bold"][aria-pressed="true"]')
+    await expect.poll(() => saved[0]?.html).toContain('<b>Hello</b> world')
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[aria-label="Text formatting"]'))
+    await iframe.waitForFunction(() => !document.querySelector('[contenteditable]'))
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(() => saved[0]?.html).toBe(source.html)
+    await page.evaluate(() => window.drawingHarness.redo())
+    await expect.poll(() => saved[0]?.html).toContain('<b>Hello</b> world')
+  })
+
+  it('bolds a picked text layer whole from the canvas and undoes it in one step', async () => {
+    const source = layerFrame('<p style="width:200px;height:80px;margin:80px">Hello <b>world</b></p>')
+    await seedFrames([source])
+    const paragraph = 'body:nth-of-type(1) > p:nth-of-type(1)'
+    await page.evaluate((selector) => window.drawingHarness.pick({ frameId: 'layers', selector }), paragraph)
+    await page.waitForFunction(
+      (selector) => window.drawingHarness.state().selectedElement?.selector === selector,
+      {},
+      paragraph,
+    )
+    expect(await page.evaluate(() => window.drawingHarness.formatText('bold'))).toBe(true)
+    await expect.poll(() => saved[0]?.html).toContain('<b>Hello world</b>')
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(() => saved[0]?.html).toBe(source.html)
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe(paragraph)
+    // The paragraph becomes a div so the list survives reload; the selection follows it.
+    expect(await page.evaluate(() => window.drawingHarness.formatText('insertUnorderedList'))).toBe(true)
+    await expect.poll(() => saved[0]?.html).toContain('<li>Hello <b>world</b></li>')
+    await page.waitForFunction(
+      () => window.drawingHarness.state().selectedElement?.selector === 'body:nth-of-type(1) > div:nth-of-type(1)',
+    )
+  })
+
+  it('leaves a layer inside a locked frame alone on a format shortcut', async () => {
+    const source = { ...layerFrame('<p id="text" style="margin:80px">Hello</p>'), locked: true }
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#text' }))
+    await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#text')
+    expect(await page.evaluate(() => window.drawingHarness.formatText('bold'))).toBe(true)
+    await new Promise((r) => setTimeout(r, 400))
+    expect(saved[0]?.html).toBe(source.html)
   })
 
   it('still enters text editing on double-click and moves the whole frame from its title', async () => {

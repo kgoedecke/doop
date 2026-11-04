@@ -5,6 +5,7 @@ import {
   editElementGeometry,
   inspectElement,
   onFrameChange,
+  onTextSelection,
   styleElement,
   styleGesture,
   type ElementInfo,
@@ -170,9 +171,11 @@ export function ElementPanel({
     if (inspected.current.ready) refresh()
     else read()
     const off = onFrameChange(frame.id, refresh)
+    const offSelection = onTextSelection(frame.id, refresh)
     return () => {
       live = false
       off()
+      offSelection()
       if (timer) window.clearTimeout(timer)
     }
   }, [frame.id, frame.html, selector])
@@ -460,6 +463,8 @@ function DesignTab({
   /* a library family offers only the weights it was uploaded with; picking
      one it lacks would just show the browser's faux bold */
   const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
+  /* runs that disagree show "Mixed", as Figma does for a text layer */
+  const mixed = info.textMixed ?? {}
   const t = useT()
   const sizeModes = SIZE_MODES.map(({ value, label }) => ({ value, label: t(label) }))
   const ratio = aspectRatio(info.aspectRatio, info.naturalAspectRatio)
@@ -839,7 +844,8 @@ function DesignTab({
           <PropertyRow label={t('inspector.rowFont')}>
             <SelectField
               label={t('inspector.fontFamily')}
-              value={info.fontFamily}
+              value={mixed.fontFamily ? null : info.fontFamily}
+              placeholder={t('inspector.mixed')}
               options={fontOptions(
                 info,
                 customFamilies,
@@ -857,14 +863,16 @@ function DesignTab({
           <PropertyRow label={t('inspector.rowSize')}>
             <NumberField
               label={t('inspector.fontSize')}
-              value={info.fontSize}
+              value={mixed.fontSize ? null : info.fontSize}
+              placeholder={t('inspector.mixed')}
               unit="px"
               onCommit={(v) => apply({ 'font-size': `${v}px` })}
             />
             <SelectField
               className="flex-[0_0_66px]"
               label={t('inspector.fontWeight')}
-              value={info.fontWeight}
+              value={mixed.fontWeight ? null : info.fontWeight}
+              placeholder={t('inspector.mixed')}
               options={[...new Set([...weights, info.fontWeight])]
                 .sort((a, b) => Number(a) - Number(b))
                 .map((w) => ({ value: w, label: w }))}
@@ -872,7 +880,11 @@ function DesignTab({
             />
           </PropertyRow>
           <PropertyRow label={t('inspector.rowColor')}>
-            <ColorField value={rgbToHex(info.color)} onCommit={(v) => apply({ color: v })} />
+            <ColorField
+              value={mixed.color ? null : rgbToHex(info.color)}
+              placeholder={t('inspector.mixed')}
+              onCommit={(v) => apply({ color: v })}
+            />
           </PropertyRow>
           <PropertyRow label={t('inspector.rowAlign')}>
             <Segmented

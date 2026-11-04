@@ -66,7 +66,9 @@ import {
   nudgeSelection,
   toggleLockSelection,
   toggleSelectionHidden,
+  formatSelectionText,
 } from '../lib/layerEdits'
+import type { TextFormatCommand } from '../lib/richText'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
@@ -142,6 +144,14 @@ const ARROW_NUDGE: Record<string, [number, number]> = {
   ArrowRight: [1, 0],
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
+}
+const LETTER_FORMATS: Record<string, TextFormatCommand> = { b: 'bold', i: 'italic', u: 'underline' }
+
+/** The text format a canvas key chord names: letters without ⇧, the ⇧ digits by code (⇧7 is & on US keyboards). */
+function layerTextShortcut(e: KeyboardEvent): TextFormatCommand | null {
+  if (!e.shiftKey) return LETTER_FORMATS[e.key.toLowerCase()] ?? null
+  if (e.key.toLowerCase() === 'x') return 'strikeThrough'
+  return e.code === 'Digit7' ? 'insertOrderedList' : e.code === 'Digit8' ? 'insertUnorderedList' : null
 }
 const LAYERS_W = 264
 const RAIL_W = 40
@@ -420,6 +430,12 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
          frames — as the eye in the Layers panel would */
       if (canEdit && (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'h') {
         if (toggleSelectionHidden()) e.preventDefault()
+        return
+      }
+      /* ⌘B / ⌘I / ⌘U, ⌘⇧X and ⌘⇧7 / ⌘⇧8 format a picked text layer whole, as in Figma */
+      const textFormat = canEdit && (e.metaKey || e.ctrlKey) && !e.altKey ? layerTextShortcut(e) : null
+      if (textFormat) {
+        if (formatSelectionText(textFormat)) e.preventDefault()
         return
       }
       /* ⌘⇧L locks or unlocks what is selected: the picked layer, else the frames */

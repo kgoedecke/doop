@@ -1,8 +1,9 @@
+import type { TextFormatCommand } from './richText'
 import type { Frame } from '../../shared/types'
 import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
 import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
-import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
+import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
 import { duplicateFrames } from './frameClipboard'
 import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
@@ -318,6 +319,34 @@ export function setLayersHidden(frame: Frame, selectors: string[], hidden: boole
 /** ⌘⇧H: picked elements move together — all shown when every one is
  *  hidden, hidden otherwise; with nothing picked the selected frames do the
  *  same. False when the key had nothing to act on. */
+/** ⌘B, ⌘I, ⌘U, ⌘⇧X and ⌘⇧7 / ⌘⇧8 on picked text layers: the format toggles
+ *  over each whole layer. True when an element was picked, whether or not it
+ *  held text; the selection follows a layer whose tag changed. */
+export function formatSelectionText(command: TextFormatCommand): boolean {
+  const s = useStore.getState()
+  const picked = s.selectedElement
+  if (!picked) return false
+  const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
+  if (!frame) return false
+  if (frame.locked) return true
+  const selectors = pickedSelectors(s)
+  formatElementText(picked.frameId, selectors, command)
+    .then((after) => {
+      /* the frame focused its layer for the command; the canvas's shortcuts listen on this window */
+      const active = document.activeElement
+      if (active instanceof HTMLIFrameElement) active.blur()
+      const primary = after?.[selectors.indexOf(picked.selector)]
+      const now = useStore.getState()
+      const unchanged =
+        now.selectedElement?.frameId === picked.frameId && pickedSelectors(now).join() === selectors.join()
+      if (!after || !primary || after.join() === selectors.join() || !unchanged) return
+      /* the whole picked set follows its layers' new selectors, the primary staying primary */
+      useStore.setState({ selectedElement: { frameId: picked.frameId, selector: primary }, selectedElements: after })
+    })
+    .catch(console.error)
+  return true
+}
+
 export function toggleSelectionHidden(): boolean {
   const s = useStore.getState()
   const frames = s.canvas?.frames ?? []

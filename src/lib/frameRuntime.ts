@@ -1,6 +1,7 @@
 import { FRAME_REPLAY_RUNTIME } from './frameReplayRuntime'
 import { FRAME_DROP_RUNTIME } from './frameDropRuntime'
 import { FRAME_PROTO_RUNTIME } from './frameProtoRuntime'
+import { FRAME_TEXT_RUNTIME } from './frameTextRuntime'
 
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
@@ -124,6 +125,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   var editing = false
   var activeEl = null
   var editTimer = null
+  ${FRAME_TEXT_RUNTIME}
 
   /* the edited element's outline is the parent's (its selection hairline,
      drawn over the frame from the hit rect): in here only the caret cursor,
@@ -151,8 +153,20 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function candidate(start) {
     var el = start && start.nodeType === 3 ? start.parentElement : start
     if (isLocked(el)) return null
+    if (activeEl && activeEl.contains(el)) return activeEl
+    var root = el && el.closest('[data-doop-text],[data-doop-drawing="text"]')
+    if (root && !root.querySelector(LOCKED)) return root
     while (el && el !== document.body && el !== document.documentElement) {
-      if (hasOwnText(el)) return el
+      if (hasOwnText(el)) {
+        // Inline formatting belongs to its surrounding text block on re-entry.
+        while (el.parentElement && el.parentElement !== document.body &&
+          getComputedStyle(el).display === 'inline' && !el.parentElement.querySelector(LOCKED)) el = el.parentElement
+        if (el.tagName === 'LI') {
+          var list = el.closest('ul,ol')
+          return list && !list.querySelector(LOCKED) ? list : el
+        }
+        return el
+      }
       el = el.parentElement
     }
     return null
@@ -165,9 +179,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function deactivate() {
     if (!activeEl) return
+    var normalized = normalizeTextParagraph(activeEl, paragraphStyleDiff(activeEl))
+    if (normalized !== activeEl) {
+      activeEl = normalized
+      postActive() // keep the selected layer's selector in sync with its new tag
+    }
     activeEl.removeAttribute('contenteditable')
     activeEl.removeAttribute('data-v-active')
     activeEl = null
+    textRange = null
     /* the edit's highlight goes with it: a click outside the frame (or
        Escape) ends the edit, and the text must not stay selected */
     var sel = getSelection()
@@ -183,6 +203,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   function postActive() {
     parent.postMessage({ type: 'doop:active', hit: activeInfo() }, '*')
+    postTextState()
   }
 
   function placeCaret(x, y) {
@@ -206,7 +227,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       activeEl = el
       el.removeAttribute('data-v-hover')
       el.setAttribute('data-v-active', '1')
-      try { el.contentEditable = 'plaintext-only' } catch (e) { el.contentEditable = 'true' }
+      prepareText(el)
+      el.contentEditable = 'true'
       el.focus({ preventScroll: true })
       postActive()
     }
@@ -233,6 +255,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
 
   /* strip the runtime's own marks from a clone of the document */
   function cleanClone(root) {
+    serializeText(root)
     // Remove only our pending loader's clone, preserving design-owned attributes.
     if (replayScript && replayScript.parentNode === document.documentElement) {
       var replayIndex = Array.prototype.indexOf.call(document.documentElement.childNodes, replayScript)
@@ -400,7 +423,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }, true)
 
   document.addEventListener('input', function () {
-    if (!editing) return
+    if (!editing || !activeEl) return
+    activeEl.setAttribute('data-doop-text', '')
+    postTextState()
     if (editTimer) clearTimeout(editTimer)
     editTimer = setTimeout(postEdited, 400)
   })
@@ -902,6 +927,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     document.fonts.forEach(function (font) {
       if (fontFamilies.indexOf(font.family) === -1) fontFamilies.push(font.family)
     })
+    var textSummary = textStyleSummary(el)
+    var textValues = textSummary.values || cs
     var sides = ['Top', 'Right', 'Bottom', 'Left']
     var drawn = 'Top'
     for (var b = 0; b < sides.length; b++) {
@@ -920,7 +947,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       index: index,
       count: siblings.length,
       inline: inline,
-      hasText: text.replace(/\\s+/g, '') !== '',
+      hasText: text.replace(/\\s+/g, '') !== '' || isTextBlock(el),
       rect: designRect(el),
       geometry: elementGeometry(el),
       scale: renderScale(el, designRect(el)),
@@ -963,10 +990,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       borderStyle: cs['border' + drawn + 'Style'],
       borderColor: cs['border' + drawn + 'Color'],
       borderRadius: px(cs.borderTopLeftRadius),
-      color: cs.color,
-      fontSize: px(cs.fontSize),
-      fontWeight: cs.fontWeight,
-      fontFamily: cs.fontFamily,
+      color: textValues.color,
+      fontSize: px(textValues.fontSize),
+      fontWeight: textValues.fontWeight,
+      fontFamily: textValues.fontFamily,
+      textMixed: textSummary.mixed,
       fontFamilies: fontFamilies,
       textAlign: cs.textAlign,
       direction: cs.direction,
@@ -1011,13 +1039,20 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
     if (styleEdit) endStyleEdit(styleEdit.selector, false)
-    // Save a previous typed/slider edit before opening this separate action.
+    // Save a previous typed/slider edit before opening this separate action:
+    // a save landing mid-gesture would carry the preview, which a cancel
+    // then has nothing to replace.
     if (styleTimer) {
       clearTimeout(styleTimer)
       styleTimer = null
       postEdited()
     }
-    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {} }
+    if (editTimer) {
+      clearTimeout(editTimer)
+      editTimer = null
+      postEdited()
+    }
+    styleEdit = { selector: selector, original: el.style.cssText, styles: {}, touched: {}, runs: [], created: [], renamed: [] }
     return true
   }
   function endStyleEdit(selector, cancel) {
@@ -1027,6 +1062,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     var el = styleTarget(selector)
     if (!el) return false
     if (cancel) {
+      restoreTextRuns(edit)
       var original = document.createElement('div').style
       original.cssText = edit.original
       for (var name in edit.touched) {
@@ -1044,12 +1080,47 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         if (restoredStyle === null) el.removeAttribute('style')
         else el.setAttribute('style', restoredStyle)
       }
-    } else if (Object.keys(edit.touched).length) postEdited(true)
+    } else if (edit.range) {
+      // The preview was outside the undo history: put it back and apply the
+      // gesture's final styles through the undoable path, as one entry.
+      restoreTextRuns(edit)
+      if (selectedTextRange(el)) styleTextRange(el, edit.styles)
+      postEdited(true)
+      postTextState()
+    } else if (Object.keys(edit.touched).length || edit.runs.length || edit.created.length || edit.renamed.length) postEdited(true)
     return true
   }
   function applyStyle(selector, styles) {
     var el = styleTarget(selector)
     if (!el || isLocked(el)) return false
+    var textPatch = isTextPatch(styles)
+    var gesture = styleEdit && styleEdit.selector === selector
+    function noteRuns(change) {
+      if (!gesture) return
+      change.before.forEach(function (run) {
+        if (!styleEdit.runs.some(function (known) { return known.el === run.el }) &&
+          styleEdit.created.indexOf(run.el) === -1) styleEdit.runs.push(run)
+      })
+      change.created.forEach(function (run) { styleEdit.created.push(run) })
+      if (change.nodes) styleEdit.nodes = change.nodes
+      if (change.renamed) change.renamed.forEach(function (run) { styleEdit.renamed.push(run) })
+    }
+    if (textPatch && selectedTextRange(el)) {
+      // Part of the text is selected: the edit belongs to that run alone. A
+      // scrub previews in place and lands once, undoably, when it commits.
+      if (gesture) {
+        Object.assign(styleEdit.styles, styles)
+        styleEdit.range = true
+        noteRuns(previewTextRange(el, styles))
+      } else {
+        styleTextRange(el, styles)
+        if (styleTimer) clearTimeout(styleTimer)
+        styleTimer = setTimeout(function () { styleTimer = null; postEdited() }, 250)
+      }
+      postTextState()
+      return true
+    }
+    if (textPatch) noteRuns(clearTextRuns(el, styles))
     if (styleEdit && styleEdit.selector === selector) {
       Object.assign(styleEdit.styles, styles)
       previewStyle(el, styles)
@@ -1113,6 +1184,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       protoHtmlChanged()
       if (d.reqId) parent.postMessage({ type: 'doop:html-result', reqId: d.reqId }, '*')
     }
+    if (d.type === 'doop:text-format' && Array.isArray(d.selectors)) {
+      parent.postMessage({ type: 'doop:text-format-result', reqId: d.reqId, selectors: formatLayers(d.selectors, d.command) }, '*')
+    } else if (d.type === 'doop:text-format') formatText(d.command)
     if (d.type === 'doop:edit') {
       setEdit(!!d.on)
       if (d.on && typeof d.x === 'number' && typeof d.y === 'number') {
