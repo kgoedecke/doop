@@ -1049,7 +1049,7 @@ export function buildMcpServer(
       if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId))))
         return err('Move frames before deleting their page')
       const actor = actorFrom(agent_name)
-      return text({ ok: true, pages: actions.setCanvasPages(canvas_id, pages, actor) })
+      return withFeedback(text({ ok: true, pages: actions.setCanvasPages(canvas_id, pages, actor) }), canvas_id, actor)
     },
   )
 
@@ -1072,7 +1072,11 @@ export function buildMcpServer(
       try {
         const created = actions.createCanvasPage(canvas_id, name, actorFrom(agent_name))
         if (!created) return noCanvas(canvas_id)
-        return text({ ok: true, page: created.page, pages: created.pages })
+        return withFeedback(
+          text({ ok: true, page: created.page, pages: created.pages }),
+          canvas_id,
+          actorFrom(agent_name),
+        )
       } catch (e) {
         if (e instanceof PageLimitError) return err(e.message)
         throw e
@@ -1104,7 +1108,7 @@ export function buildMcpServer(
       if (color !== null && !background) return err('color must be a hex colour such as #f5f5f5, or null')
       const saved = actions.setPageBackground(canvas_id, pageId, background, actorFrom(agent_name))
       if (!saved) return noCanvas(canvas_id)
-      return text({ ok: true, pages: saved })
+      return withFeedback(text({ ok: true, pages: saved }), canvas_id, actorFrom(agent_name))
     },
   )
 
@@ -1144,7 +1148,11 @@ export function buildMcpServer(
       if (!canvas) return noCanvas(canvas_id)
       const result = setPrototypeStart(canvas, pageId, frame_id, actorFrom(agent_name))
       if (!result.ok) return err(result.error)
-      return text({ ok: true, pages: result.pages, prototype_url: prototypeUrl(canvas.id) })
+      return withFeedback(
+        text({ ok: true, pages: result.pages, prototype_url: prototypeUrl(canvas.id) }),
+        canvas_id,
+        actorFrom(agent_name),
+      )
     },
   )
 
