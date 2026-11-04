@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react'
 import type { Frame } from '../../shared/types'
+import { pointerAngle, rotatedBy } from '../../shared/frameRotation'
 import { useStore } from '../lib/store'
 import { gesture } from '../lib/gesture'
 import { visibleGuides } from '../lib/guides'
 import { guideDelta } from '../lib/snap'
 import { flexSizeAxis } from '../lib/flexLayout'
-import { styleElement, styleGesture, type ElementInfo, type StylePatch } from '../lib/frameBridge'
+import { editElementGeometry, styleElement, styleGesture, type ElementInfo, type StylePatch } from '../lib/frameBridge'
 import {
   RESIZE_CORNERS,
   RESIZE_EDGES,
@@ -19,6 +20,8 @@ import {
   type ResizeHandle,
   type Size,
 } from '../lib/elementResize'
+import { derotateDelta, selectionBox, type Box } from '../lib/elementRotate'
+import { ROTATE_CORNERS, ROTATE_ZONE_INSET_PX, ROTATE_ZONE_PX, rotateCursor, rotateZoneSide } from '../lib/frameRotate'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 
 export interface ElementRect {
@@ -28,12 +31,22 @@ export interface ElementRect {
   height: number
 }
 
+/** What the furniture is drawn around: the element's rendered bounds, its
+ *  own turn and its box before that turn (the bounds when unturned). */
+export interface ElementGeometry {
+  rect: ElementRect
+  rotation: number
+  box: Box
+}
+
 /* on-screen pixels, divided by the Stage's `--zoom` so a grip stays the
    same size at every zoom, like the outline's hairline */
 const GRIP_PX = 6
 const EDGE_PX = 6
 const GRIP_SIZE = `calc(${GRIP_PX}px / var(--zoom, 1))`
 const EDGE_SIZE = `calc(${EDGE_PX}px / var(--zoom, 1))`
+const ROTATE_ZONE_SIZE = `calc(${ROTATE_ZONE_PX}px / var(--zoom, 1))`
+const ROTATE_ZONE_INSET = `calc(${ROTATE_ZONE_INSET_PX}px / var(--zoom, 1))`
 /* a corner grip: a white square on a one-pixel ring of the selection blue,
    the outline's own rgb(60,130,246) (FrameView). Tailwind only emits classes
    it finds spelled out, so these stay literal strings. */
@@ -42,7 +55,6 @@ const CORNER_CLASS =
 /* the size badge under the element: centred, counter-scaled, never in the way */
 const BADGE_CLASS =
   'pointer-events-none absolute top-full left-1/2 origin-top whitespace-nowrap rounded-tag bg-[rgb(60,130,246)] px-2 py-1 text-label font-medium text-white tabular-nums'
-const BADGE_TRANSFORM = 'translate(-50%, calc(10px / var(--zoom, 1))) scale(calc(1 / var(--zoom, 1)))'
 /* a press that travels less than this is a click, not a resize */
 const MOVE_THRESHOLD_PX = 2
 
@@ -54,25 +66,36 @@ export function handleLabelKey(handle: ResizeHandle): PlainMessageKey {
   return 'stage.resize'
 }
 
+/** The furniture an element's runtime info describes. */
+export function geometryOf(info: ElementInfo): ElementGeometry {
+  return { rect: info.rect, rotation: info.geometry.rotation ?? 0, box: info.box ?? info.rect }
+}
+
 /** The selection furniture of an element inside a frame, the way Paper draws
- *  it: a square grip in each corner, grabbable (unmarked) edges, and the box's
- *  size on a badge underneath. A drag previews inline `width` / `height` in
- *  the live frame on every move and commits once on release, so a gesture is
- *  one discrete undo step. Shift keeps the aspect ratio; Esc puts the
- *  element back. */
+ *  it: a square grip in each corner, grabbable (unmarked) edges, the box's
+ *  size on a badge underneath, and just outside each corner a zone that
+ *  shows the rotate cursor. A resize drag previews inline `width` /
+ *  `height` in the live frame on every move and commits once on release, so
+ *  a gesture is one discrete undo step; Shift keeps the aspect ratio. A
+ *  rotate drag turns the element about its centre the same way, Shift
+ *  snapping to 15°. Esc puts the element back. The furniture turns with the
+ *  element, so a turned layer keeps its grips. */
 export function ElementResizeHandles({
   frame,
   selector,
-  rect,
-  onRect,
+  geometry,
+  sizable = true,
+  onGeometry,
   onResizing,
 }: {
   frame: Frame
   selector: string
-  /** the element's box in frame px, where the grips are drawn */
-  rect: ElementRect
-  /** the box after each applied move, so the outline follows the element */
-  onRect: (rect: ElementRect) => void
+  /** the element's bounds, turn and box in frame px, where the furniture is drawn */
+  geometry: ElementGeometry
+  /** whether a width/height applies to the box: the resize grips show only then */
+  sizable?: boolean
+  /** the geometry after each applied move, so the outline follows the element */
+  onGeometry: (geometry: ElementGeometry) => void
   onResizing: (resizing: boolean) => void
 }) {
   /* an unmount mid-drag (the frame deselected, the tool switched, the
@@ -81,6 +104,10 @@ export function ElementResizeHandles({
   const stop = useRef<(() => void) | null>(null)
   useEffect(() => () => stop.current?.(), [])
   const t = useT()
+  const furniture = useRef<HTMLDivElement>(null)
+  const { rect, rotation, box } = geometry
+  /* how the element's axes sit on screen: its own turn plus its frame's */
+  const screenTurn = rotation + (frame.rotation ?? 0)
 
   function start(e: React.PointerEvent, handle: ResizeHandle) {
     if (e.button !== 0) return
@@ -138,7 +165,7 @@ export function ElementResizeHandles({
           inFlight = false
           if (info) {
             current = { width: info.width ?? info.rect.width, height: info.height ?? info.rect.height }
-            onRect(info.rect)
+            onGeometry(geometryOf(info))
           }
           /* the move that arrived while this one was out */
           if (!done) flush()
@@ -156,7 +183,10 @@ export function ElementResizeHandles({
     function patchFor(pos: { x: number; y: number; shift: boolean; alt: boolean }): StylePatch | null {
       if (!base || !moved) return null
       const zoom = useStore.getState().viewport.zoom
-      const world = snapToGuides({ dx: (pos.x - origin.x) / zoom, dy: (pos.y - origin.y) / zoom }, zoom, pos.alt)
+      /* the pointer's travel along the element's own axes; a turned element
+         has no edge lying along a ruler guide, so it does not snap */
+      const travel = derotateDelta({ dx: (pos.x - origin.x) / zoom, dy: (pos.y - origin.y) / zoom }, screenTurn)
+      const world = screenTurn ? travel : snapToGuides(travel, zoom, pos.alt)
       const delta = { dx: world.dx / scale.x, dy: world.dy / scale.y }
       const keepRatio = pos.shift
       if (keepRatio) ratioUsed = true
@@ -236,7 +266,7 @@ export function ElementResizeHandles({
         }
         styleGesture(frame.id, selector, phase)
           .then((info) => {
-            if (info) onRect(info.rect)
+            if (info) onGeometry(geometryOf(info))
           })
           .catch(console.error)
       })
@@ -271,56 +301,201 @@ export function ElementResizeHandles({
     stop.current = cancel
   }
 
+  /** A press on a rotate zone: the element turns about the centre of its
+   *  bounds with the pointer, through the same style gesture a resize uses
+   *  (one preview per move, one discrete save on release). The runtime's
+   *  rotate edit sets the element's whole turn, transform angle included. */
+  function startRotate(e: React.PointerEvent) {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    onResizing(true)
+    const pointerId = e.pointerId
+    /* the turn is about the element's centre, which its bounds share
+       whatever the turn (the runtime's rotate turns about the box's centre) */
+    const bounds = furniture.current?.getBoundingClientRect()
+    const center = bounds
+      ? { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }
+      : { x: e.clientX, y: e.clientY }
+    const startAngle = pointerAngle(center, { x: e.clientX, y: e.clientY })
+    const startRotation = rotation
+    const ready = styleGesture(frame.id, selector, 'begin').then((info) => !!info)
+    let last: { x: number; y: number; shift: boolean } | null = null
+    let latest: number | null = null
+    let inFlight = false
+    let moved = false
+    let done = false
+
+    function send(value: number) {
+      inFlight = true
+      editElementGeometry(frame.id, selector, { kind: 'rotate', value })
+        .then((info) => {
+          inFlight = false
+          if (info) onGeometry(geometryOf(info))
+          if (!done) flush()
+        })
+        .catch(console.error)
+    }
+    function flush() {
+      if (latest === null || inFlight) return
+      const value = latest
+      latest = null
+      send(value)
+    }
+    function turnFor(pos: { x: number; y: number; shift: boolean }): number | null {
+      if (!moved) return null
+      return rotatedBy(startRotation, startAngle, pointerAngle(center, pos), { snap: pos.shift })
+    }
+    function preview() {
+      if (done || !last) return
+      const value = turnFor(last)
+      if (value === null) return
+      latest = value
+      flush()
+    }
+    void ready.then(preview)
+    function trackPointer(ev: PointerEvent) {
+      last = { x: ev.clientX, y: ev.clientY, shift: ev.shiftKey }
+      if (Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) >= MOVE_THRESHOLD_PX) moved = true
+    }
+    function onMove(ev: PointerEvent) {
+      if (ev.pointerId !== pointerId || gesture.pinching) return
+      trackPointer(ev)
+      preview()
+    }
+    function finish() {
+      done = true
+      stop.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener('keydown', onKey)
+      onResizing(false)
+    }
+    function end(phase: 'commit' | 'cancel') {
+      void ready.then((open) => {
+        if (!open) return
+        if (phase === 'commit') {
+          const final = last ? turnFor(last) : null
+          if (final !== null) send(final)
+        }
+        styleGesture(frame.id, selector, phase)
+          .then((info) => {
+            if (info) onGeometry(geometryOf(info))
+          })
+          .catch(console.error)
+      })
+    }
+    function onUp(ev: PointerEvent) {
+      if (ev.pointerId !== pointerId) return
+      if (ev.type === 'pointercancel') {
+        cancel()
+        return
+      }
+      trackPointer(ev)
+      finish()
+      end(moved ? 'commit' : 'cancel')
+    }
+    function cancel() {
+      finish()
+      end('cancel')
+    }
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key !== 'Escape') return
+      ev.stopPropagation()
+      cancel()
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    window.addEventListener('keydown', onKey)
+    stop.current = cancel
+  }
+
+  const place = selectionBox(rect, rotation, box)
   return (
     <div
+      ref={furniture}
       data-resize-handles=""
+      data-element-rotation={rotation || undefined}
       className="pointer-events-none absolute z-[4]"
-      style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+      style={place}
     >
-      {RESIZE_EDGES.map((handle) => {
-        const anchor = handleAnchor(handle)
-        const horizontal = !movesWidth(handle)
+      {ROTATE_CORNERS.map((corner) => {
+        const side = rotateZoneSide(corner)
         return (
           <div
-            key={handle}
-            data-resize-handle={handle}
-            aria-label={t(handleLabelKey(handle))}
+            key={corner}
+            data-rotate-handle={corner}
+            aria-label={t('stage.rotate')}
             className="pointer-events-auto absolute touch-none"
             style={{
-              left: `${anchor.x * 100}%`,
-              top: `${anchor.y * 100}%`,
-              /* an edge zone spans its whole side, a few screen px thick */
-              width: horizontal ? '100%' : EDGE_SIZE,
-              height: horizontal ? EDGE_SIZE : '100%',
-              transform: 'translate(-50%, -50%)',
-              cursor: handleCursor(handle),
+              left: side.x < 0 ? 0 : '100%',
+              top: side.y < 0 ? 0 : '100%',
+              width: ROTATE_ZONE_SIZE,
+              height: ROTATE_ZONE_SIZE,
+              /* the zone's near corner sits a little past the box's corner,
+                 clear of the corner grip, and the rest extends away from it */
+              transform: `translate(${side.x < 0 ? '-100%' : '0'}, ${side.y < 0 ? '-100%' : '0'}) translate(calc(${side.x} * ${ROTATE_ZONE_INSET}), calc(${side.y} * ${ROTATE_ZONE_INSET}))`,
+              cursor: rotateCursor(corner, screenTurn),
             }}
-            onPointerDown={(e) => start(e, handle)}
+            onPointerDown={startRotate}
           />
         )
       })}
-      {RESIZE_CORNERS.map((handle) => {
-        const anchor = handleAnchor(handle)
-        return (
-          <div
-            key={handle}
-            data-resize-handle={handle}
-            aria-label={t(handleLabelKey(handle))}
-            className={CORNER_CLASS}
-            style={{
-              left: `${anchor.x * 100}%`,
-              top: `${anchor.y * 100}%`,
-              width: GRIP_SIZE,
-              height: GRIP_SIZE,
-              transform: 'translate(-50%, -50%)',
-              cursor: handleCursor(handle),
-            }}
-            onPointerDown={(e) => start(e, handle)}
-          />
-        )
-      })}
-      <div data-element-size="" className={BADGE_CLASS} style={{ transform: BADGE_TRANSFORM }}>
-        {sizeLabel(rect)}
+      {sizable &&
+        RESIZE_EDGES.map((handle) => {
+          const anchor = handleAnchor(handle)
+          const horizontal = !movesWidth(handle)
+          return (
+            <div
+              key={handle}
+              data-resize-handle={handle}
+              aria-label={t(handleLabelKey(handle))}
+              className="pointer-events-auto absolute touch-none"
+              style={{
+                left: `${anchor.x * 100}%`,
+                top: `${anchor.y * 100}%`,
+                /* an edge zone spans its whole side, a few screen px thick */
+                width: horizontal ? '100%' : EDGE_SIZE,
+                height: horizontal ? EDGE_SIZE : '100%',
+                transform: 'translate(-50%, -50%)',
+                cursor: handleCursor(handle),
+              }}
+              onPointerDown={(e) => start(e, handle)}
+            />
+          )
+        })}
+      {sizable &&
+        RESIZE_CORNERS.map((handle) => {
+          const anchor = handleAnchor(handle)
+          return (
+            <div
+              key={handle}
+              data-resize-handle={handle}
+              aria-label={t(handleLabelKey(handle))}
+              className={CORNER_CLASS}
+              style={{
+                left: `${anchor.x * 100}%`,
+                top: `${anchor.y * 100}%`,
+                width: GRIP_SIZE,
+                height: GRIP_SIZE,
+                transform: 'translate(-50%, -50%)',
+                cursor: handleCursor(handle),
+              }}
+              onPointerDown={(e) => start(e, handle)}
+            />
+          )
+        })}
+      <div
+        data-element-size=""
+        className={BADGE_CLASS}
+        /* under the box, counter-scaled, and turned back upright on a turned element */
+        style={{
+          transform: `translate(-50%, calc(10px / var(--zoom, 1))) scale(calc(1 / var(--zoom, 1))) rotate(${-rotation}deg)`,
+        }}
+      >
+        {sizeLabel(box)}
       </div>
     </div>
   )

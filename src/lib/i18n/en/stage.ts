@@ -31,6 +31,7 @@ export const stage = {
   resize: 'Resize',
   resizeWidth: 'Resize width',
   resizeHeight: 'Resize height',
+  rotate: 'Rotate',
   rulerHorizontal: 'Horizontal ruler: drag down to add a guide',
   rulerVertical: 'Vertical ruler: drag right to add a guide',
   guideRemove: 'Remove',

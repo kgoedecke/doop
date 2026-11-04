@@ -31,6 +31,7 @@ export const stage: Catalog['stage'] = {
   resize: 'Redimensionar',
   resizeWidth: 'Redimensionar largura',
   resizeHeight: 'Redimensionar altura',
+  rotate: 'Girar',
   rulerHorizontal: 'Régua horizontal: arraste para baixo para adicionar uma guia',
   rulerVertical: 'Régua vertical: arraste para a direita para adicionar uma guia',
   guideRemove: 'Remover',
