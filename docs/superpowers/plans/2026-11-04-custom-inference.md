@@ -66,7 +66,10 @@
 ### Task 1: Build the URL policy and safe custom fetch boundary
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Create: `server/customInference.ts`
 - Modify: `server/publicUrl.ts:1-168` only if a generalized pinned resolver is needed; preserve existing public-resource behavior.
 - Modify: `server/env.ts:148-185`
@@ -74,7 +77,10 @@
 - Test: `tests/customInference.test.ts`
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Produces `CustomInferenceError` with stable codes: `invalid_url`, `url_insecure`, `private_url_blocked`, `unreachable`, `auth_failed`, and `not_compatible`.
 - Produces `normalizeCustomBaseUrl(raw: string): URL` for syntactic normalization only.
 - Produces `validateCustomBaseUrl(raw: string, allowPrivate: boolean): Promise<URL>` for normalization plus DNS/network policy.
@@ -137,7 +143,10 @@ Expected: PASS; existing public URL tests remain green.
 ### Task 2: Add profile persistence and redacted profile service
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Modify: `server/db/schema.ts:590-610`
 - Create: `server/db/migrations/0044_custom_model_profiles.sql`
 - Modify: `server/secretBackfill.ts` sealed-column registry.
@@ -145,7 +154,10 @@ Expected: PASS; existing public URL tests remain green.
 - Test: `tests/customModelProfiles.test.ts`
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Produces `CustomModelProfile` with `{ id, userId, name, baseUrl, model, supportsVision, connectedAt, updatedAt }` and an internal record carrying `apiKey`.
 - Produces `CustomModelProfileInput` with `{ name: string; baseUrl: string; apiKey?: string | null; model: string; supportsVision: boolean }`.
 - Produces `CustomModelProfileView` with `{ id, name, baseUrl, model, supportsVision, active, connectedAt, updatedAt }`; it must never include `apiKey`.
@@ -198,7 +210,10 @@ Expected: PASS; migration is included and typecheck is clean.
 ### Task 3: Integrate `custom-key` with the active model account
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Modify: `server/modelAccounts.ts:57-235,239-279`
 - Modify: `shared/modelMenu.ts:194-203`
 - Modify: `server/agentModel.ts:199-283`
@@ -206,7 +221,10 @@ Expected: PASS; migration is included and typecheck is clean.
 - Modify: `tests/providerKeyAccounts.test.ts` or create `tests/customModelProfiles.test.ts`
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Extends `AccountKind` and client `ModelAccountKind` with `'custom-key'`.
 - `ModelAccount` gains `profileId?: string`.
 - `AccountStatus` gains `profileId?: string` only if the UI needs it; never expose the key.
@@ -264,7 +282,10 @@ bun run typecheck
 ### Task 4: Extend Chat Completions transport and custom model catalog
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Modify: `server/chatCompletionsAgent.ts:37-73,239-257`
 - Modify: `server/modelCatalog.ts:40-249`
 - Test: `tests/chatCompletionsAgent.test.ts`
@@ -272,7 +293,10 @@ bun run typecheck
 - Create or extend: `tests/customInferenceAgent.test.ts`
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Extends `ChatCompletionsConfig` with a `custom`/safe-request discriminator or a request function that prevents fixed-provider regressions.
 - Produces `customConfig(baseUrl: URL, apiKey: string | undefined, model: string, vision: boolean, label: string): ChatCompletionsConfig`.
 - Produces `customModels(profile: CustomModelProfile, signal: AbortSignal): Promise<ModelOption[]>`.
@@ -325,14 +349,20 @@ bun run typecheck
 ### Task 5: Add authenticated profile REST routes and status/catalog integration
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Modify: `server/index.ts:916-1079`
 - Modify: `src/lib/api.ts:150-193,510-545`
 - Test: `tests/customModelProfiles.test.ts`
 - Test: `tests/modelCatalog.test.ts`
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - `GET /api/model-profiles` → `CustomModelProfileView[]`.
 - `POST /api/model-profiles` accepts `{ name, baseUrl, apiKey?, model, supportsVision }` and returns the created redacted view.
 - `PATCH /api/model-profiles/:id` accepts partial `{ name?, baseUrl?, apiKey?, model?, supportsVision? }`; omitted `apiKey` preserves it, null clears it; returns the redacted view.
@@ -381,7 +411,10 @@ bun run typecheck
 ### Task 6: Build the Settings custom-profile UI
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Create: `src/components/CustomModelProfiles.tsx`
 - Modify: `src/components/ModelAccount.tsx:1-20,137-599,601-end`
 - Modify: `src/components/ModelPicker.tsx:1-57`
@@ -390,7 +423,10 @@ bun run typecheck
 - Test: `tests/customModelProfiles.test.tsx` or the repository’s closest component test setup.
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - `CustomModelProfiles` accepts `{ account: ModelAccountStatus; onChange?: () => void }` and owns profile list/form state.
 - Consumes all `api.modelProfiles*` methods from Task 5.
 - Emits refreshed account/profile state to `ModelAccountPanel` through the existing `settle`/`onChange` flow.
@@ -445,7 +481,10 @@ bun run lint
 ### Task 7: Add end-to-end custom turn and security regressions
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Modify: `tests/customInferenceAgent.test.ts`
 - Modify: `tests/chatCompletionsAgent.test.ts`
 - Modify: `tests/customModelProfiles.test.ts`
@@ -453,7 +492,10 @@ bun run lint
 - Modify: `tests/agentModel.test.ts` if a focused agent-model suite exists; otherwise add assertions to the custom profile suite.
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Consumes the completed profile API, active-account selection, safe fetch, catalog loader, and Chat Completions transport.
 - Verifies the externally observable contract rather than private implementation details wherever possible.
 
@@ -497,7 +539,10 @@ bun run lint
 ### Task 8: Update product documentation and verify the complete change
 
 **Files:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Modify: `README.md` around the connected model account section and environment table.
 - Modify: `.env.example` if Task 1 did not complete all documentation there.
 - Modify: `.context/TECHSTACK.md` in the model-account/provider section.
@@ -505,7 +550,10 @@ bun run lint
 - Test/verification: repository-wide typecheck, lint, format check, build, and relevant Vitest suites.
 
 **Interfaces:**
+<<<<<<< HEAD
 
+=======
+>>>>>>> 872919b (Docs : Implementation plan for custom inference)
 - Documentation must describe the shipped REST/UI behavior, not an aspirational API.
 - The docs must clearly distinguish external HTTPS endpoints, self-hosted private endpoints, and hosted doop.design limitations.
 
