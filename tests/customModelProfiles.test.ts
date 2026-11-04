@@ -1,6 +1,9 @@
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { sql } from 'drizzle-orm'
 import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Client, startServer, type Server } from './harness.ts'
 import { db } from '../server/db/index.ts'
 import { customModelProfiles, modelAccounts } from '../server/db/schema.ts'
 import { resealSecrets } from '../server/secretBackfill.ts'
@@ -218,5 +221,200 @@ describe('custom model profiles', () => {
     const after = await storedKey('legacy-profile')
     expect(after).toMatch(/^enc:v1:/)
     expect(after).not.toContain('legacy-plaintext-key')
+  })
+})
+
+describe('custom profile HTTP routes', () => {
+  let provider: http.Server
+  let providerBase: string
+  let server: Server
+  let alice: Client
+  let bob: Client
+
+  beforeAll(async () => {
+    provider = http.createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://x')
+      const json = (status: number, body: unknown) =>
+        res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
+      if (url.pathname.endsWith('/models')) {
+        return json(200, { data: [{ id: 'route-model' }, { id: 'route-model-two', display_name: 'Two' }] })
+      }
+      return json(404, { error: 'not a chat completion' })
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    providerBase = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`
+
+    server = await startServer({
+      ANTHROPIC_API_KEY: '',
+      OPENAI_API_KEY: '',
+      DATABASE_URL: '',
+      SMTP_HOST: '',
+      CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS: '1',
+    })
+    alice = await new Client(server).signUp('profile-alice@example.test', 'Alice')
+    bob = await new Client(server).signUp('profile-bob@example.test', 'Bob')
+  }, 60_000)
+
+  afterAll(async () => {
+    server?.stop()
+    await new Promise<void>((resolve) => provider.close(() => resolve()))
+  })
+
+  it('requires a session for every profile route', async () => {
+    const anonymous = new Client(server)
+    expect((await anonymous.get('/api/model-profiles')).status).toBe(401)
+    expect((await anonymous.post('/api/model-profiles', {})).status).toBe(401)
+    expect((await anonymous.post('/api/model-profiles/test', {})).status).toBe(401)
+    expect((await anonymous.delete('/api/model-profiles/nope')).status).toBe(401)
+  })
+
+  it('creates, lists, edits and deletes profiles without leaking the key', async () => {
+    const secret = 'sk-route-secret-never-returned'
+    const created = await alice.post('/api/model-profiles', {
+      name: 'Route endpoint',
+      baseUrl: `${providerBase}/v1/`,
+      apiKey: secret,
+      model: 'route-model',
+      supportsVision: false,
+    })
+    expect(created.status).toBe(200)
+    const profile = await created.json()
+    expect(profile).toMatchObject({
+      name: 'Route endpoint',
+      baseUrl: `${providerBase}/v1`,
+      model: 'route-model',
+      supportsVision: false,
+      active: false,
+    })
+    expect(profile).not.toHaveProperty('apiKey')
+    expect(JSON.stringify(profile)).not.toContain(secret)
+
+    const list = await (await alice.get('/api/model-profiles')).json()
+    expect(list).toHaveLength(1)
+    expect(JSON.stringify(list)).not.toContain(secret)
+
+    const patched = await alice.patch(`/api/model-profiles/${profile.id}`, {
+      name: 'Renamed endpoint',
+      model: 'route-model-two',
+    })
+    expect(patched.status).toBe(200)
+    expect(await patched.json()).toMatchObject({ name: 'Renamed endpoint', model: 'route-model-two' })
+
+    /* other users cannot see, edit, activate or delete a guessed id */
+    expect(await (await bob.get('/api/model-profiles')).json()).toEqual([])
+    expect((await bob.patch(`/api/model-profiles/${profile.id}`, { name: 'Stolen' })).status).toBe(404)
+    expect((await bob.delete(`/api/model-profiles/${profile.id}`)).status).toBe(404)
+    expect((await bob.post(`/api/model-profiles/${profile.id}/activate`)).status).toBe(404)
+    expect(await (await alice.get('/api/model-profiles')).json()).toHaveLength(1)
+
+    expect((await alice.delete(`/api/model-profiles/${profile.id}`)).status).toBe(200)
+    expect(await (await alice.get('/api/model-profiles')).json()).toEqual([])
+  })
+
+  it('validates payloads with stable codes and messages', async () => {
+    const missingName = await alice.post('/api/model-profiles', {
+      baseUrl: `${providerBase}/v1`,
+      model: 'route-model',
+      supportsVision: true,
+    })
+    expect(missingName.status).toBe(400)
+    expect(await missingName.json()).toMatchObject({ code: 'invalid_input' })
+
+    const badUrl = await alice.post('/api/model-profiles', {
+      name: 'Bad',
+      baseUrl: 'ftp://provider.example/v1',
+      model: 'route-model',
+      supportsVision: true,
+    })
+    expect(badUrl.status).toBe(400)
+    expect(await badUrl.json()).toMatchObject({ code: 'invalid_url' })
+
+    const badModel = await alice.post('/api/model-profiles', {
+      name: 'Bad',
+      baseUrl: `${providerBase}/v1`,
+      model: 'has spaces',
+      supportsVision: true,
+    })
+    expect(badModel.status).toBe(400)
+    expect(await badModel.json()).toMatchObject({ code: 'invalid_input' })
+
+    const created = await (
+      await alice.post('/api/model-profiles', {
+        name: 'Typed',
+        baseUrl: `${providerBase}/v1`,
+        model: 'route-model',
+        supportsVision: true,
+      })
+    ).json()
+    const badPatch = await alice.patch(`/api/model-profiles/${created.id}`, { supportsVision: 'yes' })
+    expect(badPatch.status).toBe(400)
+    expect(await badPatch.json()).toMatchObject({ code: 'invalid_input' })
+    await alice.delete(`/api/model-profiles/${created.id}`)
+  })
+
+  it('tests an unsaved endpoint, reports its models and never echoes the key', async () => {
+    const secret = 'sk-tested-but-never-returned'
+    const ok = await alice.post('/api/model-profiles/test', {
+      baseUrl: `${providerBase}/v1`,
+      apiKey: secret,
+      model: 'route-model',
+    })
+    expect(ok.status).toBe(200)
+    const result = await ok.json()
+    expect(result).toMatchObject({ reachable: true, models: ['route-model', 'route-model-two'] })
+    expect(JSON.stringify(result)).not.toContain(secret)
+
+    const bad = await alice.post('/api/model-profiles/test', { baseUrl: 'not a url' })
+    expect(bad.status).toBe(200)
+    expect(await bad.json()).toMatchObject({ reachable: false, errorCode: 'invalid_url' })
+
+    expect((await alice.post('/api/model-profiles/test', {})).status).toBe(400)
+  })
+
+  it('activates a profile, switches off the local agent, lists its live models and writes picks through', async () => {
+    const secret = 'sk-active-secret'
+    const created = await (
+      await alice.post('/api/model-profiles', {
+        name: 'Active',
+        baseUrl: `${providerBase}/v1`,
+        apiKey: secret,
+        model: 'route-model',
+        supportsVision: true,
+      })
+    ).json()
+
+    await alice.req('/api/local-agent', { method: 'PUT', body: JSON.stringify({ enabled: true, model: 'opus' }) })
+    const activated = await alice.post(`/api/model-profiles/${created.id}/activate`)
+    expect(activated.status).toBe(200)
+    const status = await activated.json()
+    expect(status).toMatchObject({
+      connected: true,
+      kind: 'custom-key',
+      profileId: created.id,
+      model: 'route-model',
+    })
+    expect(status.menus['custom-key']).toEqual([])
+    expect(JSON.stringify(status)).not.toContain(secret)
+    expect(await (await alice.get('/api/local-agent')).json()).toMatchObject({ enabled: false })
+
+    const catalog = await (await alice.get('/api/model-account/models')).json()
+    expect(catalog).toMatchObject({
+      live: true,
+      models: [
+        { id: 'route-model', name: 'route-model', vision: true },
+        { id: 'route-model-two', name: 'Two', vision: true },
+      ],
+    })
+
+    const picked = await alice.patch('/api/model-account', { model: 'route-model-two' })
+    expect(await picked.json()).toMatchObject({ kind: 'custom-key', model: 'route-model-two' })
+    expect((await (await alice.get('/api/model-profiles')).json())[0]).toMatchObject({
+      id: created.id,
+      active: true,
+      model: 'route-model-two',
+    })
+
+    expect((await alice.delete(`/api/model-profiles/${created.id}`)).status).toBe(200)
+    expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ connected: false })
   })
 })

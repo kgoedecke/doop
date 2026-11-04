@@ -3,7 +3,7 @@ import { and, asc, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { customModelProfiles, modelAccounts } from './db/schema.ts'
 import { env } from './env.ts'
-import { validateCustomBaseUrl } from './customInference.ts'
+import { CustomInferenceError, customEndpointUrl, fetchCustomJson, validateCustomBaseUrl } from './customInference.ts'
 import { isCustomModelId } from '../shared/customModel.ts'
 
 /**
@@ -164,6 +164,61 @@ export async function getProfile(userId: string, id: string): Promise<CustomMode
 async function normalizedBaseUrl(value: unknown): Promise<string> {
   if (typeof value !== 'string') throw new CustomModelProfileInvalidError('Enter the endpoint base URL.')
   return (await validateCustomBaseUrl(value, env.CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS)).href
+}
+
+export interface CustomEndpointTestResult {
+  reachable: boolean
+  models?: string[]
+  errorCode?: string
+  error?: string
+}
+
+/** Ask an endpoint for its model list without saving anything. The result
+ *  carries only codes and ids; the pasted key is used for this one request and
+ *  can never come back through a message or response body. */
+export async function testCustomEndpoint(input: {
+  baseUrl: unknown
+  apiKey?: unknown
+  model?: unknown
+}): Promise<CustomEndpointTestResult> {
+  try {
+    const baseUrl = await normalizedBaseUrl(input.baseUrl)
+    const apiKey = normalizeKey(input.apiKey)
+    if (input.model !== undefined) normalizeModel(input.model)
+    const body = await fetchCustomJson(
+      customEndpointUrl(new URL(baseUrl), 'models'),
+      {
+        method: 'GET',
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+        signal: AbortSignal.timeout(8_000),
+      },
+      { timeoutMs: 8_000 },
+    )
+    const data =
+      body && typeof body === 'object' && Array.isArray((body as { data?: unknown }).data)
+        ? (body as { data: unknown[] }).data
+        : null
+    if (!data) throw new CustomInferenceError('not_compatible', 'The custom endpoint did not return a model list.')
+    const models: string[] = []
+    const seen = new Set<string>()
+    for (const entry of data) {
+      if (!entry || typeof entry !== 'object') continue
+      const id = (entry as { id?: unknown }).id
+      if (typeof id !== 'string' || !id || seen.has(id)) continue
+      seen.add(id)
+      models.push(id)
+    }
+    return { reachable: true, models }
+  } catch (error) {
+    if (error instanceof CustomInferenceError) return { reachable: false, errorCode: error.code, error: error.message }
+    if (error instanceof CustomModelProfileInvalidError)
+      return { reachable: false, errorCode: error.code, error: error.message }
+    return {
+      reachable: false,
+      errorCode: 'unreachable',
+      error: 'The custom endpoint could not be reached.',
+    }
+  }
 }
 
 export async function createProfile(userId: string, input: CustomModelProfileInput): Promise<CustomModelProfile> {
