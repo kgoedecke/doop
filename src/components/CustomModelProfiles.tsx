@@ -8,6 +8,8 @@ import {
   type ModelAccountStatus,
 } from '../lib/api'
 import { useT } from '../lib/i18n'
+import { useLocalAgent, refreshLocalAgent } from '../lib/localAgent'
+import { activeModelTarget } from '../lib/activeModelTarget'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Field } from './ui/field'
@@ -70,6 +72,9 @@ export function CustomModelProfiles({
   onAccountChange?: (next: ModelAccountStatus) => void
 }) {
   const t = useT()
+  const localPreference = useLocalAgent((state) => state.preference)
+  const localEnabled = localPreference?.enabled ?? false
+  const customActive = activeModelTarget(localEnabled, account) === 'custom-key'
   const [profiles, setProfiles] = useState<CustomModelProfile[]>([])
   const [loaded, setLoaded] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -230,6 +235,7 @@ export function CustomModelProfiles({
       const next = await api.activateModelProfile(profile.id)
       onAccountChange?.(next)
       await load()
+      await refreshLocalAgent()
       onChange?.()
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))
@@ -244,6 +250,7 @@ export function CustomModelProfiles({
     try {
       await api.disconnectModelAccount()
       await refreshAll()
+      await refreshLocalAgent()
       onChange?.()
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))
@@ -318,7 +325,7 @@ export function CustomModelProfiles({
   return (
     <section className="border-t border-line-soft">
       <div className="flex gap-[14px] px-[22px] py-[18px] max-md:gap-3 max-md:px-4 max-md:py-[17px]">
-        <span className={planMark(active)}>
+        <span className={planMark(customActive)}>
           <DoopMark size={18} className="block" />
         </span>
         <div className="min-w-0 flex-1">
@@ -326,7 +333,7 @@ export function CustomModelProfiles({
             <h3 className="font-display text-heading font-semibold text-ink max-md:text-heading">
               {t('models.customTitle')}
             </h3>
-            {active && <span className={planPill(true)}>{t('models.customActive')}</span>}
+            {customActive && <span className={planPill(true)}>{t('models.customActive')}</span>}
           </div>
           <p className="mt-1.5 text-copy text-ink-soft max-md:text-copy">{t('models.customLede')}</p>
           <p className="mt-2 text-body text-ink-faint">
@@ -351,7 +358,9 @@ export function CustomModelProfiles({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-copy font-semibold text-ink">{profile.name}</span>
-                    {profile.active && <span className={planPill(true)}>{t('models.customActive')}</span>}
+                    {profile.active && customActive && (
+                      <span className={planPill(true)}>{t('models.customActive')}</span>
+                    )}
                   </div>
                   <p className="mt-1 text-label text-ink-soft [overflow-wrap:anywhere]">
                     {endpointLabel(profile.baseUrl)}

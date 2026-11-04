@@ -32,9 +32,19 @@ vi.mock('../src/lib/api', () => ({
   },
 }))
 
+const localMode = vi.hoisted(() => ({ preference: { enabled: true, model: 'default' as string } }))
+
+vi.mock('../src/lib/localAgent', () => ({
+  useLocalAgent: (selector: (state: { preference: typeof localMode.preference }) => unknown) =>
+    selector({ preference: localMode.preference }),
+  refreshLocalAgent: vi.fn().mockResolvedValue({ preference: { enabled: false, model: 'default' } }),
+  selectLocalAgent: vi.fn(),
+}))
+
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 
 import { CustomModelProfiles } from '../src/components/CustomModelProfiles'
+import { refreshLocalAgent } from '../src/lib/localAgent'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -218,6 +228,14 @@ it('activates a saved profile and reports the new account', async () => {
   expect(mocks.activate).toHaveBeenCalledExactlyOnceWith('profile-1')
   expect(onAccountChange).toHaveBeenCalledWith(next)
   expect(onChange).toHaveBeenCalled()
+  expect(refreshLocalAgent).toHaveBeenCalled()
+})
+
+it('does not show the connected provider as active when local selection wins', async () => {
+  mocks.list.mockResolvedValue([profile({ active: true })])
+  mocks.account.mockResolvedValue(activeAccount())
+  await render(activeAccount())
+  expect(container.textContent).not.toContain('Active')
 })
 
 it('asks before deleting and refreshes the list', async () => {
@@ -237,5 +255,4 @@ it('keeps the selected model visible and warns when the live catalog fails', asy
   await render(activeAccount())
   expect(container.textContent).toContain('qwen3.5-coder')
   expect(container.textContent).toContain('live model list is unavailable')
-  expect(container.textContent).toContain('Active')
 })
