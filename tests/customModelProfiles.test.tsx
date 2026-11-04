@@ -327,3 +327,134 @@ it('offers manual input only after enabling unverified fallback', async () => {
   await click(checkbox)
   expect(container.querySelector('input[name="models-manual"]')).not.toBeNull()
 })
+
+it('discards a test result that resolves after the endpoint changed', async () => {
+  let resolveTest!: (value: { reachable: boolean; models: string[] }) => void
+  mocks.test.mockImplementation(
+    () =>
+      new Promise<{ reachable: boolean; models: string[] }>((resolve) => {
+        resolveTest = resolve
+      }),
+  )
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('https://provider.example/v1'), 'https://one.example/v1')
+  await click(button('Test connection'))
+  await fill(input('https://provider.example/v1'), 'https://two.example/v1')
+  await act(async () => {
+    resolveTest({ reachable: true, models: ['m-a'] })
+    await Promise.resolve()
+  })
+  await wait()
+
+  expect(container.querySelector('[role="combobox"]')).toBeNull()
+  expect(container.textContent).not.toContain('Connection works')
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+})
+
+it('invalidates the tested fingerprint when the API key changes after test', async () => {
+  mocks.test.mockResolvedValue({ reachable: true, models: ['m-a'] })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('Local Ollama'), 'Local Ollama')
+  await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
+  await click(button('Test connection'))
+  await selectOption('m-a')
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(false)
+
+  await fill(input('sk-… (optional)'), 'sk-changed-after-test')
+
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+  expect(container.querySelector('[role="combobox"]')).toBeNull()
+  expect(container.textContent).not.toContain('Connection works')
+})
+
+it('invalidates the tested fingerprint when the stored key is cleared after test', async () => {
+  mocks.list.mockResolvedValue([profile()])
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
+  await render(disconnected)
+  await click(button('Edit'))
+  await click(button('Test connection'))
+  await selectOption('qwen3.5-coder')
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(false)
+
+  const clearLabel = Array.from(container.querySelectorAll('label')).find((label) =>
+    label.textContent?.includes('Clear the saved API key'),
+  )
+  await click(clearLabel?.querySelector('input[type="checkbox"]') ?? undefined)
+
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+  expect(container.querySelector('[role="combobox"]')).toBeNull()
+})
+
+it('blocks save for an invalid fallback id and enables it for a valid one', async () => {
+  mocks.test.mockResolvedValue({ reachable: true, models: [] })
+  mocks.create.mockResolvedValue(profile())
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('Local Ollama'), 'Local Ollama')
+  await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
+  await click(button('Test connection'))
+  await click(container.querySelector('input[name="models-fallback"]') as HTMLInputElement)
+  const manual = container.querySelector('input[name="models-manual"]') as HTMLInputElement
+  expect(manual).not.toBeNull()
+
+  await fill(manual, 'bad id!')
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+
+  await fill(manual, 'valid.model-1:x')
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(false)
+  await click(button('Save endpoint'))
+  expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: 'valid.model-1:x' }))
+})
+
+it('keeps the saved model visible with a notice when the endpoint reports none', async () => {
+  mocks.list.mockResolvedValue([profile({ model: 'saved-model-x' })])
+  mocks.test.mockResolvedValue({ reachable: true, models: [] })
+  await render(disconnected)
+  await click(button('Edit'))
+  await click(button('Test connection'))
+
+  expect(container.textContent).toContain('saved-model-x')
+  expect(container.textContent).toContain('was not reported by the endpoint')
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+})
+
+it('keeps the saved model visible with a notice when the test fails', async () => {
+  mocks.list.mockResolvedValue([profile({ model: 'saved-model-x' })])
+  mocks.test.mockResolvedValue({ reachable: false, errorCode: 'unreachable' })
+  await render(disconnected)
+  await click(button('Edit'))
+  await click(button('Test connection'))
+
+  expect(container.textContent).toContain('saved-model-x')
+  expect(container.textContent).toContain('was not reported by the endpoint')
+})
+
+it('filters a discovered list of more than 100 models with an accessible search', async () => {
+  const many = Array.from({ length: 120 }, (_, i) => `model-${String(i).padStart(3, '0')}`)
+  mocks.test.mockResolvedValue({ reachable: true, models: many })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('Local Ollama'), 'Local Ollama')
+  await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
+  await click(button('Test connection'))
+
+  const search = container.querySelector('input[name="models-search"]') as HTMLInputElement
+  expect(search).not.toBeNull()
+  expect(search.getAttribute('aria-label')).toBe('Search models')
+  expect(container.querySelector('label[for="custom-model-search"]')?.textContent).toBe('Search models')
+
+  await fill(search, 'model-105')
+  const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
+  await act(async () => trigger.focus())
+  await act(async () => {
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+  })
+  const options = [...document.querySelectorAll('[role="option"]')].map((el) => el.textContent?.trim())
+  expect(options).toContain('model-105')
+  expect(options).not.toContain('model-000')
+  await act(async () => {
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  })
+})

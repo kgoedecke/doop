@@ -124,6 +124,12 @@ export const models: Catalog['models'] = {
   customCatalogFallback: 'A lista de modelos ao vivo do endpoint não está disponível, então o modelo salvo é mostrado.',
   customUseUnverifiedModel: 'Usar um id de modelo não verificado',
   customManualModel: 'Id de modelo não verificado',
+  customModelSearch: 'Pesquisar modelos',
+  customModelSearchEmpty: 'Nenhum modelo corresponde a “{query}”.',
+  customModelMissing: 'O modelo salvo “{model}” não foi informado pelo endpoint; ele pode ter sido removido.',
+  customModelDiscoveryIdle: 'Teste a conexão para listar os modelos oferecidos por este endpoint.',
+  customModelDiscoveryUnreachable: 'Corrija o problema de conexão e teste novamente para escolher um modelo.',
+  customModelDiscoveryEmpty: 'O endpoint não informou nenhum modelo.',
 
   /* LocalClaude */
   cliSourceChosen: ', escolhido por você.',

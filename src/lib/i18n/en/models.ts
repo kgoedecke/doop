@@ -119,6 +119,12 @@ export const models = {
   customCatalogFallback: 'The endpoint’s live model list is unavailable, so the saved model is shown.',
   customUseUnverifiedModel: 'Use an unverified model id',
   customManualModel: 'Unverified model id',
+  customModelSearch: 'Search models',
+  customModelSearchEmpty: 'No models match “{query}”.',
+  customModelMissing: 'The saved model “{model}” was not reported by the endpoint; it may have been removed.',
+  customModelDiscoveryIdle: 'Test the connection to list the models this endpoint serves.',
+  customModelDiscoveryUnreachable: 'Fix the connection problem, then test again to choose a model.',
+  customModelDiscoveryEmpty: 'The endpoint did not report any models.',
 
   /* LocalClaude */
   cliSourceChosen: ', chosen by you.',

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
   type AgentModelCatalog,
@@ -108,6 +108,23 @@ export function CustomModelProfiles({
   const [error, setError] = useState('')
   const [pendingDelete, setPendingDelete] = useState<CustomModelProfile | null>(null)
   const [catalog, setCatalog] = useState<AgentModelCatalog | null>(null)
+  const [modelQuery, setModelQuery] = useState('')
+
+  /* The fingerprint of the draft as it was when a test was submitted. The
+     async test path compares against this ref, so a result that resolves
+     after the user edited the draft is discarded instead of repopulating
+     discovery for an endpoint that is no longer on screen. */
+  const draftFingerprint = draft ? fingerprint(draft) : null
+  const draftFingerprintRef = useRef(draftFingerprint)
+  useEffect(() => {
+    draftFingerprintRef.current = draftFingerprint
+  })
+  /** Edits that invalidate discovery also drop the now-stale test outcome. */
+  const editCredential = (next: Draft) => {
+    setDraft(next)
+    setTestResult(null)
+    setModelQuery('')
+  }
 
   const load = useCallback(async () => {
     try {
@@ -168,6 +185,7 @@ export function CustomModelProfiles({
     setDraft(emptyDraft())
     setTestResult(null)
     setError('')
+    setModelQuery('')
   }
 
   const openEdit = (profile: CustomModelProfile) => {
@@ -186,19 +204,40 @@ export function CustomModelProfiles({
     })
     setTestResult(null)
     setError('')
+    setModelQuery('')
   }
 
   const closeForm = () => {
     setDraft(null)
     setTestResult(null)
     setError('')
+    setModelQuery('')
   }
 
   const testConnection = async () => {
     if (!draft) return
+    /* fingerprint the submission, not whatever the draft happens to hold
+       when the response lands */
+    const submitted = fingerprint(draft)
     setTesting(true)
     setTestResult(null)
     setError('')
+    const isCurrent = () => draftFingerprintRef.current === submitted
+    const settle = (result: CustomEndpointTestResult, models: string[]) => {
+      if (!isCurrent()) return
+      setTestResult(result)
+      setModelQuery('')
+      setDraft((prev) =>
+        prev && fingerprint(prev) === submitted
+          ? {
+              ...prev,
+              discoveredModels: result.reachable ? models : [],
+              selectedModel: undefined,
+              testedFingerprint: submitted,
+            }
+          : prev,
+      )
+    }
     try {
       const result = await api.testModelProfile({
         baseUrl: draft.baseUrl.trim(),
@@ -207,33 +246,15 @@ export function CustomModelProfiles({
         ...(draft.id ? { profileId: draft.id } : {}),
         ...(draft.apiKey !== undefined ? { apiKey: draft.apiKey === null ? null : draft.apiKey.trim() || null } : {}),
       })
-      setTestResult(result)
-      setDraft((prev) =>
-        prev
-          ? {
-              ...prev,
-              discoveredModels: result.reachable ? (result.models ?? []) : [],
-              selectedModel: undefined,
-              testedFingerprint: fingerprint(prev),
-            }
-          : prev,
-      )
+      settle(result, result.models ?? [])
     } catch (e) {
-      const result = {
-        reachable: false,
-        errorCode: 'unknown',
-        error: messageFor(e, t('models.customErrorUnknown')),
-      }
-      setTestResult(result)
-      setDraft((prev) =>
-        prev
-          ? {
-              ...prev,
-              discoveredModels: [],
-              selectedModel: undefined,
-              testedFingerprint: fingerprint(prev),
-            }
-          : prev,
+      settle(
+        {
+          reachable: false,
+          errorCode: 'unknown',
+          error: messageFor(e, t('models.customErrorUnknown')),
+        },
+        [],
       )
     } finally {
       setTesting(false)
@@ -341,6 +362,21 @@ export function CustomModelProfiles({
 
   const models = visibleCatalog?.live ? visibleCatalog.models : []
   const missingModel = account.model && !models.some((model) => model.id === account.model)
+  /* the saved id that the endpoint did not report, if any — it stays visible
+     so the user can see what they had before saving again */
+  const savedMissingModel =
+    draft?.id && draft.model.trim() && !draft.discoveredModels.includes(draft.model.trim()) ? draft.model.trim() : null
+  const query = modelQuery.trim().toLowerCase()
+  const visibleDiscovered = draft
+    ? query
+      ? draft.discoveredModels.filter((model) => model.toLowerCase().includes(query))
+      : draft.discoveredModels
+    : []
+  const discoveryMessage = !testResult
+    ? t('models.customModelDiscoveryIdle')
+    : !testResult.reachable
+      ? t('models.customModelDiscoveryUnreachable')
+      : t('models.customModelDiscoveryEmpty')
   const canSave = Boolean(
     draft &&
     draft.name.trim() &&
@@ -488,35 +524,65 @@ export function CustomModelProfiles({
                   <Input
                     id="custom-model-url"
                     value={draft.baseUrl}
-                    onChange={(e) => setDraft(invalidateDiscovery({ ...draft, baseUrl: e.target.value }))}
+                    onChange={(e) => editCredential(invalidateDiscovery({ ...draft, baseUrl: e.target.value }))}
                     placeholder={t('models.customBaseUrlPlaceholder')}
                     spellCheck={false}
                   />
                 </Field>
                 <Field label={t('models.customModel')} htmlFor="custom-model-discovered">
                   {draft.discoveredModels.length > 0 ? (
-                    <Select
-                      value={draft.selectedModel ?? ''}
-                      onValueChange={(model) => setDraft({ ...draft, selectedModel: model, model })}
-                    >
-                      <SelectTrigger id="custom-model-discovered" size="md" aria-label={t('models.customModel')}>
-                        <SelectValue placeholder={t('models.customModel')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {draft.discoveredModels.map((model) => (
-                          <SelectItem key={model} value={model}>
-                            {model}
-                          </SelectItem>
-                        ))}
-                        {draft.id && draft.model && !draft.discoveredModels.includes(draft.model) && (
-                          <SelectItem value={draft.model} disabled>
-                            {draft.model}
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
+                    <>
+                      {draft.discoveredModels.length > 100 && (
+                        <div className="mb-1.5">
+                          <label htmlFor="custom-model-search" className="mb-1 block text-label text-ink-soft">
+                            {t('models.customModelSearch')}
+                          </label>
+                          <Input
+                            id="custom-model-search"
+                            name="models-search"
+                            value={modelQuery}
+                            onChange={(e) => setModelQuery(e.target.value)}
+                            placeholder={t('models.customModelSearch')}
+                            aria-label={t('models.customModelSearch')}
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                        </div>
+                      )}
+                      {visibleDiscovered.length > 0 ? (
+                        <Select
+                          value={draft.selectedModel ?? ''}
+                          onValueChange={(model) => setDraft({ ...draft, selectedModel: model, model })}
+                        >
+                          <SelectTrigger id="custom-model-discovered" size="md" aria-label={t('models.customModel')}>
+                            <SelectValue placeholder={t('models.customModel')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {visibleDiscovered.map((model) => (
+                              <SelectItem key={model} value={model}>
+                                {model}
+                              </SelectItem>
+                            ))}
+                            {savedMissingModel && (
+                              <SelectItem value={savedMissingModel} disabled>
+                                {savedMissingModel}
+                              </SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="text-body text-ink-faint">
+                          {t('models.customModelSearchEmpty', { query: modelQuery.trim() })}
+                        </p>
+                      )}
+                    </>
                   ) : (
-                    <p className="text-body text-ink-faint">{t('models.customModelPlaceholder')}</p>
+                    <p className="text-body text-ink-faint">{discoveryMessage}</p>
+                  )}
+                  {savedMissingModel && (
+                    <p className="mt-1.5 text-label text-ink-faint [overflow-wrap:anywhere]">
+                      {t('models.customModelMissing', { model: savedMissingModel })}
+                    </p>
                   )}
                 </Field>
                 <Field
@@ -527,7 +593,7 @@ export function CustomModelProfiles({
                   <Input
                     id="custom-model-key"
                     value={draft.apiKey ?? ''}
-                    onChange={(e) => setDraft(invalidateDiscovery({ ...draft, apiKey: e.target.value }))}
+                    onChange={(e) => editCredential(invalidateDiscovery({ ...draft, apiKey: e.target.value }))}
                     placeholder={t('models.customApiKeyPlaceholder')}
                     type="password"
                     autoComplete="off"
@@ -547,11 +613,6 @@ export function CustomModelProfiles({
                     />
                     {t('models.customUseUnverifiedModel')}
                   </label>
-                  {!draft.useManualFallback && (
-                    <Button variant="link" size="sm" onClick={() => setDraft({ ...draft, useManualFallback: true })}>
-                      {t('models.customUseUnverifiedModel')}
-                    </Button>
-                  )}
                   {draft.useManualFallback && (
                     <Field label={t('models.customManualModel')} htmlFor="custom-model-manual">
                       <Input
@@ -585,7 +646,7 @@ export function CustomModelProfiles({
                   <Checkbox
                     checked={draft.apiKey === null}
                     onChange={(e) =>
-                      setDraft(invalidateDiscovery({ ...draft, apiKey: e.target.checked ? null : undefined }))
+                      editCredential(invalidateDiscovery({ ...draft, apiKey: e.target.checked ? null : undefined }))
                     }
                   />
                   {t('models.customKeyClear')}
