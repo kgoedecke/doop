@@ -130,13 +130,25 @@ describe('themes', () => {
     token('--spacing-4', 'spacing', '16px', 3),
   ]
 
-  it('redeclares every alias in a theme block, so a themed subtree resolves it there', () => {
-    const css = tokensCss(themed, ['dark'])
+  it('writes every value under each theme, so a nested theme starts from its own values', () => {
+    const css = tokensCss(themed, ['dark', 'light'])
     expect(css).toBe(
       ':root{--ink:#111;--brand:var(--ink);--spacing-4:16px}\n' +
-        ':root[data-doop-theme="dark"],[data-doop-theme="dark"]{--ink:#eee;--brand:var(--ink)}',
+        ':root[data-doop-theme="dark"],[data-doop-theme="dark"]{--ink:#eee;--brand:var(--ink);--spacing-4:16px}\n' +
+        /* a theme without overrides still resets a subtree to the defaults */
+        ':root[data-doop-theme="light"],[data-doop-theme="light"]{--ink:#111;--brand:var(--ink);--spacing-4:16px}',
     )
     expect(resolveToken(themed, '--brand', 'dark')).toBe('#eee')
+  })
+
+  it('brings along every token a value reads through var(), not only whole-value aliases', () => {
+    const mixed = [
+      token('--ink', 'color', '#111', 1),
+      token('--tint', 'color', 'color-mix(in srgb, var(--ink) 50%, white)', 2),
+      token('--edge', 'color', '#000', 3, { themes: { dark: 'var(--ink)' } }),
+    ]
+    expect(tokensUsedBy('<p style="color:var(--tint)">', mixed).map((t) => t.name)).toEqual(['--ink', '--tint'])
+    expect(tokensUsedBy('<p style="color:var(--edge)">', mixed).map((t) => t.name)).toEqual(['--ink', '--edge'])
   })
 
   it('moves a frame between themes and reads which one it is on', () => {
@@ -171,6 +183,9 @@ describe('exports', () => {
     expect(tailwindName({ name: '--body', type: 'fontSize' })).toBe('--text-body')
     const theme = tokensTailwind([token('--ink', 'color', '#111', 1), token('--brand', 'color', 'var(--ink)', 2)])
     expect(theme).toBe('@theme {\n  --color-ink: #111;\n  --color-brand: var(--color-ink);\n}')
+    /* two names that would export alike keep their own names apart */
+    const clash = tokensTailwind([token('--primary', 'color', '#111', 1), token('--color-primary', 'color', '#222', 2)])
+    expect(clash).toBe('@theme {\n  --primary: #111;\n  --color-primary: #222;\n}')
   })
 
   it('writes one markdown table per type', () => {

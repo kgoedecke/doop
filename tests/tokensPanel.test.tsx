@@ -138,7 +138,14 @@ describe('TokensSection', () => {
     expect(text()).toContain('#eee')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#eee')
     /* a token without a dark value shows its default, marked as inherited */
-    expect(container.querySelector('[title="same as default"]')?.textContent).toBe('16px')
+    expect(container.querySelector('[title="same as default"]')?.textContent).toBe(
+      '16px',
+    ) /* the tick follows the frames: an undo elsewhere puts them back on the default */
+    act(() => {
+      const frame = useStore.getState().canvas!.frames[0]!
+      useStore.getState().patchFrameLocal(frame.id, { html: frame.html.replace(' data-doop-theme="dark"', '') })
+    })
+    expect(themeRow('default').getAttribute('aria-checked')).toBe('true')
   })
 
   it('opens a token with a row per theme, resets a theme, and saves only what changed', async () => {

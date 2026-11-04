@@ -228,12 +228,18 @@ export function tokensUsedBy(html: string, tokens: readonly DesignToken[]): Desi
     if (wanted.has(name)) continue
     wanted.add(name)
     const token = tokens.find((t) => t.name === name)
+    /* every var() inside a value counts, not only a whole-value alias: a
+       colour such as color-mix(in srgb, var(--ink) 50%, white) needs --ink */
     for (const value of [token?.value ?? '', ...Object.values(token?.themes ?? {})]) {
-      const next = aliasOf(value)
-      if (next) queue.push(next)
+      for (const ref of referencedTokens(value)) queue.push(ref)
     }
   }
   return sortTokens(tokens.filter((t) => wanted.has(t.name)))
+}
+
+/** The custom properties a value reads through `var()`, anywhere in it. */
+export function referencedTokens(value: string): string[] {
+  return [...value.matchAll(/var\(\s*(--[a-zA-Z0-9_-]+)/g)].map((m) => m[1]!)
 }
 
 function declarations(pairs: readonly (readonly [string, string])[]): string {
@@ -247,17 +253,20 @@ export function tokensCss(tokens: readonly DesignToken[], themeOrder: readonly s
   if (!tokens.length) return ''
   const sorted = sortTokens(tokens)
   const blocks = [`:root{${declarations(sorted.map((t) => [t.name, t.value]))}}`]
-  for (const theme of themesOf(sorted, themeOrder)) {
-    /* a theme block carries its overrides and, again, every alias: a custom
-       property's var() is substituted where it is declared, so an alias left
-       on :root would keep pointing at the default value under a themed subtree */
-    const pairs = sorted.flatMap((t) => {
-      const value = effectiveValue(t, theme)
-      return t.themes?.[theme] !== undefined || aliasOf(value) ? [[t.name, value] as const] : []
-    })
+  for (const theme of allThemes(sorted, themeOrder)) {
+    /* a theme block carries every token's value under that theme, so a
+       themed subtree starts from the theme, not from whatever the outer
+       theme set, and an alias (substituted where it is declared) resolves
+       there; a theme with no overrides still gets its block for the same reason */
+    const pairs = sorted.map((t) => [t.name, effectiveValue(t, theme)] as const)
     blocks.push(`:root[${THEME_ATTR}="${theme}"],[${THEME_ATTR}="${theme}"]{${declarations(pairs)}}`)
   }
   return blocks.join('\n')
+}
+
+/** The canvas's themes in order, then any a token names that the list lacks. */
+function allThemes(tokens: readonly DesignToken[], order: readonly string[]): string[] {
+  return [...order, ...themesOf(tokens).filter((theme) => !order.includes(theme))]
 }
 
 /** The HTML with the values of the tokens it names in its own
@@ -350,9 +359,25 @@ export function tailwindName(token: Pick<DesignToken, 'name' | 'type'>): string 
 }
 
 /** A Tailwind v4 `@theme { }` block, aliases rewritten to their namespaced names. */
+/** Each token's exported name: its type's Tailwind namespace, unless that
+ *  collides with another token (`--primary` beside `--color-primary`), in
+ *  which case the token keeps its own name so no property is written twice. */
+export function tailwindNames(tokens: readonly DesignToken[]): Map<string, string> {
+  const raw = new Set(tokens.map((t) => t.name))
+  const counts = new Map<string, number>()
+  for (const t of tokens) counts.set(tailwindName(t), (counts.get(tailwindName(t)) ?? 0) + 1)
+  return new Map(
+    tokens.map((t) => {
+      const name = tailwindName(t)
+      const collides = (counts.get(name) ?? 0) > 1 || (name !== t.name && raw.has(name))
+      return [t.name, collides ? t.name : name]
+    }),
+  )
+}
+
 export function tokensTailwind(tokens: readonly DesignToken[], themeOrder: readonly string[] = []): string {
   if (!tokens.length) return ''
-  const renamed = new Map(tokens.map((t) => [t.name, tailwindName(t)]))
+  const renamed = tailwindNames(tokens)
   const rewrite = (value: string) => {
     const alias = aliasOf(value)
     return alias && renamed.has(alias) ? `var(${renamed.get(alias)})` : value
@@ -360,12 +385,9 @@ export function tokensTailwind(tokens: readonly DesignToken[], themeOrder: reado
   const sorted = sortTokens(tokens)
   const lines = sorted.map((t) => `  ${renamed.get(t.name)}: ${rewrite(t.value)};`)
   const blocks = [`@theme {\n${lines.join('\n')}\n}`]
-  for (const theme of themesOf(sorted, themeOrder)) {
-    const overrides = sorted.flatMap((t) => {
-      const value = t.themes?.[theme]
-      return value === undefined ? [] : [`  ${renamed.get(t.name)}: ${rewrite(value)};`]
-    })
-    blocks.push(`[${THEME_ATTR}="${theme}"] {\n${overrides.join('\n')}\n}`)
+  for (const theme of allThemes(sorted, themeOrder)) {
+    const lines = sorted.map((t) => `  ${renamed.get(t.name)}: ${rewrite(effectiveValue(t, theme))};`)
+    blocks.push(`[${THEME_ATTR}="${theme}"] {\n${lines.join('\n')}\n}`)
   }
   return blocks.join('\n\n')
 }

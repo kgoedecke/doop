@@ -131,8 +131,9 @@ export function TokensSection() {
     return (s.canvas?.frames ?? []).filter((f) => ids.has(f.id))
   })
   const targets = selectedFrames.length ? selectedFrames : pageFrames
-  /** which theme the rows show and the frames wear; starts on the targets' own */
-  const [viewTheme, setViewTheme] = useState<string | null>(() => (targets[0] ? frameTheme(targets[0].html) : null))
+  /** the theme the rows show: what the target frames wear right now, so a
+   *  new selection, an undo or a rename keeps the tick and the values in step */
+  const viewTheme = targets[0] ? frameTheme(targets[0].html) : null
   const [themeBusy, setThemeBusy] = useState(false)
   const [themeError, setThemeError] = useState<string | null>(null)
   /** the type groups folded shut */
@@ -156,7 +157,6 @@ export function TokensSection() {
   /** Show a theme: the rows switch to its values, and the target frames
    *  switch their root to it, one undo step per frame. */
   function showTheme(theme: string | null) {
-    setViewTheme(theme)
     if (readOnly) return
     for (const frame of targets) {
       const before = frame.html
@@ -790,7 +790,7 @@ function ValueInput({
         </SelectContent>
       </Select>
     )
-  } else if (kind === 'opacity') {
+  } else if (kind === 'opacity' && (value === '' || /^(\d+\.?\d*|\.\d+)$/.test(value.trim()))) {
     control = numberField({
       placeholder,
       min: 0,
@@ -799,6 +799,19 @@ function ValueInput({
       value,
       onChange: (e) => onChange(e.target.value),
     })
+  } else if (kind === 'opacity') {
+    /* an alias or any other expression an agent wrote: as text, like a length's fallback */
+    control = withReset(
+      <Input
+        variant="well"
+        className={cn('w-full min-w-0 font-mono', onReset && 'pr-8')}
+        aria-label={t('panels.tokensValue')}
+        placeholder={placeholder}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      />,
+    )
   } else {
     const units = kind === 'ratio' ? RATIO_UNITS : LENGTH_UNITS
     const parsed = value ? splitLength(value) : { number: '', unit: '' }

@@ -170,7 +170,10 @@ describe('design tokens over MCP', () => {
     expect(json.isError).toBe(false)
     expect(JSON.parse(json.text).tokens.map((t: DesignToken) => t.name)).toEqual(['--color-ink', '--color-primary'])
     const glob = await mcpCall(ownerKey, 'get_tokens', { canvas_id: canvasId, name_pattern: '*-4', format: 'css' })
-    expect(glob.text).toBe(':root{--spacing-4:32px}')
+    /* the canvas has a dark theme by now, so the export carries its block too */
+    expect(glob.text).toBe(
+      ':root{--spacing-4:32px}\n:root[data-doop-theme="dark"],[data-doop-theme="dark"]{--spacing-4:32px}',
+    )
     const canvas = await mcpCall(ownerKey, 'get_canvas', { canvas_id: canvasId, agent_name: 'Tester' })
     expect(canvas.text).toContain('"--color-primary"')
     expect(canvas.text).toContain('var(--name)')

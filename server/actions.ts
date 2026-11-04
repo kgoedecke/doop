@@ -2365,11 +2365,7 @@ export function setTokens(canvasId: string, edits: TokenEdit[], actor: Actor): T
       results.push(tokenError(name, problem))
       continue
     }
-    const declared = declareThemes(canvasId, themes, actor.name)
-    if (declared) {
-      results.push(tokenError(name, declared))
-      continue
-    }
+    /* every check before any write: a refused edit changes nothing */
     let newName = name
     if (edit.newName !== undefined && normalizeTokenName(edit.newName) !== name) {
       newName = normalizeTokenName(edit.newName)
@@ -2381,6 +2377,13 @@ export function setTokens(canvasId: string, edits: TokenEdit[], actor: Actor): T
         results.push(tokenError(name, `a token named ${newName} already exists`))
         continue
       }
+    }
+    const declared = declareThemes(canvasId, themes, actor.name)
+    if (declared) {
+      results.push(tokenError(name, declared))
+      continue
+    }
+    if (newName !== name) {
       store.renameToken(canvasId, name, newName, actor.name)
       /* aliases of the old name follow it */
       const aliasing = store

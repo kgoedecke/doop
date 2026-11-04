@@ -144,6 +144,17 @@ describe('design tokens on frame writes', () => {
     expect(html).toContain('[data-doop-theme="night"]{--color-ink:#eee}')
   })
 
+  it('declares no theme for an edit it refuses', () => {
+    const canvasId = setup()
+    const [refused] = actions.setTokens(
+      canvasId,
+      [{ name: '--color-ink', newName: '--spacing-4', themes: { dim: '#000' } }],
+      human,
+    )!
+    expect(refused).toMatchObject({ result: 'error', message: expect.stringContaining('already exists') })
+    expect(store.getTokenThemes(canvasId)).toEqual([])
+  })
+
   it('refuses alias loops that only close under a theme, and deletes an aliased-by-theme token', () => {
     const canvasId = setup()
     actions.createTokens(canvasId, [{ name: '--a', type: 'color', value: '#000' }], human)
