@@ -32,6 +32,7 @@ import {
   setElementLocked,
   setElementsHidden,
   shiftElement,
+  shiftElementToEnd,
   type DropTarget,
   type FlowPlacement,
   type MovedElement,
@@ -673,4 +674,10 @@ function standaloneDocument(markup: string): string {
 export function shiftLayer(frame: Frame, selector: string, dir: -1 | 1): boolean {
   if (isLayerLocked(frame, selector)) return false
   return commitMove(frame, shiftElement(frame.html, selector, dir))
+}
+
+/** Bring the element to the front (1) or send it to the back (-1) of its siblings. */
+export function shiftLayerToEnd(frame: Frame, selector: string, dir: -1 | 1): boolean {
+  if (isLayerLocked(frame, selector)) return false
+  return commitMove(frame, shiftElementToEnd(frame.html, selector, dir))
 }

@@ -565,6 +565,18 @@ export function shiftElement(html: string, selector: string, dir: -1 | 1): Moved
   return move(doc, el, sibling, dir === -1 ? 'before' : 'after')
 }
 
+/** Put the element last (1, the front) or first (-1, the back) among its
+ *  siblings; null when it is there already. */
+export function shiftElementToEnd(html: string, selector: string, dir: -1 | 1): MovedElement | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  let end: Element | null = null
+  for (let cur = visibleSibling(el, dir); cur; cur = visibleSibling(cur, dir)) end = cur
+  if (!end) return null
+  return move(doc, el, end, dir === -1 ? 'before' : 'after')
+}
+
 /* attributes whose value is an id, or a space-separated list of ids */
 const ID_REF_ATTRS = new Set([
   'for',
