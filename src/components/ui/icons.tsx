@@ -101,6 +101,7 @@ import {
   RefreshCw,
   RotateCcw,
   Route,
+  Scaling,
   Search,
   Settings,
   Share,
@@ -281,6 +282,8 @@ export const MoonIcon = icon(Moon)
 export const FolderIcon = icon(Folder)
 export const BookOpenIcon = icon(BookOpen)
 export const SlidersIcon = icon(SlidersHorizontal)
+/** How a prototype screen is scaled to the viewer (the player's scaling menu). */
+export const ScalingIcon = icon(Scaling)
 export const PointerIcon = icon(MousePointer2)
 export const HandIcon = icon(Hand)
 /** the select tool's arrow — the same glyph as PointerIcon */
