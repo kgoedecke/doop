@@ -346,6 +346,7 @@ describe('custom profile end to end', () => {
   let base: string
   const seen: { auth: string; body: Record<string, unknown> }[] = []
   let turns = 0
+  let catalogMode: 'models' | 'missing' = 'models'
 
   beforeAll(async () => {
     provider = http.createServer((req, res) => {
@@ -355,7 +356,8 @@ describe('custom profile end to end', () => {
         const json = (value: unknown) =>
           res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(value))
         if (new URL(req.url ?? '/', 'http://x').pathname.endsWith('/models')) {
-          return json({ data: [{ id: 'local-e2e-model' }] })
+          if (catalogMode === 'missing') return res.writeHead(404).end(JSON.stringify({ error: 'missing' }))
+          return json({ data: [{ id: 'local-e2e-model' }, { id: 'model-a' }, { id: 'model-b' }] })
         }
         seen.push({
           auth: String(req.headers.authorization ?? ''),
@@ -387,6 +389,7 @@ describe('custom profile end to end', () => {
   beforeEach(() => {
     seen.length = 0
     turns = 0
+    catalogMode = 'models'
   })
 
   it('activates a keyless local profile and runs the resident turn through it', async () => {
@@ -433,6 +436,52 @@ describe('custom profile end to end', () => {
 
     const second = await model!.run(req)
     expect(second).toMatchObject({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'done' }] })
+  })
+
+  it('discovers, saves, activates, switches, and sends the selected model to chat', async () => {
+    const baseUrl = `${base}/v1`
+    const tested = await testCustomEndpoint('alice', { baseUrl, apiKey: 'journey-test-key' })
+    expect(tested).toEqual({ reachable: true, models: ['local-e2e-model', 'model-a', 'model-b'] })
+
+    const profile = await createProfile(
+      'alice',
+      input({ name: 'Discovered journey', baseUrl, apiKey: 'journey-test-key', model: 'model-b' }),
+    )
+    await activateCustomProfile('alice', profile.id)
+    await setAccountModel('alice', 'model-a')
+
+    const model = await pickModel('alice')
+    await model!.run({
+      system: [{ text: 'be a designer' }],
+      tools: [],
+      messages: [{ role: 'user', content: 'make a hero' }],
+      maxTokens: 2_000,
+    })
+    expect(seen[0]?.body).toMatchObject({ model: 'model-a' })
+    expect((await getProfile('alice', profile.id))?.model).toBe('model-a')
+  })
+
+  it('keeps an explicitly selected manual id when the endpoint has no /models route', async () => {
+    catalogMode = 'missing'
+    const profile = await createProfile(
+      'alice',
+      input({
+        name: 'Unverified journey',
+        baseUrl: `${base}/v1`,
+        model: 'manual/unverified-model',
+      }),
+    )
+    await activateCustomProfile('alice', profile.id)
+
+    const account = await getAccount('alice')
+    const catalog = await modelCatalogFor(account!, [])
+    expect(catalog).toMatchObject({
+      live: false,
+      models: [{ id: 'manual/unverified-model', name: 'manual/unverified-model' }],
+    })
+    const model = await pickModel('alice')
+    await model!.run({ system: [], tools: [], messages: [{ role: 'user', content: 'hello' }], maxTokens: 100 })
+    expect(seen[0]?.body).toMatchObject({ model: 'manual/unverified-model' })
   })
 })
 
