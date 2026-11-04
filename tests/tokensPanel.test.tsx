@@ -104,40 +104,33 @@ describe('TokensSection', () => {
     container.remove()
   })
 
-  /* Radix opens a menu on pointerdown, not click */
-  const openMenu = (label: string) =>
+  /* Radix opens a select on pointerdown, not click; its options live in a portal */
+  const pickTheme = (label: string) => {
     act(() => {
-      button(label).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+      document
+        .querySelector('[role="combobox"][aria-label="Theme"]')!
+        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
     })
-  const menuItem = (label: string) => {
-    const el = [...document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')].find(
-      (e) => e.textContent?.trim() === label,
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+      (el) => el.textContent?.trim() === label,
     )
-    if (!el) throw new Error(`no menu item “${label}”`)
-    return el
+    if (!option) throw new Error(`no theme option “${label}”`)
+    act(() => option.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
+    act(() => option.click())
   }
-  const choose = (label: string) => {
-    const item = menuItem(label)
-    act(() => item.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
-    act(() => item.click())
-  }
-  /* the Manage themes modal, from the theme menu */
-  const openManage = () => {
-    openMenu('Theme')
-    choose('Manage themes…')
-  }
+  /* the Manage themes modal, from the Themes heading's plus */
+  const openManage = () => act(() => button('Manage themes…').click())
 
   it('lists tokens by type, colours first, under the default theme', () => {
     expect(text().indexOf('color-ink')).toBeLessThan(text().indexOf('spacing-4'))
-    expect(text()).toContain('Themedefault')
+    expect(text()).toContain('default')
     expect(text()).toContain('#111')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#111')
   })
 
   it('shows another theme’s values when it is picked from the dropdown', () => {
-    openMenu('Theme')
-    choose('dark')
-    expect(text()).toContain('Themedark')
+    pickTheme('dark')
+    expect(document.querySelector('[role="combobox"][aria-label="Theme"]')?.textContent).toContain('dark')
     expect(text()).toContain('#eee')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#eee')
     /* a token without a dark value shows its default, marked as inherited */

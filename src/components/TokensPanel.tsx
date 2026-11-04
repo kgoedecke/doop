@@ -27,17 +27,8 @@ import { Field } from './ui/field'
 import { IconButton } from './ui/icon-button'
 import { ListHint, ListRow } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
-import { MenuButton } from './ui/menu-button'
+import { sectionHeading } from './PagesPanel'
 import { ConfirmDialog } from './ui/alert-dialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { PlusIcon, XIcon } from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
@@ -77,6 +68,8 @@ function firstMessage(e: unknown, fallback: string): string {
   return e instanceof Error ? e.message.replace(/^\d+\s*/, '') : fallback
 }
 
+const sectionBtn = 'size-5 rounded-tag text-ink-faint hover:bg-paper-deep hover:text-ink'
+
 /** A name that reads like a token of each type, as the name field's hint. */
 const NAME_HINT: Record<TokenType, string> = {
   color: 'primary',
@@ -112,41 +105,45 @@ export function TokensSection() {
   const sorted = sortTokens(tokens)
   return (
     <>
-      {/* one line: the theme picker at the left, the add button at the right */}
-      <div className="flex items-center justify-between gap-2 border-b border-line-soft py-1.5 pr-2.5 pl-2.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <MenuButton variant="quiet" aria-label={t('panels.tokensTheme')}>
-              <span className="text-ink-faint">{t('panels.tokensTheme')}</span>
-              <span className="min-w-0 truncate font-mono text-ink">{shown ?? DEFAULT_THEME}</span>
-            </MenuButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" width="sm">
-            <DropdownMenuRadioGroup
-              value={shown ?? DEFAULT_THEME}
-              onValueChange={(v) => setViewTheme(v === DEFAULT_THEME ? null : v)}
-            >
-              <DropdownMenuRadioItem value={DEFAULT_THEME}>{DEFAULT_THEME}</DropdownMenuRadioItem>
-              {themes.map((theme) => (
-                <DropdownMenuRadioItem key={theme} value={theme}>
-                  {theme}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            {!readOnly && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setManaging(true)}>{t('panels.tokensManageThemes')}</DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {/* Themes, in the Pages section's dress: the heading with its plus, the picker under it */}
+      <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
+        <span className={sectionHeading}>{t('panels.tokensThemesTitle')}</span>
         {!readOnly && (
-          /* the same quiet square as the Layers section's plus */
           <Button
             variant="bare"
             size="icon-sm"
-            className="size-5 rounded-tag text-ink-faint hover:bg-paper-deep hover:text-ink"
+            className={sectionBtn}
+            aria-label={t('panels.tokensManageThemes')}
+            title={t('panels.tokensManageThemes')}
+            onClick={() => setManaging(true)}
+          >
+            <PlusIcon className="size-3.5" />
+          </Button>
+        )}
+      </div>
+      <div className="px-2 pb-1" onKeyDown={(e) => e.stopPropagation()}>
+        <Select value={shown ?? DEFAULT_THEME} onValueChange={(v) => setViewTheme(v === DEFAULT_THEME ? null : v)}>
+          <SelectTrigger size="sm" className="w-full font-mono" aria-label={t('panels.tokensTheme')}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={DEFAULT_THEME}>{DEFAULT_THEME}</SelectItem>
+            {themes.map((theme) => (
+              <SelectItem key={theme} value={theme}>
+                {theme}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {/* Tokens: the heading with its plus, the rows by type under it */}
+      <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
+        <span className={sectionHeading}>{t('panels.tokensTitle')}</span>
+        {!readOnly && (
+          <Button
+            variant="bare"
+            size="icon-sm"
+            className={sectionBtn}
             aria-label={t('panels.tokensNew')}
             title={t('panels.tokensNew')}
             onClick={() => setOpen({ create: 'color' })}

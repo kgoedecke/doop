@@ -67,6 +67,7 @@ export const panels = {
   tokensThemePlaceholder: 'dark',
   tokensManageThemes: 'Manage themes…',
   tokensThemesTitle: 'Themes',
+  tokensTitle: 'Tokens',
   tokensTheme: 'Theme',
   tokensThemeValues: 'Values per theme (empty: same as default)',
   tokensDefaultTheme: 'the value itself',

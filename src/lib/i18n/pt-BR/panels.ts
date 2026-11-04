@@ -67,6 +67,7 @@ export const panels: Catalog['panels'] = {
   tokensThemePlaceholder: 'dark',
   tokensManageThemes: 'Gerenciar temas…',
   tokensThemesTitle: 'Temas',
+  tokensTitle: 'Tokens',
   tokensTheme: 'Tema',
   tokensThemeValues: 'Valores por tema (vazio: igual ao padrão)',
   tokensDefaultTheme: 'o próprio valor',
