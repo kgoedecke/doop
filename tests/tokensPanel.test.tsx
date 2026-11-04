@@ -141,6 +141,28 @@ describe('TokensSection', () => {
     expect(container.querySelector('[title="same as default"]')?.textContent).toBe('16px')
   })
 
+  it('opens a token, switches to a theme’s value, resets it, and saves only what changed', async () => {
+    act(() => button('color-ink').click())
+    expect(document.body.textContent).toContain('Edit Color token')
+    /* the default value first; the dark segment shows dark's own value, with its dot */
+    expect(input('A CSS value, or var(--other) to alias a token').value).toBe('#111')
+    const dark = [...document.querySelectorAll<HTMLElement>('[data-slot="segmented-item"]')].find((el) =>
+      el.textContent?.includes('dark'),
+    )!
+    expect(dark.querySelector('[aria-label="has its own value"]')).toBeTruthy()
+    act(() => dark.click())
+    expect(input('same as default').value).toBe('#eee')
+    act(() => button('Reset dark to the default value').click())
+    expect(input('same as default').value).toBe('')
+    type(document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, 'color-text')
+    await act(async () => {
+      button('Save').click()
+      await Promise.resolve()
+    })
+    /* only what changed: the rename and the cleared theme value */
+    expect(setToken).toHaveBeenCalledWith('c1', '--color-ink', { newName: '--color-text', themes: { dark: null } })
+  })
+
   it('creates a token of the type picked from the plus menu, named after it', async () => {
     /* Radix opens a menu on pointerdown, not click */
     act(() => {

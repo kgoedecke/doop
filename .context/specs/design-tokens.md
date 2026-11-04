@@ -90,8 +90,9 @@ in every frame and in aliasing tokens.
   `TokenModal` named `stem-N` for it (`nextTokenName`: `radius-1`, `color-2`, past the names
   taken) with the type's default value; the modal has no type control, since a type is fixed
   once a token exists. It has a value control per type (swatch and hex, font and weight lists, a
-  number with its unit, a ratio), a value per theme, an alias picker of same-type tokens, and
-  Enter to save. Names are shown and typed without the `--`.
+  number with its unit, a ratio), one value control under a segmented switch of `default` and the themes (a dot marks a
+  theme with its own value; a reset beside the field puts it back to following the default), an
+  alias picker of same-type tokens, and Enter to save. Names are shown and typed without the `--`.
 - Design panel (`ElementPanel.tsx`): fill, stroke and text colour, corner radius and font size
   carry a braces button that overlays the field's unit on hover (`trailing` on `ColorField` /
   `NumberField`, absolutely placed so the value keeps its width); the font family and weight

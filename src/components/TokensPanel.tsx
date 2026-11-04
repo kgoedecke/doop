@@ -28,6 +28,8 @@ import { recordUpdate, trackSave } from '../lib/history'
 import { usePageCanvas } from '../lib/pages'
 import { Button } from './ui/button'
 import { Pressable } from './ui/pressable'
+import { Segmented, SegmentedItem } from './ui/segmented'
+import { Dot } from './ui/dot'
 import { Input } from './ui/input'
 import { ListHint } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
@@ -49,6 +51,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   DesktopIcon,
+  HistoryIcon,
   PaletteIcon,
   PlusIcon,
   RadiusIcon,
@@ -390,6 +393,8 @@ export function TokenModal({
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const creating = name === null
   const [draft, setDraft] = useState<Draft>(() => draftOf(token, createType, tokens, initialValue))
+  /** which theme's value the control edits; null is the default */
+  const [editTheme, setEditTheme] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -496,30 +501,59 @@ export function TokenModal({
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
         </Row>
-        <Row label={t('panels.tokensValue')}>
-          <ValueInput
-            type={draft.type}
-            self={token?.name ?? null}
-            tokens={tokens}
-            value={draft.value}
-            placeholder={t('panels.tokensValuePlaceholder')}
-            disabled={busy || readOnly}
-            onChange={(value) => setDraft({ ...draft, value })}
-          />
-        </Row>
-        {themes.map((theme) => (
-          <Row key={theme} label={t('panels.tokensValueIn', { theme })}>
-            <ValueInput
-              type={draft.type}
-              self={token?.name ?? null}
-              tokens={tokens}
-              value={draft.themes[theme] ?? ''}
-              placeholder={t('panels.tokensValueInherits')}
-              disabled={busy || readOnly}
-              onChange={(value) => setDraft({ ...draft, themes: { ...draft.themes, [theme]: value } })}
-            />
-          </Row>
-        ))}
+        {/* one value control; the themes switch it, a dot marks one with its own value */}
+        <div className="grid grid-cols-[132px_minmax(0,1fr)] items-start gap-3">
+          <span data-row-label className="pt-2 text-label text-ink-soft">
+            {t('panels.tokensValue')}
+          </span>
+          <div className="flex min-w-0 flex-col gap-2">
+            {themes.length > 0 && (
+              <Segmented
+                aria-label={t('panels.tokensTheme')}
+                className="self-start"
+                value={editTheme ?? DEFAULT_THEME}
+                onValueChange={(v) => setEditTheme(v === DEFAULT_THEME ? null : v)}
+              >
+                {[DEFAULT_THEME, ...themes].map((theme) => (
+                  <SegmentedItem key={theme} value={theme} className="flex items-center gap-1.5 font-mono">
+                    {theme}
+                    {theme !== DEFAULT_THEME && draft.themes[theme]?.trim() && (
+                      <Dot tone="current" aria-label={t('panels.tokensThemeOwnValue')} />
+                    )}
+                  </SegmentedItem>
+                ))}
+              </Segmented>
+            )}
+            <div className="flex items-center gap-2">
+              <ValueInput
+                type={draft.type}
+                self={token?.name ?? null}
+                tokens={tokens}
+                value={editTheme ? (draft.themes[editTheme] ?? '') : draft.value}
+                placeholder={editTheme ? t('panels.tokensValueInherits') : t('panels.tokensValuePlaceholder')}
+                disabled={busy || readOnly}
+                onChange={(value) =>
+                  setDraft(
+                    editTheme ? { ...draft, themes: { ...draft.themes, [editTheme]: value } } : { ...draft, value },
+                  )
+                }
+              />
+              {editTheme && draft.themes[editTheme]?.trim() && !readOnly && (
+                <Button
+                  variant="bare"
+                  size="icon-sm"
+                  className="size-7 flex-none rounded-tag text-ink-faint hover:text-ink"
+                  aria-label={t('panels.tokensResetTheme', { theme: editTheme })}
+                  title={t('panels.tokensResetTheme', { theme: editTheme })}
+                  disabled={busy}
+                  onClick={() => setDraft({ ...draft, themes: { ...draft.themes, [editTheme]: '' } })}
+                >
+                  <HistoryIcon className="size-3.5" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
         <Row label={t('panels.tokensDescription')}>
           <Input
             variant="well"
