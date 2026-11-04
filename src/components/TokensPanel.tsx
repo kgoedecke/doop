@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import {
   DEFAULT_THEME,
   MAX_TOKEN_THEMES,
@@ -680,18 +680,49 @@ function ValueInput({
       field
     )
   const Glyph = TOKEN_TYPE_ICON[type]
-  const glyph = (
+  /** A number in a well with its type's glyph at the left, the scrub handle,
+   *  and the reset at the right, as the Design panel's fields are built. */
+  const numberField = (inputProps: ComponentProps<'input'>) => (
     <span
       className={cn(
-        'grid size-8 flex-none place-items-center rounded-control text-ink-faint',
-        scrub.canScrub && 'cursor-ew-resize hover:bg-sub hover:text-ink',
-        scrub.scrubbing && 'bg-sub text-ink',
+        'flex h-9 min-w-0 flex-1 items-center gap-2 rounded-pill border border-line bg-paper pr-2 pl-2.5 focus-within:border-ink focus-within:bg-surface',
+        disabled && 'opacity-50',
       )}
-      title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
-      onPointerDown={scrub.onPointerDown}
-      aria-hidden
     >
-      <Glyph className="size-3.5" />
+      <span
+        className={cn(
+          'grid size-5 flex-none place-items-center rounded-tag text-ink-faint',
+          scrub.canScrub && 'cursor-ew-resize hover:bg-sub hover:text-ink',
+          scrub.scrubbing && 'bg-sub text-ink',
+        )}
+        title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
+        onPointerDown={scrub.onPointerDown}
+        onClick={(e) => scrub.canScrub && e.preventDefault()}
+        aria-hidden
+      >
+        <Glyph className="size-3.5" />
+      </span>
+      <Input
+        type="number"
+        variant="bare"
+        inputSize="auto"
+        className="h-full w-full min-w-0 font-mono"
+        aria-label={t('panels.tokensValue')}
+        disabled={disabled}
+        {...inputProps}
+      />
+      {canReset && (
+        <Button
+          variant="bare"
+          size="icon-sm"
+          className="size-6 flex-none rounded-tag text-ink-faint hover:text-ink"
+          aria-label={t('panels.tokensResetTheme')}
+          title={t('panels.tokensResetTheme')}
+          onClick={onReset}
+        >
+          <XIcon className="size-3.5" />
+        </Button>
+      )}
     </span>
   )
 
@@ -800,26 +831,14 @@ function ValueInput({
       </Select>
     )
   } else if (kind === 'opacity') {
-    control = (
-      <>
-        {glyph}
-        {withReset(
-          <Input
-            type="number"
-            variant="well"
-            className={cn('w-full min-w-0 font-mono', onReset && 'pr-8')}
-            aria-label={t('panels.tokensValue')}
-            placeholder={placeholder}
-            min={0}
-            max={1}
-            step={0.05}
-            value={value}
-            disabled={disabled}
-            onChange={(e) => onChange(e.target.value)}
-          />,
-        )}
-      </>
-    )
+    control = numberField({
+      placeholder,
+      min: 0,
+      max: 1,
+      step: 0.05,
+      value,
+      onChange: (e) => onChange(e.target.value),
+    })
   } else {
     const units = kind === 'ratio' ? RATIO_UNITS : LENGTH_UNITS
     const parsed = value ? splitLength(value) : { number: '', unit: '' }
@@ -840,20 +859,12 @@ function ValueInput({
       const unit = parsed.number === '' ? fallbackUnit : parsed.unit
       control = (
         <>
-          {glyph}
-          {withReset(
-            <Input
-              type="number"
-              variant="well"
-              className={cn('w-full min-w-0 font-mono', onReset && 'pr-8')}
-              aria-label={t('panels.tokensValue')}
-              placeholder={placeholder}
-              step="any"
-              value={parsed.number}
-              disabled={disabled}
-              onChange={(e) => onChange(e.target.value === '' ? '' : `${e.target.value}${unit}`)}
-            />,
-          )}
+          {numberField({
+            placeholder,
+            step: 'any',
+            value: parsed.number,
+            onChange: (e) => onChange(e.target.value === '' ? '' : `${e.target.value}${unit}`),
+          })}
           <Select
             value={unit || LITERAL}
             onValueChange={(next) =>
