@@ -1,4 +1,4 @@
-import { useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import {
   DEFAULT_THEME,
   MAX_TOKEN_THEMES,
@@ -126,10 +126,15 @@ export function TokensSection() {
   const [open, setOpen] = useState<{ name: string } | { create: TokenType } | null>(null)
   /* the frames a pick applies to: the selected ones, else every frame on the page */
   const pageFrames = usePageCanvas()?.frames ?? []
-  const selectedFrames = useStore((s) => {
-    const ids = new Set(s.selectedIds.length ? s.selectedIds : s.selectedId ? [s.selectedId] : [])
-    return (s.canvas?.frames ?? []).filter((f) => ids.has(f.id))
-  })
+  const frames = useStore((s) => s.canvas?.frames)
+  const selectedIds = useStore((s) => s.selectedIds)
+  const selectedId = useStore((s) => s.selectedId)
+  /* derived here, not in the selector: a fresh array from a selector is a
+     change on every store message, cursors and cameras included */
+  const selectedFrames = useMemo(() => {
+    const ids = new Set(selectedIds.length ? selectedIds : selectedId ? [selectedId] : [])
+    return (frames ?? []).filter((f) => ids.has(f.id))
+  }, [frames, selectedIds, selectedId])
   const targets = selectedFrames.length ? selectedFrames : pageFrames
   /** the theme the rows show: what the target frames wear right now, so a
    *  new selection, an undo or a rename keeps the tick and the values in step */
