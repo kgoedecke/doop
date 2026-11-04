@@ -11,7 +11,6 @@ import {
   resolveToken,
   tokenLabel,
   sortTokens,
-  usesToken,
   type DesignToken,
   type ThemeRename,
   type TokenType,
@@ -23,7 +22,6 @@ import { fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { api } from '../lib/api'
 import { Button } from './ui/button'
-import { Badge } from './ui/badge'
 import { Input } from './ui/input'
 import { Field } from './ui/field'
 import { IconButton } from './ui/icon-button'
@@ -269,7 +267,6 @@ export function TokenModal({
   const token = useStore((s) => s.canvas?.tokens?.find((d) => d.name === name) ?? null)
   const tokens = useStore((s) => s.canvas?.tokens ?? [])
   const themes = useStore((s) => s.canvas?.tokenThemes ?? [])
-  const frames = useStore((s) => s.canvas?.frames ?? [])
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const creating = name === null
   const [draft, setDraft] = useState<Draft>(() => draftOf(token, createType, initialValue))
@@ -278,7 +275,6 @@ export function TokenModal({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const t = useT()
 
-  const used = token ? frames.filter((f) => usesToken(f.html, token.name)).length : 0
   const typedName = normalizeTokenName(draft.name)
   const validName = isTokenName(typedName)
   const canSave = validName && draft.value.trim() !== '' && !busy && !readOnly
@@ -344,7 +340,7 @@ export function TokenModal({
   if (!creating && !token)
     return (
       <Modal size="md" onClose={onClose}>
-        <ModalTitle className="sr-only">{t('panels.tokensEditTitle')}</ModalTitle>
+        <ModalTitle className="sr-only">{t('panels.tokensGone')}</ModalTitle>
         <ModalLede>{t('panels.tokensGone')}</ModalLede>
         <ModalActions>
           <Button variant="ghost" onClick={onClose}>
@@ -358,15 +354,8 @@ export function TokenModal({
     <Modal size="md" onClose={() => !busy && onClose()}>
       <div className="flex flex-wrap items-baseline gap-2.5">
         <ModalTitle>
-          {creating
-            ? t('panels.tokensNewTitle', { type: t(TOKEN_TYPE_LABEL[draft.type]) })
-            : t('panels.tokensEditTitle')}
+          {t(creating ? 'panels.tokensNewTitle' : 'panels.tokensEditTitle', { type: t(TOKEN_TYPE_LABEL[draft.type]) })}
         </ModalTitle>
-        {token && used > 0 && (
-          <Badge tone="outline" className="rounded-full px-2 py-px">
-            {t('panels.tokensUsedIn', { count: used })}
-          </Badge>
-        )}
       </div>
       <form
         className="mt-4 flex flex-col gap-3"
@@ -375,7 +364,7 @@ export function TokenModal({
           void save()
         }}
       >
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+        <div className={cn('grid gap-3', creating && 'sm:grid-cols-[minmax(0,1fr)_160px]')}>
           <Field label={t('panels.tokensName')}>
             <Input
               variant="well"
@@ -387,28 +376,30 @@ export function TokenModal({
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
             />
           </Field>
-          <Field label={t('panels.tokensType')}>
-            <Select
-              value={draft.type}
-              onValueChange={(v) => {
-                const type = v as TokenType
-                /* a type change the value cannot carry over starts from the type's default */
-                setDraft({ ...draft, type, value: creating ? DEFAULT_VALUE[type] : draft.value })
-              }}
-              disabled={busy || readOnly}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TOKEN_GROUPS.flat().map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {t(TOKEN_TYPE_LABEL[type])}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+          {creating && (
+            <Field label={t('panels.tokensType')}>
+              <Select
+                value={draft.type}
+                onValueChange={(v) => {
+                  const type = v as TokenType
+                  /* a type change the value cannot carry over starts from the type's default */
+                  setDraft({ ...draft, type, value: creating ? DEFAULT_VALUE[type] : draft.value })
+                }}
+                disabled={busy || readOnly}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TOKEN_GROUPS.flat().map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {t(TOKEN_TYPE_LABEL[type])}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
         </div>
         <Field label={t('panels.tokensValue')}>
           <ValueInput
