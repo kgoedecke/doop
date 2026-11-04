@@ -582,30 +582,36 @@ export function reorderElements(
   if (els.some((el) => !el)) return null
   const set = new Set(els as Element[])
   for (const el of set) if (!el.parentElement || el.parentElement.closest(`[${LOCK_ATTR}]`)) return null
-  /* document order; a step forward and a send to back are applied from the
-     last member back, so a member never leaps over another and the set
-     keeps its order at the edge */
+  /* document order; a step forward is applied from the last member back, so
+     a member never leaps over another */
   const ordered = [...set].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
   const toFront = move === 'forward' || move === 'front'
-  if (move === 'forward' || move === 'back') ordered.reverse()
   let changed = false
-  for (const el of ordered) {
-    const parent = el.parentElement!
-    if (move === 'front' || move === 'back') {
-      /* already there when only members of the set lie beyond it */
-      let beyond = visibleSibling(el, toFront ? 1 : -1)
-      while (beyond && set.has(beyond)) beyond = visibleSibling(beyond, toFront ? 1 : -1)
-      if (!beyond) continue
-      if (toFront) parent.append(el)
-      else parent.prepend(el)
-      changed = true
-      continue
+  if (move === 'front' || move === 'back') {
+    /* each parent's members go to its edge as one group, keeping their
+       order; a group that already fills that edge stays */
+    const groups = new Map<Element, Element[]>()
+    for (const el of ordered) {
+      const parent = el.parentElement!
+      groups.set(parent, [...(groups.get(parent) ?? []), el])
     }
-    const over = visibleSibling(el, toFront ? 1 : -1)
-    if (!over || set.has(over)) continue
-    if (toFront) over.after(el)
-    else over.before(el)
-    changed = true
+    for (const [parent, members] of groups) {
+      const visible = [...parent.children].filter((c) => !HIDDEN_TAGS.has(c.tagName))
+      const edge = toFront ? visible.slice(-members.length) : visible.slice(0, members.length)
+      if (edge.every((c) => set.has(c))) continue
+      if (toFront) parent.append(...members)
+      else parent.prepend(...members)
+      changed = true
+    }
+  } else {
+    if (toFront) ordered.reverse()
+    for (const el of ordered) {
+      const over = visibleSibling(el, toFront ? 1 : -1)
+      if (!over || set.has(over)) continue
+      if (toFront) over.after(el)
+      else over.before(el)
+      changed = true
+    }
   }
   if (!changed) return null
   return { html: serialize(doc), selectors: (els as Element[]).map(elementPath) }

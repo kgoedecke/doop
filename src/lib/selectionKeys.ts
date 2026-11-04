@@ -143,10 +143,13 @@ export function selectAll(): boolean {
     return true
   }
   const ids = (currentPageCanvas()?.frames ?? []).filter((f) => !isStackLocked(f)).map((f) => f.id)
-  if (!ids.length || (ids.length === s.selectedIds.length && ids.every((id) => s.selectedIds.includes(id)))) {
-    return false
-  }
+  const same = ids.length === s.selectedIds.length && ids.every((id) => s.selectedIds.includes(id))
+  if (!ids.length || (same && !s.selectedElement)) return false
   s.selectMany(ids)
+  /* a page-wide selection is frames: the shape's pick would otherwise stay
+     (selectMany keeps it when the primary frame is the same) and ⌫ would
+     take only the shape */
+  s.pickElement(null)
   return true
 }
 

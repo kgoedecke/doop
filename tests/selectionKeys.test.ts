@@ -212,6 +212,9 @@ describe('against the store', () => {
     useStore.getState().pickElement({ frameId: 's1', selector: SHAPE })
     expect(selectAll()).toBe(true)
     expect(selected()).toEqual(['f1', 'f2', 's1'])
+    /* and the shape's own pick goes, even though it stays the primary frame */
+    expect(picked()).toBeNull()
+    expect(selectAll()).toBe(false)
     useStore.getState().select('f1')
     useStore.getState().pickElement({ frameId: 'f1', selector: P(1) })
     expect(selectAll()).toBe(true)
@@ -250,6 +253,22 @@ describe('against the store', () => {
     expect(reorderSelection('back')).toBe(true)
     expect(html('f1')).toContain('<main><p>a</p><p>c</p><p data-doop-locked="">b</p></main>')
     expect(updateFrame).toHaveBeenCalledTimes(3)
+  })
+
+  it('a pick with a gap keeps its order at the front and the back', () => {
+    useStore.getState().select('f1')
+    useStore.getState().pickElement({ frameId: 'f1', selector: P(1) })
+    useStore.getState().toggleElement({ frameId: 'f1', selector: P(3) })
+    expect(reorderSelection('front')).toBe(true)
+    expect(html('f1')).toContain('<main><p data-doop-locked="">b</p><p>a</p><p>c</p></main>')
+    expect(useStore.getState().selectedElements).toEqual([P(2), P(3)])
+    expect(reorderSelection('front')).toBe(false)
+    /* a and c again (b, in front of them now, is locked) */
+    useStore.getState().pickElements('f1', [P(2), P(3)])
+    expect(reorderSelection('back')).toBe(true)
+    expect(html('f1')).toContain('<main><p>a</p><p>c</p><p data-doop-locked="">b</p></main>')
+    expect(useStore.getState().selectedElements).toEqual([P(1), P(2)])
+    expect(reorderSelection('back')).toBe(false)
   })
 
   it('a picked standalone shape restacks as a frame of the page', () => {
