@@ -275,6 +275,17 @@ function merge(curated: ModelOption[], live: ModelOption[]): ModelOption[] {
   return [...recommended, ...liveById.values()]
 }
 
+/** The selected custom model stays in the picker when the endpoint has no
+ *  usable `/models`. Its capability comes from the saved profile, not from a
+ *  guess: a text-only model must keep its no-vision badge even while the
+ *  catalog is unavailable. A profile that cannot be read falls back to the
+ *  permissive answer so the selected model remains usable. */
+async function customFallback(account: ModelAccount): Promise<ModelOption[]> {
+  if (!account.model) return []
+  const profile = account.profileId ? await getProfile(account.userId, account.profileId).catch(() => null) : null
+  return [{ id: account.model, name: account.model, blurb: '', vision: profile?.supportsVision ?? true }]
+}
+
 /** The menu for this account: the provider's list merged over the curated
  *  one, or the curated one alone for a kind with no catalog, or when the
  *  provider cannot be reached. */
@@ -288,10 +299,7 @@ export async function modelCatalogFor(account: ModelAccount, curated: ModelOptio
        tier, a response shape that lost its modalities) must not empty the
        picker: the curated menu stays, and the caption says why */
     if (!models.length) {
-      const fallback =
-        account.kind === 'custom-key' && account.model
-          ? [{ id: account.model, name: account.model, blurb: '', vision: true }]
-          : curated
+      const fallback = account.kind === 'custom-key' && account.model ? await customFallback(account) : curated
       return {
         models: fallback,
         live: false,
@@ -309,10 +317,7 @@ export async function modelCatalogFor(account: ModelAccount, curated: ModelOptio
         : `Could not load models from ${label}. Showing the built-in list.`
     /* a custom profile has no built-in list; keep the selected model visible
        so a provider without /models still has a usable picker */
-    const fallback =
-      account.kind === 'custom-key' && account.model
-        ? [{ id: account.model, name: account.model, blurb: '', vision: true }]
-        : curated
+    const fallback = account.kind === 'custom-key' && account.model ? await customFallback(account) : curated
     const customMessage =
       error instanceof CatalogAccessError
         ? `${label} rejected the API key. Check it in Settings.`

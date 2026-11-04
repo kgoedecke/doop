@@ -29,6 +29,7 @@ import {
   takesReasoningEffort,
 } from '../server/modelAccounts.ts'
 import { CustomInferenceError } from '../server/customInference.ts'
+import { modelCatalogFor } from '../server/modelCatalog.ts'
 import { pickModel } from '../server/agentModel.ts'
 
 vi.mock('../server/db/index.ts', async () => {
@@ -167,6 +168,22 @@ describe('custom model profiles', () => {
     expect(account?.apiKey).toBeUndefined()
     expect(account).not.toHaveProperty('baseUrl')
     expect(takesReasoningEffort('custom-key')).toBe(false)
+  })
+
+  it('keeps the selected custom model and its vision flag when the catalog is down', async () => {
+    const profile = await createProfile(
+      'alice',
+      input({ baseUrl: 'http://127.0.0.1:1/v1', model: 'text-only', supportsVision: false }),
+    )
+    await activateCustomProfile('alice', profile.id)
+    const account = await getAccount('alice')
+
+    const catalog = await modelCatalogFor(account!, [])
+    expect(catalog).toMatchObject({
+      live: false,
+      models: [{ id: 'text-only', name: 'text-only', blurb: '', vision: false }],
+    })
+    expect(catalog.error).toContain('Enter the model id manually')
   })
 
   it('refuses to activate another user’s profile', async () => {
