@@ -17,6 +17,9 @@ export const panels = {
   layersHide: 'Hide',
   layersLock: 'Lock',
   layersUnlock: 'Unlock',
+  layersRename: 'Rename',
+  layersName: 'Item name',
+  layersRenameFailed: 'Couldn’t rename “{name}”',
 
   pagesTitle: 'Pages',
   pagesAdd: 'Add page',

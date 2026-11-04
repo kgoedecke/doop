@@ -26,6 +26,8 @@ import {
 } from '../lib/layers'
 import {
   deleteLayers,
+  renameFrame,
+  renameLayer,
   dropLayer,
   setFrameHidden,
   setFramesLocked,
@@ -33,6 +35,7 @@ import {
   setLayerLocked,
   detachLayer,
   isStackLocked,
+  isLayerLocked,
   restackFrame,
   stackRoom,
   shiftFrame,
@@ -656,6 +659,61 @@ export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
   )
 }
 
+/** The editor owns its keys and pointer gestures while a name is being typed. */
+function ItemNameInput({
+  name,
+  onCommit,
+  onDone,
+}: {
+  name: string
+  onCommit: (value: string) => void
+  onDone: () => void
+}) {
+  const t = useT()
+  const finished = useRef(false)
+  function finish(input: HTMLInputElement, save: boolean) {
+    if (finished.current) return
+    finished.current = true
+    if (save && input.value.trim() !== name) onCommit(input.value)
+    onDone()
+  }
+  return (
+    <Input
+      autoFocus
+      aria-label={t('panels.layersName')}
+      variant="bare"
+      inputSize="auto"
+      className="h-5 w-full bg-surface px-1 text-ink shadow-elevation-1-focus md:text-body"
+      defaultValue={name}
+      onFocus={(e) => e.target.select()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onBlur={(e) => finish(e.currentTarget, true)}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.nativeEvent.isComposing || (e.key !== 'Enter' && e.key !== 'Escape')) return
+        e.preventDefault()
+        const tree = e.currentTarget.closest<HTMLElement>('[role="tree"]')
+        finish(e.currentTarget, e.key === 'Enter')
+        tree?.focus()
+      }}
+    />
+  )
+}
+
+function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
+  const [renaming, setRenaming] = useState(false)
+  return {
+    label:
+      renaming && allowed ? <ItemNameInput name={name} onCommit={onCommit} onDone={() => setRenaming(false)} /> : name,
+    startRename: () => {
+      if (allowed) setRenaming(true)
+    },
+  }
+}
+
 function FrameRow({
   row,
   selected,
@@ -678,6 +736,9 @@ function FrameRow({
 }) {
   const { frame } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
+  const { label, startRename } = useItemRename(frame.name, !readOnly && !frame.locked, (value) =>
+    renameFrame(frame.id, value),
+  )
   const stream = useStore((s) => s.streams[frame.id])
   const presences = useStore((s) => s.presences)
   const me = getIdentity().clientId
@@ -701,7 +762,7 @@ function FrameRow({
             caret={<Caret open={row.open} present />}
             onCaret={onToggle}
             icon={<FrameIcon className="size-3.5" />}
-            label={frame.name}
+            label={label}
             className={cn(current && !selected && 'text-ink', dragging && 'opacity-40')}
             selected={selected}
             hidden={!!frame.hidden}
@@ -710,7 +771,7 @@ function FrameRow({
             locked={!!frame.locked}
             onToggleLocked={readOnly ? undefined : () => setFramesLocked([frame], !frame.locked)}
             onClick={onActivate}
-            onDoubleClick={() => useStore.getState().requestFlyTo(frame.id)}
+            onDoubleClick={startRename}
             onContextMenu={() => {
               pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
               if (!useStore.getState().selectedIds.includes(frame.id)) onActivate()
@@ -739,7 +800,7 @@ function FrameRow({
             }
           />
         </ContextMenuTrigger>
-        <FrameContextMenu frame={frame} at={pasteAt} />
+        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
       </ContextMenu>
       {/* the caption stands in for the frame's body, so a layer dragged
           onto it lands in the frame as a drop on the frame row would; the
@@ -781,9 +842,14 @@ function NodeRow({
   const { frame, node } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const hasChildren = node.children.length > 0
-  /* a standalone element is its frame: the eye, the lock and the menu are
-     the frame's, and a double-click flies to it */
+  /* a standalone element is its frame: its name, eye, lock and menu all
+     belong to the frame */
   const standalone = !!row.standalone
+  const { label, startRename } = useItemRename(
+    standalone ? frame.name : node.label,
+    !readOnly && !frame.locked && !node.locked,
+    (value) => (standalone ? renameFrame(frame.id, value) : renameLayer(frame.id, node.selector, value)),
+  )
   const pasteAt = useRef({ x: 0, y: 0 })
   return (
     <ContextMenu>
@@ -795,7 +861,7 @@ function NodeRow({
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
           icon={<LayerKindIcon kind={node.kind} />}
-          label={standalone ? frame.name : node.label}
+          label={label}
           detail={standalone ? undefined : node.detail}
           selected={selected}
           /* a standalone element is hidden by its frame or by its own
@@ -833,7 +899,9 @@ function NodeRow({
           }
           className={cn(dragging && 'opacity-40')}
           onClick={(e) => onActivate(e.shiftKey || e.metaKey || e.ctrlKey)}
-          onDoubleClick={standalone ? () => useStore.getState().requestFlyTo(frame.id) : undefined}
+          onDoubleClick={() => {
+            if (!isLayerLocked(frame, node.selector)) startRename()
+          }}
           onContextMenu={() => {
             pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
             onActivate(false)
@@ -850,9 +918,9 @@ function NodeRow({
         />
       </ContextMenuTrigger>
       {standalone ? (
-        <FrameContextMenu frame={frame} at={pasteAt} />
+        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
       ) : (
-        <ElementContextMenu frame={frame} selector={node.selector} />
+        <ElementContextMenu frame={frame} selector={node.selector} onRename={startRename} />
       )}
     </ContextMenu>
   )
@@ -866,7 +934,7 @@ type RowProps = Omit<HTMLAttributes<HTMLDivElement>, 'onClick'> & {
   caret: ReactNode
   onCaret?: () => void
   icon: ReactNode
-  label: string
+  label: ReactNode
   detail?: string
   selected: boolean
   /** where a dragged layer would land on this row; `root` is a line above
@@ -942,6 +1010,7 @@ function Row({
       <span
         data-icon
         className={cn('grid size-3 flex-none place-items-center text-ink-faint', onCaret && 'cursor-pointer')}
+        onDoubleClick={(e) => e.stopPropagation()}
         onClick={(e) => {
           if (!onCaret) return
           e.stopPropagation()

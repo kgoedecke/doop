@@ -136,9 +136,10 @@ export function recordUpdate(frameId: string, before: Patch, after: Patch, discr
     top.after = { ...top.after, ...entry.after }
     top.at = Date.now()
     redoStack = []
-    return
+    return top
   }
   push(entry)
+  return entry
 }
 
 /** Frames restacked together: one undo step, saved as one request. */

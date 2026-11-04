@@ -2,7 +2,8 @@ import type { TextFormatCommand } from './richText'
 import type { Frame } from '../../shared/types'
 import type { ReorderMove } from './keys'
 import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
-import { pickedSelectors, useStore } from './store'
+import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
+import { t } from './i18n'
 import { api, ApiError, errorMessage } from './api'
 import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
@@ -24,6 +25,7 @@ import {
   duplicateElements,
   elementFate,
   elementHtml,
+  elementName,
   isElementHidden,
   isElementLocked,
   moveElement,
@@ -31,6 +33,7 @@ import {
   removeElements,
   replaceElement,
   setElementLocked,
+  setElementName,
   setElementsHidden,
   reorderElements,
   shiftElement,
@@ -40,6 +43,54 @@ import {
 } from './layers'
 
 /* ---- element edits shared by the Layers rail and the element panel ---- */
+
+export function renameFrame(frameId: string, value: string) {
+  const store = useStore.getState()
+  const frame = store.canvas?.frames.find((f) => f.id === frameId)
+  const name = value.trim()
+  if (!frame || !canEditOpenCanvas(store) || isStackLocked(frame) || !name || name === frame.name) return
+  const entry = recordUpdate(frame.id, { name: frame.name }, { name }, true)
+  store.patchFrameLocal(frame.id, { name })
+  trackSave(
+    api.updateFrame(frame.id, { name }).catch((err: unknown) => {
+      if (entry) dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id !== frame.canvasId) return
+      // A failed save must not overwrite a newer name from another edit.
+      if (s.canvas.frames.find((f) => f.id === frame.id)?.name === name) {
+        s.patchFrameLocal(frame.id, { name: frame.name })
+      }
+      s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name: frame.name })))
+    }),
+  )
+}
+
+export function renameLayer(frameId: string, selector: string, value: string) {
+  const store = useStore.getState()
+  const frame = store.canvas?.frames.find((f) => f.id === frameId)
+  const name = value.trim()
+  if (!frame || !canEditOpenCanvas(store) || isLayerLocked(frame, selector) || !name) return
+  const before = elementName(frame.html, selector)
+  if (before === name) return
+  const html = setElementName(frame.html, selector, name)
+  if (html === null) return
+  const entry = recordUpdate(frame.id, { html: frame.html }, { html }, true)
+  store.patchFrameLocal(frame.id, { html })
+  // Text editing can defer full HTML updates, so also update the live attribute.
+  void requestFrame(frame.id, 'doop:rename', { selector, name })
+  trackSave(
+    api.updateFrame(frame.id, { html }).catch((err: unknown) => {
+      if (entry) dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id !== frame.canvasId) return
+      if (s.canvas.frames.find((f) => f.id === frame.id)?.html === html) {
+        s.patchFrameLocal(frame.id, { html: frame.html })
+        void requestFrame(frame.id, 'doop:rename', { selector, name: before })
+      }
+      s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name })))
+    }),
+  )
+}
 
 export function saveFrameHtml(frame: Frame, html: string) {
   // Layer commands each need their own undo step, even when invoked rapidly.

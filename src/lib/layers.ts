@@ -28,6 +28,7 @@ export interface LayerNode {
 /** The attribute a locked layer carries in the frame's HTML. It travels with
  *  the markup, so every collaborator (and agent) sees the same lock. */
 export const LOCK_ATTR = 'data-doop-locked'
+export const NAME_ATTR = 'data-doop-name'
 
 /* markup that renders nothing of its own has no place in a layer list */
 const HIDDEN_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'TITLE', 'NOSCRIPT', 'TEMPLATE', 'BR', 'WBR'])
@@ -142,6 +143,12 @@ function detailOf(el: Element): string {
 }
 
 function toNode(el: Element): LayerNode {
+  const node = defaultNode(el)
+  const name = el.getAttribute(NAME_ATTR)?.trim()
+  return name ? { ...node, label: name, detail: '' } : node
+}
+
+function defaultNode(el: Element): LayerNode {
   const tag = el.tagName.toLowerCase()
   const drawingName = el.hasAttribute('data-doop-drawing') ? el.getAttribute('data-name') : null
   const base = {
@@ -211,6 +218,20 @@ function find(doc: Document, selector: string): Element | null {
 
 export function elementHtml(html: string, selector: string): string | null {
   return find(parse(html), selector)?.outerHTML ?? null
+}
+
+export function elementName(html: string, selector: string): string | null {
+  return find(parse(html), selector)?.getAttribute(NAME_ATTR) ?? null
+}
+
+/** Store a layer caption without changing its text, alt text, id or styles. */
+export function setElementName(html: string, selector: string, name: string | null): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  if (name === null) el.removeAttribute(NAME_ATTR)
+  else el.setAttribute(NAME_ATTR, name)
+  return serialize(doc)
 }
 
 /** True when the element, or anything above it, carries the lock — a lock

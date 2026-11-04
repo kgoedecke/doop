@@ -17,6 +17,9 @@ export const panels: Catalog['panels'] = {
   layersHide: 'Ocultar',
   layersLock: 'Bloquear',
   layersUnlock: 'Desbloquear',
+  layersRename: 'Renomear',
+  layersName: 'Nome do item',
+  layersRenameFailed: 'Não foi possível renomear “{name}”',
 
   pagesTitle: 'Páginas',
   pagesAdd: 'Adicionar página',
