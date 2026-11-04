@@ -44,6 +44,10 @@ it('does not parse frame HTML for closed menus, including after a frame update',
     expect(parse.mock.calls.length).toBeLessThanOrEqual(3)
     const items = [...document.querySelectorAll('[role="menuitem"]')]
     expect(items.some((item) => item.textContent?.startsWith('Unlock'))).toBe(true)
+    /* an element exports on its own, as a frame does */
+    for (const label of ['Export as PNG', 'Export as JPG', 'Copy as PNG']) {
+      expect(items.some((item) => item.textContent === label)).toBe(true)
+    }
     expect(items.find((item) => item.textContent?.startsWith('Delete element'))?.getAttribute('aria-disabled')).toBe(
       'true',
     )

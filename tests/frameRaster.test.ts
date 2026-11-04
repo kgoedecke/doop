@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options { "happyDOM": { "settings": { "disableCSSFileLoading": true } } }
 import { afterEach, expect, it, vi } from 'vitest'
-import { inlineDocument } from '../src/lib/frameRaster'
+import { clipToFrame, inlineDocument } from '../src/lib/frameRaster'
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47])
 const PNG_DATA = 'data:image/png;base64,iVBORw=='
@@ -136,4 +136,20 @@ it('rejects when a resource cannot be fetched, so the server renders instead', a
   await expect(
     inlineDocument('<html><body><img src="https://private.example/no-cors.png"></body></html>', opts()),
   ).rejects.toThrow('404 fetching https://private.example/no-cors.png')
+})
+
+/* an element export keeps the part of the whole render its box covers */
+it('clips an element box to whole frame pixels inside the frame', () => {
+  const frame = { width: 300, height: 200 }
+  expect(clipToFrame({ x: 10.4, y: 20.6, width: 50.2, height: 30 }, frame)).toEqual({
+    x: 10,
+    y: 20,
+    width: 51,
+    height: 31,
+  })
+  /* a box past the frame's edge is cut where the frame cuts it */
+  expect(clipToFrame({ x: 280, y: -10, width: 50, height: 30 }, frame)).toEqual({ x: 280, y: 0, width: 20, height: 20 })
+  /* a box the frame does not show cannot be exported from it */
+  expect(clipToFrame({ x: 300, y: 0, width: 10, height: 10 }, frame)).toBeNull()
+  expect(clipToFrame({ x: 0, y: 0, width: 0, height: 10 }, frame)).toBeNull()
 })

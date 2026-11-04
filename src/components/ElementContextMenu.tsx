@@ -1,11 +1,12 @@
 import { useRef } from 'react'
 import type { Frame } from '../../shared/types'
 import { copyElementLink } from '../lib/elementLink'
+import { copyElementPng, downloadElementExport, type ElementTarget } from '../lib/frameExport'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { writeCanvasClipboard } from '../lib/canvasClipboard'
 import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
 import { deleteLayer, duplicateLayer, setLayerHidden, setLayerLocked, shiftLayer } from '../lib/layerEdits'
-import { elementHtml, isElementHidden, isElementLocked } from '../lib/layers'
+import { buildLayerTree, elementHtml, findLayer, isElementHidden, isElementLocked, layerName } from '../lib/layers'
 import { MOD_KEY } from '../lib/keys'
 import { useT } from '../lib/i18n'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
@@ -16,6 +17,12 @@ import { MenuHint } from './ui/menu'
 export interface LiveHit {
   snippet: string
   elementId?: string
+}
+
+/** The element as an export names it: by the Layers panel's name for it. */
+function exportTarget(frame: Frame, selector: string): ElementTarget {
+  const node = findLayer(buildLayerTree(frame.html), selector)
+  return { selector, name: node ? layerName(node) : 'element' }
 }
 
 /** Shared by a layer row and the element under a canvas right-click. */
@@ -109,6 +116,16 @@ function ElementMenuItems({ frame, selector, hit, onRename }: ElementMenuProps) 
           </ContextMenuItem>
           <ContextMenuItem onSelect={() => void copyElementLink(frame, { selector, ...hit })}>
             {t('stage.copyLinkToElement')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={() => void downloadElementExport(frame, exportTarget(frame, selector), 'png')}>
+            {t('stage.exportPng')}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => void downloadElementExport(frame, exportTarget(frame, selector), 'jpg')}>
+            {t('stage.exportJpg')}
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => void copyElementPng(frame, exportTarget(frame, selector))}>
+            {t('stage.copyAsPng')}
           </ContextMenuItem>
           <ContextMenuSeparator />
           <ContextMenuItem disabled={locked} onSelect={() => shiftLayer(frame, selector, -1)}>
