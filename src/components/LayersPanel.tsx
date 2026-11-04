@@ -348,8 +348,10 @@ export function LayersPanel({
       if (standalone || row.frame.id === dragged.frame.id) return restackAt(dragged, row, fraction)
       if (row.kind === 'frame' && fraction < EDGE_BAND) return restackAt(dragged, row, 0)
       if (row.kind === 'frame' && !row.open && fraction > 1 - EDGE_BAND) return restackAt(dragged, row, 1)
-    } else if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND && row.frame.id !== dragged.frame.id)
-      /* the band above a top-level row means "beside it, at the root" */
+    } else if ((row.kind === 'frame' || standalone) && fraction < EDGE_BAND)
+      /* the band above a top-level row means "beside it, at the root"; the
+         layer's own frame counts, since nothing else lies in front of the
+         first frame in the list */
       return { key: row.key, place: 'root' }
     /* a standalone element is one shape, not a box for others */
     if (standalone) return null
@@ -693,7 +695,9 @@ function FrameRow({
           <Row
             data-row-key={row.key}
             depth={0}
-            drop={drop}
+            /* an open, empty frame shows the drop as the line its first
+               layer would sit on, under the caption, not as a box */
+            drop={row.empty && drop === 'inside' ? undefined : drop}
             caret={<Caret open={row.open} present />}
             onCaret={onToggle}
             icon={<FrameIcon className="size-3.5" />}
@@ -738,15 +742,18 @@ function FrameRow({
         <FrameContextMenu frame={frame} at={pasteAt} />
       </ContextMenu>
       {/* the caption stands in for the frame's body, so a layer dragged
-          onto it lands in the frame as a drop on the frame row would */}
+          onto it lands in the frame as a drop on the frame row would; the
+          drop is drawn as one line between the row and the caption, at the
+          indent the layer will take */}
       {row.empty && (
-        <div
-          data-row-key={row.key}
-          className={cn(
-            'rounded-[7px] py-1 pl-[46px] text-[11px] text-ink-faint',
-            drop === 'inside' && 'shadow-[inset_0_0_0_1.5px_var(--brand)]',
+        <div data-row-key={row.key} className="relative rounded-[7px] py-1 pl-[46px] text-[11px] text-ink-faint">
+          {drop === 'inside' && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute -top-px right-1 z-[1] h-0.5 rounded-full bg-brand"
+              style={{ left: 6 + INDENT }}
+            />
           )}
-        >
           {t('panels.layersEmptyFrame')}
         </div>
       )}
