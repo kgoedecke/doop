@@ -41,6 +41,7 @@ import {
 } from './access.ts'
 import { isLinkAccess, roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { auth, initAuth, syncAdmins, getUserName, loginProvidersConfig } from './auth.ts'
+import { getInstanceSettings, hydrateInstanceSettings, loginPolicy } from './instanceSettings.ts'
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
@@ -117,6 +118,7 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 }
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
+await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
@@ -549,6 +551,14 @@ app.put('/u/:token', async (req, res) => {
 const MCP_OAUTH_PATHS = /^\/api\/auth\/(mcp\/|oauth2\/(authorize|consent|token))/
 const VIEW_AS_ALLOWED = /^\/api\/auth\/(sign-out|admin\/stop-impersonating)$/
 app.all('/api/auth/*', async (req, res, next) => {
+  /* Admin → Sign-in turned email/password sign-up off: the form is hidden,
+     and the call it would make is refused too. Sign-in, password resets and
+     provider sign-ups go on as before. */
+  if (req.path === '/api/auth/sign-up/email' && !getInstanceSettings().emailPasswordSignup) {
+    return res
+      .status(403)
+      .json({ code: 'SIGNUP_DISABLED', message: 'Sign-up with email and password is off on this instance.' })
+  }
   const restricted = MCP_OAUTH_PATHS.test(req.path) || (req.method !== 'GET' && !VIEW_AS_ALLOWED.test(req.path))
   if (restricted) {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null)
@@ -627,7 +637,8 @@ app.post('/api/account-exists', async (req, res) => {
    build shared across self-hosted deploys can't know this at build time —
    see server/auth.ts loginProvidersConfig for what's safe to expose here. */
 app.get('/api/oidc-config', (req, res) => {
-  res.json(loginProvidersConfig())
+  const providers = loginProvidersConfig()
+  res.json({ ...providers, ...loginPolicy(providers.enabled) })
 })
 
 /* Public: the interface language for visitors who have not picked one. The

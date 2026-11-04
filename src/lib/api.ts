@@ -1,4 +1,5 @@
 import { useStore } from './store'
+import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
@@ -668,10 +669,22 @@ export interface AdminStats {
   agentFeedback: number
 }
 
+/** Admin → Sign-in: the policy, and what it depends on. */
+export interface AdminInstanceSettings {
+  settings: InstanceSettings
+  providers: { enabled: boolean; displayName?: string; google: boolean; microsoft: boolean; apple: boolean }
+  workspaces: { id: string; name: string; memberCount: number }[]
+  /** has an admin signed in through SSO yet? (the auto-redirect guard) */
+  ssoAdminSignedIn: boolean
+}
+
 /** Instance-admin surface. Every route 404s for non-admins, so a failure here
  *  is indistinguishable from the feature not existing — which is the point. */
 export const adminApi = {
   canvases: () => req<{ total: number; canvases: AdminCanvas[] }>('/api/admin/canvases'),
+  instanceSettings: () => req<AdminInstanceSettings>('/api/admin/instance-settings'),
+  updateInstanceSettings: (patch: InstanceSettingsPatch) =>
+    req<AdminInstanceSettings>('/api/admin/instance-settings', { method: 'PATCH', body: JSON.stringify(patch) }),
   stats: () => req<AdminStats>('/api/admin/stats'),
   users: () => req<AdminUser[]>('/api/admin/users'),
   agentFeedback: (query: { kind?: AgentFeedbackKind; q?: string; before?: AdminAgentFeedback }) => {

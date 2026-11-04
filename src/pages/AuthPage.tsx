@@ -17,6 +17,7 @@ import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
 import { Callout } from '../components/ui/callout'
 import { useT, type PlainMessageKey } from '../lib/i18n'
+import type { LoginPolicy } from '../../shared/instanceSettings'
 
 /* If login interrupted an MCP OAuth authorize redirect, send the browser
    back into the flow so the agent connection completes. */
@@ -150,8 +151,9 @@ function ssoRedirects(provider: DesktopSignInProvider): ProviderRedirects {
   return { callbackURL: location.pathname + location.search, newUserCallbackURL: firstCanvasPathAfterSignup(provider) }
 }
 
-/** Matches server/auth.ts loginProvidersConfig's response shape. */
-interface OidcClientConfig {
+/** Matches GET /api/oidc-config: server/auth.ts loginProvidersConfig plus
+ *  the instance's sign-in policy (shared/instanceSettings.ts loginPolicy). */
+interface OidcClientConfig extends LoginPolicy {
   enabled: boolean
   displayName?: string
   google: boolean
@@ -160,23 +162,41 @@ interface OidcClientConfig {
   apple: boolean
 }
 
+const UNCONFIGURED: OidcClientConfig = {
+  enabled: false,
+  google: false,
+  microsoft: false,
+  apple: false,
+  emailPasswordSignup: true,
+  ssoAutoRedirect: false,
+}
+
 /* The client bundle is static and shared across self-hosted deploys — it
    can't know at build time whether the operator configured SSO, so it asks
    the server. See server/auth.ts loginProvidersConfig. */
 function useOidcConfig(): OidcClientConfig {
-  const [config, setConfig] = useState<OidcClientConfig>({
-    enabled: false,
-    google: false,
-    microsoft: false,
-    apple: false,
-  })
+  const [config, setConfig] = useState<OidcClientConfig>(UNCONFIGURED)
   useEffect(() => {
     fetch('/api/oidc-config')
-      .then((res) => (res.ok ? res.json() : { enabled: false, google: false, microsoft: false, apple: false }))
-      .then(setConfig)
+      .then((res) => (res.ok ? res.json() : UNCONFIGURED))
+      .then((body: Partial<OidcClientConfig>) => setConfig({ ...UNCONFIGURED, ...body }))
       .catch(() => {}) // SSO button just doesn't appear — email/password still works
   }, [])
   return config
+}
+
+/* Admin → Sign-in can send every signed-out visitor straight to the OIDC
+   provider. Not after the provider sent them back with an error (that would
+   loop), not when they asked for the card (?manual=1), and not in the
+   desktop shell, whose sign-in goes through the system browser and should
+   not open one unasked. Read once, at mount: the error code is taken off
+   the address bar right after it is shown, and the policy arrives later. */
+function cardWantedByUrl(): boolean {
+  return ssoErrorFromUrl() !== null || new URLSearchParams(location.search).has('manual')
+}
+
+function shouldAutoRedirect(config: OidcClientConfig, cardWanted: boolean): boolean {
+  return config.ssoAutoRedirect && config.enabled && !cardWanted && !isDesktopShell()
 }
 
 /* Set once the desktop shell has sent a provider sign-in to the system
@@ -221,6 +241,18 @@ export function AuthPage() {
   useEffect(() => {
     if (ssoErrorFromUrl()) history.replaceState(null, '', location.pathname)
   }, [])
+
+  /* the provider round trip starts the moment the policy says so: once,
+     and only while the card is still in its sign-in state */
+  const [cardWanted] = useState(cardWantedByUrl)
+  const autoRedirect = shouldAutoRedirect(oidc, cardWanted) && mode === 'signin'
+  const [redirecting, setRedirecting] = useState(false)
+  useEffect(() => {
+    if (!autoRedirect || redirecting) return
+    setRedirecting(true)
+    void ssoSignIn()
+    // eslint-disable-next-line react/exhaustive-deps -- the start is a one-off per page load, not a reaction to ssoSignIn changing
+  }, [autoRedirect, redirecting])
 
   /* Both providers leave for the IdP and come back with a session (or an
      ?error= — see ssoErrorFromUrl); success redirects the browser away
@@ -324,10 +356,13 @@ export function AuthPage() {
           setUnverified(true)
         } else if (mode === 'signin' && !(await accountExists(email))) {
           setError(t('auth.noAccountFound'))
-          setSuggestMode('signup')
+          if (oidc.emailPasswordSignup) setSuggestMode('signup')
           posthog.capture('login_no_account_found')
         } else if (mode === 'signup' && code.startsWith('USER_ALREADY_EXISTS')) {
           setError(t('auth.accountExists'))
+          setSuggestMode('signin')
+        } else if (mode === 'signup' && code === 'SIGNUP_DISABLED') {
+          setError(t('auth.signupDisabled'))
           setSuggestMode('signin')
         } else {
           setError(authErrorMessage(res.error, t('auth.somethingWentWrong'), t('auth.unreachable')))
@@ -352,6 +387,30 @@ export function AuthPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (autoRedirect && !error) {
+    return (
+      <AuthScreen>
+        <AuthCard title={t('auth.redirectingTo', { provider: oidc.displayName ?? '' })} align="center">
+          <AuthCardText>{t('auth.taglineSignin')}</AuthCardText>
+          <Button
+            variant="link"
+            size="sm"
+            className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
+            onClick={() => {
+              /* keep the rest of the query: an interrupted MCP connect or a
+                 redirect_to must survive the switch to the card */
+              const params = new URLSearchParams(location.search)
+              params.set('manual', '1')
+              location.assign(`${location.pathname}?${params}`)
+            }}
+          >
+            {t('auth.signInAnotherWay')}
+          </Button>
+        </AuthCard>
+      </AuthScreen>
+    )
   }
 
   return (
@@ -521,14 +580,16 @@ export function AuthPage() {
                   ? t('auth.sendResetLink')
                   : t('auth.setNewPassword')}
         </Button>
-        <Button
-          variant="link"
-          size="sm"
-          className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
-          onClick={() => switchMode(mode === 'signin' ? 'signup' : 'signin')}
-        >
-          {t(mode === 'signin' ? 'auth.noAccountSignUp' : 'auth.haveAccountSignIn')}
-        </Button>
+        {(oidc.emailPasswordSignup || mode !== 'signin') && (
+          <Button
+            variant="link"
+            size="sm"
+            className="p-1.5 text-[13px] font-normal text-ink-faint hover:text-ink"
+            onClick={() => switchMode(mode === 'signin' ? 'signup' : 'signin')}
+          >
+            {t(mode === 'signin' ? 'auth.noAccountSignUp' : 'auth.haveAccountSignIn')}
+          </Button>
+        )}
       </AuthCard>
     </AuthScreen>
   )

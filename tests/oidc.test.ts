@@ -45,6 +45,8 @@ describe('GET /api/oidc-config', () => {
       microsoft: false,
       apple: false,
       appleNative: false,
+      emailPasswordSignup: true,
+      ssoAutoRedirect: false,
     })
   })
 
@@ -59,6 +61,8 @@ describe('GET /api/oidc-config', () => {
       microsoft: false,
       apple: false,
       appleNative: false,
+      emailPasswordSignup: true,
+      ssoAutoRedirect: false,
     })
     expect(body).not.toContain('test-secret')
   })
