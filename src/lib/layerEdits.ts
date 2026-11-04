@@ -1,5 +1,6 @@
 import type { TextFormatCommand } from './richText'
 import type { Frame } from '../../shared/types'
+import type { ReorderMove } from './keys'
 import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
 import { pickedSelectors, useStore } from './store'
 import { api, ApiError, errorMessage } from './api'
@@ -31,8 +32,8 @@ import {
   replaceElement,
   setElementLocked,
   setElementsHidden,
+  reorderElements,
   shiftElement,
-  shiftElementToEnd,
   type DropTarget,
   type FlowPlacement,
   type MovedElement,
@@ -676,8 +677,16 @@ export function shiftLayer(frame: Frame, selector: string, dir: -1 | 1): boolean
   return commitMove(frame, shiftElement(frame.html, selector, dir))
 }
 
-/** Bring the element to the front (1) or send it to the back (-1) of its siblings. */
-export function shiftLayerToEnd(frame: Frame, selector: string, dir: -1 | 1): boolean {
-  if (isLayerLocked(frame, selector)) return false
-  return commitMove(frame, shiftElementToEnd(frame.html, selector, dir))
+/** ⌘] / ⌘[ / ⌘⌥] / ⌘⌥[: restack the picked elements together among their
+ *  siblings, one undo step; the pick follows them. False when any is
+ *  locked or nothing could move. */
+export function reorderLayers(frame: Frame, selectors: string[], move: ReorderMove): boolean {
+  if (!selectors.length || selectors.some((sel) => isLayerLocked(frame, sel))) return false
+  const moved = reorderElements(frame.html, selectors, move)
+  if (!moved) return false
+  saveFrameHtml(frame, moved.html)
+  const store = useStore.getState()
+  store.select(frame.id)
+  store.pickElements(frame.id, moved.selectors)
+  return true
 }

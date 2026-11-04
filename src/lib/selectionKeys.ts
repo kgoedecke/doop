@@ -7,9 +7,9 @@
 
 import type { Frame } from '../../shared/types'
 import { buildLayerTree, ancestorsOf, findLayer, type LayerNode } from './layers'
-import { useStore } from './store'
+import { pickedSelectors, useStore } from './store'
 import { currentPageCanvas } from './pages'
-import { isStackLocked, restackFrame, shiftLayer, shiftLayerToEnd, standaloneSelector } from './layerEdits'
+import { isStackLocked, reorderLayers, restackFrame, standaloneSelector } from './layerEdits'
 import type { ReorderMove } from './keys'
 
 /** The rows beside a node: its parent's children, or the tree's roots. */
@@ -56,6 +56,9 @@ interface Target {
   frame: Frame
   /** the picked element, or null when the frame itself is what is selected */
   selector: string | null
+  /** the frame as the page lists it: no element picked, or the picked
+   *  element is a standalone shape, which is its own root on the page */
+  pageLevel: boolean
   tree: LayerNode[]
 }
 
@@ -67,13 +70,23 @@ function target(): Target | null {
   const frameId = picked?.frameId ?? (s.selectedIds.length === 1 ? s.selectedId : null)
   const frame = frameId ? s.canvas?.frames.find((f) => f.id === frameId) : undefined
   if (!frame) return null
-  return { frame, selector: picked?.selector ?? null, tree: buildLayerTree(frame.html) }
+  const selector = picked?.selector ?? null
+  const pageLevel = !selector || standaloneSelector(frame) === selector
+  return { frame, selector, pageLevel, tree: buildLayerTree(frame.html) }
 }
 
 function pick(frame: Frame, selector: string) {
   const s = useStore.getState()
   s.select(frame.id)
   s.pickElement({ frameId: frame.id, selector }, true)
+}
+
+/** Select a frame as the Layers panel's row would: a standalone shape is
+ *  picked as its one layer. */
+function selectFrame(frame: Frame) {
+  const shape = standaloneSelector(frame)
+  if (shape) pick(frame, shape)
+  else useStore.getState().select(frame.id)
 }
 
 /** ↩: into the selection. False when there is nothing inside. */
@@ -90,7 +103,7 @@ export function enterSelection(): boolean {
  *  standalone element is its own root and has no frame to go out to. */
 export function exitSelection(): boolean {
   const t = target()
-  if (!t?.selector || standaloneSelector(t.frame) === t.selector) return false
+  if (!t?.selector || t.pageLevel) return false
   const parent = exitTarget(t.tree, t.selector)
   if (parent === undefined) return false
   if (parent) pick(t.frame, parent)
@@ -103,7 +116,7 @@ export function exitSelection(): boolean {
 export function selectSibling(dir: 1 | -1): boolean {
   const t = target()
   if (!t) return false
-  if (t.selector) {
+  if (t.selector && !t.pageLevel) {
     const next = siblingTarget(t.tree, t.selector, dir)
     if (!next) return false
     pick(t.frame, next)
@@ -114,8 +127,7 @@ export function selectSibling(dir: 1 | -1): boolean {
   const frames = currentPageCanvas()?.frames ?? []
   const at = frames.findIndex((f) => f.id === t.frame.id)
   if (at === -1 || frames.length < 2) return false
-  const next = frames[(at - dir + frames.length) % frames.length]!
-  useStore.getState().select(next.id)
+  selectFrame(frames[(at - dir + frames.length) % frames.length]!)
   return true
 }
 
@@ -123,15 +135,14 @@ export function selectSibling(dir: 1 | -1): boolean {
  *  unlocked sibling of it. False when the selection is already that. */
 export function selectAll(): boolean {
   const s = useStore.getState()
-  const picked = s.selectedElement
-  const frame = picked ? s.canvas?.frames.find((f) => f.id === picked.frameId) : undefined
-  if (picked && frame) {
-    const all = allSiblings(buildLayerTree(frame.html), picked.selector)
+  const t = target()
+  if (t?.selector && !t.pageLevel) {
+    const all = allSiblings(t.tree, t.selector)
     if (all.length === s.selectedElements.length && all.every((sel) => s.selectedElements.includes(sel))) return false
-    s.pickElements(frame.id, all)
+    s.pickElements(t.frame.id, all)
     return true
   }
-  const ids = (currentPageCanvas()?.frames ?? []).filter((f) => !f.locked).map((f) => f.id)
+  const ids = (currentPageCanvas()?.frames ?? []).filter((f) => !isStackLocked(f)).map((f) => f.id)
   if (!ids.length || (ids.length === s.selectedIds.length && ids.every((id) => s.selectedIds.includes(id)))) {
     return false
   }
@@ -139,18 +150,12 @@ export function selectAll(): boolean {
   return true
 }
 
-/** ⌘] / ⌘[ / ⌘⌥] / ⌘⌥[: restack the picked element among its siblings,
- *  or the selected frame in its page. False when nothing could move. */
+/** ⌘] / ⌘[ / ⌘⌥] / ⌘⌥[: restack the picked elements among their siblings,
+ *  or the selected frame (a standalone shape included) in its page. False when nothing could move. */
 export function reorderSelection(move: ReorderMove): boolean {
   const t = target()
   if (!t) return false
-  const toFront = move === 'forward' || move === 'front'
-  if (t.selector) {
-    const dir = toFront ? 1 : -1
-    return move === 'forward' || move === 'backward'
-      ? shiftLayer(t.frame, t.selector, dir)
-      : shiftLayerToEnd(t.frame, t.selector, dir)
-  }
+  if (t.selector && !t.pageLevel) return reorderLayers(t.frame, pickedSelectors(useStore.getState()), move)
   if (isStackLocked(t.frame)) return false
   const frames = currentPageCanvas()?.frames ?? []
   const at = frames.findIndex((f) => f.id === t.frame.id)

@@ -66,6 +66,7 @@ const shape = page('<div data-doop-drawing="rect" style="position:absolute">x</d
   '<body data-doop-canvas-element="true">',
 )
 const SHAPE = 'body:nth-of-type(1) > div:nth-of-type(1)'
+const lockedShape = shape.replace('<div ', '<div data-doop-locked="" ')
 
 const picked = () => useStore.getState().selectedElement?.selector ?? null
 const selected = () => useStore.getState().selectedIds
@@ -143,6 +144,7 @@ describe('against the store', () => {
         frameWith('f2', 2),
         frameWith('f3', 3, BODY, { locked: true }),
         frameWith('s1', 4, shape),
+        frameWith('s2', 5, lockedShape),
       ],
     } as Canvas
     useStore.getState().setCanvas(canvas)
@@ -189,16 +191,27 @@ describe('against the store', () => {
     useStore.getState().select('f2')
     expect(selectSibling(1)).toBe(true)
     expect(selected()).toEqual(['f1'])
+    /* the bottom row wraps to the top: the shape in front, selected as its
+       one layer, which walks the page from there */
+    expect(selectSibling(1)).toBe(true)
+    expect(selected()).toEqual(['s2'])
+    expect(picked()).toBe(SHAPE)
     expect(selectSibling(1)).toBe(true)
     expect(selected()).toEqual(['s1'])
-    expect(selectSibling(-1)).toBe(true)
-    expect(selected()).toEqual(['f1'])
+    expect(selectSibling(1)).toBe(true)
+    expect(selected()).toEqual(['f3'])
+    expect(picked()).toBeNull()
   })
 
   it('⌘A selects the unlocked frames of the page, or the siblings of the pick', () => {
     expect(selectAll()).toBe(true)
     expect(selected()).toEqual(['f1', 'f2', 's1'])
     expect(selectAll()).toBe(false)
+    /* from a picked shape too: the page, not the shape's frame */
+    useStore.getState().select('s1')
+    useStore.getState().pickElement({ frameId: 's1', selector: SHAPE })
+    expect(selectAll()).toBe(true)
+    expect(selected()).toEqual(['f1', 'f2', 's1'])
     useStore.getState().select('f1')
     useStore.getState().pickElement({ frameId: 'f1', selector: P(1) })
     expect(selectAll()).toBe(true)
@@ -222,6 +235,34 @@ describe('against the store', () => {
     expect(updateFrame).toHaveBeenCalledTimes(3)
   })
 
+  it('moves a picked set together and keeps it picked', () => {
+    useStore.getState().select('f1')
+    useStore.getState().pickElements('f1', [P(1), P(3)])
+    expect(reorderSelection('backward')).toBe(true)
+    expect(html('f1')).toContain('<main><p>a</p><p>c</p><p data-doop-locked="">b</p></main>')
+    expect(useStore.getState().selectedElements).toEqual([P(1), P(2)])
+    expect(picked()).toBe(P(2))
+    expect(reorderSelection('backward')).toBe(false)
+    expect(reorderSelection('front')).toBe(true)
+    expect(html('f1')).toContain('<main><p data-doop-locked="">b</p><p>a</p><p>c</p></main>')
+    expect(useStore.getState().selectedElements).toEqual([P(2), P(3)])
+    expect(reorderSelection('front')).toBe(false)
+    expect(reorderSelection('back')).toBe(true)
+    expect(html('f1')).toContain('<main><p>a</p><p>c</p><p data-doop-locked="">b</p></main>')
+    expect(updateFrame).toHaveBeenCalledTimes(3)
+  })
+
+  it('a picked standalone shape restacks as a frame of the page', () => {
+    useStore.getState().select('s1')
+    useStore.getState().pickElement({ frameId: 's1', selector: SHAPE })
+    expect(reorderSelection('back')).toBe(true)
+    expect(stack()).toEqual(['s1', 'f1', 'f2', 'f3', 's2'])
+    expect(updateFrame).not.toHaveBeenCalled()
+    useStore.getState().select('s2')
+    useStore.getState().pickElement({ frameId: 's2', selector: SHAPE })
+    expect(reorderSelection('back')).toBe(false)
+  })
+
   it('a locked layer stays put', () => {
     useStore.getState().select('f1')
     useStore.getState().pickElement({ frameId: 'f1', selector: P(2) })
@@ -232,12 +273,12 @@ describe('against the store', () => {
   it('⌘] / ⌘[ restack a frame in its page, ⌥ to the front or back', () => {
     useStore.getState().select('f1')
     expect(reorderSelection('forward')).toBe(true)
-    expect(stack()).toEqual(['f2', 'f1', 'f3', 's1'])
+    expect(stack()).toEqual(['f2', 'f1', 'f3', 's1', 's2'])
     expect(reorderSelection('front')).toBe(true)
-    expect(stack()).toEqual(['f2', 'f3', 's1', 'f1'])
+    expect(stack()).toEqual(['f2', 'f3', 's1', 's2', 'f1'])
     expect(reorderSelection('forward')).toBe(false)
     expect(reorderSelection('back')).toBe(true)
-    expect(stack()).toEqual(['f1', 'f2', 'f3', 's1'])
+    expect(stack()).toEqual(['f1', 'f2', 'f3', 's1', 's2'])
     expect(reorderSelection('backward')).toBe(false)
     expect(restackFrames).toHaveBeenCalledTimes(3)
     useStore.getState().select('f3')
