@@ -104,33 +104,30 @@ describe('TokensSection', () => {
     container.remove()
   })
 
-  /* Radix opens a select on pointerdown, not click; its options live in a portal */
-  const pickTheme = (label: string) => {
-    act(() => {
-      document
-        .querySelector('[role="combobox"][aria-label="Theme"]')!
-        .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
-    })
-    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-      (el) => el.textContent?.trim() === label,
+  /* the theme rows under the Themes heading */
+  const themeRow = (label: string) => {
+    const el = [...container.querySelectorAll<HTMLElement>('[role="radio"]')].find(
+      (r) => r.textContent?.trim() === label,
     )
-    if (!option) throw new Error(`no theme option “${label}”`)
-    act(() => option.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
-    act(() => option.click())
+    if (!el) throw new Error(`no theme row “${label}”`)
+    return el
   }
+  const pickTheme = (label: string) => act(() => themeRow(label).click())
+
   /* the Manage themes modal, from the Themes heading's plus */
   const openManage = () => act(() => button('Manage themes…').click())
 
   it('lists tokens by type, colours first, under the default theme', () => {
     expect(text().indexOf('color-ink')).toBeLessThan(text().indexOf('spacing-4'))
-    expect(text()).toContain('default')
+    expect(themeRow('default').getAttribute('aria-checked')).toBe('true')
+    expect(themeRow('dark').getAttribute('aria-checked')).toBe('false')
     expect(text()).toContain('#111')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#111')
   })
 
   it('shows another theme’s values when it is picked from the dropdown', () => {
     pickTheme('dark')
-    expect(document.querySelector('[role="combobox"][aria-label="Theme"]')?.textContent).toContain('dark')
+    expect(themeRow('dark').getAttribute('aria-checked')).toBe('true')
     expect(text()).toContain('#eee')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#eee')
     /* a token without a dark value shows its default, marked as inherited */

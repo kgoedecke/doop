@@ -22,6 +22,7 @@ import { fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { api } from '../lib/api'
 import { Button } from './ui/button'
+import { Pressable } from './ui/pressable'
 import { Input } from './ui/input'
 import { Field } from './ui/field'
 import { IconButton } from './ui/icon-button'
@@ -30,7 +31,7 @@ import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/mo
 import { sectionHeading } from './PagesPanel'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { PlusIcon, XIcon } from './ui/icons'
+import { CheckIcon, PlusIcon, XIcon } from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 
@@ -121,20 +122,28 @@ export function TokensSection() {
           </Button>
         )}
       </div>
-      <div className="px-2 pb-1" onKeyDown={(e) => e.stopPropagation()}>
-        <Select value={shown ?? DEFAULT_THEME} onValueChange={(v) => setViewTheme(v === DEFAULT_THEME ? null : v)}>
-          <SelectTrigger size="sm" className="w-full font-mono" aria-label={t('panels.tokensTheme')}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={DEFAULT_THEME}>{DEFAULT_THEME}</SelectItem>
-            {themes.map((theme) => (
-              <SelectItem key={theme} value={theme}>
-                {theme}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      {/* every theme on a row, as the pages are; the one the rows show wears the tick */}
+      <div className="px-2 pb-1" role="radiogroup" aria-label={t('panels.tokensTheme')}>
+        {[DEFAULT_THEME, ...themes].map((theme) => {
+          const on = (shown ?? DEFAULT_THEME) === theme
+          return (
+            <Pressable
+              key={theme}
+              role="radio"
+              aria-checked={on}
+              className={cn(
+                'flex h-[27px] w-full items-center gap-1 rounded-row pr-2.5 pl-2.5 text-left text-body text-ink-soft hover:bg-sub',
+                on && 'bg-paper-deep text-ink hover:bg-paper-deep',
+              )}
+              onClick={() => setViewTheme(theme === DEFAULT_THEME ? null : theme)}
+            >
+              <span className="grid size-4 flex-none place-items-center text-ink">
+                {on && <CheckIcon className="size-3.5" />}
+              </span>
+              <span className={cn('min-w-0 flex-1 truncate pl-0.5 font-mono', on && 'font-medium')}>{theme}</span>
+            </Pressable>
+          )
+        })}
       </div>
       {/* Tokens: the heading with its plus, the rows by type under it */}
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>

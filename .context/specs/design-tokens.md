@@ -83,8 +83,8 @@ in every frame and in aliasing tokens.
   tab lives in the store as `layersTab`, so the collapsed rail's braces button opens the panel on it):
   laid out like the Pages section. A "Themes" heading with a plus (opens `ThemesModal`, where each
   theme's row renames it on Enter or blur with its values following, ✕ removes it and a line adds
-  one, saving at once) over a `Select` of `default` and the canvas's themes: the rows show the
-  picked theme's values (`effectiveValue`, an inherited default greyed). Then a "Tokens" heading
+  one, saving at once) over a row per theme, `default` first, the picked one ticked: the token rows
+  show that theme's values (`effectiveValue`, an inherited default greyed). Then a "Tokens" heading
   with a plus that opens `TokenModal` on a colour, over the rows by type with a swatch. The modal's
   type select shows only while creating (a type is fixed once a token exists) and picks any type,
   with a value control per type (swatch and hex, font and weight lists, a
