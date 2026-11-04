@@ -222,10 +222,18 @@ describe('renaming in the Layers panel', () => {
       expect(savedDocument().querySelector('#text')?.textContent).toBe('Visible text')
       expect(savedDocument().querySelector('#photo')?.getAttribute('alt')).toBe('Original alt')
       expect(savedDocument().querySelector('#photo')?.getAttribute('src')).toBe('/photo.png')
-      expect(requestFrame).toHaveBeenCalledWith('f1', 'doop:rename', { selector, name: 'Custom label' })
+      expect(requestFrame).toHaveBeenCalledWith('f1', 'doop:rename', {
+        selector,
+        name: 'Custom label',
+        elementId: expect.stringMatching(/^[a-z0-9]{6}$/),
+      })
+      /* the rename stamps the element's id, which is what undo and redo find it by */
+      const elementId = savedDocument().querySelector(selector)?.getAttribute('data-doop-id')
+      expect(elementId).toMatch(/^[a-z0-9]{6}$/)
       expect(updateFrame.mock.calls[0]?.[1]).toHaveProperty('html')
       await act(async () => undo())
       expect(savedDocument().querySelector(selector)?.hasAttribute('data-doop-name')).toBe(false)
+      expect(savedDocument().querySelector(selector)?.getAttribute('data-doop-id')).toBe(elementId)
       await act(async () => redo())
       expect(row(key).textContent).toContain('Custom label')
 
@@ -241,6 +249,61 @@ describe('renaming in the Layers panel', () => {
       expect(row(key).textContent).toContain('From nested menu')
     },
   )
+
+  it('undoes a rename on the element it named after a sibling lands before it', async () => {
+    showLayers('<body><p>First</p><p>Second</p></body>')
+    doubleClick('f1|body:nth-of-type(1) > p:nth-of-type(1)')
+    input().value = 'Lead'
+    press('Enter')
+    const first = savedDocument().querySelector('p[data-doop-name="Lead"]')!
+    const id = first.getAttribute('data-doop-id')!
+    /* a teammate's paragraph arrives in front of the named one */
+    act(() => {
+      useStore.getState().patchFrameLocal('f1', {
+        html: `<body><p>Newer</p><p data-doop-name="Lead" data-doop-id="${id}">First</p><p>Second</p></body>`,
+      })
+    })
+    await act(async () => undo())
+    const paragraphs = [...savedDocument().querySelectorAll('p')]
+    expect(paragraphs.map((p) => p.textContent)).toEqual(['Newer', 'First', 'Second'])
+    expect(paragraphs.map((p) => p.getAttribute('data-doop-name'))).toEqual([null, null, null])
+    expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', {
+      selector: `[data-doop-id="${id}"]`,
+      name: null,
+    })
+    await act(async () => redo())
+    expect(savedDocument().querySelector(`[data-doop-id="${id}"]`)?.getAttribute('data-doop-name')).toBe('Lead')
+    expect(savedDocument().querySelector('p')?.hasAttribute('data-doop-name')).toBe(false)
+  })
+
+  it('refuses the undo when the renamed layer is gone rather than renaming its neighbour', async () => {
+    showLayers('<body><p>First</p><p>Second</p></body>')
+    doubleClick('f1|body:nth-of-type(1) > p:nth-of-type(1)')
+    input().value = 'Lead'
+    press('Enter')
+    expect(updateFrame).toHaveBeenCalledTimes(1)
+    /* a teammate deletes the named paragraph */
+    act(() => useStore.getState().patchFrameLocal('f1', { html: '<body><p>Second</p></body>' }))
+    await act(async () => undo())
+    expect(updateFrame).toHaveBeenCalledTimes(1)
+    const paragraphs = [...savedDocument().querySelectorAll('p')]
+    expect(paragraphs.map((p) => p.textContent)).toEqual(['Second'])
+    expect(paragraphs[0]?.hasAttribute('data-doop-name')).toBe(false)
+    expect(paragraphs[0]?.hasAttribute('data-doop-id')).toBe(false)
+  })
+
+  it('keeps the id an element already wears instead of stamping another', async () => {
+    showLayers('<body><p data-doop-id="abc123">Hello</p></body>')
+    doubleClick('f1|body:nth-of-type(1) > p:nth-of-type(1)')
+    input().value = 'Greeting'
+    press('Enter')
+    expect(savedDocument().querySelectorAll('[data-doop-id]')).toHaveLength(1)
+    expect(savedDocument().querySelector('p')?.getAttribute('data-doop-id')).toBe('abc123')
+    expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', {
+      selector: 'body:nth-of-type(1) > p:nth-of-type(1)',
+      name: 'Greeting',
+    })
+  })
 
   it('does not rename a child of a locked layer', async () => {
     showLayers(nestedHtml.replace('id="box"', 'id="box" data-doop-locked="true"'))
@@ -260,7 +323,12 @@ describe('renaming in the Layers panel', () => {
       await Promise.resolve()
     })
     expect(savedDocument().querySelector('#photo')?.hasAttribute('data-doop-name')).toBe(false)
-    expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', { selector: '#photo', name: null })
+    expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', {
+      selector: '#photo',
+      name: null,
+      elementId: null,
+    })
+    expect(savedDocument().querySelector('#photo')?.hasAttribute('data-doop-id')).toBe(false)
     await act(async () => undo())
     expect(updateFrame).toHaveBeenCalledTimes(1)
   })

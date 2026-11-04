@@ -28,7 +28,9 @@ import {
   duplicateElements,
   elementFate,
   elementHtml,
+  elementIdAt,
   elementName,
+  freshElementId,
   htmlWithoutLayerNames,
   isElementHidden,
   isElementLocked,
@@ -105,10 +107,13 @@ export function renameLayer(frameId: string, selector: string, value: string) {
     if (isLayerLocked(frame, selector)) return
     const before = elementName(frame.html, selector)
     if (before === name) return
-    const entry = recordLayerName(frame.id, selector, before, name)
+    /* the element's identity for undo and redo: the id it wears, else one
+       stamped with the name, so a sibling added later cannot shift the target */
+    const elementId = elementIdAt(frame.html, selector) ?? freshElementId(frame.html)
+    const entry = recordLayerName(frame.id, selector, before, name, elementId)
     const started = historyEpoch()
     try {
-      await saveLayerName(frame.id, selector, name)
+      await saveLayerName(frame.id, selector, name, elementId)
     } catch (err) {
       dropEntry(entry)
       const s = useStore.getState()
