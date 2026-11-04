@@ -4,6 +4,7 @@ import {
   MAX_TOKEN_THEMES,
   aliasOf,
   effectiveValue,
+  frameTheme,
   nextTokenName,
   TOKEN_GROUPS,
   isThemeName,
@@ -12,6 +13,7 @@ import {
   resolveToken,
   tokenLabel,
   sortTokens,
+  withFrameTheme,
   type DesignToken,
   type ThemeRename,
   type TokenType,
@@ -22,6 +24,8 @@ import { DEVICE_FONTS } from '../lib/deviceFonts'
 import { fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { api } from '../lib/api'
+import { recordUpdate, trackSave } from '../lib/history'
+import { usePageCanvas } from '../lib/pages'
 import { Button } from './ui/button'
 import { Pressable } from './ui/pressable'
 import { Input } from './ui/input'
@@ -119,8 +123,15 @@ export function TokensSection() {
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   /** the open token's name, a type to create one of, or null */
   const [open, setOpen] = useState<{ name: string } | { create: TokenType } | null>(null)
-  /** which theme's values the rows show; null is the default */
-  const [viewTheme, setViewTheme] = useState<string | null>(null)
+  /* the frames a pick applies to: the selected ones, else every frame on the page */
+  const pageFrames = usePageCanvas()?.frames ?? []
+  const selectedFrames = useStore((s) => {
+    const ids = new Set(s.selectedIds.length ? s.selectedIds : s.selectedId ? [s.selectedId] : [])
+    return (s.canvas?.frames ?? []).filter((f) => ids.has(f.id))
+  })
+  const targets = selectedFrames.length ? selectedFrames : pageFrames
+  /** which theme the rows show and the frames wear; starts on the targets' own */
+  const [viewTheme, setViewTheme] = useState<string | null>(() => (targets[0] ? frameTheme(targets[0].html) : null))
   const [themeBusy, setThemeBusy] = useState(false)
   const [themeError, setThemeError] = useState<string | null>(null)
   /** the type groups folded shut */
@@ -138,6 +149,21 @@ export function TokensSection() {
       setThemeError(firstMessage(e, t('panels.tokensThemesSaveFailed')))
     } finally {
       setThemeBusy(false)
+    }
+  }
+
+  /** Show a theme: the rows switch to its values, and the target frames
+   *  switch their root to it, one undo step per frame. */
+  function showTheme(theme: string | null) {
+    setViewTheme(theme)
+    if (readOnly) return
+    for (const frame of targets) {
+      const before = frame.html
+      const html = withFrameTheme(before, theme)
+      if (html === before) continue
+      useStore.getState().patchFrameLocal(frame.id, { html })
+      recordUpdate(frame.id, { html: before }, { html }, true)
+      trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
     }
   }
 
@@ -173,7 +199,7 @@ export function TokensSection() {
             on={(shown ?? DEFAULT_THEME) === theme}
             fixed={theme === DEFAULT_THEME}
             readOnly={readOnly || themeBusy}
-            onShow={() => setViewTheme(theme === DEFAULT_THEME ? null : theme)}
+            onShow={() => showTheme(theme === DEFAULT_THEME ? null : theme)}
             onRename={(to) =>
               void saveThemes(
                 themes.map((m) => (m === theme ? to : m)),

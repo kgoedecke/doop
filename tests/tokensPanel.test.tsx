@@ -8,8 +8,10 @@ import type { DesignToken } from '../shared/designTokens'
 const setToken = vi.fn(() => Promise.resolve({ result: { name: '--color-ink', result: 'updated' }, tokens: [] }))
 const createTokens = vi.fn(() => Promise.resolve({ results: [{ name: '--x', result: 'created' }], tokens: [] }))
 const setTokenThemes = vi.fn(() => Promise.resolve({ themes: ['dark'], tokens: [] }))
+const updateFrame = vi.fn(() => Promise.resolve())
 vi.mock('../src/lib/api', () => ({
   api: {
+    updateFrame: (...args: unknown[]) => updateFrame(...(args as [])),
     setToken: (...args: unknown[]) => setToken(...(args as [])),
     createTokens: (...args: unknown[]) => createTokens(...(args as [])),
     setTokenThemes: (...args: unknown[]) => setTokenThemes(...(args as [])),
@@ -130,6 +132,9 @@ describe('TokensSection', () => {
   it('shows another theme’s values when it is picked from the dropdown', () => {
     pickTheme('dark')
     expect(themeRow('dark').getAttribute('aria-checked')).toBe('true')
+    /* and the page's frames wear it: the design switches, one save per frame */
+    expect(useStore.getState().canvas?.frames[0]?.html).toContain('data-doop-theme="dark"')
+    expect(updateFrame).toHaveBeenCalledWith('f1', { html: expect.stringContaining('data-doop-theme="dark"') })
     expect(text()).toContain('#eee')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#eee')
     /* a token without a dark value shows its default, marked as inherited */

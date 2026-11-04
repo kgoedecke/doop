@@ -27,8 +27,7 @@ fontSize | lineHeight | letterSpacing` (`TOKEN_TYPES`, grouped for menus by `TOK
   `renames` (`{ from, to }`, every token's value follows) first; a theme that leaves takes its
   values with it. Every check runs before anything is written, so a bad request changes
   nothing; a theme rename also rewrites `data-doop-theme` in frames. `frameTheme` /
-  `withFrameTheme` read and set a frame root's theme (no editor control yet; agents set the
-  attribute).
+  `withFrameTheme` read and set a frame root's theme; the Tokens tab's theme rows are the editor control.
 - Storage: `design_tokens` (migration 0044, PK canvas + name, `themes` jsonb) and
   `canvases.token_themes` jsonb. Hydrated with the canvas like guidelines; duplicates copy both.
 
@@ -82,8 +81,9 @@ in every frame and in aliasing tokens.
 - Layers panel → Tokens tab (`src/components/TokensPanel.tsx`, a `BracesIcon` tab beside Layers; the
   tab lives in the store as `layersTab`, so the collapsed rail's braces button opens the panel on it):
   laid out like the Pages section. A "Themes" heading whose plus adds `theme-N` at once, over a
-  row per theme, `default` first, the picked one ticked: the token rows show that theme's values
-  (`effectiveValue`, an inherited default greyed). A right click on a theme row renames it in
+  row per theme, `default` first, the picked one ticked: picking one switches the selected frames
+  (else every frame on the page) to it through `withFrameTheme`, one undo step per frame, and the
+  token rows show that theme's values (`effectiveValue`, an inherited default greyed). A right click on a theme row renames it in
   place (a double click on the name does too; its values follow) or deletes it; `default` is fixed. Then a "Tokens" heading whose plus
   is the menu of the eleven types in their three groups, over one folding row per type (chevron,
   glyph, as a frame in the layer tree) with the token rows under it. Picking a type opens
