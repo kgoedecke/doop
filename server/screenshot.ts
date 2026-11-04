@@ -47,10 +47,93 @@ function findBrowser(): string {
 
 let browserPromise: Promise<Browser> | null = null
 
+/** Bounds every step a wedged Chromium can stall on. Exported so tests can
+ *  shorten them; production keeps these values. */
+export const renderTuning = {
+  /** one render attempt, page creation to encoded bytes */
+  renderTimeoutMs: 20_000,
+  /** the liveness probe a reused browser must answer before it is handed out */
+  pingTimeoutMs: 2_000,
+  /** tearing down a browser context */
+  closeTimeoutMs: 5_000,
+}
+
+export class RenderTimeoutError extends Error {
+  constructor(step: string, ms: number) {
+    super(`${step} did not finish within ${ms}ms`)
+    this.name = 'RenderTimeoutError'
+  }
+}
+
+function withDeadline<T>(work: Promise<T>, ms: number, step: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new RenderTimeoutError(step, ms)), ms)
+    work.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/** The hosted server's one long-lived Chromium has been seen to stop creating
+ *  pages while its DevTools socket stays open: `connected` says yes, every
+ *  `newPage` waits 30s for a target that never comes. Such a browser is
+ *  dropped from the cache and killed, so the next caller launches a fresh one. */
+function discardBrowser(browser: Browser): void {
+  if (browserPromise) {
+    const cached = browserPromise
+    cached.then(
+      (b) => {
+        if (b === browser && browserPromise === cached) browserPromise = null
+      },
+      () => {},
+    )
+  }
+  const child = browser.process()
+  browser
+    .close()
+    .catch(() => {})
+    .finally(() => {
+      if (child && child.exitCode === null && !child.killed) child.kill('SIGKILL')
+    })
+}
+
+/** Did the failure come from the browser rather than the frame? A stall, a
+ *  closed target or a broken DevTools session all mean the browser is gone
+ *  for good; a fresh one may well succeed. */
+export function isBrowserFailure(error: unknown): boolean {
+  if (error instanceof RenderTimeoutError) return true
+  if (!(error instanceof Error)) return false
+  return (
+    error.name === 'TargetCloseError' ||
+    error.name === 'ProtocolError' ||
+    /Target closed|Session closed|Protocol error|Connection closed|waiting for target|Browser was disconnected|Navigating frame was detached/i.test(
+      error.message,
+    )
+  )
+}
+
+async function pingBrowser(browser: Browser): Promise<boolean> {
+  if (!browser.connected) return false
+  try {
+    await withDeadline(browser.version(), renderTuning.pingTimeoutMs, 'browser liveness check')
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function getBrowser(): Promise<Browser> {
   if (browserPromise) {
     const b = await browserPromise
-    if (b.connected) return b
+    if (await pingBrowser(b)) return b
+    discardBrowser(b)
     browserPromise = null
   }
   const launching = launchBrowser()
@@ -61,6 +144,28 @@ export async function getBrowser(): Promise<Browser> {
     if (browserPromise === launching) browserPromise = null
   })
   return launching
+}
+
+/** Run a render against the shared browser, under the render deadline. When
+ *  the attempt fails for a reason that points at the browser, that browser is
+ *  discarded and the work runs once more on a fresh launch. */
+export async function withBrowserRetry<T>(step: string, work: (browser: Browser) => Promise<T>): Promise<T> {
+  const attempt = async () => {
+    const browser = await getBrowser()
+    try {
+      return await withDeadline(work(browser), renderTuning.renderTimeoutMs, step)
+    } catch (error) {
+      if (isBrowserFailure(error)) discardBrowser(browser)
+      throw error
+    }
+  }
+  try {
+    return await attempt()
+  } catch (error) {
+    if (!isBrowserFailure(error)) throw error
+    console.warn(`${step}: browser failed (${error instanceof Error ? error.message : String(error)}), relaunching`)
+    return attempt()
+  }
 }
 
 /** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
@@ -90,9 +195,9 @@ export interface IsolatedPage {
 
 /** External pages never share cookies, cache or service workers across users
  *  or imports. Closing the wrapper tears down the entire browser context. */
-export async function openIsolatedPage(): Promise<IsolatedPage> {
-  const browser = await getBrowser()
-  const context = await browser.createBrowserContext()
+export async function openIsolatedPage(browser?: Browser): Promise<IsolatedPage> {
+  const b = browser ?? (await getBrowser())
+  const context = await b.createBrowserContext()
   try {
     const page = await context.newPage()
     let closed = false
@@ -101,7 +206,9 @@ export async function openIsolatedPage(): Promise<IsolatedPage> {
       close: async () => {
         if (closed) return
         closed = true
-        await context.close().catch(() => {})
+        /* a wedged browser stalls here too; the deadline keeps the caller's
+           finally from hanging on the teardown */
+        await withDeadline(context.close(), renderTuning.closeTimeoutMs, 'closing the page').catch(() => {})
       },
     }
   } catch (error) {
@@ -110,8 +217,8 @@ export async function openIsolatedPage(): Promise<IsolatedPage> {
   }
 }
 
-export async function loadFramePage(frame: Frame): Promise<IsolatedPage> {
-  const loaded = await openIsolatedPage()
+export async function loadFramePage(frame: Frame, browser?: Browser): Promise<IsolatedPage> {
+  const loaded = await openIsolatedPage(browser)
   const { page } = loaded
   try {
     const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
@@ -178,8 +285,12 @@ export interface FrameInspection {
 
 /** A compact, rendered representation for agents. It intentionally relies on
  * visible text, semantics, geometry and computed styles rather than classes. */
-export async function inspectFrame(frame: Frame): Promise<FrameInspection> {
-  const loaded = await loadFramePage(frame)
+export function inspectFrame(frame: Frame): Promise<FrameInspection> {
+  return withBrowserRetry('inspecting the frame', (browser) => inspectFrameOnce(frame, browser))
+}
+
+async function inspectFrameOnce(frame: Frame, browser: Browser): Promise<FrameInspection> {
+  const loaded = await loadFramePage(frame, browser)
   const { page } = loaded
   try {
     /* tsx/esbuild annotates nested functions with __name; page.evaluate
@@ -379,13 +490,23 @@ export async function inspectFrame(frame: Frame): Promise<FrameInspection> {
   }
 }
 
-export async function renderFrame(
+export interface RenderOptions {
+  type?: 'png' | 'jpeg'
+  quality?: number
+  maxHeight?: number
+}
+
+export function renderFrame(
   frame: Frame,
   /* output pixel density — fractional values downscale huge frames */
   scale: number = 1,
-  opts: { type?: 'png' | 'jpeg'; quality?: number; maxHeight?: number } = {},
+  opts: RenderOptions = {},
 ): Promise<Buffer> {
-  const loaded = await loadFramePage(frame)
+  return withBrowserRetry('rendering the frame', (browser) => renderFrameOnce(frame, scale, opts, browser))
+}
+
+async function renderFrameOnce(frame: Frame, scale: number, opts: RenderOptions, browser: Browser): Promise<Buffer> {
+  const loaded = await loadFramePage(frame, browser)
   const { page } = loaded
   try {
     await page.setViewport({
