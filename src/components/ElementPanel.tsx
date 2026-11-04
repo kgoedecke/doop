@@ -50,7 +50,10 @@ import { useCanvasFonts } from '../lib/customFonts'
 import { DEVICE_FONTS } from '../lib/deviceFonts'
 import {
   aliasOf,
+  effectiveValue,
+  frameTheme,
   isTokenName,
+  nextTokenName,
   normalizeTokenName,
   resolveToken,
   sortTokens,
@@ -465,12 +468,15 @@ function boundToken(info: ElementInfo, property: string, tokens: readonly Design
 function fieldToken(
   token: DesignToken | undefined,
   tokens: readonly DesignToken[],
+  theme: string | undefined,
   detach: () => void,
 ): FieldToken | undefined {
   if (!token) return undefined
   return {
     name: tokenLabel(token.name),
-    ...(token.type === 'color' ? { swatch: resolveToken(tokens, token.name) ?? token.value } : {}),
+    ...(token.type === 'color'
+      ? { swatch: resolveToken(tokens, token.name, theme) ?? effectiveValue(token, theme) }
+      : {}),
     onDetach: detach,
   }
 }
@@ -482,6 +488,7 @@ function TokenMenu({
   canvasId,
   types,
   tokens,
+  theme,
   literal,
   onPick,
   placement = 'inline',
@@ -489,6 +496,8 @@ function TokenMenu({
   canvasId: string
   types: readonly TokenType[]
   tokens: readonly DesignToken[]
+  /** the frame's theme: values and swatches are shown as that theme resolves them */
+  theme?: string
   /** the field's current value, what a new token is made from; null when there is none */
   literal: string | null
   onPick: (name: string) => void
@@ -509,7 +518,7 @@ function TokenMenu({
 
   function startCreating() {
     setValue(literal ?? '')
-    setName('')
+    setName(tokenLabel(nextTokenName(tokens, type)))
     setError(null)
     setCreating(true)
   }
@@ -652,10 +661,10 @@ function TokenMenu({
                   close()
                 }}
               >
-                <TokenSwatch token={token} tokens={tokens} size={12} />
+                <TokenSwatch token={token} tokens={tokens} size={12} theme={theme} />
                 <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink">{tokenLabel(token.name)}</span>
                 <span className="max-w-[40%] flex-none truncate font-mono text-[10.5px] text-ink-faint">
-                  {token.value}
+                  {effectiveValue(token, theme)}
                 </span>
               </button>
             ))}
@@ -684,8 +693,10 @@ function DesignTab({
   const customFamilies = libraryFamilies(library)
   /* a field bound to a token shows its name; the menu beside it binds one */
   const bound = (property: string) => boundToken(info, property, tokens)
+  /* the frame's theme, so swatches and values read as this frame resolves them */
+  const theme = frameTheme(frame.html) ?? undefined
   const chip = (property: string, literal: string | null) =>
-    fieldToken(bound(property), tokens, () => apply({ [property]: literal }))
+    fieldToken(bound(property), tokens, theme, () => apply({ [property]: literal }))
   const menu = (
     property: string,
     types: readonly TokenType[],
@@ -698,6 +709,7 @@ function DesignTab({
       canvasId={frame.canvasId}
       types={types}
       tokens={tokens}
+      theme={theme}
       literal={literal}
       placement={placement}
       onPick={(name) => apply({ [property]: `var(${name})`, ...extra })}

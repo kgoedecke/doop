@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import {
   DEFAULT_THEME,
   MAX_TOKEN_THEMES,
   aliasOf,
   effectiveValue,
+  nextTokenName,
   TOKEN_GROUPS,
   isThemeName,
   isTokenName,
@@ -25,10 +26,17 @@ import { Button } from './ui/button'
 import { Pressable } from './ui/pressable'
 import { Input } from './ui/input'
 import { Field } from './ui/field'
-import { IconButton } from './ui/icon-button'
 import { ListHint } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { sectionHeading } from './PagesPanel'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import {
@@ -47,7 +55,6 @@ import {
   TextIcon,
   TextSizeIcon,
   VerticalPaddingIcon,
-  XIcon,
 } from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
@@ -103,21 +110,6 @@ function firstMessage(e: unknown, fallback: string): string {
 
 const sectionBtn = 'size-5 rounded-tag text-ink-faint hover:bg-paper-deep hover:text-ink'
 
-/** A name that reads like a token of each type, as the name field's hint. */
-const NAME_HINT: Record<TokenType, string> = {
-  color: 'primary',
-  opacity: 'muted',
-  radius: 'card',
-  spacing: 'space-4',
-  container: 'content',
-  breakpoint: 'md',
-  fontFamily: 'body',
-  fontWeight: 'medium',
-  fontSize: 'copy',
-  lineHeight: 'tight',
-  letterSpacing: 'caps',
-}
-
 /** The Tokens tab: the canvas's design tokens by type, shown under one
  *  theme at a time, with the theme picker and the add button on one line. */
 export function TokensSection() {
@@ -129,11 +121,25 @@ export function TokensSection() {
   const [open, setOpen] = useState<{ name: string } | { create: TokenType } | null>(null)
   /** which theme's values the rows show; null is the default */
   const [viewTheme, setViewTheme] = useState<string | null>(null)
-  const [managing, setManaging] = useState(false)
+  const [themeBusy, setThemeBusy] = useState(false)
+  const [themeError, setThemeError] = useState<string | null>(null)
   /** the type groups folded shut */
   const [folded, setFolded] = useState<Set<TokenType>>(() => new Set())
   const t = useT()
   if (!canvasId) return null
+
+  async function saveThemes(next: string[], renames: ThemeRename[] = []) {
+    if (themeBusy || !canvasId) return
+    setThemeBusy(true)
+    setThemeError(null)
+    try {
+      await api.setTokenThemes(canvasId, next, renames)
+    } catch (e) {
+      setThemeError(firstMessage(e, t('panels.tokensThemesSaveFailed')))
+    } finally {
+      setThemeBusy(false)
+    }
+  }
 
   /* a theme that left takes the view back to the default */
   const shown = viewTheme && themes.includes(viewTheme) ? viewTheme : null
@@ -148,51 +154,66 @@ export function TokensSection() {
             variant="bare"
             size="icon-sm"
             className={sectionBtn}
-            aria-label={t('panels.tokensManageThemes')}
-            title={t('panels.tokensManageThemes')}
-            onClick={() => setManaging(true)}
+            aria-label={t('panels.tokensAddTheme')}
+            title={t('panels.tokensAddTheme')}
+            disabled={themeBusy || themes.length >= MAX_TOKEN_THEMES}
+            onClick={() => void saveThemes([...themes, nextThemeName(themes)])}
           >
             <PlusIcon className="size-3.5" />
           </Button>
         )}
       </div>
-      {/* every theme on a row, as the pages are; the one the rows show wears the tick */}
+      {/* every theme on a row, as the pages are; the one the rows show wears
+          the tick, and a right click renames or deletes one */}
       <div className="px-2 pb-1" role="radiogroup" aria-label={t('panels.tokensTheme')}>
-        {[DEFAULT_THEME, ...themes].map((theme) => {
-          const on = (shown ?? DEFAULT_THEME) === theme
-          return (
-            <Pressable
-              key={theme}
-              role="radio"
-              aria-checked={on}
-              className={cn(
-                'flex h-[27px] w-full items-center gap-1 rounded-row pr-2.5 pl-2.5 text-left text-body text-ink-soft hover:bg-sub',
-                on && 'bg-paper-deep text-ink hover:bg-paper-deep',
-              )}
-              onClick={() => setViewTheme(theme === DEFAULT_THEME ? null : theme)}
-            >
-              <span className="grid size-4 flex-none place-items-center text-ink">
-                {on && <CheckIcon className="size-3.5" />}
-              </span>
-              <span className={cn('min-w-0 flex-1 truncate pl-0.5', on && 'font-medium')}>{theme}</span>
-            </Pressable>
-          )
-        })}
+        {[DEFAULT_THEME, ...themes].map((theme) => (
+          <ThemeRow
+            key={theme}
+            theme={theme}
+            on={(shown ?? DEFAULT_THEME) === theme}
+            fixed={theme === DEFAULT_THEME}
+            readOnly={readOnly || themeBusy}
+            onShow={() => setViewTheme(theme === DEFAULT_THEME ? null : theme)}
+            onRename={(to) =>
+              void saveThemes(
+                themes.map((m) => (m === theme ? to : m)),
+                [{ from: theme, to }],
+              )
+            }
+            onDelete={() => void saveThemes(themes.filter((m) => m !== theme))}
+          />
+        ))}
+        {themeError && <p className="px-2.5 pt-1 text-caption text-accent-ink">{themeError}</p>}
       </div>
       {/* Tokens: the heading with its plus, the rows by type under it */}
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span className={sectionHeading}>{t('panels.tokensTitle')}</span>
         {!readOnly && (
-          <Button
-            variant="bare"
-            size="icon-sm"
-            className={sectionBtn}
-            aria-label={t('panels.tokensNew')}
-            title={t('panels.tokensNew')}
-            onClick={() => setOpen({ create: 'color' })}
-          >
-            <PlusIcon className="size-3.5" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="bare"
+                size="icon-sm"
+                className={sectionBtn}
+                aria-label={t('panels.tokensNew')}
+                title={t('panels.tokensNew')}
+              >
+                <PlusIcon className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent width="sm">
+              {TOKEN_GROUPS.map((group, i) => (
+                <div key={group.join()}>
+                  {i > 0 && <DropdownMenuSeparator />}
+                  {group.map((type) => (
+                    <DropdownMenuItem key={type} onSelect={() => setOpen({ create: type })}>
+                      {t(TOKEN_TYPE_LABEL[type])}
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
       {sorted.length === 0 && <ListHint>{t('panels.tokensHint')}</ListHint>}
@@ -259,7 +280,6 @@ export function TokensSection() {
           onClose={() => setOpen(null)}
         />
       )}
-      {managing && <ThemesModal canvasId={canvasId} themes={themes} onClose={() => setManaging(false)} />}
     </>
   )
 }
@@ -305,10 +325,15 @@ const DEFAULT_VALUE: Record<TokenType, string> = {
   letterSpacing: '0em',
 }
 
-function draftOf(token: DesignToken | null, createType: TokenType | null, initialValue = ''): Draft {
+function draftOf(
+  token: DesignToken | null,
+  createType: TokenType | null,
+  tokens: readonly DesignToken[],
+  initialValue = '',
+): Draft {
   const type = token?.type ?? createType ?? 'color'
   return {
-    name: token ? tokenLabel(token.name) : '',
+    name: tokenLabel(token ? token.name : nextTokenName(tokens, type)),
     type,
     value: token?.value ?? (initialValue || DEFAULT_VALUE[type]),
     description: token?.description ?? '',
@@ -339,7 +364,7 @@ export function TokenModal({
   const themes = useStore((s) => s.canvas?.tokenThemes ?? [])
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const creating = name === null
-  const [draft, setDraft] = useState<Draft>(() => draftOf(token, createType, initialValue))
+  const [draft, setDraft] = useState<Draft>(() => draftOf(token, createType, tokens, initialValue))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -434,42 +459,18 @@ export function TokenModal({
           void save()
         }}
       >
-        <div className={cn('grid gap-3', creating && 'sm:grid-cols-[minmax(0,1fr)_160px]')}>
+        <div className="grid gap-3">
           <Field label={t('panels.tokensName')}>
             <Input
               variant="well"
               className="font-mono"
               autoFocus={creating}
-              placeholder={NAME_HINT[draft.type]}
+              aria-label={t('panels.tokensName')}
               value={draft.name}
               disabled={busy || readOnly}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
             />
           </Field>
-          {creating && (
-            <Field label={t('panels.tokensType')}>
-              <Select
-                value={draft.type}
-                onValueChange={(v) => {
-                  const type = v as TokenType
-                  /* a type change the value cannot carry over starts from the type's default */
-                  setDraft({ ...draft, type, value: creating ? DEFAULT_VALUE[type] : draft.value })
-                }}
-                disabled={busy || readOnly}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TOKEN_GROUPS.flat().map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {t(TOKEN_TYPE_LABEL[type])}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
         </div>
         <Field label={t('panels.tokensValue')}>
           <ValueInput
@@ -778,143 +779,139 @@ function ValueInput({
   )
 }
 
-/** The canvas's themes in a modal: `default` first and fixed, then each
- *  theme on a row whose name can be retyped (a rename moves its values
- *  along) and removed, and a line to add one; every change saves at once. */
-function ThemesModal({ canvasId, themes, onClose }: { canvasId: string; themes: string[]; onClose: () => void }) {
-  const [draft, setDraft] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const t = useT()
-  const typed = draft.trim().toLowerCase()
-  const canAdd = isThemeName(typed) && !themes.includes(typed) && themes.length < MAX_TOKEN_THEMES && !busy
-
-  async function save(next: string[], renames: ThemeRename[] = []) {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      await api.setTokenThemes(canvasId, next, renames)
-      setDraft('')
-    } catch (e) {
-      setError(firstMessage(e, t('panels.tokensThemesSaveFailed')))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function rename(from: string, raw: string) {
-    const to = raw.trim().toLowerCase()
-    if (to === from) return
-    if (!isThemeName(to) || themes.includes(to)) {
-      setError(t('panels.tokensThemeInvalid'))
-      return
-    }
-    void save(
-      themes.map((theme) => (theme === from ? to : theme)),
-      [{ from, to }],
-    )
-  }
-
-  return (
-    <Modal size="sm" onClose={() => !busy && onClose()}>
-      <ModalTitle>{t('panels.tokensThemesTitle')}</ModalTitle>
-      <ModalLede>{t('panels.tokensThemesLede')}</ModalLede>
-      <div className="mt-3 flex flex-col gap-0.5">
-        <div className="flex h-8 items-center gap-2 rounded-row px-2">
-          <span className="min-w-0 flex-1 truncate font-mono text-label text-ink">{DEFAULT_THEME}</span>
-          <span className="text-caption text-ink-faint">{t('panels.tokensDefaultTheme')}</span>
-        </div>
-        {themes.map((theme) => (
-          <ThemeRow
-            key={theme}
-            theme={theme}
-            readOnly={busy}
-            onRename={(name) => rename(theme, name)}
-            onRemove={() => void save(themes.filter((m) => m !== theme))}
-          />
-        ))}
-        {themes.length < MAX_TOKEN_THEMES && (
-          <form
-            className="mt-1.5 flex items-center gap-1.5 border-t border-line-soft pt-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (canAdd) void save([...themes, typed])
-            }}
-          >
-            <Input
-              variant="well"
-              inputSize="sm"
-              className="min-w-0 flex-1 font-mono"
-              aria-label={t('panels.tokensAddTheme')}
-              placeholder={t('panels.tokensThemePlaceholder')}
-              value={draft}
-              disabled={busy}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-            <IconButton
-              size="md"
-              variant="primary"
-              type="submit"
-              aria-label={t('panels.tokensAddTheme')}
-              disabled={!canAdd}
-            >
-              <PlusIcon size="rail" />
-            </IconButton>
-          </form>
-        )}
-      </div>
-      {error && <p className="mt-2.5 text-copy text-accent-ink">{error}</p>}
-      <ModalActions>
-        <ModalSpacer />
-        <Button variant="ghost" disabled={busy} onClick={onClose}>
-          {t('common.close')}
-        </Button>
-      </ModalActions>
-    </Modal>
-  )
+/** The next free `theme-N` name. */
+function nextThemeName(themes: readonly string[]): string {
+  for (let i = 1; ; i++) if (!themes.includes(`theme-${i}`)) return `theme-${i}`
 }
 
-/** One theme: its name as a field that renames on Enter or blur, and its remove control. */
+/** One theme on a row: click shows its values (the tick), a right click
+ *  renames it in place or deletes it; `default` is fixed. */
 function ThemeRow({
   theme,
+  on,
+  fixed,
   readOnly,
+  onShow,
   onRename,
-  onRemove,
+  onDelete,
 }: {
   theme: string
+  on: boolean
+  fixed: boolean
   readOnly: boolean
-  onRename: (name: string) => void
-  onRemove: () => void
+  onShow: () => void
+  onRename: (to: string) => void
+  onDelete: () => void
 }) {
+  const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(theme)
-  const [seen, setSeen] = useState(theme)
+  const [bad, setBad] = useState(false)
+  /* the menu hands focus back to the row as it closes, which would blur the
+     rename field it just opened; the ref is set before the state lands */
+  const renameStarting = useRef(false)
+  const openedAt = useRef(0)
+  const reclaimed = useRef(false)
   const t = useT()
-  if (seen !== theme) {
-    setSeen(theme)
-    setName(theme)
+
+  function commit() {
+    const to = name.trim().toLowerCase()
+    setRenaming(false)
+    setBad(false)
+    if (to === theme) return
+    if (!isThemeName(to)) {
+      setBad(true)
+      setName(theme)
+      return
+    }
+    onRename(to)
   }
-  return (
-    <div className="flex h-8 items-center gap-1 rounded-row pl-1 pr-0.5 hover:bg-sub">
-      <Input
-        variant="bare"
-        inputSize="auto"
-        className="h-6 min-w-0 flex-1 px-1 font-mono text-label"
-        aria-label={t('panels.tokensRenameTheme', { theme })}
-        value={name}
-        readOnly={readOnly}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={() => onRename(name)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-          if (e.key === 'Escape') setName(theme)
-        }}
-      />
-      {!readOnly && (
-        <IconButton size="sm" variant="danger" aria-label={t('panels.tokensRemoveTheme', { theme })} onClick={onRemove}>
-          <XIcon size="rail" />
-        </IconButton>
+
+  const row = (
+    <div
+      className={cn(
+        'group flex h-[27px] items-center gap-1 rounded-row pr-2.5 pl-2.5 text-body text-ink-soft hover:bg-sub',
+        on && 'bg-paper-deep text-ink hover:bg-paper-deep',
       )}
+    >
+      <span className="grid size-4 flex-none place-items-center text-ink">
+        {on && <CheckIcon className="size-3.5" />}
+      </span>
+      {renaming ? (
+        <form
+          className="min-w-0 flex-1"
+          onSubmit={(e) => {
+            e.preventDefault()
+            commit()
+          }}
+        >
+          <Input
+            variant="bare"
+            inputSize="auto"
+            autoFocus
+            aria-label={t('panels.tokensRenameTheme', { theme })}
+            className="h-6 w-full rounded-tag bg-surface px-1.5 text-body text-ink shadow-elevation-1-focus"
+            value={name}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={(e) => {
+              /* the menu hands focus back to the row as it closes, right after
+                 the field opened: take it back rather than commit */
+              if (!reclaimed.current && Date.now() - openedAt.current < 250) {
+                reclaimed.current = true
+                const field = e.target
+                setTimeout(() => field.focus(), 0)
+                return
+              }
+              commit()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setName(theme)
+                setRenaming(false)
+              }
+            }}
+          />
+        </form>
+      ) : (
+        <Pressable
+          role="radio"
+          aria-checked={on}
+          className={cn('min-w-0 flex-1 truncate py-1.5 pl-0.5 text-left', on && 'font-medium')}
+          onClick={onShow}
+        >
+          {theme}
+        </Pressable>
+      )}
+      {bad && <span className="text-caption text-accent-ink">{t('panels.tokensThemeInvalidShort')}</span>}
     </div>
+  )
+  if (fixed || readOnly) return row
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent
+        onCloseAutoFocus={(e) => {
+          if (renameStarting.current) {
+            renameStarting.current = false
+            e.preventDefault()
+          }
+        }}
+      >
+        <ContextMenuItem
+          onSelect={() => {
+            renameStarting.current = true
+            openedAt.current = Date.now()
+            reclaimed.current = false
+            setName(theme)
+            setRenaming(true)
+          }}
+        >
+          {t('panels.tokensRenameThemeItem')}
+        </ContextMenuItem>
+        <ContextMenuItem tone="danger" onSelect={onDelete}>
+          {t('panels.tokensDeleteTheme')}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }

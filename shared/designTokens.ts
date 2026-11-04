@@ -288,6 +288,30 @@ export function withTokenBlock(
   return `${html.slice(0, at)}${tag}${html.slice(at)}`
 }
 
+/** The stem a new token of each type is named from: `radius-1`, `color-2`. */
+export const TOKEN_NAME_STEM: Record<TokenType, string> = {
+  color: 'color',
+  opacity: 'opacity',
+  radius: 'radius',
+  spacing: 'spacing',
+  container: 'container',
+  breakpoint: 'breakpoint',
+  fontFamily: 'font',
+  fontWeight: 'weight',
+  fontSize: 'size',
+  lineHeight: 'line-height',
+  letterSpacing: 'letter-spacing',
+}
+
+/** The next free `stem-N` name for a type, counting from 1. */
+export function nextTokenName(tokens: readonly Pick<DesignToken, 'name'>[], type: TokenType): string {
+  const taken = new Set(tokens.map((t) => t.name))
+  for (let i = 1; ; i++) {
+    const name = `--${TOKEN_NAME_STEM[type]}-${i}`
+    if (!taken.has(name)) return name
+  }
+}
+
 /** The HTML with every `data-doop-theme="from"` switched to `to`. */
 export function renameThemeAttrs(html: string, from: string, to: string): string {
   const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

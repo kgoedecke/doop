@@ -1577,6 +1577,8 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
         (el) => (el as HTMLInputElement).value,
       ),
     ).toBe('3px')
+    /* the name comes prefilled (radius-1); replace it */
+    await name!.click({ count: 3 })
     await name!.type('card')
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => !document.querySelector('[data-slot="popover-content"]'), { timeout: 10_000 })

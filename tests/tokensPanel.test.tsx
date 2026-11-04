@@ -114,9 +114,6 @@ describe('TokensSection', () => {
   }
   const pickTheme = (label: string) => act(() => themeRow(label).click())
 
-  /* the Manage themes modal, from the Themes heading's plus */
-  const openManage = () => act(() => button('Manage themes…').click())
-
   it('lists tokens by type, colours first, under the default theme', () => {
     expect(text().indexOf('color-ink')).toBeLessThan(text().indexOf('spacing-4'))
     expect(themeRow('default').getAttribute('aria-checked')).toBe('true')
@@ -139,51 +136,67 @@ describe('TokensSection', () => {
     expect(container.querySelector('[title="same as default"]')?.textContent).toBe('16px')
   })
 
-  it('creates a token from the plus button, naming it after its type', async () => {
-    act(() => button('New token').click())
-    expect(document.body.textContent).toContain('New Color token')
-    type(input('primary'), 'brand')
-    type(input('A CSS value, or var(--other) to alias a token'), '#abcdef')
+  it('creates a token of the type picked from the plus menu, named after it', async () => {
+    /* Radix opens a menu on pointerdown, not click */
+    act(() => {
+      button('New token').dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }),
+      )
+    })
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (el) => el.textContent?.trim() === 'Radius',
+    )
+    expect(item).toBeTruthy()
+    act(() => item!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
+    act(() => item!.click())
+    expect(document.body.textContent).toContain('New Radius token')
+    /* the next free stem-N name and the type's default value are prefilled */
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe('radius-1')
+    expect(input('A CSS value, or var(--other) to alias a token').value).toBe('8')
     await act(async () => {
       button('Save').click()
       await Promise.resolve()
     })
     expect(createTokens).toHaveBeenCalledWith('c1', [
-      { name: '--brand', type: 'color', value: '#abcdef', description: undefined, themes: {} },
+      { name: '--radius-1', type: 'radius', value: '8px', description: undefined, themes: {} },
     ])
   })
 
-  it('adds and removes themes from the manage modal', async () => {
-    openManage()
-    const field = document.querySelector<HTMLInputElement>('input[aria-label="Add a theme"]')!
-    type(field, 'Compact')
+  it('adds a theme from the plus, and renames or deletes one from its context menu', async () => {
     await act(async () => {
       button('Add a theme').click()
       await Promise.resolve()
     })
-    expect(setTokenThemes).toHaveBeenCalledWith('c1', ['dark', 'compact'], [])
-    await act(async () => {
-      button('Remove dark').click()
-      await Promise.resolve()
-    })
-    expect(setTokenThemes).toHaveBeenCalledWith('c1', [], [])
-  })
-
-  it('shows the default theme first and renames a theme from its row', async () => {
-    openManage()
-    expect(document.body.textContent).toContain('the value itself')
+    expect(setTokenThemes).toHaveBeenCalledWith('c1', ['dark', 'theme-1'], [])
+    const menuItem = (label: string) => {
+      const el = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (e) => e.textContent?.trim() === label,
+      )
+      if (!el) throw new Error(`no menu item “${label}”`)
+      act(() => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
+      act(() => el.click())
+    }
+    const rightClick = (label: string) =>
+      act(() => {
+        themeRow(label).dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 10 }),
+        )
+      })
+    rightClick('dark')
+    menuItem('Rename')
     const field = document.querySelector<HTMLInputElement>('input[aria-label="Rename dark"]')!
     type(field, 'Night')
+    /* Enter commits (a blur right after opening is the menu's focus hand-back, not a commit) */
     await act(async () => {
-      field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+      field.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
       await Promise.resolve()
     })
     expect(setTokenThemes).toHaveBeenCalledWith('c1', ['night'], [{ from: 'dark', to: 'night' }])
-    type(field, 'default')
+    rightClick('dark')
+    menuItem('Delete theme')
     await act(async () => {
-      field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
       await Promise.resolve()
     })
-    expect(document.body.textContent).toContain('not “default”')
+    expect(setTokenThemes).toHaveBeenCalledWith('c1', [], [])
   })
 })

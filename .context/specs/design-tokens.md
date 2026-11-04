@@ -81,24 +81,26 @@ in every frame and in aliasing tokens.
 
 - Layers panel → Tokens tab (`src/components/TokensPanel.tsx`, a `BracesIcon` tab beside Layers; the
   tab lives in the store as `layersTab`, so the collapsed rail's braces button opens the panel on it):
-  laid out like the Pages section. A "Themes" heading with a plus (opens `ThemesModal`, where each
-  theme's row renames it on Enter or blur with its values following, ✕ removes it and a line adds
-  one, saving at once) over a row per theme, `default` first, the picked one ticked: the token rows
-  show that theme's values (`effectiveValue`, an inherited default greyed). Then a "Tokens" heading
-  with a plus that opens `TokenModal` on a colour, over one folding row per type (chevron, glyph, as a
-  frame in the layer tree) with the token rows under it. The modal's
-  type select shows only while creating (a type is fixed once a token exists) and picks any type,
-  with a value control per type (swatch and hex, font and weight lists, a
-  number with its unit, a ratio), a default value and a name hint per type, a value per theme, an
-  alias picker of same-type tokens, and Enter to save. Names are shown and typed without the `--`.
+  laid out like the Pages section. A "Themes" heading whose plus adds `theme-N` at once, over a
+  row per theme, `default` first, the picked one ticked: the token rows show that theme's values
+  (`effectiveValue`, an inherited default greyed). A right click on a theme row renames it in
+  place (its values follow) or deletes it; `default` is fixed. Then a "Tokens" heading whose plus
+  is the menu of the eleven types in their three groups, over one folding row per type (chevron,
+  glyph, as a frame in the layer tree) with the token rows under it. Picking a type opens
+  `TokenModal` named `stem-N` for it (`nextTokenName`: `radius-1`, `color-2`, past the names
+  taken) with the type's default value; the modal has no type control, since a type is fixed
+  once a token exists. It has a value control per type (swatch and hex, font and weight lists, a
+  number with its unit, a ratio), a value per theme, an alias picker of same-type tokens, and
+  Enter to save. Names are shown and typed without the `--`.
 - Design panel (`ElementPanel.tsx`): fill, stroke and text colour, corner radius and font size
   carry a braces button that overlays the field's unit on hover (`trailing` on `ColorField` /
   `NumberField`, absolutely placed so the value keeps its width); the font family and weight
   selects, each on its own row now, carry a field-height one beside them (`placement="beside"`). It opens a popover
   (`TokenMenu`) listing the canvas's tokens of that type; picking one writes `var(--name)`
   inline. Its "+" opens a card beside the list with the field's current value and a name;
-  Enter creates the token and binds the field, Figma's "create variable" from a fill. A bound
-  field wins over a mixed multi-selection reading, and shows the token name as a read-only chip with the resolved swatch, and a broken-chain
+  Enter creates the token and binds the field, Figma's "create variable" from a fill. The menu's
+  values and swatches, and a bound chip's swatch, resolve under the frame's own theme
+  (`frameTheme`). A bound field wins over a mixed multi-selection reading, and shows the token name as a read-only chip with the resolved swatch, and a broken-chain
   button (`UnlinkIcon`, Lucide's `Unlink`) beside it detaches the field to the literal (`FieldToken`). The runtime's `inline` map also reports the shorthands the panel
   edits (`border-radius`, `border-color`, …), since a `var()` on a shorthand is invisible
   through its longhands. The unit span of a `NumberField` / `TextField` carries `data-unit`,

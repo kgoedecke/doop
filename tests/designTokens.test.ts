@@ -3,6 +3,7 @@ import {
   TOKEN_BLOCK_ATTR,
   aliasOf,
   frameTheme,
+  nextTokenName,
   normalizeTokenName,
   normalizeTokenValue,
   renameThemeAttrs,
@@ -94,6 +95,14 @@ describe('values and aliases', () => {
     expect(normalizeTokenValue('red; } body { display:none')).toBeNull()
     expect(normalizeTokenValue('')).toBeNull()
     expect(normalizeTokenValue('<script>')).toBeNull()
+  })
+
+  it('names a new token from its type, past the names taken', () => {
+    expect(nextTokenName([], 'radius')).toBe('--radius-1')
+    expect(nextTokenName([token('--radius-1', 'radius', '4px'), token('--radius-2', 'radius', '8px')], 'radius')).toBe(
+      '--radius-3',
+    )
+    expect(nextTokenName([token('--font-1', 'fontFamily', 'Inter')], 'fontSize')).toBe('--size-1')
   })
 
   it('normalizes a typed name to the CSS custom property', () => {
