@@ -46,7 +46,18 @@ import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
-import { Panel, PanelBody, PanelClose, PanelHeader, type PanelResize, type PanelSurface } from './ui/panel'
+import {
+  Panel,
+  PanelBody,
+  PanelClose,
+  PanelHeader,
+  PanelIconTab,
+  PanelTabs,
+  PanelTabsRoot,
+  type PanelResize,
+  type PanelSurface,
+} from './ui/panel'
+import { TokensSection } from './TokensPanel'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Tooltip } from './ui/tooltip'
@@ -61,6 +72,7 @@ import {
   EyeIcon,
   FrameIcon,
   LayersIcon,
+  BracesIcon,
   LockIcon,
   PanelCollapseIcon,
   PanelExpandIcon,
@@ -214,6 +226,8 @@ export function LayersPanel({
 }) {
   /* a row's pointerleave never fires if the panel goes away under it */
   useEffect(() => () => useStore.getState().setHoveredLayer(null), [])
+  /** which of the panel's two faces shows: the layer tree, or the design tokens */
+  const [tab, setTab] = useState<'layers' | 'tokens'>('layers')
   /* view and comment links browse the tree; nothing in it moves or changes */
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const pageCanvas = usePageCanvas()
@@ -505,124 +519,139 @@ export function LayersPanel({
         surface === 'docked' && 'left-0 w-[264px] border-r',
       )}
     >
-      {/* the panel's name with its icon, the collapse control at the far end */}
-      <PanelHeader className="h-10 pl-3.5">
-        <span className="flex items-center gap-2">
-          <LayersIcon className="size-3.5" />
-          {t('panels.layersTitle')}
-        </span>
-        {surface === 'inline' ? (
-          <PanelClose label={t('common.close')} onClick={onClose} />
-        ) : (
-          <Tooltip label={t('panels.layersCollapsePanel')} side="bottom" align="end">
-            <Button
-              variant="bare"
-              size="icon-sm"
-              className="size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
-              aria-label={t('panels.layersCollapsePanel')}
-              onClick={() => setLayersOpen(false)}
-            >
-              <PanelCollapseIcon className="size-3.5" />
-            </Button>
-          </Tooltip>
-        )}
-      </PanelHeader>
-      {/* Figma's order: the pages at the top, the frames of the active page
-          under them, the search at the bottom within thumb's reach */}
-      <PagesPanel />
-      <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
-        <span data-slot="frame-section-heading" className={sectionHeading}>
-          {t('panels.layersTitle')}
-        </span>
-        <span className="flex gap-1">
-          <Tooltip label={t('panels.layersCollapseAll')} side="bottom">
-            <Button
-              variant="bare"
-              size="icon-sm"
-              className={sectionBtn}
-              aria-label={t('panels.layersCollapseAll')}
-              onClick={() => setExpanded(new Set())}
-            >
-              <CollapseAllIcon className="size-3.5" />
-            </Button>
-          </Tooltip>
-          {!readOnly && (
-            <Tooltip label={t('panels.layersNewFrame')} side="bottom" align="end">
+      {/* the panel's two faces as icon tabs, the collapse control at the far end */}
+      <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)} className="flex-none">
+        <PanelHeader className="h-10 pl-2">
+          <PanelTabs aria-label={t('panels.layersTabsAria')}>
+            <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
+              {t('panels.layersTitle')}
+            </PanelIconTab>
+            <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
+              {t('panels.layersTabTokens')}
+            </PanelIconTab>
+          </PanelTabs>
+          {surface === 'inline' ? (
+            <PanelClose label={t('common.close')} onClick={onClose} />
+          ) : (
+            <Tooltip label={t('panels.layersCollapsePanel')} side="bottom" align="end">
               <Button
                 variant="bare"
                 size="icon-sm"
-                className={sectionBtn}
-                aria-label={t('panels.layersNewFrame')}
-                onClick={onAddFrame}
+                className="size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+                aria-label={t('panels.layersCollapsePanel')}
+                onClick={() => setLayersOpen(false)}
               >
-                <PlusIcon className="size-3.5" />
+                <PanelCollapseIcon className="size-3.5" />
               </Button>
             </Tooltip>
           )}
-        </span>
-      </div>
-      <PanelBody
-        className={cn('px-2 pb-2 outline-none', drag && 'cursor-grabbing')}
-        role="tree"
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        onClickCapture={(e) => {
-          if (!didDrag.current) return
-          didDrag.current = false
-          e.stopPropagation()
-        }}
-      >
-        {frames.length === 0 && (
-          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">{t('panels.layersEmpty')}</div>
-        )}
-        {frames.length > 0 && rows.length === 0 && (
-          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">
-            {t('panels.layersNoMatch', { query: query.trim() })}
+        </PanelHeader>
+      </PanelTabsRoot>
+      {tab === 'tokens' && (
+        <PanelBody className="flex flex-col pb-2">
+          <TokensSection />
+        </PanelBody>
+      )}
+      {tab === 'layers' && (
+        <>
+          {/* Figma's order: the pages at the top, the frames of the active page
+          under them, the search at the bottom within thumb's reach */}
+          <PagesPanel />
+          <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
+            <span data-slot="frame-section-heading" className={sectionHeading}>
+              {t('panels.layersTitle')}
+            </span>
+            <span className="flex gap-1">
+              <Tooltip label={t('panels.layersCollapseAll')} side="bottom">
+                <Button
+                  variant="bare"
+                  size="icon-sm"
+                  className={sectionBtn}
+                  aria-label={t('panels.layersCollapseAll')}
+                  onClick={() => setExpanded(new Set())}
+                >
+                  <CollapseAllIcon className="size-3.5" />
+                </Button>
+              </Tooltip>
+              {!readOnly && (
+                <Tooltip label={t('panels.layersNewFrame')} side="bottom" align="end">
+                  <Button
+                    variant="bare"
+                    size="icon-sm"
+                    className={sectionBtn}
+                    aria-label={t('panels.layersNewFrame')}
+                    onClick={onAddFrame}
+                  >
+                    <PlusIcon className="size-3.5" />
+                  </Button>
+                </Tooltip>
+              )}
+            </span>
           </div>
-        )}
-        {rows.map((row) =>
-          row.kind === 'frame' ? (
-            <FrameRow
-              key={row.key}
-              row={row}
-              selected={row.frame.id === selectedId && !selectedElement}
-              current={row.frame.id === selectedId}
-              dragging={drag?.key === row.key}
-              drop={drop?.key === row.key ? drop.place : undefined}
-              onToggle={() => setOpen(row.key, !row.open)}
-              onActivate={() => activate(row)}
-              onPointerDown={(e) => onRowPointerDown(e, row)}
-            />
-          ) : (
-            <NodeRow
-              key={row.key}
-              row={row}
-              selected={pickedRows.has(row.key)}
-              dragging={drag?.key === row.key}
-              drop={drop?.key === row.key ? drop.place : undefined}
-              onToggle={() => setOpen(row.key, !row.open)}
-              onActivate={(toggle) => activate(row, toggle)}
-              onPointerDown={(e) => onRowPointerDown(e, row)}
-            />
-          ),
-        )}
-        {drop?.key === ROOT_KEY && (
-          <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
-        )}
-      </PanelBody>
-      <footer className="flex-none px-2.5 pt-1 pb-2.5">
-        <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
-          <SearchIcon className="size-3.5 flex-none" />
-          <Input
-            variant="bare"
-            inputSize="auto"
-            className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
-            placeholder={t('panels.layersSearch')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-      </footer>
+          <PanelBody
+            className={cn('px-2 pb-2 outline-none', drag && 'cursor-grabbing')}
+            role="tree"
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            onClickCapture={(e) => {
+              if (!didDrag.current) return
+              didDrag.current = false
+              e.stopPropagation()
+            }}
+          >
+            {frames.length === 0 && (
+              <div className="px-3 py-6 text-center text-[12px] text-ink-faint">{t('panels.layersEmpty')}</div>
+            )}
+            {frames.length > 0 && rows.length === 0 && (
+              <div className="px-3 py-6 text-center text-[12px] text-ink-faint">
+                {t('panels.layersNoMatch', { query: query.trim() })}
+              </div>
+            )}
+            {rows.map((row) =>
+              row.kind === 'frame' ? (
+                <FrameRow
+                  key={row.key}
+                  row={row}
+                  selected={row.frame.id === selectedId && !selectedElement}
+                  current={row.frame.id === selectedId}
+                  dragging={drag?.key === row.key}
+                  drop={drop?.key === row.key ? drop.place : undefined}
+                  onToggle={() => setOpen(row.key, !row.open)}
+                  onActivate={() => activate(row)}
+                  onPointerDown={(e) => onRowPointerDown(e, row)}
+                />
+              ) : (
+                <NodeRow
+                  key={row.key}
+                  row={row}
+                  selected={pickedRows.has(row.key)}
+                  dragging={drag?.key === row.key}
+                  drop={drop?.key === row.key ? drop.place : undefined}
+                  onToggle={() => setOpen(row.key, !row.open)}
+                  onActivate={(toggle) => activate(row, toggle)}
+                  onPointerDown={(e) => onRowPointerDown(e, row)}
+                />
+              ),
+            )}
+            {drop?.key === ROOT_KEY && (
+              <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
+            )}
+          </PanelBody>
+          <footer className="flex-none px-2.5 pt-1 pb-2.5">
+            <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
+              <SearchIcon className="size-3.5 flex-none" />
+              <Input
+                variant="bare"
+                inputSize="auto"
+                className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
+                placeholder={t('panels.layersSearch')}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+          </footer>
+        </>
+      )}
     </Panel>
   )
 }

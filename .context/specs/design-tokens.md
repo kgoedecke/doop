@@ -1,0 +1,103 @@
+# Design tokens and themes
+
+A canvas carries typed design tokens: its named colours, spacing, radii and type, each a CSS
+custom property a frame uses by writing `var(--name)`. Tokens follow Paper's vocabulary (eleven
+types in three groups), so an agent that knows Paper's `create_tokens` / `set_tokens` /
+`get_tokens` calls ours with the same payload, and names follow Tailwind v4's `@theme`
+namespaces so the Tailwind export is a rename-free pass-through. Themes (light, dark, compact…)
+give a token a second value, as in Pen's themes and Figma's variable themes. GitHub issue #345.
+
+## Model (`shared/designTokens.ts`)
+
+- `DesignToken { name, type, value, themes?, description?, order, updatedAt, updatedBy }`.
+  `name` matches `^--[a-zA-Z0-9_-]+$` and is unique per canvas; every write runs the input through
+  `normalizeTokenName` (spaces to hyphens, the `--` added when missing), and the UI shows names
+  through `tokenLabel`, without the `--`, so people type `color-primary`. `type` is one of
+  `color | opacity | radius | spacing | container | breakpoint | fontFamily | fontWeight |
+fontSize | lineHeight | letterSpacing` (`TOKEN_TYPES`, grouped for menus by `TOKEN_GROUPS`).
+  `value` is one CSS value (`normalizeTokenValue`: trimmed, under 512 chars, no `;{}<>` or line
+  breaks, so a value can never end the declaration or the block early) or `var(--other)` to alias
+  another token on the canvas. Aliases must resolve (`resolveToken` follows the chain, null on a
+  loop or a missing link); a delete is refused while another token aliases the target.
+- `themes` holds the value under each canvas theme where it differs from `value`, which is the
+  value of the reserved `default` theme (`DEFAULT_THEME`: always present, never listed, renamed or
+  removed). The canvas lists its other themes in `canvas.tokenThemes` (`isThemeName`: a lowercase
+  slug other than `default`, at most `MAX_TOKEN_THEMES` 8). A theme is declared the first time a
+  token names it, and `set_token_themes` / `PUT /token-themes` replaces the list, applying any
+  `renames` (`{ from, to }`, every token's value follows) first; a theme that leaves takes its
+  values with it.
+- Storage: `design_tokens` (migration 0044, PK canvas + name, `themes` jsonb) and
+  `canvases.token_themes` jsonb. Hydrated with the canvas like guidelines; duplicates copy both.
+
+## Frames stay self-contained
+
+`withTokenBlock(html, tokens, themeOrder)` writes the values of the tokens a document names
+(`var(--name)` or `var(--name,` outside the block itself, alias targets included) into one
+managed `<style data-doop-tokens>` at the top of `<head>`: a `:root{…}` block, then
+`:root[data-doop-theme="x"],[data-doop-theme="x"]{…}` per theme with overrides. The block is
+replaced when the values differ and removed when the document names no token; the function
+returns the input string itself when nothing changes. It runs wherever `withFontFaces` runs:
+`withLibraryFaces` in `server/actions.ts` on every frame write (create, update, the final append
+chunk, an idle stream close) and `FrameView`'s browser save path. A frame switches theme with
+`data-doop-theme="dark"` on its `<html>`, or on one subtree.
+
+## Propagation
+
+A token change (`actions.setTokens`, `setTokenThemes`) rewrites the block in every frame on the
+canvas whose block no longer matches (`restyleTokenFrames`), as an annotation write
+(`store.updateFrame`'s `annotation` option): `ready_for_dev` sign-off stands, no version is
+filed, one activity line names the token and how many frames were restyled. Frames with an open
+append stream are skipped (their done chunk brings the block); a frame mid-reveal is updated and
+its playback rewound to where the documents diverge. A rename rewrites `var(--old` references
+in every frame and in aliasing tokens.
+
+## API
+
+- REST (`server/index.ts`, `requireCanvas`): `GET /api/canvases/:id/tokens` (view;
+  `?format=css|tailwind|md`, JSON otherwise), `POST …/tokens` (edit; `{ tokens: [...] }` or one
+  token, one in-band result per entry), `PUT …/tokens/:name` (edit; `value`, `type`,
+  `description`, `themes` merged with null removing a theme's value, `newName`, `delete`),
+  `DELETE …/tokens/:name`, `PUT …/token-themes { themes }`, and
+  `GET …/styleguide.md`: the tokens as tables plus the `:root` CSS, followed by every guideline
+  doc, the DESIGN.md a coding agent pulls into a repo.
+- Room: `{ type: 'tokens', tokens, themes, actor }` carries the whole list after a change;
+  `canvas.tokens` and `canvas.tokenThemes` ride the `init` and `GET /api/canvases/:id`.
+- MCP (`server/mcp.ts`): `get_tokens` (types, `name_pattern` glob, `format` json / css /
+  tailwind / markdown), `create_tokens`, `set_tokens` (`new_name`, `delete`, `themes`),
+  `set_token_themes`. `get_canvas` lists `tokens` and `tokenThemes` and adds `tokensBrief` to its
+  note. The resident agent has the same four tools and the brief as a `# Design tokens` system
+  block.
+
+## Editor
+
+- Layers panel → Tokens tab (`src/components/TokensPanel.tsx`, a `BracesIcon` tab beside Layers):
+  one line with the themes dropdown (`ThemesMenu`, a popover with `default` fixed first, each
+  other theme on a row whose name field renames it on Enter or blur and whose ✕ removes it, and a
+  text line that adds one, saving at once) and the "+" menu of the eleven types in their three
+  groups, then rows by type with a swatch. `TokenModal` edits name, type, value (a swatch picker
+  for colours), a value per theme and the use note, shows how many frames name the token, and
+  deletes. Names are shown and typed without the `--`.
+- Design panel (`ElementPanel.tsx`): fill, stroke and text colour, corner radius and font size
+  carry a braces button that overlays the field's unit on hover (`trailing` on `ColorField` /
+  `NumberField`, absolutely placed so the value keeps its width); the font family and weight
+  selects, each on its own row now, carry a field-height one beside them (`placement="beside"`). It opens a popover
+  (`TokenMenu`) listing the canvas's tokens of that type; picking one writes `var(--name)`
+  inline. Its "+" opens a card beside the list with the field's current value and a name;
+  Enter creates the token and binds the field, Figma's "create variable" from a fill. A bound
+  field shows the token name as a read-only chip with the resolved swatch, and a broken-chain
+  button (`UnlinkIcon`, Lucide's `Unlink`) beside it detaches the field to the literal (`FieldToken`). The runtime's `inline` map also reports the shorthands the panel
+  edits (`border-radius`, `border-color`, …), since a `var()` on a shorthand is invisible
+  through its longhands. The unit span of a `NumberField` / `TextField` carries `data-unit`,
+  which `elementPanelBrowser.test.ts` scrubs by.
+
+## Tests
+
+`designTokens.test.ts` (the block, aliases, exports), `designTokenWrites.test.ts` (frame writes,
+propagation as an annotation, rename, delete, duplicate), `designTokensHttp.test.ts` (REST, roles,
+exports, themes, MCP, restart). `agentToolParity.test.ts` holds MCP and resident tools in step.
+
+## Not yet
+
+A lint that lists hex and px literals in frames matching an existing token; workspace-scoped
+token libraries; components with slots (the second half of #345's neighbour, Figma-style
+components).

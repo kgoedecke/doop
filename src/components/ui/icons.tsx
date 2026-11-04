@@ -111,7 +111,7 @@ import {
   Trash2,
   Type,
   Upload,
-  Unlink2,
+  Unlink,
   User,
   Users,
   Workflow,
@@ -119,6 +119,7 @@ import {
   MousePointerClick,
   SquareMousePointer,
   X,
+  Braces,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -183,13 +184,14 @@ export const FlipHorizontal2Icon = icon(FlipHorizontal2)
 export const FlipVertical2Icon = icon(FlipVertical2)
 export const CircleDashedIcon = icon(CircleDashed)
 export const DropletIcon = icon(Droplet)
+export const BracesIcon = icon(Braces)
 export const RadiusIcon = icon(Radius)
 export const AlignLeftIcon = icon(AlignLeft)
 export const AlignCenterIcon = icon(AlignCenter)
 export const AlignRightIcon = icon(AlignRight)
 export const AlignJustifyIcon = icon(AlignJustify)
 export const LinkIcon = icon(Link2)
-export const UnlinkIcon = icon(Unlink2)
+export const UnlinkIcon = icon(Unlink)
 /** Lucide dropped its brand marks; this is its last GitHub outline, kept on
  *  the same grid and stroke as the rest of the set. */
 export function GithubIcon(props: IconProps) {

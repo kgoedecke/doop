@@ -4,6 +4,7 @@ import { store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief } from '../shared/fonts.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
+import { TOKEN_TYPES, describeTokens, tokensBrief, tokensCss, tokensTailwind } from '../shared/designTokens.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
@@ -602,6 +603,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         .filter(Boolean)
         .join('\n\n')
       const fontsBlock = [{ text: `# Fonts\n${fontsText}` }]
+      /* the canvas's design tokens: which exist, and that var(--name) is how
+         a frame uses one (the server writes the values into the frame) */
+      const tokens = store.getTokens(canvasId)
+      const tokensBlock = tokens.length
+        ? [{ text: `# Design tokens\n${tokensBrief(tokens, store.getTokenThemes(canvasId))}` }]
+        : []
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       const noVisionBlock = runState.vision
@@ -616,9 +623,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         const result = await model.runHarness({
           canvasId,
           prompt: kickoff,
-          system: [systemFor(role), ...guidelinesBlock.map((b) => b.text), ...fontsBlock.map((b) => b.text)].join(
-            '\n\n',
-          ),
+          system: [
+            systemFor(role),
+            ...guidelinesBlock.map((b) => b.text),
+            ...fontsBlock.map((b) => b.text),
+            ...tokensBlock.map((b) => b.text),
+          ].join('\n\n'),
           // Image generation uses a separate paid model account; the local CLI
           // connection must never imply that the user's subscription covers it.
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
@@ -658,7 +668,13 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             () =>
               model.run({
                 maxTokens: 16000,
-                system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...fontsBlock, ...noVisionBlock],
+                system: [
+                  { text: systemFor(role), cache: true },
+                  ...guidelinesBlock,
+                  ...fontsBlock,
+                  ...tokensBlock,
+                  ...noVisionBlock,
+                ],
                 tools: TOOLS,
                 messages,
                 signal: abort.signal,
@@ -1222,6 +1238,96 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_tokens',
+    description:
+      "This canvas's design tokens (CSS custom properties frames use as var(--name)), as JSON, a :root CSS block or a Tailwind v4 @theme block.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        types: { type: 'array', items: { type: 'string', enum: [...TOKEN_TYPES] } },
+        format: { type: 'string', enum: ['json', 'css', 'tailwind'] },
+      },
+    },
+  },
+  {
+    name: 'create_tokens',
+    description:
+      'Add design tokens to this canvas: each needs a CSS custom property name (--color-primary), a type and a value (a CSS value, or var(--other) to alias a token that exists or comes earlier in the batch). Names follow Tailwind v4 namespaces (--color-*, --spacing-*, --radius-*, --font-*, --text-*, --leading-*, --tracking-*, --container-*, --breakpoint-*). Reuse existing tokens before creating new ones. Use them in frames as var(--name), never the literal.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tokens: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              type: { type: 'string', enum: [...TOKEN_TYPES] },
+              value: { type: 'string' },
+              themes: {
+                type: 'object',
+                description:
+                  'The value under a theme where it differs, e.g. { "dark": "#fff" }; a new name declares the theme',
+                additionalProperties: { type: 'string' },
+              },
+              description: { type: 'string' },
+            },
+            required: ['name', 'type', 'value'],
+          },
+        },
+      },
+      required: ['tokens'],
+    },
+  },
+  {
+    name: 'set_tokens',
+    description:
+      'Change (value, type, description), rename (new_name) or delete (delete: true) design tokens by name. Every frame naming a changed token is restyled at once.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tokens: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              new_name: { type: 'string' },
+              type: { type: 'string', enum: [...TOKEN_TYPES] },
+              value: { type: 'string' },
+              themes: {
+                type: 'object',
+                description: "Theme values to set, merged in; null removes that theme's value",
+                additionalProperties: { type: ['string', 'null'] },
+              },
+              description: { type: 'string' },
+              delete: { type: 'boolean' },
+            },
+            required: ['name'],
+          },
+        },
+      },
+      required: ['tokens'],
+    },
+  },
+  {
+    name: 'set_token_themes',
+    description:
+      'Replace this canvas\'s token themes (light, dark, …) and their order. A frame switches theme with data-doop-theme="<theme>" on its <html> or on a subtree; a theme that leaves takes its values with it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        themes: { type: 'array', items: { type: 'string' } },
+        renames: {
+          type: 'array',
+          description: 'Themes to rename first; their values follow. List the new name in themes.',
+          items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } },
+        },
+      },
+      required: ['themes'],
+    },
+  },
+  {
     name: 'get_prototype',
     description:
       'List the clickable-prototype wiring of this canvas: each page with its flow start frame, and every interaction (data-doop-on / data-doop-action attributes in frame HTML) with its trigger, action and target. Interactions whose target frame does not exist carry a problem; fix them with edit_frame_html. Call it after wiring a flow.',
@@ -1777,6 +1883,55 @@ async function execTool(
             ? `saved design guide "${actions.guidelineTitle(doc)}" (${doc.name}, ${doc.markdown.length} chars) — every actor on this canvas now inherits it`
             : `deleted design guide ${raw.name.trim().toLowerCase()}`,
         )
+      }
+      case 'get_tokens': {
+        const raw = block.input as { types?: unknown; format?: unknown }
+        const types = Array.isArray(raw.types) ? raw.types.filter((t): t is string => typeof t === 'string') : []
+        let tokens = store.getTokens(canvasId)
+        const themes = store.getTokenThemes(canvasId)
+        if (types.length) tokens = tokens.filter((t) => types.includes(t.type))
+        if (!tokens.length) return ok('no design tokens on this canvas yet — add some with create_tokens')
+        if (raw.format === 'css') return ok(tokensCss(tokens, themes))
+        if (raw.format === 'tailwind') return ok(tokensTailwind(tokens, themes))
+        return ok(JSON.stringify({ tokens: describeTokens(tokens), ...(themes.length ? { themes } : {}) }))
+      }
+      case 'create_tokens': {
+        const raw = block.input as { tokens?: unknown }
+        if (!Array.isArray(raw.tokens) || !raw.tokens.length) return fail('tokens must be a non-empty array')
+        const results = actions.createTokens(canvasId, raw.tokens, actor)
+        if (!results) return fail('canvas not found')
+        return ok(JSON.stringify({ results }))
+      }
+      case 'set_tokens': {
+        const raw = block.input as { tokens?: unknown }
+        if (!Array.isArray(raw.tokens) || !raw.tokens.length) return fail('tokens must be a non-empty array')
+        const edits = raw.tokens.map((entry: unknown) => {
+          const e = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : {}
+          return {
+            name: typeof e.name === 'string' ? e.name : '',
+            ...(typeof e.new_name === 'string' ? { newName: e.new_name } : {}),
+            ...(typeof e.type === 'string' ? { type: e.type as (typeof TOKEN_TYPES)[number] } : {}),
+            ...(typeof e.value === 'string' || typeof e.value === 'number' ? { value: e.value } : {}),
+            ...(typeof e.themes === 'object' && e.themes !== null
+              ? { themes: e.themes as Record<string, string | number | null> }
+              : {}),
+            ...(typeof e.description === 'string' ? { description: e.description } : {}),
+            ...(e.delete === true ? { delete: true } : {}),
+          }
+        })
+        const results = actions.setTokens(canvasId, edits, actor)
+        if (!results) return fail('canvas not found')
+        return ok(JSON.stringify({ results }))
+      }
+      case 'set_token_themes': {
+        const raw = block.input as { themes?: unknown; renames?: unknown }
+        try {
+          const themes = actions.setTokenThemes(canvasId, raw.themes, actor, raw.renames ?? [])
+          if (!themes) return fail('canvas not found')
+          return ok(`token themes are now ${themes.length ? themes.join(', ') : 'none'}`)
+        } catch (e) {
+          return fail(e instanceof Error ? e.message : 'invalid themes')
+        }
       }
       case 'get_prototype': {
         const canvas = store.getCanvas(canvasId)

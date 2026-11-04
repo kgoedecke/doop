@@ -767,6 +767,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var name = el.style[j]
       inline[name] = el.style.getPropertyValue(name)
     }
+    // The list enumerates longhands, so a shorthand holding a var() (a design
+    // token on border-radius) is only visible through the shorthand itself.
+    var shorthands = ['border-radius', 'border-color', 'border-width', 'padding', 'gap']
+    for (var sh = 0; sh < shorthands.length; sh++) {
+      var shorthandValue = el.style.getPropertyValue(shorthands[sh])
+      if (shorthandValue) inline[shorthands[sh]] = shorthandValue
+    }
     var classes = (el.getAttribute('class') || '').trim().split(/[ ]+/).filter(Boolean)
     var text = ''
     for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) text += n.nodeValue

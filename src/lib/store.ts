@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { sortByStack } from '../../shared/frameStack'
+import type { DesignToken } from '../../shared/designTokens'
 import type {
   ActivityItem,
   AgentTask,
@@ -184,6 +185,8 @@ interface State {
   renameCanvasLocal(name: string): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
+  /** replace the open canvas's design tokens and themes (the room sends the whole list) */
+  setTokensLocal(tokens: DesignToken[], themes: string[]): void
   /** pin (reference set) or unpin (null) a Memory reference on the open canvas */
   setReferenceLocal(id: string, reference: MemoryReference | null): void
   setDecisions(decisions: DesignDecision[]): void
@@ -501,6 +504,8 @@ export const useStore = create<State>((set, get) => ({
       }
       return { canvas: { ...s.canvas, guidelines: docs } }
     }),
+  setTokensLocal: (tokens, themes) =>
+    set((s) => (s.canvas ? { canvas: { ...s.canvas, tokens, tokenThemes: themes } } : {})),
   setReferenceLocal: (id, reference) =>
     set((s) => {
       if (!s.canvas) return {}

@@ -46,6 +46,22 @@ import { Tooltip } from './ui/tooltip'
 import { familyWeights, fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { useCanvasFonts } from '../lib/customFonts'
+import { DEVICE_FONTS } from '../lib/deviceFonts'
+import {
+  aliasOf,
+  isTokenName,
+  normalizeTokenName,
+  resolveToken,
+  sortTokens,
+  tokenLabel,
+  type DesignToken,
+  type TokenType,
+} from '../../shared/designTokens'
+import { TOKEN_TYPE_LABEL, TokenSwatch } from './TokensPanel'
+import { api } from '../lib/api'
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
+import { BracesIcon, PlusIcon } from './ui/icons'
+import type { FieldToken } from './ui/property-field'
 import {
   AlignCenterIcon,
   AlignJustifyIcon,
@@ -307,7 +323,7 @@ const LOADING_SECTIONS: { title: PlainMessageKey; rows: PlainMessageKey[] }[] = 
   { title: 'inspector.sectionStroke', rows: ['inspector.rowColor', 'inspector.rowWidth'] },
   {
     title: 'inspector.sectionText',
-    rows: ['inspector.rowFont', 'inspector.rowSize', 'inspector.rowColor', 'inspector.rowAlign'],
+    rows: ['inspector.rowFont', 'inspector.rowSize', 'inspector.rowWeight', 'inspector.rowColor', 'inspector.rowAlign'],
   },
 ]
 
@@ -368,12 +384,6 @@ const BORDER_SIDES: Record<string, PlainMessageKey> = {
   bottom: 'inspector.sideBottom',
   left: 'inspector.sideLeft',
 }
-/* the viewer's own fonts: the one place a design asks for the device's
-   look on purpose, and so renders differently on each machine */
-const DEVICE_FONTS: { value: string; label: PlainMessageKey }[] = [
-  { value: 'system-ui, sans-serif', label: 'inspector.fontSystemUi' },
-  { value: 'ui-monospace, monospace', label: 'inspector.fontSystemMono' },
-]
 
 function fontName(value: string) {
   return (
@@ -440,6 +450,209 @@ function parentLayout(info: ElementInfo): string {
   return p.display
 }
 
+/** The token a property is bound to inline, if any. */
+function boundToken(info: ElementInfo, property: string, tokens: readonly DesignToken[]): DesignToken | undefined {
+  const name = aliasOf(info.inline[property] ?? '')
+  return name ? tokens.find((token) => token.name === name) : undefined
+}
+
+/** What a field shows while bound: the token's name, and its colour for a swatch. */
+function fieldToken(
+  token: DesignToken | undefined,
+  tokens: readonly DesignToken[],
+  detach: () => void,
+): FieldToken | undefined {
+  if (!token) return undefined
+  return {
+    name: tokenLabel(token.name),
+    ...(token.type === 'color' ? { swatch: resolveToken(tokens, token.name) ?? token.value } : {}),
+    onDetach: detach,
+  }
+}
+
+/** The trailing menu of a field: a popover listing the canvas's tokens of
+ *  the field's types; its + opens a card beside it that makes a new token
+ *  from the field's current value and binds the field to it. */
+function TokenMenu({
+  canvasId,
+  types,
+  tokens,
+  literal,
+  onPick,
+  placement = 'inline',
+}: {
+  canvasId: string
+  types: readonly TokenType[]
+  tokens: readonly DesignToken[]
+  /** the field's current value, what a new token is made from; null when there is none */
+  literal: string | null
+  onPick: (name: string) => void
+  /** `inline` sits inside a field and shows on hover; `beside` is a field-height box next to a select */
+  placement?: 'inline' | 'beside'
+}) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const type = types[0]!
+  const options = sortTokens(tokens.filter((token) => types.includes(token.type)))
+  const typed = normalizeTokenName(name)
+  const canCreate = isTokenName(typed) && value.trim() !== '' && !busy
+
+  function startCreating() {
+    setValue(literal ?? '')
+    setName('')
+    setError(null)
+    setCreating(true)
+  }
+
+  function close() {
+    setOpen(false)
+    setCreating(false)
+  }
+
+  async function create() {
+    if (!canCreate) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { results, tokens: next } = await api.createTokens(canvasId, [{ name: typed, type, value: value.trim() }])
+      const [result] = results
+      if (result?.result === 'error') throw new Error(result.message)
+      /* the room will send the same list; applying it now shows the chip at once */
+      const state = useStore.getState()
+      if (state.canvas?.id === canvasId) state.setTokensLocal(next, state.canvas.tokenThemes ?? [])
+      onPick(typed)
+      close()
+    } catch (e) {
+      setError(e instanceof Error ? e.message.replace(/^\d+\s*/, '') : t('inspector.tokenCreateFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const swatch = type === 'color' && /^(#|rgb|hsl|oklch|oklab|color\()/i.test(value.trim())
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (!next) setCreating(false)
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={t('inspector.tokenPick')}
+          title={t('inspector.tokenPick')}
+          className={
+            placement === 'beside'
+              ? 'grid size-[26px] flex-none place-items-center rounded-[7px] bg-sub text-ink-faint hover:bg-paper-deep hover:text-ink data-[state=open]:bg-paper-deep data-[state=open]:text-ink'
+              : 'grid size-5 flex-none place-items-center rounded-[5px] text-ink-faint opacity-0 transition-opacity hover:bg-paper-deep hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:bg-paper-deep data-[state=open]:text-ink data-[state=open]:opacity-100'
+          }
+        >
+          <BracesIcon size={placement === 'beside' ? 12 : 11} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[220px] overflow-visible p-1.5">
+        <div className="flex h-6 items-center justify-between pr-0.5 pl-2">
+          <span className="text-[11px] text-ink-faint">{t('inspector.tokenHeading')}</span>
+          {literal !== null && (
+            <button
+              type="button"
+              aria-label={t('inspector.tokenCreate')}
+              title={t('inspector.tokenCreate')}
+              aria-pressed={creating}
+              className="grid size-5 place-items-center rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink aria-pressed:bg-paper-deep aria-pressed:text-ink"
+              onClick={() => (creating ? setCreating(false) : startCreating())}
+            >
+              <PlusIcon size={12} />
+            </button>
+          )}
+        </div>
+        {options.length === 0 ? (
+          <p className="px-2 py-1.5 text-[11px] leading-[1.4] text-ink-faint">{t('inspector.tokenNone')}</p>
+        ) : (
+          <div
+            role="listbox"
+            aria-label={t('inspector.tokenPick')}
+            className="flex max-h-[220px] flex-col overflow-y-auto"
+          >
+            {options.map((token) => (
+              <button
+                key={token.name}
+                type="button"
+                role="option"
+                aria-selected={false}
+                className="flex h-7 items-center gap-2 rounded-[7px] px-2 text-left hover:bg-sub"
+                onClick={() => {
+                  onPick(token.name)
+                  close()
+                }}
+              >
+                <TokenSwatch token={token} tokens={tokens} size={12} />
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink">{tokenLabel(token.name)}</span>
+                <span className="max-w-[40%] flex-none truncate font-mono text-[10.5px] text-ink-faint">
+                  {token.value}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {creating && (
+          /* the card beside the list, Figma's "create variable" sheet */
+          <form
+            className="absolute top-0 right-full mr-1.5 flex w-[220px] flex-col gap-2 rounded-panel bg-surface p-2.5 shadow-pop"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void create()
+            }}
+          >
+            <span className="px-0.5 text-[11px] text-ink-faint">
+              {t('inspector.tokenNewTitle', { type: t(TOKEN_TYPE_LABEL[type]).toLowerCase() })}
+            </span>
+            <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
+              <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenName')}</span>
+              <input
+                aria-label={t('inspector.tokenNewName')}
+                autoFocus
+                className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
+                value={name}
+                disabled={busy}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
+              <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenValue')}</span>
+              {swatch && (
+                <span className="size-3 flex-none rounded-[3px] border border-line" style={{ background: value }} />
+              )}
+              <input
+                aria-label={t('inspector.tokenValue')}
+                className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
+                value={value}
+                disabled={busy}
+                onChange={(e) => setValue(e.target.value)}
+              />
+            </label>
+            {error && <p className="px-0.5 text-[10.5px] text-accent-ink">{error}</p>}
+            <button
+              type="submit"
+              disabled={!canCreate}
+              className="h-7 rounded-[7px] bg-ink text-[11.5px] font-medium text-paper disabled:opacity-30"
+            >
+              {busy ? t('inspector.tokenCreating') : t('inspector.tokenCreateButton')}
+            </button>
+          </form>
+        )}
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function DesignTab({
   frame,
   selector,
@@ -454,7 +667,27 @@ function DesignTab({
   editGeometry: (edit: GeometryEdit) => void
 }) {
   const library = useCanvasFonts((state) => state.fonts)
+  const tokens = useStore((state) => state.canvas?.tokens ?? [])
   const customFamilies = libraryFamilies(library)
+  /* a field bound to a token shows its name; the menu beside it binds one */
+  const bound = (property: string) => boundToken(info, property, tokens)
+  const chip = (property: string, literal: string | null) =>
+    fieldToken(bound(property), tokens, () => apply({ [property]: literal }))
+  const menu = (
+    property: string,
+    types: readonly TokenType[],
+    literal: string | null,
+    placement: 'inline' | 'beside' = 'inline',
+  ) => (
+    <TokenMenu
+      canvasId={frame.canvasId}
+      types={types}
+      tokens={tokens}
+      literal={literal}
+      placement={placement}
+      onPick={(name) => apply({ [property]: `var(${name})` })}
+    />
+  )
   /* a library family offers only the weights it was uploaded with; picking
      one it lacks would just show the browser's faux bold */
   const weights = familyWeights(library, fontName(info.fontFamily)) ?? WEIGHTS
@@ -752,6 +985,8 @@ function DesignTab({
             prefix={<RadiusIcon size="rail" />}
             value={info.borderRadius}
             unit="px"
+            token={chip('border-radius', info.borderRadius === null ? null : `${info.borderRadius}px`)}
+            trailing={menu('border-radius', ['radius'], info.borderRadius === null ? null : `${info.borderRadius}px`)}
             onCommit={(v) => apply({ 'border-radius': `${Math.max(0, v)}px` })}
           />
         </div>
@@ -780,6 +1015,8 @@ function DesignTab({
           <ColorField
             label={t('inspector.fillColor')}
             value={fillAlpha === 0 && fill === '#000000' ? null : fill}
+            token={chip('background-color', fill)}
+            trailing={menu('background-color', ['color'], fill)}
             onCommit={(v) =>
               apply({
                 'background-color': v
@@ -802,6 +1039,8 @@ function DesignTab({
           <ColorField
             label={t('inspector.borderColor')}
             value={borderColor}
+            token={chip('border-color', borderColor)}
+            trailing={menu('border-color', ['color'], borderColor)}
             onCommit={(v) =>
               apply({ 'border-color': v, ...(v && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}) })
             }
@@ -835,42 +1074,70 @@ function DesignTab({
       {info.hasText && (
         <PropertySection title={t('inspector.sectionText')}>
           <PropertyRow label={t('inspector.rowFont')}>
-            <SelectField
-              label={t('inspector.fontFamily')}
-              value={info.fontFamily}
-              options={fontOptions(
-                info,
-                customFamilies,
-                {
-                  custom: t('inspector.fontGroupCustom'),
-                  frame: t('inspector.fontGroupFrame'),
-                  web: t('inspector.fontGroupWeb'),
-                  device: t('inspector.fontGroupDevice'),
-                },
-                t,
-              )}
-              onChange={(v) => apply({ 'font-family': v })}
-            />
+            <span className="group flex min-w-0 flex-1 items-center gap-1.5">
+              <SelectField
+                label={t('inspector.fontFamily')}
+                value={bound('font-family') ? info.inline['font-family']! : info.fontFamily}
+                options={[
+                  ...sortTokens(tokens.filter((token) => token.type === 'fontFamily')).map((token) => ({
+                    value: `var(${token.name})`,
+                    label: tokenLabel(token.name),
+                    group: t('inspector.fontGroupTokens'),
+                  })),
+                  ...fontOptions(
+                    info,
+                    customFamilies,
+                    {
+                      custom: t('inspector.fontGroupCustom'),
+                      frame: t('inspector.fontGroupFrame'),
+                      web: t('inspector.fontGroupWeb'),
+                      device: t('inspector.fontGroupDevice'),
+                    },
+                    t,
+                  ),
+                ]}
+                onChange={(v) => apply({ 'font-family': v })}
+              />
+              {menu('font-family', ['fontFamily'], info.fontFamily, 'beside')}
+            </span>
           </PropertyRow>
           <PropertyRow label={t('inspector.rowSize')}>
             <NumberField
               label={t('inspector.fontSize')}
               value={info.fontSize}
               unit="px"
+              token={chip('font-size', info.fontSize === null ? null : `${info.fontSize}px`)}
+              trailing={menu('font-size', ['fontSize'], info.fontSize === null ? null : `${info.fontSize}px`)}
               onCommit={(v) => apply({ 'font-size': `${v}px` })}
             />
-            <SelectField
-              className="flex-[0_0_66px]"
-              label={t('inspector.fontWeight')}
-              value={info.fontWeight}
-              options={[...new Set([...weights, info.fontWeight])]
-                .sort((a, b) => Number(a) - Number(b))
-                .map((w) => ({ value: w, label: w }))}
-              onChange={(v) => apply({ 'font-weight': v })}
-            />
+          </PropertyRow>
+          <PropertyRow label={t('inspector.rowWeight')}>
+            <span className="group flex min-w-0 flex-1 items-center gap-1.5">
+              <SelectField
+                label={t('inspector.fontWeight')}
+                value={bound('font-weight') ? info.inline['font-weight']! : info.fontWeight}
+                options={[
+                  ...sortTokens(tokens.filter((token) => token.type === 'fontWeight')).map((token) => ({
+                    value: `var(${token.name})`,
+                    label: tokenLabel(token.name),
+                    group: t('inspector.fontGroupTokens'),
+                  })),
+                  ...[...new Set([...weights, info.fontWeight])]
+                    .sort((a, b) => Number(a) - Number(b))
+                    .map((w) => ({ value: w, label: w })),
+                ]}
+                onChange={(v) => apply({ 'font-weight': v })}
+              />
+              {menu('font-weight', ['fontWeight'], info.fontWeight, 'beside')}
+            </span>
           </PropertyRow>
           <PropertyRow label={t('inspector.rowColor')}>
-            <ColorField value={rgbToHex(info.color)} onCommit={(v) => apply({ color: v })} />
+            <ColorField
+              value={rgbToHex(info.color)}
+              token={chip('color', rgbToHex(info.color))}
+              trailing={menu('color', ['color'], rgbToHex(info.color))}
+              onCommit={(v) => apply({ color: v })}
+            />
           </PropertyRow>
           <PropertyRow label={t('inspector.rowAlign')}>
             <Segmented

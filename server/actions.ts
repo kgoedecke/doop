@@ -13,6 +13,24 @@ import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escape
 import { fontsForCanvas } from './fonts.ts'
 import { withFontFaces } from '../shared/fonts.ts'
 import { withWebFontLinks } from '../shared/webFonts.ts'
+import {
+  MAX_TOKENS,
+  MAX_TOKEN_DESCRIPTION,
+  MAX_TOKEN_THEMES,
+  aliasOf,
+  isThemeName,
+  isTokenName,
+  isTokenType,
+  normalizeTokenName,
+  normalizeTokenValue,
+  resolveToken,
+  usesToken,
+  withTokenBlock,
+  type DesignToken,
+  type TokenEdit,
+  type TokenResult,
+  type TokenType,
+} from '../shared/designTokens.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
@@ -1610,7 +1628,11 @@ function withLibraryFaces(canvasId: string, html: string): string {
   const canvas = store.getCanvas(canvasId)
   if (!canvas) return html
   const library = fontsForCanvas(canvas)
-  return withWebFontLinks(withFontFaces(html, library), library)
+  return withTokenBlock(
+    withWebFontLinks(withFontFaces(html, library), library),
+    canvas.tokens ?? [],
+    canvas.tokenThemes ?? [],
+  )
 }
 
 export function appendFrameHtml(
@@ -2001,6 +2023,380 @@ export function markGuidelinesSeen(canvasId: string, agentName: string) {
 
 export function hasSeenGuidelines(canvasId: string, agentName: string): boolean {
   return guidelinesSeen.has(`${canvasId}:${agentName}`)
+}
+
+/* ------------------------------------------------------------------ */
+/* Design tokens: a canvas's named design values (shared/designTokens) */
+/* — CSS custom properties frames use as var(--name). A change rewrites */
+/* the managed block in every frame that names the token.              */
+/* ------------------------------------------------------------------ */
+
+function tokenError(name: string, message: string): TokenResult {
+  return { name, result: 'error', message }
+}
+
+/** Why a value cannot be written, or null when it can: the literal is one
+ *  clean declaration, an alias names a token that exists (in the canvas or
+ *  earlier in the same batch) and does not loop back. */
+function valueProblem(tokens: readonly DesignToken[], name: string, value: string): string | null {
+  const target = aliasOf(value)
+  if (!target) return null
+  if (target === name) return 'a token cannot alias itself'
+  if (!tokens.some((t) => t.name === target)) return `aliases ${target}, which does not exist — create it first`
+  const probe: DesignToken[] = [
+    ...tokens.filter((t) => t.name !== name),
+    { name, type: 'color', value, order: 0, updatedAt: 0, updatedBy: '' },
+  ]
+  return resolveToken(probe, name) === null ? `aliasing ${target} would loop` : null
+}
+
+/** The theme values of an input, normalized: null when one is unusable or
+ *  the theme name is not one, undefined when none were given. A null entry
+ *  (an edit) removes that theme's value. */
+function cleanThemes(
+  value: unknown,
+): { themes: Record<string, string>; removed: string[] } | undefined | { error: string } {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { error: 'themes must be an object' }
+  const themes: Record<string, string> = {}
+  const removed: string[] = []
+  for (const [theme, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!isThemeName(theme)) return { error: `invalid theme name “${theme}” — use a lowercase slug like "dark"` }
+    if (raw === null) {
+      removed.push(theme)
+      continue
+    }
+    const text = normalizeTokenValue(raw)
+    if (text === null) return { error: `invalid value for theme ${theme} — one CSS value, no semicolons or braces` }
+    themes[theme] = text
+  }
+  return { themes, removed }
+}
+
+/** Declare any theme a token names that the canvas does not have yet. */
+function declareThemes(canvasId: string, themes: Record<string, string>, by: string): string | null {
+  const known = store.getTokenThemes(canvasId)
+  const fresh = Object.keys(themes).filter((theme) => !known.includes(theme))
+  if (!fresh.length) return null
+  if (known.length + fresh.length > MAX_TOKEN_THEMES) return `a canvas has at most ${MAX_TOKEN_THEMES} token themes`
+  store.setTokenThemes(canvasId, [...known, ...fresh], by)
+  return null
+}
+
+function cleanDescription(value: unknown): string | undefined | null {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') return null
+  const text = value.replace(/\s+/g, ' ').trim()
+  return text.length > MAX_TOKEN_DESCRIPTION ? null : text
+}
+
+/** Names of the tokens a frame uses, directly: what a token edit must restyle. */
+export function tokenUsage(canvasId: string): Map<string, number> {
+  const counts = new Map<string, number>()
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return counts
+  for (const token of canvas.tokens ?? []) {
+    counts.set(token.name, canvas.frames.filter((f) => usesToken(f.html, token.name)).length)
+  }
+  return counts
+}
+
+/** Rewrite every frame whose managed token block no longer matches the
+ *  canvas's tokens (and, on a rename, the references to the old name). An
+ *  annotation write: nothing a reviewer signed off on moved, so sign-off
+ *  stands and no version is filed. Returns how many frames changed. */
+function restyleTokenFrames(canvasId: string, actor: Actor, rename?: { from: string; to: string }): number {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return 0
+  const tokens = canvas.tokens ?? []
+  let changed = 0
+  for (const frame of [...canvas.frames]) {
+    /* an open append stream gets its block with its done chunk */
+    if (streams.has(frame.id)) continue
+    let html = frame.html
+    if (rename) html = renameTokenRefs(html, rename.from, rename.to)
+    html = withTokenBlock(html, tokens, canvas.tokenThemes ?? [])
+    if (html === frame.html) continue
+    const prevHtml = frame.html
+    const updated = store.updateFrame(frame.id, { html }, actor.name, { annotation: true })
+    if (!updated) continue
+    thumbs.purge(frame.id)
+    const openReveal = reveals.get(frame.id)
+    if (openReveal) {
+      /* mid-playback: rewind to where the documents diverge, as a rewrite does */
+      openReveal.shown = Math.min(openReveal.shown, sharedSpan(prevHtml, updated.html).prefix)
+      openReveal.deadline = Date.now() + revealDuration(updated.html.length - openReveal.shown)
+    } else broadcast(canvasId, { type: 'frame:updated', frame: updated, actor })
+    changed++
+  }
+  return changed
+}
+
+function renameTokenRefs(html: string, from: string, to: string): string {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return html.replace(new RegExp(`var\\(\\s*${escaped}(?=\\s*[,)])`, 'g'), `var(${to}`)
+}
+
+function tokenSummary(results: TokenResult[], verb: string): string {
+  const names = results.filter((r) => r.result !== 'error').map((r) => r.name)
+  if (!names.length) return ''
+  return names.length <= 3
+    ? `${verb} the design token${names.length > 1 ? 's' : ''} ${names.join(', ')}`
+    : `${verb} ${names.length} design tokens`
+}
+
+/** Add tokens; one result per entry, errors in-band so a batch with one bad
+ *  entry still lands the rest. Returns undefined when the canvas is missing. */
+export function createTokens(canvasId: string, inputs: unknown[], actor: Actor): TokenResult[] | undefined {
+  const canvas = store.getCanvas(canvasId)
+  if (!canvas) return undefined
+  const results: TokenResult[] = []
+  const accepted: {
+    name: string
+    type: TokenType
+    value: string
+    themes?: Record<string, string>
+    description?: string
+  }[] = []
+  const pending: DesignToken[] = [...(canvas.tokens ?? [])]
+  for (const raw of inputs) {
+    const input = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+    const name = normalizeTokenName(input.name)
+    if (!isTokenName(name)) {
+      results.push(tokenError(name || '?', `invalid name “${name}” — letters, digits, hyphens and underscores only`))
+      continue
+    }
+    if (!isTokenType(input.type)) {
+      results.push(tokenError(name, `unknown token type “${String(input.type)}”`))
+      continue
+    }
+    const value = normalizeTokenValue(input.value)
+    if (value === null) {
+      results.push(tokenError(name, 'invalid value — one CSS value, no semicolons or braces'))
+      continue
+    }
+    const description = cleanDescription(input.description)
+    if (description === null) {
+      results.push(tokenError(name, `description must be text under ${MAX_TOKEN_DESCRIPTION} characters`))
+      continue
+    }
+    if (pending.some((t) => t.name === name)) {
+      results.push(tokenError(name, 'a token with this name already exists — change it with set_tokens'))
+      continue
+    }
+    if (pending.length >= MAX_TOKENS) {
+      results.push(tokenError(name, `this canvas already has ${MAX_TOKENS} tokens`))
+      continue
+    }
+    const cleaned = cleanThemes(input.themes)
+    if (cleaned && 'error' in cleaned) {
+      results.push(tokenError(name, cleaned.error))
+      continue
+    }
+    const themes = cleaned?.themes ?? {}
+    const problem = [value, ...Object.values(themes)].map((v) => valueProblem(pending, name, v)).find(Boolean)
+    if (problem) {
+      results.push(tokenError(name, problem))
+      continue
+    }
+    const declared = declareThemes(canvasId, themes, actor.name)
+    if (declared) {
+      results.push(tokenError(name, declared))
+      continue
+    }
+    const token: DesignToken = { name, type: input.type, value, order: pending.length + 1, updatedAt: 0, updatedBy: '' }
+    pending.push(token)
+    accepted.push({
+      name,
+      type: input.type,
+      value,
+      ...(Object.keys(themes).length ? { themes } : {}),
+      ...(description ? { description } : {}),
+    })
+    results.push({ name, result: 'created' })
+  }
+  if (accepted.length) {
+    store.setTokens(canvasId, accepted, actor.name)
+    broadcast(canvasId, {
+      type: 'tokens',
+      tokens: store.getTokens(canvasId),
+      themes: store.getTokenThemes(canvasId),
+      actor,
+    })
+    logActivity(canvasId, actor, tokenSummary(results, 'added'))
+    touch(canvasId, actor)
+  }
+  return results
+}
+
+/** Change, rename or delete tokens by name, in order; one result per entry.
+ *  Every frame naming a changed token is restyled before this returns. */
+export function setTokens(canvasId: string, edits: TokenEdit[], actor: Actor): TokenResult[] | undefined {
+  if (!store.getCanvas(canvasId)) return undefined
+  const results: TokenResult[] = []
+  const renames: { from: string; to: string }[] = []
+  let touched = 0
+  for (const edit of edits) {
+    const tokens = store.getTokens(canvasId)
+    const name = normalizeTokenName(edit.name)
+    const token = tokens.find((t) => t.name === name)
+    if (!token) {
+      results.push(tokenError(name || '?', `no token named “${name}”`))
+      continue
+    }
+    if (edit.delete) {
+      const dependant = tokens.find((t) => aliasOf(t.value) === name)
+      if (dependant) {
+        results.push(tokenError(name, `${dependant.name} aliases it — change that token first`))
+        continue
+      }
+      store.deleteToken(canvasId, name)
+      results.push({ name, result: 'deleted' })
+      touched++
+      continue
+    }
+    const type = edit.type === undefined ? token.type : edit.type
+    if (!isTokenType(type)) {
+      results.push(tokenError(name, `unknown token type “${String(edit.type)}”`))
+      continue
+    }
+    const value = edit.value === undefined ? token.value : normalizeTokenValue(edit.value)
+    if (value === null) {
+      results.push(tokenError(name, 'invalid value — one CSS value, no semicolons or braces'))
+      continue
+    }
+    const description = cleanDescription(edit.description)
+    if (description === null) {
+      results.push(tokenError(name, `description must be text under ${MAX_TOKEN_DESCRIPTION} characters`))
+      continue
+    }
+    const cleaned = cleanThemes(edit.themes)
+    if (cleaned && 'error' in cleaned) {
+      results.push(tokenError(name, cleaned.error))
+      continue
+    }
+    const themes = { ...(token.themes ?? {}), ...(cleaned?.themes ?? {}) }
+    for (const theme of cleaned?.removed ?? []) delete themes[theme]
+    const problem = [value, ...Object.values(themes)].map((v) => valueProblem(tokens, name, v)).find(Boolean)
+    if (problem) {
+      results.push(tokenError(name, problem))
+      continue
+    }
+    const declared = declareThemes(canvasId, themes, actor.name)
+    if (declared) {
+      results.push(tokenError(name, declared))
+      continue
+    }
+    let newName = name
+    if (edit.newName !== undefined && normalizeTokenName(edit.newName) !== name) {
+      newName = normalizeTokenName(edit.newName)
+      if (!isTokenName(newName)) {
+        results.push(tokenError(name, `invalid name “${newName}” — letters, digits, hyphens and underscores only`))
+        continue
+      }
+      if (tokens.some((t) => t.name === newName)) {
+        results.push(tokenError(name, `a token named ${newName} already exists`))
+        continue
+      }
+      store.renameToken(canvasId, name, newName, actor.name)
+      /* aliases of the old name follow it */
+      const aliasing = store
+        .getTokens(canvasId)
+        .filter((t) => aliasOf(t.value) === name || Object.values(t.themes ?? {}).some((v) => aliasOf(v) === name))
+        .map((t) => ({
+          name: t.name,
+          type: t.type,
+          value: aliasOf(t.value) === name ? `var(${newName})` : t.value,
+          themes: Object.fromEntries(
+            Object.entries(t.themes ?? {}).map(([theme, v]) => [theme, aliasOf(v) === name ? `var(${newName})` : v]),
+          ),
+          description: t.description,
+        }))
+      if (aliasing.length) store.setTokens(canvasId, aliasing, actor.name)
+      renames.push({ from: name, to: newName })
+    }
+    store.setTokens(
+      canvasId,
+      [
+        {
+          name: newName,
+          type,
+          value,
+          themes,
+          description: description === undefined ? token.description : description,
+          ...(typeof edit.order === 'number' && Number.isFinite(edit.order) ? { order: edit.order } : {}),
+        },
+      ],
+      actor.name,
+    )
+    results.push({ name: newName, result: 'updated' })
+    touched++
+  }
+  if (touched) {
+    let restyled = 0
+    for (const rename of renames) restyled += restyleTokenFrames(canvasId, actor, rename)
+    restyled += restyleTokenFrames(canvasId, actor)
+    broadcast(canvasId, {
+      type: 'tokens',
+      tokens: store.getTokens(canvasId),
+      themes: store.getTokenThemes(canvasId),
+      actor,
+    })
+    const summary = tokenSummary(results, 'changed')
+    logActivity(
+      canvasId,
+      actor,
+      restyled ? `${summary} (${restyled} frame${restyled === 1 ? '' : 's'} restyled)` : summary,
+    )
+    touch(canvasId, actor)
+  }
+  return results
+}
+
+/** Replace the canvas's token themes (order included): a theme that leaves
+ *  takes its values with it, and every frame is restyled. Throws on bad
+ *  input with a message for the caller's error channel. */
+export function setTokenThemes(
+  canvasId: string,
+  themes: unknown,
+  actor: Actor,
+  renames: unknown = [],
+): string[] | undefined {
+  if (!store.getCanvas(canvasId)) return undefined
+  if (!Array.isArray(themes)) throw new Error('themes must be an array of names')
+  if (!Array.isArray(renames)) throw new Error('renames must be an array of { from, to }')
+  let renamed = 0
+  for (const raw of renames) {
+    const entry = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+    const from = typeof entry.from === 'string' ? entry.from.trim().toLowerCase() : ''
+    const to = typeof entry.to === 'string' ? entry.to.trim().toLowerCase() : ''
+    if (!isThemeName(to)) throw new Error(`invalid theme name “${String(entry.to)}” — use a lowercase slug like "dark"`)
+    if (from === to) continue
+    if (!store.getTokenThemes(canvasId).includes(from)) throw new Error(`no theme named “${from}”`)
+    if (store.getTokenThemes(canvasId).includes(to)) throw new Error(`a theme named “${to}” already exists`)
+    store.renameTokenTheme(canvasId, from, to, actor.name)
+    renamed++
+  }
+  const names: string[] = []
+  for (const raw of themes) {
+    const theme = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+    if (!isThemeName(theme)) throw new Error(`invalid theme name “${String(raw)}” — use a lowercase slug like "dark"`)
+    if (!names.includes(theme)) names.push(theme)
+  }
+  if (names.length > MAX_TOKEN_THEMES) throw new Error(`a canvas has at most ${MAX_TOKEN_THEMES} token themes`)
+  const before = store.getTokenThemes(canvasId)
+  const same = before.length === names.length && before.every((theme, i) => theme === names[i])
+  if (same && !renamed) return names
+  if (!same) store.setTokenThemes(canvasId, names, actor.name)
+  const restyled = restyleTokenFrames(canvasId, actor)
+  broadcast(canvasId, { type: 'tokens', tokens: store.getTokens(canvasId), themes: names, actor })
+  logActivity(
+    canvasId,
+    actor,
+    `set the token themes to ${names.length ? names.join(', ') : 'none'}${restyled ? ` (${restyled} frame${restyled === 1 ? '' : 's'} restyled)` : ''}`,
+  )
+  touch(canvasId, actor)
+  return names
 }
 
 /* ------------------------------------------------------------------ */

@@ -112,6 +112,19 @@
   never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
   healed document, so a cut-off script never runs).
+- Design tokens (`shared/designTokens.ts`, spec `.context/specs/design-tokens.md`): a canvas's
+  typed design values (Paper's eleven types: colour, opacity, radius, spacing, container,
+  breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom
+  property frames use as `var(--name)`, with a value per theme (`canvas.tokenThemes`; a frame
+  switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
+  frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs, and a
+  token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
+  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0044); REST under
+  `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
+  markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
+  `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
+  (`TokensPanel.tsx`) and token menus on the Design panel's colour, radius and font-size fields.
+  Tests: `designTokens.test.ts`, `designTokenWrites.test.ts`, `designTokensHttp.test.ts`.
 - Hosted fonts (`shared/webFonts.ts`): the Design panel's font menu offers the "Fonts" group, a
   curated roster of open families on Google Fonts (`WEB_FONTS`, each with its css2 axes), plus
   two "Device fonts" (system UI, system monospace) labelled as varying by viewer; the OS stacks

@@ -12,6 +12,7 @@ vi.mock('../server/db/persist.ts', () => {
     deleteCanvas: noop,
     deleteFrame: noop,
     deleteGuideline: noop,
+    deleteToken: noop,
     deleteMember: noop,
     deleteReference: noop,
     saveCanvas: noop,
@@ -19,6 +20,7 @@ vi.mock('../server/db/persist.ts', () => {
     saveFrame: (frame: Frame, immediate?: boolean) =>
       rig.savedFrames.push({ id: frame.id, pageId: frame.pageId, immediate }),
     saveGuideline: noop,
+    saveToken: noop,
     savePageCopy: async () => rig.duringCopy?.(),
     saveMember: noop,
     saveReference: noop,

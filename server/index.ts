@@ -28,6 +28,7 @@ import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
 import { fontsRouter } from './fontRoutes.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
+import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
   canManageCanvas,
@@ -1598,6 +1599,88 @@ app.get('/api/canvases/:id/guidelines/:name/history', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'view')) return
   const rows = await persist.listGuidelineVersions(req.params.id, req.params.name.toLowerCase())
   res.json(rows.map((v) => ({ markdown: v.markdown, savedAt: v.savedAt, savedBy: v.savedBy })))
+})
+
+/* design tokens (shared/designTokens.ts): the canvas's CSS custom properties.
+   `?format=css|tailwind|md` exports them for a codebase; the default is JSON. */
+app.get('/api/canvases/:id/tokens', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'view')) return
+  const tokens = store.getTokens(req.params.id)
+  const themes = store.getTokenThemes(req.params.id)
+  switch (req.query.format) {
+    case 'css':
+      return res.type('text/css').send(tokensCss(tokens, themes))
+    case 'tailwind':
+      return res.type('text/css').send(tokensTailwind(tokens, themes))
+    case 'md':
+      return res.type('text/markdown').send(tokensMarkdown(tokens, themes))
+    default:
+      return res.json(tokens)
+  }
+})
+
+/* the token themes (light, dark, …), in display order; a theme that leaves takes its values along */
+app.put('/api/canvases/:id/token-themes', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const themes = actions.setTokenThemes(req.params.id, req.body?.themes, userActor(req), req.body?.renames ?? [])
+    if (!themes) return res.status(404).json({ error: 'not found' })
+    res.json({ themes, tokens: store.getTokens(req.params.id) })
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'invalid themes' })
+  }
+})
+
+app.post('/api/canvases/:id/tokens', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const inputs = Array.isArray(req.body?.tokens) ? req.body.tokens : [req.body]
+  if (inputs.length > 200) return res.status(400).json({ error: 'at most 200 tokens per request' })
+  const results = actions.createTokens(req.params.id, inputs, userActor(req))
+  if (!results) return res.status(404).json({ error: 'not found' })
+  res.json({ results, tokens: store.getTokens(req.params.id) })
+})
+
+/* change, rename (newName) or delete (delete: true) one token by name */
+app.put('/api/canvases/:id/tokens/:name', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const body = typeof req.body === 'object' && req.body !== null ? req.body : {}
+  const edit = { ...body, name: req.params.name }
+  const results = actions.setTokens(req.params.id, [edit], userActor(req))
+  if (!results) return res.status(404).json({ error: 'not found' })
+  const [result] = results
+  if (result?.result === 'error') return res.status(400).json({ error: result.message })
+  res.json({ result, tokens: store.getTokens(req.params.id) })
+})
+
+app.delete('/api/canvases/:id/tokens/:name', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const results = actions.setTokens(req.params.id, [{ name: req.params.name, delete: true }], userActor(req))
+  if (!results) return res.status(404).json({ error: 'not found' })
+  const [result] = results
+  if (result?.result === 'error') return res.status(400).json({ error: result.message })
+  res.json({ ok: true, tokens: store.getTokens(req.params.id) })
+})
+
+/* the styleguide: the canvas's tokens and its guidelines as one markdown
+   document — what a coding agent pulls into a repo as its DESIGN.md */
+app.get('/api/canvases/:id/styleguide.md', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const tokens = store.getTokens(req.params.id)
+  const themes = store.getTokenThemes(req.params.id)
+  const docs = store.getGuidelines(req.params.id)
+  const parts = [
+    `# ${canvas.name} — styleguide`,
+    ...(tokens.length
+      ? [
+          `## Design tokens\n\nUse these as CSS custom properties (\`var(--name)\`); the Tailwind v4 \`@theme\` block and plain CSS are at \`/api/canvases/${canvas.id}/tokens?format=tailwind|css\`.`,
+          tokensMarkdown(tokens, themes),
+          '```css\n' + tokensCss(tokens, themes) + '\n```',
+        ]
+      : []),
+    ...docs.map((d) => `## ${actions.guidelineTitle(d)}\n\n${d.markdown}`),
+  ]
+  res.type('text/markdown').send(parts.join('\n\n') + '\n')
 })
 
 app.put('/api/canvases/:id/guidelines/:name', (req, res) => {

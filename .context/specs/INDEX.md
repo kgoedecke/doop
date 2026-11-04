@@ -6,6 +6,10 @@ lists every file in this folder.
 
 ## Active
 
+- [design-tokens.md](design-tokens.md) - Design tokens and themes: Paper's eleven token types as
+  CSS custom properties per canvas, the managed `<style data-doop-tokens>` block every frame
+  carries, propagation as annotation writes, modes via `data-doop-mode`, REST + MCP + the
+  styleguide export, and the Layers panel's Tokens tab.
 - [prototyping.md](prototyping.md) - Clickable prototypes: interaction data attributes in frame
   HTML (triggers, actions, transitions, canonical form), per-page flow start, the prototype player
   and `/c/<id>/proto`, the editor's Prototype mode and connectors, and the MCP tools.
