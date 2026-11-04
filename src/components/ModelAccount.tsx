@@ -2,6 +2,7 @@ import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-
 import { BrandMark } from './ui/brand-mark'
 import { AgentIcon } from './AgentIcon'
 import { LocalClaudeRow } from './LocalClaude'
+import { CustomModelProfiles } from './CustomModelProfiles'
 import { authClient } from '../lib/auth'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
 import { isDesktopShell } from '../lib/shell'
@@ -780,6 +781,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         mark: <GeminiMark />,
         placeholder: 'AIza…',
       })}
+
+      <CustomModelProfiles account={account} onAccountChange={settle} />
 
       {desktop && <LocalClaudeRow />}
       {keySection({

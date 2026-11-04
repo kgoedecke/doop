@@ -74,6 +74,54 @@ export const models: Catalog['models'] = {
   claudeKeyTitle: 'Chave de API do Claude',
   claudeKeyLede: 'Pague por token na sua conta da Anthropic. Roda no servidor do Doop.',
 
+  /* CustomModelProfiles */
+  customTitle: 'Endpoints personalizados',
+  customLede:
+    'Salve endpoints de Chat Completions compatíveis com OpenAI — um provedor hospedado ou um servidor de modelos na sua própria rede.',
+  customEmpty:
+    'Ainda não há endpoints personalizados. Adicione um para rodar o Agente Doop em um modelo que você controla.',
+  customSelfHostNote:
+    'Endpoints locais ou em rede privada só funcionam quando a implantação define CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS=1.',
+  customAdd: 'Adicionar endpoint personalizado',
+  customEdit: 'Editar',
+  customDelete: 'Excluir',
+  customDeleteTitle: 'Excluir {name}?',
+  customDeleteBody:
+    'O endpoint salvo e sua chave de API serão removidos. Se ele estiver ativo, nenhuma conta de modelo ficará disponível até você conectar outra.',
+  customDeleteConfirm: 'Excluir endpoint',
+  customActivate: 'Usar este endpoint',
+  customActive: 'Ativo',
+  customName: 'Nome',
+  customNamePlaceholder: 'Ollama local',
+  customBaseUrl: 'URL base',
+  customBaseUrlPlaceholder: 'https://provedor.exemplo/v1',
+  customModel: 'ID do modelo',
+  customModelPlaceholder: 'qwen3.5-coder',
+  customApiKey: 'Chave de API (opcional)',
+  customApiKeyPlaceholder: 'sk-… (opcional)',
+  customKeyKeep: 'Deixe em branco para manter a chave salva.',
+  customKeyClear: 'Limpar a chave de API salva',
+  customVision: 'Consegue ver imagens',
+  customVisionHint: 'Ative somente quando o modelo aceitar entradas de imagem.',
+  customTest: 'Testar conexão',
+  customTesting: 'Testando…',
+  customSave: 'Salvar endpoint',
+  customSaving: 'Salvando…',
+  customConnectionOk: {
+    one: 'Conexão funciona — 1 modelo disponível',
+    other: 'Conexão funciona — {count} modelos disponíveis',
+  },
+  customErrorInvalidUrl: 'Informe uma URL base HTTP(S) válida, sem credenciais, parâmetros de consulta ou fragmento.',
+  customErrorUrlInsecure: 'Endpoints públicos personalizados precisam usar HTTPS.',
+  customErrorPrivateUrl:
+    'Este endpoint está em uma rede privada. Ative CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS no servidor para usá-lo.',
+  customErrorUnreachable: 'Não foi possível acessar o endpoint personalizado.',
+  customErrorAuth: 'O endpoint rejeitou a chave de API.',
+  customErrorNotCompatible: 'O endpoint não retornou uma resposta compatível com OpenAI.',
+  customErrorInvalidInput: 'Confira os dados do endpoint e tente de novo.',
+  customErrorUnknown: 'Não deu certo — tente de novo.',
+  customCatalogFallback: 'A lista de modelos ao vivo do endpoint não está disponível, então o modelo salvo é mostrado.',
+
   /* LocalClaude */
   cliSourceChosen: ', escolhido por você.',
   cliSourceShell: ', o que o seu terminal executa.',
