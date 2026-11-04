@@ -4,7 +4,14 @@ import { store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief } from '../shared/fonts.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
-import { TOKEN_TYPES, describeTokens, tokensBrief, tokensCss, tokensTailwind } from '../shared/designTokens.ts'
+import {
+  TOKEN_TYPES,
+  describeTokens,
+  tokensBrief,
+  tokensCss,
+  tokensTailwind,
+  type TokenResult,
+} from '../shared/designTokens.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
@@ -193,6 +200,9 @@ interface RunState {
   /** root ids of the threads where the agent asked something and stopped:
    *  handed back to the person instead of resolved when the run ends */
   awaitingThreads: Set<string>
+  /** token writes that took (a token created, changed or deleted, the theme
+   *  list set): work a card can ask for on its own, delivered without a frame */
+  tokenWrites: number
 }
 
 export interface FramePlacement {
@@ -258,6 +268,17 @@ const MAX_IMAGES_PER_RUN = 4
 
 function deliverableFrameIds(runState: RunState): string[] {
   return [...runState.mutatedFrames].filter((id) => !runState.sourceFrames.has(id))
+}
+
+/** Whether the run has delivered anything a card can ask for: a frame of its
+ *  own changed or created, or a token write that took. Exported for tests. */
+export function deliveredWork(runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites'>): boolean {
+  return deliverableFrameIds(runState as RunState).length > 0 || runState.tokenWrites > 0
+}
+
+/** How many of a token call's results took. Exported for tests. */
+export function tokenWritesIn(results: readonly TokenResult[]): number {
+  return results.filter((r) => r.result !== 'error').length
 }
 
 function verificationFrameIds(runState: RunState): string[] {
@@ -578,6 +599,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
       repliedThreads: new Set(),
       awaitingThreads: new Set(),
+      tokenWrites: 0,
     }
     let refused = false
     let crashed = false
@@ -778,12 +800,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             continue
           }
 
-          if (requireMutation && deliverableFrameIds(runState).length === 0 && !mutationNudgeSent) {
+          if (requireMutation && !deliveredWork(runState) && !mutationNudgeSent) {
             mutationNudgeSent = true
             messages.push({
               role: 'user',
               content:
-                'You have not changed or created a deliverable frame yet, so the queued design card is not complete. Imported source frames are reference material and do not count as the deliverable. Make the requested visual change now. For a full redesign, use begin_frame_rewrite, append_frame_rewrite chunks under 12,000 characters, and commit_frame_rewrite, then verify it with screenshot_frame.',
+                'You have not changed or created a deliverable frame, or saved a token change, yet, so the queued design card is not complete. Imported source frames are reference material and do not count as the deliverable. Make the requested change now. For a full redesign, use begin_frame_rewrite, append_frame_rewrite chunks under 12,000 characters, and commit_frame_rewrite, then verify it with screenshot_frame.',
             })
             continue
           }
@@ -834,7 +856,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        or out-of-turns runs pause so nothing gets a false Done or auto-retry */
     const deliverableFrames = deliverableFrameIds(runState)
     const blockedWebsiteAccess = runState.blockedWebsiteAccess
-    const noMutation = finished && requireMutation && deliverableFrames.length === 0 && !blockedWebsiteAccess
+    const noMutation = finished && requireMutation && !deliveredWork(runState) && !blockedWebsiteAccess
     const unverifiedMutation =
       finished &&
       runState.vision &&
@@ -846,10 +868,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (blockedWebsiteAccess && !staleAccount) {
       actions.setAgentStatus(canvasId, actor, 'Website blocked — needs screenshots')
     }
-    if (noMutation) actions.setAgentStatus(canvasId, actor, 'No frame changed — waiting for a retry')
+    if (noMutation) actions.setAgentStatus(canvasId, actor, 'Nothing changed — waiting for a retry')
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
@@ -888,7 +910,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       } else if (exhausted) {
         reason = `${role.name} ran out of turns before finishing. Retry when you are ready.`
       } else if (noMutation) {
-        reason = `${role.name} finished without changing a frame. Retry when you are ready.`
+        reason = `${role.name} finished without changing a frame or a token. Retry when you are ready.`
       } else {
         reason = `${role.name} changed a frame but could not verify it. Retry when you are ready.`
       }
@@ -1504,7 +1526,8 @@ async function frameImageBlocks(
   return blocks
 }
 
-async function execTool(
+/** Runs one tool call of the resident's loop. Exported for tests. */
+export async function execTool(
   block: Anthropic.ToolUseBlockParam,
   canvasId: string,
   actor: ReturnType<typeof actions.resolveActor>,
@@ -2031,6 +2054,7 @@ async function execTool(
         if (!Array.isArray(raw.tokens) || !raw.tokens.length) return fail('tokens must be a non-empty array')
         const results = actions.createTokens(canvasId, raw.tokens, actor)
         if (!results) return fail('canvas not found')
+        runState.tokenWrites += tokenWritesIn(results)
         return ok(JSON.stringify({ results }))
       }
       case 'set_tokens': {
@@ -2052,6 +2076,7 @@ async function execTool(
         })
         const results = actions.setTokens(canvasId, edits, actor)
         if (!results) return fail('canvas not found')
+        runState.tokenWrites += tokenWritesIn(results)
         return ok(JSON.stringify({ results }))
       }
       case 'set_token_themes': {
@@ -2059,6 +2084,7 @@ async function execTool(
         try {
           const themes = actions.setTokenThemes(canvasId, raw.themes, actor, raw.renames ?? [])
           if (!themes) return fail('canvas not found')
+          runState.tokenWrites += 1
           return ok(`token themes are now ${themes.length ? themes.join(', ') : 'none'}`)
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid themes')
