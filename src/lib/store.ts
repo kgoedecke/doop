@@ -239,6 +239,9 @@ interface State {
   /** add the element to the picked set of its frame, or drop it from the
    *  set; an element in another frame starts a new set */
   toggleElement(el: { frameId: string; selector: string }): void
+  /** replace the picked set with these elements of one frame, the last
+   *  the primary (⌘A inside a frame, a keyboard walk of the tree) */
+  pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
   toggleUiHidden(): void
@@ -677,6 +680,11 @@ export const useStore = create<State>((set, get) => ({
         ? { selectedElement: { frameId: el.frameId, selector: primary }, selectedElements: rest }
         : { selectedElement: null, selectedElements: [], elementPanelOpen: false }
     }),
+  pickElements: (frameId, selectors) => {
+    const primary = selectors.at(-1)
+    if (!primary) return
+    set({ selectedElement: { frameId, selector: primary }, selectedElements: selectors, elementPanelOpen: true })
+  },
   setElementPanelOpen: (elementPanelOpen) => set({ elementPanelOpen }),
   setLayersOpen: (layersOpen) => {
     try {

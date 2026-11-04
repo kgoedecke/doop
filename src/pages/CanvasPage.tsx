@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
-import { MOD_KEY, PRESENT_SHORTCUT_HINT, isHideUiShortcut, isPresentShortcut, isTypingTarget } from '../lib/keys'
+import {
+  MOD_KEY,
+  PRESENT_SHORTCUT_HINT,
+  isControlTarget,
+  isHideUiShortcut,
+  isPresentShortcut,
+  isSelectAllShortcut,
+  isTypingTarget,
+  reorderShortcut,
+} from '../lib/keys'
+import { enterSelection, exitSelection, reorderSelection, selectAll, selectSibling } from '../lib/selectionKeys'
 import { presentStartFrame } from '../lib/present'
 import { canHideUi, hideUiHinted } from '../lib/hideUi'
 import { connect, disconnect, sendWs } from '../lib/ws'
@@ -387,6 +397,33 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         if (canEdit && !e.repeat) deleteSelection()
+      }
+      /* Figma's walk of the selection: ↩ into it, ⇧↩ out to the parent, Tab
+         and ⇧Tab along the siblings. Only the bare keys, and only when no
+         control (a button, a menu, the Layers tree) has the keyboard — there
+         ↩ presses and Tab moves focus, as they must. An unhandled key is left
+         alone, so Tab still walks the chrome when nothing is selected. */
+      const bare = !e.metaKey && !e.ctrlKey && !e.altKey
+      if (bare && !presenting && (e.key === 'Enter' || e.key === 'Tab') && !isControlTarget(e.target)) {
+        const moved =
+          e.key === 'Enter' ? (e.shiftKey ? exitSelection() : enterSelection()) : selectSibling(e.shiftKey ? -1 : 1)
+        if (moved) {
+          e.preventDefault()
+          return
+        }
+      }
+      /* ⌘A: every frame on the page, or every sibling of the picked element */
+      if (isSelectAllShortcut(e) && !presenting) {
+        e.preventDefault()
+        selectAll()
+        return
+      }
+      /* ⌘] / ⌘[ and ⌘⌥] / ⌘⌥[ restack what is selected */
+      const reorder = reorderShortcut(e)
+      if (reorder && canEdit && !presenting) {
+        e.preventDefault()
+        reorderSelection(reorder)
+        return
       }
       const nudge = ARROW_NUDGE[e.key]
       if (canEdit && nudge && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey) {

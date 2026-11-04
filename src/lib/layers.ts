@@ -565,6 +565,58 @@ export function shiftElement(html: string, selector: string, dir: -1 | 1): Moved
   return move(doc, el, sibling, dir === -1 ? 'before' : 'after')
 }
 
+/** Restack the elements among their siblings, as Figma does for a set:
+ *  forward and backward step each over the next or previous sibling outside
+ *  the set (so the set stays together and a member already at the end
+ *  stays), front and back put each at its parent's end, keeping their
+ *  order. Elements in several parents move within their own. Null when
+ *  nothing changed or a parent is locked. Returns the elements' selectors
+ *  after the move, in the order given. */
+export function reorderElements(
+  html: string,
+  selectors: string[],
+  move: 'forward' | 'backward' | 'front' | 'back',
+): { html: string; selectors: string[] } | null {
+  const doc = parse(html)
+  const els = selectors.map((sel) => find(doc, sel))
+  if (els.some((el) => !el)) return null
+  const set = new Set(els as Element[])
+  for (const el of set) if (!el.parentElement || el.parentElement.closest(`[${LOCK_ATTR}]`)) return null
+  /* document order; a step forward is applied from the last member back, so
+     a member never leaps over another */
+  const ordered = [...set].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+  const toFront = move === 'forward' || move === 'front'
+  let changed = false
+  if (move === 'front' || move === 'back') {
+    /* each parent's members go to its edge as one group, keeping their
+       order; a group that already fills that edge stays */
+    const groups = new Map<Element, Element[]>()
+    for (const el of ordered) {
+      const parent = el.parentElement!
+      groups.set(parent, [...(groups.get(parent) ?? []), el])
+    }
+    for (const [parent, members] of groups) {
+      const visible = [...parent.children].filter((c) => !HIDDEN_TAGS.has(c.tagName))
+      const edge = toFront ? visible.slice(-members.length) : visible.slice(0, members.length)
+      if (edge.every((c) => set.has(c))) continue
+      if (toFront) parent.append(...members)
+      else parent.prepend(...members)
+      changed = true
+    }
+  } else {
+    if (toFront) ordered.reverse()
+    for (const el of ordered) {
+      const over = visibleSibling(el, toFront ? 1 : -1)
+      if (!over || set.has(over)) continue
+      if (toFront) over.after(el)
+      else over.before(el)
+      changed = true
+    }
+  }
+  if (!changed) return null
+  return { html: serialize(doc), selectors: (els as Element[]).map(elementPath) }
+}
+
 /* attributes whose value is an id, or a space-separated list of ids */
 const ID_REF_ATTRS = new Set([
   'for',

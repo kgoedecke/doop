@@ -259,6 +259,17 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `Stage` paints it with contrast dots and a standalone drawing takes its ink from that tone.
   Tests: `pageBackground.test.ts`, the background cases in `storePages.test.ts`, `pages.test.ts`
   and `guideEdits.test.ts`.
+- Selection keys (`src/lib/selectionKeys.ts`, chords in `src/lib/keys.ts`), as Figma binds them: ↩
+  goes into the selected frame or element (its first layer), ⇧↩ back out to the parent (a root
+  layer's parent is the frame; a standalone shape has none), Tab / ⇧Tab to the next or previous
+  sibling (frames walk the page's stack the way the Layers panel lists it, wrapping), ⌘A takes
+  every unlocked frame on the page or every unlocked sibling of the picked element
+  (`store.pickElements`), and ⌘] / ⌘[ step the picked elements, together, or the selected frame
+  forward or backward, ⌘⌥] / ⌘⌥[ to the front or back (`reorderElements` / `reorderLayers`,
+  `restackFrame`), one undo step each. A picked standalone shape is its page's row: Tab, ⌘A and
+  the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
+  something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
+  read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
