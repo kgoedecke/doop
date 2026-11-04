@@ -29,6 +29,7 @@ import {
   takesReasoningEffort,
 } from '../server/modelAccounts.ts'
 import { CustomInferenceError } from '../server/customInference.ts'
+import { pickModel } from '../server/agentModel.ts'
 
 vi.mock('../server/db/index.ts', async () => {
   const { PGlite } = await import('@electric-sql/pglite')
@@ -221,6 +222,101 @@ describe('custom model profiles', () => {
     const after = await storedKey('legacy-profile')
     expect(after).toMatch(/^enc:v1:/)
     expect(after).not.toContain('legacy-plaintext-key')
+  })
+})
+
+describe('custom profile end to end', () => {
+  let provider: http.Server
+  let base: string
+  const seen: { auth: string; body: Record<string, unknown> }[] = []
+  let turns = 0
+
+  beforeAll(async () => {
+    provider = http.createServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => (raw += chunk))
+      req.on('end', () => {
+        const json = (value: unknown) =>
+          res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(value))
+        if (new URL(req.url ?? '/', 'http://x').pathname.endsWith('/models')) {
+          return json({ data: [{ id: 'local-e2e-model' }] })
+        }
+        seen.push({
+          auth: String(req.headers.authorization ?? ''),
+          body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {},
+        })
+        turns += 1
+        if (turns === 1) {
+          return json({
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                message: {
+                  content: 'looking',
+                  tool_calls: [{ id: 'call-e2e', function: { name: 'create_frame', arguments: '{"name":"Hero"}' } }],
+                },
+              },
+            ],
+          })
+        }
+        return json({ choices: [{ finish_reason: 'stop', message: { content: 'done' } }] })
+      })
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    base = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`
+  }, 30_000)
+
+  afterAll(() => new Promise<void>((resolve) => provider.close(() => resolve())))
+
+  beforeEach(() => {
+    seen.length = 0
+    turns = 0
+  })
+
+  it('activates a keyless local profile and runs the resident turn through it', async () => {
+    const profile = await createProfile(
+      'alice',
+      input({ name: 'Local fixture', baseUrl: `${base}/v1`, model: 'local-e2e-model', supportsVision: false }),
+    )
+    await activateCustomProfile('alice', profile.id)
+
+    const model = await pickModel('alice')
+    expect(model).toMatchObject({
+      provider: 'custom-key',
+      userId: 'alice',
+      vision: false,
+      label: `Local fixture (local-e2e-model)`,
+    })
+
+    const req = {
+      system: [{ text: 'be a designer' }],
+      tools: [
+        {
+          name: 'create_frame',
+          description: 'Make a frame',
+          input_schema: { type: 'object' as const, properties: { name: { type: 'string' } } },
+        },
+      ],
+      messages: [{ role: 'user' as const, content: 'make a hero' }],
+      maxTokens: 2_000,
+    }
+    const first = await model!.run(req)
+    expect(first).toMatchObject({
+      stop_reason: 'tool_use',
+      content: [
+        { type: 'text', text: 'looking' },
+        { type: 'tool_use', id: 'call-e2e', name: 'create_frame', input: { name: 'Hero' } },
+      ],
+    })
+    expect(seen[0]).toMatchObject({ auth: '' })
+    expect(seen[0]!.body).toMatchObject({ model: 'local-e2e-model', tool_choice: 'auto' })
+    expect(seen[0]!.body.messages).toEqual([
+      { role: 'system', content: 'be a designer' },
+      { role: 'user', content: 'make a hero' },
+    ])
+
+    const second = await model!.run(req)
+    expect(second).toMatchObject({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'done' }] })
   })
 })
 

@@ -123,6 +123,16 @@ describe('validateCustomBaseUrl', () => {
     dnsMocks.lookup.mockRejectedValue(new Error('ENOTFOUND'))
     expect(await asyncCode(() => validateCustomBaseUrl('https://missing.example/v1', false))).toBe('unreachable')
   })
+
+  it('resolves again on the next request and blocks a host that moved to a private address', async () => {
+    dnsMocks.lookup.mockResolvedValueOnce(PUBLIC)
+    await expect(validateCustomBaseUrl('https://rebind.example/v1', false)).resolves.toEqual(
+      new URL('https://rebind.example/v1'),
+    )
+    /* the same name now points at loopback: the save-time answer is never reused */
+    dnsMocks.lookup.mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }])
+    expect(await asyncCode(() => validateCustomBaseUrl('https://rebind.example/v1', false))).toBe('private_url_blocked')
+  })
 })
 
 describe('customEndpointUrl', () => {
