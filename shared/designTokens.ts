@@ -379,9 +379,10 @@ export function tokensTailwind(tokens: readonly DesignToken[], themeOrder: reado
   if (!tokens.length) return ''
   const renamed = tailwindNames(tokens)
   /* every var() naming a token follows the token's new name: an alias, and
-     a reference inside a calc() or a color-mix() alike */
+     a reference inside a calc() or a color-mix() alike; what sits between
+     the name and the comma or paren (space, a comment) is kept as written */
   const rewrite = (value: string) =>
-    value.replace(/var\(\s*(--[a-zA-Z0-9_-]+)\s*([,)])/g, (whole, name: string, end: string) =>
+    value.replace(/var\(\s*(--[a-zA-Z0-9_-]+)((?:\s|\/\*[\s\S]*?\*\/)*[,)])/g, (whole, name: string, end: string) =>
       renamed.has(name) ? `var(${renamed.get(name)}${end}` : whole,
     )
   const sorted = sortTokens(tokens)

@@ -189,7 +189,10 @@ describe('exports', () => {
       token('--tint', 'color', 'color-mix(in srgb, var(--ink) 50%, white)', 2),
       token('--edge', 'color', 'var(--ink, #000)', 3),
       token('--other', 'color', 'var(--unknown)', 4),
+      token('--step', 'spacing', '4px', 5),
+      token('--double', 'spacing', 'calc(var(--step /* base */) * 2)', 6),
     ])
+    expect(nested).toContain('--spacing-double: calc(var(--spacing-step /* base */) * 2);')
     expect(nested).toContain('--color-tint: color-mix(in srgb, var(--color-ink) 50%, white);')
     expect(nested).toContain('--color-edge: var(--color-ink, #000);')
     expect(nested).toContain('--color-other: var(--unknown);')
