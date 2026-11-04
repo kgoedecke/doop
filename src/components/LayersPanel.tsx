@@ -920,9 +920,11 @@ function Row({
       className={cn(
         'group relative flex h-7 cursor-default select-none items-center gap-[5px] whitespace-nowrap rounded-[7px] pr-1.5 text-[12px] text-ink-soft hover:bg-sub',
         selected && 'bg-paper-deep font-medium text-ink hover:bg-paper-deep [&_[data-icon]]:text-ink',
-        /* room under the floating eye and lock, so the name never runs beneath them */
+        /* room under the floating eye and lock, the strip's whole width, so
+           neither the name nor a trailing badge runs beneath them: the strip
+           paints the row's own background over whatever it covers */
         (onToggleHidden || onToggleLocked) &&
-          (hidden || locked ? 'pr-[50px]' : 'focus-within:pr-[50px] hover:pr-[50px]'),
+          (hidden || locked ? 'pr-[56px]' : 'focus-within:pr-[56px] hover:pr-[56px]'),
         drop === 'inside' && 'shadow-[inset_0_0_0_1.5px_var(--brand)]',
         className,
       )}
@@ -969,7 +971,8 @@ function Row({
            a hidden or locked row keeps its mark showing. */
         <span
           className={cn(
-            'absolute top-0 right-0 flex h-full flex-none items-center gap-0.5 rounded-r-[7px] bg-inherit pr-1.5 pl-1',
+            /* 56px: 8 + 20 + 2 + 20 + 6, the row's reserved padding above */
+            'absolute top-0 right-0 flex h-full flex-none items-center gap-0.5 rounded-r-[7px] bg-inherit pr-1.5 pl-2',
             !hidden && !locked && 'invisible group-focus-within:visible group-hover:visible',
           )}
         >
