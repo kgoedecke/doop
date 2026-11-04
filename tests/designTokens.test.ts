@@ -141,6 +141,12 @@ describe('themes', () => {
     expect(renameThemeAttrs(dark, 'dark', 'night')).toContain('data-doop-theme="night"')
     expect(renameThemeAttrs("<div data-doop-theme='dark'>", 'dark', 'night')).toBe("<div data-doop-theme='night'>")
     expect(withFrameTheme('<p>no root</p>', 'dark')).toBe('<p>no root</p>')
+    /* an unquoted attribute is read, replaced and renamed too */
+    expect(frameTheme('<html data-doop-theme=dark>')).toBe('dark')
+    expect(withFrameTheme('<html data-doop-theme=dark lang="en">', 'dim')).toBe(
+      '<html lang="en" data-doop-theme="dim">',
+    )
+    expect(renameThemeAttrs('<html data-doop-theme=dark>', 'dark', 'night')).toBe('<html data-doop-theme="night">')
   })
 })
 

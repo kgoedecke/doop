@@ -23,7 +23,7 @@ import { DEVICE_FONTS } from '../lib/deviceFonts'
 import { fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { api } from '../lib/api'
-import { recordUpdate } from '../lib/history'
+import { recordUpdate, trackSave } from '../lib/history'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Input } from './ui/input'
@@ -725,7 +725,8 @@ function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: 
       if (html === before) continue
       useStore.getState().patchFrameLocal(frame.id, { html })
       recordUpdate(frame.id, { html: before }, { html }, true)
-      api.updateFrame(frame.id, { html }).catch(console.error)
+      /* tracked, so an undo issued while this save is pending waits for it */
+      trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
     }
   }
 

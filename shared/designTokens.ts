@@ -291,17 +291,20 @@ export function withTokenBlock(
 /** The HTML with every `data-doop-theme="from"` switched to `to`. */
 export function renameThemeAttrs(html: string, from: string, to: string): string {
   const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return html.replace(new RegExp(`(${THEME_ATTR}\\s*=\\s*)(["'])${escaped}\\2`, 'g'), `$1$2${to}$2`)
+  return html
+    .replace(new RegExp(`(${THEME_ATTR}\\s*=\\s*)(["'])${escaped}\\2`, 'g'), `$1$2${to}$2`)
+    .replace(new RegExp(`(${THEME_ATTR}\\s*=\\s*)${escaped}(?=[\\s/>])`, 'g'), `$1"${to}"`)
 }
 
 const ROOT_TAG_RE = /<(html|body)\b([^>]*)>/i
-const THEME_ATTR_RE = new RegExp(`\\s*${THEME_ATTR}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i')
+/* a quoted value, or an unquoted one up to the next space or tag end */
+const THEME_ATTR_RE = new RegExp(`\\s*${THEME_ATTR}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\`]+))`, 'i')
 
 /** The theme a frame's root switches to, or null for the default. */
 export function frameTheme(html: string): string | null {
   const root = ROOT_TAG_RE.exec(html)
   const m = root ? THEME_ATTR_RE.exec(root[2]!) : null
-  return m ? (m[1] ?? m[2] ?? null) : null
+  return m ? (m[1] ?? m[2] ?? m[3] ?? null) : null
 }
 
 /** The HTML with its root switched to a theme (null: the default). The
