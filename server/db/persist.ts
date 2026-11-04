@@ -207,6 +207,13 @@ function queueTokenWrite(canvasId: string, name: string, write: () => Promise<un
   swallow(next.finally(() => tokenWrites.get(key) === next && tokenWrites.delete(key)))
 }
 
+/** Every queued token write of a canvas, settled: what a canvas delete waits
+ *  for, so a save still in the queue cannot put a row back afterwards. */
+function pendingTokenWrites(canvasId: string): Promise<unknown> {
+  const prefix = `${canvasId}\0`
+  return Promise.allSettled([...tokenWrites].filter(([key]) => key.startsWith(prefix)).map(([, write]) => write))
+}
+
 export function saveToken(canvasId: string, token: DesignToken) {
   const row = tokenRow(canvasId, token)
   queueTokenWrite(canvasId, token.name, () =>
@@ -589,7 +596,9 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
-  swallow(db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId)))
+  swallow(
+    pendingTokenWrites(canvasId).then(() => db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))),
+  )
   swallow(
     pendingVersionWrites((_, c) => c === canvasId).then(() =>
       db.delete(t.frameVersions).where(eq(t.frameVersions.canvasId, canvasId)),
