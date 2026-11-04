@@ -174,7 +174,7 @@ export function TokensSection() {
               <span className="grid size-4 flex-none place-items-center text-ink">
                 {on && <CheckIcon className="size-3.5" />}
               </span>
-              <span className={cn('min-w-0 flex-1 truncate pl-0.5 font-mono', on && 'font-medium')}>{theme}</span>
+              <span className={cn('min-w-0 flex-1 truncate pl-0.5', on && 'font-medium')}>{theme}</span>
             </Pressable>
           )
         })}
