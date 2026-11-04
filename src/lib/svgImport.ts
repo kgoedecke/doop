@@ -9,6 +9,7 @@
  */
 import {
   IDENTITY,
+  apply,
   lengthScale,
   multiply,
   paddedBounds,
@@ -122,7 +123,14 @@ const DEFAULTS: Record<string, string> = {
   'lighting-color': 'white',
   transform: 'none',
   'transform-origin': '0 0',
+  'clip-path': 'none',
+  mask: 'none',
+  filter: 'none',
 }
+/** The effects a text or image layer keeps from its stylesheet, since the
+ *  written document has no stylesheet; its `<g>` wrapper carries the transform,
+ *  so they stay in the element's own coordinates. */
+const EFFECT_PROPS = ['clip-path', 'mask', 'filter'] as const
 /** What a copied definition (a gradient stop, a clip's shape) keeps of its styles. */
 const DEF_PROPS = [
   ...PAINT_PROPS,
@@ -315,7 +323,7 @@ interface Paint {
   values: Record<string, string>
   /** The element's own opacity, which groups keep as their own and shapes wear. */
   opacity: number
-  mask: string | null
+  mask: Reference | null
   filter: string | null
 }
 
@@ -325,7 +333,7 @@ type Node =
       name: string
       opacity: number
       clip: Reference | null
-      mask: string | null
+      mask: Reference | null
       filter: string | null
       children: Node[]
     }
@@ -429,10 +437,11 @@ class Walker {
   /** A group's own effects, which the written group carries as a whole. */
   private effects(el: Element, ctm: Matrix) {
     const clip = referenceId(this.read(el, 'clip-path'))
+    const mask = referenceId(this.read(el, 'mask'))
     return {
       opacity: opacityOf(this.read(el, 'opacity')),
       clip: clip ? { id: clip, ctm } : null,
-      mask: referenceId(this.read(el, 'mask')),
+      mask: mask ? { id: mask, ctm } : null,
       filter: referenceId(this.read(el, 'filter')),
     }
   }
@@ -465,6 +474,7 @@ class Walker {
     values['stroke-dashoffset'] = String(round((parseFloat(values['stroke-dashoffset'] ?? '0') || 0) * scale))
     const stroke = values['stroke'] !== 'none' ? parseFloat(values['stroke-width'] ?? '0') || 0 : 0
     const clip = referenceId(this.read(el, 'clip-path'))
+    const mask = referenceId(this.read(el, 'mask'))
     this.layers++
     return {
       kind: 'shape',
@@ -474,7 +484,7 @@ class Walker {
       paint: {
         values,
         opacity: opacityOf(this.read(el, 'opacity')),
-        mask: referenceId(this.read(el, 'mask')),
+        mask: mask ? { id: mask, ctm } : null,
         filter: referenceId(this.read(el, 'filter')),
       },
       ctm,
@@ -487,7 +497,11 @@ class Walker {
     const element = el.cloneNode(true) as Element
     element.removeAttribute('transform')
     element.removeAttribute('id')
-    bakeStyles(element, el, this.read, [...PAINT_PROPS, ...TEXT_PROPS])
+    /* the layer's svg wears the opacity; left on the element too, it would apply twice */
+    element.removeAttribute('opacity')
+    ;(element as HTMLElement).style.removeProperty('opacity')
+    if (!element.getAttribute('style')) element.removeAttribute('style')
+    bakeStyles(element, el, this.read, [...PAINT_PROPS, ...TEXT_PROPS, ...EFFECT_PROPS])
     this.layers++
     return { kind: 'raw', name: nameOf(el), element, ctm, opacity: opacityOf(this.read(el, 'opacity')) }
   }
@@ -508,6 +522,33 @@ function bakeStyles(clone: Element, original: Element, read: StyleReader, proper
     const source = originals[index]
     if (source) bakeStyles(child, source, read, properties)
   })
+}
+
+/** The box an element's `x`/`y`/`width`/`height` name, as the transform lands
+ *  it (the box around the moved corners); `null` when any side is missing or
+ *  relative (a percentage, an `em`), since those resolve against something the
+ *  copy keeps and are left as written. */
+function transformedBounds(el: Element, ctm: Matrix): Box | null {
+  const side = (name: string) => {
+    const value = el.getAttribute(name)
+    return value && /^\s*[-+.\d]+(?:[eE][-+]?\d+)?\s*(?:px|pt|pc|mm|cm|in)?\s*$/.test(value) ? parseLength(value) : null
+  }
+  const x = side('x')
+  const y = side('y')
+  const width = side('width')
+  const height = side('height')
+  if (x === null || y === null || width === null || height === null) return null
+  const corners = [
+    { x, y },
+    { x: x + width, y },
+    { x, y: y + height },
+    { x: x + width, y: y + height },
+  ].map((corner) => apply(ctm, corner))
+  const xs = corners.map((p) => p.x)
+  const ys = corners.map((p) => p.y)
+  const left = Math.min(...xs)
+  const top = Math.min(...ys)
+  return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top }
 }
 
 function opacityOf(value: string): number {
@@ -561,6 +602,7 @@ function unwrap(nodes: Node[]): Node[] {
 class Writer {
   private readonly doc: Document
   private clipCount = 0
+  private maskCount = 0
   readonly defs: Element
   readonly gradientCopies = new Map<string, string>()
   /** Every id the file declared, plus the copies made here: what gets the prefix. */
@@ -632,7 +674,10 @@ class Writer {
       const id = this.bakedClip(node.clip, multiply(translation(-this.content.x, -this.content.y), node.clip.ctm))
       if (id) style += `clip-path:url(#${id});`
     }
-    if (node.mask) style += `mask:url(#${node.mask});`
+    if (node.mask) {
+      const id = this.bakedMask(node.mask, multiply(translation(-this.content.x, -this.content.y), node.mask.ctm))
+      if (id) style += `mask:url(#${id});`
+    }
     if (node.filter) style += `filter:url(#${node.filter});`
     div.setAttribute('style', style)
     for (const child of node.children) div.append(this.node(child))
@@ -658,7 +703,10 @@ class Writer {
       const id = this.bakedClip(node.clip, node.clip.ctm)
       if (id) path.setAttribute('clip-path', `url(#${id})`)
     }
-    if (node.paint.mask) path.setAttribute('mask', `url(#${node.paint.mask})`)
+    if (node.paint.mask) {
+      const id = this.bakedMask(node.paint.mask, node.paint.mask.ctm)
+      if (id) path.setAttribute('mask', `url(#${id})`)
+    }
     if (node.paint.filter) path.setAttribute('filter', `url(#${node.paint.filter})`)
     svg.append(path)
     return svg
@@ -738,6 +786,34 @@ class Writer {
     style.removeProperty('transform')
     if (!clone.getAttribute('style')) clone.removeAttribute('style')
     clone.setAttribute('transform', `matrix(${multiply(ctm, existing).map(round).join(' ')})`)
+    this.defs.append(clone)
+    return copy
+  }
+
+  /** A mask in user units gets a copy carrying the masked element's transform:
+   *  its content in a `<g>` (since `<mask>` itself takes none) and its bounds
+   *  moved to where they land. One wholly in the element's bounding box is
+   *  used as it is. */
+  private bakedMask(reference: Reference, ctm: Matrix): string | null {
+    const mask = this.find(reference.id)
+    if (!mask || mask.localName !== 'mask') return null
+    const userBounds = mask.getAttribute('maskUnits') === 'userSpaceOnUse'
+    const userContent = mask.getAttribute('maskContentUnits') !== 'objectBoundingBox'
+    if (!userBounds && !userContent) return reference.id
+    const copy = `${reference.id}-mask-${++this.maskCount}`
+    const clone = mask.cloneNode(true) as Element
+    clone.setAttribute('id', copy)
+    this.ids.add(copy)
+    if (userContent) {
+      const content = this.doc.createElementNS(SVG_NS, 'g')
+      content.setAttribute('transform', `matrix(${ctm.map(round).join(' ')})`)
+      content.append(...clone.childNodes)
+      clone.append(content)
+    }
+    if (userBounds) {
+      const bounds = transformedBounds(clone, ctm)
+      if (bounds) for (const [name, value] of Object.entries(bounds)) clone.setAttribute(name, String(round(value)))
+    }
     this.defs.append(clone)
     return copy
   }
