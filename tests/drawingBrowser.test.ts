@@ -100,7 +100,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     commentMoves = []
     await page.setViewport({ width: 1200, height: 800 })
     await page.goto(fixtureUrl('drawing.html'))
-    await page.waitForFunction(() => !!window.drawingHarness)
+    /* a cold fixture load on a slow CI runner can pass the default 10s wait */
+    await page.waitForFunction(() => !!window.drawingHarness, { timeout: 30_000 })
     await page.evaluate(() =>
       window.drawingHarness.seed({
         id: 'c',

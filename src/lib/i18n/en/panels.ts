@@ -262,6 +262,7 @@ export const panels = {
   copyPngFailed: 'Couldn’t copy the PNG',
   copyPngTimedOut: 'The PNG copy timed out — try again',
   copyPngDone: 'PNG copied',
+  exportElementMissing: 'Couldn’t find the element to export — is its frame on screen?',
 
   frameExportTitle: 'Export “{name}”',
   frameExportLede: 'Download this frame as a PNG or JPG image, or as a vector PDF.',
