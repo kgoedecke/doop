@@ -172,7 +172,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   and the SVG is drawn onto a canvas at 2x from a data: URL (a blob: URL taints the canvas in
   Chromium) and encoded. A resource the browser cannot fetch (an image host without CORS)
   rejects the whole render and the export falls back to `/i/<id>.<ext>` as before, so what the
-  person sees on the canvas is never the export's blocker. Tests: `frameRaster.test.ts`,
+  person sees on the canvas is never the export's blocker. An element inside a frame exports
+  too (the element menu's Export as PNG / JPG and Copy as PNG, `downloadElementExport` /
+  `copyElementPng`): the frame is rendered whole and cut to the element's live box
+  (`doop:inspect` rect, `clipToFrame`, the raster's `clip` option), so every style it inherits
+  and whatever paints behind it stay in the picture; a server render is cropped here the same
+  way (`cropRaster`), and a frame off screen says so. Tests: `frameRaster.test.ts`,
   `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
   `frameExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints

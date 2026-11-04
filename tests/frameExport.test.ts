@@ -1,13 +1,26 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Frame } from '../shared/types'
-import { copyFramePng, downloadFrameExport, downloadFramesPdf } from '../src/lib/frameExport'
-import { rasterizeFrame } from '../src/lib/frameRaster'
+import {
+  copyElementPng,
+  copyFramePng,
+  downloadElementExport,
+  downloadFrameExport,
+  downloadFramesPdf,
+} from '../src/lib/frameExport'
+import { cropRaster, rasterizeFrame } from '../src/lib/frameRaster'
+import { inspectElement } from '../src/lib/frameBridge'
 import { useStore } from '../src/lib/store'
 
 /* the browser's own render comes first; these tests are about the server
    fallback unless they make it succeed */
-vi.mock('../src/lib/frameRaster', () => ({ rasterizeFrame: vi.fn(async () => Promise.reject(new Error('no'))) }))
+vi.mock('../src/lib/frameRaster', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/frameRaster')>()),
+  rasterizeFrame: vi.fn(async () => Promise.reject(new Error('no'))),
+  cropRaster: vi.fn(async () => new Blob(['cropped'], { type: 'image/png' })),
+}))
+/* an element is measured by the live document; an unmounted frame answers null */
+vi.mock('../src/lib/frameBridge', () => ({ inspectElement: vi.fn(async () => null) }))
 
 const frame: Frame = {
   id: 'export-frame',
@@ -35,6 +48,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.mocked(rasterizeFrame).mockImplementation(async () => Promise.reject(new Error('no')))
+  vi.mocked(inspectElement).mockImplementation(async () => null)
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   delete (globalThis as { __DOOP_DESKTOP__?: string }).__DOOP_DESKTOP__
@@ -287,4 +301,80 @@ it('leaves no unhandled rejection when the clipboard refuses before reading the 
   process.off('unhandledRejection', unhandled)
   expect(unhandled).not.toHaveBeenCalled()
   expect(useStore.getState().notice?.text).toBe('Couldn’t copy the PNG')
+})
+
+const hero = { selector: 'body > div:nth-of-type(1)', name: 'div.hero' }
+const measured = (rect: { x: number; y: number; width: number; height: number }) =>
+  vi.mocked(inspectElement).mockResolvedValue({ rect } as Awaited<ReturnType<typeof inspectElement>>)
+
+it('exports one element as the whole render clipped to its measured box', async () => {
+  measured({ x: 10.5, y: 20, width: 40, height: 30.2 })
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['png'], { type: 'image/png' }))
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadElementExport(frame, hero, 'png')
+
+  expect(inspectElement).toHaveBeenCalledWith('export-frame', hero.selector)
+  expect(rasterizeFrame).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'export-frame' }),
+    expect.objectContaining({ scale: 2, type: 'png', clip: { x: 10, y: 20, width: 41, height: 31 } }),
+  )
+  expect(fetch).not.toHaveBeenCalled()
+  expect(clicked.map((a) => a.download)).toEqual(['Poster - divhero.png'])
+})
+
+it("crops the server's render of the frame when the browser cannot draw it", async () => {
+  measured({ x: 0, y: 0, width: 50, height: 50 })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('whole-frame', { headers: { 'content-type': 'image/jpeg' } })),
+  )
+
+  await downloadElementExport(frame, hero, 'jpg')
+
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(['/i/export-frame.jpg?scale=2&download'])
+  expect(cropRaster).toHaveBeenCalledWith(
+    expect.any(Blob),
+    { x: 0, y: 0, width: 50, height: 50 },
+    expect.objectContaining({ scale: 2, type: 'jpeg' }),
+  )
+  expect(clicked.map((a) => a.download)).toEqual(['Poster - divhero.jpg'])
+})
+
+it('says when the element cannot be measured instead of exporting the frame', async () => {
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadElementExport(frame, hero, 'png')
+
+  expect(rasterizeFrame).not.toHaveBeenCalled()
+  expect(fetch).not.toHaveBeenCalled()
+  expect(clicked).toHaveLength(0)
+  expect(useStore.getState().notice?.text).toMatch(/Couldn’t find the element/)
+})
+
+it('copies one element as a PNG, measured after the clipboard write has started', async () => {
+  measured({ x: 5, y: 5, width: 10, height: 10 })
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['png'], { type: 'image/png' }))
+  vi.stubGlobal('fetch', vi.fn())
+  const write = vi.fn(async (items: ClipboardItem[]) => {
+    await items[0]!.getType('image/png')
+  })
+  vi.stubGlobal('navigator', { clipboard: { write } })
+  vi.stubGlobal(
+    'ClipboardItem',
+    class {
+      constructor(private readonly items: Record<string, Promise<Blob>>) {}
+      getType(type: string) {
+        return this.items[type]
+      }
+    },
+  )
+
+  await copyElementPng(frame, hero)
+
+  expect(rasterizeFrame).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ type: 'png', clip: { x: 5, y: 5, width: 10, height: 10 } }),
+  )
+  expect(useStore.getState().notice).toMatchObject({ text: 'PNG copied', busy: false })
 })

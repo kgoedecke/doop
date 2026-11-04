@@ -5,6 +5,7 @@ import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 
 interface Rendered {
   type: string
+  topLeft: number[]
   width: number
   height: number
   block: number[]
@@ -51,6 +52,13 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
     expect([out.width, out.height]).toEqual([600, 600])
     expect(out.block).toEqual([255, 0, 0, 255])
     expect(out.pic).toEqual([0, 0, 255, 255])
+  })
+
+  it('keeps only the clipped box, drawn from the whole document, for an element export', async () => {
+    const out = await render({ scale: 2, clip: { x: 200, y: 0, width: 100, height: 100 } })
+    expect([out.width, out.height]).toEqual([200, 200])
+    /* the image at the frame's right edge is now at the origin */
+    expect(out.topLeft).toEqual([0, 0, 255, 255])
   })
 
   it('encodes a JPEG on request', async () => {

@@ -15,6 +15,14 @@ import { snapshotFrame } from './frameBridge'
 
 export type RasterType = 'png' | 'jpeg'
 
+/** A box inside the frame, in frame pixels. */
+export interface ClipRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface RasterOptions {
   /** output pixel density; 2 for a retina export */
   scale: number
@@ -23,6 +31,10 @@ export interface RasterOptions {
   quality?: number
   /** the whole render, fetches included, gives up when this fires */
   signal?: AbortSignal
+  /** the part of the frame to keep; the whole frame when unset. The
+   *  document is still laid out and painted whole, so an element keeps
+   *  every style its ancestors give it and whatever paints behind it. */
+  clip?: ClipRect
 }
 
 const RESOURCE_FETCH_MS = 15_000
@@ -36,6 +48,39 @@ export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise
   const html = snapshot?.html ?? frame.html
   const svg = await inlineDocument(html, { width: frame.width, height: frame.height, signal })
   return drawSvg(svg, { width: frame.width, height: frame.height, ...opts })
+}
+
+/** The part of the frame a rendered box covers, in whole frame pixels
+ *  (rounded outward, so an edge at a fraction is kept), or null when the
+ *  box lies outside the frame: what the frame clips away is not in any
+ *  render of it. */
+export function clipToFrame(
+  rect: { x: number; y: number; width: number; height: number },
+  frame: { width: number; height: number },
+): ClipRect | null {
+  const left = Math.max(0, Math.floor(rect.x))
+  const top = Math.max(0, Math.floor(rect.y))
+  const right = Math.min(frame.width, Math.ceil(rect.x + rect.width))
+  const bottom = Math.min(frame.height, Math.ceil(rect.y + rect.height))
+  if (right <= left || bottom <= top) return null
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
+/** Cut `clip` out of a rendered frame image drawn at `scale` (the server's
+ *  export, say) and encode the piece. */
+export async function cropRaster(
+  image: Blob,
+  clip: ClipRect,
+  opts: Pick<RasterOptions, 'scale' | 'type' | 'quality'>,
+): Promise<Blob> {
+  const bitmap = await createImageBitmap(image)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(clip.width * opts.scale))
+  canvas.height = Math.max(1, Math.round(clip.height * opts.scale))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('no 2d canvas')
+  ctx.drawImage(bitmap, -Math.round(clip.x * opts.scale), -Math.round(clip.y * opts.scale))
+  return encode(canvas, opts)
 }
 
 interface InlineOptions {
@@ -218,21 +263,30 @@ interface DrawOptions extends RasterOptions {
   height: number
 }
 
-/** Draw the SVG onto a canvas at `scale` and encode it. The canvas is
- *  painted white first, as the server's renderer paints a frame with no
- *  background, and a JPEG has no alpha to keep. */
+/** Draw the SVG onto a canvas at `scale` and encode it, the whole frame
+ *  or the `clip` of it. The canvas is painted white first, as the server's
+ *  renderer paints a frame with no background, and a JPEG has no alpha to
+ *  keep. */
 async function drawSvg(svg: string, opts: DrawOptions): Promise<Blob> {
   /* a data: URL, not a blob: one — Chromium taints the canvas for a
      foreignObject SVG drawn from a blob URL, and the export needs toBlob */
   const image = await loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, opts.signal)
+  const clip = opts.clip ?? { x: 0, y: 0, width: opts.width, height: opts.height }
   const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(opts.width * opts.scale))
-  canvas.height = Math.max(1, Math.round(opts.height * opts.scale))
+  canvas.width = Math.max(1, Math.round(clip.width * opts.scale))
+  canvas.height = Math.max(1, Math.round(clip.height * opts.scale))
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('no 2d canvas')
   ctx.fillStyle = '#fff'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+  /* the whole frame is drawn at scale, shifted so the clip lands at the origin */
+  ctx.drawImage(
+    image,
+    -Math.round(clip.x * opts.scale),
+    -Math.round(clip.y * opts.scale),
+    Math.round(opts.width * opts.scale),
+    Math.round(opts.height * opts.scale),
+  )
   return encode(canvas, opts)
 }
 
@@ -253,7 +307,7 @@ function loadImage(url: string, signal?: AbortSignal): Promise<HTMLImageElement>
   })
 }
 
-function encode(canvas: HTMLCanvasElement, opts: DrawOptions): Promise<Blob> {
+function encode(canvas: HTMLCanvasElement, opts: Pick<RasterOptions, 'type' | 'quality'>): Promise<Blob> {
   return new Promise((resolve, reject) => {
     try {
       canvas.toBlob(
