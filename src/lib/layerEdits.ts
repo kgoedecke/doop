@@ -29,6 +29,7 @@ import {
   elementFate,
   elementHtml,
   elementName,
+  htmlWithoutLayerNames,
   isElementHidden,
   isElementLocked,
   moveElement,
@@ -91,8 +92,16 @@ export function renameFrame(frameId: string, value: string) {
 
 export function renameLayer(frameId: string, selector: string, value: string) {
   const name = value.trim()
-  if (!name) return
+  const original = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
+  if (!name || !original) return
+  const expected = htmlWithoutLayerNames(original.html)
   queueRename(frameId, async (frame) => {
+    // A positional selector can now name a different sibling. Fail closed
+    // when anything except another rename changed while this edit waited.
+    if (htmlWithoutLayerNames(frame.html) !== expected) {
+      useStore.getState().pushNotice(t('panels.layersRenameChanged'))
+      return
+    }
     if (isLayerLocked(frame, selector)) return
     const before = elementName(frame.html, selector)
     if (before === name) return

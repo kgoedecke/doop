@@ -20,6 +20,7 @@ export const panels = {
   layersRename: 'Rename',
   layersName: 'Item name',
   layersRenameFailed: 'Couldn’t rename “{name}”',
+  layersRenameChanged: 'The layer changed before it could be renamed. Try again.',
 
   pagesTitle: 'Pages',
   pagesAdd: 'Add page',

@@ -308,4 +308,47 @@ describe('renaming in the Layers panel', () => {
       expect(updateFrame).toHaveBeenCalledTimes(secondSucceeds ? 3 : 2)
     },
   )
+
+  it.each(['<body><p>Second</p></body>', '<body><p>Second</p><p>First</p></body>'])(
+    'cancels a queued positional rename after the document changes to %s',
+    async (html) => {
+      let finishFirst!: () => void
+      updateFrame.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishFirst = resolve
+          }),
+      )
+      act(() => {
+        useStore.getState().patchFrameLocal('f1', { html: '<body><p>First</p><p>Second</p></body>' })
+        renameFrame('f1', 'Pending frame name')
+        renameLayer('f1', 'body:nth-of-type(1) > p:nth-of-type(1)', 'Name for first paragraph')
+        useStore.getState().patchFrameLocal('f1', { html })
+      })
+      await act(async () => finishFirst())
+      expect(updateFrame).toHaveBeenCalledTimes(1)
+      expect(savedDocument().querySelector('[data-doop-name]')).toBeNull()
+      expect(savedDocument().querySelector('p')?.textContent).toBe('Second')
+      expect(useStore.getState().notice?.text).toBe('The layer changed before it could be renamed. Try again.')
+    },
+  )
+
+  it('allows queued renames on different layers when only names have changed', async () => {
+    showLayers()
+    let finishFirst!: () => void
+    updateFrame.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = resolve
+        }),
+    )
+    act(() => {
+      renameLayer('f1', '#text', 'Caption')
+      renameLayer('f1', '#photo', 'Photo')
+    })
+    await act(async () => finishFirst())
+    expect(updateFrame).toHaveBeenCalledTimes(2)
+    expect(savedDocument().querySelector('#text')?.getAttribute('data-doop-name')).toBe('Caption')
+    expect(savedDocument().querySelector('#photo')?.getAttribute('data-doop-name')).toBe('Photo')
+  })
 })

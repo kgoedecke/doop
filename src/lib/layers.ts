@@ -224,6 +224,14 @@ export function elementName(html: string, selector: string): string | null {
   return find(parse(html), selector)?.getAttribute(NAME_ATTR) ?? null
 }
 
+/** Compare a queued rename's document while allowing earlier renames to
+ *  finish or roll back. Any other change can invalidate positional paths. */
+export function htmlWithoutLayerNames(html: string): string {
+  const doc = parse(html)
+  for (const el of doc.querySelectorAll(`[${NAME_ATTR}]`)) el.removeAttribute(NAME_ATTR)
+  return serialize(doc)
+}
+
 /** Store a layer caption without changing its text, alt text, id or styles. */
 export function setElementName(html: string, selector: string, name: string | null): string | null {
   const doc = parse(html)
