@@ -224,7 +224,6 @@ export function TokensSection() {
                   <Icon className="size-3.5" />
                 </span>
                 <span className="min-w-0 flex-1 truncate pl-0.5">{t(TOKEN_GROUP_LABEL[type])}</span>
-                <span className="font-mono text-caption text-ink-faint">{rows.length}</span>
               </Pressable>
               {!shut &&
                 rows.map((token) => (
