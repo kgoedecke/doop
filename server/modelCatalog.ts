@@ -4,7 +4,8 @@ import { env } from './env.ts'
 import type { ModelAccount } from './modelAccounts.ts'
 import { ACCOUNT_KIND_LABELS, type ModelOption } from '../shared/modelMenu.ts'
 import { CustomInferenceError, customEndpointUrl, fetchCustomJson } from './customInference.ts'
-import { getProfile, type CustomModelProfile } from './customModelProfiles.ts'
+import { getProfile, MAX_DISCOVERED_MODELS, type CustomModelProfile } from './customModelProfiles.ts'
+import { isCustomModelId } from '../shared/customModel.ts'
 
 /**
  * The models a connected account can run right now, asked of the provider
@@ -227,7 +228,7 @@ export async function customModels(profile: CustomModelProfile, signal: AbortSig
   const seen = new Set<string>()
   const models: ModelOption[] = []
   for (const entry of page.data) {
-    if (!entry.id || seen.has(entry.id)) continue
+    if (!isCustomModelId(entry.id) || seen.has(entry.id)) continue
     seen.add(entry.id)
     models.push({
       id: entry.id,
@@ -235,6 +236,7 @@ export async function customModels(profile: CustomModelProfile, signal: AbortSig
       blurb: '',
       vision: profile.supportsVision,
     })
+    if (models.length >= MAX_DISCOVERED_MODELS) break
   }
   return models
 }

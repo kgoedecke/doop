@@ -146,7 +146,7 @@ export async function validateCustomBaseUrl(
         ? allowPrivateOrOptions.timeoutMs
         : typeof timeoutMsOrOptions === 'number'
           ? timeoutMsOrOptions
-          : DEFAULT_TIMEOUT_MS
+          : (timeoutMsOrOptions?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     resolvedSignal =
       allowPrivateOrOptions.signal ??
       (typeof timeoutMsOrOptions === 'object' && timeoutMsOrOptions !== null ? timeoutMsOrOptions.signal : signal)

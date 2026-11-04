@@ -117,12 +117,24 @@ describe('validateCustomBaseUrl', () => {
     await expect(validateCustomBaseUrl('https://mixed.example/v1', true)).resolves.toEqual(
       new URL('https://mixed.example/v1'),
     )
+    expect(await asyncCode(() => validateCustomBaseUrl('http://mixed.example/v1', true))).toBe('url_insecure')
   })
 
   it('maps DNS failures to unreachable', async () => {
     dnsMocks.lookup.mockRejectedValue(new Error('ENOTFOUND'))
     expect(await asyncCode(() => validateCustomBaseUrl('https://missing.example/v1', false))).toBe('unreachable')
   })
+
+  it('honors the third-argument DNS timeout when the first options object omits it', async () => {
+    dnsMocks.lookup.mockReturnValue(new Promise(() => {}))
+    const started = Date.now()
+    expect(
+      await asyncCode(() =>
+        validateCustomBaseUrl('https://slow.example/v1', { allowPrivate: false }, { timeoutMs: 20 }),
+      ),
+    ).toBe('unreachable')
+    expect(Date.now() - started).toBeLessThan(1_000)
+  }, 10_000)
 
   it('resolves again on the next request and blocks a host that moved to a private address', async () => {
     dnsMocks.lookup.mockResolvedValueOnce(PUBLIC)

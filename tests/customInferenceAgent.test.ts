@@ -5,7 +5,7 @@ import { stubEnv, unstubAllEnvs } from './envStub.ts'
 import { customConfig, geminiConfig, openrouterConfig, runChatCompletionsTurn } from '../server/chatCompletionsAgent.ts'
 import { customModels } from '../server/modelCatalog.ts'
 import { ModelAuthError, ModelUnavailableError } from '../server/openaiAgent.ts'
-import type { CustomModelProfile } from '../server/customModelProfiles.ts'
+import { MAX_DISCOVERED_MODELS, type CustomModelProfile } from '../server/customModelProfiles.ts'
 
 /**
  * A custom endpoint is the one Chat Completions transport whose URL a user
@@ -14,7 +14,7 @@ import type { CustomModelProfile } from '../server/customModelProfiles.ts'
  * and that its model list is passed through without vendor-family filters.
  */
 
-type Mode = 'ok' | 'auth' | 'missing' | 'malformed'
+type Mode = 'ok' | 'auth' | 'missing' | 'malformed' | 'models-large' | 'models-invalid'
 
 let mode: Mode = 'ok'
 let provider: http.Server
@@ -50,6 +50,10 @@ beforeAll(async () => {
       if (mode === 'missing') return json(404, { error: 'no' })
       if (mode === 'malformed') return res.writeHead(200, { 'content-type': 'application/json' }).end('{oops')
       if (url.pathname.endsWith('/models')) {
+        if (mode === 'models-large')
+          return json(200, { data: Array.from({ length: 600 }, (_, i) => ({ id: `m-${i}` })) })
+        if (mode === 'models-invalid')
+          return json(200, { data: [{ id: 'valid-id' }, { id: 'bad id' }, { id: 'another:valid' }] })
         return json(200, {
           data: [
             { id: 'vendor/designer-9', created: 3 },
@@ -207,6 +211,18 @@ describe('custom model catalog', () => {
     expect(seen[0]!.auth).toBe('')
   })
 
+  it('filters invalid ids from the live catalog using the custom model id policy', async () => {
+    mode = 'models-invalid'
+    const models = await customModels(profile(), AbortSignal.timeout(5_000))
+    expect(models.map((model) => model.id)).toEqual(['valid-id', 'another:valid'])
+  })
+
+  it('caps the live catalog at the same bounded model count as endpoint testing', async () => {
+    mode = 'models-large'
+    const models = await customModels(profile(), AbortSignal.timeout(5_000))
+    expect(models).toHaveLength(MAX_DISCOVERED_MODELS)
+  })
+
   it('fails visibly for auth, missing and malformed catalogs so the caller can fall back', async () => {
     mode = 'auth'
     await expect(customModels(profile(), AbortSignal.timeout(5_000))).rejects.toThrow()
@@ -231,7 +247,7 @@ describe('custom abort cancellation', () => {
     abortProvider = http.createServer((req, res) => {
       if (req.url === '/v1/chat/completions' && req.method === 'POST') {
         requestReceived = true
-        req.on('close', () => {
+        req.socket.on('close', () => {
           sawRequestClose = true
         })
         res.writeHead(200, { 'content-type': 'application/json' })
@@ -279,18 +295,18 @@ describe('custom abort cancellation', () => {
       },
     )
 
+    const requestStarted = waitFor(() => requestReceived)
+    await Promise.race([
+      requestStarted,
+      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('fixture request wait timed out')), 2000)),
+    ])
     controller.abort()
     releaseResponse?.()
 
     await expect(promise).rejects.toThrow(/aborted|cancel/i)
-    if (requestReceived) {
-      const reqClosed = waitFor(() => sawRequestClose === true)
-      await expect(
-        Promise.race([
-          reqClosed,
-          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('request close wait timed out')), 2000)),
-        ]),
-      ).resolves.toBeUndefined()
-    }
+    await Promise.race([
+      waitFor(() => sawRequestClose),
+      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('request close wait timed out')), 2000)),
+    ])
   }, 15000)
 })
