@@ -168,6 +168,8 @@ export async function fetchCustomJson(
   } catch (error) {
     await dispatcher.close().catch(() => {})
     if (error instanceof CustomInferenceError) throw error
+    /* a stopped task is not an endpoint failure: hand the caller its abort */
+    if (options.signal?.aborted) throw options.signal.reason ?? error
     /* `redirect: 'error'` surfaces as a fetch failure; it is a compatibility
        problem, not a network one, and the target is never followed. */
     const detail = error instanceof Error ? `${error.message} ${String(error.cause ?? '')}` : ''
@@ -185,6 +187,7 @@ export async function fetchCustomJson(
     }
   } catch (error) {
     if (error instanceof CustomInferenceError) throw error
+    if (options.signal?.aborted) throw options.signal.reason ?? error
     throw new CustomInferenceError('unreachable', UNREACHABLE_MESSAGE)
   } finally {
     /* Graceful close waits for the returned body to be consumed, then drops

@@ -15,6 +15,16 @@ import {
   profileView,
   updateProfile,
 } from '../server/customModelProfiles.ts'
+import {
+  activateCustomProfile,
+  connectApiKey,
+  disconnectCustomProfile,
+  getAccount,
+  getStatus,
+  setAccountEffort,
+  setAccountModel,
+  takesReasoningEffort,
+} from '../server/modelAccounts.ts'
 import { CustomInferenceError } from '../server/customInference.ts'
 
 vi.mock('../server/db/index.ts', async () => {
@@ -135,6 +145,62 @@ describe('custom model profiles', () => {
     await expect(deleteProfile('alice', bob.id)).rejects.toThrow(/not found/i)
     await expect(updateProfile('alice', bob.id, { name: 'Stolen' })).rejects.toThrow(/not found/i)
     expect((await getProfile('bob', bob.id))?.name).toBe('Local Ollama')
+  })
+
+  it('activates a profile as the one account, stores only its pointer, and reports its model', async () => {
+    const profile = await createProfile('alice', input({ model: 'alice-model', supportsVision: false }))
+    await connectApiKey('alice', 'sk-alice-openai-key')
+    expect((await getAccount('alice'))?.kind).toBe('openai-key')
+
+    const status = await activateCustomProfile('alice', profile.id)
+    expect(status).toMatchObject({ connected: true, kind: 'custom-key', model: 'alice-model', profileId: profile.id })
+    expect(status).not.toHaveProperty('apiKey')
+    expect(JSON.stringify(status)).not.toContain('sk-alice-openai-key')
+
+    const account = await getAccount('alice')
+    expect(account).toMatchObject({ kind: 'custom-key', profileId: profile.id, model: 'alice-model' })
+    /* the endpoint and key live in the profile, never copied onto the account */
+    expect(account?.apiKey).toBeUndefined()
+    expect(account).not.toHaveProperty('baseUrl')
+    expect(takesReasoningEffort('custom-key')).toBe(false)
+  })
+
+  it('refuses to activate another user’s profile', async () => {
+    const bob = await createProfile('bob', input())
+    await expect(activateCustomProfile('alice', bob.id)).rejects.toThrow(/not found/i)
+    expect(await getAccount('alice')).toBeNull()
+  })
+
+  it('writes a model pick through to the active profile and rejects unsafe ids', async () => {
+    const profile = await createProfile('alice', input({ model: 'first-model' }))
+    await activateCustomProfile('alice', profile.id)
+
+    const status = await setAccountModel('alice', 'second-model')
+    expect(status).toMatchObject({ kind: 'custom-key', model: 'second-model' })
+    expect((await getProfile('alice', profile.id))?.model).toBe('second-model')
+    expect((await getAccount('alice'))?.model).toBe('second-model')
+
+    await expect(setAccountModel('alice', 'not a model')).rejects.toThrow(/unknown model/)
+    await expect(setAccountEffort('alice', 'high')).rejects.toThrow(/only OpenAI/i)
+  })
+
+  it('keeps the active account in step when its profile model is edited', async () => {
+    const profile = await createProfile('alice', input({ model: 'first-model' }))
+    await activateCustomProfile('alice', profile.id)
+    await updateProfile('alice', profile.id, { model: 'edited-model' })
+    expect(await getStatus('alice')).toMatchObject({ kind: 'custom-key', model: 'edited-model' })
+  })
+
+  it('disconnects a custom account only when it still points at the deleted profile', async () => {
+    const one = await createProfile('alice', input({ name: 'One' }))
+    const two = await createProfile('alice', input({ name: 'Two', model: 'two-model' }))
+    await activateCustomProfile('alice', one.id)
+
+    await disconnectCustomProfile('alice', two.id)
+    expect((await getStatus('alice')).kind).toBe('custom-key')
+
+    await disconnectCustomProfile('alice', one.id)
+    expect(await getAccount('alice')).toBeNull()
   })
 
   it('reseals legacy plaintext keys in the custom profile table on boot', async () => {

@@ -924,6 +924,8 @@ const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
   'anthropic-key': ANTHROPIC_MODELS,
   'openrouter-key': OPENROUTER_MODELS,
   'gemini-key': GEMINI_MODELS,
+  /* the catalog is profile-specific and loaded from /api/model-account/models */
+  'custom-key': [],
 }
 
 /* Every route that returns an account status returns the SAME shape: the

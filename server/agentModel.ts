@@ -6,9 +6,10 @@ import type { LocalAgentResult } from '../shared/localAgent.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { getAccount, withFreshToken, accountModelFor, accountVisionFor } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
+import { getProfile } from './customModelProfiles.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
-import { geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCompletionsAgent.ts'
+import { customConfig, geminiConfig, openrouterConfig, runChatCompletionsTurn } from './chatCompletionsAgent.ts'
 
 /**
  * Which model runs a Doop Agent turn, and on whose bill.
@@ -202,6 +203,7 @@ const BYO_LABELS: Record<AccountKind, string> = {
   'anthropic-key': 'Claude API',
   'openrouter-key': 'OpenRouter',
   'gemini-key': 'Gemini',
+  'custom-key': 'Custom endpoint',
 }
 
 /* the OpenAI-shaped transports take one system string; cache breakpoints are
@@ -210,7 +212,38 @@ function joinSystem(req: AgentTurnRequest): string {
   return req.system.map((block) => block.text).join('\n\n')
 }
 
-function byoModel(account: ModelAccount): AgentModel {
+function byoModel(account: ModelAccount): Promise<AgentModel> | AgentModel {
+  if (account.kind === 'custom-key') {
+    if (!account.profileId) {
+      throw new ModelAuthError('The selected custom endpoint no longer exists. Choose another profile in Settings.')
+    }
+    return getProfile(account.userId, account.profileId).then((profile) => {
+      if (!profile) {
+        throw new ModelAuthError('The selected custom endpoint no longer exists. Choose another profile in Settings.')
+      }
+      const config = customConfig(
+        new URL(profile.baseUrl),
+        profile.apiKey,
+        profile.model,
+        profile.supportsVision,
+        profile.name,
+      )
+      return {
+        provider: account.kind,
+        label: `${profile.name} (${profile.model})`,
+        userId: account.userId,
+        vision: profile.supportsVision,
+        run: (req) =>
+          runChatCompletionsTurn(config, {
+            system: joinSystem(req),
+            tools: req.tools,
+            messages: req.messages,
+            maxTokens: req.maxTokens,
+            signal: req.signal,
+          }),
+      }
+    })
+  }
   if (account.kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
     const client = new Anthropic({ apiKey: account.apiKey })

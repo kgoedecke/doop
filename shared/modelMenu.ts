@@ -197,6 +197,7 @@ export const ACCOUNT_KIND_LABELS = {
   'anthropic-key': 'Claude API',
   'openrouter-key': 'OpenRouter',
   'gemini-key': 'Gemini',
+  'custom-key': 'Custom endpoint',
 } as const
 
 export type AccountKindName = keyof typeof ACCOUNT_KIND_LABELS

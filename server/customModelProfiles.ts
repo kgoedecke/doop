@@ -4,6 +4,7 @@ import { db } from './db/index.ts'
 import { customModelProfiles, modelAccounts } from './db/schema.ts'
 import { env } from './env.ts'
 import { validateCustomBaseUrl } from './customInference.ts'
+import { isCustomModelId } from '../shared/customModel.ts'
 
 /**
  * Saved OpenAI-compatible inference profiles. The profile row is the single
@@ -65,14 +66,9 @@ export class CustomModelProfileInvalidError extends Error {
 }
 
 const NAME_MAX = 80
-/** Conservative so it cannot smuggle whitespace or control characters, but
- *  broad enough for `vendor/model`, `ft:model:org`, `@scope/model` and tags. */
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/
 const KEY_MAX = 4096
 
-export function isCustomModelId(value: unknown): value is string {
-  return typeof value === 'string' && MODEL_ID.test(value)
-}
+export { isCustomModelId }
 
 function normalizeName(value: unknown): string {
   if (typeof value !== 'string') throw new CustomModelProfileInvalidError('Give the custom endpoint a name.')
@@ -211,6 +207,12 @@ export async function updateProfile(
     .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, id)))
   const updated = await getProfile(userId, id)
   if (!updated) throw new CustomModelProfileNotFoundError()
+  /* when the edited profile is the active one, its model is what the account
+     status and picker must show */
+  await db
+    .update(modelAccounts)
+    .set({ model: updated.model, updatedAt: Date.now() })
+    .where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, 'custom-key'), eq(modelAccounts.profileId, id)))
   return updated
 }
 

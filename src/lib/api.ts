@@ -147,7 +147,8 @@ export interface Allowance {
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
+export type ModelAccountKind =
+  'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'custom-key'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -181,6 +182,8 @@ export interface ModelAccountStatus {
   kind?: ModelAccountKind
   email?: string
   plan?: string
+  /** custom-key only: the active saved profile; never a secret */
+  profileId?: string
   /** the model tier this account runs on right now */
   model?: string
   /** the reasoning effort in effect; only the OpenAI kinds have one */

@@ -13,6 +13,8 @@ import {
 } from '../shared/modelMenu.ts'
 import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
 import { effortFor, modelFor } from './openaiAgent.ts'
+import { isCustomModelId } from '../shared/customModel.ts'
+import { getProfile, updateProfile } from './customModelProfiles.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -54,7 +56,7 @@ const REDIRECT_URI = env.CHATGPT_OAUTH_REDIRECT_URI
    fetch — an ordinary product User-Agent passes where no header at all does */
 const AUTH_USER_AGENT = env.CHATGPT_AUTH_USER_AGENT
 
-export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
+export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'custom-key'
 
 const ACCOUNT_KINDS: readonly string[] = [
   'chatgpt',
@@ -62,6 +64,7 @@ const ACCOUNT_KINDS: readonly string[] = [
   'anthropic-key',
   'openrouter-key',
   'gemini-key',
+  'custom-key',
 ] satisfies AccountKind[]
 
 export interface ModelAccount {
@@ -74,6 +77,8 @@ export interface ModelAccount {
   refreshToken?: string
   expiresAt?: number
   apiKey?: string
+  /** custom-key only: identifies the active saved profile */
+  profileId?: string
   /** model tier the user picked; unset = the server default */
   model?: string
   /** OpenAI reasoning effort the user picked; unset = the server default */
@@ -87,6 +92,8 @@ export interface AccountStatus {
   kind?: AccountKind
   email?: string
   plan?: string
+  /** custom-key only: the active saved profile; never a secret */
+  profileId?: string
   /** the model tier in effect, resolved (never null in a status) */
   model?: string
   /** the reasoning effort in effect, resolved; only the OpenAI kinds have one */
@@ -125,6 +132,7 @@ function toAccount(row: typeof modelAccounts.$inferSelect): ModelAccount | null 
     ...(row.refreshToken ? { refreshToken: row.refreshToken } : {}),
     ...(row.expiresAt != null ? { expiresAt: row.expiresAt } : {}),
     ...(row.apiKey ? { apiKey: row.apiKey } : {}),
+    ...(row.profileId ? { profileId: row.profileId } : {}),
     ...(row.model ? { model: row.model } : {}),
     ...(isReasoningEffort(row.reasoningEffort) ? { effort: row.reasoningEffort } : {}),
     connectedAt: row.connectedAt,
@@ -144,6 +152,7 @@ export async function getStatus(userId: string): Promise<AccountStatus> {
     kind: account.kind,
     ...(account.email ? { email: account.email } : {}),
     ...(account.plan ? { plan: account.plan } : {}),
+    ...(account.profileId ? { profileId: account.profileId } : {}),
     /* resolved, so the UI shows what will actually run rather than "default" */
     model: accountModelFor(account),
     ...(takesReasoningEffort(account.kind) ? { effort: effortFor(account) } : {}),
@@ -179,6 +188,12 @@ const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKno
     resolve: (model) => model || DEFAULT_GEMINI,
     isKnown: (model) => GEMINI_API_MODEL.test(model),
   },
+  /* custom ids are passed through: the profile stores the model the user
+     chose, and there is no vendor family to regex */
+  'custom-key': {
+    resolve: (model) => model ?? '',
+    isKnown: (model) => isCustomModelId(model),
+  },
 }
 
 export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
@@ -204,6 +219,13 @@ export async function setAccountModel(userId: string, model: string): Promise<Ac
   const account = await getAccount(userId)
   if (!account) throw new Error('no model account connected')
   if (!MODEL_POLICY[account.kind].isKnown(model)) throw new Error('unknown model')
+  if (account.kind === 'custom-key') {
+    if (!account.profileId) throw new Error('no custom profile is active — choose one in Settings')
+    /* the profile is the source of truth; keep the active pointer's model in
+       step with it in the same write path */
+    await updateProfile(userId, account.profileId, { model })
+    return getStatus(userId)
+  }
   await savePick(account, { model })
   return getStatus(userId)
 }
@@ -225,13 +247,18 @@ export async function setAccountEffort(userId: string, effort: string): Promise<
  *  would undo each other; matching the kind keeps a pick validated for one
  *  provider off an account that switched to another meanwhile. */
 async function savePick(
-  account: Pick<ModelAccount, 'userId' | 'kind'>,
+  account: Pick<ModelAccount, 'userId' | 'kind' | 'profileId'>,
   pick: { model: string } | { reasoningEffort: string },
 ): Promise<void> {
+  if (account.kind === 'custom-key' && !account.profileId)
+    throw new Error('no custom profile is active — choose one in Settings')
+  const conditions = [eq(modelAccounts.userId, account.userId), eq(modelAccounts.kind, account.kind)]
+  /* a custom pick is only valid for the profile it was validated for */
+  if (account.kind === 'custom-key') conditions.push(eq(modelAccounts.profileId, account.profileId!))
   const written = await db
     .update(modelAccounts)
     .set({ ...pick, updatedAt: Date.now() })
-    .where(and(eq(modelAccounts.userId, account.userId), eq(modelAccounts.kind, account.kind)))
+    .where(and(...conditions))
     .returning({ userId: modelAccounts.userId })
   if (!written.length) throw new Error('the connected account changed — pick again')
 }
@@ -248,6 +275,7 @@ async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
     refreshToken: account.refreshToken ?? null,
     expiresAt: account.expiresAt ?? null,
     apiKey: account.apiKey ?? null,
+    profileId: account.profileId ?? null,
     model: account.model ?? null,
     reasoningEffort: account.effort ?? null,
     connectedAt: now,
@@ -267,6 +295,7 @@ async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
         refreshToken: row.refreshToken,
         expiresAt: row.expiresAt,
         apiKey: row.apiKey,
+        profileId: row.profileId,
         model: row.model,
         reasoningEffort: row.reasoningEffort,
         updatedAt: row.updatedAt,
@@ -276,6 +305,35 @@ async function save(account: Omit<ModelAccount, 'connectedAt'>): Promise<void> {
 
 export async function disconnect(userId: string): Promise<void> {
   await db.delete(modelAccounts).where(eq(modelAccounts.userId, userId))
+}
+
+/** Make one of this user's saved profiles the active model account. Only the
+ *  pointer and model are copied; the endpoint and key stay in the profile. */
+export async function activateCustomProfile(userId: string, profileId: string): Promise<AccountStatus> {
+  const profile = await getProfile(userId, profileId)
+  if (!profile) throw new Error('That custom endpoint profile was not found.')
+  await save({
+    userId,
+    kind: 'custom-key',
+    profileId: profile.id,
+    model: profile.model,
+  })
+  return getStatus(userId)
+}
+
+/** Drop the account only when it still points at this profile. Deleting an
+ *  inactive profile, or one the user has already switched away from, must not
+ *  disconnect whatever is active now. */
+export async function disconnectCustomProfile(userId: string, profileId: string): Promise<void> {
+  await db
+    .delete(modelAccounts)
+    .where(
+      and(
+        eq(modelAccounts.userId, userId),
+        eq(modelAccounts.kind, 'custom-key'),
+        eq(modelAccounts.profileId, profileId),
+      ),
+    )
 }
 
 /**
