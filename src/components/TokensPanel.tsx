@@ -142,14 +142,17 @@ export function TokensSection() {
           </DropdownMenuContent>
         </DropdownMenu>
         {!readOnly && (
-          <IconButton
-            size="sm"
+          /* the same quiet square as the Layers section's plus */
+          <Button
+            variant="bare"
+            size="icon-sm"
+            className="size-5 rounded-tag text-ink-faint hover:bg-paper-deep hover:text-ink"
             aria-label={t('panels.tokensNew')}
             title={t('panels.tokensNew')}
             onClick={() => setOpen({ create: 'color' })}
           >
-            <PlusIcon size="rail" />
-          </IconButton>
+            <PlusIcon className="size-3.5" />
+          </Button>
         )}
       </div>
       {sorted.length === 0 && <ListHint>{t('panels.tokensHint')}</ListHint>}
