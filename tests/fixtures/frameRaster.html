@@ -57,12 +57,17 @@
         await ready
         registerFrameWindow('live', iframe.contentWindow)
         await requestFrame('live', 'doop:html', { html: LIVE_HTML })
+        /* until the script has run AND the srcset image has a picked source:
+           currentSrc stays empty until the browser resolves srcset, a beat
+           after the script on a slow runner, and the snapshot then carries
+           no src for it, so the export (rightly) paints nothing there */
         for (let i = 0; i < 50; i++) {
           const reply = await requestFrame('live', 'doop:snapshot', {})
-          if (reply?.html?.includes('class="made"')) return
+          if (reply?.html?.includes('class="made"') && /class="picked"[^>]*src="[^"]*blue\.svg"/.test(reply.html))
+            return
           await new Promise((r) => setTimeout(r, 50))
         }
-        throw new Error('the runtime never ran the script')
+        throw new Error('the runtime never ran the script, or never picked the srcset image')
       }
 
       window.render = async ({ scale = 1, type = 'png', html = HTML, live = false, clip } = {}) => {
