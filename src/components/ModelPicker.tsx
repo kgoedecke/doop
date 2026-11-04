@@ -60,6 +60,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
       ? [...menu, { id: account.model, name: account.model, blurb: '' }]
       : menu
   const current = items.find((m) => m.id === account?.model)
+  const missingModel = kind === 'custom-key' && Boolean(account?.model) && !menu.some((m) => m.id === account?.model)
   const label = current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : 'Doop Agent')
   const mark = kind ? PROVIDER_MARK[kind] : undefined
 
@@ -127,6 +128,11 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
             {catalog && !catalog.live && kind === 'custom-key' && (
               <DropdownMenuCaption className="pb-2 text-ink-faint">
                 {t('models.customCatalogFallback')}
+              </DropdownMenuCaption>
+            )}
+            {kind === 'custom-key' && missingModel && (
+              <DropdownMenuCaption className="pb-2 text-ink-faint">
+                {t('models.customModelMissing', { model: account?.model ?? '' })}
               </DropdownMenuCaption>
             )}
             {catalog?.error && kind !== 'custom-key' && (
