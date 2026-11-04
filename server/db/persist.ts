@@ -8,6 +8,7 @@ import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
+import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { byStack } from '../../shared/frameStack.ts'
 import type {
   ActivityItem,
@@ -44,6 +45,7 @@ function canvasColumns(c: Canvas) {
     name: c.name,
     pages: c.pages ?? null,
     guides: c.guides?.length ? c.guides : null,
+    tokenThemes: c.tokenThemes?.length ? c.tokenThemes : null,
     ownerId: c.ownerId ?? null,
     linkAccess: storedLinkAccess(c.linkAccess) ?? null,
     publishedAt: c.publishedAt ?? null,
@@ -106,6 +108,10 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
           y: doc.y ?? null,
         })),
       )
+    }
+
+    if (c.tokens?.length) {
+      await tx.insert(t.designTokens).values(c.tokens.map((token) => tokenRow(c.id, token)))
     }
 
     if (c.references?.length) {
@@ -173,6 +179,66 @@ export function saveGuideline(canvasId: string, doc: GuidelineDoc) {
 
 export function deleteGuideline(canvasId: string, name: string) {
   swallow(db.delete(t.guidelines).where(and(eq(t.guidelines.canvasId, canvasId), eq(t.guidelines.name, name))))
+}
+
+function tokenRow(canvasId: string, token: DesignToken) {
+  return {
+    canvasId,
+    name: token.name,
+    type: token.type,
+    value: token.value,
+    themes: token.themes && Object.keys(token.themes).length ? token.themes : null,
+    description: token.description ?? null,
+    order: token.order,
+    updatedAt: token.updatedAt,
+    updatedBy: token.updatedBy,
+  }
+}
+
+/* Writes to one token run in order: a rename followed by an edit of the
+   same row must not let the earlier write land last on a pooled connection. */
+const tokenWrites = new Map<string, Promise<unknown>>()
+
+function queueTokenWrite(canvasId: string, name: string, write: () => Promise<unknown>) {
+  const key = `${canvasId}\0${name}`
+  const prior = tokenWrites.get(key) ?? Promise.resolve()
+  const next = prior.then(write, write)
+  tokenWrites.set(key, next)
+  swallow(next.finally(() => tokenWrites.get(key) === next && tokenWrites.delete(key)))
+}
+
+/** Every queued token write of a canvas, settled: what a canvas delete waits
+ *  for, so a save still in the queue cannot put a row back afterwards. */
+function pendingTokenWrites(canvasId: string): Promise<unknown> {
+  const prefix = `${canvasId}\0`
+  return Promise.allSettled([...tokenWrites].filter(([key]) => key.startsWith(prefix)).map(([, write]) => write))
+}
+
+export function saveToken(canvasId: string, token: DesignToken) {
+  const row = tokenRow(canvasId, token)
+  queueTokenWrite(canvasId, token.name, () =>
+    db
+      .insert(t.designTokens)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [t.designTokens.canvasId, t.designTokens.name],
+        set: {
+          type: row.type,
+          value: row.value,
+          themes: row.themes,
+          description: row.description,
+          order: row.order,
+          updatedAt: row.updatedAt,
+          updatedBy: row.updatedBy,
+        },
+      }),
+  )
+}
+
+export function deleteToken(canvasId: string, name: string) {
+  queueTokenWrite(canvasId, name, () =>
+    db.delete(t.designTokens).where(and(eq(t.designTokens.canvasId, canvasId), eq(t.designTokens.name, name))),
+  )
 }
 
 /* Append-only doc history: a snapshot per save, '' marks a deletion. */
@@ -531,6 +597,9 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
+    pendingTokenWrites(canvasId).then(() => db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))),
+  )
+  swallow(
     pendingVersionWrites((_, c) => c === canvasId).then(() =>
       db.delete(t.frameVersions).where(eq(t.frameVersions.canvasId, canvasId)),
     ),
@@ -786,6 +855,7 @@ export async function hydrate(): Promise<Hydrated> {
     commentRows,
     activityRows,
     guidelineRows,
+    tokenRows,
     referenceRows,
     decisionRows,
     proposalRows,
@@ -798,6 +868,7 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
     db.select().from(t.activity).orderBy(desc(t.activity.at)),
     db.select().from(t.guidelines).orderBy(t.guidelines.name),
+    db.select().from(t.designTokens).orderBy(t.designTokens.order, t.designTokens.name),
     db.select().from(t.memoryReferences).orderBy(desc(t.memoryReferences.pinnedAt)),
     db.select().from(t.decisions).orderBy(desc(t.decisions.at)),
     db.select().from(t.memoryProposals).orderBy(desc(t.memoryProposals.at)),
@@ -809,6 +880,7 @@ export async function hydrate(): Promise<Hydrated> {
     name: c.name,
     pages: c.pages ?? undefined,
     ...(c.guides?.length ? { guides: c.guides } : {}),
+    ...(c.tokenThemes?.length ? { tokenThemes: c.tokenThemes } : {}),
     ownerId: c.ownerId ?? undefined,
     /* 'view' / 'comment' / 'edit'; null and anything unknown read as private */
     linkAccess: storedLinkAccess(c.linkAccess),
@@ -861,6 +933,20 @@ export async function hydrate(): Promise<Hydrated> {
       updatedBy: g.updatedBy,
       ...(g.x != null ? { x: g.x } : {}),
       ...(g.y != null ? { y: g.y } : {}),
+    })
+  }
+  for (const row of tokenRows) {
+    const c = byId.get(row.canvasId)
+    if (!c) continue
+    ;(c.tokens ??= []).push({
+      name: row.name,
+      type: row.type as TokenType,
+      value: row.value,
+      ...(row.themes && Object.keys(row.themes).length ? { themes: row.themes } : {}),
+      ...(row.description != null ? { description: row.description } : {}),
+      order: row.order,
+      updatedAt: row.updatedAt,
+      updatedBy: row.updatedBy,
     })
   }
 

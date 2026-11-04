@@ -61,6 +61,8 @@ export const canvases = pgTable('canvases', {
   pages: jsonb('pages').$type<CanvasPageInfo[]>(),
   /** ruler guides of every page; null = none */
   guides: jsonb('guides').$type<CanvasGuide[]>(),
+  /** design token themes (light, dark, …) in display order; null = none */
+  tokenThemes: jsonb('token_themes').$type<string[]>(),
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerId: text('owner_id'),
@@ -501,6 +503,29 @@ export const guidelineVersions = pgTable(
     savedBy: text('saved_by').notNull(),
   },
   (t) => [index('guideline_versions_doc_idx').on(t.canvasId, t.name)],
+)
+
+/** Design tokens (shared/designTokens.ts): a canvas's named design values,
+ *  each a CSS custom property frames use as `var(--name)`. Small and read on
+ *  every frame write; hydrated with the canvas. */
+export const designTokens = pgTable(
+  'design_tokens',
+  {
+    canvasId: text('canvas_id').notNull(),
+    /** the CSS custom property name, `--color-primary` */
+    name: text('name').notNull(),
+    /** one of TOKEN_TYPES */
+    type: text('type').notNull(),
+    value: text('value').notNull(),
+    /** the value under each of the canvas's token themes that overrides `value` */
+    themes: jsonb('themes').$type<Record<string, string>>(),
+    description: text('description'),
+    /** display order within the canvas */
+    order: doublePrecision('order').notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.name] })],
 )
 
 /** Frames pinned to Memory as style exemplars: the HTML is a snapshot taken

@@ -27,6 +27,7 @@ import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
 import type { CustomFont } from '../../shared/fonts'
+import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -399,6 +400,29 @@ export const api = {
     req(`/api/canvases/${canvasId}/guidelines/${encodeURIComponent(name)}`, {
       method: 'PUT',
       body: JSON.stringify({ markdown, ...(title !== undefined ? { title } : {}) }),
+    }),
+  /* design tokens */
+  createTokens: (canvasId: string, tokens: DesignTokenInput[]) =>
+    req<{ results: TokenResult[]; tokens: DesignToken[] }>(`/api/canvases/${canvasId}/tokens`, {
+      method: 'POST',
+      body: JSON.stringify({ tokens }),
+    }),
+  setToken: (canvasId: string, name: string, edit: Omit<TokenEdit, 'name'>) =>
+    req<{ result: TokenResult; tokens: DesignToken[] }>(
+      `/api/canvases/${canvasId}/tokens/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(edit),
+      },
+    ),
+  setTokenThemes: (canvasId: string, themes: string[], renames: ThemeRename[] = []) =>
+    req<{ themes: string[]; tokens: DesignToken[] }>(`/api/canvases/${canvasId}/token-themes`, {
+      method: 'PUT',
+      body: JSON.stringify({ themes, ...(renames.length ? { renames } : {}) }),
+    }),
+  deleteToken: (canvasId: string, name: string) =>
+    req<{ ok: boolean; tokens: DesignToken[] }>(`/api/canvases/${canvasId}/tokens/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
     }),
   /* design memory */
   pinReference: (canvasId: string, frameId: string) =>
