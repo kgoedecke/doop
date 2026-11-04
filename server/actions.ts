@@ -956,6 +956,30 @@ export function retryComment(commentId: string, by: string): ElementComment | un
   return undefined
 }
 
+/**
+ * The agent answered a request with a question: the request is handed back
+ * to the person as an ordinary open thread (no claim, no agent status), so
+ * their answer — an @mention reply — queues fresh work with the whole
+ * conversation, and nothing is resolved behind their back.
+ */
+export function handBackComment(commentId: string, by: string): ElementComment | undefined {
+  for (const [canvasId, list] of commentLog) {
+    const comment = list.find((c) => c.id === commentId)
+    if (!comment || comment.resolvedAt) continue
+    delete comment.claimedBy
+    delete comment.claimedAt
+    delete comment.failedAt
+    delete comment.failureReason
+    delete comment.forAgent
+    delete comment.targetAgent
+    persist.saveComment(comment)
+    broadcast(canvasId, { type: 'comment', comment })
+    logActivity(canvasId, resolveActor({ name: by, kind: 'agent' }), 'asked a question in a comment', comment.frameId)
+    return comment
+  }
+  return undefined
+}
+
 export function resolveComment(commentId: string, by: string): ElementComment | undefined {
   for (const [canvasId, list] of commentLog) {
     const c = list.find((x) => x.id === commentId)

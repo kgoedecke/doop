@@ -716,6 +716,8 @@ async function writeComment(c: ElementComment): Promise<void> {
         pageId: row.pageId,
         x: row.x,
         y: row.y,
+        /* a request handed back to the person is no longer the agent's */
+        forAgent: row.forAgent,
         claimedBy: row.claimedBy,
         claimedAt: row.claimedAt,
         failedAt: row.failedAt,

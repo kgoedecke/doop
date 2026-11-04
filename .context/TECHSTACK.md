@@ -428,6 +428,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   server starts listening, frame by frame with awaited, ordered writes (the stamped frame, then
   the comments naming its ids); unresolvable paths become lost anchors, a row that throws or a
   frame write that fails is logged and left for the next boot. Tests: `elementIdBackfill.test.ts`.
+- Agents answer in the thread (`server/resident.ts`): a resident run about `@mentioned` comments
+  posts its closing summary as the agent's reply in each thread (one message per thread) before
+  resolving it, and a failed run posts the reason and marks the comment failed for a retry
+  (`settleComments`). The kickoff lists each comment's id, and the resident has
+  `reply_to_comment` and `resolve_comment` as tools (`replyInThread`: this canvas only, never
+  metered, a resident `@mention` in the agent's words becomes a plain name through
+  `withoutMentions` so it cannot queue itself); a thread the agent answered itself gets no
+  second reply from the summary. A question the agent needs answered first is
+  `reply_to_comment` with `awaiting_answer`: when the run ends the request is handed back
+  (`actions.handBackComment`: unclaimed, no longer an agent item in memory and in its row, the thread open), so the
+  person's `@mention` answer queues fresh work carrying the whole conversation. MCP agents have
+  had the same two tools all along. Tests: `residentComments.test.ts`, `agentToolParity.test.ts`.
 - Comment pins move by drag (`src/lib/commentMove.ts`, gesture in `CommentPin`): anyone who may
   comment drags a thread's root pin; a ghost rides the pointer in the world layer
   (`CanvasComments`), above every frame, since the pin itself sits inside a clipped frame surface.
