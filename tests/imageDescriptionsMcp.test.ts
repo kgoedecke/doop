@@ -120,6 +120,8 @@ it('the kickoff quotes each image under its frame and labels a pasted image', ()
   expect(text).toContain('    image /a/pic1.png: A checkout page with a blue Pay button.')
   expect(text).toContain('    image /a/pic2.jpg: (description pending)')
   expect(text).toContain('name="Hero", 400x300')
-  expect(text).toMatch(/screenshot_frame on the relevant ones before designing\.$/)
+  expect(text).toMatch(
+    /A frame marked \(pasted image\) is a reference .* A design that uses images is an ordinary frame\.$/,
+  )
   expect(describeFrameList([design], new Map())).not.toContain('screenshot_frame')
 })

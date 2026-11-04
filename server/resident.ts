@@ -1384,7 +1384,7 @@ export function describeFrameList(frames: Frame[], images: Map<string, FrameImag
   })
   if (images.size > 0)
     lines.push(
-      'Frames listing an image hold pictures people put on the canvas, often reference screenshots pasted in for you: read their descriptions, and call screenshot_frame on the relevant ones before designing.',
+      'Read the image descriptions above and call screenshot_frame on the relevant frames before designing. A frame marked (pasted image) is a reference someone put there for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.',
     )
   return lines.join('\n')
 }

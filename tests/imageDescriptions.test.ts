@@ -11,6 +11,7 @@ import {
   MAX_DESCRIBE_ATTEMPTS,
   describeAsset,
   describeIdle,
+  describeImage,
   describerFor,
   enqueueDescription,
   enqueuePending,
@@ -58,7 +59,10 @@ vi.mock('../server/agentModel.ts', async (importOriginal) => {
 })
 vi.mock('../server/env.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../server/env.ts')>()
-  return { ...original, env: { ...original.env, DESCRIBE_PER_CANVAS_PER_DAY: 4, DESCRIBE_CONCURRENCY: 2 } }
+  return {
+    ...original,
+    env: { ...original.env, DESCRIBE_PER_CANVAS_PER_DAY: 4, DESCRIBE_CONCURRENCY: 2, DESCRIBE_RETRY_MS: 20 },
+  }
 })
 
 const fake = (label: string) => ({ provider: 'anthropic' as const, label, run: mocks.run })
@@ -176,12 +180,40 @@ describe('the worker', () => {
     const canvasId = canvas()
     const asset = await createAsset(png, { canvasId, uploadedBy: 'alice' })
     mocks.run.mockRejectedValue(new Error('overloaded'))
-    for (let attempt = 1; attempt <= MAX_DESCRIBE_ATTEMPTS; attempt++) {
+    for (let attempt = 1; attempt < MAX_DESCRIBE_ATTEMPTS; attempt++) {
       expect(await describeAsset(asset.id)).toBe('failed')
       expect((await row(asset.id)).describeAttempts).toBe(attempt)
     }
+    expect(await describeAsset(asset.id)).toBe('exhausted')
     expect(await describeAsset(asset.id)).toBe('skipped')
     expect(mocks.run).toHaveBeenCalledTimes(MAX_DESCRIBE_ATTEMPTS)
+  })
+
+  it('tries a failed image again after the retry delay, through the queue', async () => {
+    const asset = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+    mocks.run
+      .mockRejectedValueOnce(new Error('overloaded'))
+      .mockRejectedValueOnce(new Error('overloaded'))
+      .mockResolvedValue(answer('A settings page.'))
+    enqueueDescription(asset.id)
+    await describeIdle()
+    expect((await row(asset.id)).describeAttempts).toBe(1)
+    /* the retry sits on its timer (20ms here), then runs through the queue */
+    const deadline = Date.now() + 2000
+    while ((await row(asset.id)).description === null && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      await describeIdle()
+    }
+    expect(await row(asset.id)).toMatchObject({ description: 'A settings page.', describeAttempts: 2 })
+    expect(mocks.run).toHaveBeenCalledTimes(3)
+  })
+
+  it('gives the slot back when the turn stalls, token refresh included', async () => {
+    const never = fake('Slow')
+    never.run = vi.fn(() => new Promise(() => {}))
+    const started = Date.now()
+    await expect(describeImage(never, png, AbortSignal.timeout(40))).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(1500)
   })
 
   it('stops at the canvas’s daily budget (failed calls count: they may have cost something)', async () => {

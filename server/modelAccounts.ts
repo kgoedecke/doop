@@ -815,6 +815,18 @@ export function connectGeminiKey(userId: string, apiKey: string): Promise<Accoun
 const refreshing = new Map<string, Promise<ModelAccount>>()
 const REFRESH_MARGIN_MS = 120_000
 
+/** `account` with the tokens and plan details a refresh produced on `fresh`. */
+export function withCredentialsOf(account: ModelAccount, fresh: ModelAccount): ModelAccount {
+  return {
+    ...account,
+    accessToken: fresh.accessToken,
+    refreshToken: fresh.refreshToken,
+    expiresAt: fresh.expiresAt,
+    ...(fresh.accountId ? { accountId: fresh.accountId } : {}),
+    ...(fresh.plan ? { plan: fresh.plan } : {}),
+  }
+}
+
 /** A ChatGPT account with a live access token, refreshing it if it is close
  *  to expiry. Throws when the connection has gone stale for good — the caller
  *  surfaces that as "reconnect your ChatGPT account". */
@@ -822,8 +834,11 @@ export async function withFreshToken(account: ModelAccount): Promise<ModelAccoun
   if (account.kind !== 'chatgpt') return account
   if (!account.refreshToken) throw new Error('ChatGPT connection is missing its refresh token — reconnect it')
   if ((account.expiresAt ?? 0) - REFRESH_MARGIN_MS > Date.now() && account.accessToken) return account
+  /* a caller joining a refresh in flight gets the fresh credentials on ITS
+     account: the first caller's model and effort picks (an image describer
+     at low effort, say) must not leak into a design turn, or the reverse */
   const inFlight = refreshing.get(account.userId)
-  if (inFlight) return inFlight
+  if (inFlight) return inFlight.then((fresh) => withCredentialsOf(account, fresh))
   const task = (async () => {
     const tokens = await tokenRequest({
       grant_type: 'refresh_token',

@@ -94,8 +94,10 @@
   `asset.stored`) is described once by a small vision model and the paragraph lands on its
   `assets` row (`description`, `described_at`, `described_by`, `describe_attempts`, migration
   0044). The upload never waits: a queue drains `DESCRIBE_CONCURRENCY` at a time, three attempts
-  per asset, 20s each, `DESCRIBE_PER_CANVAS_PER_DAY` per canvas (failed calls count), and boot
-  re-queues the backlog. The canvas owner's mode (`image_description_prefs`: `off` / `account` /
+  per asset `DESCRIBE_RETRY_MS` apart, 20s each (the whole turn, a ChatGPT token refresh
+  included), `DESCRIBE_PER_CANVAS_PER_DAY` per canvas (failed calls count), and boot re-queues
+  the backlog; rows from before the migration are marked out of attempts, so history is never
+  billed. The canvas owner's mode (`image_description_prefs`: `off` / `account` /
   `server`, `GET`/`PUT /api/image-descriptions`, Settings → Agents → Image descriptions) picks the
   model: `accountDescriber` is the owner's account on the provider's small tier
   (`DESCRIBER_MODELS`; the OpenAI kinds keep their model at low effort), a text-only pick or a

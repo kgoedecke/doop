@@ -253,6 +253,7 @@ const schema = {
      canvas, and how many describe calls run at once */
   DESCRIBE_PER_CANVAS_PER_DAY: nonNegativeInt({ default: 200 }),
   DESCRIBE_CONCURRENCY: perMinute({ default: 2 }),
+  DESCRIBE_RETRY_MS: nonNegativeInt({ default: 30_000 }),
   SYNC_PAGE_INTERVAL_MS: nonNegativeInt({ default: 30_000 }),
   SYNC_FREEZE_MS: nonNegativeInt({ default: 15 * 60_000 }),
 

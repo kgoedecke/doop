@@ -235,7 +235,7 @@ const agentName = z
 
 /** Said once in get_canvas when any listed frame carries an image. */
 const IMAGES_NOTE =
-  'Frames with `images` hold pictures people put on the canvas — often reference screenshots pasted in for you. Each carries a `description` of what it shows (null while it is being written). Read them, and call get_frame_screenshot on the relevant ones before designing.'
+  'Frames with `images` reference pictures people uploaded or pasted; each carries a `description` of what it shows (null while it is being written). Read them, and call get_frame_screenshot on the relevant ones before designing. A frame that is nothing but one image is a reference pasted for you: leave it as it is and deliver in a separate frame. A design that uses images is an ordinary frame.'
 
 function frameSummary(
   f: {

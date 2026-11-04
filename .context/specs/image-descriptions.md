@@ -24,8 +24,9 @@ knows what the picture is and a vision model knows which frames are worth a scre
   photo, logo, chart, sketch), visible UI and content, headings and copy, palette, layout, under
   120 words. One `AgentTurnRequest` with no tools, `maxTokens` 400.
 - **Result** lands on the asset row: `description`, `described_at`, `described_by` (the model
-  label), `describe_attempts`. A failed call bumps `describe_attempts` and is retried on the next
-  drain with a backoff; after three it is left alone. A 20s timeout bounds every call.
+  label), `describe_attempts`. A failed call bumps `describe_attempts` and comes back through the queue
+  after `DESCRIBE_RETRY_MS` (30s); after three it is left alone. A 20s timeout bounds the whole
+  turn, a ChatGPT token refresh included, so a stalled provider never holds a worker slot.
 - **Caps**: `DESCRIBE_PER_CANVAS_PER_DAY` (200, env-overridable; a failed call counts, since it
   may have cost something) and `DESCRIBE_CONCURRENCY` (2). Over the cap, the asset stays
   undescribed and a log line says so.
@@ -86,8 +87,9 @@ no user document changes, no version is cut and no activity line appears.
 - Model-written frame summaries: frames change on every save; a later spec, if at all, for
   signed-off frames. A no-model text summary (headings, visible copy, layer names) is tracked
   separately.
-- Describing images already on the canvas before this ships: a one-off backfill command may
-  follow; the worker only sees new uploads plus unfinished rows.
+- Describing images already on the canvas before this ships: migration 0044 marks them out of
+  attempts, so the first boot never bills every owner for their history; a one-off backfill
+  command resetting `describe_attempts` may follow.
 - Showing the description to humans in the editor (Inspector, Layers tooltip): follows once the
   data exists.
 - Re-describing an image when a frame crops or recolours it: the description is of the asset.

@@ -85,27 +85,43 @@ export async function describeImage(
     .flatten({ background: '#ffffff' })
     .jpeg({ quality: 80 })
     .toBuffer()
-  const result = await model.run({
-    system: [{ text: PROMPT }],
-    tools: [],
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
-          { type: 'text', text: 'Describe this image.' },
-        ],
-      },
-    ],
-    maxTokens: 400,
+  /* the signal reaches the model request, but not every step before it (a
+     ChatGPT token refresh, say) — so the whole turn is raced against it, and
+     the worker's slot comes back on time whatever stalled */
+  const result = await withinSignal(
+    model.run({
+      system: [{ text: PROMPT }],
+      tools: [],
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
+            { type: 'text', text: 'Describe this image.' },
+          ],
+        },
+      ],
+      maxTokens: 400,
+      signal,
+    }),
     signal,
-  })
+  )
   const text = result.content
     .map((block) => (block.type === 'text' ? block.text : ''))
     .join('\n')
     .trim()
   if (!text) throw new Error('the model returned no description')
   return text.slice(0, MAX_DESCRIPTION_CHARS)
+}
+
+/** Settle with `promise`, or reject the moment `signal` aborts. */
+function withinSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'))
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason ?? new Error('aborted'))
+    signal.addEventListener('abort', abort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+  })
 }
 
 /* ---------------------------------------------------------------- */
@@ -118,6 +134,9 @@ let broadcast: Broadcast = () => {}
 const queue: string[] = []
 const queued = new Set<string>()
 let inFlight = 0
+/** a failed asset waits here for its next attempt */
+const retries = new Map<string, ReturnType<typeof setTimeout>>()
+const idleWaiters: (() => void)[] = []
 
 /** a day's budget per canvas, counted in memory (resets with the process) */
 const spent = new Map<string, { day: string; count: number }>()
@@ -143,6 +162,9 @@ function drain(): void {
     const assetId = queue.shift()!
     inFlight++
     describeAsset(assetId)
+      .then((result) => {
+        if (result === 'failed') scheduleRetry(assetId)
+      })
       .catch((err: unknown) => console.error(`[describe] ${assetId} failed`, err))
       .finally(() => {
         queued.delete(assetId)
@@ -150,19 +172,40 @@ function drain(): void {
         drain()
       })
   }
+  if (queue.length === 0 && inFlight === 0) for (const wake of idleWaiters.splice(0)) wake()
 }
 
-/** Resolves when the queue is empty and nothing is in flight — for tests and shutdown. */
-export function describeIdle(): Promise<void> {
-  return new Promise((resolve) => {
-    const check = () => (queue.length === 0 && inFlight === 0 ? resolve() : setTimeout(check, 10))
-    check()
-  })
+/** A failed attempt comes back after DESCRIBE_RETRY_MS, while attempts remain. */
+function scheduleRetry(assetId: string): void {
+  if (retries.has(assetId)) return
+  const timer = setTimeout(() => {
+    retries.delete(assetId)
+    enqueueDescription(assetId)
+  }, env.DESCRIBE_RETRY_MS)
+  timer.unref?.()
+  retries.set(assetId, timer)
 }
+
+/** Resolves when the queue is empty and nothing is in flight (a retry
+ *  waiting on its timer is not in flight) — for tests and shutdown. */
+export function describeIdle(): Promise<void> {
+  if (queue.length === 0 && inFlight === 0) return Promise.resolve()
+  return new Promise((resolve) => void idleWaiters.push(resolve))
+}
+
+export type DescribeOutcome =
+  /** the paragraph is on the row */
+  | 'described'
+  /** nothing to do: already described, no model, over budget, not an image */
+  | 'skipped'
+  /** this attempt failed and another remains */
+  | 'failed'
+  /** this attempt failed and it was the last */
+  | 'exhausted'
 
 /** Describe one stored asset: skipped when already described, out of
  *  attempts, over budget, not an image, or its owner has it off. */
-export async function describeAsset(assetId: string): Promise<'described' | 'skipped' | 'failed'> {
+export async function describeAsset(assetId: string): Promise<DescribeOutcome> {
   const [row] = await db.select().from(t.assets).where(eq(t.assets.id, assetId))
   if (!row || !row.canvasId || row.description !== null || row.describeAttempts >= MAX_DESCRIBE_ATTEMPTS)
     return 'skipped'
@@ -188,16 +231,20 @@ export async function describeAsset(assetId: string): Promise<'described' | 'ski
     broadcast(row.canvasId, { type: 'asset:described', assetId, description })
     return 'described'
   } catch (err) {
-    await db
-      .update(t.assets)
-      .set({ describeAttempts: row.describeAttempts + 1 })
-      .where(eq(t.assets.id, assetId))
-    console.error(`[describe] ${assetId} attempt ${row.describeAttempts + 1} failed`, err)
-    return 'failed'
+    const attempts = row.describeAttempts + 1
+    await db.update(t.assets).set({ describeAttempts: attempts }).where(eq(t.assets.id, assetId))
+    const last = attempts >= MAX_DESCRIBE_ATTEMPTS
+    console.error(
+      `[describe] ${assetId} attempt ${attempts} of ${MAX_DESCRIBE_ATTEMPTS} failed${last ? '; giving up' : ''}`,
+      err,
+    )
+    return last ? 'exhausted' : 'failed'
   }
 }
 
-/** Queue what an earlier process left undescribed. */
+/** Queue what an earlier process left undescribed. Rows from before
+ *  descriptions existed were marked out of attempts by migration 0044, so
+ *  this never bills an owner for their history. */
 export async function enqueuePending(): Promise<number> {
   const rows = await db
     .select({ id: t.assets.id })
