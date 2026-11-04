@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { DoopMark } from './Logo'
 import { useAgentModels, useModelAccount } from './ModelAccount'
+import { useLocalAgent } from '../lib/localAgent'
+import { activeModelTarget } from '../lib/activeModelTarget'
 import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
 import { useT, type PlainMessageKey } from '@/lib/i18n'
 import {
@@ -50,7 +52,10 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const t = useT()
   const catalog = useAgentModels(account, open)
-  const kind = account?.connected ? account.kind : undefined
+  const localPreference = useLocalAgent((state) => state.preference)
+  const localEnabled = localPreference?.enabled ?? false
+  const activeTarget = activeModelTarget(localEnabled, account)
+  const kind = activeTarget === 'claude-local' ? undefined : (activeTarget ?? undefined)
   const catalogMenu = catalog && (catalog.live || kind === 'custom-key') ? catalog.models : undefined
   const menu = catalogMenu ?? (kind && account?.menus?.[kind]) ?? []
   /* a custom endpoint's saved model stays selectable while its live catalog
@@ -61,7 +66,10 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
       : menu
   const current = items.find((m) => m.id === account?.model)
   const missingModel = kind === 'custom-key' && Boolean(account?.model) && !menu.some((m) => m.id === account?.model)
-  const label = current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : 'Doop Agent')
+  const label =
+    activeTarget === 'claude-local'
+      ? `Claude CLI (${localPreference?.model ?? 'default'})`
+      : (current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : 'Doop Agent'))
   const mark = kind ? PROVIDER_MARK[kind] : undefined
 
   async function pick(model: string) {
