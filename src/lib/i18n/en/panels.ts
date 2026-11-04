@@ -62,18 +62,12 @@ export const panels = {
   // design tokens (the Tokens section of the Memory tab)
   tokensHint: 'Named colours, spacing, radii and type every frame and agent uses as var(--name).',
   tokensNew: 'New token',
-  tokensThemes: 'Themes',
   tokensThemesLede:
     'Every token has a default value; a theme (dark, compact…) gives it another. A frame switches with data-doop-theme on its <html>.',
   tokensThemePlaceholder: 'dark',
+  tokensManageThemes: 'Manage themes…',
+  tokensThemesTitle: 'Themes',
   tokensTheme: 'Theme',
-  tokensMixed: 'mixed',
-  tokensShowTheme: 'Show {theme} on the selected frames',
-  tokensSelectHint: 'Select a frame to switch its theme',
-  tokensThemesSelectedLede: {
-    one: 'Pick the theme the selected frame shows.',
-    other: 'Pick the theme the {count} selected frames show.',
-  },
   tokensThemeValues: 'Values per theme (empty: same as default)',
   tokensDefaultTheme: 'the value itself',
   tokensRenameTheme: 'Rename {theme}',
@@ -84,7 +78,6 @@ export const panels = {
   tokensNewTitle: 'New {type} token',
   tokensEditTitle: 'Edit token',
   tokensName: 'Name',
-  tokensNamePlaceholder: 'color-primary',
   tokensType: 'Type',
   tokensValue: 'Value (default)',
   tokensAlias: 'Alias…',

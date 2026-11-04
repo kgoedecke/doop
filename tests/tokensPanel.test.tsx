@@ -104,54 +104,62 @@ describe('TokensSection', () => {
     container.remove()
   })
 
-  it('lists tokens by type, colours first, with the themes line', () => {
+  /* Radix opens a menu on pointerdown, not click */
+  const openMenu = (label: string) =>
+    act(() => {
+      button(label).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+    })
+  const menuItem = (label: string) => {
+    const el = [...document.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')].find(
+      (e) => e.textContent?.trim() === label,
+    )
+    if (!el) throw new Error(`no menu item “${label}”`)
+    return el
+  }
+  const choose = (label: string) => {
+    const item = menuItem(label)
+    act(() => item.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
+    act(() => item.click())
+  }
+  /* the Manage themes modal, from the theme menu */
+  const openManage = () => {
+    openMenu('Theme')
+    choose('Manage themes…')
+  }
+
+  it('lists tokens by type, colours first, under the default theme', () => {
     expect(text().indexOf('color-ink')).toBeLessThan(text().indexOf('spacing-4'))
-    expect(text()).toContain('Themesdefault, dark')
+    expect(text()).toContain('Themedefault')
+    expect(text()).toContain('#111')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#111')
   })
 
-  it('opens a token, shows its theme value and use count, and saves a rename with themes', async () => {
-    act(() => button('color-ink').click())
-    expect(document.body.textContent).toContain('used in 1 frame')
-    expect(input('Value (dark)').value).toBe('#eee')
-    type(input('color-primary'), 'color-text')
-    type(input('Value (dark)'), '')
-    await act(async () => {
-      button('Save').click()
-      await Promise.resolve()
-    })
-    /* only what changed: the rename and the cleared theme value */
-    expect(setToken).toHaveBeenCalledWith('c1', '--color-ink', { newName: '--color-text', themes: { dark: null } })
+  it('shows another theme’s values when it is picked from the dropdown', () => {
+    openMenu('Theme')
+    choose('dark')
+    expect(text()).toContain('Themedark')
+    expect(text()).toContain('#eee')
+    expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#eee')
+    /* a token without a dark value shows its default, marked as inherited */
+    expect(container.querySelector('[title="same as default"]')?.textContent).toBe('16px')
   })
 
-  it('creates a token from the type menu', async () => {
-    /* Radix opens a menu on pointerdown, not click */
-    act(() => {
-      button('New token').dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }),
-      )
-    })
-    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) =>
-      el.textContent?.includes('Radius'),
-    )
-    expect(item).toBeTruthy()
-    act(() => item!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
-    act(() => item!.click())
-    expect(document.body.textContent).toContain('New Radius token')
-    type(input('color-primary'), 'radius-md')
-    /* a radius is a number with its unit, px by default */
-    type(input('A CSS value, or var(--other) to alias a token'), '8')
+  it('creates a token from the plus button, naming it after its type', async () => {
+    act(() => button('New token').click())
+    expect(document.body.textContent).toContain('New Color token')
+    type(input('primary'), 'brand')
+    type(input('A CSS value, or var(--other) to alias a token'), '#abcdef')
     await act(async () => {
       button('Save').click()
       await Promise.resolve()
     })
     expect(createTokens).toHaveBeenCalledWith('c1', [
-      { name: '--radius-md', type: 'radius', value: '8px', description: undefined, themes: {} },
+      { name: '--brand', type: 'color', value: '#abcdef', description: undefined, themes: {} },
     ])
   })
 
-  it('adds and removes themes from the dropdown', async () => {
-    act(() => button('Themes').click())
+  it('adds and removes themes from the manage modal', async () => {
+    openManage()
     const field = document.querySelector<HTMLInputElement>('input[aria-label="Add a theme"]')!
     type(field, 'Compact')
     await act(async () => {
@@ -167,8 +175,8 @@ describe('TokensSection', () => {
   })
 
   it('shows the default theme first and renames a theme from its row', async () => {
-    act(() => button('Themes').click())
-    expect(document.body.textContent).toContain('default')
+    openManage()
+    expect(document.body.textContent).toContain('the value itself')
     const field = document.querySelector<HTMLInputElement>('input[aria-label="Rename dark"]')!
     type(field, 'Night')
     await act(async () => {

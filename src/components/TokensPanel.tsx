@@ -3,8 +3,7 @@ import {
   DEFAULT_THEME,
   MAX_TOKEN_THEMES,
   aliasOf,
-  frameTheme,
-  withFrameTheme,
+  effectiveValue,
   TOKEN_GROUPS,
   isThemeName,
   isTokenName,
@@ -23,7 +22,6 @@ import { DEVICE_FONTS } from '../lib/deviceFonts'
 import { fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
 import { api } from '../lib/api'
-import { recordUpdate, trackSave } from '../lib/history'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Input } from './ui/input'
@@ -31,19 +29,21 @@ import { Field } from './ui/field'
 import { IconButton } from './ui/icon-button'
 import { ListHint, ListRow } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { MenuButton } from './ui/menu-button'
 import { ConfirmDialog } from './ui/alert-dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { CheckIcon, EyeIcon, PlusIcon, XIcon } from './ui/icons'
+import { PlusIcon, XIcon } from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
+import { cn } from '@/lib/utils'
 
 /** The i18n label of each token type, in the add menu's wording. */
 export const TOKEN_TYPE_LABEL: Record<TokenType, PlainMessageKey> = {
@@ -79,8 +79,23 @@ function firstMessage(e: unknown, fallback: string): string {
   return e instanceof Error ? e.message.replace(/^\d+\s*/, '') : fallback
 }
 
-/** The Tokens section of the Memory tab: the canvas's design tokens by
- *  type, its themes, and the add menu of the eleven types. */
+/** A name that reads like a token of each type, as the name field's hint. */
+const NAME_HINT: Record<TokenType, string> = {
+  color: 'primary',
+  opacity: 'muted',
+  radius: 'card',
+  spacing: 'space-4',
+  container: 'content',
+  breakpoint: 'md',
+  fontFamily: 'body',
+  fontWeight: 'medium',
+  fontSize: 'copy',
+  lineHeight: 'tight',
+  letterSpacing: 'caps',
+}
+
+/** The Tokens tab: the canvas's design tokens by type, shown under one
+ *  theme at a time, with the theme picker and the add button on one line. */
 export function TokensSection() {
   const canvasId = useStore((s) => s.canvas?.id)
   const tokens = useStore((s) => s.canvas?.tokens ?? [])
@@ -88,35 +103,55 @@ export function TokensSection() {
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   /** the open token's name, a type to create one of, or null */
   const [open, setOpen] = useState<{ name: string } | { create: TokenType } | null>(null)
+  /** which theme's values the rows show; null is the default */
+  const [viewTheme, setViewTheme] = useState<string | null>(null)
+  const [managing, setManaging] = useState(false)
   const t = useT()
   if (!canvasId) return null
 
+  /* a theme that left takes the view back to the default */
+  const shown = viewTheme && themes.includes(viewTheme) ? viewTheme : null
   const sorted = sortTokens(tokens)
   return (
     <>
-      {/* one line: the themes menu at the left, the add menu at the right */}
+      {/* one line: the theme picker at the left, the add button at the right */}
       <div className="flex items-center justify-between gap-2 border-b border-line-soft py-1.5 pr-2.5 pl-2.5">
-        <ThemesMenu canvasId={canvasId} themes={themes} readOnly={readOnly} />
-        {!readOnly && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton size="sm" aria-label={t('panels.tokensNew')} title={t('panels.tokensNew')}>
-                <PlusIcon size="rail" />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent width="sm">
-              {TOKEN_GROUPS.map((group, i) => (
-                <div key={group.join()}>
-                  {i > 0 && <DropdownMenuSeparator />}
-                  {group.map((type) => (
-                    <DropdownMenuItem key={type} onSelect={() => setOpen({ create: type })}>
-                      {t(TOKEN_TYPE_LABEL[type])}
-                    </DropdownMenuItem>
-                  ))}
-                </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <MenuButton variant="quiet" aria-label={t('panels.tokensTheme')}>
+              <span className="text-ink-faint">{t('panels.tokensTheme')}</span>
+              <span className="min-w-0 truncate font-mono text-ink">{shown ?? DEFAULT_THEME}</span>
+            </MenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" width="sm">
+            <DropdownMenuRadioGroup
+              value={shown ?? DEFAULT_THEME}
+              onValueChange={(v) => setViewTheme(v === DEFAULT_THEME ? null : v)}
+            >
+              <DropdownMenuRadioItem value={DEFAULT_THEME}>{DEFAULT_THEME}</DropdownMenuRadioItem>
+              {themes.map((theme) => (
+                <DropdownMenuRadioItem key={theme} value={theme}>
+                  {theme}
+                </DropdownMenuRadioItem>
               ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </DropdownMenuRadioGroup>
+            {!readOnly && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setManaging(true)}>{t('panels.tokensManageThemes')}</DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {!readOnly && (
+          <IconButton
+            size="sm"
+            aria-label={t('panels.tokensNew')}
+            title={t('panels.tokensNew')}
+            onClick={() => setOpen({ create: 'color' })}
+          >
+            <PlusIcon size="rail" />
+          </IconButton>
         )}
       </div>
       {sorted.length === 0 && <ListHint>{t('panels.tokensHint')}</ListHint>}
@@ -132,10 +167,16 @@ export function TokensSection() {
                 className="flex-row items-center gap-2.5 py-2"
                 onClick={() => setOpen({ name: token.name })}
               >
-                <TokenSwatch token={token} tokens={tokens} />
+                <TokenSwatch token={token} tokens={tokens} theme={shown ?? undefined} />
                 <span className="min-w-0 flex-1 truncate font-mono text-label text-ink">{tokenLabel(token.name)}</span>
-                <span className="max-w-[45%] flex-none truncate font-mono text-caption text-ink-soft">
-                  {token.value}
+                <span
+                  className={cn(
+                    'max-w-[45%] flex-none truncate font-mono text-caption',
+                    shown && token.themes?.[shown] === undefined ? 'text-ink-faint' : 'text-ink-soft',
+                  )}
+                  title={shown && token.themes?.[shown] === undefined ? t('panels.tokensValueInherits') : undefined}
+                >
+                  {effectiveValue(token, shown ?? undefined)}
                 </span>
               </ListRow>
             ))}
@@ -150,6 +191,7 @@ export function TokensSection() {
           onClose={() => setOpen(null)}
         />
       )}
+      {managing && <ThemesModal canvasId={canvasId} themes={themes} onClose={() => setManaging(false)} />}
     </>
   )
 }
@@ -159,14 +201,17 @@ export function TokenSwatch({
   token,
   tokens,
   size = 14,
+  theme,
 }: {
   token: DesignToken
   tokens: readonly DesignToken[]
   size?: number
+  /** resolve under this theme; unset is the default */
+  theme?: string
 }) {
   if (token.type !== 'color')
     return <span className="inline-block flex-none rounded-tag bg-paper-deep" style={{ width: size, height: size }} />
-  const resolved = resolveToken(tokens, token.name) ?? token.value
+  const resolved = resolveToken(tokens, token.name, theme) ?? effectiveValue(token, theme)
   return (
     <span
       className="inline-block flex-none overflow-hidden rounded-tag shadow-ring"
@@ -336,7 +381,7 @@ export function TokenModal({
               variant="well"
               className="font-mono"
               autoFocus={creating}
-              placeholder={t('panels.tokensNamePlaceholder')}
+              placeholder={NAME_HINT[draft.type]}
               value={draft.name}
               disabled={busy || readOnly}
               onChange={(e) => setDraft({ ...draft, name: e.target.value })}
@@ -672,10 +717,10 @@ function ValueInput({
   )
 }
 
-/** The canvas's token themes in a dropdown: `default` first and fixed, then
- *  each theme on a row whose name can be retyped (a rename moves its values
+/** The canvas's themes in a modal: `default` first and fixed, then each
+ *  theme on a row whose name can be retyped (a rename moves its values
  *  along) and removed, and a line to add one; every change saves at once. */
-function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: string[]; readOnly: boolean }) {
+function ThemesModal({ canvasId, themes, onClose }: { canvasId: string; themes: string[]; onClose: () => void }) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -710,88 +755,36 @@ function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: 
     )
   }
 
-  /* the selected frames: picking a theme switches their root to it */
-  const selected = useStore((s) => {
-    const ids = new Set(s.selectedIds.length ? s.selectedIds : s.selectedId ? [s.selectedId] : [])
-    return (s.canvas?.frames ?? []).filter((f) => ids.has(f.id))
-  })
-  const current = selected.length ? frameTheme(selected[0]!.html) : null
-  const mixed = selected.some((f) => frameTheme(f.html) !== current)
-
-  function show(theme: string | null) {
-    for (const frame of selected) {
-      const before = frame.html
-      const html = withFrameTheme(before, theme)
-      if (html === before) continue
-      useStore.getState().patchFrameLocal(frame.id, { html })
-      recordUpdate(frame.id, { html: before }, { html }, true)
-      /* tracked, so an undo issued while this save is pending waits for it */
-      trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
-    }
-  }
-
-  const row = 'flex h-7 items-center gap-1 rounded-row pl-1 pr-0.5 hover:bg-sub'
-  const pick = (theme: string | null) => (
-    <IconButton
-      size="sm"
-      aria-label={t('panels.tokensShowTheme', { theme: theme ?? DEFAULT_THEME })}
-      title={
-        selected.length ? t('panels.tokensShowTheme', { theme: theme ?? DEFAULT_THEME }) : t('panels.tokensSelectHint')
-      }
-      on={selected.length > 0 && !mixed && current === theme}
-      disabled={readOnly || !selected.length}
-      onClick={() => show(theme)}
-    >
-      {selected.length > 0 && !mixed && current === theme ? <CheckIcon size="rail" /> : <EyeIcon size="rail" />}
-    </IconButton>
-  )
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <MenuButton variant="quiet" aria-label={t('panels.tokensThemes')}>
-          <span className="text-ink-faint">{selected.length ? t('panels.tokensTheme') : t('panels.tokensThemes')}</span>
-          <span className="min-w-0 truncate font-mono text-ink">
-            {selected.length
-              ? mixed
-                ? t('panels.tokensMixed')
-                : (current ?? DEFAULT_THEME)
-              : [DEFAULT_THEME, ...themes].join(', ')}
-          </span>
-        </MenuButton>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[240px] p-1.5">
-        <p className="px-2 pt-1 pb-1.5 text-caption text-ink-faint">
-          {selected.length
-            ? t('panels.tokensThemesSelectedLede', { count: selected.length })
-            : t('panels.tokensThemesLede')}
-        </p>
-        <div className={row}>
-          {pick(null)}
-          <span className="min-w-0 flex-1 truncate px-1 font-mono text-label text-ink">{DEFAULT_THEME}</span>
-          <span className="pr-1.5 text-caption text-ink-faint">{t('panels.tokensDefaultTheme')}</span>
+    <Modal size="sm" onClose={() => !busy && onClose()}>
+      <ModalTitle>{t('panels.tokensThemesTitle')}</ModalTitle>
+      <ModalLede>{t('panels.tokensThemesLede')}</ModalLede>
+      <div className="mt-3 flex flex-col gap-0.5">
+        <div className="flex h-8 items-center gap-2 rounded-row px-2">
+          <span className="min-w-0 flex-1 truncate font-mono text-label text-ink">{DEFAULT_THEME}</span>
+          <span className="text-caption text-ink-faint">{t('panels.tokensDefaultTheme')}</span>
         </div>
         {themes.map((theme) => (
           <ThemeRow
             key={theme}
             theme={theme}
-            readOnly={readOnly || busy}
-            lead={pick(theme)}
+            readOnly={busy}
             onRename={(name) => rename(theme, name)}
             onRemove={() => void save(themes.filter((m) => m !== theme))}
           />
         ))}
-        {!readOnly && themes.length < MAX_TOKEN_THEMES && (
+        {themes.length < MAX_TOKEN_THEMES && (
           <form
-            className="mt-1 flex items-center gap-1.5 border-t border-line-soft px-1 pt-1.5"
+            className="mt-1.5 flex items-center gap-1.5 border-t border-line-soft pt-2"
             onSubmit={(e) => {
               e.preventDefault()
               if (canAdd) void save([...themes, typed])
             }}
           >
             <Input
-              variant="mono"
+              variant="well"
               inputSize="sm"
-              className="h-7 min-w-0 flex-1"
+              className="min-w-0 flex-1 font-mono"
               aria-label={t('panels.tokensAddTheme')}
               placeholder={t('panels.tokensThemePlaceholder')}
               value={draft}
@@ -799,7 +792,7 @@ function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: 
               onChange={(e) => setDraft(e.target.value)}
             />
             <IconButton
-              size="sm"
+              size="md"
               variant="primary"
               type="submit"
               aria-label={t('panels.tokensAddTheme')}
@@ -809,9 +802,15 @@ function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: 
             </IconButton>
           </form>
         )}
-        {error && <p className="px-2 pt-1 text-caption text-accent-ink">{error}</p>}
-      </PopoverContent>
-    </Popover>
+      </div>
+      {error && <p className="mt-2.5 text-copy text-accent-ink">{error}</p>}
+      <ModalActions>
+        <ModalSpacer />
+        <Button variant="ghost" disabled={busy} onClick={onClose}>
+          {t('common.close')}
+        </Button>
+      </ModalActions>
+    </Modal>
   )
 }
 
@@ -819,14 +818,11 @@ function ThemesMenu({ canvasId, themes, readOnly }: { canvasId: string; themes: 
 function ThemeRow({
   theme,
   readOnly,
-  lead,
   onRename,
   onRemove,
 }: {
   theme: string
   readOnly: boolean
-  /** the show-on-selection control at the row's start */
-  lead?: ReactNode
   onRename: (name: string) => void
   onRemove: () => void
 }) {
@@ -838,8 +834,7 @@ function ThemeRow({
     setName(theme)
   }
   return (
-    <div className="flex h-7 items-center gap-1 rounded-row pl-1 pr-0.5 hover:bg-sub">
-      {lead}
+    <div className="flex h-8 items-center gap-1 rounded-row pl-1 pr-0.5 hover:bg-sub">
       <Input
         variant="bare"
         inputSize="auto"

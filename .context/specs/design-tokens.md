@@ -27,8 +27,8 @@ fontSize | lineHeight | letterSpacing` (`TOKEN_TYPES`, grouped for menus by `TOK
   `renames` (`{ from, to }`, every token's value follows) first; a theme that leaves takes its
   values with it. Every check runs before anything is written, so a bad request changes
   nothing; a theme rename also rewrites `data-doop-theme` in frames. `frameTheme` /
-  `withFrameTheme` read and set a frame root's theme: the Tokens tab's themes dropdown shows the
-  selected frames' theme and switches it (one undo step per frame).
+  `withFrameTheme` read and set a frame root's theme (no editor control yet; agents set the
+  attribute).
 - Storage: `design_tokens` (migration 0044, PK canvas + name, `themes` jsonb) and
   `canvases.token_themes` jsonb. Hydrated with the canvas like guidelines; duplicates copy both.
 
@@ -81,12 +81,14 @@ in every frame and in aliasing tokens.
 
 - Layers panel → Tokens tab (`src/components/TokensPanel.tsx`, a `BracesIcon` tab beside Layers; the
   tab lives in the store as `layersTab`, so the collapsed rail's braces button opens the panel on it):
-  one line with the themes dropdown (`ThemesMenu`, a popover with `default` fixed first, each
-  other theme on a row whose name field renames it on Enter or blur and whose ✕ removes it, and a
-  text line that adds one, saving at once) and the "+" menu of the eleven types in their three
-  groups, then rows by type with a swatch. `TokenModal` edits name, type, value (a swatch picker
-  for colours), a value per theme and the use note, shows how many frames name the token, and
-  deletes. Names are shown and typed without the `--`.
+  one line with the theme picker and the "+" button, then rows by type with a swatch. The picker is
+  a radio dropdown of `default` and the canvas's themes: the rows show the picked theme's values
+  (`effectiveValue`, an inherited default greyed), and its last item, "Manage themes…", opens
+  `ThemesModal`, where each theme's row renames it on Enter or blur (its values follow), ✕ removes
+  it and a line adds one, saving at once. "+" opens `TokenModal` on a colour; the modal's type
+  select picks any type, with a value control per type (swatch and hex, font and weight lists, a
+  number with its unit, a ratio), a default value and a name hint per type, a value per theme, an
+  alias picker of same-type tokens, and Enter to save. Names are shown and typed without the `--`.
 - Design panel (`ElementPanel.tsx`): fill, stroke and text colour, corner radius and font size
   carry a braces button that overlays the field's unit on hover (`trailing` on `ColorField` /
   `NumberField`, absolutely placed so the value keeps its width); the font family and weight
