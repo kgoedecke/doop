@@ -12,11 +12,11 @@ import { posthog } from './posthog'
  *  remote actors' work is never undone from here. */
 
 type Patch = Partial<
-  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'>
+  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z' | 'rotation'>
 >
 type Snapshot = Pick<
   Frame,
-  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'
+  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z' | 'rotation'
 >
 
 type Entry =
@@ -99,6 +99,7 @@ function snapshot(f: Frame): Snapshot {
     /* a hidden or locked frame comes back as it was when its deletion is undone */
     hidden: f.hidden,
     locked: f.locked,
+    rotation: f.rotation,
     /* and back to its place in the stack */
     z: stackOf(f),
   }

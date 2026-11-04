@@ -16,6 +16,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
+import { normalizeRotation } from '../../shared/frameRotation'
 import { t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 
 const HTML_OPEN_KEY = 'doop:inspector-html'
@@ -181,6 +182,13 @@ export function Inspector({
               label="H"
               value={frame.height}
               onCommit={(v) => commitMeta({ height: Math.max(MIN_FRAME_SIZE, v) })}
+            />
+            {/* degrees clockwise about the centre; 0 straightens, and is sent
+                as 0 so the server clears the stored turn */}
+            <NumInput
+              label="∠"
+              value={frame.rotation ?? 0}
+              onCommit={(v) => commitMeta({ rotation: normalizeRotation(v) ?? 0 })}
             />
           </div>
         </InspectorGroup>
@@ -357,6 +365,7 @@ const NUM_INPUT_LABELS: Record<string, PlainMessageKey> = {
   Y: 'inspector.yPosition',
   W: 'inspector.width',
   H: 'inspector.height',
+  '∠': 'inspector.rotation',
 }
 
 function NumInput({ label, value, onCommit }: { label: string; value: number; onCommit: (v: number) => void }) {

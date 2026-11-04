@@ -5,6 +5,7 @@ import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
 import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
+import { normalizeRotation } from '../shared/frameRotation.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -245,6 +246,7 @@ function frameSummary(f: {
   demo?: boolean
   hidden?: boolean
   locked?: boolean
+  rotation?: number
   approval?: FrameApproval | null
 }) {
   return {
@@ -260,6 +262,7 @@ function frameSummary(f: {
     y: f.y,
     width: f.width,
     height: f.height,
+    ...(f.rotation ? { rotation: f.rotation } : {}),
     updatedAt: new Date(f.updatedAt).toISOString(),
     updatedBy: f.updatedBy,
     htmlBytes: f.html.length,
@@ -1921,7 +1924,7 @@ export function buildMcpServer(
       title: 'Rename, move or resize a frame',
       _meta: previewToolMeta('Updating the frame…', 'Frame updated'),
       description:
-        'Update frame metadata: rename it, move/resize it, or move it to another page using pageId. Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.',
+        'Update frame metadata: rename it, move/resize it, turn it (rotation: degrees clockwise about its centre; 0 straightens it), or move it to another page using pageId. Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -1932,11 +1935,14 @@ export function buildMcpServer(
         width: z.number().optional(),
         height: z.number().optional(),
         locked: z.boolean().optional(),
+        rotation: z.number().optional(),
         agent_name: agentName,
       },
     },
     async ({ frame_id, agent_name, ...patch }) => {
       const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
+      /* unset is unrotated, so straightening writes the column away */
+      if (typeof clean.rotation === 'number') clean.rotation = normalizeRotation(clean.rotation)
       if (!Object.keys(clean).length) return err('nothing to update')
       if (!frameFor(frame_id, 'edit')) return noFrame(frame_id)
       const frame = actions.updateFrame(frame_id, clean, actorFrom(agent_name))
