@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { env } from './env.ts'
 import type { ModelAccount } from './modelAccounts.ts'
 import { ACCOUNT_KIND_LABELS, type ModelOption } from '../shared/modelMenu.ts'
+import { CustomInferenceError, customEndpointUrl, fetchCustomJson } from './customInference.ts'
+import { getProfile, type CustomModelProfile } from './customModelProfiles.ts'
 
 /**
  * The models a connected account can run right now, asked of the provider
@@ -187,6 +189,57 @@ async function chatgptModels(account: ModelAccount, signal: AbortSignal): Promis
     }))
 }
 
+const customPage = z.object({
+  data: z.array(
+    z
+      .object({
+        id: z.string(),
+        name: z.string().optional(),
+        display_name: z.string().optional(),
+        created: z.number().optional(),
+      })
+      .passthrough(),
+  ),
+})
+
+/** A saved endpoint's own `/models`. Nothing here says what a model can do,
+ *  and custom providers do not share a naming scheme, so ids are passed
+ *  through as-is; the profile's explicit vision flag supplies the capability.
+ *  An endpoint without `/models` is not fatal: saving and running a manually
+ *  typed model still works (the caller falls back with `live: false`). */
+export async function customModels(profile: CustomModelProfile, signal: AbortSignal): Promise<ModelOption[]> {
+  const url = customEndpointUrl(new URL(profile.baseUrl), 'models')
+  let body: unknown
+  try {
+    body = await fetchCustomJson(
+      url,
+      {
+        method: 'GET',
+        headers: profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {},
+        signal,
+      },
+      { signal, timeoutMs: 8_000 },
+    )
+  } catch (error) {
+    if (error instanceof CustomInferenceError && error.code === 'auth_failed') throw new CatalogAccessError()
+    throw error
+  }
+  const page = customPage.parse(body)
+  const seen = new Set<string>()
+  const models: ModelOption[] = []
+  for (const entry of page.data) {
+    if (!entry.id || seen.has(entry.id)) continue
+    seen.add(entry.id)
+    models.push({
+      id: entry.id,
+      name: entry.display_name || entry.name || entry.id,
+      blurb: '',
+      vision: profile.supportsVision,
+    })
+  }
+  return models
+}
+
 const keyed =
   (load: (apiKey: string, signal: AbortSignal) => Promise<ModelOption[]>): Loader =>
   (account, signal) => {
@@ -201,6 +254,12 @@ const LOADERS: Partial<Record<ModelAccount['kind'], Loader>> = {
   'anthropic-key': keyed(anthropicModels),
   'openai-key': keyed(openaiModels),
   'gemini-key': keyed(geminiModels),
+  'custom-key': async (account, signal) => {
+    if (!account.profileId) throw new CatalogAccessError()
+    const profile = await getProfile(account.userId, account.profileId)
+    if (!profile) throw new CatalogAccessError()
+    return customModels(profile, signal)
+  },
 }
 
 /** Curated entries the provider confirms come first, in curated order, with
@@ -229,21 +288,39 @@ export async function modelCatalogFor(account: ModelAccount, curated: ModelOptio
        tier, a response shape that lost its modalities) must not empty the
        picker: the curated menu stays, and the caption says why */
     if (!models.length) {
+      const fallback =
+        account.kind === 'custom-key' && account.model
+          ? [{ id: account.model, name: account.model, blurb: '', vision: true }]
+          : curated
       return {
-        models: curated,
+        models: fallback,
         live: false,
-        error: `${label} listed no models the agent can run. Showing the built-in list.`,
+        error:
+          account.kind === 'custom-key'
+            ? `${label} listed no models. Enter the model id manually.`
+            : `${label} listed no models the agent can run. Showing the built-in list.`,
       }
     }
     return { models, live: true }
   } catch (error) {
+    const message =
+      error instanceof CatalogAccessError
+        ? `${label} rejected the connected key. Reconnect it to see its models.`
+        : `Could not load models from ${label}. Showing the built-in list.`
+    /* a custom profile has no built-in list; keep the selected model visible
+       so a provider without /models still has a usable picker */
+    const fallback =
+      account.kind === 'custom-key' && account.model
+        ? [{ id: account.model, name: account.model, blurb: '', vision: true }]
+        : curated
+    const customMessage =
+      error instanceof CatalogAccessError
+        ? `${label} rejected the API key. Check it in Settings.`
+        : `Could not load models from ${label}. Enter the model id manually.`
     return {
-      models: curated,
+      models: fallback,
       live: false,
-      error:
-        error instanceof CatalogAccessError
-          ? `${label} rejected the connected key. Reconnect it to see its models.`
-          : `Could not load models from ${label}. Showing the built-in list.`,
+      error: account.kind === 'custom-key' ? customMessage : message,
     }
   }
 }
