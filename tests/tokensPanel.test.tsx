@@ -47,7 +47,7 @@ const button = (label: string) => {
 const input = (placeholderOrLabel: string) => {
   const el =
     document.querySelector<HTMLInputElement>(`input[placeholder="${placeholderOrLabel}"]`) ??
-    [...document.querySelectorAll<HTMLElement>('label')]
+    [...document.querySelectorAll<HTMLElement>('label, [data-row-label]')]
       .find((l) => l.textContent?.trim() === placeholderOrLabel)
       ?.parentElement?.querySelector<HTMLInputElement>('input:not([type="color"])')
   if (!el) throw new Error(`no input “${placeholderOrLabel}”`)

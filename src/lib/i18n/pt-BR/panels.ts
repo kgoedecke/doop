@@ -68,7 +68,6 @@ export const panels: Catalog['panels'] = {
   tokensThemesTitle: 'Temas',
   tokensTitle: 'Tokens',
   tokensTheme: 'Tema',
-  tokensThemeValues: 'Valores por tema (vazio: igual ao padrão)',
   tokensRenameTheme: 'Renomear {theme}',
   tokensAddTheme: 'Adicionar um modo',
   tokensRemoveTheme: 'Remover {theme}',

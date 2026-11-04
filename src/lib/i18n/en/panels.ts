@@ -68,7 +68,6 @@ export const panels = {
   tokensThemesTitle: 'Themes',
   tokensTitle: 'Tokens',
   tokensTheme: 'Theme',
-  tokensThemeValues: 'Values per theme (empty: same as default)',
   tokensRenameTheme: 'Rename {theme}',
   tokensAddTheme: 'Add a theme',
   tokensRemoveTheme: 'Remove {theme}',

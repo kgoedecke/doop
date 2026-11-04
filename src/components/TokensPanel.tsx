@@ -29,7 +29,6 @@ import { usePageCanvas } from '../lib/pages'
 import { Button } from './ui/button'
 import { Pressable } from './ui/pressable'
 import { Input } from './ui/input'
-import { Field } from './ui/field'
 import { ListHint } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { sectionHeading } from './PagesPanel'
@@ -472,7 +471,7 @@ export function TokenModal({
     )
 
   return (
-    <Modal size="md" onClose={() => !busy && onClose()}>
+    <Modal size="lg" onClose={() => !busy && onClose()}>
       <div className="flex flex-wrap items-baseline gap-2.5">
         <ModalTitle>
           {t(creating ? 'panels.tokensNewTitle' : 'panels.tokensEditTitle', { type: t(TOKEN_TYPE_LABEL[draft.type]) })}
@@ -485,20 +484,19 @@ export function TokenModal({
           void save()
         }}
       >
-        <div className="grid gap-3">
-          <Field label={t('panels.tokensName')}>
-            <Input
-              variant="well"
-              className="font-mono"
-              autoFocus={creating}
-              aria-label={t('panels.tokensName')}
-              value={draft.name}
-              disabled={busy || readOnly}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            />
-          </Field>
-        </div>
-        <Field label={t('panels.tokensValue')}>
+        {/* each field on a row: the label at the left, the control filling the rest */}
+        <Row label={t('panels.tokensName')}>
+          <Input
+            variant="well"
+            className="font-mono"
+            autoFocus={creating}
+            aria-label={t('panels.tokensName')}
+            value={draft.name}
+            disabled={busy || readOnly}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          />
+        </Row>
+        <Row label={t('panels.tokensValue')}>
           <ValueInput
             type={draft.type}
             self={token?.name ?? null}
@@ -508,10 +506,9 @@ export function TokenModal({
             disabled={busy || readOnly}
             onChange={(value) => setDraft({ ...draft, value })}
           />
-        </Field>
-        {themes.length > 0 && <p className="mt-1 text-caption text-ink-faint">{t('panels.tokensThemeValues')}</p>}
+        </Row>
         {themes.map((theme) => (
-          <Field key={theme} label={t('panels.tokensValueIn', { theme })}>
+          <Row key={theme} label={t('panels.tokensValueIn', { theme })}>
             <ValueInput
               type={draft.type}
               self={token?.name ?? null}
@@ -521,9 +518,9 @@ export function TokenModal({
               disabled={busy || readOnly}
               onChange={(value) => setDraft({ ...draft, themes: { ...draft.themes, [theme]: value } })}
             />
-          </Field>
+          </Row>
         ))}
-        <Field label={t('panels.tokensDescription')}>
+        <Row label={t('panels.tokensDescription')}>
           <Input
             variant="well"
             placeholder={t('panels.tokensDescriptionPlaceholder')}
@@ -531,7 +528,7 @@ export function TokenModal({
             disabled={busy || readOnly}
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
           />
-        </Field>
+        </Row>
         {/* Enter anywhere in the form saves */}
         <Button type="submit" className="hidden" aria-hidden tabIndex={-1} disabled={!canSave} />
       </form>
@@ -647,7 +644,7 @@ function ValueInput({
 
   if (alias)
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex w-full items-center gap-2">
         {kind === 'color' && (
           <span
             className="size-8 flex-none rounded-control shadow-ring"
@@ -798,9 +795,22 @@ function ValueInput({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex w-full items-center gap-2">
       {control}
       {aliasPick}
+    </div>
+  )
+}
+
+/** One row of the token form: the label in a fixed column, the control filling the rest. */
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  /* a div, not a label: a colour row holds a swatch label of its own */
+  return (
+    <div className="grid grid-cols-[132px_minmax(0,1fr)] items-center gap-3">
+      <span data-row-label className="text-label text-ink-soft">
+        {label}
+      </span>
+      <div className="flex min-w-0 items-center">{children}</div>
     </div>
   )
 }
