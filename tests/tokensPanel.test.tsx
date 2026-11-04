@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act } from 'react'
+import { Profiler, act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Canvas } from '../shared/types'
 import type { DesignToken } from '../shared/designTokens'
@@ -196,6 +196,25 @@ describe('TokensSection', () => {
     })
     /* only the description: the stale draft value is not sent back */
     expect(setToken).toHaveBeenCalledWith('c1', '--color-ink', { description: 'body text' })
+  })
+
+  it('does not render again for a cursor move', () => {
+    let commits = 0
+    act(() => root.unmount())
+    root = createRoot(container)
+    act(() =>
+      root.render(
+        <TooltipProvider>
+          <Profiler id="tokens" onRender={() => commits++}>
+            <TokensSection />
+          </Profiler>
+        </TooltipProvider>,
+      ),
+    )
+    const mounted = commits
+    act(() => useStore.getState().setCursor('peer', 10, 20))
+    act(() => useStore.getState().setCursor('peer', 11, 21))
+    expect(commits).toBe(mounted)
   })
 
   it('creates a token of the type picked from the plus menu, named after it', async () => {
