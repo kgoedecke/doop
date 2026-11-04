@@ -83,7 +83,6 @@ export const panels = {
   tokensValuePlaceholder: 'A CSS value, or var(--other) to alias a token',
   tokensValueInherits: 'same as default',
   tokensResetTheme: 'Reset {theme} to the default value',
-  tokensThemeOwnValue: 'has its own value',
   tokensDescription: 'Use',
   tokensDescriptionPlaceholder: 'When to reach for it',
   tokensSaving: 'saving…',

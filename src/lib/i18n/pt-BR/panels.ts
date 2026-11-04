@@ -83,7 +83,6 @@ export const panels: Catalog['panels'] = {
   tokensValuePlaceholder: 'Um valor CSS, ou var(--outro) para referenciar um token',
   tokensValueInherits: 'igual ao padrão',
   tokensResetTheme: 'Redefinir {theme} para o valor padrão',
-  tokensThemeOwnValue: 'tem valor próprio',
   tokensDescription: 'Uso',
   tokensDescriptionPlaceholder: 'Quando usar',
   tokensSaving: 'salvando…',

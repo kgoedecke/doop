@@ -141,16 +141,15 @@ describe('TokensSection', () => {
     expect(container.querySelector('[title="same as default"]')?.textContent).toBe('16px')
   })
 
-  it('opens a token, switches to a theme’s value, resets it, and saves only what changed', async () => {
+  it('opens a token with a row per theme, resets a theme, and saves only what changed', async () => {
     act(() => button('color-ink').click())
     expect(document.body.textContent).toContain('Edit Color token')
-    /* the default value first; the dark segment shows dark's own value, with its dot */
+    /* a row per theme: the default first, then dark with its own value */
     expect(input('A CSS value, or var(--other) to alias a token').value).toBe('#111')
-    const dark = [...document.querySelectorAll<HTMLElement>('[data-slot="segmented-item"]')].find((el) =>
-      el.textContent?.includes('dark'),
-    )!
-    expect(dark.querySelector('[aria-label="has its own value"]')).toBeTruthy()
-    act(() => dark.click())
+    expect([...document.querySelectorAll('[data-theme-label]')].map((el) => el.textContent)).toEqual([
+      'default',
+      'dark',
+    ])
     expect(input('same as default').value).toBe('#eee')
     act(() => button('Reset dark to the default value').click())
     expect(input('same as default').value).toBe('')

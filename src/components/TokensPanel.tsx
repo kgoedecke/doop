@@ -28,8 +28,6 @@ import { recordUpdate, trackSave } from '../lib/history'
 import { usePageCanvas } from '../lib/pages'
 import { Button } from './ui/button'
 import { Pressable } from './ui/pressable'
-import { Segmented, SegmentedItem } from './ui/segmented'
-import { Dot } from './ui/dot'
 import { Input } from './ui/input'
 import { ListHint } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
@@ -63,6 +61,7 @@ import {
   VerticalPaddingIcon,
 } from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
+import { useValueScrub } from '@/hooks/use-value-scrub'
 import { cn } from '@/lib/utils'
 
 /** The i18n label of each token type, in the add menu's wording. */
@@ -393,8 +392,6 @@ export function TokenModal({
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const creating = name === null
   const [draft, setDraft] = useState<Draft>(() => draftOf(token, createType, tokens, initialValue))
-  /** which theme's value the control edits; null is the default */
-  const [editTheme, setEditTheme] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -501,57 +498,52 @@ export function TokenModal({
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
         </Row>
-        {/* one value control; the themes switch it, a dot marks one with its own value */}
+        {/* every theme's value on its own row, the default first; a themed one
+            can go back to following the default with the reset at its end */}
         <div className="grid grid-cols-[132px_minmax(0,1fr)] items-start gap-3">
           <span data-row-label className="pt-2 text-label text-ink-soft">
             {t('panels.tokensValue')}
           </span>
-          <div className="flex min-w-0 flex-col gap-2">
-            {themes.length > 0 && (
-              <Segmented
-                aria-label={t('panels.tokensTheme')}
-                className="self-start"
-                value={editTheme ?? DEFAULT_THEME}
-                onValueChange={(v) => setEditTheme(v === DEFAULT_THEME ? null : v)}
-              >
-                {[DEFAULT_THEME, ...themes].map((theme) => (
-                  <SegmentedItem key={theme} value={theme} className="flex items-center gap-1.5 font-mono">
-                    {theme}
-                    {theme !== DEFAULT_THEME && draft.themes[theme]?.trim() && (
-                      <Dot tone="current" aria-label={t('panels.tokensThemeOwnValue')} />
-                    )}
-                  </SegmentedItem>
-                ))}
-              </Segmented>
-            )}
-            <div className="flex items-center gap-2">
-              <ValueInput
-                type={draft.type}
-                self={token?.name ?? null}
-                tokens={tokens}
-                value={editTheme ? (draft.themes[editTheme] ?? '') : draft.value}
-                placeholder={editTheme ? t('panels.tokensValueInherits') : t('panels.tokensValuePlaceholder')}
-                disabled={busy || readOnly}
-                onChange={(value) =>
-                  setDraft(
-                    editTheme ? { ...draft, themes: { ...draft.themes, [editTheme]: value } } : { ...draft, value },
-                  )
-                }
-              />
-              {editTheme && draft.themes[editTheme]?.trim() && !readOnly && (
-                <Button
-                  variant="bare"
-                  size="icon-sm"
-                  className="size-7 flex-none rounded-tag text-ink-faint hover:text-ink"
-                  aria-label={t('panels.tokensResetTheme', { theme: editTheme })}
-                  title={t('panels.tokensResetTheme', { theme: editTheme })}
-                  disabled={busy}
-                  onClick={() => setDraft({ ...draft, themes: { ...draft.themes, [editTheme]: '' } })}
-                >
-                  <HistoryIcon className="size-3.5" />
-                </Button>
-              )}
-            </div>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            {[null, ...themes].map((theme) => {
+              const own = theme ? draft.themes[theme]?.trim() : draft.value
+              return (
+                <div key={theme ?? DEFAULT_THEME} className="flex items-center gap-2">
+                  {themes.length > 0 && (
+                    <span
+                      data-theme-label
+                      className="w-[72px] flex-none truncate font-mono text-caption text-ink-faint"
+                    >
+                      {theme ?? DEFAULT_THEME}
+                    </span>
+                  )}
+                  <ValueInput
+                    type={draft.type}
+                    self={token?.name ?? null}
+                    tokens={tokens}
+                    value={theme ? (draft.themes[theme] ?? '') : draft.value}
+                    placeholder={theme ? t('panels.tokensValueInherits') : t('panels.tokensValuePlaceholder')}
+                    disabled={busy || readOnly}
+                    onChange={(value) =>
+                      setDraft(theme ? { ...draft, themes: { ...draft.themes, [theme]: value } } : { ...draft, value })
+                    }
+                  />
+                  {theme && (
+                    <Button
+                      variant="bare"
+                      size="icon-sm"
+                      className={cn('size-7 flex-none rounded-tag text-ink-faint hover:text-ink', !own && 'invisible')}
+                      aria-label={t('panels.tokensResetTheme', { theme })}
+                      title={t('panels.tokensResetTheme', { theme })}
+                      disabled={busy || readOnly || !own}
+                      onClick={() => setDraft({ ...draft, themes: { ...draft.themes, [theme]: '' } })}
+                    >
+                      <HistoryIcon className="size-3.5" />
+                    </Button>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
         <Row label={t('panels.tokensDescription')}>
@@ -655,6 +647,31 @@ function ValueInput({
   const peers = sortTokens(tokens.filter((token) => token.type === type && token.name !== self))
   const kind = valueKind(type)
   const resolved = alias ? (resolveToken(tokens, alias) ?? '') : value
+  /* the number kinds scrub from their type's glyph, as the Design panel's fields do from their unit */
+  const numeric = kind === 'length' || kind === 'ratio' || kind === 'opacity'
+  const parsedForScrub = numeric && value ? splitLength(value) : null
+  const scrub = useValueScrub({
+    value: parsedForScrub?.number ?? '',
+    enabled: numeric && !alias && !disabled && parsedForScrub !== null && parsedForScrub.number !== '',
+    min: kind === 'opacity' ? 0 : -Infinity,
+    max: kind === 'opacity' ? 1 : Infinity,
+    onChange: (next) => onChange(`${next}${parsedForScrub?.unit ?? ''}`),
+  })
+  const Glyph = TOKEN_TYPE_ICON[type]
+  const glyph = (
+    <span
+      className={cn(
+        'grid size-8 flex-none place-items-center rounded-control text-ink-faint',
+        scrub.canScrub && 'cursor-ew-resize hover:bg-sub hover:text-ink',
+        scrub.scrubbing && 'bg-sub text-ink',
+      )}
+      title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
+      onPointerDown={scrub.onPointerDown}
+      aria-hidden
+    >
+      <Glyph className="size-3.5" />
+    </span>
+  )
 
   const aliasPick = peers.length > 0 && (
     <Select
@@ -760,19 +777,22 @@ function ValueInput({
     )
   } else if (kind === 'opacity') {
     control = (
-      <Input
-        type="number"
-        variant="well"
-        className="min-w-0 flex-1 font-mono"
-        aria-label={t('panels.tokensValue')}
-        placeholder={placeholder}
-        min={0}
-        max={1}
-        step={0.05}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      <>
+        {glyph}
+        <Input
+          type="number"
+          variant="well"
+          className="min-w-0 flex-1 font-mono"
+          aria-label={t('panels.tokensValue')}
+          placeholder={placeholder}
+          min={0}
+          max={1}
+          step={0.05}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </>
     )
   } else {
     const units = kind === 'ratio' ? RATIO_UNITS : LENGTH_UNITS
@@ -794,6 +814,7 @@ function ValueInput({
       const unit = parsed.number === '' ? fallbackUnit : parsed.unit
       control = (
         <>
+          {glyph}
           <Input
             type="number"
             variant="well"
