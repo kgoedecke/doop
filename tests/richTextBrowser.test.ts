@@ -49,6 +49,8 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     })
     await frame.evaluate(
       (start, end) => {
+        // An identical selection would fire no selectionchange: clear it first.
+        getSelection()!.removeAllRanges()
         const text = document.querySelector('#text')!.firstChild!
         getSelection()!.setBaseAndExtent(text, start, text, end)
       },
