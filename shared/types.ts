@@ -576,6 +576,8 @@ export type ServerMessage =
   | { type: 'decision'; decision: DesignDecision }
   /** the distiller proposed a rule, or a proposal was accepted/dismissed */
   | { type: 'proposal'; proposal: MemoryProposal }
+  /** an uploaded image got its description for agents (shared/imageDescriptions.ts) */
+  | { type: 'asset:described'; assetId: string; description: string }
   | { type: 'canvas:deleted' }
   | { type: 'activity'; item: ActivityItem }
 

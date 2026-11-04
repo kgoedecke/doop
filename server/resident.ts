@@ -13,6 +13,8 @@ import type { AgentRole } from '../shared/agents.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
+import { imagesForFrames } from './assets.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
@@ -432,12 +434,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        content, not user work — hidden so agents never mistake them for
        the canvas's established style */
     const visibleFrames = (canvas?.frames ?? []).filter((f) => !f.demo)
-    const frameList = visibleFrames
-      .map(
-        (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
-      )
-      .join('\n')
+    const frameList = describeFrameList(visibleFrames, await imagesForFrames(visibleFrames.map((f) => f.id)))
 
     const sections: string[] = []
     /* design-synced canvases: real navigation between the synced screens is
@@ -1367,6 +1364,31 @@ export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
    breach the API's 8000px image limit */
+/** How many characters of an image's description the kickoff quotes. */
+const KICKOFF_IMAGE_CHARS = 300
+
+/** The kickoff's frame list: one line per frame, and under it one line per
+ *  image the frame shows with the description the describer wrote
+ *  (shared/imageDescriptions.ts), so a pasted screenshot reads as what it
+ *  is rather than as a 600-byte frame named after a file. */
+export function describeFrameList(frames: Frame[], images: Map<string, FrameImage[]>): string {
+  const lines = frames.map((f, index) => {
+    const shown = images.get(f.id) ?? []
+    const pasted = shown.length > 0 && /data-doop-canvas-element/.test(f.html) ? ' (pasted image)' : ''
+    const head = `- Frame ${index + 1}: id=${f.id}, name="${f.name}"${pasted}, ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`
+    const pictures = shown.map(
+      (image) =>
+        `    image ${image.src}: ${image.description ? image.description.slice(0, KICKOFF_IMAGE_CHARS) : '(description pending)'}`,
+    )
+    return [head, ...pictures].join('\n')
+  })
+  if (images.size > 0)
+    lines.push(
+      'Frames listing an image hold pictures people put on the canvas, often reference screenshots pasted in for you: read their descriptions, and call screenshot_frame on the relevant ones before designing.',
+    )
+  return lines.join('\n')
+}
+
 const MAX_SHOT_HEIGHT = 4000
 
 async function frameImageBlocks(

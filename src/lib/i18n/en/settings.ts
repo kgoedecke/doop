@@ -38,6 +38,20 @@ export const settings = {
   meterUsedUp: 'Your free tasks are used up.',
   meterLeft: { one: '{left} of {count} free task left.', other: '{left} of {count} free tasks left.' },
 
+  imageDescriptionsTitle: 'Image descriptions',
+  imageDescriptionsDescription:
+    'When an image is pasted or uploaded on a canvas you own, a small vision model writes a short description of what it shows, so agents reading the canvas know what the picture is. It runs on your connected account when it has one that can see images, otherwise on this server’s model. Your provider’s charges apply.',
+  imageDescriptionsAria: 'Image descriptions',
+  imageDescriptionsOff: 'Off',
+  imageDescriptionsAccount: 'My account',
+  imageDescriptionsServer: 'This server',
+  imageDescriptionsRunsOn: 'Images are described by {label}.',
+  imageDescriptionsReasonOff: 'Images on your canvases are not described.',
+  imageDescriptionsReasonTextOnly:
+    'Your connected model cannot see images, and this server has no model of its own — images stay undescribed.',
+  imageDescriptionsReasonNoModel:
+    'This server has no model for descriptions — connect an account, or ask your operator.',
+
   themeTitle: 'Theme',
   themeDescription:
     'Light or dark, across every canvas and page in this browser. System follows your operating system and switches whenever it does.',

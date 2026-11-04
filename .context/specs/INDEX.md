@@ -6,6 +6,9 @@ lists every file in this folder.
 
 ## Active
 
+- [image-descriptions.md](image-descriptions.md) - Model-written descriptions of uploaded images,
+  stored once per asset, run on the canvas owner's connected account or the server tier behind an
+  Agents setting, and surfaced to MCP and resident agents as `images` per frame.
 - [prototyping.md](prototyping.md) - Clickable prototypes: interaction data attributes in frame
   HTML (triggers, actions, transitions, canonical form), per-page flow start, the prototype player
   and `/c/<id>/proto`, the editor's Prototype mode and connectors, and the MCP tools.

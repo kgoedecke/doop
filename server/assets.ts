@@ -1,8 +1,10 @@
 import { nanoid } from 'nanoid'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
+import type { FrameImage } from '../shared/imageDescriptions.ts'
+import { emitCanvasEvent } from './events.ts'
 
 /**
  * Uploaded assets (images, and the files of font libraries): bytes in object storage (server/storage.ts), one
@@ -26,6 +28,13 @@ const MIME_EXT = {
 } as const
 
 type AssetMime = keyof typeof MIME_EXT
+
+/** Raster images a vision model can read; svg is markup, so it is not described. */
+const DESCRIBABLE_MIMES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+
+export function isDescribableImage(mime: string): boolean {
+  return DESCRIBABLE_MIMES.has(mime)
+}
 
 /* trust the bytes, not the sender: content sniffing decides the type */
 export function sniffMime(buf: Buffer): AssetMime | undefined {
@@ -132,7 +141,43 @@ export async function storeAsset(
     uploadedBy: meta.uploadedBy,
     createdAt: Date.now(),
   })
-  return { id, mime, ext, size: buf.length }
+  const asset = { id, mime, ext, size: buf.length }
+  if (meta.canvasId && isDescribableImage(mime))
+    emitCanvasEvent(meta.canvasId, { type: 'asset.stored', asset: { ...asset, canvasId: meta.canvasId } })
+  return asset
+}
+
+/** The images each frame references, with their descriptions, for agents
+ *  reading the canvas: one query over asset_refs, grouped by frame. A frame
+ *  with no raster image is absent from the map. */
+export async function imagesForFrames(frameIds: string[]): Promise<Map<string, FrameImage[]>> {
+  const images = new Map<string, FrameImage[]>()
+  if (frameIds.length === 0) return images
+  let rows: { frameId: string; id: string; ext: string; mime: string; description: string | null }[]
+  try {
+    rows = await db
+      .select({
+        frameId: t.assetRefs.frameId,
+        id: t.assets.id,
+        ext: t.assets.ext,
+        mime: t.assets.mime,
+        description: t.assets.description,
+      })
+      .from(t.assetRefs)
+      .innerJoin(t.assets, eq(t.assetRefs.assetId, t.assets.id))
+      .where(inArray(t.assetRefs.frameId, frameIds))
+  } catch (err) {
+    /* an enrichment: a canvas read must never fail because of it */
+    console.error('[assets] could not read frame images', err)
+    return images
+  }
+  for (const row of rows) {
+    if (!isDescribableImage(row.mime)) continue
+    const list = images.get(row.frameId) ?? []
+    list.push({ src: `/a/${row.id}.${row.ext}`, description: row.description })
+    images.set(row.frameId, list)
+  }
+  return images
 }
 
 export async function getAsset(id: string): Promise<{ meta: AssetMeta; buf: Buffer } | null> {

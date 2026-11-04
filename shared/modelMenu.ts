@@ -165,6 +165,23 @@ export const ANTHROPIC_MODELS: ModelOption[] = [
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5'
 
 /**
+ * The small, vision-capable tier an image description runs on, per account
+ * kind (shared/imageDescriptions.ts): a paragraph about a screenshot never
+ * needs the model the owner picked for design work. The OpenAI kinds are
+ * absent on purpose: the ChatGPT backend answers for a short list of models
+ * that differs per subscription, so those keep the account's own model and
+ * drop to low reasoning effort instead.
+ */
+export const DESCRIBER_MODELS: Readonly<Record<string, string>> = {
+  'anthropic-key': 'claude-haiku-4-5-20251001',
+  'gemini-key': 'gemini-3.7-flash',
+  'openrouter-key': 'google/gemini-3.7-flash',
+}
+
+/** The server tier's describer when DOOP_AGENT_PROVIDER is anthropic. */
+export const DESCRIBER_ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001'
+
+/**
  * How hard an OpenAI model thinks per turn, on a ChatGPT subscription or an
  * OpenAI key: the user's pick rides the account (`PATCH /api/model-account`),
  * and the server's `DOOP_AGENT_OPENAI_EFFORT` is what runs until they pick.

@@ -42,6 +42,20 @@ export const settings: Catalog['settings'] = {
     other: '{left} de {count} tarefas gratuitas restantes.',
   },
 
+  imageDescriptionsTitle: 'Descrições de imagens',
+  imageDescriptionsDescription:
+    'Quando uma imagem é colada ou enviada em um canvas seu, um modelo de visão pequeno escreve uma descrição curta do que ela mostra, para que os agentes que leem o canvas saibam o que é a imagem. Roda na sua conta conectada quando ela tem um modelo que enxerga imagens; senão, no modelo deste servidor. As cobranças do seu provedor se aplicam.',
+  imageDescriptionsAria: 'Descrições de imagens',
+  imageDescriptionsOff: 'Desligado',
+  imageDescriptionsAccount: 'Minha conta',
+  imageDescriptionsServer: 'Este servidor',
+  imageDescriptionsRunsOn: 'As imagens são descritas por {label}.',
+  imageDescriptionsReasonOff: 'As imagens dos seus canvases não são descritas.',
+  imageDescriptionsReasonTextOnly:
+    'Seu modelo conectado não enxerga imagens, e este servidor não tem um modelo próprio — as imagens ficam sem descrição.',
+  imageDescriptionsReasonNoModel:
+    'Este servidor não tem um modelo para descrições — conecte uma conta ou fale com seu operador.',
+
   themeTitle: 'Tema',
   themeDescription:
     'Claro ou escuro, em todos os canvases e páginas deste navegador. Sistema segue o seu sistema operacional e muda sempre que ele mudar.',

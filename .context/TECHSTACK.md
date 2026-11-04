@@ -89,6 +89,24 @@
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+- Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
+  `shared/imageDescriptions.ts`): every raster image stored for a canvas (`storeAsset` emits
+  `asset.stored`) is described once by a small vision model and the paragraph lands on its
+  `assets` row (`description`, `described_at`, `described_by`, `describe_attempts`, migration
+  0044). The upload never waits: a queue drains `DESCRIBE_CONCURRENCY` at a time, three attempts
+  per asset, 20s each, `DESCRIBE_PER_CANVAS_PER_DAY` per canvas (failed calls count), and boot
+  re-queues the backlog. The canvas owner's mode (`image_description_prefs`: `off` / `account` /
+  `server`, `GET`/`PUT /api/image-descriptions`, Settings → Agents → Image descriptions) picks the
+  model: `accountDescriber` is the owner's account on the provider's small tier
+  (`DESCRIBER_MODELS`; the OpenAI kinds keep their model at low effort), a text-only pick or a
+  harness-only one falls through to `serverDescriber` (Haiku on `ANTHROPIC_API_KEY`, the Azure
+  deployment), and with no key the image stays undescribed. Agents read it as `images:
+[{ src, description }]` on each frame of `get_canvas` and `get_frame` (`imagesForFrames`, one
+  query over `asset_refs`, with a note once) and under each frame line of the resident kickoff
+  (`describeFrameList`, a standalone image frame labelled `(pasted image)`); the room gets
+  `asset:described`. Frame HTML is never written. Tests: `imageDescriptions.test.ts`,
+  `describerModels.test.ts`, `imageDescriptionsMcp.test.ts`, `imageDescriptionsHttp.test.ts`,
+  `imageDescriptionsCard.test.tsx`.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)

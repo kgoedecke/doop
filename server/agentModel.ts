@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { DESCRIBER_ANTHROPIC_MODEL, DESCRIBER_MODELS } from '../shared/modelMenu.ts'
 import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
@@ -70,7 +71,7 @@ const ANTHROPIC_MODEL = env.DOOP_AGENT_MODEL
 
 let anthropic: Anthropic | null = null
 
-function anthropicTier(): AgentModel | null {
+function anthropicTier(model: string = ANTHROPIC_MODEL): AgentModel | null {
   if (!env.ANTHROPIC_API_KEY) {
     warnOnce(
       '[doop-agent] ANTHROPIC_API_KEY not set — the free Doop Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See README → "The Doop Agent".',
@@ -81,8 +82,8 @@ function anthropicTier(): AgentModel | null {
   const client = anthropic
   return {
     provider: 'anthropic',
-    label: `Doop (${ANTHROPIC_MODEL})`,
-    run: (req) => runAnthropicTurn(client, ANTHROPIC_MODEL, req),
+    label: `Doop (${model})`,
+    run: (req) => runAnthropicTurn(client, model, req),
   }
 }
 
@@ -331,4 +332,31 @@ export async function pickModel(payerId?: string): Promise<AgentModel | null> {
     : null
   if (account) return byoModel(account)
   return serverTiers[serverProvider()]()
+}
+
+/* ---------------------------------------------------------------- */
+/* image descriptions: a small tier, never the design model          */
+/* ---------------------------------------------------------------- */
+
+/**
+ * The model that describes an uploaded image on a user's own account
+ * (shared/imageDescriptions.ts): the provider's small vision tier from
+ * DESCRIBER_MODELS, or the account's own model at low reasoning effort where
+ * the provider's roster is per subscription. Null when the account's model
+ * cannot see images — the caller falls through to the server tier.
+ */
+export function accountDescriber(account: ModelAccount): AgentModel | null {
+  const small: ModelAccount = {
+    ...account,
+    model: DESCRIBER_MODELS[account.kind] ?? account.model,
+    effort: 'low',
+  }
+  if (!accountVisionFor(small)) return null
+  return byoModel(small)
+}
+
+/** The server tier's describer: Haiku on the Anthropic key, the one
+ *  deployment on Azure. Null when the free tier is off. */
+export function serverDescriber(): AgentModel | null {
+  return serverProvider() === 'anthropic' ? anthropicTier(DESCRIBER_ANTHROPIC_MODEL) : azureTier()
 }
