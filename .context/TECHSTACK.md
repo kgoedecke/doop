@@ -345,6 +345,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   dragged edges snap to neighbours and guides (`snapFrame` takes the handle). Frames go down to
   1×1 (`MIN_FRAME_SIZE`, also the Inspector's floor). `tests/frameResize.test.ts` covers the
   geometry, `tests/frameResizeBrowser.test.ts` drags the grips in Chromium.
+  The frame Inspector's X / Y / W / H are the same `NumberField` the element panel uses
+  (`src/components/ui/property-field.tsx`): the `px` unit is the drag handle (`useValueScrub`,
+  Shift ×10, Alt ×0.1, Esc cancels) and ↑/↓ nudge. A drag previews every step through
+  `patchFrameLocal` and, through `PropertyScrubContext`, commits once on release as one discrete
+  undo step and one PATCH; Esc puts the frame's box back and saves nothing. Tests:
+  `inspectorScrub.test.tsx`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
   chrome step in by `RULER_PX`) (remembered under
