@@ -270,11 +270,26 @@ describe('renaming in the Layers panel', () => {
     expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', {
       selector: `[data-doop-id="${id}"]`,
       name: null,
-      elementId: id,
     })
     await act(async () => redo())
     expect(savedDocument().querySelector(`[data-doop-id="${id}"]`)?.getAttribute('data-doop-name')).toBe('Lead')
     expect(savedDocument().querySelector('p')?.hasAttribute('data-doop-name')).toBe(false)
+  })
+
+  it('refuses the undo when the renamed layer is gone rather than renaming its neighbour', async () => {
+    showLayers('<body><p>First</p><p>Second</p></body>')
+    doubleClick('f1|body:nth-of-type(1) > p:nth-of-type(1)')
+    input().value = 'Lead'
+    press('Enter')
+    expect(updateFrame).toHaveBeenCalledTimes(1)
+    /* a teammate deletes the named paragraph */
+    act(() => useStore.getState().patchFrameLocal('f1', { html: '<body><p>Second</p></body>' }))
+    await act(async () => undo())
+    expect(updateFrame).toHaveBeenCalledTimes(1)
+    const paragraphs = [...savedDocument().querySelectorAll('p')]
+    expect(paragraphs.map((p) => p.textContent)).toEqual(['Second'])
+    expect(paragraphs[0]?.hasAttribute('data-doop-name')).toBe(false)
+    expect(paragraphs[0]?.hasAttribute('data-doop-id')).toBe(false)
   })
 
   it('keeps the id an element already wears instead of stamping another', async () => {
@@ -285,9 +300,8 @@ describe('renaming in the Layers panel', () => {
     expect(savedDocument().querySelectorAll('[data-doop-id]')).toHaveLength(1)
     expect(savedDocument().querySelector('p')?.getAttribute('data-doop-id')).toBe('abc123')
     expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', {
-      selector: '[data-doop-id="abc123"]',
+      selector: 'body:nth-of-type(1) > p:nth-of-type(1)',
       name: 'Greeting',
-      elementId: 'abc123',
     })
   })
 
@@ -309,7 +323,11 @@ describe('renaming in the Layers panel', () => {
       await Promise.resolve()
     })
     expect(savedDocument().querySelector('#photo')?.hasAttribute('data-doop-name')).toBe(false)
-    expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', { selector: '#photo', name: null })
+    expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', {
+      selector: '#photo',
+      name: null,
+      elementId: null,
+    })
     expect(savedDocument().querySelector('#photo')?.hasAttribute('data-doop-id')).toBe(false)
     await act(async () => undo())
     expect(updateFrame).toHaveBeenCalledTimes(1)

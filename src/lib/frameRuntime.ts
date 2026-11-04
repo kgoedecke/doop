@@ -1210,8 +1210,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (namedEl) {
         if (typeof d.name === 'string') namedEl.setAttribute('data-doop-name', d.name)
         else if (d.name === null) namedEl.removeAttribute('data-doop-name')
-        /* the saved document stamps the element's id with its name; the live one follows */
+        /* the saved document stamps the element's id with its name; the live
+           one follows, and a rolled-back stamp (null) comes off again */
         if (typeof d.elementId === 'string' && !namedEl.hasAttribute('data-doop-id')) namedEl.setAttribute('data-doop-id', d.elementId)
+        else if (d.elementId === null) namedEl.removeAttribute('data-doop-id')
       }
       parent.postMessage({ type: 'doop:rename-result', reqId: d.reqId, ok: !!namedEl }, '*')
     }

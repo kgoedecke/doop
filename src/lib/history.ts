@@ -167,34 +167,39 @@ export function recordLayerName(
 }
 
 /** A name is metadata, not an HTML snapshot. Undo and rollback must update
- *  the live attribute even while the frame is being text-edited. */
-export async function saveLayerName(frameId: string, selector: string, name: string | null, elementId?: string) {
+ *  the live attribute even while the frame is being text-edited.
+ *  `stamp` is the `data-doop-id` the first rename gives the element it
+ *  reaches by position; undo and redo pass the id's own selector and no
+ *  stamp, so a layer whose id is gone is refused, never a neighbour renamed. */
+export async function saveLayerName(frameId: string, selector: string, name: string | null, stamp?: string) {
   const store = useStore.getState()
   const frame = store.canvas?.frames.find((f) => f.id === frameId)
   if (!frame) throw new Error('Frame removed')
-  /* once the element wears its id, that is how it is found; the first
-     rename reaches it by position and stamps the id in the same write */
-  const byId = elementId ? elementIdSelector(elementId) : null
-  const where = byId && elementIdAt(frame.html, byId) === elementId ? byId : selector
-  const before = elementName(frame.html, where)
-  const stamping = !!elementId && elementIdAt(frame.html, where) === null
-  const html = setElementName(frame.html, where, name, elementId)
+  const before = elementName(frame.html, selector)
+  const stamping = !!stamp && elementIdAt(frame.html, selector) === null
+  const html = setElementName(frame.html, selector, name, stamp)
   if (html === null) throw new Error('Layer removed')
   const started = epoch
   store.patchFrameLocal(frameId, { html })
-  const mirrored = requestFrame(frameId, 'doop:rename', { selector: where, name, ...(elementId ? { elementId } : {}) })
+  const mirrored = requestFrame(frameId, 'doop:rename', { selector, name, ...(stamping ? { elementId: stamp } : {}) })
   try {
     await api.updateFrame(frameId, { html })
     await mirrored
   } catch (err) {
     const s = useStore.getState()
     const current = s.canvas?.frames.find((f) => f.id === frameId)
-    if (s.canvas?.id === frame.canvasId && epoch === started && current && elementName(current.html, where) === name) {
-      const named = setElementName(current.html, where, before)
-      const rollback = named !== null && stamping ? clearElementId(named, where) : named
+    if (
+      s.canvas?.id === frame.canvasId &&
+      epoch === started &&
+      current &&
+      elementName(current.html, selector) === name
+    ) {
+      /* a stamp this write made goes with it, in the saved and the live document */
+      const named = setElementName(current.html, selector, before)
+      const rollback = named !== null && stamping ? clearElementId(named, selector) : named
       if (rollback !== null) {
         s.patchFrameLocal(frameId, { html: rollback })
-        await requestFrame(frameId, 'doop:rename', { selector: where, name: before })
+        await requestFrame(frameId, 'doop:rename', { selector, name: before, ...(stamping ? { elementId: null } : {}) })
       }
     }
     throw err
@@ -607,7 +612,11 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'layer-name') {
-    await saveLayerName(e.frameId, e.selector, forward ? e.after : e.before, e.elementId)
+    await saveLayerName(
+      e.frameId,
+      e.elementId ? elementIdSelector(e.elementId) : e.selector,
+      forward ? e.after : e.before,
+    )
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
     const canvas = useStore.getState().canvas
