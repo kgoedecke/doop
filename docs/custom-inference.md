@@ -10,26 +10,40 @@ running on the same machine as a self-hosted Doop. It is not a way to reach a la
 hosted Doop: the server makes the outbound request, so the endpoint must be reachable **from the
 server**.
 
-## What a profile needs
+## Add and select a model
 
 - **Name** — a label such as `Local Ollama`.
 - **Base URL** — the OpenAI-compatible API root, for example:
   - hosted: `https://provider.example/v1`
   - self-hosted local: `http://127.0.0.1:11434/v1`
-- **Model id** — the id the endpoint advertises, for example `qwen3.5-coder` or
-  `vendor/designer-9`. OpenRouter-style ids with a slash are fine.
 - **API key** — optional. Local model servers usually do not need one; hosted providers do.
 - **Can see images** — turn this on only when the model accepts image inputs. When it is off, the
   agent degrades to no screenshot review and verifies through frame HTML instead.
+
+You do not need to know or type a model id for the normal setup. Choose **Test connection**; Doop
+requests `<base URL>/models` (normally `/v1/models`) and offers the ids it discovers. Select one of
+those ids, then save the profile. The test lists models only; it does not save the profile or send a
+chat completion. Editing the URL or API key invalidates that test, so test the new configuration
+before saving.
+
+If the endpoint has no `/models` route, returns no usable models, or cannot be reached, Doop keeps a
+saved model id visible instead of silently changing it. For a new or changed profile, you can
+explicitly choose **Use an unverified model id** and enter an id such as `qwen3.5-coder` or
+`vendor/designer-9`. This manual id is unverified: Doop could not confirm it against the endpoint's
+catalog, and the endpoint may reject it at runtime. A missing saved id is shown with a warning; it
+is never silently replaced by another model.
 
 Profiles are saved independently from the active account. Saving several is fine; only one can be
 active for resident-agent work at a time. **Use this endpoint** makes it the active account and
 switches the local Claude CLI preference off, matching the other provider connection flows.
 Disconnecting leaves no provider selected until another account is connected.
 
-The endpoint's `/models` route is used for the picker. If the endpoint does not implement it, the
-saved model id is still shown and can still run; the picker only loses the live list. Requests go
-to `<base URL>/models` and `<base URL>/chat/completions`.
+When this custom endpoint is active, choosing a different model in the chat composer updates the
+saved profile's model too. Settings and the composer therefore use the same model selection.
+
+The API key is sealed on the server and never returned to the browser. When editing a profile, a
+blank key field keeps the stored key; clearing it is a separate explicit action. Requests go to
+`<base URL>/models` and `<base URL>/chat/completions`.
 
 ## Operator configuration
 

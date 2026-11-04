@@ -443,7 +443,7 @@ and keeps keys encrypted server-side. Public endpoints require HTTPS; private/lo
 the operator's explicit `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS=1`. See
 [custom inference](docs/custom-inference.md).
 
-Either way the user picks their **model tier** in Settings from that provider's curated menu — on
+For the built-in providers, the user picks a **model tier** in Settings from that provider's menu — on
 OpenAI, `gpt-6-astra` (the newest flagship; on a ChatGPT subscription it needs Plus or better and
 OpenAI is still rolling it out per account), `gpt-5.6-sol` (flagship), `gpt-5.6-terra` (the default
 workhorse) or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the choice is theirs;
@@ -451,6 +451,11 @@ workhorse) or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the ch
 default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so
 pinning a 5.4 id via that env var will break the subscription path after that date.
+
+Custom inference profiles instead discover model ids from the endpoint after **Test connection**;
+typing an id is only an explicit, unverified fallback when discovery is unavailable. Selecting a
+different model in the chat composer updates the active custom profile. See the
+[custom inference guide](docs/custom-inference.md) for setup and security details.
 
 OpenAI registers no redirect URI for a hosted app, so connecting ChatGPT takes one of three shapes
 and Doop picks the cheapest one available:
