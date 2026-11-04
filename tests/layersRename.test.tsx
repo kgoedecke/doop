@@ -299,8 +299,9 @@ describe('renaming in the Layers panel', () => {
     press('Enter')
     expect(savedDocument().querySelectorAll('[data-doop-id]')).toHaveLength(1)
     expect(savedDocument().querySelector('p')?.getAttribute('data-doop-id')).toBe('abc123')
+    /* reached by the id it wears, in the saved and the live document alike */
     expect(requestFrame).toHaveBeenLastCalledWith('f1', 'doop:rename', {
-      selector: 'body:nth-of-type(1) > p:nth-of-type(1)',
+      selector: '[data-doop-id="abc123"]',
       name: 'Greeting',
     })
   })

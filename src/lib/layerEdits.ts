@@ -46,6 +46,7 @@ import {
   type FlowPlacement,
   type MovedElement,
 } from './layers'
+import { elementIdSelector } from '../../shared/elementId'
 
 /* ---- element edits shared by the Layers rail and the element panel ---- */
 
@@ -107,13 +108,16 @@ export function renameLayer(frameId: string, selector: string, value: string) {
     if (isLayerLocked(frame, selector)) return
     const before = elementName(frame.html, selector)
     if (before === name) return
-    /* the element's identity for undo and redo: the id it wears, else one
-       stamped with the name, so a sibling added later cannot shift the target */
-    const elementId = elementIdAt(frame.html, selector) ?? freshElementId(frame.html)
+    /* the element's identity, for this write and its undo and redo: the id
+       it wears, reached by that id now (the live document may have drifted
+       from the saved one mid-edit), else one stamped with the name */
+    const worn = elementIdAt(frame.html, selector)
+    const elementId = worn ?? freshElementId(frame.html)
     const entry = recordLayerName(frame.id, selector, before, name, elementId)
     const started = historyEpoch()
     try {
-      await saveLayerName(frame.id, selector, name, elementId)
+      if (worn) await saveLayerName(frame.id, elementIdSelector(worn), name)
+      else await saveLayerName(frame.id, selector, name, elementId)
     } catch (err) {
       dropEntry(entry)
       const s = useStore.getState()
