@@ -2385,20 +2385,21 @@ export function setTokens(canvasId: string, edits: TokenEdit[], actor: Actor): T
     }
     if (newName !== name) {
       store.renameToken(canvasId, name, newName, actor.name)
-      /* aliases of the old name follow it */
-      const aliasing = store
+      /* every var() reference to the old name in another token's values
+         follows it, whole-value aliases and references inside expressions alike */
+      const referencing = store
         .getTokens(canvasId)
-        .filter((t) => aliasOf(t.value) === name || Object.values(t.themes ?? {}).some((v) => aliasOf(v) === name))
+        .filter((t) => [t.value, ...Object.values(t.themes ?? {})].some((v) => usesToken(v, name)))
         .map((t) => ({
           name: t.name,
           type: t.type,
-          value: aliasOf(t.value) === name ? `var(${newName})` : t.value,
+          value: renameTokenRefs(t.value, name, newName),
           themes: Object.fromEntries(
-            Object.entries(t.themes ?? {}).map(([theme, v]) => [theme, aliasOf(v) === name ? `var(${newName})` : v]),
+            Object.entries(t.themes ?? {}).map(([theme, v]) => [theme, renameTokenRefs(v, name, newName)]),
           ),
           description: t.description,
         }))
-      if (aliasing.length) store.setTokens(canvasId, aliasing, actor.name)
+      if (referencing.length) store.setTokens(canvasId, referencing, actor.name)
       renames.push({ kind: 'token', from: name, to: newName })
     }
     store.setTokens(

@@ -9,6 +9,7 @@ const setToken = vi.fn(() => Promise.resolve({ result: { name: '--color-ink', re
 const createTokens = vi.fn(() => Promise.resolve({ results: [{ name: '--x', result: 'created' }], tokens: [] }))
 const setTokenThemes = vi.fn(() => Promise.resolve({ themes: ['dark'], tokens: [] }))
 const updateFrame = vi.fn(() => Promise.resolve())
+
 vi.mock('../src/lib/api', () => ({
   api: {
     updateFrame: (...args: unknown[]) => updateFrame(...(args as [])),
@@ -146,6 +147,15 @@ describe('TokensSection', () => {
       useStore.getState().patchFrameLocal(frame.id, { html: frame.html.replace(' data-doop-theme="dark"', '') })
     })
     expect(themeRow('default').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('browses the themes through a local pick when the frames cannot be switched', () => {
+    /* a canvas with no frames on the page: nothing to switch, the rows still follow the pick */
+    act(() => useStore.getState().setCanvas({ ...useStore.getState().canvas!, frames: [] }))
+    pickTheme('dark')
+    expect(themeRow('dark').getAttribute('aria-checked')).toBe('true')
+    expect(text()).toContain('#eee')
+    expect(updateFrame).not.toHaveBeenCalledWith('f1', expect.anything())
   })
 
   it('opens a token with a row per theme, resets a theme, and saves only what changed', async () => {

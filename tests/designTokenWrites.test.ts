@@ -190,6 +190,26 @@ describe('design tokens on frame writes', () => {
     expect(html).toContain(':root{--space-4:16px}')
   })
 
+  it('follows a rename into references inside other tokens’ expressions', () => {
+    const canvasId = setup()
+    actions.createTokens(
+      canvasId,
+      [
+        {
+          name: '--tint',
+          type: 'color',
+          value: 'color-mix(in srgb, var(--color-ink) 50%, white)',
+          themes: { dark: 'var(--color-ink)' },
+        },
+      ],
+      human,
+    )
+    actions.setTokens(canvasId, [{ name: '--color-ink', newName: '--color-text' }], human)
+    const tint = store.getTokens(canvasId).find((t) => t.name === '--tint')!
+    expect(tint.value).toBe('color-mix(in srgb, var(--color-text) 50%, white)')
+    expect(tint.themes).toEqual({ dark: 'var(--color-text)' })
+  })
+
   it('follows a rename into frames and aliases', () => {
     const canvasId = setup()
     const frame = actions.createFrame(

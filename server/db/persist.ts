@@ -195,9 +195,21 @@ function tokenRow(canvasId: string, token: DesignToken) {
   }
 }
 
+/* Writes to one token run in order: a rename followed by an edit of the
+   same row must not let the earlier write land last on a pooled connection. */
+const tokenWrites = new Map<string, Promise<unknown>>()
+
+function queueTokenWrite(canvasId: string, name: string, write: () => Promise<unknown>) {
+  const key = `${canvasId}\0${name}`
+  const prior = tokenWrites.get(key) ?? Promise.resolve()
+  const next = prior.then(write, write)
+  tokenWrites.set(key, next)
+  swallow(next.finally(() => tokenWrites.get(key) === next && tokenWrites.delete(key)))
+}
+
 export function saveToken(canvasId: string, token: DesignToken) {
   const row = tokenRow(canvasId, token)
-  swallow(
+  queueTokenWrite(canvasId, token.name, () =>
     db
       .insert(t.designTokens)
       .values(row)
@@ -217,7 +229,9 @@ export function saveToken(canvasId: string, token: DesignToken) {
 }
 
 export function deleteToken(canvasId: string, name: string) {
-  swallow(db.delete(t.designTokens).where(and(eq(t.designTokens.canvasId, canvasId), eq(t.designTokens.name, name))))
+  queueTokenWrite(canvasId, name, () =>
+    db.delete(t.designTokens).where(and(eq(t.designTokens.canvasId, canvasId), eq(t.designTokens.name, name))),
+  )
 }
 
 /* Append-only doc history: a snapshot per save, '' marks a deletion. */

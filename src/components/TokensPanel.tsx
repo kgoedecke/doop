@@ -133,7 +133,11 @@ export function TokensSection() {
   const targets = selectedFrames.length ? selectedFrames : pageFrames
   /** the theme the rows show: what the target frames wear right now, so a
    *  new selection, an undo or a rename keeps the tick and the values in step */
-  const viewTheme = targets[0] ? frameTheme(targets[0].html) : null
+  /* with frames to switch, the shown theme is what they wear; a viewer, a
+     commenter or an empty page browses the list through a local pick instead */
+  const [preview, setPreview] = useState<string | null>(null)
+  const switching = !readOnly && targets.length > 0
+  const viewTheme = switching ? frameTheme(targets[0]!.html) : preview
   const [themeBusy, setThemeBusy] = useState(false)
   const [themeError, setThemeError] = useState<string | null>(null)
   /** the type groups folded shut */
@@ -157,7 +161,8 @@ export function TokensSection() {
   /** Show a theme: the rows switch to its values, and the target frames
    *  switch their root to it, one undo step per frame. */
   function showTheme(theme: string | null) {
-    if (readOnly) return
+    setPreview(theme)
+    if (!switching) return
     for (const frame of targets) {
       const before = frame.html
       const html = withFrameTheme(before, theme)

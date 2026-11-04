@@ -732,6 +732,9 @@ function DesignTab({
   /* the fill as the document has it: a translucent one keeps its alpha */
   const fillLiteral = fill && fillAlpha < 1 ? info.backgroundColor : fill
   const strokeOn: StylePatch = info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}
+  /* the stroke and text colours as the document has them: a translucent one keeps its alpha */
+  const strokeLiteral = borderColor && colorAlpha(info.borderColor) < 1 ? info.borderColor : borderColor
+  const textLiteral = colorAlpha(info.color) < 1 ? info.color : rgbToHex(info.color)
   const isFlex = info.display === 'flex' || info.display === 'inline-flex'
   const border = borderSummary(info.borderWidths)
   const textAlign =
@@ -1072,8 +1075,8 @@ function DesignTab({
           <ColorField
             label={t('inspector.borderColor')}
             value={borderColor}
-            token={chip('border-color', borderColor)}
-            trailing={menu('border-color', ['color'], borderColor, 'inline', strokeOn)}
+            token={chip('border-color', strokeLiteral)}
+            trailing={menu('border-color', ['color'], strokeLiteral, 'inline', strokeOn)}
             onCommit={(v) =>
               apply({ 'border-color': v, ...(v && info.borderStyle === 'none' ? { 'border-style': 'solid' } : {}) })
             }
@@ -1171,8 +1174,8 @@ function DesignTab({
             <ColorField
               value={mixed.color ? null : rgbToHex(info.color)}
               placeholder={t('inspector.mixed')}
-              token={chip('color', rgbToHex(info.color))}
-              trailing={menu('color', ['color'], rgbToHex(info.color))}
+              token={chip('color', textLiteral)}
+              trailing={menu('color', ['color'], textLiteral)}
               onCommit={(v) => apply({ color: v })}
             />
           </PropertyRow>
