@@ -261,6 +261,9 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await copyImage()
     await page.click('[data-frame-title]', { button: 'right' })
     await choose('Copy')
+    /* the menu's copy writes the clipboard asynchronously: paste once the
+       token has replaced the image, or the paste lands the image instead */
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('doop:clipboard:')
     await chord('v')
     await expect.poll(() => created.length).toBe(1)
     expect(created[0]).toMatchObject({ html: HTML, width: 400, height: 300 })
