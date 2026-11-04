@@ -216,7 +216,6 @@ export async function customModels(profile: CustomModelProfile, signal: AbortSig
       {
         method: 'GET',
         headers: profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {},
-        signal,
       },
       { signal, timeoutMs: 8_000 },
     )

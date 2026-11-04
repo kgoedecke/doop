@@ -72,10 +72,17 @@ interface ResolvedCustomUrl {
 async function lookupWithDeadline(host: string, timeoutMs: number): Promise<PublicAddress[]> {
   const started = Date.now()
   const remaining = Math.max(1, timeoutMs - (Date.now() - started))
-  return Promise.race([
-    dns.lookup(host, { all: true, verbatim: true }) as Promise<PublicAddress[]>,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('DNS lookup timed out')), remaining)),
-  ]) as Promise<PublicAddress[]>
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return (await Promise.race([
+      dns.lookup(host, { all: true, verbatim: true }) as Promise<PublicAddress[]>,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('DNS lookup timed out')), remaining)
+      }),
+    ])) as PublicAddress[]
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 async function resolveWithPolicy(
@@ -112,12 +119,36 @@ async function resolveCustomUrl(
 /** Normalize a base URL and verify it may be contacted from this server. */
 export async function validateCustomBaseUrl(
   raw: string,
-  allowPrivate: boolean,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  allowPrivateOrOptions: boolean | { allowPrivate?: boolean; timeoutMs?: number; signal?: AbortSignal } = false,
+  timeoutMsOrOptions: number | { timeoutMs?: number; signal?: AbortSignal } = DEFAULT_TIMEOUT_MS,
   signal?: AbortSignal,
 ): Promise<URL> {
+  let allowPrivate: boolean
+  let resolvedTimeout: number
+  let resolvedSignal: AbortSignal | undefined
+  if (typeof allowPrivateOrOptions === 'object' && allowPrivateOrOptions !== null) {
+    allowPrivate = allowPrivateOrOptions.allowPrivate ?? false
+    resolvedTimeout =
+      allowPrivateOrOptions.timeoutMs !== undefined
+        ? allowPrivateOrOptions.timeoutMs
+        : typeof timeoutMsOrOptions === 'number'
+          ? timeoutMsOrOptions
+          : DEFAULT_TIMEOUT_MS
+    resolvedSignal =
+      allowPrivateOrOptions.signal ??
+      (typeof timeoutMsOrOptions === 'object' && timeoutMsOrOptions !== null ? timeoutMsOrOptions.signal : signal)
+  } else {
+    allowPrivate = allowPrivateOrOptions
+    if (typeof timeoutMsOrOptions === 'object' && timeoutMsOrOptions !== null) {
+      resolvedTimeout = timeoutMsOrOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS
+      resolvedSignal = timeoutMsOrOptions.signal ?? signal
+    } else {
+      resolvedTimeout = timeoutMsOrOptions
+      resolvedSignal = signal
+    }
+  }
   const url = normalizeCustomBaseUrl(raw)
-  await resolveWithPolicy(url, allowPrivate, timeoutMs, signal)
+  await resolveWithPolicy(url, allowPrivate, resolvedTimeout, resolvedSignal)
   return url
 }
 
