@@ -85,6 +85,7 @@ export const models = {
     'The saved endpoint and its API key will be removed. If it was active, no model account will remain until you connect another.',
   customDeleteConfirm: 'Delete endpoint',
   customActivate: 'Use this endpoint',
+  customReplaceNote: 'Activating this endpoint replaces the currently connected model account.',
   customActive: 'Active',
   customName: 'Name',
   customNamePlaceholder: 'Local Ollama',

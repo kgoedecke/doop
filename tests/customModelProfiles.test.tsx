@@ -150,13 +150,32 @@ it('tests an endpoint and reports translated success and failure without echoing
   await render(disconnected)
   await click(button('Add custom endpoint'))
   await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
+  await fill(input('qwen3.5-coder'), 'qwen3.5-coder')
   await fill(input('sk-… (optional)'), 'sk-test-secret')
   await click(button('Test connection'))
   expect(container.textContent).toContain('Connection works — 2 models available')
   expect(container.textContent).not.toContain('sk-test-secret')
+  expect(mocks.test).toHaveBeenLastCalledWith({
+    baseUrl: 'https://provider.example/v1',
+    apiKey: 'sk-test-secret',
+    model: 'qwen3.5-coder',
+  })
 
   await click(button('Test connection'))
   expect(container.textContent).toContain('The endpoint rejected the API key')
+})
+
+it('tests an existing profile with its stored key when the field stays blank', async () => {
+  mocks.list.mockResolvedValue([profile()])
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
+  await render(disconnected)
+  await click(button('Edit'))
+  await click(button('Test connection'))
+  expect(mocks.test).toHaveBeenCalledExactlyOnceWith({
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    profileId: 'profile-1',
+    model: 'qwen3.5-coder',
+  })
 })
 
 it('preserves a stored key when editing and clears it only when asked', async () => {
