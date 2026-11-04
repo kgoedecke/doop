@@ -149,7 +149,11 @@ it('commits a field typed before the drag on its own when Tab lands mid-drag', (
   expect(stored()).toMatchObject({ x: 200, width: 770 })
   expect(update).toHaveBeenCalledTimes(1)
   expect(update).toHaveBeenCalledWith('f', { x: 200 })
+  /* the room echoes that save as the server's whole frame, still at the old width */
+  act(() => useStore.getState().upsertFrame({ ...frame, x: 200, updatedAt: 11 }))
+  expect(stored().width).toBe(760)
   act(() => unit.dispatchEvent(pointer('pointerup', 110)))
+  expect(stored().width).toBe(770)
   expect(update).toHaveBeenCalledTimes(2)
   expect(update).toHaveBeenLastCalledWith('f', { width: 770 })
 })

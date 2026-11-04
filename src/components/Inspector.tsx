@@ -62,7 +62,7 @@ export function Inspector({
   const frameId = useRef(frame.id)
   /* the frame as it was when a scrub began: the drag previews in the store
      and this is what one undo step and one save are measured against */
-  const scrubStart = useRef<{ id: string; box: FrameBox; key: BoxKey | null } | null>(null)
+  const scrubStart = useRef<{ id: string; box: FrameBox; key: BoxKey | null; value: number | undefined } | null>(null)
 
   /* switching frames resets the draft; otherwise pull in remote html
      updates unless the user is typing */
@@ -149,12 +149,14 @@ export function Inspector({
     const key = BOX_KEYS.find((k) => k in patch)
     if (!key) return
     if (scrub) scrub.key ??= key
-    if (scrub?.key === key) useStore.getState().patchFrameLocal(scrub.id, { [key]: patch[key] })
-    else commitMeta(patch)
+    if (scrub?.key === key) {
+      scrub.value = patch[key]
+      useStore.getState().patchFrameLocal(scrub.id, { [key]: patch[key] })
+    } else commitMeta(patch)
   }
   const boxScrub = {
     onStart: () => {
-      scrubStart.current = { id: frame.id, box: boxOf(frame), key: null }
+      scrubStart.current = { id: frame.id, box: boxOf(frame), key: null, value: undefined }
     },
     onEnd: (cancel: boolean) => {
       const scrub = scrubStart.current
@@ -167,8 +169,12 @@ export function Inspector({
         store.patchFrameLocal(id, { [key]: from })
         return
       }
-      const to = store.canvas?.frames.find((f) => f.id === id)?.[key]
+      /* the gesture's own latest value, not the store's: a save or broadcast
+         landing mid-drag (another field's commit, a teammate) puts the
+         server's frame in the store, and that still carries the old size */
+      const to = scrub.value
       if (to === undefined || to === from) return
+      store.patchFrameLocal(id, { [key]: to })
       recordUpdate(id, { [key]: from }, { [key]: to }, true)
       const save = api.updateFrame(id, { [key]: to })
       trackSave(save)
