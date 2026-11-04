@@ -103,6 +103,22 @@ const render = async (account: ModelAccountStatus, props: Record<string, unknown
   await wait()
 }
 
+const selectOption = async (label: string) => {
+  const trigger = container.querySelector<HTMLButtonElement>('[role="combobox"]')!
+  await act(async () => trigger.focus())
+  await act(async () => {
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+  })
+  const option = [...document.querySelectorAll('[role="option"]')].find((el) => el.textContent?.trim() === label)
+  expect(option).toBeDefined()
+  await act(async () => {
+    ;(option as HTMLElement).dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    )
+  })
+  await wait()
+}
+
 beforeEach(() => {
   vi.resetAllMocks()
   mocks.list.mockResolvedValue([])
@@ -123,7 +139,6 @@ it('shows the empty state and opens a form with the optional key and vision togg
   await click(button('Add custom endpoint'))
   expect(input('Local Ollama')).toBeDefined()
   expect(input('https://provider.example/v1')).toBeDefined()
-  expect(input('qwen3.5-coder')).toBeDefined()
   expect(input('sk-… (optional)')).toBeDefined()
   expect(container.querySelector('[role="switch"]')).not.toBeNull()
   expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
@@ -132,13 +147,15 @@ it('shows the empty state and opens a form with the optional key and vision togg
 it('creates a profile with the vision value and never renders the key back', async () => {
   mocks.list.mockResolvedValueOnce([]).mockResolvedValue([profile({ supportsVision: false })])
   mocks.create.mockResolvedValue(profile())
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
   await render(disconnected)
   await click(button('Add custom endpoint'))
   await fill(input('Local Ollama'), 'Local Ollama')
   await fill(input('https://provider.example/v1'), 'http://127.0.0.1:11434/v1')
-  await fill(input('qwen3.5-coder'), 'qwen3.5-coder')
   await fill(input('sk-… (optional)'), 'sk-never-rendered')
   await act(async () => (container.querySelector('[role="switch"]') as HTMLElement).click())
+  await click(button('Test connection'))
+  await selectOption('qwen3.5-coder')
   await click(button('Save endpoint'))
 
   expect(mocks.create).toHaveBeenCalledExactlyOnceWith({
@@ -160,7 +177,6 @@ it('tests an endpoint and reports translated success and failure without echoing
   await render(disconnected)
   await click(button('Add custom endpoint'))
   await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
-  await fill(input('qwen3.5-coder'), 'qwen3.5-coder')
   await fill(input('sk-… (optional)'), 'sk-test-secret')
   await click(button('Test connection'))
   expect(container.textContent).toContain('Connection works — 2 models available')
@@ -168,7 +184,6 @@ it('tests an endpoint and reports translated success and failure without echoing
   expect(mocks.test).toHaveBeenLastCalledWith({
     baseUrl: 'https://provider.example/v1',
     apiKey: 'sk-test-secret',
-    model: 'qwen3.5-coder',
   })
 
   await click(button('Test connection'))
@@ -184,12 +199,12 @@ it('tests an existing profile with its stored key when the field stays blank', a
   expect(mocks.test).toHaveBeenCalledExactlyOnceWith({
     baseUrl: 'http://127.0.0.1:11434/v1',
     profileId: 'profile-1',
-    model: 'qwen3.5-coder',
   })
 })
 
 it('preserves a stored key when editing and clears it only when asked', async () => {
   mocks.list.mockResolvedValue([profile()])
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
   mocks.update.mockResolvedValue(profile({ name: 'Renamed' }))
   const account = disconnected
   await render(account)
@@ -197,6 +212,8 @@ it('preserves a stored key when editing and clears it only when asked', async ()
   expect((input('Local Ollama') as HTMLInputElement).value).toBe('Local Ollama')
   expect((input('sk-… (optional)') as HTMLInputElement).value).toBe('')
   await fill(input('Local Ollama'), 'Renamed')
+  await click(button('Test connection'))
+  await selectOption('qwen3.5-coder')
   await click(button('Save endpoint'))
   expect(mocks.update).toHaveBeenNthCalledWith(1, 'profile-1', {
     name: 'Renamed',
@@ -205,8 +222,11 @@ it('preserves a stored key when editing and clears it only when asked', async ()
     supportsVision: false,
   })
 
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
   await click(button('Edit'))
   await click(container.querySelector('input[type="checkbox"]')!)
+  await click(button('Test connection'))
+  await selectOption('qwen3.5-coder')
   await click(button('Save endpoint'))
   expect(mocks.update).toHaveBeenNthCalledWith(2, 'profile-1', {
     name: 'Local Ollama',
@@ -255,4 +275,55 @@ it('keeps the selected model visible and warns when the live catalog fails', asy
   await render(activeAccount())
   expect(container.textContent).toContain('qwen3.5-coder')
   expect(container.textContent).toContain('live model list is unavailable')
+})
+
+it('requires selecting a discovered model before save', async () => {
+  mocks.test.mockResolvedValue({ reachable: true, models: ['m-a', 'm-b'] })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('Local Ollama'), 'Local Ollama')
+  await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
+  await click(button('Test connection'))
+
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+  await selectOption('m-a')
+  await click(button('Save endpoint'))
+  expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: 'm-a' }))
+})
+
+it('invalidates discovery when base URL changes after test', async () => {
+  mocks.test.mockResolvedValueOnce({ reachable: true, models: ['m-a'] })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('https://provider.example/v1'), 'https://one.example/v1')
+  await click(button('Test connection'))
+  await fill(input('https://provider.example/v1'), 'https://two.example/v1')
+
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+})
+
+it('uses stored key when blank key is tested for saved profile', async () => {
+  mocks.list.mockResolvedValue([profile()])
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
+  await render(disconnected)
+  await click(button('Edit'))
+  await click(button('Test connection'))
+
+  expect(mocks.test).toHaveBeenCalledWith({
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    profileId: 'profile-1',
+  })
+})
+
+it('offers manual input only after enabling unverified fallback', async () => {
+  mocks.test.mockResolvedValue({ reachable: true, models: [] })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
+  await click(button('Test connection'))
+
+  expect(container.querySelector('input[name="models-manual"]')).toBeNull()
+  const checkbox = container.querySelector('input[name="models-fallback"]') as HTMLInputElement
+  await click(checkbox)
+  expect(container.querySelector('input[name="models-manual"]')).not.toBeNull()
 })

@@ -122,6 +122,8 @@ export const models: Catalog['models'] = {
   customErrorInvalidInput: 'Confira os dados do endpoint e tente de novo.',
   customErrorUnknown: 'Não deu certo — tente de novo.',
   customCatalogFallback: 'A lista de modelos ao vivo do endpoint não está disponível, então o modelo salvo é mostrado.',
+  customUseUnverifiedModel: 'Usar um id de modelo não verificado',
+  customManualModel: 'Id de modelo não verificado',
 
   /* LocalClaude */
   cliSourceChosen: ', escolhido por você.',

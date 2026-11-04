@@ -117,6 +117,8 @@ export const models = {
   customErrorInvalidInput: 'Check the endpoint details and try again.',
   customErrorUnknown: 'That did not work — try again.',
   customCatalogFallback: 'The endpoint’s live model list is unavailable, so the saved model is shown.',
+  customUseUnverifiedModel: 'Use an unverified model id',
+  customManualModel: 'Unverified model id',
 
   /* LocalClaude */
   cliSourceChosen: ', chosen by you.',

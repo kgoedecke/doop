@@ -10,6 +10,7 @@ import {
 import { useT } from '../lib/i18n'
 import { useLocalAgent, refreshLocalAgent } from '../lib/localAgent'
 import { activeModelTarget } from '../lib/activeModelTarget'
+import { isCustomModelId } from '../../shared/customModel'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Field } from './ui/field'
@@ -35,6 +36,12 @@ interface Draft {
   apiKey?: string | null
   model: string
   supportsVision: boolean
+  /** UI-only discovery state produced by a successful/attempted test */
+  selectedModel?: string
+  discoveredModels: string[]
+  useManualFallback: boolean
+  manualModel: string
+  testedFingerprint: string | null
 }
 
 const emptyDraft = (): Draft => ({
@@ -43,6 +50,11 @@ const emptyDraft = (): Draft => ({
   apiKey: '',
   model: '',
   supportsVision: true,
+  selectedModel: undefined,
+  discoveredModels: [],
+  useManualFallback: false,
+  manualModel: '',
+  testedFingerprint: null,
 })
 
 function messageFor(error: unknown, fallback: string): string {
@@ -60,6 +72,18 @@ function endpointLabel(baseUrl: string): string {
   } catch {
     return baseUrl
   }
+}
+
+function fingerprint(draft: Draft): string {
+  return JSON.stringify({
+    baseUrl: draft.baseUrl.trim(),
+    apiKey: draft.apiKey === null ? null : draft.apiKey?.trim() || '(stored)',
+    profileId: draft.id ?? null,
+  })
+}
+
+function invalidateDiscovery(draft: Draft): Draft {
+  return { ...draft, discoveredModels: [], selectedModel: undefined, testedFingerprint: null }
 }
 
 export function CustomModelProfiles({
@@ -154,6 +178,11 @@ export function CustomModelProfiles({
       apiKey: undefined,
       model: profile.model,
       supportsVision: profile.supportsVision,
+      selectedModel: undefined,
+      discoveredModels: [],
+      useManualFallback: false,
+      manualModel: '',
+      testedFingerprint: null,
     })
     setTestResult(null)
     setError('')
@@ -171,22 +200,41 @@ export function CustomModelProfiles({
     setTestResult(null)
     setError('')
     try {
-      setTestResult(
-        await api.testModelProfile({
-          baseUrl: draft.baseUrl.trim(),
-          /* undefined keeps a saved profile's key on the server, an entered key
-             replaces it for this test, and null means it was deliberately cleared */
-          ...(draft.id ? { profileId: draft.id } : {}),
-          ...(draft.apiKey !== undefined ? { apiKey: draft.apiKey === null ? null : draft.apiKey.trim() || null } : {}),
-          ...(draft.model.trim() ? { model: draft.model.trim() } : {}),
-        }),
+      const result = await api.testModelProfile({
+        baseUrl: draft.baseUrl.trim(),
+        /* undefined keeps a saved profile's key on the server, an entered key
+           replaces it for this test, and null means it was deliberately cleared */
+        ...(draft.id ? { profileId: draft.id } : {}),
+        ...(draft.apiKey !== undefined ? { apiKey: draft.apiKey === null ? null : draft.apiKey.trim() || null } : {}),
+      })
+      setTestResult(result)
+      setDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              discoveredModels: result.reachable ? (result.models ?? []) : [],
+              selectedModel: undefined,
+              testedFingerprint: fingerprint(prev),
+            }
+          : prev,
       )
     } catch (e) {
-      setTestResult({
+      const result = {
         reachable: false,
         errorCode: 'unknown',
         error: messageFor(e, t('models.customErrorUnknown')),
-      })
+      }
+      setTestResult(result)
+      setDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              discoveredModels: [],
+              selectedModel: undefined,
+              testedFingerprint: fingerprint(prev),
+            }
+          : prev,
+      )
     } finally {
       setTesting(false)
     }
@@ -201,10 +249,11 @@ export function CustomModelProfiles({
     setBusy(true)
     setError('')
     try {
+      const model = (draft.useManualFallback ? draft.manualModel : (draft.selectedModel ?? draft.model)).trim()
       const base = {
         name: draft.name.trim(),
         baseUrl: draft.baseUrl.trim(),
-        model: draft.model.trim(),
+        model,
         supportsVision: draft.supportsVision,
       }
       if (draft.id) {
@@ -292,7 +341,13 @@ export function CustomModelProfiles({
 
   const models = visibleCatalog?.live ? visibleCatalog.models : []
   const missingModel = account.model && !models.some((model) => model.id === account.model)
-  const canSave = Boolean(draft?.name.trim() && draft.baseUrl.trim() && draft.model.trim())
+  const canSave = Boolean(
+    draft &&
+    draft.name.trim() &&
+    draft.baseUrl.trim() &&
+    draft.testedFingerprint === fingerprint(draft) &&
+    (draft.useManualFallback ? isCustomModelId(draft.manualModel) : Boolean(draft.selectedModel)),
+  )
   let errorText = ''
   if (testResult && !testResult.reachable) {
     switch (testResult.errorCode) {
@@ -433,19 +488,36 @@ export function CustomModelProfiles({
                   <Input
                     id="custom-model-url"
                     value={draft.baseUrl}
-                    onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+                    onChange={(e) => setDraft(invalidateDiscovery({ ...draft, baseUrl: e.target.value }))}
                     placeholder={t('models.customBaseUrlPlaceholder')}
                     spellCheck={false}
                   />
                 </Field>
-                <Field label={t('models.customModel')} htmlFor="custom-model-id">
-                  <Input
-                    id="custom-model-id"
-                    value={draft.model}
-                    onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-                    placeholder={t('models.customModelPlaceholder')}
-                    spellCheck={false}
-                  />
+                <Field label={t('models.customModel')} htmlFor="custom-model-discovered">
+                  {draft.discoveredModels.length > 0 ? (
+                    <Select
+                      value={draft.selectedModel ?? ''}
+                      onValueChange={(model) => setDraft({ ...draft, selectedModel: model, model })}
+                    >
+                      <SelectTrigger id="custom-model-discovered" size="md" aria-label={t('models.customModel')}>
+                        <SelectValue placeholder={t('models.customModel')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {draft.discoveredModels.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ))}
+                        {draft.id && draft.model && !draft.discoveredModels.includes(draft.model) && (
+                          <SelectItem value={draft.model} disabled>
+                            {draft.model}
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="text-body text-ink-faint">{t('models.customModelPlaceholder')}</p>
+                  )}
                 </Field>
                 <Field
                   label={t('models.customApiKey')}
@@ -455,7 +527,7 @@ export function CustomModelProfiles({
                   <Input
                     id="custom-model-key"
                     value={draft.apiKey ?? ''}
-                    onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
+                    onChange={(e) => setDraft(invalidateDiscovery({ ...draft, apiKey: e.target.value }))}
                     placeholder={t('models.customApiKeyPlaceholder')}
                     type="password"
                     autoComplete="off"
@@ -464,6 +536,36 @@ export function CustomModelProfiles({
                   />
                 </Field>
               </div>
+
+              {testResult && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-body text-ink-soft">
+                    <Checkbox
+                      name="models-fallback"
+                      checked={draft.useManualFallback}
+                      onChange={(e) => setDraft({ ...draft, useManualFallback: e.target.checked })}
+                    />
+                    {t('models.customUseUnverifiedModel')}
+                  </label>
+                  {!draft.useManualFallback && (
+                    <Button variant="link" size="sm" onClick={() => setDraft({ ...draft, useManualFallback: true })}>
+                      {t('models.customUseUnverifiedModel')}
+                    </Button>
+                  )}
+                  {draft.useManualFallback && (
+                    <Field label={t('models.customManualModel')} htmlFor="custom-model-manual">
+                      <Input
+                        id="custom-model-manual"
+                        name="models-manual"
+                        value={draft.manualModel}
+                        onChange={(e) => setDraft({ ...draft, manualModel: e.target.value, model: e.target.value })}
+                        placeholder={t('models.customModelPlaceholder')}
+                        spellCheck={false}
+                      />
+                    </Field>
+                  )}
+                </div>
+              )}
 
               <div className="mt-3 flex items-start gap-2">
                 <Switch
@@ -482,7 +584,9 @@ export function CustomModelProfiles({
                 <label className="mt-3 flex items-center gap-2 text-body text-ink-soft">
                   <Checkbox
                     checked={draft.apiKey === null}
-                    onChange={(e) => setDraft({ ...draft, apiKey: e.target.checked ? null : undefined })}
+                    onChange={(e) =>
+                      setDraft(invalidateDiscovery({ ...draft, apiKey: e.target.checked ? null : undefined }))
+                    }
                   />
                   {t('models.customKeyClear')}
                 </label>
