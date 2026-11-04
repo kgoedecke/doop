@@ -4,7 +4,7 @@ import { useStore } from '../lib/store'
 import { api, errorMessage } from '../lib/api'
 import { beginFrameSave } from '../lib/frameSaves'
 import { copyFramePng, downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
-import { deleteFrameTracked, recordUpdate } from '../lib/history'
+import { deleteFrameTracked, recordUpdate, trackSave } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
@@ -26,18 +26,12 @@ const fillBtn = 'h-7 rounded-[7px] bg-sub px-2 text-[12px] font-normal text-ink 
 /* the position and size fields, tall enough to hit on a phone */
 const boxField = 'max-md:h-10 max-md:min-h-10'
 
-type FrameBox = Pick<Frame, 'x' | 'y' | 'width' | 'height'>
-const BOX_KEYS = ['x', 'y', 'width', 'height'] as const
+type BoxKey = 'x' | 'y' | 'width' | 'height'
+type FrameBox = Pick<Frame, BoxKey>
+const BOX_KEYS: readonly BoxKey[] = ['x', 'y', 'width', 'height']
 
 function boxOf(frame: Frame): FrameBox {
   return { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
-}
-
-/** The box values a drag changed, or null when it moved nothing. */
-function boxDiff(before: FrameBox, after: FrameBox): Partial<FrameBox> | null {
-  const patch: Partial<FrameBox> = {}
-  for (const key of BOX_KEYS) if (after[key] !== before[key]) patch[key] = after[key]
-  return Object.keys(patch).length ? patch : null
 }
 
 export function Inspector({
@@ -68,7 +62,7 @@ export function Inspector({
   const frameId = useRef(frame.id)
   /* the frame as it was when a scrub began: the drag previews in the store
      and this is what one undo step and one save are measured against */
-  const scrubStart = useRef<Frame | null>(null)
+  const scrubStart = useRef<{ id: string; box: FrameBox; key: BoxKey | null } | null>(null)
 
   /* switching frames resets the draft; otherwise pull in remote html
      updates unless the user is typing */
@@ -141,34 +135,43 @@ export function Inspector({
   function commitMeta(patch: Partial<Frame>) {
     recordUpdate(frame.id, frame, patch)
     useStore.getState().patchFrameLocal(frame.id, patch)
-    api.updateFrame(frame.id, patch).catch(console.error)
+    const save = api.updateFrame(frame.id, patch)
+    trackSave(save)
+    save.catch(console.error)
   }
 
   /* a typed value commits at once; a scrubbed one only previews, and the
-     gesture's end commits the whole drag */
+     gesture's end commits the whole drag. Only the scrubbed field belongs to
+     the gesture: a teammate's move of the same frame meanwhile is theirs */
   function editBox(patch: Partial<FrameBox>) {
-    if (scrubStart.current) useStore.getState().patchFrameLocal(frame.id, patch)
-    else commitMeta(patch)
+    const scrub = scrubStart.current
+    if (!scrub) return commitMeta(patch)
+    const key = BOX_KEYS.find((k) => k in patch)
+    if (!key) return
+    scrub.key ??= key
+    if (scrub.key === key) useStore.getState().patchFrameLocal(scrub.id, { [key]: patch[key] })
   }
   const boxScrub = {
     onStart: () => {
-      scrubStart.current = frame
+      scrubStart.current = { id: frame.id, box: boxOf(frame), key: null }
     },
     onEnd: (cancel: boolean) => {
-      const before = scrubStart.current
+      const scrub = scrubStart.current
       scrubStart.current = null
-      if (!before) return
+      if (!scrub?.key) return
+      const { id, key } = scrub
+      const from = scrub.box[key]
       const store = useStore.getState()
       if (cancel) {
-        store.patchFrameLocal(before.id, boxOf(before))
+        store.patchFrameLocal(id, { [key]: from })
         return
       }
-      const after = store.canvas?.frames.find((f) => f.id === before.id)
-      if (!after) return
-      const patch = boxDiff(before, after)
-      if (!patch) return
-      recordUpdate(before.id, before, patch, true)
-      api.updateFrame(before.id, patch).catch(console.error)
+      const to = store.canvas?.frames.find((f) => f.id === id)?.[key]
+      if (to === undefined || to === from) return
+      recordUpdate(id, { [key]: from }, { [key]: to }, true)
+      const save = api.updateFrame(id, { [key]: to })
+      trackSave(save)
+      save.catch(console.error)
     },
   }
 

@@ -86,7 +86,53 @@ it('previews a scrubbed X in the store and saves the drag once, as one undo step
   expect(update).toHaveBeenLastCalledWith('f', { x: 120 })
 })
 
-it('puts a cancelled scrub back and saves nothing', () => {
+it('lets undo wait for a slow scrub save, so the inverse write never lands first', async () => {
+  const order: string[] = []
+  let finish!: () => void
+  const update = vi.spyOn(api, 'updateFrame').mockImplementation(
+    (id, patch) =>
+      new Promise((resolve) => {
+        const done = () => {
+          order.push(`saved ${JSON.stringify(patch)}`)
+          resolve({ ...stored(), ...patch, id })
+        }
+        if (order.length === 0) {
+          order.push('scrub save started')
+          finish = done
+        } else done()
+      }),
+  )
+  const unit = unitOf('X position')
+  act(() => {
+    unit.dispatchEvent(pointer('pointerdown', 100))
+    unit.dispatchEvent(pointer('pointermove', 105))
+    unit.dispatchEvent(pointer('pointerup', 105))
+  })
+  const undone = act(() => undo())
+  await Promise.resolve()
+  expect(update).toHaveBeenCalledTimes(1)
+  finish()
+  await undone
+  expect(order).toEqual(['scrub save started', 'saved {"x":125}', 'saved {"x":120}'])
+})
+
+it("leaves a teammate's move of the same frame out of the drag", async () => {
+  const update = vi.spyOn(api, 'updateFrame').mockImplementation(async (id, patch) => ({ ...stored(), ...patch, id }))
+  const unit = unitOf('Width')
+  act(() => {
+    unit.dispatchEvent(pointer('pointerdown', 100))
+    unit.dispatchEvent(pointer('pointermove', 110))
+  })
+  act(() => useStore.getState().patchFrameLocal('f', { x: 400 }))
+  act(() => unit.dispatchEvent(pointer('pointerup', 110)))
+  expect(update).toHaveBeenCalledTimes(1)
+  expect(update).toHaveBeenCalledWith('f', { width: 770 })
+  await act(() => undo())
+  expect(stored()).toMatchObject({ x: 400, width: 760 })
+  expect(update).toHaveBeenLastCalledWith('f', { width: 760 })
+})
+
+it('puts a cancelled scrub back and saves nothing, keeping what a teammate moved', () => {
   const update = vi.spyOn(api, 'updateFrame')
   const unit = unitOf('Width')
   act(() => {
@@ -94,10 +140,11 @@ it('puts a cancelled scrub back and saves nothing', () => {
     unit.dispatchEvent(pointer('pointermove', 90))
   })
   expect(stored().width).toBe(750)
+  act(() => useStore.getState().patchFrameLocal('f', { y: 300 }))
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
   })
-  expect(stored().width).toBe(760)
+  expect(stored()).toMatchObject({ width: 760, y: 300 })
   expect(update).not.toHaveBeenCalled()
 })
 
