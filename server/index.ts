@@ -2446,6 +2446,7 @@ const server = http.createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
 
 wss.on('connection', (ws, upgradeReq) => {
+  ws.on('error', () => {})
   /* the session cookie rides the upgrade request; resolve it once */
   const sessionPromise = auth.api.getSession({ headers: fromNodeHeaders(upgradeReq.headers) }).catch(() => null)
 
@@ -2456,6 +2457,7 @@ wss.on('connection', (ws, upgradeReq) => {
     } catch {
       return
     }
+    if (!msg || typeof msg !== 'object') return
     const conn = conns.get(ws)
 
     if (msg.type === 'join') {
@@ -2488,6 +2490,9 @@ wss.on('connection', (ws, upgradeReq) => {
         activeFrameId: null,
       }
       const silent = !!(session.session as { impersonatedBy?: string | null }).impersonatedBy
+      if (conn && !conn.silent && (conn.canvasId !== msg.canvasId || conn.presence.clientId !== msg.clientId)) {
+        broadcast(conn.canvasId, { type: 'presence:leave', clientId: conn.presence.clientId })
+      }
       conns.set(ws, { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent })
       const others = room(msg.canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
