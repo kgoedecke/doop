@@ -582,7 +582,7 @@ export const api = {
     req<{ ok: boolean }>(`/api/model-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   activateModelProfile: (id: string) =>
     req<ModelAccountStatus>(`/api/model-profiles/${encodeURIComponent(id)}/activate`, { method: 'POST' }),
-  testModelProfile: (input: { baseUrl: string; apiKey?: string | null; model?: string }) =>
+  testModelProfile: (input: { baseUrl: string; apiKey?: string | null; model?: string; profileId?: string }) =>
     req<CustomEndpointTestResult>('/api/model-profiles/test', { method: 'POST', body: JSON.stringify(input) }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),

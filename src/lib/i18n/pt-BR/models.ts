@@ -90,6 +90,7 @@ export const models: Catalog['models'] = {
     'O endpoint salvo e sua chave de API serão removidos. Se ele estiver ativo, nenhuma conta de modelo ficará disponível até você conectar outra.',
   customDeleteConfirm: 'Excluir endpoint',
   customActivate: 'Usar este endpoint',
+  customReplaceNote: 'Ativar este endpoint substitui a conta de modelo conectada no momento.',
   customActive: 'Ativo',
   customName: 'Nome',
   customNamePlaceholder: 'Ollama local',

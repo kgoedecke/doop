@@ -148,6 +148,10 @@ export async function fetchCustomJson(
   const resolved = await resolveCustomUrl(url)
   const timeout = AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout
+  /* caller cancellation must stay a caller cancellation: the transport hands
+     back its own reason, while the request's safety timeout always becomes an
+     `unreachable` endpoint failure. */
+  const callerAborted = () => (options.signal?.aborted ? (options.signal.reason ?? new Error('aborted')) : null)
   const dispatcher = new Agent({
     connect: {
       lookup: createPinnedLookup(resolved.url.hostname.replace(/^\[|\]$/g, ''), resolved.addresses, {
@@ -168,8 +172,8 @@ export async function fetchCustomJson(
   } catch (error) {
     await dispatcher.close().catch(() => {})
     if (error instanceof CustomInferenceError) throw error
-    /* a stopped task is not an endpoint failure: hand the caller its abort */
-    if (options.signal?.aborted) throw options.signal.reason ?? error
+    const callerAbort = callerAborted()
+    if (callerAbort) throw callerAbort
     /* `redirect: 'error'` surfaces as a fetch failure; it is a compatibility
        problem, not a network one, and the target is never followed. */
     const detail = error instanceof Error ? `${error.message} ${String(error.cause ?? '')}` : ''
@@ -187,7 +191,8 @@ export async function fetchCustomJson(
     }
   } catch (error) {
     if (error instanceof CustomInferenceError) throw error
-    if (options.signal?.aborted) throw options.signal.reason ?? error
+    const callerAbort = callerAborted()
+    if (callerAbort) throw callerAbort
     throw new CustomInferenceError('unreachable', UNREACHABLE_MESSAGE)
   } finally {
     /* Graceful close waits for the returned body to be consumed, then drops

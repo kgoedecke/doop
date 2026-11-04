@@ -29,10 +29,10 @@ interface Draft {
   id?: string
   name: string
   baseUrl: string
-  apiKey: string
+  /** undefined = keep the stored key; null = clear it; a string = replace it */
+  apiKey?: string | null
   model: string
   supportsVision: boolean
-  clearKey: boolean
 }
 
 const emptyDraft = (): Draft => ({
@@ -41,7 +41,6 @@ const emptyDraft = (): Draft => ({
   apiKey: '',
   model: '',
   supportsVision: true,
-  clearKey: false,
 })
 
 function messageFor(error: unknown, fallback: string): string {
@@ -147,10 +146,9 @@ export function CustomModelProfiles({
       id: profile.id,
       name: profile.name,
       baseUrl: profile.baseUrl,
-      apiKey: '',
+      apiKey: undefined,
       model: profile.model,
       supportsVision: profile.supportsVision,
-      clearKey: false,
     })
     setTestResult(null)
     setError('')
@@ -171,7 +169,10 @@ export function CustomModelProfiles({
       setTestResult(
         await api.testModelProfile({
           baseUrl: draft.baseUrl.trim(),
-          ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+          /* undefined keeps a saved profile's key on the server, an entered key
+             replaces it for this test, and null means it was deliberately cleared */
+          ...(draft.id ? { profileId: draft.id } : {}),
+          ...(draft.apiKey !== undefined ? { apiKey: draft.apiKey === null ? null : draft.apiKey.trim() || null } : {}),
           ...(draft.model.trim() ? { model: draft.model.trim() } : {}),
         }),
       )
@@ -186,6 +187,10 @@ export function CustomModelProfiles({
     }
   }
 
+  const refreshAll = useCallback(async () => {
+    await Promise.all([load(), refreshAccount()])
+  }, [load, refreshAccount])
+
   const save = async () => {
     if (!draft) return
     setBusy(true)
@@ -199,19 +204,17 @@ export function CustomModelProfiles({
       }
       if (draft.id) {
         const patch: CustomModelProfilePatch = { ...base }
-        if (draft.clearKey) patch.apiKey = null
-        else if (draft.apiKey.trim()) patch.apiKey = draft.apiKey.trim()
+        if (draft.apiKey !== undefined) patch.apiKey = draft.apiKey?.trim() || null
         await api.updateModelProfile(draft.id, patch)
       } else {
         await api.createModelProfile({
           ...base,
-          ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {}),
+          ...(draft.apiKey?.trim() ? { apiKey: draft.apiKey.trim() } : {}),
         })
       }
       setDraft(null)
       setTestResult(null)
-      await load()
-      await refreshAccount()
+      await refreshAll()
       onChange?.()
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))
@@ -240,8 +243,7 @@ export function CustomModelProfiles({
     setError('')
     try {
       await api.disconnectModelAccount()
-      await refreshAccount()
-      await load()
+      await refreshAll()
       onChange?.()
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))
@@ -258,8 +260,7 @@ export function CustomModelProfiles({
     setError('')
     try {
       await api.deleteModelProfile(target.id)
-      await load()
-      await refreshAccount()
+      await refreshAll()
       onChange?.()
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))
@@ -328,7 +329,9 @@ export function CustomModelProfiles({
             {active && <span className={planPill(true)}>{t('models.customActive')}</span>}
           </div>
           <p className="mt-1.5 text-copy text-ink-soft max-md:text-copy">{t('models.customLede')}</p>
-          <p className="mt-2 text-body text-ink-faint">{t('models.customSelfHostNote')}</p>
+          <p className="mt-2 text-body text-ink-faint">
+            {t('models.customSelfHostNote')} {t('models.customReplaceNote')}
+          </p>
 
           {!draft && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -442,12 +445,12 @@ export function CustomModelProfiles({
                 >
                   <Input
                     id="custom-model-key"
-                    value={draft.apiKey}
-                    onChange={(e) => setDraft({ ...draft, apiKey: e.target.value, clearKey: false })}
+                    value={draft.apiKey ?? ''}
+                    onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
                     placeholder={t('models.customApiKeyPlaceholder')}
                     type="password"
                     autoComplete="off"
-                    disabled={draft.clearKey}
+                    disabled={draft.id !== undefined && draft.apiKey === null}
                     spellCheck={false}
                   />
                 </Field>
@@ -469,8 +472,8 @@ export function CustomModelProfiles({
               {draft.id && (
                 <label className="mt-3 flex items-center gap-2 text-body text-ink-soft">
                   <Checkbox
-                    checked={draft.clearKey}
-                    onChange={(e) => setDraft({ ...draft, clearKey: e.target.checked, apiKey: '' })}
+                    checked={draft.apiKey === null}
+                    onChange={(e) => setDraft({ ...draft, apiKey: e.target.checked ? null : undefined })}
                   />
                   {t('models.customKeyClear')}
                 </label>

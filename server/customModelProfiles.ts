@@ -174,23 +174,36 @@ export interface CustomEndpointTestResult {
 }
 
 /** Ask an endpoint for its model list without saving anything. The result
- *  carries only codes and ids; the pasted key is used for this one request and
- *  can never come back through a message or response body. */
-export async function testCustomEndpoint(input: {
-  baseUrl: unknown
-  apiKey?: unknown
-  model?: unknown
-}): Promise<CustomEndpointTestResult> {
+ *  carries only codes and ids; a pasted key is used for this one request and
+ *  can never come back through a message or response body. `storedProfileId`
+ *  lets the edit form test a saved endpoint with its existing key without
+ *  ever sending that key back to the browser. */
+export async function testCustomEndpoint(
+  userId: string,
+  input: {
+    baseUrl: unknown
+    apiKey?: unknown
+    model?: unknown
+    profileId?: unknown
+  },
+): Promise<CustomEndpointTestResult> {
   try {
     const baseUrl = await normalizedBaseUrl(input.baseUrl)
-    const apiKey = normalizeKey(input.apiKey)
+    let apiKey = normalizeKey(input.apiKey)
+    if (input.profileId !== undefined) {
+      if (typeof input.profileId !== 'string') throw new CustomModelProfileInvalidError('That profile is not valid.')
+      const profile = await getProfile(userId, input.profileId)
+      if (!profile) throw new CustomModelProfileNotFoundError()
+      /* a blank key field on an edit keeps the stored key, so the test does
+         the same instead of silently testing an unauthenticated request */
+      if (input.apiKey === undefined) apiKey = profile.apiKey ?? null
+    }
     if (input.model !== undefined) normalizeModel(input.model)
     const body = await fetchCustomJson(
       customEndpointUrl(new URL(baseUrl), 'models'),
       {
         method: 'GET',
         headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-        signal: AbortSignal.timeout(8_000),
       },
       { timeoutMs: 8_000 },
     )

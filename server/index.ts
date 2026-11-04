@@ -1004,7 +1004,17 @@ app.post('/api/model-profiles/test', async (req, res) => {
   if (body.apiKey !== undefined && body.apiKey !== null && typeof body.apiKey !== 'string') {
     return res.status(400).json({ error: 'That API key is not valid.', code: 'invalid_input' })
   }
-  res.json(await customProfiles.testCustomEndpoint({ baseUrl: body.baseUrl, apiKey: body.apiKey, model: body.model }))
+  if (body.profileId !== undefined && typeof body.profileId !== 'string') {
+    return res.status(400).json({ error: 'That profile is not valid.', code: 'invalid_input' })
+  }
+  res.json(
+    await customProfiles.testCustomEndpoint(req.user!.id, {
+      baseUrl: body.baseUrl,
+      apiKey: body.apiKey,
+      model: body.model,
+      profileId: body.profileId,
+    }),
+  )
 })
 
 app.patch('/api/model-profiles/:id', async (req, res) => {
