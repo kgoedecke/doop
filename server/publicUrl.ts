@@ -53,7 +53,10 @@ for (const [network, prefix] of [
   blockedIpv6.addSubnet(network, prefix, 'ipv6')
 }
 
-function isPrivateIp(rawIp: string): boolean {
+/** Whether an address is outside the public internet: loopback, private,
+ *  link-local, multicast, unspecified, documentation and cloud metadata
+ *  ranges are all treated the same. Anything that is not an IP is blocked. */
+export function isBlockedIp(rawIp: string): boolean {
   const ip = rawIp.replace(/^\[|\]$/g, '')
   const family = net.isIP(ip)
   if (family === 0) return true
@@ -79,7 +82,7 @@ export function parsePublicHttpUrl(raw: string): URL {
     host.endsWith('.local') ||
     host.endsWith('.internal') ||
     (!isIp && !host.includes('.')) ||
-    (isIp && isPrivateIp(ipHost))
+    (isIp && isBlockedIp(ipHost))
   ) {
     throw new Error('that host is not reachable from here')
   }
@@ -107,14 +110,18 @@ async function resolvePublicNetworkUrl(raw: string | URL): Promise<ResolvedPubli
   const addresses: PublicAddress[] = literalFamily
     ? [{ address: host, family: literalFamily as 4 | 6 }]
     : ((await dns.lookup(host, { all: true, verbatim: true })) as PublicAddress[])
-  if (addresses.length === 0 || addresses.some(({ address }) => isPrivateIp(address))) {
+  if (addresses.length === 0 || addresses.some(({ address }) => isBlockedIp(address))) {
     throw new Error('that host is not reachable from here')
   }
   return { url, addresses }
 }
 
-export function createPinnedLookup(expectedHost: string, addresses: PublicAddress[]): LookupFunction {
-  if (!addresses.length || addresses.some(({ address }) => isPrivateIp(address))) {
+export function createPinnedLookup(
+  expectedHost: string,
+  addresses: PublicAddress[],
+  options: { allowPrivate?: boolean } = {},
+): LookupFunction {
+  if (!addresses.length || (!options.allowPrivate && addresses.some(({ address }) => isBlockedIp(address)))) {
     throw new Error('cannot pin a non-public address')
   }
   return (hostname, options, callback) => {

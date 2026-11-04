@@ -145,6 +145,11 @@ const schema = {
   /* ------------------------------------------------------ webhooks */
   WEBHOOK_ALLOW_PRIVATE_URLS: bool({ default: false }),
 
+  /* ------------------------------------------------- custom inference */
+  /* self-host only: allow an OpenAI-compatible endpoint on localhost or the
+     LAN. Public endpoints still have to be HTTPS. */
+  CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS: bool({ default: false }),
+
   /* ------------------------------------------------ resident agents */
   DOOP_AGENT_PROVIDER: str({ choices: ['anthropic', 'azure'], default: 'anthropic' }),
   ANTHROPIC_API_KEY: str({ default: undefined }),
