@@ -76,8 +76,6 @@ export const panels = {
   tokensEditTitle: 'Edit {type} token',
   tokensName: 'Name',
   tokensValue: 'Value',
-  tokensAlias: 'Alias…',
-  tokensNoAlias: 'No alias',
   tokensUnit: 'Unit',
   tokensUnitless: 'none',
   tokensValuePlaceholder: 'A CSS value, or var(--other) to alias a token',

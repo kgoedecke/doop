@@ -76,8 +76,6 @@ export const panels: Catalog['panels'] = {
   tokensEditTitle: 'Editar token de {type}',
   tokensName: 'Nome',
   tokensValue: 'Valor',
-  tokensAlias: 'Alias…',
-  tokensNoAlias: 'Sem alias',
   tokensUnit: 'Unidade',
   tokensUnitless: 'nenhuma',
   tokensValuePlaceholder: 'Um valor CSS, ou var(--outro) para referenciar um token',

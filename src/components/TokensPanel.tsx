@@ -528,8 +528,6 @@ export function TokenModal({
                   )}
                   <ValueInput
                     type={draft.type}
-                    self={token?.name ?? null}
-                    tokens={tokens}
                     value={theme ? (draft.themes[theme] ?? '') : draft.value}
                     placeholder={theme ? t('panels.tokensValueInherits') : t('panels.tokensValuePlaceholder')}
                     disabled={busy || readOnly}
@@ -617,13 +615,11 @@ function splitLength(value: string): { number: string; unit: string } | null {
 }
 
 /** A token value edited the way its type wants: a swatch and hex for a
- *  colour, a font list, a weight list, a number with its unit, a ratio, or
- *  an alias of another token of the same type. A value the control cannot
- *  read (a calc(), an unusual unit) falls back to text. */
+ *  colour, a font list, a weight list, a number with its unit, a ratio. A
+ *  value the control cannot read (a calc(), an alias an agent wrote) falls
+ *  back to text. */
 function ValueInput({
   type,
-  self,
-  tokens,
   value,
   placeholder,
   disabled,
@@ -631,9 +627,6 @@ function ValueInput({
   onReset,
 }: {
   type: TokenType
-  /** the token being edited, which may not alias itself */
-  self: string | null
-  tokens: readonly DesignToken[]
   value: string
   placeholder: string
   disabled: boolean
@@ -644,18 +637,19 @@ function ValueInput({
   const t = useT()
   const library = useCanvasFonts((state) => state.fonts)
   const alias = aliasOf(value)
-  const peers = sortTokens(tokens.filter((token) => token.type === type && token.name !== self))
   const kind = valueKind(type)
-  const resolved = alias ? (resolveToken(tokens, alias) ?? '') : value
   /* the number kinds scrub from their type's glyph, as the Design panel's fields do from their unit */
   const numeric = kind === 'length' || kind === 'ratio' || kind === 'opacity'
   const parsedForScrub = numeric && value ? splitLength(value) : null
+  /* an empty field (a theme following the default) scrubs from zero in the type's unit */
+  const scrubUnit = parsedForScrub?.unit || (kind === 'length' ? (type === 'letterSpacing' ? 'em' : 'px') : '')
   const scrub = useValueScrub({
-    value: parsedForScrub?.number ?? '',
-    enabled: numeric && !alias && !disabled && parsedForScrub !== null && parsedForScrub.number !== '',
+    value: value ? (parsedForScrub?.number ?? '') : '0',
+    enabled:
+      numeric && !alias && !disabled && (value === '' || (parsedForScrub !== null && parsedForScrub.number !== '')),
     min: kind === 'opacity' ? 0 : -Infinity,
     max: kind === 'opacity' ? 1 : Infinity,
-    onChange: (next) => onChange(`${next}${parsedForScrub?.unit ?? ''}`),
+    onChange: (next) => onChange(`${next}${scrubUnit}`),
   })
   const canReset = !!onReset && value.trim() !== '' && !disabled
   /* the field with the reset sitting inside its right end */
@@ -725,40 +719,6 @@ function ValueInput({
       )}
     </span>
   )
-
-  const aliasPick = peers.length > 0 && (
-    <Select
-      value={alias ?? LITERAL}
-      onValueChange={(next) => onChange(next === LITERAL ? (alias ? resolved : value) : `var(${next})`)}
-      disabled={disabled}
-    >
-      <SelectTrigger size="sm" className="w-[120px] flex-none" aria-label={t('panels.tokensAlias')}>
-        <SelectValue placeholder={t('panels.tokensAlias')} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={LITERAL}>{t('panels.tokensNoAlias')}</SelectItem>
-        {peers.map((token) => (
-          <SelectItem key={token.name} value={token.name}>
-            {tokenLabel(token.name)}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  )
-
-  if (alias)
-    return (
-      <div className="flex w-full items-center gap-2">
-        {kind === 'color' && (
-          <span
-            className="size-8 flex-none rounded-control shadow-ring"
-            style={{ background: resolved || 'transparent' }}
-          />
-        )}
-        <span className="min-w-0 flex-1 truncate font-mono text-copy text-ink-soft">{resolved}</span>
-        {aliasPick}
-      </div>
-    )
 
   let control: ReactNode
   if (kind === 'color') {
@@ -903,7 +863,6 @@ function ValueInput({
           <XIcon className="size-3.5" />
         </Button>
       )}
-      {aliasPick}
     </div>
   )
 }
