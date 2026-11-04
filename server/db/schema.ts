@@ -601,6 +601,8 @@ export const modelAccounts = pgTable('model_accounts', {
   /** epoch ms the access token expires; refreshed ahead of this */
   expiresAt: bigint('expires_at', { mode: 'number' }),
   apiKey: sealedText('api_key'),
+  /** active custom_model_profiles.id for kind 'custom-key'; never a secret */
+  profileId: text('profile_id'),
   /** the model tier this user picked; null = the server default */
   model: text('model'),
   /** OpenAI reasoning effort this user picked; null = the server default */
@@ -608,6 +610,28 @@ export const modelAccounts = pgTable('model_accounts', {
   connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
+
+/** Saved OpenAI-compatible inference endpoints. A user may keep several; the
+ *  active one is referenced by modelAccounts.profileId. The API key is sealed
+ *  like every other credential and is never returned to a browser. */
+export const customModelProfiles = pgTable(
+  'custom_model_profiles',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull(),
+    name: text('name').notNull(),
+    /** normalized base URL, e.g. https://provider.example/v1 */
+    baseUrl: text('base_url').notNull(),
+    apiKey: sealedText('api_key'),
+    /** the provider's own model id, passed through without family regexes */
+    model: text('model').notNull(),
+    /** explicit capability: screenshots are stripped when false */
+    supportsVision: boolean('supports_vision').notNull().default(true),
+    connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('custom_model_profiles_user_idx').on(t.userId)],
+)
 
 /* The curated background library behind search_backgrounds
    (server/backgrounds.ts). Bytes live in object storage under bg/<id>.webp

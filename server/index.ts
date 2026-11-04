@@ -73,6 +73,8 @@ import * as githubApp from './githubApp.ts'
 import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
+import * as customProfiles from './customModelProfiles.ts'
+import { CustomInferenceError } from './customInference.ts'
 import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
@@ -924,6 +926,8 @@ const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
   'anthropic-key': ANTHROPIC_MODELS,
   'openrouter-key': OPENROUTER_MODELS,
   'gemini-key': GEMINI_MODELS,
+  /* the catalog is profile-specific and loaded from /api/model-account/models */
+  'custom-key': [],
 }
 
 /* Every route that returns an account status returns the SAME shape: the
@@ -932,6 +936,133 @@ const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
 function accountView(status: modelAccounts.AccountStatus) {
   return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
 }
+
+function requestObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+}
+
+function profileFailure(res: express.Response, error: unknown) {
+  if (error instanceof customProfiles.CustomModelProfileNotFoundError) {
+    return res.status(404).json({ error: error.message, code: error.code })
+  }
+  if (error instanceof customProfiles.CustomModelProfileInvalidError) {
+    return res.status(400).json({ error: error.message, code: error.code })
+  }
+  if (error instanceof CustomInferenceError) {
+    return res.status(400).json({ error: error.message, code: error.code })
+  }
+  return res.status(400).json({
+    error: error instanceof Error ? error.message : 'could not save that custom endpoint',
+    code: 'invalid_input',
+  })
+}
+
+/** The user's saved custom endpoints. The active account only points at one;
+ *  the endpoint and key stay in this profile table and never enter a response. */
+app.get('/api/model-profiles', async (req, res) => {
+  try {
+    res.json(await customProfiles.listProfileViews(req.user!.id))
+  } catch {
+    res.status(500).json({ error: 'model profiles unavailable' })
+  }
+})
+
+app.post('/api/model-profiles', async (req, res) => {
+  const body = requestObject(req.body)
+  try {
+    if (
+      typeof body.name !== 'string' ||
+      typeof body.baseUrl !== 'string' ||
+      typeof body.model !== 'string' ||
+      typeof body.supportsVision !== 'boolean'
+    ) {
+      throw new customProfiles.CustomModelProfileInvalidError(
+        'Fill in the custom endpoint name, base URL, model and vision setting.',
+      )
+    }
+    if (body.apiKey !== undefined && body.apiKey !== null && typeof body.apiKey !== 'string') {
+      throw new customProfiles.CustomModelProfileInvalidError('That API key is not valid.')
+    }
+    const profile = await customProfiles.createProfile(req.user!.id, {
+      name: body.name,
+      baseUrl: body.baseUrl,
+      apiKey: body.apiKey,
+      model: body.model,
+      supportsVision: body.supportsVision,
+    })
+    res.json(customProfiles.profileView(profile, await customProfiles.activeCustomProfileId(req.user!.id)))
+  } catch (error) {
+    profileFailure(res, error)
+  }
+})
+
+app.post('/api/model-profiles/test', async (req, res) => {
+  const body = requestObject(req.body)
+  if (typeof body.baseUrl !== 'string') {
+    return res.status(400).json({ error: 'Enter the endpoint base URL.', code: 'invalid_input' })
+  }
+  if (body.apiKey !== undefined && body.apiKey !== null && typeof body.apiKey !== 'string') {
+    return res.status(400).json({ error: 'That API key is not valid.', code: 'invalid_input' })
+  }
+  res.json(await customProfiles.testCustomEndpoint({ baseUrl: body.baseUrl, apiKey: body.apiKey, model: body.model }))
+})
+
+app.patch('/api/model-profiles/:id', async (req, res) => {
+  const body = requestObject(req.body)
+  try {
+    const patch: customProfiles.CustomModelProfilePatch = {}
+    if (Object.hasOwn(body, 'name')) {
+      if (typeof body.name !== 'string')
+        throw new customProfiles.CustomModelProfileInvalidError('Give the custom endpoint a name.')
+      patch.name = body.name
+    }
+    if (Object.hasOwn(body, 'baseUrl')) {
+      if (typeof body.baseUrl !== 'string')
+        throw new customProfiles.CustomModelProfileInvalidError('Enter the endpoint base URL.')
+      patch.baseUrl = body.baseUrl
+    }
+    if (Object.hasOwn(body, 'model')) {
+      if (typeof body.model !== 'string') throw new customProfiles.CustomModelProfileInvalidError('Enter a model id.')
+      patch.model = body.model
+    }
+    if (Object.hasOwn(body, 'supportsVision')) {
+      if (typeof body.supportsVision !== 'boolean')
+        throw new customProfiles.CustomModelProfileInvalidError('Choose whether the model can see images.')
+      patch.supportsVision = body.supportsVision
+    }
+    if (Object.hasOwn(body, 'apiKey')) {
+      if (body.apiKey !== null && typeof body.apiKey !== 'string')
+        throw new customProfiles.CustomModelProfileInvalidError('That API key is not valid.')
+      patch.apiKey = body.apiKey
+    }
+    const profile = await customProfiles.updateProfile(req.user!.id, String(req.params.id), patch)
+    res.json(customProfiles.profileView(profile, await customProfiles.activeCustomProfileId(req.user!.id)))
+  } catch (error) {
+    profileFailure(res, error)
+  }
+})
+
+app.delete('/api/model-profiles/:id', async (req, res) => {
+  try {
+    await customProfiles.deleteProfile(req.user!.id, String(req.params.id))
+    res.json({ ok: true })
+  } catch (error) {
+    profileFailure(res, error)
+  }
+})
+
+app.post('/api/model-profiles/:id/activate', async (req, res) => {
+  try {
+    const profile = await customProfiles.getProfile(req.user!.id, String(req.params.id))
+    if (!profile) throw new customProfiles.CustomModelProfileNotFoundError()
+    const status = await modelAccounts.activateCustomProfile(req.user!.id, profile.id)
+    const preference = await getLocalAgentPreference(req.user!.id)
+    if (preference.enabled) await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
+    res.json(accountView(status))
+  } catch (error) {
+    profileFailure(res, error)
+  }
+})
 
 app.get('/api/model-account', (req, res) => {
   modelAccounts
