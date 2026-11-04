@@ -183,6 +183,16 @@ describe('exports', () => {
     expect(tailwindName({ name: '--body', type: 'fontSize' })).toBe('--text-body')
     const theme = tokensTailwind([token('--ink', 'color', '#111', 1), token('--brand', 'color', 'var(--ink)', 2)])
     expect(theme).toBe('@theme {\n  --color-ink: #111;\n  --color-brand: var(--color-ink);\n}')
+    /* a reference inside a function, and one with a fallback, follow the rename too */
+    const nested = tokensTailwind([
+      token('--ink', 'color', '#111', 1),
+      token('--tint', 'color', 'color-mix(in srgb, var(--ink) 50%, white)', 2),
+      token('--edge', 'color', 'var(--ink, #000)', 3),
+      token('--other', 'color', 'var(--unknown)', 4),
+    ])
+    expect(nested).toContain('--color-tint: color-mix(in srgb, var(--color-ink) 50%, white);')
+    expect(nested).toContain('--color-edge: var(--color-ink, #000);')
+    expect(nested).toContain('--color-other: var(--unknown);')
     /* two names that would export alike keep their own names apart */
     const clash = tokensTailwind([token('--primary', 'color', '#111', 1), token('--color-primary', 'color', '#222', 2)])
     expect(clash).toBe('@theme {\n  --primary: #111;\n  --color-primary: #222;\n}')
