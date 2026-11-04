@@ -79,7 +79,8 @@ in every frame and in aliasing tokens.
 
 ## Editor
 
-- Layers panel → Tokens tab (`src/components/TokensPanel.tsx`, a `BracesIcon` tab beside Layers):
+- Layers panel → Tokens tab (`src/components/TokensPanel.tsx`, a `BracesIcon` tab beside Layers; the
+  tab lives in the store as `layersTab`, so the collapsed rail's braces button opens the panel on it):
   one line with the themes dropdown (`ThemesMenu`, a popover with `default` fixed first, each
   other theme on a row whose name field renames it on Enter or blur and whose ✕ removes it, and a
   text line that adds one, saving at once) and the "+" menu of the eleven types in their three

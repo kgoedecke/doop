@@ -229,8 +229,10 @@ export function LayersPanel({
 }) {
   /* a row's pointerleave never fires if the panel goes away under it */
   useEffect(() => () => useStore.getState().setHoveredLayer(null), [])
-  /** which of the panel's two faces shows: the layer tree, or the design tokens */
-  const [tab, setTab] = useState<'layers' | 'tokens'>('layers')
+  /* which of the panel's two faces shows: the layer tree, or the design
+     tokens; in the store so the collapsed rail can open straight onto one */
+  const tab = useStore((s) => s.layersTab)
+  const setTab = useStore((s) => s.setLayersTab)
   /* view and comment links browse the tree; nothing in it moves or changes */
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const pageCanvas = usePageCanvas()
@@ -681,8 +683,25 @@ export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
       <ToolbarControl label={t('panels.layersExpandPanel')} side="right" onClick={() => setLayersOpen(true)}>
         <PanelExpandIcon />
       </ToolbarControl>
-      <ToolbarControl label={t('panels.layersRailCount', { count })} side="right" onClick={() => setLayersOpen(true)}>
+      <ToolbarControl
+        label={t('panels.layersRailCount', { count })}
+        side="right"
+        onClick={() => {
+          useStore.getState().setLayersTab('layers')
+          setLayersOpen(true)
+        }}
+      >
         <LayersIcon />
+      </ToolbarControl>
+      <ToolbarControl
+        label={t('panels.layersTabTokens')}
+        side="right"
+        onClick={() => {
+          useStore.getState().setLayersTab('tokens')
+          setLayersOpen(true)
+        }}
+      >
+        <BracesIcon />
       </ToolbarControl>
     </Toolbar>
   )
