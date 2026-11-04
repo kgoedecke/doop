@@ -102,9 +102,22 @@ async function resolveWithPolicy(
     throw new CustomInferenceError('unreachable', UNREACHABLE_MESSAGE)
   }
   if (!addresses.length) throw new CustomInferenceError('unreachable', UNREACHABLE_MESSAGE)
-  const privateTarget = addresses.some(({ address }) => isBlockedIp(address))
-  if (privateTarget && !allowPrivate) throw new CustomInferenceError('private_url_blocked', BLOCKED_MESSAGE)
-  if (url.protocol !== 'https:' && !privateTarget) throw new CustomInferenceError('url_insecure', INSECURE_MESSAGE)
+  /* Classify the resolved answer set instead of collapsing it into a single
+     "any private" flag: a mixed public/private answer is neither a clean
+     private endpoint nor a fully public one, and must not authorize HTTP. */
+  const hasPublic = addresses.some(({ address }) => !isBlockedIp(address))
+  const allBlocked = addresses.every(({ address }) => isBlockedIp(address))
+  const hasBlocked = addresses.some(({ address }) => isBlockedIp(address))
+  if (allBlocked) {
+    if (!allowPrivate) throw new CustomInferenceError('private_url_blocked', BLOCKED_MESSAGE)
+  } else if (hasPublic) {
+    /* At least one public answer: public HTTP is forbidden regardless of the
+       operator opt-in, so a mixed answer cannot authorize an HTTP endpoint. */
+    if (url.protocol !== 'https:') throw new CustomInferenceError('url_insecure', INSECURE_MESSAGE)
+    /* HTTPS keeps the existing mixed-answer policy: refuse when private
+       endpoints are disabled, otherwise pin the approved answer set. */
+    if (hasBlocked && !allowPrivate) throw new CustomInferenceError('private_url_blocked', BLOCKED_MESSAGE)
+  }
   return { url, addresses, allowPrivate }
 }
 
