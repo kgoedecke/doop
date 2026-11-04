@@ -40,8 +40,6 @@ const MISSING = [
   'set_canvas_pages',
   'create_canvas_page',
   'set_page_background',
-  'reply_to_comment',
-  'resolve_comment',
   'export_frame',
   'upload_asset',
   'list_linear_issues', // integration tools, registered by their connections
