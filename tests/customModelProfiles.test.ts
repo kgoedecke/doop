@@ -224,6 +224,32 @@ describe('custom model profiles', () => {
     expect(await getAccount('alice')).toBeNull()
   })
 
+  it('keeps independent profile updates made concurrently', async () => {
+    const profile = await createProfile('alice', input({ name: 'A', model: 'm-a' }))
+
+    await Promise.all([
+      updateProfile('alice', profile.id, { model: 'm-b' }),
+      updateProfile('alice', profile.id, { name: 'B' }),
+    ])
+
+    expect(await getProfile('alice', profile.id)).toMatchObject({ name: 'B', model: 'm-b' })
+  })
+
+  it('activation and deletion cannot leave an account pointing at a deleted profile', async () => {
+    const profile = await createProfile('alice', input())
+
+    const outcomes = await Promise.allSettled([
+      activateCustomProfile('alice', profile.id),
+      deleteProfile('alice', profile.id),
+    ])
+
+    const account = await getAccount('alice')
+    if (account?.profileId) {
+      expect(await getProfile('alice', account.profileId)).not.toBeNull()
+    }
+    expect(outcomes.length).toBe(2)
+  })
+
   it('reseals legacy plaintext keys in the custom profile table on boot', async () => {
     const now = Date.now()
     await db.execute(sql`

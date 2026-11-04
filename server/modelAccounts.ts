@@ -3,7 +3,7 @@ import http from 'node:http'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
-import { modelAccounts } from './db/schema.ts'
+import { customModelProfiles, modelAccounts } from './db/schema.ts'
 import {
   DEFAULT_ANTHROPIC_MODEL,
   GEMINI_MODELS,
@@ -14,7 +14,7 @@ import {
 import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
 import { effortFor, modelFor } from './openaiAgent.ts'
 import { isCustomModelId } from '../shared/customModel.ts'
-import { getProfile, updateProfile } from './customModelProfiles.ts'
+import { updateProfile } from './customModelProfiles.ts'
 
 /**
  * "Bring your own model": a user connects their ChatGPT subscription (or an
@@ -310,13 +310,51 @@ export async function disconnect(userId: string): Promise<void> {
 /** Make one of this user's saved profiles the active model account. Only the
  *  pointer and model are copied; the endpoint and key stay in the profile. */
 export async function activateCustomProfile(userId: string, profileId: string): Promise<AccountStatus> {
-  const profile = await getProfile(userId, profileId)
-  if (!profile) throw new Error('That custom endpoint profile was not found.')
-  await save({
-    userId,
-    kind: 'custom-key',
-    profileId: profile.id,
-    model: profile.model,
+  await db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select()
+      .from(customModelProfiles)
+      .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, profileId)))
+      .for('update')
+    if (!locked) throw new Error('That custom endpoint profile was not found.')
+
+    const now = Date.now()
+    const row = {
+      userId,
+      kind: 'custom-key' as const,
+      accountId: null,
+      email: null,
+      plan: null,
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      apiKey: null,
+      profileId: locked.id,
+      model: locked.model,
+      reasoningEffort: null,
+      connectedAt: now,
+      updatedAt: now,
+    }
+    await tx
+      .insert(modelAccounts)
+      .values(row)
+      .onConflictDoUpdate({
+        target: modelAccounts.userId,
+        set: {
+          kind: row.kind,
+          accountId: row.accountId,
+          email: row.email,
+          plan: row.plan,
+          accessToken: row.accessToken,
+          refreshToken: row.refreshToken,
+          expiresAt: row.expiresAt,
+          apiKey: row.apiKey,
+          profileId: row.profileId,
+          model: row.model,
+          reasoningEffort: row.reasoningEffort,
+          updatedAt: row.updatedAt,
+        },
+      })
   })
   return getStatus(userId)
 }
@@ -325,15 +363,17 @@ export async function activateCustomProfile(userId: string, profileId: string): 
  *  inactive profile, or one the user has already switched away from, must not
  *  disconnect whatever is active now. */
 export async function disconnectCustomProfile(userId: string, profileId: string): Promise<void> {
-  await db
-    .delete(modelAccounts)
-    .where(
-      and(
-        eq(modelAccounts.userId, userId),
-        eq(modelAccounts.kind, 'custom-key'),
-        eq(modelAccounts.profileId, profileId),
-      ),
-    )
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(modelAccounts)
+      .where(
+        and(
+          eq(modelAccounts.userId, userId),
+          eq(modelAccounts.kind, 'custom-key'),
+          eq(modelAccounts.profileId, profileId),
+        ),
+      )
+  })
 }
 
 /**

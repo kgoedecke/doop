@@ -260,40 +260,68 @@ export async function updateProfile(
   id: string,
   patch: CustomModelProfilePatch,
 ): Promise<CustomModelProfile> {
-  const existing = await getProfile(userId, id)
-  if (!existing) throw new CustomModelProfileNotFoundError()
-  const next = {
-    name: patch.name === undefined ? existing.name : normalizeName(patch.name),
-    baseUrl: patch.baseUrl === undefined ? existing.baseUrl : await normalizedBaseUrl(patch.baseUrl),
-    model: patch.model === undefined ? existing.model : normalizeModel(patch.model),
-    supportsVision: patch.supportsVision === undefined ? existing.supportsVision : patch.supportsVision !== false,
-    apiKey: Object.hasOwn(patch, 'apiKey') ? normalizeKey(patch.apiKey) : (existing.apiKey ?? null),
+  const set: Partial<typeof customModelProfiles.$inferInsert> = { updatedAt: Date.now() }
+  if (Object.hasOwn(patch, 'name')) set.name = normalizeName(patch.name)
+  if (Object.hasOwn(patch, 'baseUrl')) set.baseUrl = await normalizedBaseUrl(patch.baseUrl)
+  if (Object.hasOwn(patch, 'model')) set.model = normalizeModel(patch.model)
+  if (Object.hasOwn(patch, 'supportsVision')) {
+    set.supportsVision = patch.supportsVision !== false
   }
-  await db
-    .update(customModelProfiles)
-    .set({ ...next, updatedAt: Date.now() })
-    .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, id)))
-  const updated = await getProfile(userId, id)
-  if (!updated) throw new CustomModelProfileNotFoundError()
-  /* when the edited profile is the active one, its model is what the account
-     status and picker must show */
-  await db
-    .update(modelAccounts)
-    .set({ model: updated.model, updatedAt: Date.now() })
-    .where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, 'custom-key'), eq(modelAccounts.profileId, id)))
-  return updated
+  if (Object.hasOwn(patch, 'apiKey')) set.apiKey = await normalizeKey(patch.apiKey)
+
+  const modelChanged = Object.hasOwn(patch, 'model')
+
+  return await db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select()
+      .from(customModelProfiles)
+      .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, id)))
+      .for('update')
+    if (!locked) throw new CustomModelProfileNotFoundError()
+
+    const [row] = await tx
+      .update(customModelProfiles)
+      .set(set)
+      .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, id)))
+      .returning()
+    if (!row) throw new CustomModelProfileNotFoundError()
+
+    /* when the edited profile is the active one, its model is what the account
+       status and picker must show — guarded by profileId so a stale edit can
+       never move an account that has since switched to another profile */
+    if (modelChanged) {
+      await tx
+        .update(modelAccounts)
+        .set({ model: set.model, updatedAt: Date.now() })
+        .where(
+          and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, 'custom-key'), eq(modelAccounts.profileId, id)),
+        )
+    }
+
+    return toProfile(row)
+  })
 }
 
 export async function deleteProfile(userId: string, id: string): Promise<void> {
-  const existing = await getProfile(userId, id)
-  if (!existing) throw new CustomModelProfileNotFoundError()
-  await db
-    .delete(customModelProfiles)
-    .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, id)))
-  /* The account points at the profile, so deleting the active one must drop
-     that pointer too. Guarded by profileId so a stale delete can never remove
-     an account that has since switched to another profile. */
-  await db
-    .delete(modelAccounts)
-    .where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, 'custom-key'), eq(modelAccounts.profileId, id)))
+  await db.transaction(async (tx) => {
+    const [locked] = await tx
+      .select()
+      .from(customModelProfiles)
+      .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, id)))
+      .for('update')
+    if (!locked) throw new CustomModelProfileNotFoundError()
+
+    await tx
+      .delete(customModelProfiles)
+      .where(and(eq(customModelProfiles.userId, userId), eq(customModelProfiles.id, id)))
+
+    /* The account points at the profile, so deleting the active one must drop
+       that pointer too. Guarded by profileId so a stale delete can never remove
+       an account that has since switched to another profile. */
+    await tx
+      .delete(modelAccounts)
+      .where(
+        and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, 'custom-key'), eq(modelAccounts.profileId, id)),
+      )
+  })
 }
