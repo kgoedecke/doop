@@ -116,6 +116,36 @@ describe('human feedback on read-only MCP tools', () => {
       await close()
     }
   })
+
+  it.each([
+    ['create_canvas_page', { canvas_id: CANVAS.id, name: 'Mobile', agent_name: 'Claude' }],
+    [
+      'set_canvas_pages',
+      {
+        canvas_id: CANVAS.id,
+        expectedPages: [{ id: 'c1:page1', name: 'Page 1' }],
+        pages: [{ id: 'c1:page1', name: 'Main' }],
+        agent_name: 'Claude',
+      },
+    ],
+    ['set_page_background', { canvas_id: CANVAS.id, color: '#1e1e1e', agent_name: 'Claude' }],
+    ['set_prototype_start', { canvas_id: CANVAS.id, frame_id: FRAME.id, agent_name: 'Claude' }],
+  ])('%s claims and delivers feedback like every other write', async (tool, args) => {
+    const page = { id: 'c1:page2', name: 'Mobile' }
+    vi.spyOn(actions, 'createCanvasPage').mockReturnValue({ page, pages: [{ id: 'c1:page1', name: 'Page 1' }, page] })
+    vi.spyOn(actions, 'setCanvasPages').mockImplementation((_id, pages) => pages)
+    vi.spyOn(actions, 'setPageBackground').mockReturnValue([{ id: 'c1:page1', name: 'Page 1' }])
+    vi.spyOn(actions, 'setFlowStart').mockReturnValue([{ id: 'c1:page1', name: 'Page 1', startFrameId: FRAME.id }])
+    const take = vi.spyOn(actions, 'takeFeedbackFor').mockReturnValue([FEEDBACK])
+    const { client, close } = await connect()
+    try {
+      const raw = await callText(client, tool, args)
+      expect(take).toHaveBeenCalledWith(CANVAS.id, 'Claude')
+      expect(raw).toContain(FEEDBACK.text)
+    } finally {
+      await close()
+    }
+  })
 })
 
 describe('openFeedbackFor', () => {
