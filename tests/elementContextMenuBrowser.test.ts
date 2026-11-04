@@ -14,6 +14,7 @@ declare global {
       updateHtml: (html: string) => void
       selectMany: (ids: string[]) => void
       undo: () => Promise<void>
+      redo: () => Promise<void>
     }
   }
 }
@@ -286,6 +287,31 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     expect(await page.evaluate(() => window.contextMenuHarness.selection())).toEqual({ frameId: 'f', selector: '#art' })
     await choose('Lock')
     await expect.poll(() => saved.html).toContain('<svg id="art" width="80" height="50" data-doop-locked="true">')
+  })
+
+  it('keeps rename undo and redo in sync with an actively edited text layer', async () => {
+    const doc = (await frameDoc())!
+    const box = await (await doc.$('#text'))!.boundingBox()
+    await page.mouse.click(box!.x + 20, box!.y + 10, { count: 2 })
+    await doc.waitForSelector('style[data-v-edit]')
+    const row = '[data-row-key="f|#text"]'
+    await page.click(`${row} > span:nth-of-type(3)`, { count: 2 })
+    await page.waitForSelector('input[aria-label="Item name"]')
+    await page.keyboard.type('Renamed text')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => saved.html).toContain('data-doop-name="Renamed text"')
+    await page.evaluate(() => window.contextMenuHarness.undo())
+    expect(await doc.$eval('#text', (el) => el.getAttribute('data-doop-name'))).toBeNull()
+    await page.evaluate(() => window.contextMenuHarness.redo())
+    expect(await doc.$eval('#text', (el) => el.getAttribute('data-doop-name'))).toBe('Renamed text')
+    await page.evaluate(() => window.contextMenuHarness.undo())
+    expect(await doc.$('style[data-v-edit]')).not.toBeNull()
+    await doc.$eval('#text', (el) => {
+      el.textContent = 'Typed after undo'
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await expect.poll(() => saved.html).toContain('Typed after undo')
+    expect(saved.html).not.toContain('data-doop-name')
   })
 
   it('opens the element menu during inline text editing and preserves the final text', async () => {

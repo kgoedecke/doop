@@ -12,12 +12,15 @@ import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from '
 import {
   deleteFramesTracked,
   dropEntry,
+  historyEpoch,
   keepTransferDestination,
   recordDrawingTransfer,
+  recordLayerName,
   recordStack,
   recordUpdate,
   recordUpdates,
   saveStack,
+  saveLayerName,
   trackSave,
 } from './history'
 import {
@@ -33,7 +36,6 @@ import {
   removeElements,
   replaceElement,
   setElementLocked,
-  setElementName,
   setElementsHidden,
   reorderElements,
   shiftElement,
@@ -44,52 +46,68 @@ import {
 
 /* ---- element edits shared by the Layers rail and the element panel ---- */
 
+/* Serializing renames gives each save a confirmed predecessor. A second
+   failed rename must never roll back to the first failed, optimistic name. */
+const pendingRenames = new Map<string, Promise<void>>()
+function queueRename(frameId: string, edit: (frame: Frame) => Promise<void>) {
+  const canvasId = useStore.getState().canvas?.id
+  const started = historyEpoch()
+  const run = async () => {
+    const s = useStore.getState()
+    if (s.canvas?.id !== canvasId || historyEpoch() !== started || !canEditOpenCanvas(s)) return
+    const frame = s.canvas?.frames.find((f) => f.id === frameId)
+    if (frame) await edit(frame)
+  }
+  const prior = pendingRenames.get(frameId)
+  const pending = (prior ? prior.then(run) : run()).finally(() => {
+    if (pendingRenames.get(frameId) === pending) pendingRenames.delete(frameId)
+  })
+  pendingRenames.set(frameId, pending)
+  trackSave(pending)
+}
+
 export function renameFrame(frameId: string, value: string) {
-  const store = useStore.getState()
-  const frame = store.canvas?.frames.find((f) => f.id === frameId)
   const name = value.trim()
-  if (!frame || !canEditOpenCanvas(store) || isStackLocked(frame) || !name || name === frame.name) return
-  const entry = recordUpdate(frame.id, { name: frame.name }, { name }, true)
-  store.patchFrameLocal(frame.id, { name })
-  trackSave(
-    api.updateFrame(frame.id, { name }).catch((err: unknown) => {
+  if (!name) return
+  queueRename(frameId, async (frame) => {
+    if (isStackLocked(frame) || name === frame.name) return
+    const entry = recordUpdate(frame.id, { name: frame.name }, { name }, true)
+    const started = historyEpoch()
+    useStore.getState().patchFrameLocal(frame.id, { name })
+    try {
+      await api.updateFrame(frame.id, { name })
+    } catch (err) {
       if (entry) dropEntry(entry)
       const s = useStore.getState()
-      if (s.canvas?.id !== frame.canvasId) return
+      if (s.canvas?.id !== frame.canvasId || historyEpoch() !== started) return
       // A failed save must not overwrite a newer name from another edit.
       if (s.canvas.frames.find((f) => f.id === frame.id)?.name === name) {
         s.patchFrameLocal(frame.id, { name: frame.name })
       }
       s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name: frame.name })))
-    }),
-  )
+    }
+  })
 }
 
 export function renameLayer(frameId: string, selector: string, value: string) {
-  const store = useStore.getState()
-  const frame = store.canvas?.frames.find((f) => f.id === frameId)
   const name = value.trim()
-  if (!frame || !canEditOpenCanvas(store) || isLayerLocked(frame, selector) || !name) return
-  const before = elementName(frame.html, selector)
-  if (before === name) return
-  const html = setElementName(frame.html, selector, name)
-  if (html === null) return
-  const entry = recordUpdate(frame.id, { html: frame.html }, { html }, true)
-  store.patchFrameLocal(frame.id, { html })
-  // Text editing can defer full HTML updates, so also update the live attribute.
-  void requestFrame(frame.id, 'doop:rename', { selector, name })
-  trackSave(
-    api.updateFrame(frame.id, { html }).catch((err: unknown) => {
-      if (entry) dropEntry(entry)
+  if (!name) return
+  queueRename(frameId, async (frame) => {
+    if (isLayerLocked(frame, selector)) return
+    const before = elementName(frame.html, selector)
+    if (before === name) return
+    const entry = recordLayerName(frame.id, selector, before, name)
+    const started = historyEpoch()
+    try {
+      await saveLayerName(frame.id, selector, name)
+    } catch (err) {
+      dropEntry(entry)
       const s = useStore.getState()
-      if (s.canvas?.id !== frame.canvasId) return
-      if (s.canvas.frames.find((f) => f.id === frame.id)?.html === html) {
-        s.patchFrameLocal(frame.id, { html: frame.html })
-        void requestFrame(frame.id, 'doop:rename', { selector, name: before })
+      if (s.canvas?.id === frame.canvasId && historyEpoch() === started) {
+        s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name })))
       }
-      s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name })))
-    }),
-  )
+    }
+  })
 }
 
 export function saveFrameHtml(frame: Frame, html: string) {

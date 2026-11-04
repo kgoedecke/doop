@@ -18,6 +18,7 @@ vi.mock('../src/lib/frameBridge', () => ({
 
 const { useStore } = await import('../src/lib/store')
 const { clearHistory, undo, redo } = await import('../src/lib/history')
+const { renameFrame, renameLayer } = await import('../src/lib/layerEdits')
 const { LayersPanel } = await import('../src/components/LayersPanel')
 const { TooltipProvider } = await import('../src/components/ui/tooltip')
 
@@ -263,4 +264,48 @@ describe('renaming in the Layers panel', () => {
     await act(async () => undo())
     expect(updateFrame).toHaveBeenCalledTimes(1)
   })
+
+  it.each([
+    ['frame', false],
+    ['layer', false],
+    ['frame', true],
+    ['layer', true],
+  ] as const)(
+    'uses the confirmed name after an overlapping %s save fails (second succeeds: %s)',
+    async (kind, secondSucceeds) => {
+      showLayers()
+      let rejectFirst!: (error: Error) => void
+      let finishSecond!: () => void
+      updateFrame.mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectFirst = reject
+          }),
+      )
+      updateFrame.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            finishSecond = () => (secondSucceeds ? resolve() : reject(new Error('offline again')))
+          }),
+      )
+      const rename = (name: string) => (kind === 'frame' ? renameFrame('f1', name) : renameLayer('f1', '#photo', name))
+      const currentName = () =>
+        kind === 'frame'
+          ? useStore.getState().canvas!.frames.find((f) => f.id === 'f1')!.name
+          : savedDocument().querySelector('#photo')?.getAttribute('data-doop-name')
+      act(() => {
+        rename('A')
+        rename('B')
+      })
+      expect(updateFrame).toHaveBeenCalledTimes(1)
+      await act(async () => rejectFirst(new Error('offline')))
+      expect(updateFrame).toHaveBeenCalledTimes(2)
+      expect(currentName()).toBe('B')
+      await act(async () => finishSecond())
+      expect(currentName()).toBe(secondSucceeds ? 'B' : kind === 'frame' ? 'Frame' : null)
+      await act(async () => undo())
+      expect(currentName()).toBe(kind === 'frame' ? 'Frame' : null)
+      expect(updateFrame).toHaveBeenCalledTimes(secondSucceeds ? 3 : 2)
+    },
+  )
 })
