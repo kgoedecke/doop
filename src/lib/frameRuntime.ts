@@ -1197,6 +1197,15 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         }
       }
     }
+    if (d.type === 'doop:rename') {
+      var namedEl = null
+      try { namedEl = d.selector ? document.querySelector(d.selector) : null } catch (e) { /* bad selector */ }
+      if (namedEl) {
+        if (typeof d.name === 'string') namedEl.setAttribute('data-doop-name', d.name)
+        else if (d.name === null) namedEl.removeAttribute('data-doop-name')
+      }
+      parent.postMessage({ type: 'doop:rename-result', reqId: d.reqId, ok: !!namedEl }, '*')
+    }
     // Mirror the Layers eye in the live document, including during text edits.
     if (d.type === 'doop:visibility') {
       var hideEl = null

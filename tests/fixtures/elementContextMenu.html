@@ -19,7 +19,7 @@
         ContextMenuItem,
       } from '/src/components/ui/context-menu.tsx'
       import { useStore } from '/src/lib/store.ts'
-      import { clearHistory, undo } from '/src/lib/history.ts'
+      import { clearHistory, undo, redo } from '/src/lib/history.ts'
       import '/src/styles.css'
 
       window.contextMenuHarness = {
@@ -34,6 +34,7 @@
         updateHtml: (html) => useStore.getState().patchFrameLocal('f', { html }),
         selectMany: (ids) => useStore.getState().selectMany(ids),
         undo,
+        redo,
       }
 
       function Fixture() {

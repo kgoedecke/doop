@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import type { Frame } from '../../shared/types'
 import { copyElementLink } from '../lib/elementLink'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
@@ -18,17 +19,38 @@ export interface LiveHit {
 }
 
 /** Shared by a layer row and the element under a canvas right-click. */
-export function ElementContextMenu({ frame, selector, hit }: { frame: Frame; selector: string | null; hit?: LiveHit }) {
+type ElementMenuProps = { frame: Frame; selector: string | null; hit?: LiveHit; onRename?: () => void }
+
+export function ElementContextMenu({ frame, selector, hit, onRename }: ElementMenuProps) {
+  const renameRequested = useRef(false)
   return (
-    <ContextMenuContent>
-      <ElementMenuItems frame={frame} selector={selector} hit={hit} />
+    <ContextMenuContent
+      onCloseAutoFocus={(event) => {
+        if (!renameRequested.current) return
+        event.preventDefault()
+        renameRequested.current = false
+        onRename?.()
+      }}
+    >
+      <ElementMenuItems
+        frame={frame}
+        selector={selector}
+        hit={hit}
+        onRename={
+          onRename
+            ? () => {
+                renameRequested.current = true
+              }
+            : undefined
+        }
+      />
     </ContextMenuContent>
   )
 }
 
 /** Radix mounts these children only while the menu is open. Closed layer
  *  rows must not parse their frame HTML just to render a dormant menu. */
-function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: string | null; hit?: LiveHit }) {
+function ElementMenuItems({ frame, selector, hit, onRename }: ElementMenuProps) {
   const hidden = selector ? isElementHidden(frame.html, selector) : null
   const exists = hidden !== null
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
@@ -60,6 +82,11 @@ function ElementMenuItems({ frame, selector, hit }: { frame: Frame; selector: st
       </ContextMenuItem>
       {selector && exists && (
         <>
+          {onRename && (
+            <ContextMenuItem disabled={locked} onSelect={onRename}>
+              {t('panels.layersRename')}
+            </ContextMenuItem>
+          )}
           <ContextMenuItem disabled={locked} onSelect={() => duplicateLayer(frame, selector)}>
             {t('stage.duplicate')}
             <MenuHint>{MOD_KEY}D</MenuHint>
