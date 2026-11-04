@@ -84,7 +84,7 @@ in every frame and in aliasing tokens.
   laid out like the Pages section. A "Themes" heading whose plus adds `theme-N` at once, over a
   row per theme, `default` first, the picked one ticked: the token rows show that theme's values
   (`effectiveValue`, an inherited default greyed). A right click on a theme row renames it in
-  place (its values follow) or deletes it; `default` is fixed. Then a "Tokens" heading whose plus
+  place (a double click on the name does too; its values follow) or deletes it; `default` is fixed. Then a "Tokens" heading whose plus
   is the menu of the eleven types in their three groups, over one folding row per type (chevron,
   glyph, as a frame in the layer tree) with the token rows under it. Picking a type opens
   `TokenModal` named `stem-N` for it (`nextTokenName`: `radius-1`, `color-2`, past the names

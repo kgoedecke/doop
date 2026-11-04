@@ -813,6 +813,13 @@ function ThemeRow({
   const reclaimed = useRef(false)
   const t = useT()
 
+  function startRename() {
+    openedAt.current = Date.now()
+    reclaimed.current = false
+    setName(theme)
+    setRenaming(true)
+  }
+
   function commit() {
     const to = name.trim().toLowerCase()
     setRenaming(false)
@@ -878,6 +885,9 @@ function ThemeRow({
           aria-checked={on}
           className={cn('min-w-0 flex-1 truncate py-1.5 pl-0.5 text-left', on && 'font-medium')}
           onClick={onShow}
+          onDoubleClick={() => {
+            if (!fixed && !readOnly) startRename()
+          }}
         >
           {theme}
         </Pressable>
@@ -900,10 +910,7 @@ function ThemeRow({
         <ContextMenuItem
           onSelect={() => {
             renameStarting.current = true
-            openedAt.current = Date.now()
-            reclaimed.current = false
-            setName(theme)
-            setRenaming(true)
+            startRename()
           }}
         >
           {t('panels.tokensRenameThemeItem')}

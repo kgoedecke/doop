@@ -182,6 +182,15 @@ describe('TokensSection', () => {
           new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 10 }),
         )
       })
+    /* a double click on the name opens the rename too */
+    act(() => themeRow('dark').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+    expect(document.querySelector('input[aria-label="Rename dark"]')).toBeTruthy()
+    act(() => {
+      document
+        .querySelector<HTMLInputElement>('input[aria-label="Rename dark"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    expect(document.querySelector('input[aria-label="Rename dark"]')).toBeNull()
     rightClick('dark')
     menuItem('Rename')
     const field = document.querySelector<HTMLInputElement>('input[aria-label="Rename dark"]')!
