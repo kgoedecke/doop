@@ -151,7 +151,7 @@ describe('TokensSection', () => {
       'dark',
     ])
     expect(input('same as default').value).toBe('#eee')
-    act(() => button('Reset dark to the default value').click())
+    act(() => button('Back to the default value').click())
     expect(input('same as default').value).toBe('')
     type(document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, 'color-text')
     await act(async () => {

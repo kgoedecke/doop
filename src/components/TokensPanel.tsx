@@ -49,7 +49,6 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   DesktopIcon,
-  HistoryIcon,
   PaletteIcon,
   PlusIcon,
   RadiusIcon,
@@ -59,6 +58,7 @@ import {
   TextIcon,
   TextSizeIcon,
   VerticalPaddingIcon,
+  XIcon,
 } from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
 import { useValueScrub } from '@/hooks/use-value-scrub'
@@ -304,6 +304,7 @@ export function TokensSection() {
           canvasId={canvasId}
           name={'name' in open ? open.name : null}
           createType={'create' in open ? open.create : null}
+          currentTheme={shown}
           onClose={() => setOpen(null)}
         />
       )}
@@ -376,6 +377,7 @@ export function TokenModal({
   name,
   createType,
   initialValue,
+  currentTheme,
   onCreated,
   onClose,
 }: {
@@ -383,6 +385,8 @@ export function TokenModal({
   name: string | null
   createType: TokenType | null
   initialValue?: string
+  /** the theme the frames show; its value row is highlighted */
+  currentTheme?: string | null
   onCreated?: (name: string) => void
   onClose: () => void
 }) {
@@ -506,9 +510,14 @@ export function TokenModal({
           </span>
           <div className="flex min-w-0 flex-col gap-1.5">
             {[null, ...themes].map((theme) => {
-              const own = theme ? draft.themes[theme]?.trim() : draft.value
               return (
-                <div key={theme ?? DEFAULT_THEME} className="flex items-center gap-2">
+                <div
+                  key={theme ?? DEFAULT_THEME}
+                  className={cn(
+                    '-mx-1.5 flex items-center gap-2 rounded-row px-1.5 py-1',
+                    (theme ?? null) === (currentTheme ?? null) && 'bg-sub',
+                  )}
+                >
                   {themes.length > 0 && (
                     <span
                       data-theme-label
@@ -527,20 +536,8 @@ export function TokenModal({
                     onChange={(value) =>
                       setDraft(theme ? { ...draft, themes: { ...draft.themes, [theme]: value } } : { ...draft, value })
                     }
+                    onReset={theme ? () => setDraft({ ...draft, themes: { ...draft.themes, [theme]: '' } }) : undefined}
                   />
-                  {theme && (
-                    <Button
-                      variant="bare"
-                      size="icon-sm"
-                      className={cn('size-7 flex-none rounded-tag text-ink-faint hover:text-ink', !own && 'invisible')}
-                      aria-label={t('panels.tokensResetTheme', { theme })}
-                      title={t('panels.tokensResetTheme', { theme })}
-                      disabled={busy || readOnly || !own}
-                      onClick={() => setDraft({ ...draft, themes: { ...draft.themes, [theme]: '' } })}
-                    >
-                      <HistoryIcon className="size-3.5" />
-                    </Button>
-                  )}
                 </div>
               )
             })}
@@ -631,6 +628,7 @@ function ValueInput({
   placeholder,
   disabled,
   onChange,
+  onReset,
 }: {
   type: TokenType
   /** the token being edited, which may not alias itself */
@@ -640,6 +638,8 @@ function ValueInput({
   placeholder: string
   disabled: boolean
   onChange: (value: string) => void
+  /** a themed value: the ✕ inside the field puts it back to following the default */
+  onReset?: () => void
 }) {
   const t = useT()
   const library = useCanvasFonts((state) => state.fonts)
@@ -657,6 +657,28 @@ function ValueInput({
     max: kind === 'opacity' ? 1 : Infinity,
     onChange: (next) => onChange(`${next}${parsedForScrub?.unit ?? ''}`),
   })
+  const canReset = !!onReset && value.trim() !== '' && !disabled
+  /* the field with the reset sitting inside its right end */
+  const withReset = (field: ReactNode) =>
+    onReset ? (
+      <span className="relative min-w-0 flex-1">
+        {field}
+        {canReset && (
+          <Button
+            variant="bare"
+            size="icon-sm"
+            className="absolute top-1/2 right-1 size-6 -translate-y-1/2 rounded-tag text-ink-faint hover:text-ink"
+            aria-label={t('panels.tokensResetTheme')}
+            title={t('panels.tokensResetTheme')}
+            onClick={onReset}
+          >
+            <XIcon className="size-3.5" />
+          </Button>
+        )}
+      </span>
+    ) : (
+      field
+    )
   const Glyph = TOKEN_TYPE_ICON[type]
   const glyph = (
     <span
@@ -728,14 +750,16 @@ function ValueInput({
             onChange={(e) => onChange(e.target.value)}
           />
         </label>
-        <Input
-          variant="well"
-          className="min-w-0 flex-1 font-mono"
-          placeholder={placeholder}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        {withReset(
+          <Input
+            variant="well"
+            className={cn('w-full min-w-0 font-mono', onReset && 'pr-8')}
+            placeholder={placeholder}
+            value={value}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.value)}
+          />,
+        )}
       </>
     )
   } else if (kind === 'family') {
@@ -779,19 +803,21 @@ function ValueInput({
     control = (
       <>
         {glyph}
-        <Input
-          type="number"
-          variant="well"
-          className="min-w-0 flex-1 font-mono"
-          aria-label={t('panels.tokensValue')}
-          placeholder={placeholder}
-          min={0}
-          max={1}
-          step={0.05}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        {withReset(
+          <Input
+            type="number"
+            variant="well"
+            className={cn('w-full min-w-0 font-mono', onReset && 'pr-8')}
+            aria-label={t('panels.tokensValue')}
+            placeholder={placeholder}
+            min={0}
+            max={1}
+            step={0.05}
+            value={value}
+            disabled={disabled}
+            onChange={(e) => onChange(e.target.value)}
+          />,
+        )}
       </>
     )
   } else {
@@ -799,33 +825,35 @@ function ValueInput({
     const parsed = value ? splitLength(value) : { number: '', unit: '' }
     const fallbackUnit = kind === 'ratio' ? '' : type === 'letterSpacing' ? 'em' : 'px'
     if (!parsed || (parsed.unit && !(units as readonly string[]).includes(parsed.unit)))
-      control = (
+      control = withReset(
         <Input
           variant="well"
-          className="min-w-0 flex-1 font-mono"
+          className={cn('w-full min-w-0 font-mono', onReset && 'pr-8')}
           aria-label={t('panels.tokensValue')}
           placeholder={placeholder}
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
-        />
+        />,
       )
     else {
       const unit = parsed.number === '' ? fallbackUnit : parsed.unit
       control = (
         <>
           {glyph}
-          <Input
-            type="number"
-            variant="well"
-            className="min-w-0 flex-1 font-mono"
-            aria-label={t('panels.tokensValue')}
-            placeholder={placeholder}
-            step="any"
-            value={parsed.number}
-            disabled={disabled}
-            onChange={(e) => onChange(e.target.value === '' ? '' : `${e.target.value}${unit}`)}
-          />
+          {withReset(
+            <Input
+              type="number"
+              variant="well"
+              className={cn('w-full min-w-0 font-mono', onReset && 'pr-8')}
+              aria-label={t('panels.tokensValue')}
+              placeholder={placeholder}
+              step="any"
+              value={parsed.number}
+              disabled={disabled}
+              onChange={(e) => onChange(e.target.value === '' ? '' : `${e.target.value}${unit}`)}
+            />,
+          )}
           <Select
             value={unit || LITERAL}
             onValueChange={(next) =>
@@ -852,6 +880,18 @@ function ValueInput({
   return (
     <div className="flex w-full items-center gap-2">
       {control}
+      {(kind === 'family' || kind === 'weight') && canReset && (
+        <Button
+          variant="bare"
+          size="icon-sm"
+          className="size-7 flex-none rounded-tag text-ink-faint hover:text-ink"
+          aria-label={t('panels.tokensResetTheme')}
+          title={t('panels.tokensResetTheme')}
+          onClick={onReset}
+        >
+          <XIcon className="size-3.5" />
+        </Button>
+      )}
       {aliasPick}
     </div>
   )
