@@ -253,6 +253,15 @@ describe('importing an SVG file', () => {
     expect(sized.getAttribute('id')).toMatch(/^k-u-mask-/)
     expect(['x', 'y', 'width', 'height'].map((n) => sized.getAttribute(n))).toEqual(['20', '0', '10', '10'])
     expect(sized.firstElementChild!.localName).toBe('rect')
+    /* bounds in ems resolve against the mask's own font size, which the copy keeps: left as written */
+    const em = imported(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+        <mask id="e" maskUnits="userSpaceOnUse" font-size="32" x="0" y="0" width="1em" height="1em"><rect width="40" height="40" fill="white"/></mask>
+        <rect mask="url(#e)" width="10" height="10" transform="translate(20 0)"/>
+      </svg>`)
+    const kept = doc(em.html).querySelector('mask[id^="k-e-mask-"]')!
+    expect(['x', 'width'].map((n) => kept.getAttribute(n))).toEqual(['0', '1em'])
+    expect(kept.querySelector('g')!.getAttribute('transform')).toBe('matrix(1 0 0 1 20 0)')
     expect(moved).toMatch(/^url\(#k-m-mask-\d+\)$/)
     /* the copy's content wears the shape's whole transform, since the shape's points do too */
     const copy = d.querySelector(`mask[id="${moved!.slice(5, -1)}"]`)!

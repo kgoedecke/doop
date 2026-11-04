@@ -526,9 +526,13 @@ function bakeStyles(clone: Element, original: Element, read: StyleReader, proper
 
 /** The box an element's `x`/`y`/`width`/`height` name, as the transform lands
  *  it (the box around the moved corners); `null` when any side is missing or
- *  relative, which no transform of the shape would change. */
+ *  relative (a percentage, an `em`), since those resolve against something the
+ *  copy keeps and are left as written. */
 function transformedBounds(el: Element, ctm: Matrix): Box | null {
-  const side = (name: string) => parseLength(el.getAttribute(name))
+  const side = (name: string) => {
+    const value = el.getAttribute(name)
+    return value && /^\s*[-+.\d]+(?:[eE][-+]?\d+)?\s*(?:px|pt|pc|mm|cm|in)?\s*$/.test(value) ? parseLength(value) : null
+  }
   const x = side('x')
   const y = side('y')
   const width = side('width')
