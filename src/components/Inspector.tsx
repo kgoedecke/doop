@@ -142,14 +142,15 @@ export function Inspector({
 
   /* a typed value commits at once; a scrubbed one only previews, and the
      gesture's end commits the whole drag. Only the scrubbed field belongs to
-     the gesture: a teammate's move of the same frame meanwhile is theirs */
+     the gesture: a teammate's move of the same frame meanwhile is theirs, and
+     another field committed mid-drag (Tab out of a typed X) is its own edit */
   function editBox(patch: Partial<FrameBox>) {
     const scrub = scrubStart.current
-    if (!scrub) return commitMeta(patch)
     const key = BOX_KEYS.find((k) => k in patch)
     if (!key) return
-    scrub.key ??= key
-    if (scrub.key === key) useStore.getState().patchFrameLocal(scrub.id, { [key]: patch[key] })
+    if (scrub) scrub.key ??= key
+    if (scrub?.key === key) useStore.getState().patchFrameLocal(scrub.id, { [key]: patch[key] })
+    else commitMeta(patch)
   }
   const boxScrub = {
     onStart: () => {

@@ -132,6 +132,28 @@ it("leaves a teammate's move of the same frame out of the drag", async () => {
   expect(update).toHaveBeenLastCalledWith('f', { width: 760 })
 })
 
+it('commits a field typed before the drag on its own when Tab lands mid-drag', () => {
+  const update = vi.spyOn(api, 'updateFrame').mockImplementation(async (id, patch) => ({ ...stored(), ...patch, id }))
+  const x = container.querySelector<HTMLInputElement>('input[aria-label="X position"]')!
+  act(() => {
+    x.focus()
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(x, '200')
+    x.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const unit = unitOf('Width')
+  act(() => {
+    unit.dispatchEvent(pointer('pointerdown', 100))
+    unit.dispatchEvent(pointer('pointermove', 110))
+  })
+  act(() => x.blur())
+  expect(stored()).toMatchObject({ x: 200, width: 770 })
+  expect(update).toHaveBeenCalledTimes(1)
+  expect(update).toHaveBeenCalledWith('f', { x: 200 })
+  act(() => unit.dispatchEvent(pointer('pointerup', 110)))
+  expect(update).toHaveBeenCalledTimes(2)
+  expect(update).toHaveBeenLastCalledWith('f', { width: 770 })
+})
+
 it('puts a cancelled scrub back and saves nothing, keeping what a teammate moved', () => {
   const update = vi.spyOn(api, 'updateFrame')
   const unit = unitOf('Width')
