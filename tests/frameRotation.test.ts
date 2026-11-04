@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   ROTATION_SNAP_DEG,
+  frameDesignPoint,
+  frameTurnMatrix,
+  frameWorldPoint,
   normalizeRotation,
   pointerAngle,
+  rotateVector,
   rotatedBounds,
   rotatedBy,
   unrotatePoint,
@@ -126,5 +130,40 @@ describe('rotate zones', () => {
     expect(rotateCursor('se', 0.3)).toBe(cursor)
     expect(rotateCursor('nw', 180)).toBe(cursor)
     expect(rotateCursor('se', 1)).not.toBe(cursor)
+  })
+})
+
+describe('a turned frame on the canvas', () => {
+  const frame = { x: 100, y: 50, width: 200, height: 100, rotation: 90 }
+  it('turns a vector clockwise', () => {
+    const v = rotateVector({ x: 10, y: 0 }, 90)
+    expect(v.x).toBeCloseTo(0)
+    expect(v.y).toBeCloseTo(10)
+    expect(rotateVector({ x: 3, y: 4 }, 0)).toEqual({ x: 3, y: 4 })
+  })
+  it('maps a world point into the design and back', () => {
+    /* the centre stays the centre */
+    const c = frameDesignPoint({ x: 200, y: 100 }, frame)
+    expect(c.x).toBeCloseTo(100)
+    expect(c.y).toBeCloseTo(50)
+    /* a quarter turn puts the design's top-left corner at the canvas's top-right of the turned box */
+    const corner = frameWorldPoint({ x: 0, y: 0 }, frame)
+    expect(corner.x).toBeCloseTo(250)
+    expect(corner.y).toBeCloseTo(0)
+    const back = frameDesignPoint(corner, frame)
+    expect(back.x).toBeCloseTo(0)
+    expect(back.y).toBeCloseTo(0)
+    expect(frameDesignPoint({ x: 130, y: 70 }, { ...frame, rotation: 0 })).toEqual({ x: 30, y: 20 })
+  })
+  it('is the identity matrix unturned and turns about the centre otherwise', () => {
+    expect(frameTurnMatrix({ ...frame, rotation: 0 })).toEqual([1, 0, 0, 1, 0, 0])
+    const [a, b, c, d, e, f] = frameTurnMatrix(frame)
+    const at = (p: { x: number; y: number }) => ({ x: a * p.x + c * p.y + e, y: b * p.x + d * p.y + f })
+    const centre = at({ x: 200, y: 100 })
+    expect(centre.x).toBeCloseTo(200)
+    expect(centre.y).toBeCloseTo(100)
+    const corner = at({ x: 100, y: 50 })
+    expect(corner.x).toBeCloseTo(250)
+    expect(corner.y).toBeCloseTo(0)
   })
 })

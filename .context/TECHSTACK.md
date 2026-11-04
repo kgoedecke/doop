@@ -345,7 +345,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `x`/`y`/`width`/`height` stay the unrotated box and the wrapper carries `rotate()`, so the
   frame's name, grips and pins turn with it. The Inspector's Layout group has the `∠` field, the
   size badge sits under the turned bounds, and a press inside a turned frame
-  is turned back into design px (`unrotatePoint`) before the runtime is probed. MCP `update_frame`
+  is turned back into design px (`unrotatePoint`, `frameDesignPoint` for the element move hook and the
+  path editor's `frameTurnMatrix`) before the runtime is probed; the frame's own grips pull along
+  its axes with the far corner held still (`keepAnchorTurned`) and do not snap while turned. MCP `update_frame`
   takes `rotation` and `get_canvas` lists it when set; copy, paste and duplicate
   (`frameClipboard.ts`) carry it. Not yet turned: marquee selection,
   snapping and exports read the unrotated box. Tests: `frameRotation.test.ts`,

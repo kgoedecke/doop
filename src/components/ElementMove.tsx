@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { frameDesignPoint, rotateVector } from '../../shared/frameRotation'
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
@@ -246,11 +247,15 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         useStore.getState().setSnapGuides(snapped.guides.filter((g) => (g.axis === 'v' ? 'x' : 'y') !== locked))
       } else useStore.getState().setSnapGuides([])
       if (layer) {
+        /* the layer's place in its document: where it was, plus the drag's
+           travel turned back by the frame's rotation; the pointer likewise */
+        const travel = rotateVector({ x: rect.x - bounds.x, y: rect.y - bounds.y }, -(frame.rotation ?? 0))
+        const pointer = frameDesignPoint(point, frame)
         layerPoint = {
-          x: rect.x - frame.x,
-          y: rect.y - frame.y,
-          pointerX: point.x - contentOrigin.x,
-          pointerY: point.y - contentOrigin.y,
+          x: layer.rect.x + travel.x,
+          y: layer.rect.y + travel.y,
+          pointerX: pointer.x - (contentOrigin.x - frame.x),
+          pointerY: pointer.y - (contentOrigin.y - frame.y),
         }
         previewLayer()
         return
@@ -325,8 +330,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (!(await frameShows(frame.id, frame.html))) return undefined
       return frame.html.includes('data-doop-drawing')
         ? requestFrame(frame.id, 'doop:drawing-hit', {
-            x: origin.x - frame.x,
-            y: origin.y - frame.y,
+            ...frameDesignPoint(origin, frame),
             standalone,
             selected,
           })
@@ -338,8 +342,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       hit = (reply?.hit ?? null) as DrawingHit | null
       if (!hit) {
         const response = await requestFrame(frame.id, 'doop:move-hit', {
-          x: origin.x - frame.x,
-          y: origin.y - frame.y,
+          ...frameDesignPoint(origin, frame),
           selected,
         })
         if (closed) return

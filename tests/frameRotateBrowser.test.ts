@@ -201,6 +201,30 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
     expect(angle).toBe('45')
   })
 
+  it('resizes a turned frame along its own axes and keeps the far edge still', async () => {
+    await reset()
+    saved = { ...saved, rotation: 90, updatedAt: saved.updatedAt + 1 }
+    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
+    await page.evaluate(() => window.elementPanelHarness.selectFrame())
+    await page.waitForFunction(() => document.querySelector('[data-frame-resize-handle="e"]'))
+    /* turned a quarter, the east grip hangs under the frame's centre */
+    const grip = await box('[data-frame-resize-handle="e"]')
+    const c = await centre()
+    const from = { x: grip.left + grip.width / 2, y: grip.top + grip.height / 2 }
+    expect(Math.abs(from.x - c.x)).toBeLessThan(2)
+    expect(from.y).toBeGreaterThan(c.y)
+    const before = saves
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(from.x, from.y + 20)
+    await page.mouse.move(from.x, from.y + 40, { steps: 4 })
+    await page.mouse.up()
+    await expect.poll(() => saves).toBe(before + 1)
+    /* 40px of width; the far (west) edge, which sits at the top on the
+       canvas, has not moved: the box shifts to keep it there */
+    expect(saved).toMatchObject({ x: 20, y: 80, width: 640, height: 500, rotation: 90 })
+  })
+
   it('puts the frame back on Escape and saves nothing', async () => {
     await reset()
     const before = saves

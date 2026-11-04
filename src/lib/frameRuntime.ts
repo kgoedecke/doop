@@ -531,15 +531,34 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      its ancestors' scale, which a drag's pointer delta has to be divided by.
      A turned element's bounds are wider than its box: the scale is read off
      the width those bounds would have at this turn, as one factor both ways */
+  /* the element's own scale, each way: its scale property times the
+     length of its transform's columns (a turn-and-scale matrix keeps them
+     orthogonal, so each column is one axis's scale) */
+  function ownScale(el) {
+    var cs = getComputedStyle(el)
+    var scale = cs.scale === 'none' ? [1, 1] : cs.scale.split(/\\s+/).map(parseFloat)
+    var sx = scale[0], sy = scale[1] === undefined ? scale[0] : scale[1]
+    var m = /^matrix\\(([^)]+)\\)$/.exec(cs.transform)
+    if (m) {
+      var p = m[1].split(',').map(parseFloat)
+      sx *= Math.hypot(p[0], p[1])
+      sy *= Math.hypot(p[2], p[3])
+    }
+    return { x: sx, y: sy }
+  }
+
   function renderScale(el, rect) {
     var w = el.offsetWidth
     var h = el.offsetHeight
     var turn = ownRotation(el) || 0
     if (turn && w > 0) {
+      /* the bounds' width is the turned box's span: the element's own scale
+         each way, turned, times whatever its ancestors scale it by */
+      var own = ownScale(el)
       var rad = turn * Math.PI / 180
-      var span = w * Math.abs(Math.cos(rad)) + h * Math.abs(Math.sin(rad))
+      var span = w * own.x * Math.abs(Math.cos(rad)) + h * own.y * Math.abs(Math.sin(rad))
       var k = span > 0 && rect.width > 0 ? rect.width / span : 1
-      return { x: k, y: k }
+      return { x: k * own.x, y: k * own.y }
     }
     return { x: w > 0 && rect.width > 0 ? rect.width / w : 1, y: h > 0 && rect.height > 0 ? rect.height / h : 1 }
   }

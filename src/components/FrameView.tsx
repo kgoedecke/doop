@@ -46,8 +46,8 @@ import { AgentIcon } from './AgentIcon'
 import { ElementResizeHandles, type ElementGeometry } from './ElementResizeHandles'
 import { selectionBox } from '../lib/elementRotate'
 import { FrameResizeHandles } from './FrameResizeHandles'
-import { keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
-import { pointerAngle, rotatedBounds, rotatedBy, unrotatePoint } from '../../shared/frameRotation'
+import { keepAnchorTurned, keepRatioAfterSnap, resizeFrameRect } from '../lib/frameResize'
+import { pointerAngle, rotateVector, rotatedBounds, rotatedBy, unrotatePoint } from '../../shared/frameRotation'
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 import { withFontFaces } from '../../shared/fonts'
 import { withWebFontLinks } from '../../shared/webFonts'
@@ -521,10 +521,19 @@ export const FrameView = memo(function FrameView({
       const dx = (ev.clientX - base.x) / zoom
       const dy = (ev.clientY - base.y) / zoom
       const from = base.rect
+      /* a turned frame's grips pull along its own axes: the travel is turned
+         back by its rotation, and the far corner stays where it was */
+      const turn = mode === 'resize' ? (frame.rotation ?? 0) : 0
+      const pull = rotateVector({ x: dx, y: dy }, -turn)
       const raw =
         mode === 'move'
           ? { ...from, x: Math.round(from.x + dx), y: Math.round(from.y + dy) }
-          : resizeFrameRect(handle, from, { dx, dy }, { keepRatio: ev.shiftKey })
+          : keepAnchorTurned(
+              handle,
+              from,
+              resizeFrameRect(handle, from, { dx: pull.x, dy: pull.y }, { keepRatio: ev.shiftKey }),
+              turn,
+            )
       /* edges pull onto neighbouring frames' edges/centers and the page's
          ruler guides; ⌥ drags free —
          except that a ⌥⇧ duplicate-drag holds ⌥ for the whole gesture, and
@@ -532,7 +541,8 @@ export const FrameView = memo(function FrameView({
          riding along in the group are not neighbours, and neither is a
          hidden frame — there is nothing on the stage to line up with. */
       const others = currentPageCanvas()?.frames.filter((f) => !f.hidden && !groupIds.has(f.id)) ?? []
-      const free = ev.altKey && !duplicating
+      /* a turned frame's edges lie along nothing: no snapping while resizing it */
+      const free = (ev.altKey && !duplicating) || !!turn
       let snapped = free ? { ...raw, guides: [] } : snapFrame(mode, raw, others, zoom, visibleGuides(), handle)
       /* with Shift the ratio wins: the snapped axis leads, the other follows */
       if (mode === 'resize' && ev.shiftKey && !free) snapped = keepRatioAfterSnap(handle, from, raw, snapped)

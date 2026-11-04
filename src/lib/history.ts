@@ -549,6 +549,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
+    /* a frame that was straight has no rotation to go back to: JSON drops
+       an undefined field, so the server is told 0 to clear the turn */
+    if ('rotation' in patch && patch.rotation === undefined) patch.rotation = 0
     const canvas = useStore.getState().canvas
     if (patch.pageId !== undefined && canvas) {
       const pages = canvasPages(canvas)

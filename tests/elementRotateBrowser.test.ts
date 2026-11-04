@@ -34,9 +34,11 @@ const HTML = `<!doctype html><html><head><style>
   body { margin: 0; padding: 40px }
   #box { width: 200px; height: 100px; background: #ddd }
   #turned { width: 100px; height: 50px; margin-top: 80px; transform: rotate(90deg); background: #fcf }
+  #stretched { width: 100px; height: 50px; margin-top: 120px; transform: rotate(90deg) scale(2, 1); background: #cff }
 </style></head><body>
   <div id="box"></div>
   <div id="turned"></div>
+  <div id="stretched"></div>
 </body></html>`
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number }
@@ -195,6 +197,19 @@ describe.skipIf(!findBrowserPath())('element rotate zones', () => {
     await new Promise((r) => setTimeout(r, 300))
     expect(await computedRotate('#box')).toBe('none')
     expect(saves).toBe(before)
+  }, 20_000)
+
+  it("reads a turned element's scale each way, so a stretched one gets the right box", async () => {
+    await reset()
+    await select('#stretched')
+    await page.waitForFunction(
+      () => document.querySelector('[data-resize-handles]')?.getAttribute('data-element-rotation') === '90',
+    )
+    expect(await page.$eval('[data-element-size]', (el) => el.textContent)).toBe('200 × 50')
+    const furniture = await box('[data-resize-handles]')
+    /* turned a quarter, the 200×50 box stands 50 wide and 200 tall on screen */
+    expect(furniture.width).toBeCloseTo(50, 0)
+    expect(furniture.height).toBeCloseTo(200, 0)
   }, 20_000)
 
   it('resizes a turned element along its own axes, from grips that turned with it', async () => {

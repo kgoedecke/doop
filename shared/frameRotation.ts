@@ -72,3 +72,52 @@ export function unrotatePoint(
     y: dx * Math.sin(rad) + dy * Math.cos(rad) + size.height / 2,
   }
 }
+
+/** A vector turned by `deg` degrees clockwise (screen space). */
+export function rotateVector(v: { x: number; y: number }, deg: number): { x: number; y: number } {
+  if (!deg) return v
+  const rad = (deg * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  return { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos }
+}
+
+export interface TurnedRect {
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation?: number
+}
+
+/** A world point inside a frame's design, turning the frame's rotation
+ *  back about its centre: where the point lands in the unrotated
+ *  document, measured from the frame's top-left. */
+export function frameDesignPoint(world: { x: number; y: number }, frame: TurnedRect): { x: number; y: number } {
+  const d = { x: world.x - frame.x, y: world.y - frame.y }
+  if (!frame.rotation) return d
+  const c = { x: frame.width / 2, y: frame.height / 2 }
+  const turned = rotateVector({ x: d.x - c.x, y: d.y - c.y }, -frame.rotation)
+  return { x: turned.x + c.x, y: turned.y + c.y }
+}
+
+/** The inverse of `frameDesignPoint`: a design point's place on the canvas. */
+export function frameWorldPoint(design: { x: number; y: number }, frame: TurnedRect): { x: number; y: number } {
+  if (!frame.rotation) return { x: frame.x + design.x, y: frame.y + design.y }
+  const c = { x: frame.width / 2, y: frame.height / 2 }
+  const turned = rotateVector({ x: design.x - c.x, y: design.y - c.y }, frame.rotation)
+  return { x: frame.x + c.x + turned.x, y: frame.y + c.y + turned.y }
+}
+
+/** The 2D matrix [a, b, c, d, e, f] that turns world points by the frame's
+ *  rotation about its centre: the identity for an unturned frame. */
+export function frameTurnMatrix(frame: TurnedRect): [number, number, number, number, number, number] {
+  const deg = frame.rotation ?? 0
+  if (!deg) return [1, 0, 0, 1, 0, 0]
+  const rad = (deg * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const cx = frame.x + frame.width / 2
+  const cy = frame.y + frame.height / 2
+  return [cos, sin, -sin, cos, cx - cx * cos + cy * sin, cy - cx * sin - cy * cos]
+}
