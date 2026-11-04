@@ -40,7 +40,7 @@ it('keeps the lock across a server restart', async () => {
   expect((await owner.patch(`/api/frames/${frame.id}`, { locked: true })).status).toBe(200)
 
   const dataDir = server.dataDir
-  server.stop({ keepData: true })
+  await server.stop({ keepData: true })
   await server.stopped
   server = await startServer({}, dataDir)
 

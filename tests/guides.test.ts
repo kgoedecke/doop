@@ -74,7 +74,7 @@ it('stores guides per page, broadcasts them live, gates them by access and survi
   expect(current.guides).toEqual([{ ...horizontal, at: -60 }])
 
   await new Promise((resolve) => setTimeout(resolve, 600))
-  server.stop({ keepData: true })
+  await server.stop({ keepData: true })
   await server.stopped
   server = await startServer({}, server.dataDir)
   const persisted = await (await owner.get(`/api/canvases/${canvas.id}`)).json()

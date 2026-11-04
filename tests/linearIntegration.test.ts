@@ -36,8 +36,8 @@ beforeAll(async () => {
   stranger = await new Client(server).signUp('linear-stranger@test.dev', 'Stranger')
 }, 60_000)
 
-afterAll(() => {
-  server?.stop()
+afterAll(async () => {
+  await server?.stop()
   upstream?.close()
 })
 

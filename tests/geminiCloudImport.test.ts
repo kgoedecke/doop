@@ -21,7 +21,7 @@ beforeAll(async () => {
   const { id: userId } = await (await alice.get('/api/me')).json()
   canvasId = (await (await alice.post('/api/canvases', { name: 'Pilot' })).json()).id
   bobCanvasId = (await (await bob.post('/api/canvases', { name: 'Other user' })).json()).id
-  server.stop({ keepData: true })
+  await server.stop({ keepData: true })
   await server.stopped
   server = await startServer(
     {

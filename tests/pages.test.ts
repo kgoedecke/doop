@@ -81,7 +81,7 @@ it('creates, reorders and copies pages while preserving frame membership and acc
 
   // Reopen the same database to verify actual durable writes, not just memory.
   await new Promise((resolve) => setTimeout(resolve, 600))
-  server.stop({ keepData: true })
+  await server.stop({ keepData: true })
   await server.stopped
   server = await startServer({}, server.dataDir)
   const persisted = await (await owner.get(`/api/canvases/${canvas.id}`)).json()
@@ -209,7 +209,7 @@ it('duplicates a page with its frames right after the source, numbering the name
   ])
 
   // Reopen the database: the page and its frames were written as one unit.
-  server.stop({ keepData: true })
+  await server.stop({ keepData: true })
   await server.stopped
   server = await startServer({}, server.dataDir)
   const persisted = await (await owner.get(`/api/canvases/${canvas.id}`)).json()

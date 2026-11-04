@@ -165,7 +165,7 @@ describe('frame version history', () => {
     const [version] = await versionsOf(client, frame.id, 1)
 
     const dataDir = server.dataDir
-    server.stop({ keepData: true })
+    await server.stop({ keepData: true })
     await server.stopped
     server = await startServer({}, dataDir)
     const back = new Client(server)

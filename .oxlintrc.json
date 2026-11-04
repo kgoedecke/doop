@@ -11,6 +11,7 @@
     "builtin": true
   },
   "ignorePatterns": [
+    "cli-package/",
     "dist/",
     "node_modules/",
     "desktop/src-tauri/target/",

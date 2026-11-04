@@ -106,10 +106,10 @@ beforeAll(async () => {
   ])
 }, 70_000)
 
-afterAll(() => {
+afterAll(async () => {
   idp?.close()
-  server?.stop()
-  restricted?.stop()
+  await server?.stop()
+  await restricted?.stop()
 })
 
 async function driveSsoCallback(client: Client, code: string): Promise<Response> {

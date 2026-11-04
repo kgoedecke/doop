@@ -74,9 +74,9 @@ beforeAll(async () => {
   ])
 }, 90_000)
 
-afterAll(() => {
-  native?.stop()
-  webOnly?.stop()
+afterAll(async () => {
+  await native?.stop()
+  await webOnly?.stop()
   keys?.close()
 })
 
