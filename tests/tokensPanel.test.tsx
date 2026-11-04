@@ -179,6 +179,25 @@ describe('TokensSection', () => {
     expect(setToken).toHaveBeenCalledWith('c1', '--color-ink', { newName: '--color-text', themes: { dark: null } })
   })
 
+  it('keeps a value a teammate changed while the modal was open', async () => {
+    act(() => button('color-ink').click())
+    /* the teammate's edit lands in the store while the person is still typing */
+    act(() => {
+      const canvas = useStore.getState().canvas!
+      useStore.getState().setCanvas({
+        ...canvas,
+        tokens: canvas.tokens!.map((d) => (d.name === '--color-ink' ? { ...d, value: '#222' } : d)),
+      })
+    })
+    type(input('When to reach for it'), 'body text')
+    await act(async () => {
+      button('Save').click()
+      await Promise.resolve()
+    })
+    /* only the description: the stale draft value is not sent back */
+    expect(setToken).toHaveBeenCalledWith('c1', '--color-ink', { description: 'body text' })
+  })
+
   it('creates a token of the type picked from the plus menu, named after it', async () => {
     /* Radix opens a menu on pointerdown, not click */
     act(() => {

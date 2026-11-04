@@ -400,7 +400,10 @@ export function TokenModal({
   const themes = useStore((s) => s.canvas?.tokenThemes ?? [])
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const creating = name === null
-  const [draft, setDraft] = useState<Draft>(() => draftOf(token, createType, tokens, initialValue))
+  /** the token as the modal opened: the draft is diffed against this, not the
+   *  live row, so a field a teammate changed meanwhile is not sent back stale */
+  const [opened] = useState(token)
+  const [draft, setDraft] = useState<Draft>(() => draftOf(opened, createType, tokens, initialValue))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -435,8 +438,8 @@ export function TokenModal({
         if (result?.result === 'error') throw new Error(result.message)
         onCreated?.(typedName)
       } else {
-        /* only the fields that changed, so a concurrent edit elsewhere is kept */
-        const was = token!
+        /* only the fields the person changed, so a concurrent edit elsewhere is kept */
+        const was = opened!
         const changedThemes = Object.fromEntries(
           Object.entries(modeValues).filter(([theme, value]) => (was.themes?.[theme] ?? null) !== value),
         )
