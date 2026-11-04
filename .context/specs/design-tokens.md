@@ -85,7 +85,8 @@ in every frame and in aliasing tokens.
   theme's row renames it on Enter or blur with its values following, ✕ removes it and a line adds
   one, saving at once) over a row per theme, `default` first, the picked one ticked: the token rows
   show that theme's values (`effectiveValue`, an inherited default greyed). Then a "Tokens" heading
-  with a plus that opens `TokenModal` on a colour, over the rows by type with a swatch. The modal's
+  with a plus that opens `TokenModal` on a colour, over one folding row per type (chevron, glyph,
+  count, as a frame in the layer tree) with the token rows under it. The modal's
   type select shows only while creating (a type is fixed once a token exists) and picks any type,
   with a value control per type (swatch and hex, font and weight lists, a
   number with its unit, a ratio), a default value and a name hint per type, a value per theme, an

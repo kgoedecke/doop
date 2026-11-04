@@ -123,6 +123,11 @@ describe('TokensSection', () => {
     expect(themeRow('dark').getAttribute('aria-checked')).toBe('false')
     expect(text()).toContain('#111')
     expect(container.querySelector<HTMLElement>('[style*="background"]')?.style.background).toBe('#111')
+    /* a group folds on its row and opens again */
+    act(() => button('Colors').click())
+    expect(text()).not.toContain('color-ink')
+    act(() => button('Colors').click())
+    expect(text()).toContain('color-ink')
   })
 
   it('shows another theme’s values when it is picked from the dropdown', () => {

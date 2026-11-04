@@ -127,6 +127,11 @@ import {
   SquareMousePointer,
   X,
   Braces,
+  ALargeSmall,
+  Blend,
+  Palette,
+  Ruler,
+  Space,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -199,6 +204,11 @@ export const FlipVertical2Icon = icon(FlipVertical2)
 export const CircleDashedIcon = icon(CircleDashed)
 export const DropletIcon = icon(Droplet)
 export const BracesIcon = icon(Braces)
+export const PaletteIcon = icon(Palette)
+export const BlendIcon = icon(Blend)
+export const RulerIcon = icon(Ruler)
+export const TextSizeIcon = icon(ALargeSmall)
+export const SpaceIcon = icon(Space)
 export const RadiusIcon = icon(Radius)
 export const AlignLeftIcon = icon(AlignLeft)
 export const AlignCenterIcon = icon(AlignCenter)

@@ -26,12 +26,29 @@ import { Pressable } from './ui/pressable'
 import { Input } from './ui/input'
 import { Field } from './ui/field'
 import { IconButton } from './ui/icon-button'
-import { ListHint, ListRow } from './ui/list'
+import { ListHint } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { sectionHeading } from './PagesPanel'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
-import { CheckIcon, PlusIcon, XIcon } from './ui/icons'
+import {
+  BlendIcon,
+  BoldIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  DesktopIcon,
+  PaletteIcon,
+  PlusIcon,
+  RadiusIcon,
+  RulerIcon,
+  SpaceIcon,
+  SquareDashedIcon,
+  TextIcon,
+  TextSizeIcon,
+  VerticalPaddingIcon,
+  XIcon,
+} from './ui/icons'
 import { type PlainMessageKey, useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 
@@ -63,6 +80,21 @@ const TOKEN_GROUP_LABEL: Record<TokenType, PlainMessageKey> = {
   fontSize: 'panels.tokensGroupFontSize',
   lineHeight: 'panels.tokensGroupLineHeight',
   letterSpacing: 'panels.tokensGroupLetterSpacing',
+}
+
+/** The glyph that leads each type's group row. */
+const TOKEN_TYPE_ICON: Record<TokenType, typeof PaletteIcon> = {
+  color: PaletteIcon,
+  opacity: BlendIcon,
+  radius: RadiusIcon,
+  spacing: RulerIcon,
+  container: SquareDashedIcon,
+  breakpoint: DesktopIcon,
+  fontFamily: TextIcon,
+  fontWeight: BoldIcon,
+  fontSize: TextSizeIcon,
+  lineHeight: VerticalPaddingIcon,
+  letterSpacing: SpaceIcon,
 }
 
 function firstMessage(e: unknown, fallback: string): string {
@@ -98,6 +130,8 @@ export function TokensSection() {
   /** which theme's values the rows show; null is the default */
   const [viewTheme, setViewTheme] = useState<string | null>(null)
   const [managing, setManaging] = useState(false)
+  /** the type groups folded shut */
+  const [folded, setFolded] = useState<Set<TokenType>>(() => new Set())
   const t = useT()
   if (!canvasId) return null
 
@@ -162,34 +196,62 @@ export function TokensSection() {
         )}
       </div>
       {sorted.length === 0 && <ListHint>{t('panels.tokensHint')}</ListHint>}
-      {TOKEN_GROUPS.flat().map((type) => {
-        const rows = sorted.filter((token) => token.type === type)
-        if (!rows.length) return null
-        return (
-          <div key={type}>
-            <div className="px-4 pb-1 pt-2.5 text-caption text-ink-faint">{t(TOKEN_GROUP_LABEL[type])}</div>
-            {rows.map((token) => (
-              <ListRow
-                key={token.name}
-                className="flex-row items-center gap-2.5 py-2"
-                onClick={() => setOpen({ name: token.name })}
+      <div className="px-2 pb-1">
+        {TOKEN_GROUPS.flat().map((type) => {
+          const rows = sorted.filter((token) => token.type === type)
+          if (!rows.length) return null
+          const Icon = TOKEN_TYPE_ICON[type]
+          const shut = folded.has(type)
+          return (
+            <div key={type}>
+              {/* the group row, folded like a frame in the layer tree: chevron, glyph, name */}
+              <Pressable
+                aria-expanded={!shut}
+                className="flex h-[27px] w-full items-center gap-1 rounded-row pr-2.5 pl-1 text-left text-body text-ink-soft hover:bg-sub"
+                onClick={() =>
+                  setFolded((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(type)) next.delete(type)
+                    else next.add(type)
+                    return next
+                  })
+                }
               >
-                <TokenSwatch token={token} tokens={tokens} theme={shown ?? undefined} />
-                <span className="min-w-0 flex-1 truncate font-mono text-label text-ink">{tokenLabel(token.name)}</span>
-                <span
-                  className={cn(
-                    'max-w-[45%] flex-none truncate font-mono text-caption',
-                    shown && token.themes?.[shown] === undefined ? 'text-ink-faint' : 'text-ink-soft',
-                  )}
-                  title={shown && token.themes?.[shown] === undefined ? t('panels.tokensValueInherits') : undefined}
-                >
-                  {effectiveValue(token, shown ?? undefined)}
+                <span className="grid size-4 flex-none place-items-center text-ink-faint">
+                  {shut ? <ChevronRightIcon className="size-3" /> : <ChevronDownIcon className="size-3" />}
                 </span>
-              </ListRow>
-            ))}
-          </div>
-        )
-      })}
+                <span className="grid size-4 flex-none place-items-center text-ink-faint">
+                  <Icon className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1 truncate pl-0.5">{t(TOKEN_GROUP_LABEL[type])}</span>
+                <span className="font-mono text-caption text-ink-faint">{rows.length}</span>
+              </Pressable>
+              {!shut &&
+                rows.map((token) => (
+                  <Pressable
+                    key={token.name}
+                    className="flex h-[27px] w-full items-center gap-2 rounded-row pr-2.5 pl-6 text-left hover:bg-sub"
+                    onClick={() => setOpen({ name: token.name })}
+                  >
+                    <TokenSwatch token={token} tokens={tokens} theme={shown ?? undefined} size={12} />
+                    <span className="min-w-0 flex-1 truncate font-mono text-label text-ink">
+                      {tokenLabel(token.name)}
+                    </span>
+                    <span
+                      className={cn(
+                        'max-w-[45%] flex-none truncate font-mono text-caption',
+                        shown && token.themes?.[shown] === undefined ? 'text-ink-faint' : 'text-ink-soft',
+                      )}
+                      title={shown && token.themes?.[shown] === undefined ? t('panels.tokensValueInherits') : undefined}
+                    >
+                      {effectiveValue(token, shown ?? undefined)}
+                    </span>
+                  </Pressable>
+                ))}
+            </div>
+          )
+        })}
+      </div>
       {open !== null && (
         <TokenModal
           canvasId={canvasId}
