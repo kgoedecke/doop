@@ -96,11 +96,11 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
   const base = new URL(doc.querySelector('base[href]')?.getAttribute('href') ?? '', document.baseURI).href
   const resources = new ResourceCache(opts.signal)
 
-  /* nothing runs or embeds inside an SVG image: scripts, nested documents,
-     and the <base> that has done its job */
-  for (const el of doc.querySelectorAll('script, iframe, object, embed, base, link:not([rel~="stylesheet"])')) {
-    el.remove()
-  }
+  /* nothing embeds inside an SVG image: a nested document would be a hole
+     in the picture, so a frame holding one is for the server's browser */
+  if (doc.querySelector('iframe, object, embed')) throw new Error('the frame embeds a document')
+  /* nothing runs inside one either: scripts, and the <base> that has done its job */
+  for (const el of doc.querySelectorAll('script, base, link:not([rel~="stylesheet"])')) el.remove()
 
   const work: Promise<void>[] = []
   for (const link of doc.querySelectorAll('link[rel~="stylesheet"][href]')) {
