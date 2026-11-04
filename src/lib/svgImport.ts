@@ -9,6 +9,7 @@
  */
 import {
   IDENTITY,
+  apply,
   lengthScale,
   multiply,
   paddedBounds,
@@ -523,6 +524,29 @@ function bakeStyles(clone: Element, original: Element, read: StyleReader, proper
   })
 }
 
+/** The box an element's `x`/`y`/`width`/`height` name, as the transform lands
+ *  it (the box around the moved corners); `null` when any side is missing or
+ *  relative, which no transform of the shape would change. */
+function transformedBounds(el: Element, ctm: Matrix): Box | null {
+  const side = (name: string) => parseLength(el.getAttribute(name))
+  const x = side('x')
+  const y = side('y')
+  const width = side('width')
+  const height = side('height')
+  if (x === null || y === null || width === null || height === null) return null
+  const corners = [
+    { x, y },
+    { x: x + width, y },
+    { x, y: y + height },
+    { x: x + width, y: y + height },
+  ].map((corner) => apply(ctm, corner))
+  const xs = corners.map((p) => p.x)
+  const ys = corners.map((p) => p.y)
+  const left = Math.min(...xs)
+  const top = Math.min(...ys)
+  return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top }
+}
+
 function opacityOf(value: string): number {
   const number = parseFloat(value)
   return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : 1
@@ -762,21 +786,30 @@ class Writer {
     return copy
   }
 
-  /** A mask drawn in user units gets a copy whose content carries the masked
-   *  element's transform (in a `<g>`, since `<mask>` itself takes none); one
-   *  drawn in the element's bounding box is used as it is. */
+  /** A mask in user units gets a copy carrying the masked element's transform:
+   *  its content in a `<g>` (since `<mask>` itself takes none) and its bounds
+   *  moved to where they land. One wholly in the element's bounding box is
+   *  used as it is. */
   private bakedMask(reference: Reference, ctm: Matrix): string | null {
     const mask = this.find(reference.id)
     if (!mask || mask.localName !== 'mask') return null
-    if (mask.getAttribute('maskContentUnits') === 'objectBoundingBox') return reference.id
+    const userBounds = mask.getAttribute('maskUnits') === 'userSpaceOnUse'
+    const userContent = mask.getAttribute('maskContentUnits') !== 'objectBoundingBox'
+    if (!userBounds && !userContent) return reference.id
     const copy = `${reference.id}-mask-${++this.maskCount}`
     const clone = mask.cloneNode(true) as Element
     clone.setAttribute('id', copy)
     this.ids.add(copy)
-    const content = this.doc.createElementNS(SVG_NS, 'g')
-    content.setAttribute('transform', `matrix(${ctm.map(round).join(' ')})`)
-    content.append(...clone.childNodes)
-    clone.append(content)
+    if (userContent) {
+      const content = this.doc.createElementNS(SVG_NS, 'g')
+      content.setAttribute('transform', `matrix(${ctm.map(round).join(' ')})`)
+      content.append(...clone.childNodes)
+      clone.append(content)
+    }
+    if (userBounds) {
+      const bounds = transformedBounds(clone, ctm)
+      if (bounds) for (const [name, value] of Object.entries(bounds)) clone.setAttribute(name, String(round(value)))
+    }
     this.defs.append(clone)
     return copy
   }

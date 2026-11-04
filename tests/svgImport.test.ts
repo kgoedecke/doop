@@ -238,14 +238,21 @@ describe('importing an SVG file', () => {
         <defs>
           <mask id="m"><rect width="5" height="10" fill="white"/></mask>
           <mask id="b" maskContentUnits="objectBoundingBox"><rect width="0.5" height="1" fill="white"/></mask>
+          <mask id="u" maskUnits="userSpaceOnUse" maskContentUnits="objectBoundingBox" x="0" y="0" width="10" height="10"><rect width="1" height="1" fill="white"/></mask>
         </defs>
         <g transform="translate(20 0)">
           <rect mask="url(#m)" width="10" height="10" transform="scale(2)"/>
           <rect mask="url(#b)" width="10" height="10"/>
+          <rect mask="url(#u)" width="10" height="10"/>
         </g>
       </svg>`)
     const d = doc(result.html)
-    const [moved, boxed] = shapes(result.html).map((svg) => shapePath(svg)!.getAttribute('mask'))
+    const [moved, boxed, bounded] = shapes(result.html).map((svg) => shapePath(svg)!.getAttribute('mask'))
+    /* bounds in user units move with the shape too, content in its box stays put */
+    const sized = d.querySelector(`mask[id="${bounded!.slice(5, -1)}"]`)!
+    expect(sized.getAttribute('id')).toMatch(/^k-u-mask-/)
+    expect(['x', 'y', 'width', 'height'].map((n) => sized.getAttribute(n))).toEqual(['20', '0', '10', '10'])
+    expect(sized.firstElementChild!.localName).toBe('rect')
     expect(moved).toMatch(/^url\(#k-m-mask-\d+\)$/)
     /* the copy's content wears the shape's whole transform, since the shape's points do too */
     const copy = d.querySelector(`mask[id="${moved!.slice(5, -1)}"]`)!

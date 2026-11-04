@@ -115,15 +115,17 @@ describe('withWebFontLinks', () => {
     expect(withWebFontLinks(dropped)).toBe(dropped)
   })
 
-  it('does not refuse a document whose link carries a broken escape', () => {
+  it('rewrites a link that carries a broken escape rather than refusing the document', () => {
     const damaged = DESIGN.replace(
       '<title>x</title>',
-      `<title>x</title><link rel="stylesheet" ${WEB_FONT_LINK_ATTR} href="https://fonts.googleapis.com/css2?family=Inter%&family=Lora:wght@400">`,
+      `<title>x</title><link rel="stylesheet" ${WEB_FONT_LINK_ATTR} href="https://fonts.googleapis.com/css2?family=Roboto%&family=Inter:wght@400">`,
     )
+    /* the design names Inter alone, so the families wanted match the ones
+       read: the broken value still has to go */
     const html = withWebFontLinks(damaged)
     expect(linkOf(html)).toContain('family=Inter:')
-    expect(linkOf(html)).toContain('family=Lora:')
-    expect(linkOf(html)).not.toContain('Inter%')
+    expect(linkOf(html)).not.toContain('Roboto%')
+    expect(html.match(new RegExp(WEB_FONT_LINK_ATTR, 'g'))).toHaveLength(1)
   })
 
   it('places the link in a document without a head', () => {
