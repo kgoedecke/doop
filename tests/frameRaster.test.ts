@@ -26,10 +26,10 @@ const opts = () => ({ width: 300, height: 200, signal: new AbortController().sig
 
 afterEach(() => vi.unstubAllGlobals())
 
-it('wraps the document in a frame-sized SVG with scripts and nested documents removed', async () => {
+it('wraps the document in a frame-sized SVG with scripts removed', async () => {
   serve({})
   const svg = await inlineDocument(
-    '<!doctype html><html><head><script>alert(1)</script></head><body><h1>Hi</h1><iframe src="/x"></iframe></body></html>',
+    '<!doctype html><html><head><script>alert(1)</script></head><body><h1>Hi</h1></body></html>',
     opts(),
   )
   expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200">')).toBe(true)
@@ -37,7 +37,15 @@ it('wraps the document in a frame-sized SVG with scripts and nested documents re
   expect(svg).toContain('<html xmlns="http://www.w3.org/1999/xhtml">')
   expect(svg).toContain('<h1>Hi</h1>')
   expect(svg).not.toContain('<script')
-  expect(svg).not.toContain('<iframe')
+})
+
+it('rejects a document that embeds another, so the server renders it whole', async () => {
+  serve({})
+  for (const embed of ['<iframe src="/x"></iframe>', '<object data="/x.svg"></object>', '<embed src="/x.pdf">']) {
+    await expect(inlineDocument(`<html><body><h1>Hi</h1>${embed}</body></html>`, opts())).rejects.toThrow(
+      'embeds a document',
+    )
+  }
 })
 
 it('inlines images, stylesheets and the fonts they name as data: URLs', async () => {
