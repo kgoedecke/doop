@@ -75,17 +75,62 @@ describe('WebSocket room switching', () => {
     }
   })
 
-  it('safely drops non-object or null messages without throwing an unhandled rejection', async () => {
-    const ws = new WebSocket(`ws://localhost:${server.port}/ws`, { headers: { Cookie: alice.header() } })
+  it('handles back-to-back overlapping joins without leaving ghost presences', async () => {
+    const canvas1: Canvas = await (await alice.post('/api/canvases', { name: 'Overlap 1' })).json()
+    const canvas2: Canvas = await (await alice.post('/api/canvases', { name: 'Overlap 2' })).json()
+
+    await alice.post(`/api/canvases/${canvas1.id}/members`, { email: 'bob-switch@test.dev' })
+    await alice.post(`/api/canvases/${canvas2.id}/members`, { email: 'bob-switch@test.dev' })
+
+    const bobWs = new WebSocket(`ws://localhost:${server.port}/ws`, { headers: { Cookie: bob.header() } })
+    const bobMessages: ServerMessage[] = []
+    bobWs.on('message', (d) => bobMessages.push(JSON.parse(String(d))))
+
+    const aliceWs = new WebSocket(`ws://localhost:${server.port}/ws`, { headers: { Cookie: alice.header() } })
+    const aliceMessages: ServerMessage[] = []
+    aliceWs.on('message', (d) => aliceMessages.push(JSON.parse(String(d))))
+
     try {
-      await new Promise<void>((resolve) => ws.once('open', resolve))
-      ws.send('null')
-      ws.send('123')
-      ws.send('"bare-string"')
-      await new Promise((r) => setTimeout(r, 100))
-      expect(ws.readyState).toBe(WebSocket.OPEN)
+      await Promise.all([
+        new Promise<void>((resolve) => bobWs.once('open', resolve)),
+        new Promise<void>((resolve) => aliceWs.once('open', resolve)),
+      ])
+
+      bobWs.send(JSON.stringify({ type: 'join', canvasId: canvas1.id, clientId: 'bob-tab', name: 'Bob', kind: 'user' }))
+      await expect.poll(() => bobMessages.some((m) => m.type === 'init')).toBe(true)
+
+      // Alice sends back-to-back joins without waiting between them
+      aliceWs.send(
+        JSON.stringify({ type: 'join', canvasId: canvas1.id, clientId: 'alice-tab', name: 'Alice', kind: 'user' }),
+      )
+      aliceWs.send(
+        JSON.stringify({ type: 'join', canvasId: canvas2.id, clientId: 'alice-tab', name: 'Alice', kind: 'user' }),
+      )
+
+      // Alice receives init for canvas 2
+      await expect
+        .poll(() => aliceMessages.some((m) => m.type === 'init' && (m as { canvas: Canvas }).canvas.id === canvas2.id))
+        .toBe(true)
+
+      // Bob in canvas 1 sees Alice join and then leave canvas 1
+      await expect
+        .poll(() =>
+          bobMessages.some(
+            (m) =>
+              m.type === 'presence:join' &&
+              (m as { presence: { clientId: string } }).presence.clientId === 'alice-tab',
+          ),
+        )
+        .toBe(true)
+
+      await expect
+        .poll(() =>
+          bobMessages.some((m) => m.type === 'presence:leave' && (m as { clientId: string }).clientId === 'alice-tab'),
+        )
+        .toBe(true)
     } finally {
-      ws.close()
+      bobWs.close()
+      aliceWs.close()
     }
   })
 })

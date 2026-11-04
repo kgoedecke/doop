@@ -2458,7 +2458,6 @@ wss.on('connection', (ws, upgradeReq) => {
       return
     }
     if (!msg || typeof msg !== 'object') return
-    const conn = conns.get(ws)
 
     if (msg.type === 'join') {
       const session = await sessionPromise
@@ -2490,8 +2489,9 @@ wss.on('connection', (ws, upgradeReq) => {
         activeFrameId: null,
       }
       const silent = !!(session.session as { impersonatedBy?: string | null }).impersonatedBy
-      if (conn && !conn.silent && (conn.canvasId !== msg.canvasId || conn.presence.clientId !== msg.clientId)) {
-        broadcast(conn.canvasId, { type: 'presence:leave', clientId: conn.presence.clientId })
+      const prevConn = conns.get(ws)
+      if (prevConn && !prevConn.silent && (prevConn.canvasId !== msg.canvasId || prevConn.presence.clientId !== msg.clientId)) {
+        broadcast(prevConn.canvasId, { type: 'presence:leave', clientId: prevConn.presence.clientId })
       }
       conns.set(ws, { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent })
       const others = room(msg.canvasId)
@@ -2529,6 +2529,7 @@ wss.on('connection', (ws, upgradeReq) => {
       return
     }
 
+    const conn = conns.get(ws)
     if (!conn) return
     if (conn.silent) return // view-as connections receive updates but never emit
     const { canvasId, presence } = conn
