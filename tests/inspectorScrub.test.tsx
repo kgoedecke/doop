@@ -71,7 +71,7 @@ it('previews a scrubbed X in the store and saves the drag once, as one undo step
     unit.dispatchEvent(pointer('pointerdown', 100))
     unit.dispatchEvent(pointer('pointermove', 105))
   })
-  expect(stored().x).toBe(125)
+  expect(stored().x).toBe(126)
   expect(update).not.toHaveBeenCalled()
   act(() => {
     unit.dispatchEvent(pointer('pointermove', 110))
@@ -114,7 +114,7 @@ it('lets undo wait for a slow scrub save, so the inverse write never lands first
   expect(update).toHaveBeenCalledTimes(1)
   finish()
   await undone
-  expect(order).toEqual(['scrub save started', 'saved {"x":125}', 'saved {"x":120}'])
+  expect(order).toEqual(['scrub save started', 'saved {"x":126}', 'saved {"x":120}'])
 })
 
 it("leaves a teammate's move of the same frame out of the drag", async () => {

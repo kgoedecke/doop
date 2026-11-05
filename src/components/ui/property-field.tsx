@@ -130,6 +130,7 @@ export function NumberField({
   const scrub = useValueScrub({
     ...scrubLifecycle,
     value: draft,
+    unit: u,
     enabled: !disabled && draft.trim() !== '' && Number.isFinite(Number(draft)),
     min,
     max,
@@ -201,6 +202,7 @@ export function NumberField({
           className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
           title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
           onPointerDown={scrub.onPointerDown}
+          onWheel={scrub.onWheel}
           onClick={(e) => scrub.canScrub && e.preventDefault()}
         >
           {u}
@@ -238,6 +240,7 @@ export function TextField({
   const scrub = useValueScrub({
     ...scrubLifecycle,
     value: draft,
+    unit: u,
     enabled: scrubbable,
     min,
     onChange: (v) => {
@@ -266,6 +269,7 @@ export function TextField({
           className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
           title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
           onPointerDown={scrub.onPointerDown}
+          onWheel={scrub.onWheel}
           onClick={(e) => scrub.canScrub && e.preventDefault()}
         >
           {u}

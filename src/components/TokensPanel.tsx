@@ -658,6 +658,7 @@ function ValueInput({
   const scrubUnit = parsedForScrub?.unit || (kind === 'length' ? (type === 'letterSpacing' ? 'em' : 'px') : '')
   const scrub = useValueScrub({
     value: value ? (parsedForScrub?.number ?? '') : '0',
+    unit: scrubUnit,
     enabled:
       numeric && !alias && !disabled && (value === '' || (parsedForScrub !== null && parsedForScrub.number !== '')),
     min: kind === 'opacity' ? 0 : -Infinity,
@@ -704,6 +705,7 @@ function ValueInput({
         )}
         title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
         onPointerDown={scrub.onPointerDown}
+        onWheel={scrub.onWheel}
         onClick={(e) => scrub.canScrub && e.preventDefault()}
         aria-hidden
       >

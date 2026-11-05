@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+} from 'react'
 
 /** Only scrub numeric lengths, never keywords or expressions such as calc(). */
 function parse(value: string) {
@@ -14,6 +20,7 @@ function parse(value: string) {
  * inspection replies must not reset the starting point halfway through. */
 export function useValueScrub({
   value,
+  unit,
   onChange,
   min = -Infinity,
   max = Infinity,
@@ -22,6 +29,7 @@ export function useValueScrub({
   onEnd,
 }: {
   value: string
+  unit?: string
   onChange: (value: string) => void
   min?: number
   max?: number
@@ -61,15 +69,18 @@ export function useValueScrub({
       }
       moved = true
       lastX = e.clientX
-      const step = e.shiftKey ? 10 : e.altKey ? 0.1 : 1
+      const isPixel = unit === 'px' || parts!.some((p) => p.unit === 'px')
+      const rate = e.shiftKey ? 10 : e.altKey ? 0.1 : 1
+      const grid = e.shiftKey ? 10 : e.altKey ? 0.1 : isPixel ? 2 : 1
       // Each part keeps an unsnapped running value, so fractional pointer
       // positions (a zoomed browser) add up instead of being rounded away; only
       // the emitted value lands on the step's grid, so a field that starts at a
       // measured fraction (9.94) scrubs through whole values, not 10.94, 11.94.
+      // Pixel slider scroll values land on even pixel values (2px).
       const next = parts!
         .map((part) => {
-          part.number = Math.min(max, Math.max(min, part.number + dx * step))
-          const snapped = Math.min(max, Math.max(min, Math.round(part.number / step) * step))
+          part.number = Math.min(max, Math.max(min, part.number + dx * rate))
+          const snapped = Math.min(max, Math.max(min, Math.round(part.number / grid) * grid))
           return `${Number(snapped.toFixed(4))}${part.unit}`
         })
         .join(' ')
@@ -120,5 +131,27 @@ export function useValueScrub({
     window.addEventListener('keydown', keydown, true)
   }
 
-  return { canScrub, scrubbing, onPointerDown }
+  function onWheel(event: ReactWheelEvent<HTMLElement>) {
+    if (!canScrub) return
+    const parts = parse(value)
+    if (!parts) return
+    event.preventDefault()
+    event.stopPropagation()
+    const isPixel = unit === 'px' || parts.some((p) => p.unit === 'px')
+    const rate = event.shiftKey ? 10 : event.altKey ? 0.1 : isPixel ? 2 : 1
+    const grid = event.shiftKey ? 10 : event.altKey ? 0.1 : isPixel ? 2 : 1
+    const dir = event.deltaY < 0 ? 1 : -1
+    onStart?.()
+    const next = parts
+      .map((part) => {
+        const target = Math.min(max, Math.max(min, part.number + dir * rate))
+        const snapped = Math.min(max, Math.max(min, Math.round(target / grid) * grid))
+        return `${Number(snapped.toFixed(4))}${part.unit}`
+      })
+      .join(' ')
+    onChange(next)
+    onEnd?.(false)
+  }
+
+  return { canScrub, scrubbing, onPointerDown, onWheel }
 }

@@ -14,17 +14,17 @@ afterEach(() => {
   host = null
 })
 
-function Scrubber({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const scrub = useValueScrub({ value, onChange })
-  return createElement('span', { 'data-unit': true, onPointerDown: scrub.onPointerDown })
+function Scrubber({ value, unit, onChange }: { value: string; unit?: string; onChange: (v: string) => void }) {
+  const scrub = useValueScrub({ value, unit, onChange })
+  return createElement('span', { 'data-unit': true, onPointerDown: scrub.onPointerDown, onWheel: scrub.onWheel })
 }
 
-function mount(value: string) {
+function mount(value: string, unitName?: string) {
   const changes: string[] = []
   host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
-  act(() => root!.render(createElement(Scrubber, { value, onChange: (v) => changes.push(v) })))
+  act(() => root!.render(createElement(Scrubber, { value, unit: unitName, onChange: (v) => changes.push(v) })))
   const unit = host.querySelector('[data-unit]') as HTMLElement
   Object.assign(unit, {
     setPointerCapture: () => {},
@@ -38,6 +38,10 @@ function pointer(type: string, clientX: number, init: PointerEventInit = {}) {
   return new PointerEvent(type, { pointerId: 1, isPrimary: true, button: 0, clientX, bubbles: true, ...init })
 }
 
+function wheel(deltaY: number, init: WheelEventInit = {}) {
+  return new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...init })
+}
+
 function drag(unit: HTMLElement, dx: number, init: PointerEventInit = {}) {
   act(() => {
     unit.dispatchEvent(pointer('pointerdown', 100))
@@ -47,10 +51,43 @@ function drag(unit: HTMLElement, dx: number, init: PointerEventInit = {}) {
 }
 
 describe('useValueScrub', () => {
-  it('scrubs a fractional start onto whole values', () => {
+  it('scrubs a fractional pixel start onto even pixel values', () => {
     const { unit, changes } = mount('9.94px')
     drag(unit, 5)
-    expect(changes).toEqual(['15px'])
+    expect(changes).toEqual(['14px'])
+  })
+
+  it('scrubs pixel values strictly into even pixel values', () => {
+    const { unit, changes } = mount('1220', 'px')
+    act(() => {
+      unit.dispatchEvent(pointer('pointerdown', 100))
+      unit.dispatchEvent(pointer('pointermove', 103))
+      unit.dispatchEvent(pointer('pointermove', 104))
+      unit.dispatchEvent(pointer('pointermove', 105))
+      unit.dispatchEvent(pointer('pointermove', 106))
+      unit.dispatchEvent(pointer('pointerup', 106))
+    })
+    // 1220 + 3 = 1223 -> 1224; + 4 = 1224; + 5 = 1225 -> 1226; + 6 = 1226
+    expect(changes).toEqual(['1224', '1226'])
+  })
+
+  it('snaps an odd starting pixel value to even pixel values on drag', () => {
+    const { unit, changes } = mount('1221px')
+    drag(unit, 3)
+    // 1221 + 3 = 1224
+    expect(changes).toEqual(['1224px'])
+  })
+
+  it('scrolls with mouse wheel on pixel sliders in even pixel values', () => {
+    const { unit, changes } = mount('1220', 'px')
+    act(() => {
+      unit.dispatchEvent(wheel(-100)) // scroll up: +2
+    })
+    expect(changes).toEqual(['1222'])
+    act(() => {
+      unit.dispatchEvent(wheel(100)) // scroll down: -2
+    })
+    expect(changes).toEqual(['1222', '1218'])
   })
 
   it('snaps to tens with Shift and tenths with Alt', () => {
@@ -64,7 +101,7 @@ describe('useValueScrub', () => {
     expect(alt.changes).toEqual(['10.2'])
   })
 
-  it('adds up fractional pointer moves instead of rounding each away', () => {
+  it('adds up fractional pointer moves instead of rounding each away for non-pixel fields', () => {
     const { unit, changes } = mount('10')
     act(() => {
       unit.dispatchEvent(pointer('pointerdown', 100))

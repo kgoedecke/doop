@@ -1073,11 +1073,11 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await page.evaluate(() => window.elementPanelHarness.setZoom(2.5))
     const point = await startScrub('X position')
     for (let i = 1; i <= 12; i++) await page.mouse.move(point.x + 3 + i * 0.5, point.y)
-    await frame.waitForFunction(() => (document.querySelector('#box') as HTMLElement).style.translate === '19px 5px')
+    await frame.waitForFunction(() => (document.querySelector('#box') as HTMLElement).style.translate === '18px 5px')
     await page.mouse.up()
-    await expect.poll(() => saved.html).toContain('translate: 19px 5px')
+    await expect.poll(() => saved.html).toContain('translate: 18px 5px')
     await page.waitForFunction(
-      () => document.querySelector<HTMLInputElement>('[aria-label="X position"]')?.value === '19',
+      () => document.querySelector<HTMLInputElement>('[aria-label="X position"]')?.value === '18',
     )
     await page.evaluate(() => window.elementPanelHarness.setZoom(1))
   }, 15_000)
