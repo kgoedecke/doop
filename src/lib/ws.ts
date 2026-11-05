@@ -169,6 +169,9 @@ function handle(msg: ServerMessage) {
     case 'guidelines':
       s.setGuidelineLocal(msg.name, msg.doc)
       break
+    case 'tokens':
+      s.setTokensLocal(msg.tokens, msg.themes)
+      break
     case 'reference':
       s.setReferenceLocal(msg.id, msg.reference)
       break

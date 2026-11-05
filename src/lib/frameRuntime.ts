@@ -920,6 +920,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var name = el.style[j]
       inline[name] = el.style.getPropertyValue(name)
     }
+    // The list enumerates longhands, so a shorthand holding a var() (a design
+    // token on border-radius) is only visible through the shorthand itself.
+    var shorthands = ['border-radius', 'border-color', 'border-width', 'padding', 'gap']
+    for (var sh = 0; sh < shorthands.length; sh++) {
+      var shorthandValue = el.style.getPropertyValue(shorthands[sh])
+      if (shorthandValue) inline[shorthands[sh]] = shorthandValue
+    }
     var classes = (el.getAttribute('class') || '').trim().split(/[ ]+/).filter(Boolean)
     var text = ''
     for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) text += n.nodeValue
@@ -1203,6 +1210,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       if (namedEl) {
         if (typeof d.name === 'string') namedEl.setAttribute('data-doop-name', d.name)
         else if (d.name === null) namedEl.removeAttribute('data-doop-name')
+        /* the saved document stamps the element's id with its name; the live
+           one follows, and a rolled-back stamp (null) comes off again */
+        if (typeof d.elementId === 'string' && !namedEl.hasAttribute('data-doop-id')) namedEl.setAttribute('data-doop-id', d.elementId)
+        else if (d.elementId === null) namedEl.removeAttribute('data-doop-id')
       }
       parent.postMessage({ type: 'doop:rename-result', reqId: d.reqId, ok: !!namedEl }, '*')
     }

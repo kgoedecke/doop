@@ -14,6 +14,15 @@ import { z } from 'zod'
 import { PageLimitError, store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
+import {
+  MAX_TOKEN_DESCRIPTION,
+  TOKEN_TYPES,
+  describeTokens,
+  tokensBrief,
+  tokensCss,
+  tokensMarkdown,
+  tokensTailwind,
+} from '../shared/designTokens.ts'
 import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
 import * as actions from './actions.ts'
 import { canvasRole } from './access.ts'
@@ -87,12 +96,17 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 ${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
 - Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
+- Design tokens: canvases can carry typed design tokens (colour, spacing, radius, type scale — CSS custom properties), each with a value per theme (light, dark, …) where it differs. get_canvas lists them; use one by writing var(--name) in CSS, never the literal, so a token change restyles every frame; switch a frame's theme with data-doop-theme="dark" on its <html>. create_tokens adds them when a brief names a palette or scale; set_tokens changes, renames or deletes; set_token_themes declares the themes; get_tokens exports them as JSON, CSS or a Tailwind @theme block.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.
 - Problems with Doop itself: when a Doop tool errors, misbehaves or lacks something you need, or the guide leaves you guessing, call report_issue with what you tried and what happened, then carry on. Ideas for making Doop better for agents, or something that worked well, go to share_feedback. Both reach the Doop team, not the humans on the canvas.`
 
 function extensionGuideLines(): string {
   const lines = extensions.flatMap((extension) => extension.mcpGuideLines ?? [])
   return lines.length ? lines.join('\n') + '\n' : ''
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function text(data: unknown) {
@@ -531,6 +545,8 @@ export function buildMcpServer(
       const docs = store.getGuidelines(canvas_id)
       const refs = store.getReferences(canvas_id)
       const library = fontsForCanvas(c)
+      const tokens = store.getTokens(canvas_id)
+      const tokenThemes = store.getTokenThemes(canvas_id)
       /* design-synced canvases carry a flow map: real user navigation between
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
@@ -547,6 +563,7 @@ export function buildMcpServer(
           : []),
         ...(library.length ? [libraryBrief(library)] : []),
         webFontsBrief(),
+        ...(tokens.length ? [tokensBrief(tokens, tokenThemes)] : []),
         ...(refs.length
           ? [
               'This canvas has pinned style references — exemplar designs humans marked as "more like this". Call get_reference on the relevant one and match its look (palette, type, spacing) in what you design.',
@@ -575,6 +592,8 @@ export function buildMcpServer(
             })),
             ...(library.length ? { fonts: describeLibrary(library) } : {}),
             webFonts: webFontFamilies(),
+            ...(tokens.length ? { tokens: describeTokens(tokens) } : {}),
+            ...(tokenThemes.length ? { tokenThemes } : {}),
             ...(flow.length ? { flow } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),
@@ -690,6 +709,168 @@ export function buildMcpServer(
         )
       } catch (e) {
         return err(e instanceof Error ? e.message : 'invalid guideline doc')
+      }
+    },
+  )
+
+  server.registerTool(
+    'get_tokens',
+    {
+      title: 'List design tokens',
+      description:
+        "A canvas's design tokens: its named design values (colour, opacity, radius, spacing, container, breakpoint, font family/weight/size, line height, letter spacing), each a CSS custom property frames use as var(--name), with its value per theme (light, dark, …) where one differs. Filter by type or a name glob; export as JSON (default), a :root CSS block with one block per theme, a Tailwind v4 @theme block, or markdown tables for a styleguide.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        types: z.array(z.enum(TOKEN_TYPES)).optional().describe('Only these token types; omit for all'),
+        name_pattern: z
+          .string()
+          .optional()
+          .describe('Glob on the full name, case-insensitive, * wildcard: "--color-*", "*-500", "*brand*"'),
+        format: z.enum(['json', 'css', 'tailwind', 'markdown']).optional(),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ canvas_id, types, name_pattern, format }) => {
+      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
+      let tokens = store.getTokens(canvas_id)
+      const themes = store.getTokenThemes(canvas_id)
+      if (types?.length) tokens = tokens.filter((t) => types.includes(t.type))
+      if (name_pattern) {
+        const re = new RegExp(`^${name_pattern.split('*').map(escapeRegExp).join('.*')}$`, 'i')
+        tokens = tokens.filter((t) => re.test(t.name))
+      }
+      if (!tokens.length)
+        return text({
+          tokens: [],
+          note: 'No design tokens match. Add some with create_tokens when a brief names a palette, spacing scale or type ramp, and use them as var(--name).',
+        })
+      switch (format) {
+        case 'css':
+          return text(tokensCss(tokens, themes))
+        case 'tailwind':
+          return text(tokensTailwind(tokens, themes))
+        case 'markdown':
+          return text(tokensMarkdown(tokens, themes))
+        default:
+          return text({ tokens: describeTokens(tokens), ...(themes.length ? { themes } : {}) })
+      }
+    },
+  )
+
+  server.registerTool(
+    'create_tokens',
+    {
+      title: 'Create design tokens',
+      description:
+        'Add design tokens to a canvas: each needs a CSS custom property name (--color-primary), a type and a value (a CSS value — "#0177d3", "oklch(…)", "8px", 600 — or var(--other) to alias another token, which must exist already or come earlier in the batch). Order matters: semantic colours before palette colours, neutrals before primary, secondary and accent; other types smallest value first. Names follow Tailwind v4 namespaces (--color-*, --spacing-*, --radius-*, --font-*, --text-* for sizes, --leading-*, --tracking-*, --container-*, --breakpoint-*). Reuse existing tokens before creating new ones; a name already in use is an error. Returns one result per entry.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        tokens: z
+          .array(
+            z.object({
+              name: z.string().describe('CSS custom property name, e.g. "--color-primary"'),
+              type: z.enum(TOKEN_TYPES),
+              value: z.union([z.string(), z.number()]),
+              themes: z
+                .record(z.string(), z.union([z.string(), z.number()]))
+                .optional()
+                .describe(
+                  'The value under a theme where it differs, e.g. { "dark": "#fff" }; a new theme name declares it',
+                ),
+              description: z
+                .string()
+                .max(MAX_TOKEN_DESCRIPTION)
+                .optional()
+                .describe('What it is for and when to use it'),
+            }),
+          )
+          .min(1)
+          .max(200),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, tokens, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const actor = actorFrom(agent_name)
+      const results = actions.createTokens(canvas_id, tokens, actor)
+      if (!results) return noCanvas(canvas_id)
+      return withFeedback(text({ results }), canvas_id, actor)
+    },
+  )
+
+  server.registerTool(
+    'set_tokens',
+    {
+      title: 'Change, rename or delete design tokens',
+      description:
+        'Update existing design tokens by name, applied in order: set `value` (or `type`, `description`, `themes`) to change one, `new_name` to rename it (every frame and alias follows), `delete: true` to remove it (refused while another token aliases it). Every frame that names a changed token is restyled at once. Returns one result per entry; errors are reported in-band.',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        tokens: z
+          .array(
+            z.object({
+              name: z.string().describe('The token to change, by its full name'),
+              new_name: z.string().optional(),
+              type: z.enum(TOKEN_TYPES).optional(),
+              value: z.union([z.string(), z.number()]).optional(),
+              themes: z
+                .record(z.string(), z.union([z.string(), z.number(), z.null()]))
+                .optional()
+                .describe("Theme values to set, merged in; null removes that theme's value"),
+              description: z.string().max(MAX_TOKEN_DESCRIPTION).optional(),
+              delete: z.boolean().optional(),
+            }),
+          )
+          .min(1)
+          .max(200),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, tokens, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const actor = actorFrom(agent_name)
+      const results = actions.setTokens(
+        canvas_id,
+        tokens.map(({ new_name, ...rest }) => ({ ...rest, ...(new_name !== undefined ? { newName: new_name } : {}) })),
+        actor,
+      )
+      if (!results) return noCanvas(canvas_id)
+      return withFeedback(text({ results }), canvas_id, actor)
+    },
+  )
+
+  server.registerTool(
+    'set_token_themes',
+    {
+      title: 'Set the design token themes',
+      description:
+        'Replace the canvas\'s token themes (light, dark, compact, …) and their order. A token carries a value per theme where it differs from its default (set them with create_tokens / set_tokens `themes`); a frame switches theme with data-doop-theme="<theme>" on its <html>, or on one subtree. A theme that leaves the list takes its values with it.',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        themes: z
+          .array(z.string())
+          .max(8)
+          .describe('Theme names in display order, e.g. ["light", "dark"]; "default" is always there and never listed'),
+        renames: z
+          .array(z.object({ from: z.string(), to: z.string() }))
+          .optional()
+          .describe('Themes to rename first; their values follow. List the new name in `themes`.'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, themes, renames, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const actor = actorFrom(agent_name)
+      try {
+        const set = actions.setTokenThemes(canvas_id, themes, actor, renames ?? [])
+        if (!set) return noCanvas(canvas_id)
+        return withFeedback(text({ ok: true, themes: set }), canvas_id, actor)
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'invalid themes')
       }
     },
   )

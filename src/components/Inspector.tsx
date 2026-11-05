@@ -174,6 +174,8 @@ export function Inspector({
          server's frame in the store, and that still carries the old size */
       const to = scrub.value
       if (to === undefined || to === from) return
+      /* a frame a teammate deleted mid-drag has nothing to commit to */
+      if (!store.canvas?.frames.some((f) => f.id === id)) return
       store.patchFrameLocal(id, { [key]: to })
       recordUpdate(id, { [key]: from }, { [key]: to }, true)
       const save = api.updateFrame(id, { [key]: to })

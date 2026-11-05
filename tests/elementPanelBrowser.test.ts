@@ -67,6 +67,18 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
       }
       // The delayed-font test releases this stylesheet after the panel's first read.
       if (new URL(request.url()).pathname === '/tests/fixtures/late-font.css') return
+      if (new URL(request.url()).pathname === '/api/canvases/c/tokens' && request.method() === 'POST') {
+        const { tokens } = JSON.parse(request.postData()!)
+        await request.respond({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            results: tokens.map((t: { name: string }) => ({ name: t.name, result: 'created' })),
+            tokens,
+          }),
+        })
+        return
+      }
       if (new URL(request.url()).pathname === '/api/frames/f' && request.method() === 'PATCH') {
         framePatches.push(JSON.parse(request.postData()!))
         saved = { ...saved, ...framePatches.at(-1) }
@@ -998,7 +1010,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   }
 
   async function startScrub(label: string) {
-    const unit = (await page.$(`label:has(input[aria-label="${label}"]) > span:last-child`))!
+    const unit = (await page.$(`label:has(input[aria-label="${label}"]) > span[data-unit]`))!
     await unit.scrollIntoView()
     expect(await unit.evaluate((el) => getComputedStyle(el).cursor)).toBe('ew-resize')
     const box = (await unit.boundingBox())!
@@ -1552,4 +1564,33 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await frame.waitForFunction(() => (document.querySelector('#scrub') as HTMLElement).style.aspectRatio === '80 / 40')
     await expect.poll(() => saved.html).toContain('aspect-ratio: 80 / 40')
   }, 15_000)
+  it("creates a token from a field with that field's value, and binds the field", async () => {
+    const frame = await seedScrubTarget()
+    await page.click('label:has(input[aria-label="Corner radius"]) button[aria-label="Use a token"]')
+    await page.click('[data-slot="popover-content"] button[aria-label="Create a token from this value"]')
+    const name = await page.waitForSelector('[data-slot="popover-content"] input[aria-label="New token name"]')
+    /* the field's value is what the token is made from, and it can be edited first */
+    expect(
+      await page.$eval(
+        '[data-slot="popover-content"] input[aria-label="Value"]',
+        (el) => (el as HTMLInputElement).value,
+      ),
+    ).toBe('3px')
+    /* the name comes prefilled (radius-1); replace it */
+    await name!.click({ count: 3 })
+    await name!.type('card')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => !document.querySelector('[data-slot="popover-content"]'), { timeout: 10_000 })
+    await frame.waitForFunction(
+      () => (document.querySelector('#scrub') as HTMLElement).style.getPropertyValue('border-radius') === 'var(--card)',
+    )
+    await expect.poll(() => saved.html).toContain('border-radius: var(--card)')
+    /* bound: the field shows the token's name, and the broken chain detaches it */
+    await page.waitForSelector('label:has(span[title="Bound to card"])')
+    await page.click('button[aria-label="Detach from card"]')
+    /* detached to the computed literal (the fixture's frame carries no token block, so 0px here) */
+    await frame.waitForFunction(
+      () => !(document.querySelector('#scrub') as HTMLElement).style.getPropertyValue('border-radius').includes('var('),
+    )
+  }, 20_000)
 })

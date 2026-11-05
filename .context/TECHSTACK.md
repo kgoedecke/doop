@@ -18,7 +18,7 @@
 - Zustand 4.5.4 - client-side state management.
 - Element ids (`shared/elementId.ts`): anything outside a frame that points at an element
   inside it uses the element's `data-doop-id` attribute, stamped into the frame HTML the first
-  time something needs it (a comment, an element link) and kept by agents like every other
+  time something needs it (a comment, an element link, a layer rename, whose undo and redo find the element by it) and kept by agents like every other
   `data-doop-*` attribute. The server stamps (`server/elementIds.ts`, parse5 by source offset,
   so nothing else is re-serialized; `actions.ensureElementId`, exposed as
   `POST /api/frames/:id/element-id` to the comment role) as an annotation: `store.updateFrame`'s
@@ -127,6 +127,19 @@
   never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
   healed document, so a cut-off script never runs).
+- Design tokens (`shared/designTokens.ts`, spec `.context/specs/design-tokens.md`): a canvas's
+  typed design values (Paper's eleven types: colour, opacity, radius, spacing, container,
+  breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom
+  property frames use as `var(--name)`, with a value per theme (`canvas.tokenThemes`; a frame
+  switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
+  frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs, and a
+  token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
+  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0044); REST under
+  `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
+  markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
+  `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
+  (`TokensPanel.tsx`) and token menus on the Design panel's colour, radius and font-size fields.
+  Tests: `designTokens.test.ts`, `designTokenWrites.test.ts`, `designTokensHttp.test.ts`.
 - Hosted fonts (`shared/webFonts.ts`): the Design panel's font menu offers the "Fonts" group, a
   curated roster of open families on Google Fonts (`WEB_FONTS`, each with its css2 axes), plus
   two "Device fonts" (system UI, system monospace) labelled as varying by viewer; the OS stacks
@@ -177,11 +190,17 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   does not answer within its 15s is unreadable, and the server renders), `inlineDocument` turns it
   into one SVG sized to the frame, every image, stylesheet (both `@import` forms, cycles cut)
   and font fetched and inlined as a data: URL (an SVG drawn as an image loads nothing itself;
-  scripts, nested documents and `srcset` are dropped, a link's `media` kept),
+  scripts and `srcset` are dropped, a link's `media` kept; a nested document (iframe, object, embed) sends
+  the frame to the server, since it would be a hole in the picture),
   and the SVG is drawn onto a canvas at 2x from a data: URL (a blob: URL taints the canvas in
   Chromium) and encoded. A resource the browser cannot fetch (an image host without CORS)
   rejects the whole render and the export falls back to `/i/<id>.<ext>` as before, so what the
-  person sees on the canvas is never the export's blocker. Tests: `frameRaster.test.ts`,
+  person sees on the canvas is never the export's blocker. An element inside a frame exports
+  too (the element menu's Export as PNG / JPG and Copy as PNG, `downloadElementExport` /
+  `copyElementPng`): the frame is rendered whole and cut to the element's live box
+  (`doop:inspect` rect, `clipToFrame`, the raster's `clip` option), so every style it inherits
+  and whatever paints behind it stay in the picture; a server render is cropped here the same
+  way (`cropRaster`), and a frame off screen says so. Tests: `frameRaster.test.ts`,
   `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
   `frameExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints

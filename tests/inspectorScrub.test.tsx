@@ -29,7 +29,8 @@ let root: Root
 let container: HTMLDivElement
 
 function Panel() {
-  const current = useStore((s) => s.canvas!.frames[0]!)
+  const current = useStore((s) => s.canvas?.frames[0])
+  if (!current) return null
   return (
     <TooltipProvider>
       <Inspector frame={current} />
@@ -156,6 +157,21 @@ it('commits a field typed before the drag on its own when Tab lands mid-drag', (
   expect(stored().width).toBe(770)
   expect(update).toHaveBeenCalledTimes(2)
   expect(update).toHaveBeenLastCalledWith('f', { width: 770 })
+})
+
+it('records and saves nothing when a teammate deletes the frame mid-drag', async () => {
+  const update = vi.spyOn(api, 'updateFrame')
+  const unit = unitOf('Width')
+  act(() => {
+    unit.dispatchEvent(pointer('pointerdown', 100))
+    unit.dispatchEvent(pointer('pointermove', 110))
+  })
+  /* the room's delete unmounts the Inspector, which ends the gesture */
+  act(() => useStore.getState().removeFrame('f'))
+  expect(container.querySelector('input[aria-label="Width"]')).toBeNull()
+  expect(update).not.toHaveBeenCalled()
+  await act(() => undo())
+  expect(update).not.toHaveBeenCalled()
 })
 
 it('puts a cancelled scrub back and saves nothing, keeping what a teammate moved', () => {

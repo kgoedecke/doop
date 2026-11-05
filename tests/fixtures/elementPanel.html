@@ -32,6 +32,8 @@
             updatedAt: 0,
           })
         },
+        /* the canvas's design tokens, as the room would send them */
+        tokens: (tokens, modes) => useStore.getState().setTokensLocal(tokens, modes ?? []),
         remote: (frame) => useStore.getState().setCanvas({ ...useStore.getState().canvas, frames: [frame] }),
         select: (selector) => useStore.getState().pickElement({ frameId: 'f', selector }),
         panelOpen: () => useStore.getState().elementPanelOpen,

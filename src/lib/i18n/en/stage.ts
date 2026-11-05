@@ -70,6 +70,8 @@ export const stage = {
   copySelector: 'Copy selector',
   copyLink: 'Copy link',
   copyLinkToElement: 'Copy link to element',
+  exportPng: 'Export as PNG',
+  exportJpg: 'Export as JPG',
   moveUp: 'Move up',
   moveDown: 'Move down',
   deleteElement: 'Delete element',
