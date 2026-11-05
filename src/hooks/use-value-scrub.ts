@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
-} from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 
 /** Only scrub numeric lengths, never keywords or expressions such as calc(). */
 function parse(value: string) {
@@ -39,8 +33,60 @@ export function useValueScrub({
 }) {
   const [scrubbing, setScrubbing] = useState(false)
   const cleanup = useRef<(() => void) | null>(null)
-  useEffect(() => () => cleanup.current?.(), [])
+  const targetRef = useRef<HTMLElement | null>(null)
   const canScrub = enabled && parse(value) !== null
+
+  const latest = useRef({ value, unit, min, max, canScrub, onStart, onEnd, onChange })
+  useEffect(() => {
+    latest.current = { value, unit, min, max, canScrub, onStart, onEnd, onChange }
+  })
+
+  const onWheel = useCallback((e: WheelEvent) => {
+    // Ignore wheel when inactive, during an in-flight drag, or on horizontal-only scroll
+    if (!latest.current.canScrub || cleanup.current || e.deltaY === 0) return
+    const { value, unit, min, max, onStart, onEnd, onChange } = latest.current
+    const parts = parse(value)
+    if (!parts) return
+    e.preventDefault()
+    e.stopPropagation()
+    const isPixel = unit === 'px' || parts.some((p) => p.unit === 'px')
+    const rate = e.shiftKey ? 10 : e.altKey ? 0.1 : isPixel ? 2 : 1
+    const grid = e.shiftKey ? 10 : e.altKey ? 0.1 : isPixel ? 2 : 1
+    const dir = e.deltaY < 0 ? 1 : -1
+    onStart?.()
+    const next = parts
+      .map((part) => {
+        const target = Math.min(max, Math.max(min, part.number + dir * rate))
+        const snapped = Math.min(max, Math.max(min, Math.round(target / grid) * grid))
+        return `${Number(snapped.toFixed(4))}${part.unit}`
+      })
+      .join(' ')
+    onChange(next)
+    onEnd?.(false)
+  }, [])
+
+  const attachHandle = useCallback(
+    (node: HTMLElement | null) => {
+      if (targetRef.current) {
+        targetRef.current.removeEventListener('wheel', onWheel)
+      }
+      targetRef.current = node
+      if (node) {
+        node.addEventListener('wheel', onWheel, { passive: false })
+      }
+    },
+    [onWheel],
+  )
+
+  useEffect(
+    () => () => {
+      cleanup.current?.()
+      if (targetRef.current) {
+        targetRef.current.removeEventListener('wheel', onWheel)
+      }
+    },
+    [onWheel],
+  )
 
   function onPointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (!canScrub || event.button !== 0 || !event.isPrimary || cleanup.current) return
@@ -131,27 +177,5 @@ export function useValueScrub({
     window.addEventListener('keydown', keydown, true)
   }
 
-  function onWheel(event: ReactWheelEvent<HTMLElement>) {
-    if (!canScrub) return
-    const parts = parse(value)
-    if (!parts) return
-    event.preventDefault()
-    event.stopPropagation()
-    const isPixel = unit === 'px' || parts.some((p) => p.unit === 'px')
-    const rate = event.shiftKey ? 10 : event.altKey ? 0.1 : isPixel ? 2 : 1
-    const grid = event.shiftKey ? 10 : event.altKey ? 0.1 : isPixel ? 2 : 1
-    const dir = event.deltaY < 0 ? 1 : -1
-    onStart?.()
-    const next = parts
-      .map((part) => {
-        const target = Math.min(max, Math.max(min, part.number + dir * rate))
-        const snapped = Math.min(max, Math.max(min, Math.round(target / grid) * grid))
-        return `${Number(snapped.toFixed(4))}${part.unit}`
-      })
-      .join(' ')
-    onChange(next)
-    onEnd?.(false)
-  }
-
-  return { canScrub, scrubbing, onPointerDown, onWheel }
+  return { attachHandle, canScrub, scrubbing, onPointerDown }
 }

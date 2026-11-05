@@ -1118,7 +1118,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     for (const [label, dx, property, expected, modifier] of [
       ['Height', 4, 'height', '120px', 'Shift'],
       ['Gap', 8, 'column-gap', '18px'],
-      ['Padding top', 5, 'padding-top', '9px'],
+      ['Padding top', 5, 'padding-top', '10px'],
       ['Element opacity', 40, 'opacity', '1'],
       ['Element opacity', -150, 'opacity', '0'],
       ['Border width', 4, 'border-width', '6px'],

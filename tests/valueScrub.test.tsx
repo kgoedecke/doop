@@ -16,7 +16,7 @@ afterEach(() => {
 
 function Scrubber({ value, unit, onChange }: { value: string; unit?: string; onChange: (v: string) => void }) {
   const scrub = useValueScrub({ value, unit, onChange })
-  return createElement('span', { 'data-unit': true, onPointerDown: scrub.onPointerDown, onWheel: scrub.onWheel })
+  return createElement('span', { ref: scrub.attachHandle, 'data-unit': true, onPointerDown: scrub.onPointerDown })
 }
 
 function mount(value: string, unitName?: string) {
@@ -88,6 +88,33 @@ describe('useValueScrub', () => {
       unit.dispatchEvent(wheel(100)) // scroll down: -2
     })
     expect(changes).toEqual(['1222', '1218'])
+  })
+
+  it('ignores horizontal-only wheel scroll (deltaY === 0)', () => {
+    const { unit, changes } = mount('1220', 'px')
+    act(() => {
+      unit.dispatchEvent(wheel(0, { deltaX: 100 }))
+    })
+    expect(changes).toEqual([])
+  })
+
+  it('ignores wheel events during an active drag so drag cancellation is preserved', () => {
+    const { unit, changes } = mount('1220', 'px')
+    act(() => {
+      unit.dispatchEvent(pointer('pointerdown', 100))
+      unit.dispatchEvent(pointer('pointermove', 104))
+    })
+    expect(changes).toEqual(['1224'])
+    // Wheel event during active drag must be ignored
+    act(() => {
+      unit.dispatchEvent(wheel(-100))
+    })
+    expect(changes).toEqual(['1224'])
+    // Escape should cancel the drag and revert to starting value
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    expect(changes).toEqual(['1224', '1220'])
   })
 
   it('snaps to tens with Shift and tenths with Alt', () => {

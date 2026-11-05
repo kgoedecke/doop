@@ -698,6 +698,7 @@ function ValueInput({
       )}
     >
       <span
+        ref={scrub.attachHandle}
         className={cn(
           'grid size-5 flex-none place-items-center rounded-tag text-ink-faint',
           scrub.canScrub && 'cursor-ew-resize hover:bg-sub hover:text-ink',
@@ -705,7 +706,6 @@ function ValueInput({
         )}
         title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
         onPointerDown={scrub.onPointerDown}
-        onWheel={scrub.onWheel}
         onClick={(e) => scrub.canScrub && e.preventDefault()}
         aria-hidden
       >
