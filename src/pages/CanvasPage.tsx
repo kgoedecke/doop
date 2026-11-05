@@ -1,3 +1,4 @@
+import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, pickedSelectors, roleOf, useStore } from '../lib/store'
 import {
@@ -520,6 +521,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       if (isTypingTarget(e.target)) return
       /* every paste lands a frame or a layer */
       if (!canEditOpenCanvas(useStore.getState())) return
+      const captureText = e.clipboardData?.getData('text/plain') ?? ''
+      if (captureText.startsWith(CAPTURE_PREFIX)) {
+        e.preventDefault()
+        void pasteWebCapture(canvasId, captureText).catch((error: Error) => {
+          setToast(error.message)
+          window.setTimeout(() => setToast(null), 4000)
+        })
+        return
+      }
       /* bitmaps land as pictures, SVGs as editable shapes and PDFs as pages, in one row */
       const incoming = splitIncoming([...(e.clipboardData?.files ?? [])], svgMarkupOf(e.clipboardData))
       if (hasIncoming(incoming)) {
