@@ -36,6 +36,8 @@
   --shadow-pop: var(--shadow-pop);
   --shadow-modal: var(--shadow-modal);
   --shadow-ring: var(--shadow-ring);
+  --shadow-ring-primary: var(--shadow-ring-primary);
+  --shadow-ring-primary-hover: var(--shadow-ring-primary-hover);
   --shadow-ring-hover: var(--shadow-ring-hover);
   --shadow-float: var(--shadow-float);
   --shadow-elevation-1: var(--shadow-elevation-1);
@@ -173,6 +175,10 @@
      floats over the canvas, --shadow-pop a menu or toast. */
   --shadow-ring: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
   --shadow-ring-hover: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 2px -1px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-ring-primary:
+    0 0 0 1px rgba(255, 255, 255, 0.16), 0 1px 2px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.15);
+  --shadow-ring-primary-hover:
+    0 0 0 1px rgba(255, 255, 255, 0.24), 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.2);
   --shadow-float: 0 12px 40px -10px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
   --shadow-card: var(--shadow-ring);
   --shadow-pop: 0 25px 80px -12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
@@ -431,6 +437,8 @@
      ring on top of a deeper ambient drop. */
   --shadow-ring: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25);
   --shadow-ring-hover: 0 0 0 1px rgba(255, 255, 255, 0.13), 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-ring-primary: var(--shadow-ring);
+  --shadow-ring-primary-hover: var(--shadow-ring-hover);
   --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 40px -10px rgba(0, 0, 0, 0.7);
   --shadow-pop:
     0 0 0 1px rgba(255, 255, 255, 0.11), 0 4px 12px rgba(0, 0, 0, 0.45), 0 24px 56px -16px rgba(0, 0, 0, 0.75);

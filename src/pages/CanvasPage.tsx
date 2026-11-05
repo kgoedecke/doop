@@ -919,7 +919,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           {/* the bar's one black action — it opens the MCP connection modal */}
           <Button
             variant="primary"
-            className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
+            className={cn(
+              docked ? barPrimaryCompactBtn : barPrimaryBtn,
+              'shadow-ring-primary hover:shadow-ring-primary-hover',
+            )}
             onClick={openConnect}
           >
             <PlusIcon className="size-3.5" strokeWidth={1.4} />
@@ -938,7 +941,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           </div>
           <Button
             variant="primary"
-            className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
+            className={cn(
+              docked ? barPrimaryCompactBtn : barPrimaryBtn,
+              'shadow-ring-primary hover:shadow-ring-primary-hover',
+            )}
             onClick={openConnect}
           >
             <PlusIcon className="size-3.5" strokeWidth={1.4} />
