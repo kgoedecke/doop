@@ -80,6 +80,7 @@ const WELCOME_HTML = `<!doctype html>
     font-size: 12.5px;
     font-weight: 400;
     background: #111;
+    border: 1px solid #dcdcdc;
     color: #fdfdfd;
     padding: 7px 14px;
     border-radius: 10px;
