@@ -309,9 +309,33 @@ export const FRAME_TEXT_RUNTIME = `
   }
 
   function formatText(command) {
-    if (!editing || textCommands.indexOf(command) === -1 || !validTextRange(textRange)) return
-    activeEl.focus({ preventScroll: true })
+    if (!editing || textCommands.indexOf(command) === -1 || !activeEl) return
     var selection = getSelection()
+    if (!validTextRange(textRange)) {
+      if (selection && selection.rangeCount && validTextRange(selection.getRangeAt(0))) {
+        textRange = selection.getRangeAt(0).cloneRange()
+      } else {
+        var r = document.createRange()
+        r.selectNodeContents(activeEl)
+        textRange = r
+      }
+    }
+    // If inserting a list into a <p>, convert to <div> first because in HTML <p> cannot contain <ul>/<ol>
+    if ((command === 'insertUnorderedList' || command === 'insertOrderedList') && activeEl.tagName === 'P') {
+      var diff = paragraphStyleDiff(activeEl)
+      var block = document.createElement('div')
+      Array.prototype.forEach.call(activeEl.attributes, function (attr) { block.setAttribute(attr.name, attr.value) })
+      for (var name in diff) if (!block.style.getPropertyValue(name)) block.style.setProperty(name, diff[name])
+      while (activeEl.firstChild) block.appendChild(activeEl.firstChild)
+      activeEl.replaceWith(block)
+      activeEl = block
+      if (typeof postActive === 'function') postActive()
+      var newRange = document.createRange()
+      newRange.selectNodeContents(activeEl)
+      textRange = newRange
+    }
+    activeEl.focus({ preventScroll: true })
+    selection = getSelection()
     selection.removeAllRanges()
     selection.addRange(textRange)
     // Native commands preserve the browser's undo stack, including typed text.
@@ -327,10 +351,14 @@ export const FRAME_TEXT_RUNTIME = `
   function styleLists(el, command, selection) {
     if (command !== 'insertUnorderedList' && command !== 'insertOrderedList') return
     el.querySelectorAll('ul,ol').forEach(function (list) {
-      if (!selection.rangeCount || !selection.getRangeAt(0).intersectsNode(list)) return
+      if (selection && selection.rangeCount && !selection.getRangeAt(0).intersectsNode(list)) return
       list.style.listStyleType = list.tagName === 'OL' ? 'decimal' : 'disc'
       list.style.paddingInlineStart = '1.5em'
       list.style.marginBlock = '0'
+      list.querySelectorAll('li').forEach(function (li) {
+        li.style.listStyleType = list.tagName === 'OL' ? 'decimal' : 'disc'
+        li.style.display = 'list-item'
+      })
     })
   }
 
@@ -377,10 +405,80 @@ export const FRAME_TEXT_RUNTIME = `
 
   document.addEventListener('selectionchange', postTextState)
   document.addEventListener('keydown', function (ev) {
-    if (!editing || !activeEl || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return
+    if (!editing || !activeEl) return
+    if (ev.key === 'Tab') {
+      var selection = getSelection()
+      if (selection && selection.rangeCount) {
+        var range = selection.getRangeAt(0)
+        var targetNode = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement
+        var li = targetNode && activeEl.contains(targetNode) ? targetNode.closest('li') : null
+        if (li) {
+          ev.preventDefault()
+          document.execCommand(ev.shiftKey ? 'outdent' : 'indent', false, null)
+          styleLists(activeEl, 'insertUnorderedList', getSelection())
+          if (editTimer) { clearTimeout(editTimer); editTimer = null }
+          postEdited(true)
+          postTextState()
+          return
+        }
+      }
+    }
+    if (ev.key === ' ' && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      var selection = getSelection()
+      if (selection && selection.isCollapsed && selection.rangeCount) {
+        var range = selection.getRangeAt(0)
+        var node = range.startContainer
+        if (node && node.nodeType === 3 && activeEl.contains(node)) {
+          var targetEl = node.parentElement
+          if (!targetEl || !targetEl.closest('li')) {
+            var offset = range.startOffset
+            var textBefore = node.nodeValue.slice(0, offset)
+            var lastNl = textBefore.lastIndexOf('\\n')
+            var linePrefix = lastNl !== -1 ? textBefore.slice(lastNl + 1) : null
+            var atLineStart = false
+            var matchText = ''
+            if (linePrefix !== null) {
+              matchText = linePrefix
+              atLineStart = true
+            } else {
+              var sib = node.previousSibling
+              var hasContentOnLine = false
+              while (sib) {
+                if (sib.tagName === 'BR') break
+                if ((sib.textContent || '').length > 0) {
+                  hasContentOnLine = true
+                  break
+                }
+                sib = sib.previousSibling
+              }
+              if (!hasContentOnLine) {
+                matchText = textBefore
+                atLineStart = true
+              }
+            }
+            var isBullet = atLineStart && (matchText === '-' || matchText === '*' || matchText === '\\u2022')
+            var isNumber = atLineStart && matchText === '1.'
+            if (isBullet || isNumber) {
+              ev.preventDefault()
+              var delStart = lastNl !== -1 ? lastNl + 1 : 0
+              var delRange = document.createRange()
+              delRange.setStart(node, delStart)
+              delRange.setEnd(node, offset)
+              delRange.deleteContents()
+              textRange = delRange.cloneRange()
+              formatText(isBullet ? 'insertUnorderedList' : 'insertOrderedList')
+              return
+            }
+          }
+        }
+      }
+    }
+    if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return
     var key = ev.key.toLowerCase()
     var command = !ev.shiftKey ? { b: 'bold', i: 'italic', u: 'underline' }[key]
-      : ev.code === 'Digit7' ? 'insertOrderedList' : ev.code === 'Digit8' ? 'insertUnorderedList' : null
+      : key === 'x' ? 'strikeThrough'
+      : (ev.code === 'Digit7' || key === '7' || key === '&') ? 'insertOrderedList'
+      : (ev.code === 'Digit8' || key === '8' || key === '*') ? 'insertUnorderedList' : null
     if (!command) return
     ev.preventDefault()
     postTextState()
@@ -398,12 +496,11 @@ export const FRAME_TEXT_RUNTIME = `
   function prepareText(el) {
     // Pre-wrapped newlines are separate visual lines, but native list commands
     // only understand DOM line breaks. Convert before editing/undo begins.
-    if (!/^pre/.test(getComputedStyle(el).whiteSpace)) return
     var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
     var nodes = []
     while (walker.nextNode()) nodes.push(walker.currentNode)
     nodes.forEach(function (node) {
-      if (node.nodeValue.indexOf('\\n') === -1 || !/^pre/.test(getComputedStyle(node.parentElement).whiteSpace)) return
+      if (node.nodeValue.indexOf('\\n') === -1) return
       var fragment = document.createDocumentFragment()
       node.nodeValue.split('\\n').forEach(function (line, index) {
         if (index) fragment.appendChild(document.createElement('br'))

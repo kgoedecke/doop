@@ -472,4 +472,87 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     expect(await frame.$('[contenteditable]')).toBeNull()
     expect(await frame.$('#text b')).toBeNull()
   })
+
+  it('toggles strikethrough with Ctrl+Shift+X while editing', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">Hello world</p>')
+    await select(0, 5)
+    await page.keyboard.down('Control')
+    await page.keyboard.down('Shift')
+    await page.keyboard.press('KeyX')
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Control')
+    await frame.waitForSelector('#text strike, #text s')
+    expect(await frame.$eval('#text strike, #text s', (el) => el.textContent)).toBe('Hello')
+  })
+
+  it('automatically converts markdown bullet prefixes into bullet lists when typing', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial;width:200px;min-height:40px">One</p>')
+    await frame.evaluate(() => {
+      const text = document.querySelector('#text')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 0, text, 3)
+    })
+    await page.keyboard.type('-')
+    await page.keyboard.press('Space')
+    await frame.waitForSelector('#text li, #text ul')
+    await page.keyboard.type('Bullet item')
+    expect(await frame.$eval('#text li', (el) => el.textContent)).toBe('Bullet item')
+  })
+
+  it('automatically converts markdown number prefix into ordered list when typing', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial;width:200px;min-height:40px">One</p>')
+    await frame.evaluate(() => {
+      const text = document.querySelector('#text')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 0, text, 3)
+    })
+    await page.keyboard.type('1.')
+    await page.keyboard.press('Space')
+    await frame.waitForSelector('#text ol')
+    await page.keyboard.type('Numbered item')
+    expect(await frame.$eval('#text ol li', (el) => el.textContent)).toBe('Numbered item')
+  })
+
+  it('indents and outdents list items with Tab and Shift+Tab', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">One</p>')
+    await format('insertUnorderedList')
+    await frame.evaluate(() => {
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector('#text li')!)
+      range.collapse(false)
+      getSelection()!.removeAllRanges()
+      getSelection()!.addRange(range)
+    })
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('Two')
+    expect(await frame.$$eval('#text li', (items) => items.map((li) => li.textContent))).toEqual(['One', 'Two'])
+    await page.keyboard.press('Tab')
+    expect(await frame.$$eval('#text ul ul li', (items) => items.map((li) => li.textContent))).toEqual(['Two'])
+    await page.keyboard.down('Shift')
+    await page.keyboard.press('Tab')
+    await page.keyboard.up('Shift')
+    expect(await frame.$('#text ul ul')).toBeNull()
+  })
+
+  it('converts multiline paragraph to a bullet list from toolbar even without existing selection', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial;white-space:pre-wrap">First line\nSecond line</p>')
+    await format('insertUnorderedList')
+    await frame.waitForSelector('#text ul, div#text ul')
+    expect(await frame.$$eval('li', (items) => items.map((li) => li.textContent))).toEqual([
+      'First line',
+      'Second line',
+    ])
+  })
+
+  it('converts a markdown bullet on a subsequent line into a bullet list', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">First line</p>')
+    await frame.evaluate(() => {
+      const text = document.querySelector('#text')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 10, text, 10)
+    })
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('*')
+    await page.keyboard.press('Space')
+    await frame.waitForSelector('li')
+    await page.keyboard.type('Second line')
+    expect(await frame.$eval('#text', (el) => el.textContent)).toContain('Second line')
+  })
 })
