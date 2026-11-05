@@ -173,7 +173,7 @@ export const barPillIconBtn =
 /* the bar's button sizes, so every screen's actions line up */
 export const barGhostBtn = 'h-9 rounded-[10px] bg-surface px-3.5 text-[12.5px] font-medium hover:bg-paper-deep'
 export const barIconBtn = 'size-9 rounded-[10px] bg-surface hover:bg-paper-deep disabled:opacity-40'
-export const barPrimaryBtn = 'h-9 rounded-[10px] border border-line px-3.5 text-[12.5px] font-medium'
+export const barPrimaryBtn = 'h-9 rounded-[10px] px-3.5 text-[12.5px] font-medium'
 /** The primary action in the docked bar, where the pills are flat: the
  *  same 30px as the actions beside it. */
-export const barPrimaryCompactBtn = 'h-[30px] gap-[7px] rounded-[8px] border border-line px-2.5 text-[12px] font-medium'
+export const barPrimaryCompactBtn = 'h-[30px] gap-[7px] rounded-[8px] px-2.5 text-[12px] font-medium'
