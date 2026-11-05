@@ -377,10 +377,64 @@ export const FRAME_TEXT_RUNTIME = `
 
   document.addEventListener('selectionchange', postTextState)
   document.addEventListener('keydown', function (ev) {
-    if (!editing || !activeEl || !(ev.metaKey || ev.ctrlKey) || ev.altKey) return
+    if (!editing || !activeEl) return
+    if (ev.key === 'Tab') {
+      var selection = getSelection()
+      if (selection && selection.rangeCount) {
+        var range = selection.getRangeAt(0)
+        var targetNode = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement
+        var li = targetNode && activeEl.contains(targetNode) ? targetNode.closest('li') : null
+        if (li) {
+          ev.preventDefault()
+          document.execCommand(ev.shiftKey ? 'outdent' : 'indent', false, null)
+          styleLists(activeEl, 'insertUnorderedList', getSelection())
+          if (editTimer) { clearTimeout(editTimer); editTimer = null }
+          postEdited(true)
+          postTextState()
+          return
+        }
+      }
+    }
+    if (ev.key === ' ' && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      var selection = getSelection()
+      if (selection && selection.isCollapsed && selection.rangeCount) {
+        var range = selection.getRangeAt(0)
+        var node = range.startContainer
+        if (node && node.nodeType === 3 && activeEl.contains(node)) {
+          var targetNode = node.parentElement
+          if (!targetNode || !targetNode.closest('li')) {
+            var offset = range.startOffset
+            var before = node.nodeValue.slice(0, offset)
+            var isBullet = before === '-' || before === '*' || before === '\u2022'
+            var isNumber = before === '1.'
+            if (isBullet || isNumber) {
+              var prev = node.previousSibling
+              var atStart = true
+              while (prev) {
+                if (prev.nodeType === 3 && prev.nodeValue.trim().length > 0) { atStart = false; break }
+                if (prev.nodeType === 1 && prev.tagName !== 'BR') { atStart = false; break }
+                prev = prev.previousSibling
+              }
+              if (atStart) {
+                ev.preventDefault()
+                var delRange = document.createRange()
+                delRange.setStart(node, offset - before.length)
+                delRange.setEnd(node, offset)
+                delRange.deleteContents()
+                formatText(isBullet ? 'insertUnorderedList' : 'insertOrderedList')
+                return
+              }
+            }
+          }
+        }
+      }
+    }
+    if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return
     var key = ev.key.toLowerCase()
     var command = !ev.shiftKey ? { b: 'bold', i: 'italic', u: 'underline' }[key]
-      : ev.code === 'Digit7' ? 'insertOrderedList' : ev.code === 'Digit8' ? 'insertUnorderedList' : null
+      : key === 'x' ? 'strikeThrough'
+      : (ev.code === 'Digit7' || key === '7' || key === '&') ? 'insertOrderedList'
+      : (ev.code === 'Digit8' || key === '8' || key === '*') ? 'insertUnorderedList' : null
     if (!command) return
     ev.preventDefault()
     postTextState()

@@ -127,7 +127,13 @@ async function boot(env: Record<string, string>, reuseDir: string | undefined, t
       stopped,
       stop({ keepData }: { keepData?: boolean } = {}) {
         proc.kill()
-        if (!keepData) rmSync(dataDir, { recursive: true, force: true })
+        if (!keepData) {
+          try {
+            rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+          } catch {
+            // Windows may briefly lock data directory files
+          }
+        }
       },
     }
   }
@@ -160,7 +166,11 @@ export async function buildTemplate(dir: string): Promise<void> {
   server.stop({ keepData: true })
   await server.stopped
   cpSync(server.dataDir, dir, { recursive: true })
-  rmSync(server.dataDir, { recursive: true, force: true })
+  try {
+    rmSync(server.dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+  } catch {
+    // Windows may briefly lock data directory files
+  }
 }
 
 /** Minimal cookie-jar client: better-auth drives everything through cookies. */

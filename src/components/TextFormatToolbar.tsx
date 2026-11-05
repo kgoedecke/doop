@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import { useT } from '../lib/i18n'
 import type { TextFormatCommand, TextFormatState } from '../lib/richText'
 import { Button } from './ui/button'
@@ -22,20 +23,22 @@ export function TextFormatToolbar({
   const t = useT()
   return (
     <div role="group" aria-label={t('stage.textFormatting')} className="flex items-center gap-0.5">
-      {formats.map(({ command, label, Icon }) => (
-        <Button
-          key={command}
-          variant="inverse"
-          size="icon-sm"
-          aria-label={t(`stage.${label}`)}
-          title={t(`stage.${label}`)}
-          aria-pressed={!!state[command]}
-          className="aria-pressed:bg-paper/25"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => onFormat(command)}
-        >
-          <Icon size="rail" />
-        </Button>
+      {formats.map(({ command, label, Icon }, index) => (
+        <Fragment key={command}>
+          {index === 4 && <div className="mx-0.5 h-4 w-px bg-paper/20" />}
+          <Button
+            variant="inverse"
+            size="icon-sm"
+            aria-label={t(`stage.${label}`)}
+            title={t(`stage.${label}`)}
+            aria-pressed={!!state[command]}
+            className="aria-pressed:bg-paper/25"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => onFormat(command)}
+          >
+            <Icon size="rail" />
+          </Button>
+        </Fragment>
       ))}
     </div>
   )
