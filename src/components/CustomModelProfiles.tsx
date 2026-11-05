@@ -258,10 +258,10 @@ export function CustomModelProfiles({
     try {
       const result = await api.testModelProfile({
         baseUrl: draft.baseUrl.trim(),
-        /* undefined keeps a saved profile's key on the server, an entered key
-           replaces it for this test, and null means it was deliberately cleared */
+        /* undefined or a blank edit keeps a saved profile's key on the server;
+           a nonblank key replaces it, and null means it was deliberately cleared */
         ...(draft.id ? { profileId: draft.id } : {}),
-        ...(draft.apiKey !== undefined ? { apiKey: draft.apiKey === null ? null : draft.apiKey.trim() || null } : {}),
+        ...(draft.apiKey === null ? { apiKey: null } : draft.apiKey?.trim() ? { apiKey: draft.apiKey.trim() } : {}),
       })
       settle(result, result.models ?? [])
     } catch (e) {

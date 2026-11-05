@@ -192,11 +192,13 @@ it('tests an endpoint and reports translated success and failure without echoing
   expect(container.textContent).toContain('The endpoint rejected the API key')
 })
 
-it('tests an existing profile with its stored key when the field stays blank', async () => {
+it('tests an existing profile with its stored key when a replacement field is erased', async () => {
   mocks.list.mockResolvedValue([profile()])
   mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
   await render(disconnected)
   await click(button('Edit'))
+  await fill(input('sk-… (optional)'), 'sk-temporary')
+  await fill(input('sk-… (optional)'), '')
   await click(button('Test connection'))
   expect(mocks.test).toHaveBeenCalledExactlyOnceWith({
     baseUrl: 'http://127.0.0.1:11434/v1',
