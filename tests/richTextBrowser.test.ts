@@ -531,4 +531,28 @@ describe.skipIf(!findBrowserPath())('rich text editing', { timeout: 30_000 }, ()
     await page.keyboard.up('Shift')
     expect(await frame.$('#text ul ul')).toBeNull()
   })
+
+  it('converts multiline paragraph to a bullet list from toolbar even without existing selection', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial;white-space:pre-wrap">First line\nSecond line</p>')
+    await format('insertUnorderedList')
+    await frame.waitForSelector('#text ul, div#text ul')
+    expect(await frame.$$eval('li', (items) => items.map((li) => li.textContent))).toEqual([
+      'First line',
+      'Second line',
+    ])
+  })
+
+  it('converts a markdown bullet on a subsequent line into a bullet list', async () => {
+    await render('<p id="text" style="margin:0;font:24px Arial">First line</p>')
+    await frame.evaluate(() => {
+      const text = document.querySelector('#text')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 10, text, 10)
+    })
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('*')
+    await page.keyboard.press('Space')
+    await frame.waitForSelector('li')
+    await page.keyboard.type('Second line')
+    expect(await frame.$eval('#text', (el) => el.textContent)).toContain('Second line')
+  })
 })

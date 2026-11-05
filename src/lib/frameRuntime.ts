@@ -132,7 +132,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
      and no focus ring of the browser's own */
   var EDIT_CSS =
     '[data-v-hover]{cursor:text}' +
-    '[data-v-active]{cursor:text}' +
+    '[data-v-active]{cursor:text;caret-color:currentColor}' +
+    '[data-v-active] *{caret-color:currentColor}' +
     '[data-v-active]:focus{outline:none!important}'
 
   function hasOwnText(el) {
@@ -407,11 +408,18 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   /* capture-phase: no link navigation or button handlers while editing */
   document.addEventListener('click', function (ev) {
     if (!editing) return
-    ev.preventDefault()
-    ev.stopPropagation()
     var el = candidate(ev.target)
-    if (el) activate(el, ev.clientX, ev.clientY, ev.detail > 1)
-    else deactivate()
+    if (el && el !== activeEl) {
+      ev.preventDefault()
+      ev.stopPropagation()
+      activate(el, ev.clientX, ev.clientY, ev.detail > 1)
+    } else if (!el) {
+      ev.preventDefault()
+      ev.stopPropagation()
+      deactivate()
+    } else if (ev.target && ev.target.closest && ev.target.closest('a')) {
+      ev.preventDefault()
+    }
   }, true)
 
   document.addEventListener('mousemove', function (ev) {
