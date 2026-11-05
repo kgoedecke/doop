@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { PDFDocument } from 'pdf-lib'
+import { decodePDFRawStream, PDFDocument, PDFRawStream } from 'pdf-lib'
 import { readingOrder } from '../shared/frameOrder.ts'
-import { mapLimited, pageSizeFor, selectPdfFrames, takePdfExportSlot } from '../server/pdfExport.ts'
+import { mapLimited, pageSizeFor, renderFramePdfPage, selectPdfFrames, takePdfExportSlot } from '../server/pdfExport.ts'
 import { findBrowserPath } from '../server/screenshot.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
 import { Client, startServer, type Server } from './harness.ts'
@@ -48,6 +48,48 @@ describe('pageSizeFor', () => {
     expect(size.scale).toBe(0.5)
     expect(size).toMatchObject({ width: 500, height: 19_200 })
   })
+})
+
+/** Every drawing operator in a PDF, page and form streams alike. */
+function drawingOperators(pdf: PDFDocument): string {
+  return pdf.context
+    .enumerateIndirectObjects()
+    .flatMap(([, object]) =>
+      object instanceof PDFRawStream ? [new TextDecoder().decode(decodePDFRawStream(object).decode())] : [],
+    )
+    .join('\n')
+}
+
+describe('renderFramePdfPage', () => {
+  it.skipIf(!findBrowserPath())(
+    'keeps a block that straddles the frame’s bottom edge, with viewport units at the frame’s size',
+    async () => {
+      /* 60vh puts the red block across the 300px edge: printed bare, Chrome
+         moved it whole onto a second sheet, which the export dropped */
+      const html =
+        '<!doctype html><html><body style="margin:0"><div style="height:60vh"></div>' +
+        '<svg width="100" height="200" style="display:block"><rect width="100" height="200" fill="#ff0000"/></svg>' +
+        '</body></html>'
+      const frame: Frame = {
+        id: 'edge',
+        canvasId: 'c',
+        name: 'Edge',
+        x: 0,
+        y: 0,
+        width: 400,
+        height: 300,
+        html,
+        createdAt: 0,
+        updatedAt: 0,
+        updatedBy: 'me',
+      }
+      const pdf = await PDFDocument.load(await renderFramePdfPage(frame))
+      expect(pdf.getPageCount()).toBe(1)
+      expect(pdf.getPage(0).getHeight()).toBeCloseTo(300 * PX_TO_PT, 0)
+      expect(drawingOperators(pdf)).toMatch(/\b1 0 0 (rg|scn)\b/)
+    },
+    60_000,
+  )
 })
 
 describe('selectPdfFrames', () => {
