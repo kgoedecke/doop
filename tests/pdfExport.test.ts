@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { decodePDFRawStream, PDFDocument, PDFRawStream } from 'pdf-lib'
+import { decodePDFRawStream, PDFArray, PDFDocument, PDFName, PDFRawStream } from 'pdf-lib'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { mapLimited, pageSizeFor, renderFramePdfPage, selectPdfFrames, takePdfExportSlot } from '../server/pdfExport.ts'
 import { findBrowserPath } from '../server/screenshot.ts'
@@ -50,14 +50,90 @@ describe('pageSizeFor', () => {
   })
 })
 
-/** Every drawing operator in a PDF, page and form streams alike. */
-function drawingOperators(pdf: PDFDocument): string {
-  return pdf.context
-    .enumerateIndirectObjects()
-    .flatMap(([, object]) =>
-      object instanceof PDFRawStream ? [new TextDecoder().decode(decodePDFRawStream(object).decode())] : [],
+interface Box {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+type Matrix = [number, number, number, number, number, number]
+
+function concat([a, b, c, d, e, f]: Matrix, [ta, tb, tc, td, te, tf]: Matrix): Matrix {
+  return [
+    a * ta + b * tc,
+    a * tb + b * td,
+    c * ta + d * tc,
+    c * tb + d * td,
+    e * ta + f * tc + te,
+    e * tb + f * td + tf,
+  ]
+}
+
+function intersect(box: Box, clip: Box): Box | null {
+  const left = Math.max(box.left, clip.left)
+  const top = Math.max(box.top, clip.top)
+  const right = Math.min(box.right, clip.right)
+  const bottom = Math.min(box.bottom, clip.bottom)
+  return left < right && top < bottom ? { left, top, right, bottom } : null
+}
+
+/**
+ * The visible boxes a page fills with `color` (its `rg` operands), in CSS px
+ * from the top left, after every clip: enough of the PDF operators (q/Q, cm,
+ * re, W n, rg, f) to follow what Chrome writes for axis-aligned boxes.
+ */
+function visibleFills(pdf: PDFDocument, color: string): Box[] {
+  const page = pdf.getPage(0)
+  const pageHeight = page.getHeight()
+  const contents = pdf.context.lookup(page.node.get(PDFName.of('Contents')))
+  const streams = contents instanceof PDFArray ? contents.asArray().map((ref) => pdf.context.lookup(ref)) : [contents]
+  const operators = streams
+    .flatMap((stream) =>
+      stream instanceof PDFRawStream ? [new TextDecoder().decode(decodePDFRawStream(stream).decode())] : [],
     )
     .join('\n')
+    .split(/\s+/)
+  const pageBox: Box = { left: 0, top: 0, right: Infinity, bottom: Infinity }
+  let state = { ctm: [1, 0, 0, 1, 0, 0] as Matrix, clip: pageBox, fill: '' }
+  const saved: (typeof state)[] = []
+  let operands: string[] = []
+  let path: Box | null = null
+  let clipping = false
+  const fills: Box[] = []
+  for (const token of operators) {
+    if (/^[-+.\d]/.test(token)) {
+      operands.push(token)
+      continue
+    }
+    const n = operands.map(Number)
+    if (token === 'q') saved.push({ ...state })
+    else if (token === 'Q') state = saved.pop() ?? state
+    else if (token === 'cm') state.ctm = concat(n as Matrix, state.ctm)
+    else if (token === 'rg') state.fill = operands.join(' ')
+    else if (token === 're') {
+      const [x = 0, y = 0, w = 0, h = 0] = n
+      const [a, b, c, d, e, f] = state.ctm
+      const corners = [
+        [x, y],
+        [x + w, y + h],
+      ].map(([px = 0, py = 0]) => [(a * px + c * py + e) / PX_TO_PT, (pageHeight - (b * px + d * py + f)) / PX_TO_PT])
+      const xs = corners.map(([cx = 0]) => cx)
+      const ys = corners.map(([, cy = 0]) => cy)
+      path = { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) }
+    } else if (token === 'W' || token === 'W*') clipping = true
+    else if (token === 'n') {
+      if (clipping && path) state.clip = intersect(path, state.clip) ?? { left: 0, top: 0, right: 0, bottom: 0 }
+      clipping = false
+      path = null
+    } else if (token === 'f' || token === 'f*') {
+      const visible = path && state.fill === color ? intersect(path, state.clip) : null
+      if (visible) fills.push(visible)
+      path = null
+    }
+    operands = []
+  }
+  return fills
 }
 
 describe('renderFramePdfPage', () => {
@@ -86,7 +162,13 @@ describe('renderFramePdfPage', () => {
       const pdf = await PDFDocument.load(await renderFramePdfPage(frame))
       expect(pdf.getPageCount()).toBe(1)
       expect(pdf.getPage(0).getHeight()).toBeCloseTo(300 * PX_TO_PT, 0)
-      expect(drawingOperators(pdf)).toMatch(/\b1 0 0 (rg|scn)\b/)
+      /* the block starts at 60vh of the frame and is cut at its bottom edge */
+      const [red, ...others] = visibleFills(pdf, '1 0 0')
+      expect(others).toEqual([])
+      expect(red!.left).toBeCloseTo(0, 0)
+      expect(red!.right).toBeCloseTo(100, 0)
+      expect(red!.top).toBeCloseTo(180, 0)
+      expect(red!.bottom).toBeCloseTo(300, 0)
     },
     60_000,
   )
