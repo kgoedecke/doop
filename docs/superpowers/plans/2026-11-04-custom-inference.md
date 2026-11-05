@@ -1,631 +1,935 @@
-# Custom Inference Implementation Plan
+# Custom Inference: Close Blockers and Select Models Dynamically Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+>
+> **Execution status:** Implemented and reviewed in-session on 2026-11-05. Focused verification passed (134 tests across 9 suites); the full suite passed (2,362 tests across 250 files) with one worker. Typecheck and lint passed.
 
-**Goal:** Let users save and activate multiple OpenAI-compatible inference profiles, using an API key (optional for local servers), base URL, and custom model id, while safely supporting public providers and local endpoints on self-hosted Doop.
+**Goal:** Make custom OpenAI-compatible custom endpoints safe to merge by fixing the six review blockers, and let a successfully tested endpoint provide its model list so users can choose a model without typing a model id in the normal connect flow.
 
-**Architecture:** Add a `custom_model_profiles` table for many saved profiles and add `profile_id` plus the `custom-key` kind to the existing one-row-per-user `model_accounts` active-account record. A focused custom-inference module validates URLs, protects server-side requests against SSRF/DNS rebinding, and reuses the existing Chat Completions translation. The REST and Settings UI expose profile CRUD, connection testing, activation, model selection, and vision capability without ever returning API keys.
+**Architecture:** Keep `custom_model_profiles.model` as the saved profile source of truth and keep `/models` as a live discovery call, not a persisted catalog. Add a tested fingerprint so discovery results and selected ids cannot be saved after `(baseUrl, apiKey, profileId)` changes; use one client-side active-target helper, `localPreference.enabled ? 'claude-local' : connectedAccount?.kind`, so Local Claude and a connected provider cannot both render as active. Keep `/api/model-account/models` and composer `ModelPicker` as the live-catalog path; all custom outbound requests, including discovery, remain behind the SSRF-safe transport with pinned DNS, bounded output, redirect refusal, and error redaction.
 
-**Tech Stack:** TypeScript 5.9 strict mode, Express 4, Drizzle/Postgres/PGlite, Node `dns`/`net`/`undici`, React 18, Zustand-backed existing settings patterns, Vitest 5, existing `sealedText` secret encryption, English + Brazilian Portuguese i18n.
+**Tech Stack:** TypeScript strict mode, React 18, Zustand-backed local-agent state, Express 4, Drizzle ORM, Postgres/PGlite, Node/undici/dns, Vitest and happy-dom, existing Doop Settings primitives, English and Brazilian Portuguese i18n.
 
 ## Global Constraints
 
-- Custom inference speaks OpenAI-compatible **Chat Completions** only; raw-HTTP adapters and custom Anthropic-dialect endpoints are out of scope.
-- A user may save multiple custom profiles, but only one model account is active for resident-agent execution at a time.
-- `custom_model_profiles` stores the profile source of truth; `model_accounts.profile_id` only identifies the active profile and must not duplicate the API key or endpoint.
-- Public custom endpoints require HTTPS; self-hosted local/private endpoints require `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS=1`; public HTTP remains forbidden even when private URLs are enabled.
-- Reject credentials, query strings, fragments, unsupported schemes, numeric-IP tricks, loopback/private/link-local/multicast/unspecified/cloud-metadata targets by default.
-- Resolve and validate the endpoint on every outbound request, pin the approved DNS address for that request, disable redirects, bound timeout and response size, and never let a user-controlled redirect escape validation.
-- API keys use the existing `sealedText` mechanism, never appear in profile/status JSON, logs, analytics, or error messages.
-- Custom model ids are non-empty, length-bounded strings with a conservative allowed character set; do not apply OpenAI/Gemini family regexes.
-- Existing Claude, OpenAI, ChatGPT, OpenRouter, Gemini, local Claude, and server free-tier behavior must remain unchanged.
-- Use `clean-code:typescript` for every TypeScript implementation/review task.
-- Follow repository formatting: no semicolons, single quotes, 120-column print width, trailing commas.
-- Use existing UI primitives and named design tokens; no raw form controls or arbitrary typography/radius classes in migrated components.
-- Add all user-facing copy through `src/lib/i18n/en/models.ts` and the mirrored `pt-BR` catalog; preserve catalog parity tests.
-- Use test-first development: each task writes focused failing tests before implementation and ends with a targeted test command.
+- At plan approval time, implementation was gated until the user selected an execution mode; the user has since authorized inline execution and integration.
+- Public custom endpoints remain HTTPS-only. Public HTTP is forbidden even when `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS=1`.
+- A private/local HTTP endpoint may be allowed only when **every** resolved address is blocked/private and the operator set `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS=1`.
+- An HTTP endpoint whose DNS answers mix public and private addresses is `url_insecure`, never “private and therefore accepted”.
+- For an HTTPS endpoint with mixed answers and private URLs disabled, keep `private_url_blocked`; with the flag enabled, pin to the approved answer set.
+- API keys remain sealed server-side and never enter browser responses, errors, logs, analytics, or test snapshots.
+- Custom model ids are pass-through ids; use `isCustomModelId`. Do not apply OpenAI or Gemini family regexes.
+- Normal `/models` flow must not show or require a manually typed model id. Manual entry exists only through explicit unverified fallback.
+- `/models` is not mandatory at save for fallback users. Save is blocked until either a discovered model was selected or fallback is explicitly enabled and contains a valid id.
+- `true` catalog re-fetch is allowed at picker open through existing `/api/model-account/models`; do not add a fake catalog cache or change provider ordering.
+- Do not verify chat by sending a Chat Completions request; test connection checks endpoint authentication and model discovery only.
+- No global “provider order” reordering. `customer-key` remains one provider selected by the same account mechanism.
+- All i18n copy must update English and pt-BR together; i18n parity tests remain green.
+- Preserve existing OpenRouter, Gemini, OpenAI, ChatGPT, Anthropic, free-tier, local-Claude, and Gemini-Cloud behavior.
+- Use `clean-code:typescript`.
+- Follow test-first execution for every task.
+- **Every requirement in this document implicitly includes these constraints.**
 
 ---
 
-## File map and responsibilities
+## Decisions Locked In
 
-### New files
-
-- `server/customInference.ts` — custom endpoint normalization, URL policy, safe request helper, bounded JSON response handling, and public error types/codes.
-- `server/customModelProfiles.ts` — profile domain types, CRUD, active-profile lookup, activation/deactivation, redacted views, and profile-level validation orchestration.
-- `server/db/migrations/0044_custom_model_profiles.sql` — creates `custom_model_profiles` and adds `model_accounts.profile_id`.
-- `tests/customInference.test.ts` — URL and safe-fetch security tests.
-- `tests/customModelProfiles.test.ts` — profile service and HTTP API tests.
-- `tests/customInferenceAgent.test.ts` — custom Chat Completions and catalog integration tests, unless the existing transport tests are expanded instead.
-- `src/components/CustomModelProfiles.tsx` — Settings profile list and add/edit/test/activate UI, using existing primitives.
-
-### Modified files
-
-- `server/env.ts` — parse `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS`.
-- `.env.example` — document the self-host-only private endpoint opt-in.
-- `server/db/schema.ts` — define `customModelProfiles`; add nullable `profileId` to `modelAccounts`.
-- `server/secretBackfill.ts` — include the new sealed profile API-key column in legacy resealing.
-- `server/modelAccounts.ts` — add `custom-key`, profile-aware status/model selection, and activation helpers.
-- `server/modelCatalog.ts` — load a custom profile's `/models` catalog without provider-family filtering.
-- `server/chatCompletionsAgent.ts` — make safe custom URL requests possible while retaining fixed URL configs for existing providers.
-- `server/agentModel.ts` — construct a custom `AgentModel` from the active profile.
-- `server/index.ts` — add custom profile routes and include `custom-key` in status/menu types.
-- `shared/modelMenu.ts` — add the `custom-key` account label.
-- `src/lib/api.ts` — client types and profile endpoint methods.
-- `src/components/ModelAccount.tsx` — render custom profile management and custom model selection.
-- `src/components/ModelPicker.tsx` — generic custom provider mark behavior/types if required by the new union.
-- `src/lib/i18n/en/models.ts` — English profile/security/error strings.
-- `src/lib/i18n/pt-BR/models.ts` — matching Portuguese strings.
-- `tests/chatCompletionsAgent.test.ts` — preserve existing fixed-provider behavior and add custom request assertions where appropriate.
-- `tests/modelCatalog.test.ts` — custom catalog behavior.
-- `tests/providerKeyAccounts.test.ts` or a new focused HTTP suite — activation/status/disconnect behavior.
-- `README.md` — explain custom profiles and self-hosted local model support.
+1. **Flow:** `Require /models + fallback`.
+2. **Normal connect flow:** selected from discovery, not typed.
+3. **Fallback:** explicit only; validates with `isCustomModelId`; marked unverified; usable after failed or empty discovery.
+4. **Save gate:** Save requires a current `(baseUrl, apiKey, profileId)` fingerprint and either a selected discovered model or a complete fallback id.
+5. **No silent switching:** disappearance from `/models` does not switch model; UI keeps it visibly selected and warns.
+6. **Single active target:** local preferences take precedence; otherwise connected account kind.
+7. **No schema migration:** model remains `NOT NULL`; fallback still backs it.
+8. **No broad refactor:** introduce the smallest shared active-target helper, not a new state architecture.
+9. **No test cheating:** fixture servers and mock sockets only where required; do not suppress SSRF guard paths in production code.
+10. **Execution authorization:** the user approved inline implementation and integration after reviewing the plan.
 
 ---
 
-### Task 1: Build the URL policy and safe custom fetch boundary
+## File Structure
+
+Create:
+
+- `tests/customInferenceModelsFixture.ts` only if the same fixture is shared by more than one test file; otherwise inline models fixture in `tests/customModelProfiles.test.ts`.
+- `tests/modelPicker.test.tsx` for focused composer tests; if an existing happy-dom suite can host the tests, do not duplicate it.
+- `src/lib/activeModelTarget.ts` for the single-active-target helper.
+
+Modify:
+
+- `server/customInference.ts` — DNS policy classification and deadline-based resolver.
+- `server/chatCompletionsAgent.ts` — stop signal passes through fetch options, not only request init.
+- `server/customModelProfiles.ts` — atomic partial updates, capped discovery, fallback result; transactions for activation/delete.
+- `server/modelAccounts.ts` — activation/delete transactional `save` path without whole-row clobbering.
+- `server/index.ts` only if request/response shape or validation messages need narrow updates.
+- `server/modelCatalog.ts` — no API rewrite; verify fallback/missing-model behavior remains safe.
+- `shared/customModel.ts` — no change expected.
+- `src/lib/api.ts` — client contract stays `{ reachable, models?: string[] }` unless explicitly expanded with ids only; avoid alternate shapes.
+- `src/components/CustomModelProfiles.tsx` — tested fingerprint, selection dropdown, fallback, stale edit behavior.
+- `src/components/ModelPicker.tsx` — saved-missing-model caption and active-target correctness if chat label reflects wrong provider.
+- `src/components/ModelAccount.tsx` — active-target tests/helper.
+- `src/lib/i18n/en/models.ts`, `src/lib/i18n/pt-BR/models.ts` — discovery strings; preserve parity.
+- Documentation matching behavior; no new env flag expected.
+
+---
+
+## Task 1: Write stop/abort tests and forward cancellation correctly
+
+### Task 1
 
 **Files:**
-<<<<<<< HEAD
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Create: `server/customInference.ts`
-- Modify: `server/publicUrl.ts:1-168` only if a generalized pinned resolver is needed; preserve existing public-resource behavior.
-- Modify: `server/env.ts:148-185`
-- Modify: `.env.example` near the server/provider settings and URL settings.
+- Modify: `server/chatCompletionsAgent.ts`
+- Modify: `server/customInference.ts`
+- Test: `tests/customInferenceAgent.test.ts`
+- Test: `tests/customInference.test.ts` only for timeout budget; stop test belongs in agent fixture
+
+**Interfaces**
+
+- Consumes: `TurnRequest.signal?: AbortSignal`
+- Produces: abort-visible custom HTTP requests and caller-cancellation-safe transport
+- Must not change: fixed-provider URLs, fixed provider headers, redirect rules, one-time connection pool
+
+- [x] **Step 1: Add the failing request-fixture test**
+
+In `tests/customInferenceAgent.test.ts`, add a local helper implementation with explicit lifecycle, never a mock HTTP response body constant nor a test-only transport stub:
+
+```ts
+let sawRequestClose = false
+let releaseResponse: (() => void) | undefined
+const releaseGate = new Promise<void>((resolve) => {
+  releaseResponse = resolve
+})
+
+server.on('request', (req, res) => {
+  if (req.url === '/v1/chat/completions' && req.method === 'POST') {
+    req.on('close', () => {
+      sawRequestClose = true
+    })
+    res.writeHead(200, { 'content-type': 'application/json' })
+    releaseGate.then(() => {
+      res.end(JSON.stringify({ choices: [{ message: { content: 'done' } }] }))
+    })
+  }
+})
+```
+
+Add the abort test using a real local fixture:
+
+```ts
+it('forwards abort cancellation into the custom undici request', async () => {
+  const controller = new AbortController()
+  const promise = runChatCompletionsTurn(customConfig(new URL(baseUrl), 'test-key', 'model-a', false, 'Example'), {
+    system: 'sys',
+    tools: [],
+    messages: [],
+    maxTokens: 10,
+    signal: controller.signal,
+  })
+
+  const reqClosed = waitFor(() => sawRequestClose === true)
+  controller.abort()
+  releaseResponse?.()
+
+  await expect(promise).rejects.toThrow(/aborted|cancel/i)
+  await expect(reqClosed).resolves.toBeUndefined()
+})
+```
+
+`waitFor` is a tiny local test helper polling `sawRequestClose`; define it in the same file if not already available.
+
+Also add to `tests/customInference.test.ts`:
+
+```ts
+it('does not let DNS resolution bypass the request timeout', async () => {
+  dnsMocks.lookup.mockReturnValue(new Promise(() => {}))
+  const promise = fetchCustomJson(
+    new URL('https://provider.example/v1/models'),
+    {
+      method: 'GET',
+    },
+    { timeoutMs: 10 },
+  )
+  await expect(promise).rejects.toMatchObject({ code: 'unreachable' })
+})
+```
+
+- [x] **Step 2: Run focused tests and verify failure**
+
+```bash
+bunx vitest run tests/customInferenceAgent.test.ts tests/customInference.test.ts
+```
+
+Expected: request fixture does not observe closure promptly, and timeout test can outlive ten milliseconds.
+
+- [x] **Step 3: Implement minimal cancellation plumbing**
+
+In `tests/customInferenceAgent.test.ts`, keep the fixture import path local and do not add a global mock; do not interpose `AbortSignal` types.
+
+Change `runChatCompletionsTurn` to pass the caller signal as transport options:
+
+```ts
+{
+  timeoutMs: 10 * 60_000,
+  signal: req.signal,
+}
+```
+
+In `server/customInference.ts`, add a deadline resolver:
+
+```ts
+async function lookupWithDeadline(host: string, timeoutMs: number) {
+  const started = Date.now()
+  const remaining = Math.max(1, timeoutMs - (Date.now() - started))
+  return Promise.race([
+    dns.lookup(host, { all: true, verbatim: true }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('DNS lookup timed out')), remaining)),
+  ])
+}
+```
+
+Pass the result of this helper into `resolveWithPolicy`, and classify deadline errors as `unreachable`; external stop still wins if caller signal is already aborted.
+
+- [x] **Step 4: Verify**
+
+```bash
+bunx vitest run tests/customInferenceAgent.test.ts tests/customInference.test.ts
+```
+
+Expected: abort closes the connected request; DNS never extends beyond the request budget; timeout remains `unreachable`; user stop remains caller cancellation, not a provider interruption.
+
+- [x] **Step 5: Commit**
+
+```bash
+git add server/chatCompletionsAgent.ts server/customInference.ts tests/customInferenceAgent.test.ts tests/customInference.test.ts
+git commit -m "fix(custom-inference): forward stop and deadline through custom requests"
+```
+
+---
+
+## Task 2: Write mixed-DNS policy tests before changing URL resolution
+
+### Task 2
+
+**Files:**
+
+- Modify: `server/customInference.ts`
 - Test: `tests/customInference.test.ts`
+- Test: `tests/publicUrl.test.ts` unchanged
 
-**Interfaces:**
-<<<<<<< HEAD
+**Interfaces**
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Produces `CustomInferenceError` with stable codes: `invalid_url`, `url_insecure`, `private_url_blocked`, `unreachable`, `auth_failed`, and `not_compatible`.
-- Produces `normalizeCustomBaseUrl(raw: string): URL` for syntactic normalization only.
-- Produces `validateCustomBaseUrl(raw: string, allowPrivate: boolean): Promise<URL>` for normalization plus DNS/network policy.
-- Produces `customEndpointUrl(baseUrl: URL, path: 'models' | 'chat/completions'): URL`.
-- Produces `fetchCustomJson(url: URL, init: RequestInit, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<unknown>`.
-- Consumes `env.CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS`.
+- Consumes: `PublicAddress`, `isBlockedIp`, `normalizeCustomBaseUrl`
+- Produces: `resolveWithPolicy(url, allowPrivate)` returns one classification: `https-public`, `https-private-opt-in`, `http-private-opt-in`, or error code
+- Must not change: credentials/query/fragment rejection or pinned-request semantics
 
-- [ ] **Step 1: Write failing URL-policy tests.** Cover:
-  - bare `https://provider.example/v1/` normalizes to one trailing path form;
-  - `ftp:`, malformed URLs, credentials, query strings, fragments, and empty hosts fail with `invalid_url`;
-  - public `http://provider.example` fails with `url_insecure`;
-  - `https://localhost`, loopback IPs, private IPs, link-local IPs, IPv4-mapped private IPv6, and cloud metadata addresses fail with `private_url_blocked` when private URLs are disabled;
-  - the same loopback URL is accepted when `allowPrivate` is true;
-  - an HTTPS public host with a DNS result containing a blocked address fails, even if another result is public;
-  - `/models` and `/chat/completions` append below a base path without double slashes.
+- [x] **Step 1: Add the exact DNS matrix**
 
-- [ ] **Step 2: Run the focused tests and verify they fail.**
+In `tests/customInference.test.ts`, add the resolver fixtures and assertions:
 
-Run:
+```ts
+const publicAnswer = { address: '93.184.216.34', family: 4 as const }
+const privateAnswer = { address: '127.0.0.1', family: 4 as const }
+
+it('rejects public HTTP even when DNS includes a private address', async () => {
+  dnsMocks.lookup.mockResolvedValue([publicAnswer, privateAnswer])
+  await expect(validateCustomBaseUrl('http://provider.example/v1', true)).rejects.toMatchObject({
+    code: 'url_insecure',
+  })
+})
+
+it('permits public HTTPS with public answers and disabled private URLs', async () => {
+  dnsMocks.lookup.mockResolvedValue([publicAnswer])
+  await expect(validateCustomBaseUrl('https://provider.example/v1', false)).resolves.toEqual(
+    new URL('https://provider.example/v1'),
+  )
+})
+
+it('permits private HTTP only when every answer is blocked and private URLs are enabled', async () => {
+  dnsMocks.lookup.mockResolvedValue([privateAnswer, { address: '10.1.2.3', family: 4 }])
+  await expect(validateCustomBaseUrl('http://internal.example/v1', true)).resolves.toEqual(
+    new URL('http://internal.example/v1'),
+  )
+})
+
+it('refuses all-private HTTP when private URLs are disabled', async () => {
+  dnsMocks.lookup.mockResolvedValue([privateAnswer])
+  await expect(validateCustomBaseUrl('http://internal.example/v1', false)).rejects.toMatchObject({
+    code: 'private_url_blocked',
+  })
+})
+
+it('refuses mixed DNS for HTTPS when private URLs are disabled', async () => {
+  dnsMocks.lookup.mockResolvedValue([publicAnswer, privateAnswer])
+  await expect(validateCustomBaseUrl('https://provider.example/v1', false)).rejects.toMatchObject({
+    code: 'private_url_blocked',
+  })
+})
+```
+
+- [x] **Step 2: Run tests and verify failure on the HTTP fixture**
 
 ```bash
 bunx vitest run tests/customInference.test.ts
 ```
 
-Expected: FAIL because the custom-inference exports do not exist.
+Expected: current code routes by an any-private `privateTarget` and allows this HTTP case as long as at least one answer is blocked.
 
-- [ ] **Step 3: Implement URL parsing and policy.**
-  - Parse only absolute HTTP(S) URLs.
-  - Reject username/password, search, and hash components.
-  - Preserve a user-supplied path, trim trailing slashes, and reject control characters.
-  - Require HTTPS for non-private hosts.
-  - Reuse the blocked address ranges and pinned lookup pattern from `server/publicUrl.ts`; refactor only the smallest shared portion if needed.
-  - Resolve hostnames on every request. If any answer is blocked, reject the request rather than selecting a public answer.
-  - For private opt-in requests, still resolve and pin the returned addresses so DNS rebinding cannot redirect the connection after validation.
+- [x] **Step 3: Implement classification**
 
-- [ ] **Step 4: Add bounded request and response handling.**
-  - Force `redirect: 'error'`.
-  - Compose an `AbortSignal.timeout` with the caller signal, with an 8-second default connection/catalog timeout and a longer bounded turn timeout consistent with resident-agent expectations.
-  - Reject a declared response larger than the configured maximum and stop reading once the limit is exceeded.
-  - Parse JSON only after bounded reading; never include response bodies or authorization values in thrown errors.
-  - Convert 401/403 to `auth_failed`, 404/405 or invalid expected shapes to `not_compatible`, and network/timeouts to `unreachable`.
+```ts
+const hasPublic = addresses.some(({ address }) => !isBlockedIp(address))
+const allBlocked = addresses.every(({ address }) => isBlockedIp(address))
 
-- [ ] **Step 5: Add the operator flag and documentation.**
-  - Add `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS` as an `envalid` boolean with default `false`.
-  - Document that it is intended for self-hosted local inference only and does not permit public HTTP.
-  - Keep `.env.example` aligned with `server/env.ts` conventions.
+if (hasPublic && url.protocol !== 'https:') {
+  throw new CustomInferenceError('url_insecure', INSECURE_MESSAGE)
+}
+if (allBlocked && !allowPrivate) {
+  throw new CustomInferenceError('private_url_blocked', BLOCKED_MESSAGE)
+}
+```
 
-- [ ] **Step 6: Run focused tests and commit.**
+Also make literal IPs participate in the same matrix (the current literal path already uses `isBlockedIp`; do not introduce a separate check).
+
+- [x] **Step 4: Verify**
 
 ```bash
 bunx vitest run tests/customInference.test.ts tests/publicUrl.test.ts
- git add server/customInference.ts server/publicUrl.ts server/env.ts .env.example tests/customInference.test.ts
- git commit -m "feat: secure custom inference endpoints"
 ```
 
-Expected: PASS; existing public URL tests remain green.
+Expected: every DNS/protocol case above is green; existing public-url tests are unchanged.
+
+- [x] **Step 5: Commit**
+
+```bash
+git add server/customInference.ts tests/customInference.test.ts
+git commit -m "fix(custom-inference): reject public HTTP across every DNS mix"
+```
 
 ---
 
-### Task 2: Add profile persistence and redacted profile service
+## Task 3: Make partial updates and activation/delete operations atomic
+
+### Task 3
 
 **Files:**
-<<<<<<< HEAD
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Modify: `server/db/schema.ts:590-610`
-- Create: `server/db/migrations/0044_custom_model_profiles.sql`
-- Modify: `server/secretBackfill.ts` sealed-column registry.
-- Create: `server/customModelProfiles.ts`
+- Modify: `server/customModelProfiles.ts:258-299`
+- Modify: `server/modelAccounts.ts` (`activateCustomProfile`, `disconnectCustomProfile`)
 - Test: `tests/customModelProfiles.test.ts`
+- Test: `tests/providerKeyAccounts.test.ts`
 
-**Interfaces:**
-<<<<<<< HEAD
+**Interfaces**
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Produces `CustomModelProfile` with `{ id, userId, name, baseUrl, model, supportsVision, connectedAt, updatedAt }` and an internal record carrying `apiKey`.
-- Produces `CustomModelProfileInput` with `{ name: string; baseUrl: string; apiKey?: string | null; model: string; supportsVision: boolean }`.
-- Produces `CustomModelProfileView` with `{ id, name, baseUrl, model, supportsVision, active, connectedAt, updatedAt }`; it must never include `apiKey`.
-- Produces `listProfiles(userId)`, `getProfile(userId, id)`, `createProfile(userId, input)`, `updateProfile(userId, id, patch)`, `deleteProfile(userId, id)`, and `profileView(profile, activeProfileId)`.
-- Consumes `validateCustomBaseUrl` for save-time validation and the existing `sealedText` column type.
+- Consumes: Drizzle transactions with `tx`, `RETURNING`, Postgres row lock (`for('update')`)
+- Produces: `updateProfile(userId, id, patch)` and `deleteProfile(userId, id)` semantics that cannot merge stale full-row snapshots
+- Public API signatures do not change
 
-- [ ] **Step 1: Write failing schema/service tests.** Assert:
-  - profiles are isolated by `userId`;
-  - create normalizes and stores a profile with a sealed key;
-  - list/view never returns the key;
-  - patching without `apiKey` preserves the key, `apiKey: null` clears it, and a new key replaces it;
-  - empty/overlong names and invalid model ids are rejected;
-  - deleting an inactive profile removes only that profile;
-  - active-profile deletion invokes the active-account disconnect path (the exact account transition is completed in Task 3).
+- [x] **Step 1: Add executable concurrency tests**
 
-- [ ] **Step 2: Run the focused tests and verify they fail.**
+```ts
+it('keeps independent profile updates made concurrently', async () => {
+  const profile = await createProfile('alice', input({ name: 'A', model: 'm-a' }))
 
-```bash
-bunx vitest run tests/customModelProfiles.test.ts
+  await Promise.all([
+    updateProfile('alice', profile.id, { model: 'm-b' }),
+    updateProfile('alice', profile.id, { name: 'B' }),
+  ])
+
+  expect(await getProfile('alice', profile.id)).toMatchObject({ name: 'B', model: 'm-b' })
+})
+
+it('activation and deletion cannot leave an account pointing at a deleted profile', async () => {
+  const profile = await createProfile('alice', input())
+
+  const outcomes = await Promise.allSettled([
+    activateCustomProfile('alice', profile.id),
+    deleteProfile('alice', profile.id),
+  ])
+
+  const account = await getAccount('alice')
+  if (account?.profileId) {
+    expect(await getProfile('alice', account.profileId)).not.toBeNull()
+  }
+  expect(outcomes.length).toBe(2)
+})
 ```
 
-- [ ] **Step 3: Add the Drizzle schema and migration.**
-  - Create `custom_model_profiles` with a generated string id, non-null `user_id`, `name`, `base_url`, `api_key` using `sealedText`, `model`, `supports_vision`, `connected_at`, and `updated_at`.
-  - Add an index on `user_id`.
-  - Add nullable `profile_id` to `model_accounts`.
-  - Generate the checked-in SQL in the repository’s existing style, preserving migration metadata conventions.
-  - Do not add a foreign key that makes deleting a profile silently cascade an active account; the service must perform the explicit disconnect transition.
+Do not export the transaction lock helper for the test; use public APIs and assert the invariant.
 
-- [ ] **Step 4: Implement the profile service.**
-  - Validate input lengths and model syntax before writing.
-  - Use `crypto.randomUUID()` for ids and `Date.now()` for timestamps.
-  - Store only `apiKey` in sealed storage; base URL is not secret but must be redacted only where the UI contract requires it.
-  - Use user-scoped `where(and(eq(...)))` clauses for every read/update/delete.
-  - Return views through one redaction function so no route accidentally leaks the key.
-  - Add the new sealed column to `secretBackfill.ts` so legacy plaintext rows are resealed on boot.
-
-- [ ] **Step 5: Run tests, migration/type checks, and commit.**
+- [x] **Step 2: Run and verify current lost update / stale pointer**
 
 ```bash
-bunx vitest run tests/customModelProfiles.test.ts
-bun run typecheck
- git add server/db/schema.ts server/db/migrations/0044_custom_model_profiles.sql server/secretBackfill.ts server/customModelProfiles.ts tests/customModelProfiles.test.ts
- git commit -m "feat: store custom inference profiles"
+bunx vitest run tests/customModelProfiles.test.ts tests/providerKeyAccounts.test.ts
 ```
 
-Expected: PASS; migration is included and typecheck is clean.
+Expected: independent profile update can restore a stale model or name, and concurrent activation/delete can leave an account pointing at a missing profile before Task 3 is implemented.
 
----
+- [x] **Step 3: Implement atomic writes**
 
-### Task 3: Integrate `custom-key` with the active model account
+Replace read-modify-write in `updateProfile` with:
 
-**Files:**
-<<<<<<< HEAD
-
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Modify: `server/modelAccounts.ts:57-235,239-279`
-- Modify: `shared/modelMenu.ts:194-203`
-- Modify: `server/agentModel.ts:199-283`
-- Modify: `src/lib/api.ts:144-193`
-- Modify: `tests/providerKeyAccounts.test.ts` or create `tests/customModelProfiles.test.ts`
-
-**Interfaces:**
-<<<<<<< HEAD
-
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Extends `AccountKind` and client `ModelAccountKind` with `'custom-key'`.
-- `ModelAccount` gains `profileId?: string`.
-- `AccountStatus` gains `profileId?: string` only if the UI needs it; never expose the key.
-- Produces `activateCustomProfile(userId: string, profileId: string): Promise<AccountStatus>`.
-- Produces `disconnectCustomProfile(userId: string, profileId: string): Promise<void>` or an equivalent guarded helper for deletion.
-- `accountModelFor` resolves the active profile’s model through the account record without applying provider-specific regexes.
-- `byoModel` consumes an internal profile loaded by the authenticated user and produces a `ChatCompletionsConfig` for the custom endpoint.
-
-- [ ] **Step 1: Write failing active-account tests.** Cover:
-  - activating Alice’s profile creates/updates only Alice’s `custom-key` account;
-  - the active account stores `profileId` and does not store a duplicate endpoint or key;
-  - activation replaces a prior provider account and disables the local-agent preference using the existing switching convention;
-  - `GET /api/model-account` reports `custom-key`, active profile id if exposed, and selected model without a key;
-  - `PATCH /api/model-account { model }` updates the active custom profile and rejects invalid model syntax;
-  - disconnecting removes the active account but leaves saved profiles intact;
-  - deleting the active profile disconnects the account and does not affect other profiles.
-
-- [ ] **Step 2: Run the focused tests and verify they fail.**
-
-```bash
-bunx vitest run tests/providerKeyAccounts.test.ts tests/customModelProfiles.test.ts
+```ts
+const set: Partial<typeof customModelProfiles.$inferInsert> = { updatedAt: Date.now() }
+if (Object.hasOwn(patch, 'name')) set.name = normalizeName(patch.name)
+if (Object.hasOwn(patch, 'baseUrl')) set.baseUrl = await normalizedBaseUrl(patch.baseUrl)
+if (Object.hasOwn(patch, 'model')) set.model = normalizeModel(patch.model)
+if (Object.hasOwn(patch, 'supportsVision')) {
+  set.supportsVision = patch.supportsVision !== false
+}
+if (Object.hasOwn(patch, 'apiKey')) set.apiKey = await normalizeKey(patch.apiKey)
 ```
 
-- [ ] **Step 3: Extend account storage and policy.**
-  - Add `'custom-key'` to `ACCOUNT_KINDS`, `AccountKind`, and `ACCOUNT_KIND_LABELS` as `Custom endpoint`.
-  - Read/write `profileId` in `toAccount` and `save`.
-  - Add custom policy: resolve to the profile model; accept only the shared custom-model validator.
-  - Keep `takesReasoningEffort('custom-key') === false`.
-  - Ensure switching existing providers clears `profileId`, and activating custom clears OAuth/API fields without copying the profile secret.
-  - Keep `savePick` guarded by both user id and kind; custom model writes must additionally guard the profile id to avoid a stale profile update.
+Then `await tx.update(...).set(set).returning()`; if no row returns, throw `CustomModelProfileNotFoundError`.
 
-- [ ] **Step 4: Implement `activateCustomProfile` and guarded disconnect behavior.**
-  - Confirm the profile belongs to the requesting user.
-  - Upsert the one active account with kind `custom-key`, profile id, and no API key/token fields.
-  - Disable local Claude preference when changing into a custom account, matching existing provider routes.
-  - On profile deletion, conditionally delete the active account only when its `profileId` matches the profile being removed.
+Activation/deletion implementation must happen in one transaction each:
 
-- [ ] **Step 5: Wire `byoModel`.**
-  - For `custom-key`, load the profile by `userId` + `profileId`; missing profile becomes `ModelAuthError('The selected custom endpoint no longer exists. Choose another profile in Settings.')`.
-  - Build a config with the profile’s base URL, model, optional key, profile name, and vision flag.
-  - Use the safe request function from Task 1 through the transport rather than raw `fetch`.
-  - Map custom auth and compatibility errors to `ModelAuthError` / `ModelUnavailableError` without echoing URL query strings or keys.
+```ts
+await db.transaction(async (tx) => {
+  const [locked] = await tx
+    .select()
+    .from(customModelProfiles)
+    .where(and(eq(customModelProfiles.id, profileId), eq(customModelProfiles.userId, userId)))
+    .for('update')
 
-- [ ] **Step 6: Run tests/typecheck and commit.**
+  if (!locked) throw new CustomModelProfileNotFoundError()
+  // upsert or conditional delete through tx, never through global db
+})
+```
+
+Profile edits that change an active profile's `model` update the owning account pointer in the same transaction with a guarded `profileId` predicate; do not route through the old full-row `save()` implementation.
+
+- [x] **Step 4: Verify**
 
 ```bash
-bunx vitest run tests/providerKeyAccounts.test.ts tests/customModelProfiles.test.ts tests/anthropicAccount.test.ts
-bun run typecheck
- git add server/modelAccounts.ts server/agentModel.ts shared/modelMenu.ts src/lib/api.ts tests/providerKeyAccounts.test.ts tests/customModelProfiles.test.ts
- git commit -m "feat: activate custom inference profiles"
+bunx vitest run tests/customModelProfiles.test.ts tests/providerKeyAccounts.test.ts
+```
+
+Expected: independent patches both persist; no public row points at a deleted profile; intentional activation still succeeds when delete is not scheduled first.
+
+- [x] **Step 5: Commit**
+
+```bash
+git add server/customModelProfiles.ts server/modelAccounts.ts tests/customModelProfiles.test.ts tests/providerKeyAccounts.test.ts
+git commit -m "fix(custom-inference): make profile writes and activation transactional"
 ```
 
 ---
 
-### Task 4: Extend Chat Completions transport and custom model catalog
+## Task 4: Establish one client-side active target
+
+### Task 4
 
 **Files:**
-<<<<<<< HEAD
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Modify: `server/chatCompletionsAgent.ts:37-73,239-257`
-- Modify: `server/modelCatalog.ts:40-249`
-- Test: `tests/chatCompletionsAgent.test.ts`
-- Test: `tests/modelCatalog.test.ts`
-- Create or extend: `tests/customInferenceAgent.test.ts`
+- Modify: `src/components/CustomModelProfiles.tsx`
+- Modify: `src/components/ModelAccount.tsx`
+- Modify: `src/components/ModelPicker.tsx` only where label/status semantics share the same helper
+- Create: `src/lib/activeModelTarget.ts`
+- Test: `tests/localAgentSelection.test.ts`
+- Test: `tests/customModelProfiles.test.tsx`
 
-**Interfaces:**
-<<<<<<< HEAD
+**Interfaces**
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Extends `ChatCompletionsConfig` with a `custom`/safe-request discriminator or a request function that prevents fixed-provider regressions.
-- Produces `customConfig(baseUrl: URL, apiKey: string | undefined, model: string, vision: boolean, label: string): ChatCompletionsConfig`.
-- Produces `customModels(profile: CustomModelProfile, signal: AbortSignal): Promise<ModelOption[]>`.
-- Consumes `fetchCustomJson` and `customEndpointUrl` from Task 1.
+- Consumes: `useLocalAgent((state) => state.preference)` and `ModelAccountStatus`
+- Produces: `activeModelTarget(localEnabled, account): 'claude-local' | AccountKind | null`
+- Must not change: server routing; this helper is presentation and tests only do not duplicate daemon routing
 
-- [ ] **Step 1: Write failing transport tests.** Assert:
-  - custom config posts to `{base}/chat/completions` with the optional Bearer header;
-  - request JSON remains exactly the existing Chat Completions contract (`model`, translated messages, tools, `tool_choice: 'auto'`, `max_tokens`);
-  - vision=false still strips image inputs and tool-result images;
-  - a 401 maps to `ModelAuthError`/the custom auth code, a 404/405 maps to compatibility failure, and a malformed successful body fails visibly;
-  - existing OpenRouter and Gemini configs still use their fixed URLs and existing headers.
+- [x] **Step 1: Add a failing consistency test**
 
-- [ ] **Step 2: Run focused tests and verify they fail.**
+In `tests/customModelProfiles.test.tsx`, add a module-local mock near the existing api mocks:
 
-```bash
-bunx vitest run tests/chatCompletionsAgent.test.ts tests/customInferenceAgent.test.ts
+```ts
+const localMode = vi.hoisted(() => ({ preference: { enabled: true, model: 'default' as string } }))
+
+vi.mock('../src/lib/localAgent', () => ({
+  useLocalAgent: (selector: (state: { preference: typeof localMode.preference }) => unknown) =>
+    selector({ preference: localMode.preference }),
+  refreshLocalAgent: vi.fn().mockResolvedValue({ preference: { enabled: false, model: 'default' } }),
+  selectLocalAgent: vi.fn(),
+}))
 ```
 
-- [ ] **Step 3: Implement the custom config and safe request selection.**
-  - Keep `openrouterConfig` and `geminiConfig` unchanged externally.
-  - Add `customConfig` carrying a normalized base URL and optional API key.
-  - In `runChatCompletionsTurn`, use `fetchCustomJson` only for the custom config and retain ordinary `fetch` for fixed trusted constants, or route all configs through a transport abstraction that explicitly distinguishes fixed vs custom.
-  - Preserve existing body translation and response parsing.
-  - Do not add provider-specific parameters such as `reasoning`, `parallel_tool_calls`, or image-generation fields.
+Test:
 
-- [ ] **Step 4: Write failing custom catalog tests.** Cover:
-  - an OpenAI-compatible `{ data: [{ id, created? }] }` response returns model options;
-  - ids are passed through without OpenAI/Gemini family filtering;
-  - display names are stable and derived from ids when no display name exists;
-  - auth, timeout, malformed body, and missing `/models` fall back to `live: false` with the curated/free-text path;
-  - profile-specific URL and key are used, never another user’s profile.
-
-- [ ] **Step 5: Implement the catalog loader.**
-  - Add a `custom-key` loader in `LOADERS` that loads the active profile and calls its `/models` endpoint through the safe request boundary.
-  - Keep only chat-capable shape checks that can be proven from the response; do not reject arbitrary model names based on vendor regexes.
-  - Return `ModelOption[]` with `vision` equal to the profile’s explicit `supportsVision` value.
-  - Ensure `modelCatalogFor` has an appropriate label and preserves a non-empty fallback if the catalog cannot be reached.
-
-- [ ] **Step 6: Run tests/typecheck and commit.**
-
-```bash
-bunx vitest run tests/chatCompletionsAgent.test.ts tests/modelCatalog.test.ts tests/customInferenceAgent.test.ts
-bun run typecheck
- git add server/chatCompletionsAgent.ts server/modelCatalog.ts tests/chatCompletionsAgent.test.ts tests/modelCatalog.test.ts tests/customInferenceAgent.test.ts
- git commit -m "feat: run custom models through chat completions"
+```ts
+it('does not show the connected provider as active when local selection wins', async () => {
+  mocks.list.mockResolvedValue([profile({ active: true })])
+  mocks.account.mockResolvedValue(activeAccount())
+  await render(activeAccount())
+  expect(container.textContent).not.toContain('Active')
+})
 ```
 
----
+After the custom activation mock returns a fresh account, assert `refreshLocalAgent` has been called by the save path if implementation refreshes the store.
 
-### Task 5: Add authenticated profile REST routes and status/catalog integration
-
-**Files:**
-<<<<<<< HEAD
-
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Modify: `server/index.ts:916-1079`
-- Modify: `src/lib/api.ts:150-193,510-545`
-- Test: `tests/customModelProfiles.test.ts`
-- Test: `tests/modelCatalog.test.ts`
-
-**Interfaces:**
-<<<<<<< HEAD
-
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- `GET /api/model-profiles` → `CustomModelProfileView[]`.
-- `POST /api/model-profiles` accepts `{ name, baseUrl, apiKey?, model, supportsVision }` and returns the created redacted view.
-- `PATCH /api/model-profiles/:id` accepts partial `{ name?, baseUrl?, apiKey?, model?, supportsVision? }`; omitted `apiKey` preserves it, null clears it; returns the redacted view.
-- `DELETE /api/model-profiles/:id` → `{ ok: true }`.
-- `POST /api/model-profiles/:id/activate` → the same `accountView` shape as existing provider connections.
-- `POST /api/model-profiles/test` accepts `{ baseUrl, apiKey?, model? }` and returns `{ reachable: boolean; models?: string[]; errorCode?: string; error?: string }`, with no secret echo.
-
-- [ ] **Step 1: Write failing route tests.** Verify:
-  - unauthenticated requests are rejected by the existing session gate;
-  - Alice cannot read, patch, activate, test, or delete Bob’s profile even with a guessed id;
-  - invalid payloads return 400 with stable error codes/messages;
-  - create/list/patch/delete responses omit `apiKey` and do not leak it in serialized errors;
-  - activation returns complete `accountView` including menus and `custom-key`;
-  - `/api/model-account/models` uses the active custom profile;
-  - `/api/model-account` model patch writes through to the profile.
-
-- [ ] **Step 2: Run the route tests and verify they fail.**
-
-```bash
-bunx vitest run tests/customModelProfiles.test.ts tests/modelCatalog.test.ts
-```
-
-- [ ] **Step 3: Implement route handlers.**
-  - Parse body fields with explicit runtime checks; do not use unchecked `any`.
-  - Use the authenticated `req.user!.id` for all service calls.
-  - Map `CustomInferenceError` to 400 with its stable code and a safe human-readable message.
-  - Use 404 for profiles that do not belong to the user, matching existing resource behavior without confirming whether another user’s id exists.
-  - Keep activation and local-agent switching server-authoritative.
-
-- [ ] **Step 4: Add custom menu/status typing.**
-  - Add `custom-key` to `MODEL_MENUS`; its initial menu can be empty because the catalog is profile-specific.
-  - Ensure status responses retain `menus` on every route, as existing `accountView` promises.
-  - Add client API methods and types for profile list/create/update/delete/test/activate.
-
-- [ ] **Step 5: Run tests/typecheck and commit.**
-
-```bash
-bunx vitest run tests/customModelProfiles.test.ts tests/modelCatalog.test.ts tests/providerKeyAccounts.test.ts
-bun run typecheck
- git add server/index.ts src/lib/api.ts tests/customModelProfiles.test.ts tests/modelCatalog.test.ts
- git commit -m "feat: expose custom model profile API"
-```
-
----
-
-### Task 6: Build the Settings custom-profile UI
-
-**Files:**
-<<<<<<< HEAD
-
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Create: `src/components/CustomModelProfiles.tsx`
-- Modify: `src/components/ModelAccount.tsx:1-20,137-599,601-end`
-- Modify: `src/components/ModelPicker.tsx:1-57`
-- Modify: `src/lib/i18n/en/models.ts`
-- Modify: `src/lib/i18n/pt-BR/models.ts`
-- Test: `tests/customModelProfiles.test.tsx` or the repository’s closest component test setup.
-
-**Interfaces:**
-<<<<<<< HEAD
-
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- `CustomModelProfiles` accepts `{ account: ModelAccountStatus; onChange?: () => void }` and owns profile list/form state.
-- Consumes all `api.modelProfiles*` methods from Task 5.
-- Emits refreshed account/profile state to `ModelAccountPanel` through the existing `settle`/`onChange` flow.
-
-- [ ] **Step 1: Write failing component tests.** Cover:
-  - empty state shows Add custom endpoint;
-  - form requires name, base URL, and model, while API key is optional;
-  - the vision toggle is visible and its value is sent;
-  - Test connection reports success/error without displaying the key after submission;
-  - saved profiles show host/path, model, vision status, and active state but never the API key;
-  - Activate calls the correct profile endpoint and refreshes the active account;
-  - edit preserves a key when the API key field is left blank and clears it only when explicitly requested;
-  - delete asks for the existing confirmation treatment and refreshes the list/account.
-
-- [ ] **Step 2: Run the component test and verify it fails.**
+- [x] **Step 2: Run and confirm expected discord**
 
 ```bash
 bunx vitest run tests/customModelProfiles.test.tsx
 ```
 
-- [ ] **Step 3: Implement the profile component with existing primitives.**
-  - Use `SettingsCard`/`CardRow` or the established model-plan primitives already used by `ModelAccountPanel`.
-  - Use `Input`, `Switch`/`Checkbox`, `Button`, `AlertDialog`, and existing status/error patterns; do not introduce raw controls.
-  - Show the normalized base URL as returned by the server, but never show or log the API key.
-  - Keep the edit form’s API key field blank when a key already exists; provide an explicit “replace/clear key” action rather than implying blank means clear.
-  - Disable submit/test controls while requests are pending and surface server error codes through translated copy.
-  - Add a self-host note explaining that localhost/private URLs require the deployment operator to enable `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS`.
+Expected: the custom profile renders an “Active” pill while the mocked local preference remains enabled.
 
-- [ ] **Step 4: Integrate it into `ModelAccountPanel`.**
-  - Render the custom-profile section without disrupting existing provider key sections.
-  - Refresh profiles and account after create/edit/delete/activate.
-  - Do not treat a saved inactive profile as the active resident provider.
-  - Keep existing local Claude switching semantics: activating a custom profile disables local Claude; disconnecting restores no provider automatically.
+- [x] **Step 3: Implement the helper**
 
-- [ ] **Step 5: Update picker/type behavior and translations.**
-  - Add `custom-key` to client unions and make `PROVIDER_MARK` fall back to the existing Doop mark.
-  - For active custom accounts, use live catalog options; if live loading fails, show the selected model and a translated catalog warning rather than an empty/broken picker.
-  - Add English and Portuguese keys for profile actions, fields, security note, vision, test states, validation errors, activation, deletion, and catalog failures.
+```ts
+// src/lib/activeModelTarget.ts
+import type { ModelAccountKind, ModelAccountStatus } from './api'
 
-- [ ] **Step 6: Run component/i18n/type checks and commit.**
+export type ActiveModelTarget = 'claude-local' | ModelAccountKind | null
+export function activeModelTarget(localEnabled: boolean, account: ModelAccountStatus | null): ActiveModelTarget {
+  if (localEnabled) return 'claude-local'
+  if (account?.connected && account.kind) return account.kind
+  return null
+}
+```
+
+Use `activeModelTarget(...)` in custom row, local row label, and all existing connected-row “Active” labels. Connecting/switching from the custom row still calls the server route, and the client calls `refreshLocalAgent()` (or receives an already-refreshed preference) so local state does not remain stale.
+
+- [x] **Step 4: Verify and commit**
+
+```bash
+bunx vitest run tests/customModelProfiles.test.tsx tests/localAgentSelection.test.ts tests/i18n.test.ts
+git add src/lib/activeModelTarget.ts src/components/CustomModelProfiles.tsx src/components/ModelAccount.tsx src/components/ModelPicker.tsx tests/customModelProfiles.test.tsx tests/localAgentSelection.test.ts
+git commit -m "fix(custom-inference): use one active-target rule in settings"
+```
+
+---
+
+## Task 5: Write `/models` cap and error contract tests first
+
+### Task 5
+
+**Files:**
+
+- Modify: `server/customModelProfiles.ts`
+- Modify: `server/index.ts` only if validation cannot express the new cap locally
+- Test: `tests/customModelProfiles.test.ts`
+
+**Interfaces**
+
+- Consumes: `fetchCustomJson`, `isCustomModelId` for fallback checks, existing `CustomEndpointTestResult` JSON
+- Produces: capped `models: string[]`, stable test error codes, no key echo
+- Must not change: 2 MB response cap, redirect refusal, bounded request timeout
+
+- [x] **Step 1: Write discovery contract tests using existing test server style**
+
+Create a focused local fixture helper in `tests/customModelProfiles.test.ts`:
+
+```ts
+interface ModelFixture {
+  status?: number
+  body?: unknown
+  contentType?: string
+}
+
+async function withModelFixture(body: ModelFixture, run: (baseUrl: string) => Promise<void>) {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(body.status ?? 200, { 'content-type': body.contentType ?? 'application/json' })
+    res.end(body.body === undefined ? '' : String(body.body))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`)
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  }
+}
+```
+
+Tests:
+
+```ts
+it('returns deduplicated model ids and no key echo', async () => {
+  await withModelFixture(
+    { body: JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }, { id: 'a' }] }) },
+    async (baseUrl) => {
+      const result = await testCustomEndpoint('alice', { baseUrl, apiKey: 'sk-never-returned' })
+      expect(result).toEqual({ reachable: true, models: ['a', 'b'] })
+      expect(JSON.stringify(result)).not.toContain('sk-never-returned')
+    },
+  )
+})
+
+it('caps parsed model ids at a bounded limit', async () => {
+  const entries = Array.from({ length: 600 }, (_, i) => ({ id: `m-${i}` }))
+  await withModelFixture({ body: JSON.stringify({ data: entries }) }, async (baseUrl) => {
+    const result = await testCustomEndpoint('alice', { baseUrl })
+    expect(result.models?.length).toBe(MAX_DISCOVERED_MODELS)
+  })
+})
+
+it('maps malformed models JSON to not_compatible', async () => {
+  await withModelFixture({ body: 'not-json' }, async (baseUrl) => {
+    await expect(testCustomEndpoint('alice', { baseUrl })).resolves.toMatchObject({
+      reachable: false,
+      errorCode: 'not_compatible',
+    })
+  })
+})
+
+it('does not send chat requests while testing models', async () => {
+  // fixture must count paths; invoke handler and assert only /v1/models appears
+})
+```
+
+- [x] **Step 2: Run focused tests and verify cap failure**
+
+```bash
+bunx vitest run tests/customModelProfiles.test.ts
+```
+
+- [x] **Step 3: Implement cap and parser only**
+
+Declare server constant:
+
+```ts
+export const MAX_DISCOVERED_MODELS = 500
+```
+
+Parse through the same bounded validator and pass through conservative ids accepted by `isCustomModelId` for consistency; no provider family regex. Set response to `models` strings exactly.
+
+- [x] **Step 4: Verify and commit**
+
+```bash
+bunx vitest run tests/customModelProfiles.test.ts
+git add server/customModelProfiles.ts tests/customModelProfiles.test.ts
+git commit -m "feat(custom-inference): return capped discovered model ids"
+```
+
+If route files change, add `server/index.ts` explicitly; do not add unused build artifacts.
+
+---
+
+## Task 6: Implement tested-fingerprint and discovery-only selection in the UI
+
+### Task 6
+
+**Files:**
+
+- Modify: `src/components/CustomModelProfiles.tsx`
+- Modify: `src/lib/api.ts:198-227`
+- Modify: `src/lib/i18n/en/models.ts` and `src/lib/i18n/pt-BR/models.ts`
+- Test: `tests/customModelProfiles.test.tsx`
+
+**Interfaces**
+
+- Consumes: `CustomEndpointTestResult { reachable, models? , errorCode?, error? }`
+- Produces: UI-only draft containing `selectedModel`, `discoveredModels`, `useManualFallback`; payload remains `CustomModelProfileInput` with `model`
+- Must not change: server key redaction or test route behavior
+
+- [x] **Step 1: Write failing component tests**
+
+```ts
+it('requires selecting a discovered model before save', async () => {
+  mocks.test.mockResolvedValue({ reachable: true, models: ['m-a', 'm-b'] })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('Local Ollama'), 'Local Ollama')
+  await fill(input('https://provider.example/v1'), 'https://provider.example/v1')
+  await click(button('Test connection'))
+
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+  // Select m-a in the Select dropdown; exact helper mirrors existing select tests.
+  expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ model: 'm-a' }))
+})
+
+it('invalidates discovery when base URL changes after test', async () => {
+  mocks.test.mockResolvedValueOnce({ reachable: true, models: ['m-a'] })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await fill(input('https://one.example/v1'), 'https://one.example/v1')
+  await click(button('Test connection'))
+  await fill(input('https://one.example/v1'), 'https://two.example/v1')
+
+  expect((button('Save endpoint') as HTMLButtonElement).disabled).toBe(true)
+})
+
+it('uses stored key when blank key is tested for saved profile', async () => {
+  mocks.list.mockResolvedValue([profile()])
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
+  await render(disconnected)
+  await click(button('Edit'))
+  await click(button('Test connection'))
+
+  expect(mocks.test).toHaveBeenCalledWith({
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    profileId: 'profile-1',
+  })
+})
+
+it('offers manual input only after enabling unverified fallback', async () => {
+  mocks.test.mockResolvedValue({ reachable: true, models: [] })
+  await render(disconnected)
+  await click(button('Add custom endpoint'))
+  await click(button('Test connection'))
+
+  expect(container.querySelector('input[name="models-manual"]')).toBeNull()
+  // enable fallback; manual input visible; invalid ids disabled
+})
+```
+
+Additional exact assertions:
+
+- entering any new key invalidates the tested fingerprint;
+- missing saved model remains disabled/visible and save requires entering fallback;
+- empty discovered list exposes fallback automatically after enabling it;
+- selected model is never rendered as an `<input>`;
+- normal path sends no `model` to `/models` test.
+
+- [x] **Step 2: Run failing test**
+
+```bash
+bunx vitest run tests/customModelProfiles.test.tsx
+```
+
+- [x] **Step 3: Implement the draft state and gate**
+
+Keep a fingerprint function in the component test helper or local utility:
+
+```ts
+const fingerprint = (draft: Draft) =>
+  JSON.stringify({
+    baseUrl: draft.baseUrl.trim(),
+    apiKey: draft.apiKey === null ? null : draft.apiKey?.trim() || '(stored)',
+    profileId: draft.id ?? null,
+  })
+```
+
+Save enabled only when:
+
+```ts
+draft.testedFingerprint === fingerprint(draft) &&
+  ((!draft.useManualFallback && Boolean(draft.selectedModel)) ||
+    (draft.useManualFallback && isCustomModelId(draft.manualModel)))
+```
+
+On base URL, API key, or profile identity change: clear discovery list, selection, and fingerprint. For saved profile identity, editing name/vision alone preserves valid discovery state; changing credential does not.
+
+Test in discovery mode sends:
+
+```ts
+{
+  baseUrl: draft.baseUrl.trim(),
+  ...(draft.id ? { profileId: draft.id } : {}),
+  ...(draft.apiKey !== undefined ? { apiKey: draft.apiKey } : {}),
+}
+```
+
+Normal UI has dropdown with discovered ids; if list exceeds 100, include search. Fallback link appears only for failed/empty discovery or explicit opt-in. Do not test Chat Completions automatically on saving.
+
+- [x] **Step 4: Verify and commit**
 
 ```bash
 bunx vitest run tests/customModelProfiles.test.tsx tests/i18n.test.ts
-bun run typecheck
-bun run lint
- git add src/components/CustomModelProfiles.tsx src/components/ModelAccount.tsx src/components/ModelPicker.tsx src/lib/api.ts src/lib/i18n/en/models.ts src/lib/i18n/pt-BR/models.ts tests/customModelProfiles.test.tsx
- git commit -m "feat: add custom inference profile settings"
+git add src/components/CustomModelProfiles.tsx src/lib/api.ts src/lib/i18n/en/models.ts src/lib/i18n/pt-BR/models.ts tests/customModelProfiles.test.tsx
+git commit -m "feat(custom-inference): select discovered models after test"
 ```
 
 ---
 
-### Task 7: Add end-to-end custom turn and security regressions
+## Task 7: Add focused composer behavior for model switching and missing catalog entries
+
+### Task 7
 
 **Files:**
-<<<<<<< HEAD
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
+- Modify: `src/components/ModelPicker.tsx` only for missing-current-model caption and stale catalog behavior
+- Modify: `src/components/ModelAccount.tsx` only for active-target helper consumption if needed
+- Test: `tests/modelPicker.test.tsx`
+- Test: `tests/chatCompletionsAgent.test.ts` untouched except fixture if needed
+
+**Interfaces**
+
+- Consumes: mocked `../src/lib/api`, mocked `../src/components/ModelAccount`, `activeModelTarget` helper
+- Produces: bounded proof that chat picker lists live list entries and keeps saved missing id visible
+- Must not change: request routing; selecting a model only calls `PATCH /api/model-account`
+
+- [x] **Step 1: Create the focused test**
+
+```ts
+const accountState = vi.hoisted(() => ({
+  account: { connected: true, kind: 'custom-key' as const, model: 'm-missing' },
+}))
+
+vi.mock('../src/components/ModelAccount', () => ({
+  useModelAccount: () => ({ account: accountState.account, set: vi.fn(), refresh: vi.fn() }),
+  useAgentModels: () => ({
+    models: [{ id: 'm-a', name: 'm-a', blurb: '' }],
+    live: true,
+  }),
+}))
+```
+
+Write:
+
+- open picker;
+- `m-a` listed;
+- `m-missing` remains visible with translated caption;
+- selecting `m-a` invokes `api.setAgentModel('m-a')`;
+- selecting cannot silently substitute `m-missing`;
+- with local preference enabled, picker/label shows local authoritative state once Task 4 lands; do not broaden this task into unrelated picker redesign.
+
+- [x] **Step 2: Run expected RED state**
+
+```bash
+bunx vitest run tests/modelPicker.test.tsx
+```
+
+If `/models` currently already lists and returns saved fallback, assert existing behavior instead of duplicating it.
+
+- [x] **Step 3: Implement minimal missing-model caption/search only**
+
+Use existing Select primitives; search input label is `Search models` in English and equivalent in Portuguese. Keep local translation keys; do not add a duplicate picker.
+
+- [x] **Step 4: Verify and commit**
+
+```bash
+bunx vitest run tests/modelPicker.test.tsx tests/i18n.test.ts
+git add src/components/ModelPicker.tsx src/components/ModelAccount.tsx tests/modelPicker.test.tsx
+git commit -m "feat(custom-inference): show live and missing custom models in composer"
+```
+
+---
+
+## Task 8: Align documentation and manual fallback behavior, then commit
+
+### Task 8
+
+**Files:**
+
+- Modify: `README.md`
+- Modify: `docs/custom-inference.md`
+- Modify: `src/lib/i18n/en/models.ts`, `src/lib/i18n/pt-BR/models.ts` if translation strings are not already included in Task 6
+- Test: `tests/modelCatalog.test.ts`
+
+**Interfaces**
+
+- Consumes: live catalog fallback path from `modelCatalogFor`, saved model preservation behavior
+- Produces: documented user journey, no new environment variables
+
+- [x] **Step 1: Model catalog behavior assertion**
+
+```ts
+it('preserves saved custom model id when live /models omits it', async () => {
+  const catalog = await modelCatalogFor(active, [])
+  expect(catalog.models.map((model) => model.id)).toContain('saved-model')
+})
+```
+
+Add one empty-list assertion and one `/models` rejection assertion if not already covered by the existing custom suite.
+
+- [x] **Step 2: Run catalog suite**
+
+```bash
+bunx vitest run tests/modelCatalog.test.ts
+```
+
+- [x] **Step 3: Write docs around actual behavior**
+
+Include all of this:
+
+- testing lists models through `/v1/models`;
+- normal users choose from that list;
+- manual id is a fallback explicitly declared unverified;
+- empty/failing/missing model from `/models` does not silently change selection;
+- public HTTP remains forbidden; private/local needs operator flag;
+- switching in composer changes the saved profile's model;
+- superseding/API key behavior is not visible to browser;
+- minimal example endpoints use example values only; never real secrets.
+
+- [x] **Step 4: Commit**
+
+```bash
+git add README.md docs/custom-inference.md tests/modelCatalog.test.ts src/lib/i18n/en/models.ts src/lib/i18n/pt-BR/models.ts
+git commit -m "docs(custom-inference): document dynamic model selection"
+```
+
+If translations were committed in Task 6, omit duplicates.
+
+---
+
+## Task 9: Run bounded end-to-end fixture matrix and full verification
+
+### Task 9
+
+**Files:**
+
 - Modify: `tests/customInferenceAgent.test.ts`
-- Modify: `tests/chatCompletionsAgent.test.ts`
 - Modify: `tests/customModelProfiles.test.ts`
-- Modify: `tests/modelCatalog.test.ts`
-- Modify: `tests/agentModel.test.ts` if a focused agent-model suite exists; otherwise add assertions to the custom profile suite.
+- Modify: fixture helpers only; no production behavior outside prior tasks
+- Test: `tests/customInference.test.ts`, `tests/modelCatalog.test.ts`, `tests/chatCompletionsAgent.test.ts`, `tests/modelTurnRetry.test.ts`
 
-**Interfaces:**
-<<<<<<< HEAD
+**Interfaces**
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Consumes the completed profile API, active-account selection, safe fetch, catalog loader, and Chat Completions transport.
-- Verifies the externally observable contract rather than private implementation details wherever possible.
+- Consumes: local fixture helpers; `POST /v1/chat/completions` request recorder
+- Produces: deterministic regression proof, not new product behavior
 
-- [ ] **Step 1: Add a mock OpenAI-compatible endpoint fixture.**
-  - Serve `/v1/models` with a valid model list.
-  - Serve `/v1/chat/completions` with one tool call followed by a successful text response.
-  - Add routes for 401, 404, malformed JSON, oversized body, redirect, and delayed response.
-  - Keep the fixture in a test-only server/handler; never execute downloaded or external scripts.
+- [x] **Step 1: Add or extend shared fixture**
 
-- [ ] **Step 2: Add the successful end-to-end test.**
-  - Create a custom profile with no key against an explicitly allowed local fixture URL.
-  - Activate it.
-  - Assert catalog models are returned.
-  - Assert the resident-agent transport sends the selected custom model, translated tools/messages, and correct vision behavior.
-  - Assert the tool call is converted back into the Anthropic-shaped `TurnBlock[]` expected by `resident.ts`.
+Fixture support:
 
-- [ ] **Step 3: Add security regression tests.**
-  - Confirm a redirect to a private host is rejected rather than followed.
-  - Confirm a DNS response changing from public to private is rejected on the next request.
-  - Confirm private URLs fail when the feature flag is false and work only when the test explicitly enables the flag.
-  - Confirm query strings/fragments/credentials never reach the transport.
-  - Confirm no API key appears in response JSON, thrown error text, logs captured by the test, or PostHog payloads.
+- `/v1/models` returns `a`, `b`;
+- 401/404/empty/malformed/oversized cases;
+- `/v1/chat/completions` validates `model`;
+- redirect returns 302 to another origin without following;
+- request close is observable for abort tests;
+- no downloading scripts or remote modules.
 
-- [ ] **Step 4: Add provider-regression tests.**
-  - Existing OpenRouter/Gemini requests retain their fixed URLs and headers.
-  - Existing account kinds retain their model regexes and reasoning behavior.
-  - Existing model picker/settings tests remain green when `custom-key` is present in the unions.
+- [x] **Step 2: Add two end-to-end journeys**
 
-- [ ] **Step 5: Run the full relevant suite and commit.**
+```text
+Journey A: create with only name/url/key -> test returns { models: [a,b] } -> select b -> save -> activate -> switch composer to a -> chat fixture receives model "a"
+```
+
+```text
+Journey B: endpoint missing /models -> fallback selected -> save -> activation -> fixture records manual model id -> live catalog reports live:false and keeps saved id selected
+```
+
+- [x] **Step 3: Run full suite and checks**
 
 ```bash
-bunx vitest run tests/customInference.test.ts tests/customInferenceAgent.test.ts tests/customModelProfiles.test.ts tests/chatCompletionsAgent.test.ts tests/modelCatalog.test.ts tests/providerKeyAccounts.test.ts tests/i18n.test.ts
+bunx vitest run tests/customInference.test.ts tests/customInferenceAgent.test.ts tests/customModelProfiles.test.ts tests/customModelProfiles.test.tsx tests/modelCatalog.test.ts tests/chatCompletionsAgent.test.ts tests/modelTurnRetry.test.ts tests/i18n.test.ts tests/modelPicker.test.tsx
 bun run typecheck
 bun run lint
- git add tests/customInference.test.ts tests/customInferenceAgent.test.ts tests/customModelProfiles.test.ts tests/chatCompletionsAgent.test.ts tests/modelCatalog.test.ts tests/providerKeyAccounts.test.ts tests/i18n.test.ts
- git commit -m "test: cover custom inference end to end"
+```
+
+Expected: all named suites pass; typecheck and lint have no errors. If unrelated existing failure is present, record it exactly and do not rewrite unrelated legacy tests as a side effect.
+
+- [x] **Step 4: Commit verification only if behavior/tests changed**
+
+```bash
+git add tests/customInferenceAgent.test.ts tests/customModelProfiles.test.ts tests/modelPicker.test.tsx
+git commit -m "test: cover custom endpoint discovery flow end to end"
 ```
 
 ---
 
-### Task 8: Update product documentation and verify the complete change
+## Self-Review Against Your Input
 
-**Files:**
-<<<<<<< HEAD
+1. **Normal flow requires no typed model:** Tasks 5 and 6 establish discovery and disable save until a member of the returned list is selected; fallback is explicit and marked unverified.
+2. **Successful test drives selection:** Task 5 returns ids; Task 6 replaces the model input with a Select; Task 6 clears it when fingerprint changes.
+3. **All endpoint models are shown dynamically:** capped server list and live picker/search keep it bounded; unknown ids remain possible only through explicit unverified fallback.
+4. **Selection persists / changes from chat:** Task 3 makes profile updates atomic; Task 4 keeps active target honest; Task 7 covers composer behavior; Task 9 verifies end-to-end.
+5. **Public HTTP blocked:** Task 1 and Task 2 pin DNS and enforce mixed/private policy.
+6. **Stopped requests stop:** Task 1 forwards the signal into undici and confirms closure with a real fixture.
+7. **Overwrites cannot resurrect stale values:** Task 3 uses transactions, `RETURNING`, and row locks.
+8. **Deleted endpoint cannot become active:** Task 3 races activation against deletion and asserts the invariant.
+9. **No silent model replacement:** Task 7 and Task 8 keep missing saved model visible and force explicit choice.
+10. **No provider/order hijack:** no provider rewrite; only one shared presentation-time helper.
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Modify: `README.md` around the connected model account section and environment table.
-- Modify: `.env.example` if Task 1 did not complete all documentation there.
-- Modify: `.context/TECHSTACK.md` in the model-account/provider section.
-- Create or modify: `docs/custom-inference.md` if the README section would otherwise become too long.
-- Test/verification: repository-wide typecheck, lint, format check, build, and relevant Vitest suites.
+## Remaining Deliberate Tradeoff
 
-**Interfaces:**
-<<<<<<< HEAD
+Save does not call `/models` again at save time. This is intentional, because a transient discovery failure should not invalidate a user's save and because the endpoint explicitly promised no re-check. Live picker remains authoritative at use time. The fallback is visible and explicitly unverified, so the tradeoff is surfaced instead of hidden.
 
-=======
->>>>>>> 872919b (Docs : Implementation plan for custom inference)
-- Documentation must describe the shipped REST/UI behavior, not an aspirational API.
-- The docs must clearly distinguish external HTTPS endpoints, self-hosted private endpoints, and hosted doop.design limitations.
+## Verification Checklist Before Calling It "Perfect"
 
-- [ ] **Step 1: Document user behavior.** Include:
-  - Settings → Doop Agent → Custom endpoint profile flow;
-  - multiple saved profiles and one active profile;
-  - base URL examples such as `https://provider.example/v1` and self-hosted `http://127.0.0.1:11434/v1`;
-  - optional API key for local servers;
-  - explicit vision toggle and degraded no-screenshot behavior;
-  - OpenAI-compatible Chat Completions requirement.
-
-- [ ] **Step 2: Document operator security configuration.** State that:
-  - the server performs model requests;
-  - keys are encrypted and never returned to the browser;
-  - public endpoints must use HTTPS;
-  - private/local URLs work only on self-hosted deployments with `CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS=1`;
-  - hosted Doop cannot reach a user’s localhost/LAN through this feature.
-
-- [ ] **Step 3: Run formatting and all CI-equivalent checks.**
-
-```bash
-bun run format:check
-bun run typecheck
-bun run lint
-bun run build
-bun run test
-```
-
-Expected: all commands pass. If a command fails, fix the underlying issue and rerun the failed command before claiming completion.
-
-- [ ] **Step 4: Review the final diff for secret/SSRF regressions.**
-  - Search for custom API-key serialization, logging, analytics capture, raw custom `fetch`, and `redirect: 'follow'`.
-  - Confirm every custom outbound request uses the safe helper.
-  - Confirm every profile query is user-scoped.
-  - Confirm `custom-key` is present in every relevant server/client union and absent from image-generation provider assumptions unless explicitly unsupported.
-
-```bash
-git diff --check
-grep -R "apiKey" -n server/index.ts server/customModelProfiles.ts src/components/CustomModelProfiles.tsx
- grep -R "fetch(.*profile\|fetch(.*baseUrl\|redirect: 'follow'" -n server
-```
-
-- [ ] **Step 5: Commit documentation and final verification.**
-
-```bash
-git add README.md .env.example .context/TECHSTACK.md docs/custom-inference.md
- git commit -m "docs: document custom inference profiles"
-```
-
----
-
-## Spec coverage self-review
-
-- Multiple saved profiles: Tasks 2, 3, 5, and 6.
-- One active account pointer: Task 3.
-- OpenAI-compatible Chat Completions: Task 4 and Task 7.
-- External public endpoints: Task 1 HTTPS/DNS policy and Task 7 regression tests.
-- Self-hosted local models: Task 1 operator flag, Task 6 explanatory UI, Task 8 docs.
-- SSRF, DNS rebinding, redirects, bounded responses/timeouts: Tasks 1 and 7.
-- Encrypted keys and no browser/log leakage: Tasks 2, 5, 6, and 7.
-- Custom model ids and live `/models` catalog: Tasks 2, 4, and 5.
-- Existing provider behavior preserved: Tasks 3, 4, and 7.
-- REST API: Task 5.
-- Settings and composer UI: Task 6.
-- i18n parity: Task 6 and Task 8 verification.
-- Documentation/configuration: Task 1 and Task 8.
-- Migration and secret resealing: Task 2.
-
-## Plan self-review
-
-- No placeholder steps remain; each implementation area names files, interfaces, tests, commands, and expected outcomes.
-- Type names are consistent across tasks: `custom-key`, `CustomModelProfile`, `CustomModelProfileView`, `profileId`, `customConfig`, and `fetchCustomJson`.
-- The transport boundary is explicit: fixed provider URLs remain unchanged, while custom requests go through the SSRF-safe path.
-- The profile key is stored once in `custom_model_profiles`; `model_accounts` stores only the active profile pointer.
-- The design’s one potential ambiguity — whether `/models` is mandatory — is resolved consistently: catalog failure does not prevent saving or running a manually entered model.
+- [x] Fixture endpoint returns mixed DNS fixtures for one public + one private answer
+- [x] Custom route returns no keys and no URL-derived credentials
+- [x] A saved missing model is visible but clearly indicated as not listed
+- [x] "Local Claude" and "custom endpoint" never both render active
+- [x] A stop aborts the request and closes the fixture connection
+- [x] Save is disabled on stale discovery or empty fingerprint
+- [x] Focused suite, typecheck, and lint pass
+- [x] Full suite (250 files, 2,362 tests) passes with one worker
