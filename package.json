@@ -10,7 +10,7 @@
     "build:claude-extension": "node scripts/build-claude-extension.mjs",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsgo --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=4",
     "lint": "oxlint --type-aware --deny-warnings . && eslint . --max-warnings 0",
     "lint:fix": "oxlint --type-aware --deny-warnings --fix . && eslint . --fix",
     "format": "prettier --write .",
