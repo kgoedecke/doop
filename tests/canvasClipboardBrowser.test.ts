@@ -196,6 +196,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await copyImage()
     await chord('v')
     await expect.poll(() => uploads).toBe(1)
+    await expect.poll(() => created.length).toBe(1)
     expect(await count('section')).toBe(1)
   })
 
@@ -203,6 +204,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await page.evaluate(() => window.canvasClipboardHarness.pick('#card'))
     await chord('c')
     await page.evaluate(() => navigator.clipboard.writeText('new external text'))
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('new external text')
     await chord('v')
     await page.evaluate(
       () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
@@ -244,7 +246,7 @@ describe.skipIf(!findBrowserPath() || !CLIPBOARD_IS_RELIABLE)('canvas clipboard 
     await chord('c')
     await chord('v')
     await expect.poll(() => count('section, p')).toBe(4)
-    expect(await page.evaluate(() => window.canvasClipboardHarness.picked())).toHaveLength(2)
+    await expect.poll(() => page.evaluate(() => window.canvasClipboardHarness.picked().length)).toBe(2)
   })
 
   it('copies through the element menu and pastes with the keyboard', async () => {
