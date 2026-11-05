@@ -22,6 +22,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { planMark, planPill } from './ui/model-plan'
 import { DoopMark } from './Logo'
 
+export async function pickCustomModel(
+  model: string,
+  currentModel: string | undefined,
+  saveModel: (model: string) => Promise<ModelAccountStatus>,
+  refreshProfiles: () => Promise<void>,
+  onAccountChange?: (next: ModelAccountStatus) => void,
+  onChange?: () => void,
+): Promise<void> {
+  if (model === currentModel) return
+  onAccountChange?.(await saveModel(model))
+  await refreshProfiles()
+  onChange?.()
+}
+
 /**
  * Saved OpenAI-compatible endpoints. The server keeps every key sealed and
  * never returns one, so this component edits a profile from its redacted view:
@@ -282,7 +296,8 @@ export function CustomModelProfiles({
       }
       if (draft.id) {
         const patch: CustomModelProfilePatch = { ...base }
-        if (draft.apiKey !== undefined) patch.apiKey = draft.apiKey?.trim() || null
+        if (draft.apiKey === null) patch.apiKey = null
+        else if (draft.apiKey?.trim()) patch.apiKey = draft.apiKey.trim()
         await api.updateModelProfile(draft.id, patch)
       } else {
         await api.createModelProfile({
@@ -350,12 +365,10 @@ export function CustomModelProfiles({
   }
 
   const pickModel = async (model: string) => {
-    if (model === account.model) return
     setBusy(true)
     setError('')
     try {
-      onAccountChange?.(await api.setAgentModel(model))
-      onChange?.()
+      await pickCustomModel(model, account.model, api.setAgentModel, load, onAccountChange, onChange)
     } catch (e) {
       setError(messageFor(e, t('models.failedRetry')))
     } finally {
@@ -466,7 +479,7 @@ export function CustomModelProfiles({
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {!profile.active && (
+                  {(!profile.active || !customActive) && (
                     <Button size="sm" onClick={() => void activate(profile)} disabled={busy}>
                       {t('models.customActivate')}
                     </Button>

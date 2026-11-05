@@ -1,6 +1,12 @@
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
-import { linearOAuthStates, liveActivities, liveActivityStarters, slackOAuthStates } from './db/schema.ts'
+import {
+  customModelProfiles,
+  linearOAuthStates,
+  liveActivities,
+  liveActivityStarters,
+  slackOAuthStates,
+} from './db/schema.ts'
 import { store } from './store.ts'
 import { removeMember as leaveWorkspace, workspaceIdsFor } from './workspaces.ts'
 
@@ -20,6 +26,7 @@ export async function purgeUserData(userId: string): Promise<{ deletedCanvases: 
   await linear.disconnectAgent(userId)
   await db.delete(slackOAuthStates).where(eq(slackOAuthStates.userId, userId))
   await db.delete(linearOAuthStates).where(eq(linearOAuthStates.userId, userId))
+  await db.delete(customModelProfiles).where(eq(customModelProfiles.userId, userId))
   let deletedCanvases = 0
   for (const canvas of store.allCanvases()) {
     const others = (canvas.memberIds ?? []).filter((id) => id !== userId)

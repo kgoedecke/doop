@@ -220,8 +220,9 @@ interface CompletionBody {
   }[]
 }
 
-function fromCompletion(body: CompletionBody, label: string): TurnResult {
+function fromCompletion(body: CompletionBody, label: string, sanitizeEndpointErrors = false): TurnResult {
   if (body.error?.message) {
+    if (sanitizeEndpointErrors) throw new ModelUnavailableError('The custom model endpoint returned an error response.')
     throw isModelUnavailable(body.error.message)
       ? new ModelUnavailableError(`${label}: ${body.error.message}`)
       : new Error(`${label}: ${body.error.message}`)
@@ -295,7 +296,7 @@ export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req:
       }
       throw error
     }
-    return fromCompletion(parsed, config.label)
+    return fromCompletion(parsed, config.label, true)
   }
   const res = await fetch(config.url, {
     method: 'POST',

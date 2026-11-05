@@ -14,7 +14,7 @@ import { MAX_DISCOVERED_MODELS, type CustomModelProfile } from '../server/custom
  * and that its model list is passed through without vendor-family filters.
  */
 
-type Mode = 'ok' | 'auth' | 'missing' | 'malformed' | 'models-large' | 'models-invalid'
+type Mode = 'ok' | 'auth' | 'missing' | 'malformed' | 'completion-error' | 'models-large' | 'models-invalid'
 
 let mode: Mode = 'ok'
 let provider: http.Server
@@ -49,6 +49,7 @@ beforeAll(async () => {
       if (mode === 'auth') return json(401, { error: 'no' })
       if (mode === 'missing') return json(404, { error: 'no' })
       if (mode === 'malformed') return res.writeHead(200, { 'content-type': 'application/json' }).end('{oops')
+      if (mode === 'completion-error') return json(200, { error: { message: 'invalid key sk-do-not-leak' } })
       if (url.pathname.endsWith('/models')) {
         if (mode === 'models-large')
           return json(200, { data: Array.from({ length: 600 }, (_, i) => ({ id: `m-${i}` })) })
@@ -177,6 +178,18 @@ describe('custom chat completions', () => {
     expect(await runChatCompletionsTurn(config, req).catch((error: unknown) => error)).toBeInstanceOf(
       ModelUnavailableError,
     )
+  })
+
+  it('does not expose an endpoint error message that contains the saved API key', async () => {
+    mode = 'completion-error'
+    const error = await runChatCompletionsTurn(
+      customConfig(new URL(`${base}/v1`), 'sk-do-not-leak', 'm', true, 'Custom'),
+      req,
+    ).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(ModelUnavailableError)
+    expect(String(error)).not.toContain('sk-do-not-leak')
+    expect(String(error)).not.toContain('invalid key')
   })
 
   it('keeps the fixed provider configs on their trusted URLs', () => {

@@ -45,7 +45,7 @@ vi.mock('../src/lib/localAgent', () => ({
 
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 
-import { CustomModelProfiles } from '../src/components/CustomModelProfiles'
+import { CustomModelProfiles, pickCustomModel } from '../src/components/CustomModelProfiles'
 import { refreshLocalAgent } from '../src/lib/localAgent'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -239,6 +239,26 @@ it('preserves a stored key when editing and clears it only when asked', async ()
   })
 })
 
+it('does not clear a saved key when a replacement key is typed and then blanked', async () => {
+  mocks.list.mockResolvedValue([profile()])
+  mocks.test.mockResolvedValue({ reachable: true, models: ['qwen3.5-coder'] })
+  mocks.update.mockResolvedValue(profile())
+  await render(disconnected)
+  await click(button('Edit'))
+  await fill(input('sk-… (optional)'), 'sk-temporary')
+  await fill(input('sk-… (optional)'), '')
+  await click(button('Test connection'))
+  await selectOption('qwen3.5-coder')
+  await click(button('Save endpoint'))
+
+  expect(mocks.update).toHaveBeenCalledWith('profile-1', {
+    name: 'Local Ollama',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'qwen3.5-coder',
+    supportsVision: false,
+  })
+})
+
 it('activates a saved profile and reports the new account', async () => {
   const next = activeAccount()
   mocks.list.mockResolvedValue([profile()])
@@ -256,8 +276,27 @@ it('activates a saved profile and reports the new account', async () => {
 it('does not show the connected provider as active when local selection wins', async () => {
   mocks.list.mockResolvedValue([profile({ active: true })])
   mocks.account.mockResolvedValue(activeAccount())
+  mocks.activate.mockResolvedValue(activeAccount())
   await render(activeAccount())
   expect(container.textContent).not.toContain('Active')
+  expect(button('Use this endpoint')).toBeDefined()
+  await click(button('Use this endpoint'))
+  expect(mocks.activate).toHaveBeenCalledWith('profile-1')
+})
+
+it('refreshes the saved profile model after selecting a different live model', async () => {
+  const next = activeAccount({ model: 'qwen3.5-coder:latest' })
+  const refreshed = vi.fn().mockResolvedValue(undefined)
+  const onAccountChange = vi.fn()
+  const onChange = vi.fn()
+  mocks.pick.mockResolvedValue(next)
+
+  await pickCustomModel('qwen3.5-coder:latest', 'qwen3.5-coder', mocks.pick, refreshed, onAccountChange, onChange)
+
+  expect(mocks.pick).toHaveBeenCalledWith('qwen3.5-coder:latest')
+  expect(onAccountChange).toHaveBeenCalledWith(next)
+  expect(refreshed).toHaveBeenCalledOnce()
+  expect(onChange).toHaveBeenCalledOnce()
 })
 
 it('asks before deleting and refreshes the list', async () => {
