@@ -195,7 +195,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
   `frameExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
-  each frame onto a page of its own size, pages in the order the frames are listed (a whole page
+  each frame onto a page of its own size (inside an iframe of the frame's size, as the canvas shows
+  it, so content taller than the frame is clipped rather than paginated: bare, Chrome moved a block
+  straddling the edge whole onto a dropped second sheet), pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
   order); render limits in `shared/pdfLimits.ts`, which also sizes the browser's download
   timeout; served by `GET /api/canvases/:id/export.pdf` and MCP `export_frame`.
