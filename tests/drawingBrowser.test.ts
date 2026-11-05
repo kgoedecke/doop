@@ -117,7 +117,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     )
     await page.waitForSelector('[aria-label="Canvas tools"]')
     await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 2 }))
-  })
+  }, 60_000)
 
   afterAll(async () => {
     await page?.close()

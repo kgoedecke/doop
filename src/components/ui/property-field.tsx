@@ -127,9 +127,10 @@ export function NumberField({
   const [draft, setDraft] = useState(shown)
   const [seen, setSeen] = useState({ value: shown, scrubbing: false })
   const scrubLifecycle = useContext(PropertyScrubContext)
-  const scrub = useValueScrub({
+  const { canScrub, attachHandle, onPointerDown, scrubbing } = useValueScrub({
     ...scrubLifecycle,
     value: draft,
+    unit: u,
     enabled: !disabled && draft.trim() !== '' && Number.isFinite(Number(draft)),
     min,
     max,
@@ -140,12 +141,12 @@ export function NumberField({
   })
   // A reply received during the drag still needs to replace the draft on
   // release, even when CSS constrained or rounded it back to the old value.
-  if (seen.value !== shown || seen.scrubbing !== scrub.scrubbing) {
-    setSeen({ value: shown, scrubbing: scrub.scrubbing })
-    if (!scrub.scrubbing) setDraft(shown)
+  if (seen.value !== shown || seen.scrubbing !== scrubbing) {
+    setSeen({ value: shown, scrubbing })
+    if (!scrubbing) setDraft(shown)
   }
   function commit() {
-    if (scrub.scrubbing) return
+    if (scrubbing) return
     const n = Number(draft)
     if (draft.trim() !== '' && Number.isFinite(n) && n !== value) {
       const next = Math.min(max, Math.max(min, n))
@@ -197,11 +198,12 @@ export function NumberField({
       </span>
       {!token && (
         <span
+          ref={attachHandle}
           data-unit
-          className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
-          title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
-          onPointerDown={scrub.onPointerDown}
-          onClick={(e) => scrub.canScrub && e.preventDefault()}
+          className={cn(unitCls, canScrub && scrubUnitCls)}
+          title={canScrub ? t('inspector.scrubHint') : undefined}
+          onPointerDown={onPointerDown}
+          onClick={(e) => canScrub && e.preventDefault()}
         >
           {u}
         </span>
@@ -235,9 +237,10 @@ export function TextField({
   const [draft, setDraft] = useState(value)
   const [seen, setSeen] = useState({ value, scrubbing: false })
   const scrubLifecycle = useContext(PropertyScrubContext)
-  const scrub = useValueScrub({
+  const { canScrub, attachHandle, onPointerDown, scrubbing } = useValueScrub({
     ...scrubLifecycle,
     value: draft,
+    unit: u,
     enabled: scrubbable,
     min,
     onChange: (v) => {
@@ -245,9 +248,9 @@ export function TextField({
       onCommit(v)
     },
   })
-  if (seen.value !== value || seen.scrubbing !== scrub.scrubbing) {
-    setSeen({ value, scrubbing: scrub.scrubbing })
-    if (!scrub.scrubbing) setDraft(value)
+  if (seen.value !== value || seen.scrubbing !== scrubbing) {
+    setSeen({ value, scrubbing })
+    if (!scrubbing) setDraft(value)
   }
   return (
     <label className={cn(fieldCls, className)}>
@@ -257,16 +260,17 @@ export function TextField({
         value={draft}
         placeholder={placeholder}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => !scrub.scrubbing && draft !== value && onCommit(draft)}
+        onBlur={() => !scrubbing && draft !== value && onCommit(draft)}
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
       />
       {u && (
         <span
+          ref={attachHandle}
           data-unit
-          className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
-          title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
-          onPointerDown={scrub.onPointerDown}
-          onClick={(e) => scrub.canScrub && e.preventDefault()}
+          className={cn(unitCls, canScrub && scrubUnitCls)}
+          title={canScrub ? t('inspector.scrubHint') : undefined}
+          onPointerDown={onPointerDown}
+          onClick={(e) => canScrub && e.preventDefault()}
         >
           {u}
         </span>

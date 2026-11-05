@@ -658,6 +658,7 @@ function ValueInput({
   const scrubUnit = parsedForScrub?.unit || (kind === 'length' ? (type === 'letterSpacing' ? 'em' : 'px') : '')
   const scrub = useValueScrub({
     value: value ? (parsedForScrub?.number ?? '') : '0',
+    unit: scrubUnit,
     enabled:
       numeric && !alias && !disabled && (value === '' || (parsedForScrub !== null && parsedForScrub.number !== '')),
     min: kind === 'opacity' ? 0 : -Infinity,
@@ -697,6 +698,7 @@ function ValueInput({
       )}
     >
       <span
+        ref={scrub.attachHandle}
         className={cn(
           'grid size-5 flex-none place-items-center rounded-tag text-ink-faint',
           scrub.canScrub && 'cursor-ew-resize hover:bg-sub hover:text-ink',
