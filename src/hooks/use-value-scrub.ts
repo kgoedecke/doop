@@ -32,14 +32,16 @@ export function useValueScrub({
   onEnd?: (cancel: boolean) => void
 }) {
   const [scrubbing, setScrubbing] = useState(false)
+  const [target, attachHandle] = useState<HTMLElement | null>(null)
   const cleanup = useRef<(() => void) | null>(null)
-  const targetRef = useRef<HTMLElement | null>(null)
   const canScrub = enabled && parse(value) !== null
 
   const latest = useRef({ value, unit, min, max, canScrub, onStart, onEnd, onChange })
   useEffect(() => {
     latest.current = { value, unit, min, max, canScrub, onStart, onEnd, onChange }
   })
+
+  useEffect(() => () => cleanup.current?.(), [])
 
   const onWheel = useCallback((e: WheelEvent) => {
     // Ignore wheel when inactive, during an in-flight drag, or on horizontal-only scroll
@@ -56,8 +58,8 @@ export function useValueScrub({
     onStart?.()
     const next = parts
       .map((part) => {
-        const target = Math.min(max, Math.max(min, part.number + dir * rate))
-        const snapped = Math.min(max, Math.max(min, Math.round(target / grid) * grid))
+        const targetVal = Math.min(max, Math.max(min, part.number + dir * rate))
+        const snapped = Math.min(max, Math.max(min, Math.round(targetVal / grid) * grid))
         return `${Number(snapped.toFixed(4))}${part.unit}`
       })
       .join(' ')
@@ -65,28 +67,13 @@ export function useValueScrub({
     onEnd?.(false)
   }, [])
 
-  const attachHandle = useCallback(
-    (node: HTMLElement | null) => {
-      if (targetRef.current) {
-        targetRef.current.removeEventListener('wheel', onWheel)
-      }
-      targetRef.current = node
-      if (node) {
-        node.addEventListener('wheel', onWheel, { passive: false })
-      }
-    },
-    [onWheel],
-  )
-
-  useEffect(
-    () => () => {
-      cleanup.current?.()
-      if (targetRef.current) {
-        targetRef.current.removeEventListener('wheel', onWheel)
-      }
-    },
-    [onWheel],
-  )
+  useEffect(() => {
+    if (!target) return
+    target.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      target.removeEventListener('wheel', onWheel)
+    }
+  }, [target, onWheel])
 
   function onPointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (!canScrub || event.button !== 0 || !event.isPrimary || cleanup.current) return
@@ -94,7 +81,7 @@ export function useValueScrub({
     if (!parts) return
     event.preventDefault()
     event.stopPropagation()
-    const target = event.currentTarget
+    const targetEl = event.currentTarget
     const pointerId = event.pointerId
     let lastX = event.clientX
     let moved = false
@@ -102,7 +89,7 @@ export function useValueScrub({
     const cursor = document.createElement('style')
     cursor.textContent = '* { cursor: ew-resize !important; user-select: none !important; }'
     document.head.append(cursor)
-    target.setPointerCapture(pointerId)
+    targetEl.setPointerCapture(pointerId)
 
     function move(e: PointerEvent) {
       if (e.pointerId !== pointerId) return
@@ -137,14 +124,14 @@ export function useValueScrub({
     }
 
     function dispose() {
-      target.removeEventListener('pointermove', move)
-      target.removeEventListener('pointerup', end)
-      target.removeEventListener('pointercancel', end)
-      target.removeEventListener('lostpointercapture', end)
+      targetEl.removeEventListener('pointermove', move)
+      targetEl.removeEventListener('pointerup', end)
+      targetEl.removeEventListener('pointercancel', end)
+      targetEl.removeEventListener('lostpointercapture', end)
       window.removeEventListener('blur', blur)
       window.removeEventListener('keydown', keydown, true)
       cursor.remove()
-      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
+      if (targetEl.hasPointerCapture(pointerId)) targetEl.releasePointerCapture(pointerId)
       cleanup.current = null
     }
     function finish(cancel = false) {
@@ -169,10 +156,10 @@ export function useValueScrub({
       dispose()
       if (moved) onEnd?.(false)
     }
-    target.addEventListener('pointermove', move)
-    target.addEventListener('pointerup', end)
-    target.addEventListener('pointercancel', end)
-    target.addEventListener('lostpointercapture', end)
+    targetEl.addEventListener('pointermove', move)
+    targetEl.addEventListener('pointerup', end)
+    targetEl.addEventListener('pointercancel', end)
+    targetEl.addEventListener('lostpointercapture', end)
     window.addEventListener('blur', blur)
     window.addEventListener('keydown', keydown, true)
   }
