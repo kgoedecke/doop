@@ -453,6 +453,9 @@ export interface TaskFeedback {
   from: string
   /** account id of the human who left it — decides which model credential runs it */
   fromUserId?: string
+  /** the connection the task it answers ran on, kept from when it was left,
+   *  so the reply runs there even after the task leaves the history */
+  runner?: RunnerPick
   text: string
   at: number
   /** set once the feedback has been included in some agent's tool result */

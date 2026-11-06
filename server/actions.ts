@@ -235,9 +235,11 @@ export function workKey(payer: string, runner: RunnerPick | undefined): string {
 }
 
 /** Feedback runs on what the task it answers ran on, so a reply to a card
- *  sent to the Claude Plan stays on the Claude Plan. */
+ *  sent to the Claude Plan stays on the Claude Plan. The pick is kept on the
+ *  feedback itself; the task history is only asked for feedback left before
+ *  that, while its task is still there. */
 function feedbackRunner(f: TaskFeedback): RunnerPick | undefined {
-  return (taskLog.get(f.canvasId) ?? []).find((t) => t.id === f.taskId)?.runner
+  return f.runner ?? (taskLog.get(f.canvasId) ?? []).find((t) => t.id === f.taskId)?.runner
 }
 
 /**
@@ -394,6 +396,7 @@ export function addTaskFeedback(
       ...(target ? { targetAgent: target } : {}),
       from,
       ...(fromUserId ? { fromUserId } : {}),
+      ...(task.runner ? { runner: task.runner } : {}),
       text: clean,
       at: Date.now(),
     }

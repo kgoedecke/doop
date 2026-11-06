@@ -324,16 +324,22 @@ export async function disconnect(userId: string, kind: AccountKind): Promise<voi
   await db.delete(modelAccounts).where(and(eq(modelAccounts.userId, userId), eq(modelAccounts.kind, kind)))
 }
 
+/** What a ChatGPT token refresh changes on the account. */
+interface RefreshedTokens {
+  accessToken: string
+  refreshToken: string
+  expiresAt: number
+  accountId?: string
+  plan?: string
+}
+
 /**
  * Write ONLY the refreshed token columns, and only if the row still exists.
  * A full upsert here would race the user: disconnecting mid-refresh would see
  * the row re-created, and changing the model mid-refresh would see it reverted
  * to whatever this refresh started with.
  */
-async function saveRefreshedTokens(
-  userId: string,
-  tokens: { accessToken: string; refreshToken: string; expiresAt: number; accountId?: string; plan?: string },
-): Promise<void> {
+async function saveRefreshedTokens(userId: string, tokens: RefreshedTokens): Promise<void> {
   await db
     .update(modelAccounts)
     .set({
@@ -856,7 +862,7 @@ export function connectGeminiKey(userId: string, apiKey: string): Promise<void> 
 
 /* refreshes are per-user serialized: two runs starting together must not both
    spend the single-use refresh token */
-const refreshing = new Map<string, Promise<ModelAccount>>()
+const refreshing = new Map<string, Promise<RefreshedTokens>>()
 const REFRESH_MARGIN_MS = 120_000
 
 /** A ChatGPT account with a live access token, refreshing it if it is close
@@ -866,6 +872,13 @@ export async function withFreshToken(account: ModelAccount): Promise<ModelAccoun
   if (account.kind !== 'chatgpt') return account
   if (!account.refreshToken) throw new Error('ChatGPT connection is missing its refresh token — reconnect it')
   if ((account.expiresAt ?? 0) - REFRESH_MARGIN_MS > Date.now() && account.accessToken) return account
+  /* callers racing one refresh share only the new credentials: each keeps its
+     own model and effort, since two tasks may run different picks */
+  return { ...account, ...(await refreshedTokens(account)) }
+}
+
+/** One refresh per user at a time; its credentials, nothing else. */
+function refreshedTokens(account: ModelAccount): Promise<RefreshedTokens> {
   const inFlight = refreshing.get(account.userId)
   if (inFlight) return inFlight
   const task = (async () => {
@@ -878,23 +891,16 @@ export async function withFreshToken(account: ModelAccount): Promise<ModelAccoun
     if (!tokens.access_token) throw new Error('OpenAI did not return a refreshed access token')
     const claims = readIdToken(tokens.id_token)
     const auth = claims['https://api.openai.com/auth'] ?? {}
-    const next: ModelAccount = {
-      ...account,
+    const fresh: RefreshedTokens = {
       accessToken: tokens.access_token,
       /* rotation is optional — keep the current token when none comes back */
-      refreshToken: tokens.refresh_token || account.refreshToken,
+      refreshToken: tokens.refresh_token || account.refreshToken!,
       expiresAt: Date.now() + (tokens.expires_in ?? 3600) * 1000,
       ...(auth.chatgpt_account_id ? { accountId: auth.chatgpt_account_id } : {}),
       ...(auth.chatgpt_plan_type ? { plan: auth.chatgpt_plan_type } : {}),
     }
-    await saveRefreshedTokens(account.userId, {
-      accessToken: next.accessToken!,
-      refreshToken: next.refreshToken!,
-      expiresAt: next.expiresAt!,
-      ...(auth.chatgpt_account_id ? { accountId: auth.chatgpt_account_id } : {}),
-      ...(auth.chatgpt_plan_type ? { plan: auth.chatgpt_plan_type } : {}),
-    })
-    return next
+    await saveRefreshedTokens(account.userId, fresh)
+    return fresh
   })().finally(() => refreshing.delete(account.userId))
   refreshing.set(account.userId, task)
   return task

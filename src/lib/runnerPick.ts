@@ -56,7 +56,10 @@ export function useAgentRunners(): AgentRunners | null {
     let stale = false
     api.agentRunners().then(
       (next) => {
-        if (!stale) useRunnerPick.setState({ runners: next })
+        /* an answer without the list (an older server, a stubbed route) is
+           nothing connected, never a crash in the composer */
+        if (!stale)
+          useRunnerPick.setState({ runners: { ...next, runners: Array.isArray(next?.runners) ? next.runners : [] } })
       },
       () => {},
     )

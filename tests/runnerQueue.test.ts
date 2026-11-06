@@ -106,6 +106,16 @@ describe('feedback and comments', () => {
       fb.id,
     ])
   })
+  it('keeps feedback on its connection after the task leaves the history', () => {
+    const card = actions.addQueuedCard(canvasId, 'one', 'alice', ['doop'], [], 'alice', undefined, chatgpt)!
+    actions.takeQueuedCardsFor(canvasId, DOOP, 'alice')
+    const fb = actions.addTaskFeedback(card.id, 'alice', 'more blue', 'alice')!
+    expect(fb.runner).toEqual(chatgpt)
+    /* newer cards push the answered task out of the trimmed history */
+    const tasks = actions.getTasks(canvasId)
+    tasks.splice(tasks.indexOf(card), 1)
+    expect(actions.nextWork(canvasId, DOOP)).toMatchObject({ payer: 'alice', runner: chatgpt })
+  })
   it('never hands an agent comment to a run on a picked connection', () => {
     const pageId = canvasPages(store.getCanvas(canvasId)!)[0]!.id
     actions.addCanvasComment(canvasId, { pageId, x: 10, y: 10, text: `@${DOOP} fix it` }, 'alice', 'alice')

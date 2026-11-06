@@ -730,6 +730,7 @@ export function saveFeedback(fb: TaskFeedback) {
     completedAt: fb.completedAt ?? null,
     failedAt: fb.failedAt ?? null,
     failureReason: fb.failureReason ?? null,
+    runner: fb.runner ? JSON.stringify(fb.runner) : null,
   }
   swallow(
     db
@@ -1032,6 +1033,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.targetAgent != null ? { targetAgent: row.targetAgent } : {}),
       from: row.fromName,
       ...(row.fromUserId != null ? { fromUserId: row.fromUserId } : {}),
+      ...runnerField(row.runner),
       text: row.text,
       at: row.at,
       ...(row.deliveredAt != null ? { deliveredAt: row.deliveredAt } : {}),

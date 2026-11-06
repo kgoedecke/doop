@@ -107,7 +107,7 @@
   the whole view (`accountsView`: every account on or off, the default, the menus). The meter
   counts any connection that is on and names the default; image generation uses the enabled
   account matching the image provider (ChatGPT before an OpenAI key), server keys only for
-  someone with none. Tests: `anthropicAccount.test.ts` (end to end), `defaultRouting.test.ts`,
+  someone who connected none (switching every account off does not count). Tests: `anthropicAccount.test.ts` (end to end), `defaultRouting.test.ts`,
   `agentRunners.test.ts`, `chatgptProviderSwitch.test.tsx`, `localClaudeConnection.test.tsx`.
 - Which connection runs a task (`shared/agentRunner.ts`, `server/agentRunners.ts`):
   `GET /api/agent-runners` lists every connection that is on, with its menus, plus `default`.
@@ -118,7 +118,8 @@
   model the provider does not know runs on the connection's configured one, and anything else
   runs on the default. One resident run claims work that agrees on the pick (`actions.nextWork`,
   the `runner` filter on the take functions): comments and automations carry none and run on
-  the default, feedback runs on what its task ran on. Tests: `agentRunner.test.ts`,
+  the default, feedback runs on what its task ran on (kept on the feedback, `feedback.runner`,
+  migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
   `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
   `localAgentRouting.test.ts`.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and

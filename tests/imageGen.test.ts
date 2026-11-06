@@ -20,7 +20,7 @@ vi.mock('../server/imagePrefs.ts', () => ({
 
 import { getAccounts } from '../server/modelAccounts.ts'
 import { getImagePref } from '../server/imagePrefs.ts'
-import { _internal, generateImage, generatorFor } from '../server/imageGen.ts'
+import { _internal, generateImage, generatorFor, imageModelAvailability } from '../server/imageGen.ts'
 import sharp from 'sharp'
 
 const mockedGetAccounts = vi.mocked(getAccounts)
@@ -216,6 +216,17 @@ describe('the image-model registry', () => {
     stubEnv('GEMINI_API_KEY', 'gm-server')
     const generator = await generatorFor('u1')
     expect(generator.ok).toBe(false)
+  })
+
+  it('never moves the charge onto the server when every account is switched off', async () => {
+    mockedGetAccounts.mockResolvedValue([
+      { enabled: false, userId: 'u1', kind: 'openai-key', apiKey: 'sk-own', connectedAt: 1 },
+    ])
+    stubEnv('OPENAI_API_KEY', 'sk-server')
+    stubEnv('GEMINI_API_KEY', 'gm-server')
+    const generator = await generatorFor('u1')
+    expect(generator.ok).toBe(false)
+    expect((await imageModelAvailability('u1')).filter((m) => m.available).map((m) => m.id)).toEqual([])
   })
 })
 

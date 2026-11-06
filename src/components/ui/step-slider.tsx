@@ -11,7 +11,8 @@ import { cn } from '@/lib/utils'
    once, on release: a save per step passed re-rendered the menu mid-drag.
    A save that returns a promise keeps the picked step showing until it
    settles; dropping it on release flashed the old step back for the length
-   of the round trip. */
+   of the round trip. The slider holds still meanwhile, so a second pick can
+   never be shown and then lost when the first save lands. */
 
 /* the thumb stands proud of the track, so no edge of the fill shows around it */
 const TRACK = 28
@@ -103,7 +104,9 @@ function StepSlider({
           value={index}
           aria-label={label}
           aria-valuetext={current?.name}
-          className="absolute inset-0 size-full cursor-pointer opacity-0"
+          disabled={saving}
+          aria-busy={saving}
+          className="absolute inset-0 size-full cursor-pointer opacity-0 disabled:cursor-progress"
           onChange={(e) => setDraft(Number(e.target.value))}
           onPointerUp={commit}
           onKeyUp={commit}

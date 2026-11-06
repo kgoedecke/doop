@@ -374,6 +374,8 @@ export const feedback = pgTable(
     completedAt: bigint('completed_at', { mode: 'number' }),
     failedAt: bigint('failed_at', { mode: 'number' }),
     failureReason: text('failure_reason'),
+    /** JSON RunnerPick of the task it answers, kept from when it was left */
+    runner: text('runner'),
   },
   (t) => [index('feedback_canvas_idx').on(t.canvasId)],
 )

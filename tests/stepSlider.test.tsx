@@ -86,3 +86,13 @@ it('falls back to the saved step when the save fails', async () => {
   await act(async () => input().dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
   expect(input().getAttribute('aria-valuetext')).toBe('Medium')
 })
+
+it('holds still while a save is under way, so a second pick is never dropped', async () => {
+  let finish: () => void = () => {}
+  onChange.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)))
+  await slideTo(3)
+  act(() => input().dispatchEvent(new PointerEvent('pointerup', { bubbles: true })))
+  expect(input().disabled).toBe(true)
+  await act(async () => finish())
+  expect(input().disabled).toBe(false)
+})
