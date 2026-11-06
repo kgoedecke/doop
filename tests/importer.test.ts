@@ -454,6 +454,11 @@ describe('webpage capture', () => {
     })
     expect(browserMocks.openIsolatedPage).toHaveBeenCalledTimes(2)
     expect(page.close).toHaveBeenCalledTimes(2)
+    /* the capture's render slot is back before the preview asks for one, so
+       a one-slot renderer cannot wait on itself */
+    const [, previewOpen] = browserMocks.openIsolatedPage.mock.invocationCallOrder
+    const [captureClose] = page.close.mock.invocationCallOrder
+    expect(captureClose).toBeLessThan(previewOpen!)
   })
 
   it('renders the Context.dev HTML locally for the agent preview', async () => {
