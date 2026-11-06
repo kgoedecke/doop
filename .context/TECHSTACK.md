@@ -234,12 +234,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `fitExportScale` brings a huge frame down to 16,384 px a side and 64 MP, the same limit
   for the browser render, `/i/<id>.png?scale=` (any parsed scale, 1x when unreadable) and MCP
   `export_frame`'s `scale`, and the toast says so. SVG is `frameSvg`: the inlined document
-  `inlineDocument` already builds, cropped by `viewBox` for an element, on white, with viewport
-  units written as the frame's px (`pinViewportUnits`: opened as a page, `100vh` would be the
-  viewer's window, not the frame); HTML in a
+  `inlineDocument` already builds, cropped by `viewBox` for an element, on white, settled for
+  a file opened as a page, where the viewer's window would be the viewport (`standalone`,
+  `FrameViewport`): viewport units become the frame's px, `@media` rules and `<style media>` are
+  kept or dropped by a hidden iframe of the frame's size, imported sheets included, and inline
+  handlers and `javascript:` URLs are stripped; HTML in a
   `foreignObject`, so it opens in browsers but is not editable vector art, and it has no server
   fallback. Tests: `exportScale.test.ts`, the scale and SVG cases in `frameExport.test.ts`,
-  `frameRasterBrowser.test.ts` and `mcpPdfExport.test.ts`.
+  `frameRasterBrowser.test.ts` (the SVG opened as a page in a wide window), `exportOptions.test.tsx`
+  and `mcpPdfExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size (inside an iframe of the frame's size, as the canvas shows
   it, so content taller than the frame is clipped rather than paginated: bare, Chrome moved a block

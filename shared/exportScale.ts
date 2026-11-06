@@ -16,11 +16,12 @@ export const DEFAULT_EXPORT_SCALE = 2
 export const MAX_EXPORT_SIDE = 16_384
 export const MAX_EXPORT_PIXELS = 64_000_000
 
-/** A multiplier as typed or sent: `2`, `"2"`, `"1.5x"`, `"3×"`. Kept to two
- *  decimals (so the server's image cache sees a bounded set of keys), or
- *  null when it is not a number within the range. */
+/** A multiplier as typed or sent: `2`, `"2"`, `"1.5x"`, `"3×"`, and a
+ *  decimal comma as Portuguese writes it (`"0,5"`). Kept to two decimals
+ *  (so the server's image cache sees a bounded set of keys), or null when
+ *  it is not a number within the range. */
 export function parseExportScale(raw: unknown): number | null {
-  const text = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim() : ''
+  const text = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim().replace(',', '.') : ''
   const match = /^(\d*\.?\d+)\s*[x×]?$/i.exec(text)
   if (!match) return null
   const scale = Math.round(Number(match[1]) * 100) / 100

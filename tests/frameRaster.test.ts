@@ -190,8 +190,21 @@ it('writes viewport units as the frame px, leaving words and data URLs alone', (
 it('pins viewport units only when asked, in sheets and style attributes', async () => {
   serve({})
   const html = '<html><head><style>body{height:100vh}</style></head><body><p style="width:50vw">x</p></body></html>'
-  const pinned = await inlineDocument(html, { ...opts(), pinViewport: true })
+  const pinned = await inlineDocument(html, { ...opts(), standalone: true })
   expect(pinned).toContain('body{height:200px}')
   expect(pinned).toContain('style="width:150px"')
   expect(await inlineDocument(html, opts())).toContain('body{height:100vh}')
+})
+
+it('drops what would run once the file is opened as a page', async () => {
+  serve({})
+  const svg = await inlineDocument(
+    '<html><body onload="go()"><a href="javascript:alert(1)" onclick="go()">x</a>' +
+      '<a href=" JavaScript:go()">y</a><a href="https://doop.design">z</a>' +
+      '<form action="javascript:go()"><button formaction="javascript:go()">b</button></form>' +
+      '<svg><a xlink:href="javascript:go()"><rect onmouseover="go()"/></a></svg></body></html>',
+    opts(),
+  )
+  expect(svg).not.toMatch(/javascript:|onload|onclick|onmouseover/i)
+  expect(svg).toContain('href="https://doop.design"')
 })

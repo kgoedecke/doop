@@ -82,6 +82,48 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
     expect(piece.topLeft).toEqual([0, 0, 255, 255])
   })
 
+  it('lays an SVG opened as a page out at the frame size, not the window', async () => {
+    const html = `<html><head>
+      <style>@import url("/tests/fixtures/svgStandalone.css?direct");</style>
+      <style>
+        body { margin: 0 }
+        .box { width: 10px; height: 10px; background: rgb(255, 0, 0) }
+        @media (min-width: 600px) { .box { background: rgb(0, 128, 0) } }
+        .half { width: 50vw; height: 10px }
+      </style>
+      <style media="(min-width: 600px)">.box { outline: 3px solid rgb(0, 0, 0) }</style>
+      </head><body><div class="box"></div><div class="half"></div><div class="tall imported"></div></body></html>`
+    const text = await page.evaluate(
+      (h) => (window as unknown as { svgText: (o: unknown) => Promise<string> }).svgText({ html: h }),
+      html,
+    )
+    /* a window far wider and taller than the 300px frame */
+    const standalone = await browser.newPage()
+    try {
+      await standalone.setViewport({ width: 1400, height: 900 })
+      await standalone.goto(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`)
+      const laid = await standalone.evaluate(() => {
+        const style = (selector: string) => getComputedStyle(document.querySelector(selector)!)
+        return {
+          box: style('.box').backgroundColor,
+          outline: style('.box').outlineStyle,
+          half: style('.half').width,
+          tall: style('.tall').height,
+          imported: style('.imported').backgroundColor,
+        }
+      })
+      expect(laid).toEqual({
+        box: 'rgb(255, 0, 0)',
+        outline: 'none',
+        half: '150px',
+        tall: '300px',
+        imported: 'rgba(0, 0, 0, 0)',
+      })
+    } finally {
+      await standalone.close()
+    }
+  })
+
   it('keeps only the clipped box, drawn from the whole document, for an element export', async () => {
     const out = await render({ scale: 2, clip: { x: 200, y: 0, width: 100, height: 100 } })
     expect([out.width, out.height]).toEqual([200, 200])

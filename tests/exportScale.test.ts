@@ -17,6 +17,8 @@ describe('parseExportScale', () => {
     expect(parseExportScale('1.5x')).toBe(1.5)
     expect(parseExportScale(' 0.5× ')).toBe(0.5)
     expect(parseExportScale('.75')).toBe(0.75)
+    expect(parseExportScale('0,5')).toBe(0.5)
+    expect(parseExportScale('1,5x')).toBe(1.5)
   })
 
   it('keeps two decimals, so the image cache sees a bounded set of keys', () => {
@@ -25,7 +27,7 @@ describe('parseExportScale', () => {
   })
 
   it('refuses anything outside 0.1 to 4, or not a number', () => {
-    for (const raw of ['0', '0.05', '4.5', '10', '-2', 'abc', '', '2px', '1e3', undefined, null, ['2'], NaN]) {
+    for (const raw of ['0', '0.05', '4.5', '10', '-2', 'abc', '', '2px', '1e3', '1,2,3', undefined, null, ['2'], NaN]) {
       expect(parseExportScale(raw)).toBeNull()
     }
   })

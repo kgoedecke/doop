@@ -30,9 +30,13 @@ export function ExportOptions({
   const custom = typing || !isPreset(value.scale)
   const vector = value.format === 'svg'
 
-  function commitCustom(raw: string) {
-    const scale = parseExportScale(raw)
-    if (scale !== null) onChange({ scale })
+  /** A readable multiplier is the scale; anything else puts the field back
+   *  to the scale exports use, so it never shows one they ignore. */
+  function commitCustom(field: HTMLInputElement) {
+    const scale = parseExportScale(field.value)
+    if (scale === null) field.value = String(value.scale)
+    else if (scale !== value.scale) onChange({ scale })
+    else field.value = String(scale)
   }
 
   return (
@@ -83,9 +87,9 @@ export function ExportOptions({
           defaultValue={String(value.scale)}
           aria-label={t('panels.exportScaleCustomLabel')}
           placeholder="1.5"
-          onBlur={(e) => commitCustom(e.currentTarget.value)}
+          onBlur={(e) => commitCustom(e.currentTarget)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') commitCustom(e.currentTarget.value)
+            if (e.key === 'Enter') commitCustom(e.currentTarget)
           }}
         />
       )}
