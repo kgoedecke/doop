@@ -26,6 +26,8 @@ export interface DrawingHit {
   selector: string
   rect: DrawingRect
   geometry: DrawingGeometry
+  /** the parent box and siblings, in design px, for snapping */
+  snapRects?: DrawingRect[]
 }
 
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html')

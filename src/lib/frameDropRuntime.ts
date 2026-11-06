@@ -118,6 +118,6 @@ export const FRAME_DROP_RUNTIME = `
       }
     }
     return { free: false, drop: { target: { selector: best.selector, place: best.place },
-      styles: styles, container: bounds, line: best.line } }
+      styles: styles, container: bounds, line: best.line, reparent: parent !== source.parentElement } }
   }
 `

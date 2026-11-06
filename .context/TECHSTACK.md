@@ -369,7 +369,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Completed saves survive navigation; unfinished drafts are cancelled. Drawing shortcuts leave
   native fields and rich-text editors alone, except for the drawing textarea's keys: ⌘/Ctrl+Enter,
   Esc and a blur all commit the typed text (an empty draft is dropped).
-- `ElementMove.tsx` renders an unclipped drawing preview and highlights the destination frame.
+- `ElementMove.tsx` moves a drawing as an unclipped copy under the pointer and highlights the
+  destination frame; the original is hidden in its frame (`doop:drawing-moving`) once the copy
+  paints, and the copy stays until the frames show the save, so the shape itself follows the drag.
+  While anything moves (a drawing, a layer, a standalone shape) its outline, grips and size badge
+  stay hidden. Drawings and layers snap to their frame's edges and centre, their parent box and
+  their siblings (`snapRects` on the runtime's hit replies) as well as the ruler guides.
   Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
   preserving layout and transforms and committing one undo step per drag.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
