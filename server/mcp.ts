@@ -34,6 +34,7 @@ import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
 import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { capture, captureThrottled } from './analytics.ts'
+import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { renderFrame } from './screenshot.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
@@ -860,6 +861,7 @@ export function buildMcpServer(
       const actor = actorFrom(agent_name)
       const results = actions.createTokens(canvas_id, tokens, actor)
       if (!results) return noCanvas(canvas_id)
+      captureTokenResults(ownerId, canvas_id, 'mcp', results)
       return withFeedback(text({ results }), canvas_id, actor)
     },
   )
@@ -902,6 +904,7 @@ export function buildMcpServer(
         actor,
       )
       if (!results) return noCanvas(canvas_id)
+      captureTokenResults(ownerId, canvas_id, 'mcp', results)
       return withFeedback(text({ results }), canvas_id, actor)
     },
   )
@@ -932,6 +935,7 @@ export function buildMcpServer(
       try {
         const set = actions.setTokenThemes(canvas_id, themes, actor, renames ?? [])
         if (!set) return noCanvas(canvas_id)
+        captureFeature(ownerId, 'token_themes_set', 'mcp', { canvas_id, theme_count: set.length })
         return withFeedback(text({ ok: true, themes: set }), canvas_id, actor)
       } catch (e) {
         return err(e instanceof Error ? e.message : 'invalid themes')
@@ -1348,6 +1352,7 @@ export function buildMcpServer(
       if (color !== null && !background) return err('color must be a hex colour such as #f5f5f5, or null')
       const saved = actions.setPageBackground(canvas_id, pageId, background, actorFrom(agent_name))
       if (!saved) return noCanvas(canvas_id)
+      captureFeature(ownerId, 'page_background_changed', 'mcp', { canvas_id, cleared: !background })
       return withFeedback(text({ ok: true, pages: saved }), canvas_id, actorFrom(agent_name))
     },
   )
@@ -1388,6 +1393,7 @@ export function buildMcpServer(
       if (!canvas) return noCanvas(canvas_id)
       const result = setPrototypeStart(canvas, pageId, frame_id, actorFrom(agent_name))
       if (!result.ok) return err(result.error)
+      captureFeature(ownerId, 'prototype_start_set', 'mcp', { canvas_id: canvas.id, cleared: frame_id === null })
       return withFeedback(
         text({ ok: true, pages: result.pages, prototype_url: prototypeUrl(canvas.id) }),
         canvas_id,
@@ -2340,6 +2346,7 @@ export function buildMcpServer(
       const restored = await actions.restoreFrameVersion(frame_id, version_id, actorFrom(agent_name))
       if (restored === null) return err(`no version ${version_id} on frame ${frame_id} — call list_frame_versions`)
       if (!restored) return noFrame(frame_id)
+      captureFeature(ownerId, 'frame_version_restored', 'mcp', { canvas_id: restored.frame.canvasId })
       return withFeedback(
         textWithNudge({ ok: true, frame: frameSummary(restored.frame) }, REVIEW_NUDGE),
         restored.frame.canvasId,

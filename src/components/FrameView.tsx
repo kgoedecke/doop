@@ -2114,12 +2114,13 @@ export const FrameView = memo(function FrameView({
                             <div className="mb-1 flex w-fit rounded-control bg-ink p-1 shadow-pop">
                               <TextFormatToolbar
                                 state={textFormat}
-                                onFormat={(command) =>
+                                onFormat={(command) => {
+                                  posthog.capture('text_formatted', { command })
                                   iframeRef.current?.contentWindow?.postMessage(
                                     { type: 'doop:text-format', command },
                                     '*',
                                   )
-                                }
+                                }}
                               />
                             </div>
                           )}

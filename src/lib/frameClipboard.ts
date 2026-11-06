@@ -391,12 +391,21 @@ async function importIncoming(
 export async function pasteFilesCentered(canvasId: string, incoming: IncomingFiles) {
   const landed = await importIncoming(canvasId, incoming, { fallbackName: 'Pasted image' })
   posthog.capture('files_pasted', landed)
+  trackFileImports(landed, 'paste')
 }
 
 /** Files dragged in from the desktop land centered on the drop point. */
 export async function dropFiles(canvasId: string, incoming: IncomingFiles, at: { x: number; y: number }) {
   const landed = await importIncoming(canvasId, incoming, { fallbackName: 'Dropped image', at })
   posthog.capture('files_dropped', landed)
+  trackFileImports(landed, 'drop')
+}
+
+/** SVG and PDF imports as features of their own, beside the paste or drop
+ *  that brought them. */
+function trackFileImports(landed: Landed, via: 'paste' | 'drop') {
+  if (landed.vectors) posthog.capture('svg_imported', { count: landed.vectors, via })
+  if (landed.pages) posthog.capture('pdf_imported', { page_count: landed.pages, via })
 }
 
 /** Duplicate frames 40px down-right of the originals, keeping their layout;

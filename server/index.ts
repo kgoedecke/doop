@@ -41,6 +41,7 @@ import { GuideLimitError, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
+import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
 import * as imageDescriptions from './imageDescriptions.ts'
@@ -1933,6 +1934,7 @@ app.put('/api/canvases/:id/token-themes', (req, res) => {
   try {
     const themes = actions.setTokenThemes(req.params.id, req.body?.themes, userActor(req), req.body?.renames ?? [])
     if (!themes) return res.status(404).json({ error: 'not found' })
+    captureFeature(req.user!.id, 'token_themes_set', 'ui', { canvas_id: req.params.id, theme_count: themes.length })
     res.json({ themes, tokens: store.getTokens(req.params.id) })
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'invalid themes' })
@@ -1945,6 +1947,7 @@ app.post('/api/canvases/:id/tokens', (req, res) => {
   if (inputs.length > 200) return res.status(400).json({ error: 'at most 200 tokens per request' })
   const results = actions.createTokens(req.params.id, inputs, userActor(req))
   if (!results) return res.status(404).json({ error: 'not found' })
+  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
   res.json({ results, tokens: store.getTokens(req.params.id) })
 })
 
@@ -1955,6 +1958,7 @@ app.put('/api/canvases/:id/tokens/:name', (req, res) => {
   const edit = { ...body, name: req.params.name }
   const results = actions.setTokens(req.params.id, [edit], userActor(req))
   if (!results) return res.status(404).json({ error: 'not found' })
+  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
   const [result] = results
   if (result?.result === 'error') return res.status(400).json({ error: result.message })
   res.json({ result, tokens: store.getTokens(req.params.id) })
@@ -1964,6 +1968,7 @@ app.delete('/api/canvases/:id/tokens/:name', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const results = actions.setTokens(req.params.id, [{ name: req.params.name, delete: true }], userActor(req))
   if (!results) return res.status(404).json({ error: 'not found' })
+  captureTokenResults(req.user!.id, req.params.id, 'ui', results)
   const [result] = results
   if (result?.result === 'error') return res.status(400).json({ error: result.message })
   res.json({ ok: true, tokens: store.getTokens(req.params.id) })
@@ -2122,7 +2127,10 @@ app.put('/api/canvases/:id/pages/:pageId/background', (req, res) => {
   if (!canvasPages(canvas).some((p) => p.id === req.params.pageId))
     return res.status(404).json({ error: 'page not found' })
   const actor = userActor(req)
-  res.json(actions.setPageBackground(canvas.id, req.params.pageId, background, actor))
+  const pages = actions.setPageBackground(canvas.id, req.params.pageId, background, actor)
+  if (pages)
+    captureFeature(req.user!.id, 'page_background_changed', 'ui', { canvas_id: canvas.id, cleared: !background })
+  res.json(pages)
 })
 
 /* the frame a page's prototype flow starts on; null clears it */
@@ -2141,7 +2149,10 @@ app.put('/api/canvases/:id/pages/:pageId/flow-start', (req, res) => {
       return res.status(400).json({ error: 'the start frame must be on the same page' })
   }
   const actor = userActor(req)
-  res.json(actions.setFlowStart(canvas.id, req.params.pageId, frameId, actor))
+  const pages = actions.setFlowStart(canvas.id, req.params.pageId, frameId, actor)
+  if (pages)
+    captureFeature(req.user!.id, 'prototype_start_set', 'ui', { canvas_id: canvas.id, cleared: frameId === null })
+  res.json(pages)
 })
 
 /* Ruler guides, one per request so two people dragging different guides
@@ -2522,6 +2533,7 @@ app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
   const restored = await actions.restoreFrameVersion(req.params.id, req.params.versionId, actor)
   if (restored === null) return res.status(404).json({ error: 'version not found' })
   if (!restored) return res.status(404).json({ error: 'frame not found' })
+  captureFeature(req.user!.id, 'frame_version_restored', 'ui', { canvas_id: restored.frame.canvasId })
   res.json(restored)
 })
 

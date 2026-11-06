@@ -15,6 +15,7 @@ import { changeInstance, componentContextOf, goToMain, promptMakeComponent } fro
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
 import { FrameExportModal } from './FrameExportModal'
+import { trackPngCopy } from '../lib/exportEvents'
 
 /** What the live document said about a right-clicked element; a Layers row
  *  has none, its selector comes from the saved HTML itself. */
@@ -177,7 +178,12 @@ function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementI
           <ContextMenuItem onSelect={() => onExport(exportTarget(frame, selector))}>
             {t('stage.exportEllipsis')}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => void copyElementPng(frame, exportTarget(frame, selector), scale)}>
+          <ContextMenuItem
+            onSelect={() => {
+              trackPngCopy('element', 'element_menu')
+              void copyElementPng(frame, exportTarget(frame, selector), scale)
+            }}
+          >
             {t('stage.copyAsPng')}
           </ContextMenuItem>
           <ContextMenuSeparator />

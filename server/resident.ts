@@ -16,6 +16,7 @@ import {
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
+import { captureFeature, captureTokenResults } from './featureEvents.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole } from '../shared/agents.ts'
@@ -215,6 +216,9 @@ interface RunState {
   vision: boolean
   /** whose account pays for generated images: the run's payer, else the server key */
   payerId?: string
+  /** the person whose work this run claims, whoever pays for the model
+   *  (unset for pre-attribution work) */
+  requesterId?: string
   /** images actually produced in this run — capped, since each one spends the payer's quota or money */
   imagesGenerated: number
   /** where a new frame goes unless the model says otherwise: the page (and,
@@ -631,6 +635,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       rewriteDrafts: new Map(),
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
+      ...(payer ? { requesterId: payer } : {}),
       imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
       ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
@@ -2224,6 +2229,7 @@ export async function execTool(
         if (!Array.isArray(raw.tokens) || !raw.tokens.length) return fail('tokens must be a non-empty array')
         const results = actions.createTokens(canvasId, raw.tokens, actor)
         if (!results) return fail('canvas not found')
+        captureTokenResults(runState.requesterId, canvasId, 'resident', results)
         runState.tokenWrites += tokenWritesIn(results)
         return ok(JSON.stringify({ results }))
       }
@@ -2246,6 +2252,7 @@ export async function execTool(
         })
         const results = actions.setTokens(canvasId, edits, actor)
         if (!results) return fail('canvas not found')
+        captureTokenResults(runState.requesterId, canvasId, 'resident', results)
         runState.tokenWrites += tokenWritesIn(results)
         return ok(JSON.stringify({ results }))
       }
@@ -2255,6 +2262,10 @@ export async function execTool(
           const themes = actions.setTokenThemes(canvasId, raw.themes, actor, raw.renames ?? [])
           if (!themes) return fail('canvas not found')
           runState.tokenWrites += 1
+          captureFeature(runState.requesterId, 'token_themes_set', 'resident', {
+            canvas_id: canvasId,
+            theme_count: themes.length,
+          })
           return ok(`token themes are now ${themes.length ? themes.join(', ') : 'none'}`)
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid themes')
@@ -2336,8 +2347,14 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const pageId = typeof raw.page_id === 'string' && raw.page_id ? raw.page_id : undefined
-        const result = setPrototypeStart(canvas, pageId, raw.frame_id.trim() || null, actor)
-        return result.ok ? ok(JSON.stringify({ pages: result.pages })) : fail(result.error)
+        const frameId = raw.frame_id.trim() || null
+        const result = setPrototypeStart(canvas, pageId, frameId, actor)
+        if (!result.ok) return fail(result.error)
+        captureFeature(runState.requesterId, 'prototype_start_set', 'resident', {
+          canvas_id: canvasId,
+          cleared: frameId === null,
+        })
+        return ok(JSON.stringify({ pages: result.pages }))
       }
       case 'screenshot_frame': {
         const f = store.getFrame(input.frame_id)
