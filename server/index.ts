@@ -36,6 +36,7 @@ import {
   canEditCanvas,
   canManageCanvas,
   canvasRole,
+  guestCanvasRole,
   hasDurableCanvasAccess,
   isAdmin,
   roomMessageNeeds,
@@ -181,13 +182,42 @@ interface Conn {
   ws: WebSocket
   canvasId: string
   /** the session's user — the role is re-read from it on every message, so
-   *  a link changed mid-visit takes effect without a reconnect */
-  userId: string
+   *  a link changed mid-visit takes effect without a reconnect. Unset for a
+   *  signed-out guest on a link-shared canvas. */
+  userId?: string
   presence: Presence
   /** an admin viewing as someone else: receives updates, emits nothing.
    *  Showing their borrowed identity as a live cursor would tell the room
    *  the owner is here when they aren't. */
   silent?: boolean
+}
+
+/* What a signed-out guest is not sent: the team's conversation (comments,
+   agent tasks and their feedback, the activity feed) and its memory. A guest
+   sees the frames; the rest is for people with an account. */
+const GUEST_HIDDEN: ReadonlySet<ServerMessage['type']> = new Set([
+  'task',
+  'feedback',
+  'comment',
+  'activity',
+  'decision',
+  'proposal',
+  'reference',
+  'guidelines',
+  /* an agent's status line is its task's summary (setAgentStatus) */
+  'status',
+] satisfies ServerMessage['type'][])
+
+/** A presence as a guest sees it: without the status line, which carries
+ *  the same task summary GUEST_HIDDEN keeps from them. */
+function guestPresence<P extends Presence>({ status: _status, ...presence }: P): Omit<P, 'status'> {
+  return presence
+}
+
+/** A room message as a guest may see it, or null when it is withheld. */
+function forGuest(msg: ServerMessage): ServerMessage | null {
+  if (GUEST_HIDDEN.has(msg.type)) return null
+  return msg.type === 'presence:join' ? { ...msg, presence: guestPresence(msg.presence) } : msg
 }
 
 const conns = new Map<WebSocket, Conn>()
@@ -210,7 +240,8 @@ function refreshPresenceImage(userId: string, image: string | undefined): void {
 /** The live role of one room connection (null once access is gone). */
 function connRole(conn: Conn): CanvasRole | null {
   const canvas = store.getCanvas(conn.canvasId)
-  return canvas ? canvasRole(conn.userId, canvas) : null
+  if (!canvas) return null
+  return conn.userId ? canvasRole(conn.userId, canvas) : guestCanvasRole(canvas)
 }
 
 /* After a share-link change: everyone in the room learns their new role (the
@@ -240,7 +271,8 @@ function send(ws: WebSocket, msg: ServerMessage) {
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
-    send(c.ws, msg)
+    const shown = c.userId ? msg : forGuest(msg)
+    if (shown) send(c.ws, shown)
   }
 }
 
@@ -2529,6 +2561,40 @@ if (env.isProduction) {
 const server = http.createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
 
+/* A signed-out visitor on a link-shared canvas watches it as a guest
+   (guestCanvasRole): view only, silent like a view-as session (no presence,
+   no cursor, nothing it sends is relayed) and without the team's
+   conversation (GUEST_HIDDEN). Anything else — a private canvas, a missing
+   one — is the same 4401, so the sign-in screen does not reveal which. */
+function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: Canvas | undefined) {
+  const role = canvas && guestCanvasRole(canvas)
+  if (!canvas || !role) {
+    ws.close(4401, 'unauthorized')
+    return
+  }
+  const presence: Presence = { clientId, name: '', color: colorFor(clientId), kind: 'user', activeFrameId: null }
+  conns.set(ws, { ws, canvasId, presence, silent: true })
+  const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
+  send(ws, {
+    type: 'init',
+    canvas: { ...shown, role },
+    presences: [
+      ...room(canvasId)
+        .filter((c) => c.ws !== ws && !c.silent)
+        .map((c) => guestPresence(c.presence)),
+      ...[...(agentPresences.get(canvasId)?.values() ?? [])].map(guestPresence),
+    ],
+    activity: [],
+    tasks: [],
+    feedback: [],
+    comments: [],
+    decisions: [],
+    proposals: [],
+    selfColor: presence.color,
+    serverBuild: BUILD_ID,
+  })
+}
+
 wss.on('connection', (ws, upgradeReq) => {
   /* the session cookie rides the upgrade request; resolve it once */
   const sessionPromise = auth.api.getSession({ headers: fromNodeHeaders(upgradeReq.headers) }).catch(() => null)
@@ -2544,11 +2610,11 @@ wss.on('connection', (ws, upgradeReq) => {
 
     if (msg.type === 'join') {
       const session = await sessionPromise
+      const canvas = store.getCanvas(msg.canvasId)
       if (!session) {
-        ws.close(4401, 'unauthorized')
+        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
         return
       }
-      const canvas = store.getCanvas(msg.canvasId)
       if (!canvas) {
         /* a typo'd id or a canvas someone just deleted: say so and close,
            instead of leaving the socket open with nothing ever coming back.

@@ -86,6 +86,7 @@ it('hands focus from the frame menu to a persistent export dialog and dismisses 
   expect(dialog.textContent).toContain('Download PNG')
   /* the scale picker starts at 2x */
   expect(dialog.textContent).toContain('2x')
+  expect(dialog.textContent).toContain('Download SVG')
   expect(dialog.textContent).not.toMatch(/PSD|Canva|Figma/)
   expect(dialog.textContent).toContain('Download PDF')
   expect(dialog.textContent).not.toContain('Copy image URL')

@@ -123,6 +123,7 @@ import {
   User,
   Users,
   Workflow,
+  Server,
   Flag,
   MousePointerClick,
   SquareMousePointer,
@@ -323,6 +324,7 @@ export const ShareUpIcon = icon(Share)
 export const FolderPlusIcon = icon(FolderPlus)
 /** automations: two linked steps */
 export const WorkflowIcon = icon(Workflow)
+export const ServerIcon = icon(Server)
 /** integrations: building blocks */
 export const BlocksIcon = icon(Blocks)
 /** connect an agent: a plus in a ring */

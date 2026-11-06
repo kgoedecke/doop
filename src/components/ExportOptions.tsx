@@ -15,20 +15,23 @@ const isPreset = (scale: number) => (EXPORT_SCALE_PRESETS as readonly number[]).
 /**
  * Figma's export row: a density (the presets or a typed multiplier) and a
  * format. An SVG has no density: the scale reads 1x and is set aside
- * while it is picked.
+ * while it is picked. Without `withFormat` it is the scale alone, for a
+ * list whose rows are the formats.
  */
 export function ExportOptions({
   value,
   onChange,
+  withFormat = true,
 }: {
   value: ExportSettings
   onChange: (patch: Partial<ExportSettings>) => void
+  withFormat?: boolean
 }) {
   const t = useT()
   /* picking Custom shows the field even while the scale is still a preset */
   const [typing, setTyping] = useState(false)
   const custom = typing || !isPreset(value.scale)
-  const vector = value.format === 'svg'
+  const vector = withFormat && value.format === 'svg'
 
   /** A readable multiplier is the scale; anything else puts the field back
    *  to the scale exports use, so it never shows one they ignore. */
@@ -64,18 +67,20 @@ export function ExportOptions({
             <SelectItem value={CUSTOM}>{t('panels.exportScaleCustom')}</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={value.format} onValueChange={(next) => onChange({ format: next as FrameExportFormat })}>
-          <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t('panels.exportFormat')}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {FORMATS.map((format) => (
-              <SelectItem key={format} value={format}>
-                {FORMAT_LABEL[format]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {withFormat && (
+          <Select value={value.format} onValueChange={(next) => onChange({ format: next as FrameExportFormat })}>
+            <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label={t('panels.exportFormat')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FORMATS.map((format) => (
+                <SelectItem key={format} value={format}>
+                  {FORMAT_LABEL[format]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
       {custom && !vector && (
         <Input

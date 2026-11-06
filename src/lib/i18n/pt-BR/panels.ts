@@ -237,8 +237,7 @@ export const panels: Catalog['panels'] = {
   exportNothing: 'Nada para exportar ainda',
   exportNothingLede: 'Adicione um frame a esta página primeiro.',
   exportPdfTitle: 'Exportar como PDF',
-  exportPdfLede:
-    'Os frames marcados viram um único PDF, uma página vetorial por frame no tamanho dele, na ordem abaixo: de cima para baixo e depois da esquerda para a direita no canvas.',
+  exportPdfLede: 'Uma página vetorial por frame, no tamanho dele, na ordem abaixo.',
   exportSelectAll: 'Selecionar tudo',
   exportClear: 'Limpar',
   exportFramesAria: 'Frames para exportar',
@@ -264,15 +263,19 @@ export const panels: Catalog['panels'] = {
   exportElementMissing: 'Não foi possível encontrar o elemento para exportar — o frame está na tela?',
 
   frameExportTitle: 'Exportar “{name}”',
-  frameExportLede: 'Baixe este frame como imagem em qualquer tamanho, ou como PDF vetorial.',
+  frameExportLede: 'Baixe este frame como imagem em qualquer escala, ou como PDF vetorial.',
   elementExportLede: 'Baixe este elemento como imagem, recortado do frame como você o vê.',
+  frameExportPng: 'Baixar PNG',
+  frameExportPngHint: 'Imagem sem perdas na escala acima',
+  frameExportJpg: 'Baixar JPG',
+  frameExportJpgHint: 'Imagem comprimida na escala acima, um arquivo menor',
+  frameExportSvg: 'Baixar SVG',
+  frameExportSvgHint:
+    'O HTML do frame em um SVG: abre em qualquer navegador, não como formas no Illustrator ou no Figma',
   exportScale: 'Escala',
   exportScaleCustom: 'Personalizada…',
   exportScaleCustomLabel: 'Escala personalizada, de 0,1 a 4',
   exportFormat: 'Formato',
-  exportSvgHint:
-    'O SVG contém o HTML do frame: abre em qualquer navegador, mas não como formas editáveis no Illustrator ou no Figma.',
-  exportDownloadFormat: 'Baixar {label}',
   exportScaledDown: 'exportado em {scale}, o máximo que este frame permite',
   exportSvgFailed:
     'Não foi possível exportar o SVG — uma imagem ou incorporação deste frame não pode ser lida aqui. Tente PNG.',
