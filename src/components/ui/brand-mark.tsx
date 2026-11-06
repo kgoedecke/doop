@@ -1,5 +1,6 @@
 import { useId, type JSX } from 'react'
 import { cn } from '@/lib/utils'
+import { ImageIcon, PdfIcon, PuzzleIcon, RadioTowerIcon, ServerIcon, WebIcon } from './icons'
 import canvaLogo from './brand/canva.svg'
 import linearLogo from './brand/linear.svg'
 import slackLogo from './brand/slack.svg'
@@ -251,15 +252,45 @@ export function BrandMark({ brand, size = 16, color, className }: BrandMarkProps
   return <Glyph size={size} color={color} className={className} />
 }
 
-/** The providers an agent can run on, as app icons. */
-export type AppIconBrand = 'claude' | 'claude-code' | 'openai' | 'gemini' | 'openrouter' | 'seedream'
+/** The providers an agent can run on, and the places a design comes from or
+ *  goes to (import sources, export formats), as app icons. */
+export type AppIconBrand =
+  | 'claude'
+  | 'claude-code'
+  | 'openai'
+  | 'gemini'
+  | 'openrouter'
+  | 'seedream'
+  | 'codex'
+  | 'cursor'
+  | 'mcp'
+  | 'headless'
+  | 'github'
+  | 'figma'
+  | 'photoshop'
+  | 'canva'
+  | 'website'
+  | 'live-app'
+  | 'pdf'
+  | 'png'
+  | 'jpg'
 
 /* the tile's light: a hairline edge, a highlight along the top, a soft drop */
 const APP_TILE_SHADOW =
   'inset 0 0 0 0.5px rgba(0,0,0,.1), inset 0 1px 0 rgba(255,255,255,.28), 0 1px 2px rgba(0,0,0,.12), 0 4px 10px -4px rgba(0,0,0,.22)'
 
+/** A tile's fill and what it carries: a `glyph` drawn on the 24 grid at 56%
+ *  of the side, or `art` that sizes itself (a chrome glyph, a full-bleed mark). */
+type AppTile =
+  { tile: string; glyph: (gradientId: string) => JSX.Element } | { tile: string; art: (side: number) => JSX.Element }
+
+/** A chrome glyph on a tile (white unless told), at the chrome's own hairline. */
+function chromeGlyph(Glyph: typeof WebIcon, color = '#fff') {
+  return (side: number) => <Glyph size={Math.round(side * 0.56)} style={{ color }} />
+}
+
 /** Each tile's fill and the glyph it carries, after doop.design's "Works with" row. */
-const APP_TILES: Record<AppIconBrand, { tile: string; glyph: (gradientId: string) => JSX.Element }> = {
+const APP_TILES: Record<AppIconBrand, AppTile> = {
   claude: { tile: CLAUDE_COLOR, glyph: () => <path fill="#fff" d={CLAUDE_PATH} /> },
   'claude-code': { tile: '#262624', glyph: () => <path fill={CLAUDE_COLOR} d={CLAUDE_PATH} /> },
   openai: { tile: '#fff', glyph: () => <path fill="#111" d={OPENAI_PATH} /> },
@@ -291,25 +322,61 @@ const APP_TILES: Record<AppIconBrand, { tile: string; glyph: (gradientId: string
     tile: '#111',
     glyph: () => <path fill="#fff" transform="translate(0 3.52) scale(0.09375)" d={OPENROUTER_PATH} />,
   },
+  /* the knot reversed out of black, beside ChatGPT's black on white */
+  codex: { tile: '#111', glyph: () => <path fill="#fff" d={OPENAI_PATH} /> },
+  cursor: { tile: '#14120b', glyph: () => <path fill="#fff" d={CURSOR_PATH} /> },
+  /* any other MCP client: no brand of its own, so a plain tile */
+  mcp: { tile: '#fff', art: chromeGlyph(PuzzleIcon, '#111') },
+  /* a headless agent or server: a plain tile, like any other MCP client */
+  headless: { tile: '#fff', art: chromeGlyph(ServerIcon, '#111') },
+  github: { tile: '#111', glyph: () => <path fill="#fff" d={GITHUB_PATH} /> },
+  /* Figma's own app icon: the five colours on near-black */
+  figma: { tile: '#1e1e1e', art: (side) => <Figma size={Math.round(side * 0.56)} /> },
+  /* the letters alone on Adobe's tile, at the size the app icon draws them */
+  photoshop: {
+    tile: '#001e36',
+    art: (side) => (
+      <svg width={side} height={side} viewBox="0 0 42 42" aria-hidden>
+        <path fill="#31a8ff" d={PHOTOSHOP_P} />
+        <path fill="#31a8ff" d={PHOTOSHOP_S} />
+      </svg>
+    ),
+  },
+  canva: {
+    tile: '#fff',
+    art: (side) => <img src={canvaLogo} alt="" width={Math.round(side * 0.7)} height={Math.round(side * 0.7)} />,
+  },
+  website: { tile: '#0177d3', art: chromeGlyph(WebIcon) },
+  'live-app': { tile: '#1f9d55', art: chromeGlyph(RadioTowerIcon) },
+  pdf: { tile: '#e5322d', art: chromeGlyph(PdfIcon) },
+  png: { tile: '#6e56cf', art: chromeGlyph(ImageIcon) },
+  jpg: { tile: '#0891b2', art: chromeGlyph(ImageIcon) },
 }
 
+export const APP_ICON_BRANDS = Object.keys(APP_TILES) as AppIconBrand[]
+
 /**
- * A provider as an app icon, the way doop.design shows the agents it works
- * with: the brand's tile (corners at 23% of the side) with its glyph at 56%.
+ * A provider, source or format as an app icon, the way doop.design shows the
+ * agents it works with: the brand's tile (corners at 23% of the side) with its
+ * glyph at 56%. 32px in a list row, 40px beside a modal title.
  */
 export function AppIcon({ brand, size = 32, className }: { brand: AppIconBrand; size?: number; className?: string }) {
   const id = useId()
-  const { tile, glyph } = APP_TILES[brand]
+  const tile = APP_TILES[brand]
   const inner = Math.round(size * 0.56)
   return (
     <span
       aria-hidden
-      className={cn('grid flex-none place-items-center', className)}
-      style={{ width: size, height: size, borderRadius: '23%', background: tile, boxShadow: APP_TILE_SHADOW }}
+      className={cn('grid flex-none place-items-center overflow-hidden', className)}
+      style={{ width: size, height: size, borderRadius: '23%', background: tile.tile, boxShadow: APP_TILE_SHADOW }}
     >
-      <svg width={inner} height={inner} viewBox="0 0 24 24">
-        {glyph(id)}
-      </svg>
+      {'art' in tile ? (
+        tile.art(size)
+      ) : (
+        <svg width={inner} height={inner} viewBox="0 0 24 24">
+          {tile.glyph(id)}
+        </svg>
+      )}
     </span>
   )
 }

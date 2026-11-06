@@ -53,6 +53,7 @@ import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
 import { ShareModal } from '../components/ShareModal'
 import { ExportModal } from '../components/ExportModal'
+import { AppIcon } from '../components/ui/brand-mark'
 import { pageFrames } from '../../shared/pages'
 import type { Frame } from '../../shared/types'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
@@ -105,10 +106,8 @@ import {
   PlayIcon,
   PlusIcon,
   PrototypeModeIcon,
-  RadioTowerIcon,
   ShareIcon,
   ShareUpIcon,
-  WebIcon,
   XIcon,
 } from '../components/ui/icons'
 import { Badge, badgeVariants } from '../components/ui/badge'
@@ -1504,8 +1503,14 @@ function ImportModal({
     .filter(Boolean)
     .join(' + ')
 
+  const picking = !repoReview && !discovery && source === null
   return (
-    <Modal size="xl" className="sm:max-w-[820px]" onClose={() => !busy && onClose()}>
+    <Modal
+      /* the source list reads best narrow; every screen after it takes the review width */
+      size={picking ? 'lg' : 'xl'}
+      className={picking ? undefined : 'sm:max-w-[820px]'}
+      onClose={() => !busy && onClose()}
+    >
       <>
         {repoReview ? (
           <>
@@ -1635,10 +1640,10 @@ function ImportModal({
             ) : source === 'website' ? (
               <>
                 <ImportStepHeader
-                  icon={<WebIcon className="size-[22px] text-ink" />}
+                  icon={<AppIcon brand="website" size={40} />}
                   title={t('canvas.websiteTitle')}
+                  lede={t('canvas.websiteLede')}
                 />
-                <ModalLede>{t('canvas.websiteLede')}</ModalLede>
                 <Field className="mt-[22px]" label={t('canvas.websiteUrl')} labelVariant="form" htmlFor="import-url">
                   <Input
                     id="import-url"
@@ -1915,16 +1920,22 @@ function SyncKeysSection({ canvasId, onBack }: { canvasId: string; onBack: () =>
   if (forbidden) {
     return (
       <>
-        <ImportStepHeader icon={<RadioTowerIcon className="size-[22px] text-ink" />} title={t('canvas.syncTitle')} />
-        <ModalLede>{t('canvas.syncForbidden')}</ModalLede>
+        <ImportStepHeader
+          icon={<AppIcon brand="live-app" size={40} />}
+          title={t('canvas.syncTitle')}
+          lede={t('canvas.syncForbidden')}
+        />
         <ImportStepFooter onBack={onBack} />
       </>
     )
   }
   return (
     <>
-      <ImportStepHeader icon={<RadioTowerIcon className="size-[22px] text-ink" />} title={t('canvas.syncTitle')} />
-      <ModalLede>{t('canvas.syncLede')}</ModalLede>
+      <ImportStepHeader
+        icon={<AppIcon brand="live-app" size={40} />}
+        title={t('canvas.syncTitle')}
+        lede={t('canvas.syncLede')}
+      />
       {(keys ?? []).map((k) => (
         <div key={k.id} className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2 text-[13px]">
@@ -2148,16 +2159,22 @@ function GithubSection({
   if (forbidden) {
     return (
       <>
-        <ImportStepHeader icon={<GithubIcon width={22} height={22} />} title={t('canvas.githubTitle')} />
-        <ModalLede>{t('canvas.githubForbidden')}</ModalLede>
+        <ImportStepHeader
+          icon={<AppIcon brand="github" size={40} />}
+          title={t('canvas.githubTitle')}
+          lede={t('canvas.githubForbidden')}
+        />
         <ImportStepFooter onBack={onBack} />
       </>
     )
   }
   return (
     <>
-      <ImportStepHeader icon={<GithubIcon width={22} height={22} />} title={t('canvas.githubTitle')} />
-      <ModalLede>{t('canvas.githubLede')}</ModalLede>
+      <ImportStepHeader
+        icon={<AppIcon brand="github" size={40} />}
+        title={t('canvas.githubTitle')}
+        lede={t('canvas.githubLede')}
+      />
       <div className="mt-[22px] flex flex-col gap-2.5">
         {(connections ?? []).map((conn) => (
           <div key={conn.id} className="flex flex-col gap-1.5">
