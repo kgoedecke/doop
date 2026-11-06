@@ -70,6 +70,10 @@ describe('claiming work per connection', () => {
     const first = (await actions.addQueuedCard(canvasId, 'one', 'alice', ['doop'], [], 'alice', undefined, plan))!
     const second = (await actions.addQueuedCard(canvasId, 'two', 'alice', ['doop'], [], 'alice', undefined, chatgpt))!
     const third = (await actions.addQueuedCard(canvasId, 'three', 'alice', ['doop'], [], 'alice', undefined, plan))!
+    /* cards queued in one millisecond tie on age, and a tie goes to the
+       newest scanned: a step apart each, so the oldest is unambiguous */
+    first.startedAt -= 2
+    second.startedAt -= 1
     const work = actions.nextWork(canvasId, DOOP)
     expect(work).toMatchObject({ payer: 'alice', runner: plan })
     const key = actions.workKey('alice', plan)
