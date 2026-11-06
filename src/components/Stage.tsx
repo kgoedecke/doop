@@ -797,6 +797,9 @@ export function Stage({
       const control = (e.target as HTMLElement).closest<HTMLElement>(PRESSABLE)
       if (!control) return
       control.blur()
+      /* this keydown still reaches the control (a Radix trigger would reopen
+         its menu), so it is always cancelled; the repeats land on the body */
+      e.preventDefault()
       startPan(e)
     }
     function onDown(e: KeyboardEvent) {
