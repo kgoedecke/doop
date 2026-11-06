@@ -12,7 +12,7 @@ export const workspace = {
   fonts: 'Fonts',
   planBilling: 'Plan & billing',
   billing: 'Billing',
-  general: 'General',
+  general: 'Settings',
   breadcrumb: 'Breadcrumb',
   home: 'Home',
   memberCount: { one: '{count} person', other: '{count} people' },

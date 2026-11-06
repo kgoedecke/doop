@@ -635,12 +635,16 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Import makes a canvas and opens it with `?import=1`, which `CanvasPage` turns into the import
   picker. `GET /api/canvases` adds `people` (owner, then members) for the tiles' avatar stacks.
   The rail is `src/components/AppRail.tsx`, mounted by Home, Automations, Integrations, Community,
-  Workspace and Admin alike (a page's own group, such as a workspace's panes, goes in as children;
+  Workspace and Admin alike (a page's own group, such as the admin indexes, goes in as children;
   Settings draws its own rail from the same `ui/dash.tsx` parts); it owns
   the ⌘K search palette (`CanvasSearchModal.tsx`), the connect-an-agent modal, the collapsed
   narrow state (remembered in `localStorage` under `doop-rail`) and the account face at the bottom.
   From another page the rail sends scope picks home as `/?scope=` and new workspaces as
-  `/?workspace=new`.
+  `/?workspace=new`. The workspace in view opens under its row: All canvases, People, Fonts, and
+  for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
+  they switch its pane in place, elsewhere they go to `/w/<id>?pane=…`, and the page keeps the
+  pane in its URL. The rail keeps the last lists it drew (`lastLists`), so a page change does not
+  blink its rows out, and fades only when collapsed or expanded.
 
 ## 11. Developer Experience Tooling
 

@@ -331,15 +331,6 @@ export function Home() {
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare">
           <span className="flex-1" />
-          {currentWorkspace && (
-            <Button
-              variant="ghost"
-              className="min-h-10 max-md:hidden md:min-h-0"
-              onClick={() => navigate(`/w/${currentWorkspace.id}`)}
-            >
-              <BuildingIcon /> {t('home.manage')}
-            </Button>
-          )}
           <Button variant="default" size="bar" disabled={starting} onClick={() => setImporting(true)}>
             <UploadIcon width={15} height={15} className="text-ink-soft" /> {t('home.import')}
           </Button>

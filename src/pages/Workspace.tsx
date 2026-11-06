@@ -5,7 +5,7 @@ import { navigate } from '../App'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
-import { AppRail, railLayout } from '../components/AppRail'
+import { AppRail, railLayout, workspacePanesFor, type WorkspacePane } from '../components/AppRail'
 import { UpgradeModal } from '../components/WorkspaceModals'
 import { Avatar } from '../components/ui/avatar'
 import { Badge } from '../components/ui/badge'
@@ -19,22 +19,19 @@ import { PersonRow } from '../components/ui/list'
 import { Skeleton } from '../components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Toast } from '../components/ui/toast'
-import { ChevronRightIcon, CreditCardIcon, GearIcon, TextIcon, UsersIcon } from '../components/ui/icons'
+import { ChevronRightIcon } from '../components/ui/icons'
 import { FontLibrary } from '../components/FontLibrary'
-import {
-  DashContent,
-  DashHeader,
-  DashLayout,
-  DashMain,
-  DashNavItem,
-  DashSectionLabel,
-  DashSubtitle,
-  DashTitle,
-} from '../components/ui/dash'
+import { DashContent, DashHeader, DashLayout, DashMain, DashSubtitle, DashTitle } from '../components/ui/dash'
 import { timeAgo } from '../lib/time'
 import { getLocale, t as translate, useT, type PlainMessageKey } from '../lib/i18n'
 
-type Pane = 'members' | 'fonts' | 'billing' | 'general'
+type Pane = WorkspacePane
+
+const PANES: readonly string[] = ['members', 'fonts', 'billing', 'general'] satisfies Pane[]
+
+function isPane(value: string | null): value is Pane {
+  return value !== null && PANES.includes(value)
+}
 
 const STATUS_LABEL = {
   inactive: 'workspace.statusInactive',
@@ -50,6 +47,14 @@ const ROLE_LABEL = {
   admin: 'workspace.roleAdmin',
   member: 'workspace.roleMember',
 } as const satisfies Record<WorkspaceRole, PlainMessageKey>
+
+/* the phone's pane switcher, where billing has room for one word */
+const TAB_LABEL = {
+  members: 'workspace.people',
+  fonts: 'workspace.fonts',
+  billing: 'workspace.billing',
+  general: 'workspace.general',
+} as const satisfies Record<Pane, PlainMessageKey>
 
 /** A date in the app's language. */
 function dateText(at: number): string {
@@ -74,9 +79,20 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
      once, then clean the URL in the effect below */
   const [landing] = useState(() => {
     const q = new URLSearchParams(location.search)
-    return { checkout: q.get('checkout'), sessionId: q.get('session_id') ?? undefined }
+    const pane = q.get('pane')
+    return {
+      checkout: q.get('checkout'),
+      sessionId: q.get('session_id') ?? undefined,
+      pane: isPane(pane) ? pane : undefined,
+    }
   })
-  const [pane, setPane] = useState<Pane>(landing.checkout ? 'billing' : 'members')
+  const [picked, setPicked] = useState<Pane>(landing.checkout ? 'billing' : (landing.pane ?? 'members'))
+
+  /* the pane rides in the URL, so a reload or a shared link lands on it */
+  function setPane(next: Pane) {
+    setPicked(next)
+    history.replaceState(null, '', `${location.pathname}?pane=${next}`)
+  }
 
   /* the rail's workspace list, reloaded with the workspace so a rename or a
      new plan shows in its row too */
@@ -127,6 +143,10 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
 
   const admin = ws ? ws.role !== 'member' : false
   const isOwner = ws?.role === 'owner'
+  /* billing and settings are for the owner and admins; anyone else asking
+     for them (a stale link) sees the people */
+  const panes = workspacePanesFor(ws?.role)
+  const pane: Pane = !ws || panes.includes(picked) ? picked : 'members'
 
   if (missing) {
     return (
@@ -148,44 +168,8 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
 
   return (
     <DashLayout className={railLayout}>
-      {/* the app rail, lit on this workspace, with its panes as the page's group */}
-      <AppRail active={`ws:${workspaceId}`} workspaces={spaces}>
-        <DashSectionLabel density="rail">{ws?.name ?? t('workspace.workspace')}</DashSectionLabel>
-        <nav className="flex flex-col gap-0.5">
-          <DashNavItem
-            density="rail"
-            icon={<UsersIcon size="rail" />}
-            active={pane === 'members'}
-            onClick={() => setPane('members')}
-          >
-            {t('workspace.people')}
-          </DashNavItem>
-          <DashNavItem
-            density="rail"
-            icon={<TextIcon size="rail" />}
-            active={pane === 'fonts'}
-            onClick={() => setPane('fonts')}
-          >
-            {t('workspace.fonts')}
-          </DashNavItem>
-          <DashNavItem
-            density="rail"
-            icon={<CreditCardIcon size="rail" />}
-            active={pane === 'billing'}
-            onClick={() => setPane('billing')}
-          >
-            {t('workspace.planBilling')}
-          </DashNavItem>
-          <DashNavItem
-            density="rail"
-            icon={<GearIcon size="rail" />}
-            active={pane === 'general'}
-            onClick={() => setPane('general')}
-          >
-            {t('workspace.general')}
-          </DashNavItem>
-        </nav>
-      </AppRail>
+      {/* the app rail, lit on this workspace, with its panes open under its row */}
+      <AppRail active={`ws:${workspaceId}`} workspaces={spaces} workspacePane={pane} onWorkspacePane={setPane} />
 
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare">
@@ -219,10 +203,11 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
 
           <Tabs value={pane} onValueChange={(next) => setPane(next as Pane)} className="mt-4 flex md:hidden">
             <TabsList variant="card">
-              <TabsTrigger value="members">{t('workspace.people')}</TabsTrigger>
-              <TabsTrigger value="fonts">{t('workspace.fonts')}</TabsTrigger>
-              <TabsTrigger value="billing">{t('workspace.billing')}</TabsTrigger>
-              <TabsTrigger value="general">{t('workspace.general')}</TabsTrigger>
+              {panes.map((p) => (
+                <TabsTrigger key={p} value={p}>
+                  {t(TAB_LABEL[p])}
+                </TabsTrigger>
+              ))}
             </TabsList>
           </Tabs>
 
