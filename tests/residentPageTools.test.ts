@@ -113,6 +113,33 @@ describe('the resident agent reorganizes pages', () => {
     expect(pages()).toHaveLength(2)
   })
 
+  it('does not count a frame save that changed nothing as delivered work', async () => {
+    const runState = run()
+    const frame = store.getFrame(frameId)!
+    const result = await execTool(
+      call('update_frame', { frame_id: frameId, name: frame.name, x: frame.x, y: frame.y, width: frame.width }),
+      canvasId,
+      actor(),
+      runState,
+    )
+    expect(result.is_error).toBeUndefined()
+    expect(runState.arrangeWrites).toBe(0)
+    expect(deliveredWork(runState)).toBe(false)
+  })
+
+  it('does not count a page list saved unchanged as delivered work', async () => {
+    const runState = run()
+    const result = await execTool(
+      call('set_canvas_pages', { expectedPages: pages(), pages: pages() }),
+      canvasId,
+      actor(),
+      runState,
+    )
+    expect(result.is_error).toBeUndefined()
+    expect(runState.arrangeWrites).toBe(0)
+    expect(deliveredWork(runState)).toBe(false)
+  })
+
   it('will not delete a page that still holds frames', async () => {
     const pageId = await addPage('Mobile')
     const before = pages()

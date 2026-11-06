@@ -37,7 +37,7 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
 import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
@@ -2164,8 +2164,12 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         const f = store.getFrame(input.frame_id)
         if (!canvas || !f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
-        /* the store updates the frame object in place, so its size is read first */
-        const before = { width: f.width, height: f.height }
+        /* the store updates the frame object in place, so what it was is read first */
+        const arrangement = (frame: typeof f) =>
+          [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
+            '\u0000',
+          )
+        const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
         const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
         const updated = updateFrameMeta(
@@ -2189,7 +2193,8 @@ export async function execTool(
           runState.mutatedFrames.add(frame.id)
           runState.verifiedFrames.delete(frame.id)
         }
-        runState.arrangeWrites += 1
+        /* a save that changed nothing has not delivered anything */
+        if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
         return ok(
           `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
         )
@@ -2213,9 +2218,10 @@ export async function execTool(
         const raw = block.input as { expectedPages?: unknown; pages?: unknown }
         const pages = parsePageList(raw.pages)
         if (typeof pages === 'string') return fail(pages)
+        const previous = pageList(canvas)
         const saved = savePages(canvas, raw.expectedPages, pages, actor)
         if (!saved.ok) return fail(saved.error)
-        runState.arrangeWrites += 1
+        if (!samePages(previous, saved.value)) runState.arrangeWrites += 1
         return ok(JSON.stringify({ pages: saved.value.map(({ id, name }) => ({ id, name })) }))
       }
       case 'get_prototype': {
