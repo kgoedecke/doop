@@ -99,6 +99,28 @@ const EDITOR_CHIP_TEXT = '@max-[180px]/title:hidden'
 /* the element toolbar's buttons sit on ink and stay compact */
 const EL_TOOLBAR_BTN = 'rounded-[7px] px-2 py-1 text-xs'
 
+/** What a culled frame shows instead of its document: the persisted preview
+ *  render (`/i/<id>.jpg?preview`, the top `PREVIEW_MAX_HEIGHT` px of the frame)
+ *  across the frame's width, so a zoomed-out page reads as its screens and not
+ *  as blank boxes. `version` gives a changed frame a fresh URL past the
+ *  browser cache; a render that fails leaves the hatch underneath. */
+function FramePlaceholderPreview({ frameId, version }: { frameId: string; version: number }) {
+  const src = `/i/${frameId}.jpg?preview&v=${version}`
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  if (failedSrc === src) return null
+  return (
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      className="block w-full select-none"
+      onError={() => setFailedSrc(src)}
+    />
+  )
+}
+
 /** A hidden frame's place on the stage: nothing, unless it is selected —
  *  then a dashed box with its name, so a pick from the Layers panel still
  *  shows where the frame sits. It takes no pointer events: there is nothing
@@ -1587,11 +1609,16 @@ export const FrameView = memo(function FrameView({
                 }}
               />
             ) : (
-              /* no document behind it: the frame's box, hatched like an empty one */
+              /* no document behind it: the frame's last preview render over the
+                 hatch of an empty frame, which shows while it loads or if it fails */
               <div
                 data-frame-placeholder=""
-                className="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)]"
-              />
+                className="absolute inset-0 overflow-hidden bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)]"
+              >
+                {(frame.htmlDeferred || (frame.html && !isCanvasElement(frame.html))) && (
+                  <FramePlaceholderPreview frameId={frame.id} version={frame.updatedAt} />
+                )}
+              </div>
             )}
             {!frame.html && !frame.htmlDeferred && (
               <div className="absolute inset-0 grid place-items-center bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)] text-[13px] text-ink-faint">
