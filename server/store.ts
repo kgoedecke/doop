@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid'
-import { canvasActor, mapFrames } from './frame-sync.ts'
+import { canvasActor, mapFrames, setFrameStoreResolver, type FrameStore } from './frame-sync.ts'
+import { env } from './env.ts'
+import { CANVAS_ACTORS, featureFlags } from './featureFlags.ts'
 import type {
   CanvasSummary,
   FrameChange,
@@ -66,6 +68,8 @@ export type FrameUpdateOptions = {
   annotation?: boolean
   /** refuse the write (FrameConflictError) unless the frame is at this version */
   expectedUpdatedAt?: number
+  /** the document is a stream cut off before its end: viewers heal it before painting */
+  partial?: boolean
   /** a deliberate whole-document write: it always opens a design-history burst */
   replace?: boolean
 }
@@ -93,10 +97,13 @@ function importBatches(frames: Frame[]): Frame[][] {
   return batches
 }
 
-/** SQL owns canvas metadata. Each canvas actor owns its pages and frames; every
- *  frame read and write is actor RPC. */
+/** SQL owns canvas metadata. A canvas's pages and frames are in its canvas
+ *  actor, or in Postgres through the actor's stand-in (frameStoreOf); every
+ *  frame read and write is one of their calls. */
 class Store {
   canvases = new Map<string, Canvas>()
+  /** where each canvas's frames live, decided once per process */
+  private frameStores = new Map<string, FrameStore>()
   /** the page copy in flight per canvas, so the next one waits for it */
   private pageCopies = new Map<string, Promise<unknown>>()
 
@@ -111,26 +118,58 @@ class Store {
     return canvas
   }
 
-  /** The canvas actor's summary, importing legacy SQL frames the first time.
-   *  Undefined for a deleted canvas. */
+  /** Where a canvas's pages and frames live. A canvas already moved to its
+   *  actor stays there. Any other moves on its first open when
+   *  DOOP_CANVAS_ACTORS is `all`, or `flag` and its owner has the
+   *  canvas-actors flag; the rest keep their frames in Postgres. The answer
+   *  holds for the life of this process, so an open canvas never switches. */
+  async frameStoreOf(id: string): Promise<FrameStore> {
+    const known = this.frameStores.get(id)
+    if (known) return known
+    /* every canvas is on actors: nothing to look up */
+    if (env.DOOP_CANVAS_ACTORS === 'all') {
+      this.frameStores.set(id, 'actor')
+      return 'actor'
+    }
+    const canvas = await this.loadCanvasMetadata(id)
+    /* a canvas this process has not seen may still be on its way into SQL */
+    if (!canvas) return 'postgres'
+    const decided = this.frameStores.get(id) ?? frameStoreFor(canvas)
+    this.frameStores.set(id, decided)
+    return decided
+  }
+
+  /** The canvas's summary, opening it the first time: a canvas moving to its
+   *  actor brings its SQL frames along. Undefined for a deleted canvas. */
   private async openCanvas(id: string): Promise<CanvasSummary | undefined> {
     const actor = canvasActor(id)
     let summary = await actor.summary()
     /* the canvas can be deleted from memory while any await below is pending */
     const metadata = () => this.canvases.get(id)
+    const onActor = (await this.frameStoreOf(id)) === 'actor'
+    /* recorded before its frames move, so the canvas stays on its actor
+       whatever the flag or DOOP_CANVAS_ACTORS say later */
+    const opening = metadata()
+    if (onActor && opening && opening.frameStore !== 'actor') {
+      opening.frameStore = 'actor'
+      persist.saveCanvas(opening)
+    }
     if (!summary.initialized) {
       const loaded = metadata()
       if (!loaded) return undefined
       const pages = canvasPages(loaded)
-      const frames = await mapFrames(await persist.loadLegacyFrameIds(id), async (frameId) => {
-        const frame = await persist.loadLegacyFrame(frameId)
-        if (!frame || frame.canvasId !== id) throw new Error(`Legacy frame unavailable: ${frameId}`)
-        // Frames from before pages, or on a page since deleted, open on the first page.
-        return pages.some((page) => page.id === frame.pageId) ? frame : { ...frame, pageId: pages[0]!.id }
-      })
-      // Imports skip frames already in and the actor opens once, so concurrent
-      // imports and retries after a crash cannot overwrite edits.
-      for (const batch of importBatches(frames)) await actor.importFrames(batch)
+      /* a Postgres canvas already holds its SQL frames */
+      if (onActor) {
+        const frames = await mapFrames(await persist.loadLegacyFrameIds(id), async (frameId) => {
+          const frame = await persist.loadLegacyFrame(frameId)
+          if (!frame || frame.canvasId !== id) throw new Error(`Legacy frame unavailable: ${frameId}`)
+          // Frames from before pages, or on a page since deleted, open on the first page.
+          return pages.some((page) => page.id === frame.pageId) ? frame : { ...frame, pageId: pages[0]!.id }
+        })
+        // Imports skip frames already in and the actor opens once, so concurrent
+        // imports and retries after a crash cannot overwrite edits.
+        for (const batch of importBatches(frames)) await actor.importFrames(batch)
+      }
       await actor.initialize(pages)
       summary = await actor.summary()
     }
@@ -251,10 +290,18 @@ class Store {
     const now = Date.now()
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
+    this.placeFrames(canvas)
     this.canvases.set(canvas.id, canvas)
     canvas.pages = canvasPages(canvas)
     persist.saveCanvas(canvas)
     return canvas
+  }
+
+  /** Decide where a new canvas's frames live, before anything is written to it. */
+  private placeFrames(canvas: Canvas) {
+    const store = frameStoreFor(canvas)
+    if (store === 'actor') canvas.frameStore = 'actor'
+    this.frameStores.set(canvas.id, store)
   }
 
   /** Copy reusable design content into a new private canvas. Collaboration,
@@ -314,6 +361,8 @@ class Store {
       ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
+    /* the copier's flag decides, as for any canvas they create */
+    this.placeFrames(canvas)
     const actor = canvasActor(canvasId)
     try {
       for (const batch of importBatches(frames)) await actor.importFrames(batch, 'user')
@@ -987,3 +1036,17 @@ class Store {
 }
 
 export const store = new Store()
+setFrameStoreResolver((canvasId) => store.frameStoreOf(canvasId))
+
+/** Where a canvas not yet placed this process should keep its frames. */
+function frameStoreFor(canvas: Canvas): FrameStore {
+  if (canvas.frameStore === 'actor') return 'actor'
+  switch (env.DOOP_CANVAS_ACTORS) {
+    case 'all':
+      return 'actor'
+    case 'off':
+      return 'postgres'
+    default:
+      return featureFlags.has(canvas.ownerId, CANVAS_ACTORS) ? 'actor' : 'postgres'
+  }
+}

@@ -1511,7 +1511,7 @@ function finishStream(frameId: string, logDone: boolean) {
      this is then a no-op */
   const renames = pendingRenames.get(frameId) ?? []
   pendingRenames.delete(frameId)
-  void orderedFrame(frameId, () => settleStreamedHtml(frameId, renames, s.actor)).catch((error) =>
+  void orderedFrame(frameId, () => settleStreamedHtml(frameId, renames, s.actor, logDone)).catch((error) =>
     console.error('[stream] settle failed', error),
   )
   broadcast(s.canvasId, { type: 'frame:streaming', frameId, active: false, actor: s.actor })
@@ -1520,14 +1520,17 @@ function finishStream(frameId: string, logDone: boolean) {
 }
 
 /** The renames a stream missed and the library faces it uses, written once
- *  the document is whole. */
-async function settleStreamedHtml(frameId: string, renames: TokenRename[], actor: Actor) {
+ *  the stream ends. The store keeps what arrived; a stream cut off before its
+ *  done chunk is marked partial, so viewers heal it and never run a script it
+ *  left half-written. */
+async function settleStreamedHtml(frameId: string, renames: TokenRename[], actor: Actor, finished: boolean) {
   const current = await store.getFrame(frameId)
   if (!current) return
   let renamed = current.html
   for (const rename of renames) renamed = applyRename(renamed, rename)
   const html = withLibraryFaces(current.canvasId, renamed)
-  if (html !== current.html) await store.updateFrame(frameId, { html }, actor.name, actor)
+  if (html !== current.html)
+    await store.updateFrame(frameId, { html }, actor.name, actor, finished ? {} : { partial: true })
 }
 
 // Content mutations run in the actor. Keep this server's stream/task side effects in the same order.
@@ -1568,7 +1571,7 @@ export async function appendFrameHtml(
   actor: Actor,
   opts: { start?: boolean; done?: boolean } = {},
 ): Promise<Frame | undefined> {
-  return orderedFrame(frameId, async () => {
+  const appended = await orderedFrame(frameId, async () => {
     if (!(await store.getFrameMembership(frameId))) return undefined
     const starting = opts.start || !streams.has(frameId)
     /* an agent that escapes its opening chunk escapes the whole stream, so latch
@@ -1605,6 +1608,10 @@ export async function appendFrameHtml(
     touch(frame.canvasId, actor, frameId)
     return frame
   })
+  /* the done chunk's closing write (library faces, renames the stream missed)
+     queues right behind it: answer with the document once that has landed */
+  if (!opts.done || !appended) return appended
+  return (await orderedFrame(frameId, () => store.getFrame(frameId))) ?? appended
 }
 
 /* ------------------------------------------------------------------ */

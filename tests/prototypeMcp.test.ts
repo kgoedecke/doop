@@ -153,9 +153,10 @@ it('paints a page through set_page_background and clears it again', async () => 
     name: 'set_page_background',
     arguments: { canvas_id: canvas.id, page_id: 'two', color: '#1E1E1E', agent_name: 'A' },
   })
+  /* the colour rides beside each page's flow start, which it leaves alone */
   expect(payload(painted).pages).toEqual([
-    { id: 'one', name: 'One' },
-    { id: 'two', name: 'Two', background: '#1e1e1e' },
+    { id: 'one', name: 'One', startFrameId: frames.home.id },
+    { id: 'two', name: 'Two', background: '#1e1e1e', startFrameId: frames.other.id },
   ])
   const cleared = await client.callTool({
     name: 'set_page_background',
@@ -163,7 +164,7 @@ it('paints a page through set_page_background and clears it again', async () => 
   })
   /* no page_id means the first page, which had no colour: a no-op there */
   expect(payload(cleared).pages).toEqual([
-    { id: 'one', name: 'One' },
-    { id: 'two', name: 'Two', background: '#1e1e1e' },
+    { id: 'one', name: 'One', startFrameId: frames.home.id },
+    { id: 'two', name: 'Two', background: '#1e1e1e', startFrameId: frames.other.id },
   ])
 })

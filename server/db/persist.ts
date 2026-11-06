@@ -60,6 +60,7 @@ function canvasColumns(c: Canvas) {
     category: c.category ?? null,
     copyCount: c.copyCount ?? 0,
     workspaceId: c.workspaceId ?? null,
+    frameStore: c.frameStore ?? null,
     updatedAt: c.updatedAt,
   }
 }
@@ -735,7 +736,7 @@ export async function legacyFrameCanvasId(id: string): Promise<string | undefine
 export async function loadCanvas(id: string): Promise<Canvas | undefined> {
   const [c] = await db.select().from(t.canvases).where(eq(t.canvases.id, id))
   if (!c) return undefined
-  const [members, guidelines, references] = await Promise.all([
+  const [members, guidelines, references, tokens] = await Promise.all([
     db.select().from(t.canvasMembers).where(eq(t.canvasMembers.canvasId, id)),
     db.select().from(t.guidelines).where(eq(t.guidelines.canvasId, id)).orderBy(t.guidelines.name),
     db
@@ -743,12 +744,33 @@ export async function loadCanvas(id: string): Promise<Canvas | undefined> {
       .from(t.memoryReferences)
       .where(eq(t.memoryReferences.canvasId, id))
       .orderBy(desc(t.memoryReferences.pinnedAt)),
+    db
+      .select()
+      .from(t.designTokens)
+      .where(eq(t.designTokens.canvasId, id))
+      .orderBy(t.designTokens.order, t.designTokens.name),
   ])
   return {
     id,
     name: c.name,
     pages: c.pages ?? undefined,
     ...(c.guides?.length ? { guides: c.guides } : {}),
+    ...(c.tokenThemes?.length ? { tokenThemes: c.tokenThemes } : {}),
+    ...(tokens.length
+      ? {
+          tokens: tokens.map((row) => ({
+            name: row.name,
+            type: row.type as TokenType,
+            value: row.value,
+            ...(row.themes && Object.keys(row.themes).length ? { themes: row.themes } : {}),
+            ...(row.description != null ? { description: row.description } : {}),
+            order: row.order,
+            updatedAt: row.updatedAt,
+            updatedBy: row.updatedBy,
+          })),
+        }
+      : {}),
+    ...(c.frameStore === 'actor' ? { frameStore: 'actor' as const } : {}),
     ownerId: c.ownerId ?? undefined,
     linkAccess: storedLinkAccess(c.linkAccess),
     publishedAt: c.publishedAt ?? undefined,
@@ -814,6 +836,7 @@ export async function hydrate(): Promise<Hydrated> {
     ...(isCommunityCategory(c.category) ? { category: c.category } : {}),
     ...(c.copyCount ? { copyCount: c.copyCount } : {}),
     ...(c.workspaceId ? { workspaceId: c.workspaceId } : {}),
+    ...(c.frameStore === 'actor' ? { frameStore: 'actor' as const } : {}),
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     frames: [],

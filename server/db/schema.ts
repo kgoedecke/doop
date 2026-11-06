@@ -80,9 +80,25 @@ export const canvases = pgTable('canvases', {
   /** the shared workspace this canvas lives in; null = the owner's personal
    *  space. Every workspace member can open a workspace canvas. */
   workspaceId: text('workspace_id'),
+  /** 'actor' once the canvas's pages and frames moved into its Terse canvas
+   *  actor (its owner has the canvas-actors flag); null = the frames table.
+   *  A canvas never moves back on its own. */
+  frameStore: text('frame_store'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
+
+/** Per-user feature flags (server/featureFlags.ts): a row turns `flag` on for
+ *  `user_id`; no row is off. Changed with `bun run flags`, read every 30s. */
+export const featureFlags = pgTable(
+  'feature_flags',
+  {
+    flag: text('flag').notNull(),
+    userId: text('user_id').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.flag, t.userId] })],
+)
 
 /** A shared workspace: a team's home for canvases. Membership (below) grants
  *  access to every canvas inside it, so a workspace is the org-level unit

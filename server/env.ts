@@ -110,10 +110,15 @@ const schema = {
      separately hosted API whose WebSocket endpoint browsers can reach. The
      generated client (generated/actors) reads both from the environment. */
   TERSE_ACTOR_URL: str({
-    devDefault: undefined,
-    desc: 'The actor API, e.g. https://api.useterse.ai/<project>/actors; must be set in production',
+    default: undefined,
+    desc: 'The actor API, e.g. https://api.useterse.ai/<project>/actors; needed in production unless DOOP_CANVAS_ACTORS is off',
   }),
   TERSE_API_KEY: str({ default: undefined }),
+  /* which canvases keep their pages and frames in a canvas actor; the rest
+     use the frames table. `flag`: those whose owner has the canvas-actors
+     feature flag (`bun run flags`), plus any already moved; `all`: every
+     canvas; `off`: none, so no actor API is needed */
+  DOOP_CANVAS_ACTORS: str({ choices: ['flag', 'all', 'off'], default: 'flag' }),
 
   /* ---------------------------------------------------------- auth */
   BETTER_AUTH_SECRET: str({

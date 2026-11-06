@@ -1,18 +1,19 @@
-import WebSocket from 'ws'
-import { canvasActor, prepareCanvasSocket } from './frame-sync.ts'
-import type { CanvasCommand, CanvasEvent, CanvasSnapshot, FrameDrag } from '../src/actor.ts'
+import { canvasActor, openCanvasSocket, type FrameSocket } from './frame-sync.ts'
+import { healPartialHtml } from '../shared/frame-html.ts'
+import type { CanvasEvent, CanvasSnapshot, FrameDrag } from '../src/actor.ts'
 import type { Actor, ServerMessage } from '../shared/types.ts'
 
 /* Room frames: clients built before canvas actors (installed iOS apps, tabs
    left open across a deploy) read frames from the /ws room, as on main. Newer
    clients write to the canvas actor directly, past the server, so while an
    older client is in a canvas's room the server holds one socket to that
-   canvas actor and turns its changes into the room's frame messages. */
+   canvas actor (or, for a canvas whose frames are in Postgres, a subscription
+   in this process) and turns its changes into the room's frame messages. */
 
 type Listener = (message: ServerMessage) => void
 type Feed = {
   listeners: Set<Listener>
-  socket?: WebSocket
+  socket?: FrameSocket
   retry?: ReturnType<typeof setTimeout>
   stopped: boolean
   revision: number
@@ -58,27 +59,22 @@ export async function followRoomFrames(canvasId: string, listener: Listener): Pr
 export function forwardRoomDrag(canvasId: string, drag: Omit<FrameDrag, 'type' | 'updatedAt'>) {
   const feed = feeds.get(canvasId)
   const updatedAt = feed?.frames.get(drag.frameId)
-  if (feed?.socket?.readyState !== WebSocket.OPEN || updatedAt === undefined) return
-  feed.socket.send(JSON.stringify({ type: 'drag', ...drag, updatedAt } satisfies CanvasCommand))
+  if (!feed?.socket?.open || updatedAt === undefined) return
+  feed.socket.send({ type: 'drag', ...drag, updatedAt })
 }
 
 async function connect(canvasId: string, feed: Feed) {
   try {
     const accessVersion = await canvasActor(canvasId).accessVersion()
     // The server's own socket: it only reads changes and relays drags.
-    const grant = await prepareCanvasSocket({
-      actorId: canvasId,
-      metadata: { actor: SNAPSHOT_ACTOR, readOnly: false, accessVersion },
-    })
-    if (feed.stopped) return
-    const socket = new WebSocket(grant.websocketUrl)
+    const socket = await openCanvasSocket(canvasId, { actor: SNAPSHOT_ACTOR, readOnly: false, accessVersion })
+    if (feed.stopped) return socket.close()
     feed.socket = socket
-    socket.on('message', (data) => {
-      if (feed.socket === socket) receive(feed, JSON.parse(String(data)))
+    socket.onMessage((message) => {
+      if (feed.socket === socket) receive(feed, message as Received)
     })
-    socket.on('error', () => socket.close())
     // An access change closes actor sockets; reconnecting takes a fresh grant.
-    socket.on('close', () => {
+    socket.onClose(() => {
       if (feed.socket === socket) retry(canvasId, feed)
     })
   } catch (error) {
@@ -117,7 +113,7 @@ function receive(feed: Feed, event: Received) {
   if (change.type === 'canvas-snapshot') return applySnapshot(feed, change)
   if (change.revision <= feed.revision) return
   if (change.revision > feed.revision + 1) {
-    feed.socket?.send(JSON.stringify({ type: 'snapshot' } satisfies CanvasCommand))
+    feed.socket?.send({ type: 'snapshot' })
     return
   }
   feed.revision = change.revision
@@ -129,7 +125,9 @@ function receive(feed: Feed, event: Received) {
   }
   const known = feed.frames.has(change.frame.id)
   feed.frames.set(change.frame.id, change.frame.updatedAt)
-  emit(feed, { type: known ? 'frame:updated' : 'frame:created', frame: change.frame, actor: change.actor })
+  /* older clients paint what the room sends: an unfinished stream goes out healed */
+  const frame = change.partial ? { ...change.frame, html: healPartialHtml(change.frame.html) } : change.frame
+  emit(feed, { type: known ? 'frame:updated' : 'frame:created', frame, actor: change.actor })
 }
 
 /** The first snapshot sets the baseline; later ones (after a reconnect or a

@@ -251,15 +251,29 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 ## 3. Data and Persistence
 
-- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - existing application records.
-  Legacy frame rows are imported automatically on first canvas access, preserving IDs and references.
+- PostgreSQL 16 (`postgres:16-alpine` in `docker-compose.yml`) - application records, and the frames of
+  every canvas not on a canvas actor.
+- Two frame stores, chosen per canvas (`store.frameStoreOf`, `DOOP_CANVAS_ACTORS`): a canvas on actors has
+  a Terse `CanvasActor`; every other canvas has `server/postgresCanvas.ts`, an in-process stand-in with the
+  actor's methods and socket protocol that keeps frames in the `frames` table (`server/db/frameRows.ts`:
+  creates written at once, edits debounced 400ms, flushed on shutdown) and design history in
+  `frame_versions`, as on main. `canvasActor(id)` (`server/frame-sync.ts`) sends each call to whichever the
+  canvas has; `/api/canvases/:id/actor` hands browsers either the actor's socket URL or a one-time ticket
+  for this server's `/ws/frames`, so clients cannot tell them apart. `DOOP_CANVAS_ACTORS=flag` (default)
+  puts a canvas on actors when its owner has the `canvas-actors` feature flag (`feature_flags` table,
+  `server/featureFlags.ts`, re-read every 30s; `bun run flags list|enable|disable canvas-actors <email>`):
+  new canvases at creation (copies by the copier's flag), existing ones on their first open in a process,
+  bringing their SQL frames along. The move is recorded in `canvases.frame_store` and never undone
+  automatically; a canvas already open stays where it is until the server restarts. `all` puts every
+  canvas on actors (the test default), `off` moves none.
 - Terse actors - one `CanvasActor` per canvas owns its pages, its frames (content, geometry, page and
-  canvas order), their design history and frame activity. Each write is one call in the actor's queue and
-  one SQLite transaction, so creates, page moves, page copies and deletes land whole or not at all. It
-  takes the deployment's default CPU and memory. Browser and iOS clients hold one socket to it, with a
-  fresh snapshot on reconnect and whenever they notice a missed change.
-  Local actors start automatically in development/tests;
-  production requires a separate actor API, with client WebSockets connecting directly to it.
+  canvas order, stacking `z`), their design history and frame activity. Each write is one call in the
+  actor's queue and one SQLite transaction, so creates, page moves, page copies, restacks and deletes land
+  whole or not at all. It takes the deployment's default CPU and memory. Browser and iOS clients hold one
+  socket to it, with a fresh snapshot on reconnect and whenever they notice a missed change. A stream cut
+  off before its done chunk is saved as it arrived and marked `partial`, so viewers heal it before
+  painting. Local actors start automatically in development/tests; production requires a separate actor
+  API, with client WebSockets connecting directly to it, unless `DOOP_CANVAS_ACTORS=off`.
 - drizzle-orm 0.45.2 + drizzle-kit - schema in `server/db/schema.ts` and
   `server/db/auth-schema.ts`; migrations generated via `npx drizzle-kit generate` into
   `server/db/migrations`, applied at boot by `server/db/index.ts` (never by drizzle-kit itself).

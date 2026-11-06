@@ -151,6 +151,9 @@ export interface Canvas {
   id: string
   name: string
   ownerId?: string
+  /** where its pages and frames live: 'actor' is its Terse canvas actor
+   *  (an owner with the canvas-actors feature flag); unset is the frames table */
+  frameStore?: 'actor'
   /** what the share link grants people who are not the owner or invited:
    *  'view', 'comment' or 'edit', or 'none' (private — the default; unset
    *  means 'none'). See shared/canvasRole.ts. */

@@ -1407,6 +1407,10 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.undo())
     await expect.poll(() => saved[0]?.html).toBe(source.html)
     expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe(paragraph)
+    const layers = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    await expect
+      .poll(() => layers.evaluate(() => document.body.innerHTML), { timeout: 3000 })
+      .toContain('Hello <b>world</b>')
     // The paragraph becomes a div so the list survives reload; the selection follows it.
     expect(await page.evaluate(() => window.drawingHarness.formatText('insertUnorderedList'))).toBe(true)
     await expect.poll(() => saved[0]?.html).toContain('<li>Hello <b>world</b></li>')

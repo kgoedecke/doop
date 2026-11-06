@@ -426,7 +426,9 @@ export const useStore = create<State>((set, get) => ({
   setFrameIndex: (frameIndex) =>
     set((state) => ({
       frameIndex,
-      canvas: state.canvas ? { ...state.canvas, frames: sortByStack(orderFrames([...state.canvas.frames], frameIndex)) } : null,
+      canvas: state.canvas
+        ? { ...state.canvas, frames: sortByStack(orderFrames([...state.canvas.frames], frameIndex)) }
+        : null,
     })),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),

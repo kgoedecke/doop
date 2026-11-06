@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+
+/* opening a canvas records that its frames are on its actor */
+vi.mock('../server/db/persist.ts', () => ({ saveCanvas: vi.fn() }))
 import { canvasActor } from '../server/frame-sync.ts'
 import { store } from '../server/store.ts'
 

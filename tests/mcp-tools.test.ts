@@ -3,8 +3,15 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { describe, expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
 import { FRAME_PREVIEW_URI } from '../server/chatgptApp.ts'
+import { canvasActor } from '../server/frame-sync.ts'
 
-vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
+vi.mock('../server/db/persist.ts', () => ({
+  saveCanvas: () => {},
+  saveFrame: () => {},
+  saveActivity: () => {},
+  loadLegacyFrameIds: async () => [],
+  loadLegacyFrame: async () => undefined,
+}))
 
 interface ToolInputSchema {
   properties?: Record<string, unknown>
@@ -202,8 +209,9 @@ it('create_canvas_page refuses a page beyond the canvas limit', async () => {
 })
 
 it('get_canvas lists the pages and narrows the frames to page_id', async () => {
-  const frame = (id: string, pageId?: string) => ({
+  const frame = (id: string, pageId: string) => ({
     id,
+    canvasId: 'mcp-page-filter',
     pageId,
     name: id,
     html: '<html></html>',
@@ -223,8 +231,10 @@ it('get_canvas lists the pages and narrows the frames to page_id', async () => {
       { id: 'first', name: 'Main' },
       { id: 'second', name: 'Mobile' },
     ],
-    frames: [frame('a', 'first'), frame('b', 'second'), frame('c', 'second')],
+    frames: [],
   })
+  /* frames live in the canvas actor: they are there before the canvas first opens */
+  await canvasActor('mcp-page-filter').importFrames([frame('a', 'first'), frame('b', 'second'), frame('c', 'second')])
   try {
     const all = body(await client.callTool({ name: 'get_canvas', arguments: { canvas_id: 'mcp-page-filter' } }))
     expect(all.pages).toEqual([

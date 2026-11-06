@@ -137,10 +137,10 @@ describe('human feedback on read-only MCP tools', () => {
     ['set_prototype_start', { canvas_id: CANVAS.id, frame_id: FRAME.id, agent_name: 'Claude' }],
   ])('%s claims and delivers feedback like every other write', async (tool, args) => {
     const page = { id: 'c1:page2', name: 'Mobile' }
-    vi.spyOn(actions, 'createCanvasPage').mockReturnValue({ page, pages: [{ id: 'c1:page1', name: 'Page 1' }, page] })
-    vi.spyOn(actions, 'setCanvasPages').mockImplementation((_id, pages) => pages)
-    vi.spyOn(actions, 'setPageBackground').mockReturnValue([{ id: 'c1:page1', name: 'Page 1' }])
-    vi.spyOn(actions, 'setFlowStart').mockReturnValue([{ id: 'c1:page1', name: 'Page 1', startFrameId: FRAME.id }])
+    vi.spyOn(actions, 'createCanvasPage').mockResolvedValue({ page, pages: [{ id: 'c1:page1', name: 'Page 1' }, page] })
+    vi.spyOn(actions, 'setCanvasPages').mockImplementation(async (_id, pages) => ({ pages, dropped: [] }))
+    vi.spyOn(actions, 'setPageBackground').mockResolvedValue([{ id: 'c1:page1', name: 'Page 1' }])
+    vi.spyOn(actions, 'setFlowStart').mockResolvedValue([{ id: 'c1:page1', name: 'Page 1', startFrameId: FRAME.id }])
     const take = vi.spyOn(actions, 'takeFeedbackFor').mockReturnValue([FEEDBACK])
     const { client, close } = await connect()
     try {

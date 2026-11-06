@@ -59,7 +59,9 @@ async function startManagedActors(options) {
 }
 
 export async function prepareActors({ test = false, environment = process.env } = {}) {
-  if (test) environment = testEnvironment(environment)
+  /* the suite covers canvas actors unless asked otherwise: DOOP_CANVAS_ACTORS=off
+     runs it with every canvas's frames in Postgres (server/postgresCanvas.ts) */
+  if (test) environment = { DOOP_CANVAS_ACTORS: 'all', ...testEnvironment(environment) }
   // Tests always own an isolated runtime, even when the shell targets production.
   if (!test && environment.TERSE_ACTOR_URL) return { env: { ...environment }, stop: async () => {} }
   const temporary = test ? await mkdtemp(path.join(tmpdir(), 'doop-actors-')) : undefined

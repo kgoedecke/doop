@@ -175,6 +175,8 @@ type FrameChange = {
     requestId?: string
     activity?: ActivityItem
     streaming?: boolean
+    /** an unfinished stream's document: heal it (shared/frame-html.ts) before painting */
+    partial?: boolean
 }
 type FrameDrag = {
     type: "drag"
@@ -190,6 +192,8 @@ type FrameEdit =
           annotation?: boolean
           /** A deliberate whole-document write: it always opens a design-history burst. */
           replace?: boolean
+          /** The document is a stream cut off before its end: viewers heal it before painting. */
+          partial?: boolean
       }
     | {
           type: "replace"

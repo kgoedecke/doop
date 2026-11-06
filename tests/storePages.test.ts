@@ -194,13 +194,18 @@ it('points a copied canvas’s prototype links and flow starts at the copied fra
 it('keeps a page’s background across page-list saves and gives it to copies of the page and the canvas', async () => {
   const canvas = store.createCanvas('Painted', 'alice')
   const [page] = canvasPages(canvas)
-  expect(store.setPageBackground(canvas.id, 'missing', '#1e1e1e')).toBeUndefined()
-  expect(store.setPageBackground(canvas.id, page!.id, '#1e1e1e')).toEqual([{ ...page, background: '#1e1e1e' }])
+  expect(await store.setPageBackground(canvas.id, 'missing', '#1e1e1e')).toBeUndefined()
+  const painted = await store.setPageBackground(canvas.id, page!.id, '#1e1e1e')
+  expect(painted).toEqual([{ ...page, background: '#1e1e1e' }])
   /* a rename or reorder never touches the colour, whatever the client sends for it */
-  const saved = store.setPages(canvas.id, [
-    { id: page!.id, name: 'Renamed', background: '#ffffff' },
-    { id: 'second', name: 'Second', background: '#ff0000' },
-  ])
+  const saved = await store.setPages(
+    canvas.id,
+    [
+      { id: page!.id, name: 'Renamed', background: '#ffffff' },
+      { id: 'second', name: 'Second', background: '#ff0000' },
+    ],
+    painted!,
+  )
   expect(saved!.pages).toEqual([
     { id: page!.id, name: 'Renamed', background: '#1e1e1e' },
     { id: 'second', name: 'Second' },
@@ -209,7 +214,7 @@ it('keeps a page’s background across page-list saves and gives it to copies of
   expect(copy!.page.background).toBe('#1e1e1e')
   const twin = await store.duplicateCanvas(canvas.id, 'alice', 'alice')
   expect(canvasPages(twin!).map((p) => p.background)).toEqual(['#1e1e1e', '#1e1e1e', undefined])
-  expect(store.setPageBackground(canvas.id, page!.id, null)).toEqual([
+  expect(await store.setPageBackground(canvas.id, page!.id, null)).toEqual([
     { id: page!.id, name: 'Renamed' },
     { id: copy!.page.id, name: 'Renamed copy', background: '#1e1e1e' },
     { id: 'second', name: 'Second' },

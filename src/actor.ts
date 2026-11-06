@@ -40,6 +40,8 @@ export type FrameEdit =
       annotation?: boolean
       /** A deliberate whole-document write: it always opens a design-history burst. */
       replace?: boolean
+      /** The document is a stream cut off before its end: viewers heal it before painting. */
+      partial?: boolean
     }
   | { type: 'replace'; find: string; replacement: string }
   | { type: 'append'; chunk: string; start: boolean; done?: boolean }
@@ -64,6 +66,8 @@ export type FrameChange = {
   requestId?: string
   activity?: ActivityItem
   streaming?: boolean
+  /** an unfinished stream's document: heal it (shared/frame-html.ts) before painting */
+  partial?: boolean
 }
 export type FrameRemoval = { type: 'frame-removal'; revision: number; frameId: string; actor: Attribution }
 export type PagesChange = { type: 'pages-change'; revision: number; pages: CanvasPageInfo[] }
@@ -394,7 +398,8 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
         const edge = placed?.edge ?? null
         frame = { ...frame, x: edge === null ? 120 : edge + 80 }
       }
-      if (frame.z === undefined) frame = { ...frame, z: (await frontOfPage(this.orm, frame.pageId!)) ?? frame.createdAt }
+      if (frame.z === undefined)
+        frame = { ...frame, z: (await frontOfPage(this.orm, frame.pageId!)) ?? frame.createdAt }
       validateFrame(frame)
       await insertFrame(this.orm, frame)
       this.bursts = { ...this.bursts, [frame.id]: creatorBurst(frame, by.kind) }
@@ -438,9 +443,19 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
             : Object.fromEntries(
                 Object.entries(write.patch).filter(
                   ([key, value]) =>
-                    ['name', 'pageId', 'x', 'y', 'width', 'height', 'html', 'hidden', 'locked', 'approval', 'z'].includes(
-                      key,
-                    ) && value !== undefined,
+                    [
+                      'name',
+                      'pageId',
+                      'x',
+                      'y',
+                      'width',
+                      'height',
+                      'html',
+                      'hidden',
+                      'locked',
+                      'approval',
+                      'z',
+                    ].includes(key) && value !== undefined,
                 ),
               )
       if (write.type !== 'append' && patch.html !== undefined) patch.html = repairEscapedHtml(patch.html)
@@ -488,6 +503,7 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
         actor: by,
         ...(requestId ? { requestId } : {}),
         ...(write.type === 'append' ? { streaming: !write.done } : {}),
+        ...(write.type === 'update' && write.partial ? { partial: true } : {}),
       }
       if (requestId && !annotation && (html !== before.html || name !== before.name)) {
         change.activity = {

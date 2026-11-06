@@ -77,12 +77,25 @@ jobs:
       # would run Bun's own runner against the same files
       - run: bun run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
+  # The suite runs every canvas on its actor; most canvases keep their frames
+  # in Postgres (DOOP_CANVAS_ACTORS=flag), so the end-to-end tests that boot a
+  # real server, plus the stand-in's own, run again with every canvas there.
+  test-postgres-frames:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: >-
+          DOOP_CANVAS_ACTORS=off bun run test --
+          $(grep -l "from './harness" tests/*.test.ts) tests/postgresCanvas.test.ts tests/canvasActorFlag.test.ts
+
   # One status that stands for every shard, so a required check or a merge
   # queue names "tests" rather than each "test (N)"; renumbering the matrix
   # never silently drops a protection.
   tests:
-    needs: test
+    needs: [test, test-postgres-frames]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.test.result }}" = success
+      - run: test "${{ needs.test.result }}" = success && test "${{ needs.test-postgres-frames.result }}" = success

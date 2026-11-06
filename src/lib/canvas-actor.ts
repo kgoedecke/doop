@@ -92,6 +92,12 @@ function showFrame(event: FrameChange) {
     paint(event.streaming ? { ...frame, html: healPartialHtml(frame.html) } : frame)
     return
   }
+  /* a stream that stopped before its end: never run what it left half-written */
+  if (event.partial) {
+    state.setStream(frame.id, null)
+    paint({ ...frame, html: healPartialHtml(frame.html) })
+    return
+  }
   const previous = state.canvas?.frames.find((candidate) => candidate.id === frame.id)?.html ?? ''
   let shown = 0
   while (shown < previous.length && shown < frame.html.length && previous[shown] === frame.html[shown]) shown++

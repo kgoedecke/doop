@@ -19,6 +19,10 @@ import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
 import { FrameConflictError, GuideLimitError, PageLimitError, store } from './store.ts'
 import { canvasActor, prepareCanvasSocket } from './frame-sync.ts'
+import { featureFlags } from './featureFlags.ts'
+import { flushFrameRows } from './db/frameRows.ts'
+import { postgresCanvas, redeemFrameTicket, type FrameConnection } from './postgresCanvas.ts'
+import type { CanvasCommand } from '../src/actor.ts'
 import { followRoomFrames, forwardRoomDrag } from './roomFrames.ts'
 import { actorRoute as frameRoute } from './actor-route.ts'
 import { parseGuide } from '../shared/guides.ts'
@@ -109,6 +113,7 @@ await initDb()
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
+await featureFlags.start() // before the first request: a canvas's owner flag places its frames
 const data = await persist.hydrate()
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
@@ -144,14 +149,14 @@ process.on('unhandledRejection', (reason) => {
   console.error('[unhandled-rejection]', reason)
 })
 
-/* Frame writes are durable in their actors; drain queued SQL history writes
-   before the process dies — with a hard-exit timeout so a wedged DB can never
-   keep the process (and the port) alive */
+/* Frame writes are durable in their actors; drain the debounced frame rows of
+   Postgres canvases and queued SQL history writes before the process dies —
+   with a hard-exit timeout so a wedged DB can never keep the process (and the
+   port) alive */
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.once(sig, () => {
     setTimeout(() => process.exit(0), 1500).unref()
-    persist
-      .flush()
+    Promise.all([flushFrameRows(), persist.flush()])
       .catch((err) => console.error('flush on shutdown failed', err))
       .finally(() => process.exit(0))
   })
@@ -703,6 +708,7 @@ declare global {
    the gate looks at that session (shared/desktopConnect.ts) */
 app.get('/api/integrations/:provider/callback', relayDesktopCallback)
 app.use('/api/live-activities', logLiveActivityRequests)
+app.get('/api/canvases/:id/actor', guestFrameGrant)
 app.use('/api', async (req, res, next) => {
   try {
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
@@ -1273,22 +1279,75 @@ app.get(
     const canvas = requireCanvas(req, res, req.params.id, 'view')
     if (!canvas) return
     const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 128) : undefined
-    const grant = await prepareCanvasSocket({
-      actorId: req.params.id,
-      metadata: {
-        actor: {
-          name: req.user!.name,
-          kind: 'user',
-          color: colorFor(req.user!.name),
-          ...(clientId ? { clientId } : {}),
+    const grant = await prepareCanvasSocket(
+      {
+        actorId: req.params.id,
+        metadata: {
+          actor: {
+            name: req.user!.name,
+            kind: 'user',
+            color: colorFor(req.user!.name),
+            ...(clientId ? { clientId } : {}),
+          },
+          readOnly: !!req.impersonatedBy || !canEditCanvas(req.user!.id, canvas),
+          accessVersion,
         },
-        readOnly: !!req.impersonatedBy || !canEditCanvas(req.user!.id, canvas),
-        accessVersion,
       },
-    })
+      socketOrigin(req),
+    )
     res.set('Cache-Control', 'no-store').json(grant)
   }),
 )
+
+/* A signed-out visitor on a link-shared canvas watches its frames read only,
+   as the room lets them watch (joinAsGuest); anyone signed in goes on to the
+   grant behind the session gate. */
+function guestFrameGrant(req: express.Request<{ id: string }>, res: express.Response, next: express.NextFunction) {
+  void (async () => {
+    if (await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })) return next()
+    const canvas = await store.syncCanvas(req.params.id, 'index')
+    if (!canvas || !guestCanvasRole(canvas)) return res.status(401).json({ error: 'unauthorized' })
+    const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 128) : undefined
+    const grant = await prepareCanvasSocket(
+      {
+        actorId: canvas.id,
+        metadata: {
+          actor: {
+            name: 'Guest',
+            kind: 'user',
+            color: colorFor(clientId ?? 'guest'),
+            ...(clientId ? { clientId } : {}),
+          },
+          readOnly: true,
+          accessVersion: await canvasActor(canvas.id).accessVersion(),
+        },
+      },
+      socketOrigin(req),
+    )
+    res.set('Cache-Control', 'no-store').json(grant)
+  })().catch(next)
+}
+
+/** The ws(s) origin a browser reached this server on, for sockets it opens back to it. */
+function socketOrigin(req: express.Request): string {
+  return `${req.protocol === 'https' ? 'wss' : 'ws'}://${req.get('host')}`
+}
+
+/** A message a browser may send a canvas's frame socket (src/actor.ts `CanvasCommand`). */
+function isCanvasCommand(value: unknown): value is CanvasCommand {
+  if (typeof value !== 'object' || value === null || !('type' in value)) return false
+  if (value.type === 'snapshot') return true
+  if (!('frameId' in value) || typeof value.frameId !== 'string') return false
+  if (value.type === 'drag') return true
+  return (
+    value.type === 'write' &&
+    'requestId' in value &&
+    typeof value.requestId === 'string' &&
+    'write' in value &&
+    typeof value.write === 'object' &&
+    value.write !== null
+  )
+}
 
 app.get(
   '/api/canvases/:id',
@@ -1999,18 +2058,21 @@ app.put(
 )
 
 /* a page's own canvas colour (`#rrggbb`); null puts the theme paper back */
-app.put('/api/canvases/:id/pages/:pageId/background', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'edit')
-  if (!canvas) return
-  const color: unknown = req.body?.color
-  const background = color === null ? null : normalizePageBackground(color)
-  if (color !== null && !background)
-    return res.status(400).json({ error: 'color must be a hex colour such as #f5f5f5, or null' })
-  if (!canvasPages(canvas).some((p) => p.id === req.params.pageId))
-    return res.status(404).json({ error: 'page not found' })
-  const actor = userActor(req)
-  res.json(actions.setPageBackground(canvas.id, req.params.pageId, background, actor))
-})
+app.put(
+  '/api/canvases/:id/pages/:pageId/background',
+  frameRoute<{ id: string; pageId: string }>(async (req, res) => {
+    const canvas = requireCanvas(req, res, req.params.id, 'edit')
+    if (!canvas) return
+    const color: unknown = req.body?.color
+    const background = color === null ? null : normalizePageBackground(color)
+    if (color !== null && !background)
+      return res.status(400).json({ error: 'color must be a hex colour such as #f5f5f5, or null' })
+    if (!canvasPages(canvas).some((p) => p.id === req.params.pageId))
+      return res.status(404).json({ error: 'page not found' })
+    const actor = userActor(req)
+    res.json(await actions.setPageBackground(canvas.id, req.params.pageId, background, actor))
+  }),
+)
 
 /* the frame a page's prototype flow starts on; null clears it */
 app.put(
@@ -2698,28 +2760,76 @@ if (env.isProduction) {
 
 const server = http.createServer(app)
 const wss = new WebSocketServer({ noServer: true })
+/* the frames of canvases not on actors (server/postgresCanvas.ts), speaking a canvas actor's socket protocol */
+const frameSockets = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 * 1024 })
 server.on('upgrade', (req, socket, head) => {
-  if (new URL(req.url ?? '/', 'http://localhost').pathname !== '/ws') return socket.destroy()
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  if (url.pathname === '/ws/frames') {
+    const granted = redeemFrameTicket(url.searchParams.get('ticket') ?? '')
+    if (!granted) return socket.destroy()
+    return frameSockets.handleUpgrade(req, socket, head, (ws) =>
+      serveFrameSocket(ws, granted.canvasId, granted.metadata),
+    )
+  }
+  if (url.pathname !== '/ws') return socket.destroy()
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
 })
+
+/** One browser on a Postgres canvas: its socket becomes a subscriber of the canvas. */
+function serveFrameSocket(ws: WebSocket, canvasId: string, metadata: FrameConnection['metadata']) {
+  const canvas = postgresCanvas(canvasId)
+  const connection: FrameConnection = {
+    metadata,
+    send: (message) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message))
+    },
+    close: (code, reason) => ws.close(code, reason),
+  }
+  canvas.connect(connection)
+  ws.on('message', (raw) => {
+    let command
+    try {
+      command = JSON.parse(String(raw))
+    } catch {
+      return
+    }
+    if (isCanvasCommand(command)) canvas.receive(connection, command)
+  })
+  ws.on('close', () => canvas.disconnect(connection))
+  ws.on('error', () => ws.close())
+}
 
 /* A signed-out visitor on a link-shared canvas watches it as a guest
    (guestCanvasRole): view only, silent like a view-as session (no presence,
    no cursor, nothing it sends is relayed) and without the team's
    conversation (GUEST_HIDDEN). Anything else — a private canvas, a missing
    one — is the same 4401, so the sign-in screen does not reveal which. */
-function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: Canvas | undefined) {
+async function joinAsGuest(
+  ws: WebSocket,
+  canvasId: string,
+  clientId: string,
+  canvas: Canvas | undefined,
+  onFrameSocket: boolean,
+) {
   const role = canvas && guestCanvasRole(canvas)
   if (!canvas || !role) {
     ws.close(4401, 'unauthorized')
     return
   }
   const presence: Presence = { clientId, name: '', color: colorFor(clientId), kind: 'user', activeFrameId: null }
-  conns.set(ws, { ws, canvasId, presence, silent: true })
+  const joined: Conn = { ws, canvasId, presence, silent: true }
+  conns.set(ws, joined)
+  let frames: Frame[] = []
+  let flushFrames = () => {}
+  if (!onFrameSocket) {
+    const followed = await roomFramesFor(ws, joined)
+    if (!followed) return
+    ;({ frames, flush: flushFrames } = followed)
+  }
   const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
   send(ws, {
     type: 'init',
-    canvas: { ...shown, role },
+    canvas: { ...shown, frames, role },
     presences: [
       ...room(canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
@@ -2735,6 +2845,39 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
     selfColor: presence.color,
     serverBuild: BUILD_ID,
   })
+  flushFrames()
+}
+
+/* Clients built before canvas actors (installed iOS apps, tabs left open
+   across a deploy) get their frames from the room, as on main: every frame in
+   init, then room frame messages. Messages that arrive before init is sent
+   wait for it. Undefined when the client left meanwhile, or the canvas could
+   not be read (the socket is then closed). */
+async function roomFramesFor(ws: WebSocket, joined: Conn): Promise<{ frames: Frame[]; flush: () => void } | undefined> {
+  const early: ServerMessage[] = []
+  let initSent = false
+  joined.unfollowFrames = await followRoomFrames(joined.canvasId, (message) =>
+    initSent ? send(ws, message) : early.push(message),
+  )
+  // The client left (or joined again) while the feed was starting.
+  if (conns.get(ws) !== joined) {
+    joined.unfollowFrames()
+    return undefined
+  }
+  try {
+    const frames = (await store.syncCanvas(joined.canvasId, 'full'))?.frames ?? []
+    return {
+      frames,
+      flush: () => {
+        initSent = true
+        for (const message of early.splice(0)) send(ws, message)
+      },
+    }
+  } catch {
+    joined.unfollowFrames()
+    ws.close(1013, 'canvas service unavailable')
+    return undefined
+  }
 }
 
 wss.on('connection', (ws, upgradeReq) => {
@@ -2760,7 +2903,7 @@ wss.on('connection', (ws, upgradeReq) => {
         return
       }
       if (!session) {
-        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
+        await joinAsGuest(ws, msg.canvasId, msg.clientId, canvas, msg.frames === 'actor')
         return
       }
       if (!canvas) {
@@ -2789,33 +2932,12 @@ wss.on('connection', (ws, upgradeReq) => {
       conns.get(ws)?.unfollowFrames?.()
       const joined: Conn = { ws, canvasId: msg.canvasId, userId: session.user.id, presence, silent }
       conns.set(ws, joined)
-      /* Clients built before canvas actors get their frames here, as on main:
-         every frame in init, then room frame messages. Messages that arrive
-         before init is sent wait for it. */
       let frames: Frame[] = []
       let flushFrames = () => {}
       if (msg.frames !== 'actor') {
-        const early: ServerMessage[] = []
-        let initSent = false
-        joined.unfollowFrames = await followRoomFrames(msg.canvasId, (message) =>
-          initSent ? send(ws, message) : early.push(message),
-        )
-        // The client left (or joined again) while the feed was starting.
-        if (conns.get(ws) !== joined) {
-          joined.unfollowFrames()
-          return
-        }
-        flushFrames = () => {
-          initSent = true
-          for (const message of early.splice(0)) send(ws, message)
-        }
-        try {
-          frames = (await store.syncCanvas(msg.canvasId, 'full'))?.frames ?? []
-        } catch {
-          joined.unfollowFrames()
-          ws.close(1013, 'canvas service unavailable')
-          return
-        }
+        const followed = await roomFramesFor(ws, joined)
+        if (!followed) return
+        ;({ frames, flush: flushFrames } = followed)
       }
       const others = room(msg.canvasId)
         .filter((c) => c.ws !== ws && !c.silent)

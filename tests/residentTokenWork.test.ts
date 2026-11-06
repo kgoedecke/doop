@@ -14,6 +14,8 @@ vi.mock('../server/db/persist.ts', () => ({
   saveProposal: () => {},
   saveToken: () => {},
   deleteToken: () => {},
+  loadLegacyFrameIds: async () => [],
+  loadLegacyFrame: async () => undefined,
 }))
 
 const actions = await import('../server/actions.ts')
