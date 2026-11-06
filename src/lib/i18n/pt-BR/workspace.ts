@@ -13,7 +13,7 @@ export const workspace: Catalog['workspace'] = {
   fonts: 'Fontes',
   planBilling: 'Plano e cobrança',
   billing: 'Cobrança',
-  general: 'Geral',
+  general: 'Configurações',
   breadcrumb: 'Trilha de navegação',
   home: 'Início',
   memberCount: { one: '{count} pessoa', other: '{count} pessoas' },

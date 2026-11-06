@@ -57,6 +57,7 @@ import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Toast } from '../components/ui/toast'
 import { DashContent, DashHeader, DashLayout, DashMain } from '../components/ui/dash'
 import { useT, type PlainMessageKey } from '../lib/i18n'
+import { prefetchWorkspace } from '../lib/workspaceCache'
 import { cn } from '@/lib/utils'
 
 /** the three fixed views, or one workspace (`ws:<id>`) */
@@ -292,6 +293,11 @@ export function Home() {
   const first = session?.user.name?.split(' ')[0]
   const scopedWorkspace = workspaceOf(scope)
   const currentWorkspace = scopedWorkspace ? workspaces.find((w) => w.id === scopedWorkspace) : undefined
+  /* its settings are one rail row away: have them ready to draw */
+  const currentWorkspaceId = currentWorkspace?.id
+  useEffect(() => {
+    if (currentWorkspaceId) prefetchWorkspace(currentWorkspaceId)
+  }, [currentWorkspaceId])
   /* a workspace that vanished (deleted, or left) drops the view back to all */
   const scopeGone = !!scopedWorkspace && workspacesLoaded && !currentWorkspace
   const [seenScopeGone, setSeenScopeGone] = useState(false)
@@ -323,23 +329,14 @@ export function Home() {
     <DashLayout className={railLayout}>
       <AppRail
         active={scope}
-        canvases={canvases ?? []}
-        workspaces={workspaces}
+        canvases={canvases}
+        workspaces={workspacesLoaded ? workspaces : null}
         onScope={setScope}
         onCreateWorkspace={() => setCreatingWorkspace(true)}
       />
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare">
           <span className="flex-1" />
-          {currentWorkspace && (
-            <Button
-              variant="ghost"
-              className="min-h-10 max-md:hidden md:min-h-0"
-              onClick={() => navigate(`/w/${currentWorkspace.id}`)}
-            >
-              <BuildingIcon /> {t('home.manage')}
-            </Button>
-          )}
           <Button variant="default" size="bar" disabled={starting} onClick={() => setImporting(true)}>
             <UploadIcon width={15} height={15} className="text-ink-soft" /> {t('home.import')}
           </Button>

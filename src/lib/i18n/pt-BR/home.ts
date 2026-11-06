@@ -2,7 +2,6 @@ import type { Catalog } from '..'
 
 export const home: Catalog['home'] = {
   /* header */
-  manage: 'Gerenciar',
   import: 'Importar',
   newCanvas: 'Novo canvas',
   newShort: 'Novo',

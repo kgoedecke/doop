@@ -1083,6 +1083,31 @@ body:has([data-panel-resizing]) * {
   animation: icon-lift var(--icon-motion);
 }
 
+/* fonts: the letter is set, cap bar first, then the stem drops and the foot lands */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-type path:nth-child(2) {
+  animation: icon-widen var(--icon-motion);
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-type path:nth-child(1) {
+  transform-origin: top;
+  animation: icon-rise var(--icon-motion) 0.08s backwards;
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-type path:nth-child(3) {
+  animation: icon-widen var(--icon-motion) 0.2s backwards;
+}
+
+/* plan & billing: the card tips as if swiped, its number reads across */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg.lucide-credit-card {
+  animation: icon-swipe var(--icon-motion);
+}
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-credit-card path {
+  animation: icon-step-in var(--icon-motion) 0.12s backwards;
+}
+
+/* settings: the gear turns one tooth round its hub */
+[data-icon-motion] :is(button, a):is(:hover, :focus-visible) > .lucide-settings path {
+  animation: icon-turn-tooth 0.6s var(--ease-in-out-cubic);
+}
+
 /* search: the lens takes a look around */
 [data-icon-motion] :is(button, a):is(:hover, :focus-visible) > svg.lucide-search {
   animation: icon-look var(--icon-motion);
@@ -1144,6 +1169,23 @@ body:has([data-panel-resizing]) * {
 @keyframes icon-lift {
   40% {
     transform: translate(1.5px, -1.5px) rotate(12deg);
+  }
+}
+@keyframes icon-widen {
+  from {
+    transform: scaleX(0.3);
+    opacity: 0;
+  }
+}
+@keyframes icon-swipe {
+  40% {
+    transform: translateX(1.5px) rotate(-8deg);
+  }
+}
+@keyframes icon-turn-tooth {
+  from {
+    /* six teeth: a sixth of a turn lands it where it started */
+    transform: rotate(-60deg);
   }
 }
 @keyframes icon-look {
