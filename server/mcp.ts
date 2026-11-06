@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as authSchema from './db/auth-schema.ts'
-import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_PAGE_NAME } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { prototypeReport, prototypeUrl, setPrototypeStart } from './prototypeTools.ts'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -11,7 +11,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
-import { PageLimitError, store } from './store.ts'
+import { store } from './store.ts'
+import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import {
@@ -1223,14 +1224,10 @@ export function buildMcpServer(
     async ({ canvas_id, pages, expectedPages, agent_name }) => {
       const canvas = canvasFor(canvas_id, 'edit')
       if (!canvas) return noCanvas(canvas_id)
-      if (!samePages(expectedPages, canvasPages(canvas)))
-        return err('Pages changed. Read get_canvas again before saving.')
-      if (new Set(pages.map((p) => p.id)).size !== pages.length) return err('Page IDs must be unique')
-      const firstId = canvas.pages?.[0]?.id ?? `${canvas.id}:page1`
-      if (canvas.frames.some((f) => !pages.some((p) => p.id === (f.pageId ?? firstId))))
-        return err('Move frames before deleting their page')
       const actor = actorFrom(agent_name)
-      return withFeedback(text({ ok: true, pages: actions.setCanvasPages(canvas_id, pages, actor) }), canvas_id, actor)
+      const saved = savePages(canvas, expectedPages, pages, actor)
+      if (!saved.ok) return err(saved.error)
+      return withFeedback(text({ ok: true, pages: saved.value }), canvas_id, actor)
     },
   )
 
@@ -1250,18 +1247,13 @@ export function buildMcpServer(
     async ({ canvas_id, name, agent_name }) => {
       const canvas = canvasFor(canvas_id, 'edit')
       if (!canvas) return noCanvas(canvas_id)
-      try {
-        const created = actions.createCanvasPage(canvas_id, name, actorFrom(agent_name))
-        if (!created) return noCanvas(canvas_id)
-        return withFeedback(
-          text({ ok: true, page: created.page, pages: created.pages }),
-          canvas_id,
-          actorFrom(agent_name),
-        )
-      } catch (e) {
-        if (e instanceof PageLimitError) return err(e.message)
-        throw e
-      }
+      const created = addPage(canvas_id, name, actorFrom(agent_name))
+      if (!created.ok) return err(created.error)
+      return withFeedback(
+        text({ ok: true, page: created.value.page, pages: created.value.pages }),
+        canvas_id,
+        actorFrom(agent_name),
+      )
     },
   )
 
@@ -2102,7 +2094,7 @@ export function buildMcpServer(
       title: 'Rename, move or resize a frame',
       _meta: previewToolMeta('Updating the frame…', 'Frame updated'),
       description:
-        'Update frame metadata: rename it, move/resize it, or move it to another page using pageId. Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.',
+        "Update frame metadata in one call: rename it (name), move it on its page (x, y), resize it (width, height), or move it to another page (pageId from get_canvas; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Set locked to true to lock the frame on the canvas (humans cannot select, move, resize or delete it from the stage until it is unlocked) or false to unlock it.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         frame_id: z.string(),
@@ -2117,11 +2109,12 @@ export function buildMcpServer(
       },
     },
     async ({ frame_id, agent_name, ...patch }) => {
-      const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined))
-      if (!Object.keys(clean).length) return err('nothing to update')
-      if (!frameFor(frame_id, 'edit')) return noFrame(frame_id)
-      const frame = actions.updateFrame(frame_id, clean, actorFrom(agent_name))
-      if (!frame) return noFrame(frame_id)
+      const found = frameFor(frame_id, 'edit')
+      const canvas = found && store.getCanvas(found.canvasId)
+      if (!canvas) return noFrame(frame_id)
+      const updated = updateFrameMeta(canvas, frame_id, patch, actorFrom(agent_name))
+      if (!updated.ok) return err(updated.error)
+      const frame = updated.value
       return withPreview(
         withFeedback(text({ ok: true, frame: frameSummary(frame) }), frame.canvasId, actorFrom(agent_name)),
         frame.canvasId,

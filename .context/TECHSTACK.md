@@ -126,8 +126,12 @@
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
   and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
-  rename, reorder and delete; `update_frame` moves a frame between pages. The guide's "Frames
-  and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
+  rename, reorder and delete; `update_frame` moves a frame between pages (it keeps its x/y; an
+  unknown `pageId` is refused with the canvas's page list). The guide's "Frames and HTML" section says when a page beats a
+  frame. The resident agent has the same three tools under the same names; both surfaces run
+  `server/pageTools.ts`, its kickoff lists the pages and each frame's page and position, and a
+  run whose only work was arranging counts as delivered (`arrangeWrites`). Tests: the page cases
+  in `mcp-tools.test.ts`, `residentPageTools.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one

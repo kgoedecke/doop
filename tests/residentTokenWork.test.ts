@@ -33,6 +33,7 @@ const run = () => ({
   repliedThreads: new Set<string>(),
   awaitingThreads: new Set<string>(),
   tokenWrites: 0,
+  arrangeWrites: 0,
 })
 const call = (name: string, input: unknown) => ({ type: 'tool_use' as const, id: 't1', name, input })
 
