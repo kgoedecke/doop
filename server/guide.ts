@@ -328,9 +328,11 @@ any public image URL. Source images in this order:
 - **When to use them.** Enumerated content — feature cards, step lists, capability
   grids, value rows — needs a visual anchor per item: an icon (search_icons), a big
   number, or a mono label. Naked text lists read as drafts. Pick ONE anchor style per
-  section and never use emoji as icons. Logos: always real marks from search_logos —
-  integrations, platforms, payment methods, and the customer walls and testimonial
-  cards too. Pick real brands the product's audience would recognize; invented quotes
+  section and never use emoji or Unicode symbols (✕ □ ▸ ⟶ ↗) as icons: they draw from
+  whatever fonts the viewer has, so they show up as empty boxes or colour emoji in
+  screenshots and exports — use search_icons or an inline SVG. Logos: always real marks
+  from search_logos — integrations, platforms, payment methods, and the customer walls
+  and testimonial cards too. Pick real brands the product's audience would recognize; invented quotes
   can sit beside a real company mark, but a placeholder mark is never acceptable.
 - **Nothing fits — draw it.** Inline SVG or pure CSS (gradients, patterns, shapes) in
   the frame. Never ship a gray "image goes here" box, and never guess an image URL
