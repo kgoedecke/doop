@@ -49,6 +49,7 @@ import { FrameLabelLayer } from './FrameLabelLayer'
 import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
+import { spaceWouldScroll } from '../lib/spaceScroll'
 
 const MIN_ZOOM = 0.08
 /* The settled world is laid out at up to this zoom too (layoutZoomFor), so
@@ -764,8 +765,13 @@ export function Stage({
       const t = e.target as HTMLElement
       return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
     }
+    /* WebKit hides the pointer after every key the page handles, held-space
+       repeats included (spaceScroll.ts), so with nothing focused the key is
+       cancelled only when it would scroll. Anything focused keeps it cancelled:
+       space is that element's own press (a <select> opens). */
     function startPan(e: KeyboardEvent) {
-      e.preventDefault()
+      const focused = document.activeElement && document.activeElement !== document.body
+      if (focused || spaceWouldScroll(lastPressed, e.shiftKey)) e.preventDefault()
       if (!useStore.getState().panMode) useStore.getState().setPanMode(true)
     }
     /* a chrome button keeps focus after a click (a layer's eye), and space
@@ -777,8 +783,10 @@ export function Stage({
        so the last input is tracked instead. Only controls are caught this
        early: Radix menus skip their own space once it is default-prevented. */
     let byPointer = false
-    function onPointerDownCapture() {
+    let lastPressed: Element | null = null
+    function onPointerDownCapture(e: PointerEvent) {
       byPointer = true
+      lastPressed = e.target instanceof Element ? e.target : null
     }
     function onDownCapture(e: KeyboardEvent) {
       if (e.key !== ' ') {
