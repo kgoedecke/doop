@@ -6,34 +6,37 @@ import { api } from './api'
  * its people and plan on its first frame instead of a skeleton. Home warms
  * it while a workspace's canvases are in view, since its settings are one
  * rail row away; the page still refetches on arrival and replaces it.
+ *
+ * Every fetch is its own request: a refresh after an edit must not ride on
+ * one that left before the edit. Each is numbered, and an answer older than
+ * the one already kept never replaces it.
  */
-const details = new Map<string, WorkspaceDetail>()
-const pending = new Map<string, Promise<WorkspaceDetail>>()
+const details = new Map<string, { detail: WorkspaceDetail; seq: number }>()
+const warming = new Set<string>()
+let lastSeq = 0
 
 export function cachedWorkspace(id: string): WorkspaceDetail | null {
-  return details.get(id) ?? null
+  return details.get(id)?.detail ?? null
 }
 
-/** Fetches a workspace's detail, sharing a request already in flight. */
-export function loadWorkspace(id: string): Promise<WorkspaceDetail> {
-  const inFlight = pending.get(id)
-  if (inFlight) return inFlight
-  const request = api
-    .getWorkspace(id)
-    .then((detail) => {
-      details.set(id, detail)
-      return detail
-    })
-    .catch((error: unknown) => {
-      details.delete(id)
-      throw error
-    })
-    .finally(() => pending.delete(id))
-  pending.set(id, request)
-  return request
+/** Fetches a workspace's detail afresh and keeps it unless a newer answer already landed. */
+export async function fetchWorkspace(id: string): Promise<WorkspaceDetail> {
+  const seq = ++lastSeq
+  try {
+    const detail = await api.getWorkspace(id)
+    if (seq > (details.get(id)?.seq ?? 0)) details.set(id, { detail, seq })
+    return detail
+  } catch (error) {
+    details.delete(id)
+    throw error
+  }
 }
 
-/** Warms the cache; a failure is the Workspace page's to report. */
+/** Warms the cache, one warm-up per workspace at a time; a failure is the Workspace page's to report. */
 export function prefetchWorkspace(id: string): void {
-  loadWorkspace(id).catch(() => undefined)
+  if (warming.has(id)) return
+  warming.add(id)
+  fetchWorkspace(id)
+    .catch(() => undefined)
+    .finally(() => warming.delete(id))
 }

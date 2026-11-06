@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkspaceDetail, WorkspaceRole, WorkspaceSummary } from '../../shared/types'
 import { formatUsd, TEAM_SEAT_PRICE, type WorkspaceStatus } from '../../shared/billing'
 import { navigate } from '../App'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
-import { cachedWorkspace, loadWorkspace } from '../lib/workspaceCache'
+import { cachedWorkspace, fetchWorkspace } from '../lib/workspaceCache'
 import { AppRail, railLayout, workspacePanesFor, type WorkspacePane } from '../components/AppRail'
 import { UpgradeModal } from '../components/WorkspaceModals'
 import { Avatar } from '../components/ui/avatar'
@@ -99,10 +99,18 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
      new plan shows in its row too */
   const [spaces, setSpaces] = useState<WorkspaceSummary[] | undefined>(undefined)
 
+  /* reloads can overlap (arrival, then an edit): only the latest one's answer is shown */
+  const reloadSeq = useRef(0)
+
   const reload = useCallback(() => {
-    loadWorkspace(workspaceId)
-      .then(setWs)
-      .catch(() => setMissing(true))
+    const seq = ++reloadSeq.current
+    fetchWorkspace(workspaceId)
+      .then((detail) => {
+        if (seq === reloadSeq.current) setWs(detail)
+      })
+      .catch(() => {
+        if (seq === reloadSeq.current) setMissing(true)
+      })
     api
       .listWorkspaces()
       .then((w) => setSpaces(w.workspaces))
@@ -613,6 +621,13 @@ function GeneralPane({
 }) {
   const t = useT()
   const [name, setName] = useState(ws.name)
+  /* a rename from elsewhere (or fresh details over cached ones) updates the
+     field unless it is being edited */
+  const [seenName, setSeenName] = useState(ws.name)
+  if (ws.name !== seenName) {
+    setSeenName(ws.name)
+    if (name === seenName) setName(ws.name)
+  }
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
