@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { DownloadIcon } from '@/components/ui/icons'
+import { IconButton } from '@/components/ui/icon-button'
+import { DownloadIcon, XIcon } from '@/components/ui/icons'
 import { type UpdateOffer, listenForUpdates, restartToUpdate } from '@/lib/desktopUpdate'
 import { useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
@@ -14,7 +14,9 @@ export function UpdateCard() {
   /* the live region stays mounted so the card is announced when it appears,
      without taking focus from whatever the person is doing */
   return (
-    <div aria-live="polite" className="fixed bottom-4 left-4 z-[80]">
+    /* bottom right, just above the canvas's zoom pill (14px in, 36px tall),
+       so it never covers the zoom or the getting-started card on the left */
+    <div aria-live="polite" className="fixed right-3.5 bottom-[58px] z-[80]">
       {offer && <UpdateCardControls offer={offer} onLater={() => setOffer(null)} />}
     </div>
   )
@@ -49,31 +51,41 @@ type UpdateCardViewProps = {
 
 export function UpdateCardView({ version, restarting = false, onRestart, onLater, className }: UpdateCardViewProps) {
   const t = useT()
+  /* the canvas's getting-started card in shape (src/components/Onboarding.tsx):
+     a titled panel with its dismiss in the header */
   return (
-    <Card
-      role="region"
+    <section
       aria-labelledby="update-card-title"
       aria-describedby="update-card-body"
-      className={cn('w-[300px] rounded-panel p-4 shadow-pop animate-[chip-in_0.2s_ease]', className)}
+      className={cn(
+        'flex w-[340px] flex-col gap-3 rounded-panel bg-surface px-5 pt-4 pb-5 shadow-pop animate-[chip-in_0.2s_ease]',
+        className,
+      )}
     >
-      <div className="flex size-11 items-center justify-center rounded-card bg-paper-deep text-ink-soft">
-        <DownloadIcon size={20} aria-hidden />
+      <header className="flex items-center justify-between">
+        <h2 id="update-card-title" className="flex items-center gap-2 text-lead font-semibold text-ink">
+          <DownloadIcon size="rail" className="text-brand" aria-hidden />
+          {t('shell.updateTitle')}
+        </h2>
+        <IconButton
+          size="sm"
+          className="-mr-1"
+          aria-label={t('shell.updateLater')}
+          disabled={restarting}
+          onClick={onLater}
+        >
+          <XIcon size="rail" />
+        </IconButton>
+      </header>
+      <div className="flex flex-col gap-1">
+        <p id="update-card-body" className="text-pretty text-body text-ink-soft">
+          {t('shell.updateBody', { version })}
+        </p>
+        <p className="text-pretty text-caption text-ink-faint">{t('shell.updateAgentNote')}</p>
       </div>
-      <h2 id="update-card-title" className="mt-3 text-copy font-medium text-ink">
-        {t('shell.updateTitle')}
-      </h2>
-      <p id="update-card-body" className="mt-1 text-pretty text-body text-ink-soft">
-        {t('shell.updateBody', { version })}
-      </p>
-      <p className="mt-1 text-pretty text-caption text-ink-faint">{t('shell.updateAgentNote')}</p>
-      <div className="mt-4 flex gap-2">
-        <Button variant="primary" className="flex-1" disabled={restarting} onClick={onRestart}>
-          {restarting ? t('shell.updateRestarting') : t('shell.updateRestart')}
-        </Button>
-        <Button className="flex-1" disabled={restarting} onClick={onLater}>
-          {t('shell.updateLater')}
-        </Button>
-      </div>
-    </Card>
+      <Button variant="primary" size="sm" className="self-start" disabled={restarting} onClick={onRestart}>
+        {restarting ? t('shell.updateRestarting') : t('shell.updateRestart')}
+      </Button>
+    </section>
   )
 }
