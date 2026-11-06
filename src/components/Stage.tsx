@@ -870,10 +870,13 @@ export function Stage({
     }
     /* a cancelled pointer (touch or pen taken by the system) ends the pan
        too, but is not a click */
+    function onCancel(ev: PointerEvent) {
+      if (ev.pointerId === e.pointerId) end()
+    }
     function end() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', end)
+      window.removeEventListener('pointercancel', onCancel)
       setPanning(false)
       unlockSelection()
     }
@@ -883,7 +886,7 @@ export function Stage({
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', end)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   function startMarquee(e: React.PointerEvent) {
@@ -922,10 +925,13 @@ export function Stage({
         .map((f) => f.id)
       useStore.getState().selectMany([...keep, ...hits.filter((id) => !keep.includes(id))])
     }
+    function onCancel(ev: PointerEvent) {
+      if (ev.pointerId === e.pointerId) end()
+    }
     function end() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('pointercancel', end)
+      window.removeEventListener('pointercancel', onCancel)
       setMarquee(null)
       unlockSelection()
     }
@@ -936,7 +942,7 @@ export function Stage({
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', end)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   function onPointerMove(e: React.PointerEvent) {
