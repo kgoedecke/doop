@@ -9,8 +9,11 @@ rather than hand-rolling primitives; it writes into `src/components/ui` per the 
 
 White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no warm cream.
 
-- `--paper` `#fdfdfd` (canvas) / `--paper-deep` `#f0f0f0` (pressed or selected row fill) / `--sub`
+- `--paper` `#fdfdfd` (page ground) / `--paper-deep` `#f0f0f0` (pressed or selected row fill) / `--sub`
   `#f7f7f7` (filled field wells) - background layers.
+- `--canvas` `#f5f5f5` (`bg-canvas`) - the editor stage behind the frames, a step below white so a
+  white frame reads on it without a border (frames wear no resting edge, only a soft brand ring on
+  hover); in dark it is `--paper`.
 - `--surface` `#ffffff` - card/panel surfaces.
 - `--ink` `#111`, `--ink-soft` `#5f5e5b`, `--ink-faint` `#9c9b99`, `--ink-ghost` `#b8b8b8` - text, in
   descending emphasis (ghost: placeholders, unit letters).

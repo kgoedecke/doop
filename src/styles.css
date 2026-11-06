@@ -9,6 +9,7 @@
    component rules are migrated incrementally. */
 @theme inline {
   --color-paper: var(--paper);
+  --color-canvas: var(--canvas);
   --color-paper-deep: var(--paper-deep);
   --color-sub: var(--sub);
   --color-surface: var(--surface);
@@ -134,6 +135,9 @@
      --paper is the canvas, --surface a floating panel, --paper-deep the
      pressed/selected row fill, --sub the filled well behind a field. */
   --paper: #fdfdfd;
+  /* the stage behind the frames: a step below white, so a white frame reads
+     on it without a border (Figma's canvas grey) */
+  --canvas: #f5f5f5;
   --paper-deep: #f0f0f0;
   --surface: #ffffff;
   --sub: #f7f7f7;
@@ -406,6 +410,7 @@
      shadcn tokens above resolve through these, so only the primitives and
      the shadows are redefined. */
   --paper: #141414;
+  --canvas: var(--paper);
   --paper-deep: #2a2a2a;
   --surface: #1c1c1c;
   --sub: #242424;

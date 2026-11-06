@@ -1481,18 +1481,25 @@ export const FrameView = memo(function FrameView({
             ref={surfaceRef}
             className={cn(
               'absolute inset-0 overflow-hidden',
-              isCanvasElement(frame.html) ? 'bg-transparent' : 'border border-line bg-white',
+              isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white',
               /* Select keeps the arrow, like Figma: the frame is a thing to
                  point at, not a handle. The Hand tool's grab and the Comment
                  tool's bubble come from the Stage, which overrides every
                  cursor under it. */
               elementMove.moving ? 'cursor-move' : 'cursor-default',
-              !isCanvasElement(frame.html) && (dragging ? 'shadow-pop' : 'shadow-card'),
+              /* no edge at rest, as in Figma: the artwork meets the canvas
+                 directly. A hovered frame wears a soft one-screen-pixel brand ring
+                 (the selected one has its own), a dragged one lifts */
+              !isCanvasElement(frame.html) &&
+                (dragging
+                  ? 'shadow-pop'
+                  : !selected &&
+                    'hover:shadow-[0_0_0_calc(1px/var(--zoom,1))_color-mix(in_srgb,var(--brand)_55%,transparent)]'),
               editing && 'cursor-text',
               !stream &&
                 remoteEditor &&
                 'outline-2 outline-offset-1 outline-solid outline-[var(--editing-color,var(--brand))]',
-              stream && 'border-transparent outline-none',
+              stream && 'outline-none',
             )}
             /* a remote editor's ring has the selection ring's geometry: two
                screen pixels straddling the frame's edge at every zoom */
