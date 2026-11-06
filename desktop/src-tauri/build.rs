@@ -11,6 +11,8 @@ fn main() {
             "claude_stop",
             "claude_add_extension",
             "codex_add_mcp",
+            "fonts_choose_local",
+            "fonts_read_local",
             "view_menu_state",
         ]),
     ))

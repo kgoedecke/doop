@@ -13,6 +13,8 @@ vi.mock('../src/lib/api', () => ({
   api: {
     updateFrame: () => updateFrame(),
     deleteFrame: () => deleteFrame(),
+    /* the test frames tie in the stack, so a drop between them renumbers first */
+    restackFrames: () => Promise.resolve([]),
     createFrame: (canvasId: string, input: Partial<Frame> & { name: string }) => createFrame(canvasId, input),
   },
   errorMessage: (_err: unknown, fallback: string) => fallback,
@@ -88,6 +90,7 @@ const flush = () => act(async () => {})
 describe('LayersPanel drag between frames', () => {
   beforeEach(() => {
     updateFrame.mockClear()
+    createFrame.mockClear()
     const canvas: Canvas = {
       id: 'c1',
       name: 'Canvas',
@@ -123,6 +126,34 @@ describe('LayersPanel drag between frames', () => {
   afterEach(() => {
     act(() => root.unmount())
     container.remove()
+  })
+
+  it('draws a drop over an emptied frame as one line under its row, not a box around both', () => {
+    const P = 'body:nth-of-type(1) > p:nth-of-type(1)'
+    act(() => row('f1').querySelector<HTMLElement>('[data-icon]')!.click())
+    act(() => row('f2').querySelector<HTMLElement>('[data-icon]')!.click())
+    dragRow(`f1|${P}`, 'f2')
+    /* hold the moved element over the empty caption */
+    const target = caption('f1')
+    document.elementFromPoint = () => target
+    target.getBoundingClientRect = () => ({ top: 0, height: 28 }) as DOMRect
+    act(() => {
+      row(`f2|${P}`).dispatchEvent(
+        new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 0, clientY: 0 }),
+      )
+    })
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 14 }))
+    })
+    const outlined = (el: HTMLElement) => el.className.includes('inset_0_0_0')
+    expect(outlined(row('f1'))).toBe(false)
+    expect(outlined(caption('f1'))).toBe(false)
+    expect(caption('f1').querySelector('.bg-brand')).not.toBeNull()
+    expect(row('f1').querySelector('.bg-brand')).toBeNull()
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointerup', { clientX: 10, clientY: 14 }))
+    })
+    expect(html('f1')).toMatch(/<p[^>]*>only<\/p>/)
   })
 
   it('carries a frame’s only element over and back onto the emptied frame row', () => {
@@ -194,5 +225,30 @@ describe('LayersPanel drag between frames', () => {
     expect(createFrame.mock.calls[0]![1]).toMatchObject({ name: 'only', x: 5, y: 5, width: 40, height: 20 })
     expect(html('f1')).not.toContain('<p>')
     expect(row(`new|${P}`).textContent).toContain('only')
+  })
+  it('lifts a layer onto the canvas in front of its own frame, the frontmost in the list', async () => {
+    const P = 'body:nth-of-type(1) > p:nth-of-type(1)'
+    /* the list runs front first: put f1 at the front of the stack, so its
+       row is the first in the panel and nothing lies above it */
+    const canvas = useStore.getState().canvas!
+    act(() =>
+      useStore
+        .getState()
+        .setCanvas({ ...canvas, frames: [...canvas.frames.filter((f) => f.id !== 'f1'), canvas.frames[0]!] }),
+    )
+    const rootKeys = () => [...container.querySelectorAll<HTMLElement>('[data-row-key]')].map((r) => r.dataset.rowKey!)
+    expect(rootKeys()[0]).toBe('f1')
+    act(() => row('f1').querySelector<HTMLElement>('[data-icon]')!.click())
+    /* the band above the layer's own frame row is the root too */
+    dragRow(`f1|${P}`, 'f1', 2)
+    await flush()
+    await flush()
+    expect(createFrame).toHaveBeenCalledTimes(1)
+    expect(createFrame.mock.calls[0]![1]).toMatchObject({ name: 'only', x: 5, y: 5, width: 40, height: 20 })
+    expect(html('f1')).not.toContain('<p>')
+    expect(rootKeys()[0]).toBe(`new|${P}`)
+    expect(row(`new|${P}`).textContent).toContain('only')
+    const order = useStore.getState().canvas!.frames.map((f) => f.id)
+    expect(order[order.length - 1]).toBe('new')
   })
 })

@@ -11,6 +11,7 @@ import * as demo from './demo.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { acceptInvites } from './workspaces.ts'
 import { purgeUserData } from './accountDeletion.ts'
+import { MCP_REFRESH_TOKEN_TTL_S } from './mcpTokens.ts'
 import { createHash } from 'node:crypto'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
@@ -309,6 +310,23 @@ async function linkVerifiedProviderEmail(profile: {
       .from(authSchema.user)
       .where(and(eq(sql`lower(${authSchema.user.email})`, email), eq(authSchema.user.emailVerified, false)))
     if (existing) {
+      /* The IdP proved the person signing in owns the ADDRESS. It proved
+         nothing about who set the local account's password: with
+         verification required, anyone could have typed this email into the
+         signup form first and parked a password on it, waiting for the real
+         owner's Google sign-in to flip the flag below and make that password
+         live (a pre-account takeover). That password was never usable by
+         anyone, so dropping it costs a genuine owner nothing — they sign in
+         through the IdP now, and a password reset sets a fresh one. Without
+         required verification every password account is unverified and in
+         use, so there the password is left alone: it was already a working
+         login for whoever set it, and nothing here can tell owner from
+         squatter. */
+      if (REQUIRE_VERIFICATION) {
+        await db
+          .delete(authSchema.account)
+          .where(and(eq(authSchema.account.userId, existing.id), eq(authSchema.account.providerId, 'credential')))
+      }
       await db.update(authSchema.user).set({ emailVerified: true }).where(eq(authSchema.user.id, existing.id))
     }
   }
@@ -349,6 +367,9 @@ function buildAuth() {
        it, so in dev it must be the web port that proxies /api and /mcp */
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
+    /* the provider tokens a social or SSO sign-in leaves on its account row,
+       sealed with the auth secret; doop never reads them back */
+    account: { encryptOAuthTokens: true },
     /* prod: the public origin, plus any extras from env, plus Apple when its
        web flow is on: Apple returns the authorization code by POSTing a form
        from appleid.apple.com to /api/auth/callback/apple, and better-auth's
@@ -500,7 +521,10 @@ function buildAuth() {
        so the gate's own default (matching, IdP-verified email) is what
        actually decides linking, as intended. */
     plugins: [
-      mcp({ loginPage: '/', oidcConfig: { loginPage: '/', consentPage: '/oauth/consent' } }),
+      mcp({
+        loginPage: '/',
+        oidcConfig: { loginPage: '/', consentPage: '/oauth/consent', refreshTokenExpiresIn: MCP_REFRESH_TOKEN_TTL_S },
+      }),
       admin({ impersonationSessionDuration: 15 * 60 }),
       /* oneTimeToken: how a Google / Microsoft / SSO sign-in finished in the
          system browser reaches the desktop app (src/lib/desktopAuth.ts). The

@@ -2,9 +2,11 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { recordCreate, recordCreates } from './history'
+import { recordCreates } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
+import { importSvgInBrowser, looksLikeSvg } from './svgImport'
+import { importPdf, isPdfFile } from './pdfImport'
 
 /** One copied frame, positioned relative to the top-left of the copied group
  *  so a multi-frame paste keeps the frames' layout. */
@@ -64,6 +66,12 @@ function clipBounds(frames: ClipFrame[]) {
  *  failing must not orphan its siblings: whatever landed is still recorded
  *  in history (undoable as a group) and becomes the selection. */
 async function createFrames(requests: { canvasId: string; frame: Parameters<typeof api.createFrame>[1] }[]) {
+  return (await settleFrames(requests)).flatMap((frame) => (frame ? [frame] : []))
+}
+
+/** Like `createFrames`, but says which request each frame came from: a
+ *  `null` where that request failed. */
+async function settleFrames(requests: { canvasId: string; frame: Parameters<typeof api.createFrame>[1] }[]) {
   const results = await Promise.allSettled(requests.map((r) => api.createFrame(r.canvasId, r.frame)))
   const created = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
   const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -72,7 +80,7 @@ async function createFrames(requests: { canvasId: string; frame: Parameters<type
     recordCreates(created)
     useStore.getState().selectMany(created.map((f) => f.id))
   }
-  return created
+  return results.map((r) => (r.status === 'fulfilled' ? r.value : null))
 }
 
 /** Create the copied frames with the group's top-left at a world point. */
@@ -169,18 +177,23 @@ function imageSize(blob: Blob): Promise<{ width: number; height: number }> {
 /** Horizontal breathing room between images dropped together. */
 const IMAGE_ROW_GAP = 40
 
-/** Upload images and place them as canvas elements laid out in a row,
- *  centered as a group on `at` (a screen point, the middle of the view when
- *  left out; one image lands dead-center). Sizes are read first so
- *  differently-sized images sit side by side, never stacked. */
-export async function uploadImageFrames(
-  canvasId: string,
-  files: File[],
-  { fallbackName = 'Pasted image', at }: { fallbackName?: string; at?: { x: number; y: number } } = {},
-): Promise<Frame[]> {
-  const dims = await Promise.all(files.map((f) => imageSize(f)))
-  const scaled = dims.map((d) => {
+interface Slot {
+  width: number
+  height: number
+  /** A vector keeps its proportions; a bitmap sits in a box it fits inside. */
+  uniform?: boolean
+  /** A page keeps its size: its markup is laid out in those px. */
+  exact?: boolean
+}
+
+/** Lay sizes out in a row centered as a group on `at` (a screen point, the
+ *  middle of the view when left out; one lands dead-center), in world px. */
+function rowSlots(sizes: Slot[], at?: { x: number; y: number }) {
+  const scaled = sizes.map((d) => {
+    if (d.exact) return { width: d.width, height: d.height }
     const scale = Math.min(1, MAX_PASTE_DIM / Math.max(d.width, d.height))
+    if (d.uniform)
+      return { width: Math.max(1, Math.round(d.width * scale)), height: Math.max(1, Math.round(d.height * scale)) }
     return { width: Math.max(40, Math.round(d.width * scale)), height: Math.max(40, Math.round(d.height * scale)) }
   })
   const vp = useStore.getState().viewport
@@ -193,47 +206,193 @@ export async function uploadImageFrames(
   const cy = (point.y - vp.y) / vp.zoom
   const totalW = scaled.reduce((sum, s) => sum + s.width, 0) + IMAGE_ROW_GAP * (scaled.length - 1)
   let x = cx - totalW / 2
-  const placed = scaled.map((size) => {
-    const slot = { ...size, x }
+  return scaled.map((size) => {
+    const slot = { ...size, x: Math.round(x), y: Math.round(cy - size.height / 2) }
     x += size.width + IMAGE_ROW_GAP
     return slot
   })
+}
+
+/** Upload images and place them as canvas elements laid out in a row,
+ *  centered as a group on `at`. Sizes are read first so differently-sized
+ *  images sit side by side, never stacked. */
+export async function uploadImageFrames(
+  canvasId: string,
+  files: File[],
+  { fallbackName = 'Pasted image', at }: { fallbackName?: string; at?: { x: number; y: number } } = {},
+): Promise<Frame[]> {
+  const placed = rowSlots(await Promise.all(files.map((f) => imageSize(f))), at)
   return Promise.all(
     files.map(async (file, i) => {
       const slot = placed[i]
       if (!slot) throw new Error('image slot missing')
       const { url } = await api.uploadAsset(canvasId, file)
-      const name = file.name.replace(/\.[a-z0-9]+$/i, '').trim() || fallbackName
+      const name = fileStem(file.name) || fallbackName
       return api.createFrame(canvasId, {
         name,
         html: imageElementHtml(url, name),
         width: slot.width,
         height: slot.height,
-        x: Math.round(slot.x),
-        y: Math.round(cy - slot.height / 2),
+        x: slot.x,
+        y: slot.y,
       })
     }),
   )
 }
 
-export async function pasteImagesCentered(canvasId: string, files: File[]) {
-  const frames = await uploadImageFrames(canvasId, files)
-  posthog.capture('image_pasted', { count: frames.length })
-  adoptImageFrames(frames)
+function fileStem(name: string): string {
+  return name.replace(/\.[a-z0-9]+$/i, '').trim()
 }
 
-/** Images dragged in from the desktop land centered on the drop point. */
-export async function dropImages(canvasId: string, files: File[], at: { x: number; y: number }) {
-  const frames = await uploadImageFrames(canvasId, files, { fallbackName: 'Dropped image', at })
-  posthog.capture('image_dropped', { count: frames.length })
-  adoptImageFrames(frames)
+/* ---- files from the clipboard or a drop: bitmaps become pictures, SVGs editable shapes ---- */
+
+/** An SVG on the clipboard or in a drop, by type or by name. */
+export function isSvgFile(file: File): boolean {
+  return file.type === 'image/svg+xml' || /\.svg$/i.test(file.name)
 }
 
-/** New image frames are undoable and the last one becomes the selection. */
-function adoptImageFrames(frames: Frame[]) {
-  frames.forEach(recordCreate)
-  const last = frames[frames.length - 1]
-  if (last) useStore.getState().select(last.id)
+/** The text on the clipboard when it is an SVG document, as copying a file's
+ *  source or an icon from a design tool puts there. */
+export function svgMarkupOf(data: DataTransfer | null): string | null {
+  const text = data?.getData('text/plain') ?? ''
+  return looksLikeSvg(text) ? text : null
+}
+
+/** What a paste or drop brought: image files, SVG files, PDFs, or SVG source text. */
+export interface IncomingFiles {
+  images: File[]
+  vectors: File[]
+  pdfs: File[]
+  markup?: string | null
+}
+
+export function splitIncoming(files: File[], markup: string | null = null): IncomingFiles {
+  const vectors = files.filter(isSvgFile)
+  return {
+    vectors,
+    pdfs: files.filter(isPdfFile),
+    images: files.filter((f) => f.type.startsWith('image/') && !isSvgFile(f)),
+    markup: files.length ? null : markup,
+  }
+}
+
+export function hasIncoming({ images, vectors, pdfs, markup }: IncomingFiles): boolean {
+  return images.length > 0 || vectors.length > 0 || pdfs.length > 0 || !!markup
+}
+
+/** One frame to create, sized and named, with its markup ready. */
+type Prepared = { kind: 'image' | 'vector' | 'page'; name: string; size: Slot; html: () => Promise<string> }
+
+/** What a paste or drop landed, by kind. */
+interface Landed {
+  images: number
+  vectors: number
+  pages: number
+}
+
+/** Place everything a paste or drop brought as one row, bitmaps and vectors
+ *  alike, centered on `at`. Whatever lands is recorded as one undo step and
+ *  becomes the selection, even when a sibling's upload or request fails. */
+async function importIncoming(
+  canvasId: string,
+  incoming: IncomingFiles,
+  { fallbackName, at }: { fallbackName: string; at?: { x: number; y: number } },
+): Promise<Landed> {
+  const images: Prepared[] = await Promise.all(
+    incoming.images.map(async (file) => ({
+      kind: 'image' as const,
+      name: fileStem(file.name) || fallbackName,
+      size: await imageSize(file),
+      html: async () => {
+        const { url } = await api.uploadAsset(canvasId, file)
+        return imageElementHtml(url, fileStem(file.name) || fallbackName)
+      },
+    })),
+  )
+  const sources = incoming.markup
+    ? [{ name: 'Vector', markup: incoming.markup }]
+    : await Promise.all(
+        incoming.vectors.map(async (file) => ({ name: fileStem(file.name) || 'Vector', markup: await file.text() })),
+      )
+  const vectors: Prepared[] = sources.flatMap(({ name, markup }) => {
+    const result = importSvgInBrowser(markup, name)
+    if (!result) return []
+    return [
+      {
+        kind: 'vector' as const,
+        name,
+        size: { width: result.width, height: result.height, uniform: true },
+        html: () => Promise.resolve(result.html),
+      },
+    ]
+  })
+  if (sources.length && !vectors.length && !images.length) throw new Error('The SVG has no shapes to import.')
+  /* a PDF is one frame per page, at the page's printed size */
+  /* a PDF that cannot be read drops out on its own; its siblings still land */
+  const read = await Promise.allSettled(
+    incoming.pdfs.map(async (file) =>
+      importPdf(new Uint8Array(await file.arrayBuffer()), fileStem(file.name) || 'PDF', {
+        importSvg: importSvgInBrowser,
+        /* pictures become assets, so a photo-heavy page stays under the frame's size cap */
+        storeImage: async (bytes, mime) =>
+          (await api.uploadAsset(canvasId, new Blob([bytes as BlobPart], { type: mime }))).url,
+      }),
+    ),
+  )
+  const unreadable = read.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (unreadable) console.error('PDF import failed', unreadable.reason)
+  const pages: Prepared[] = read
+    .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+    .map((page) => ({
+      kind: 'page' as const,
+      name: page.name,
+      size: { width: page.width, height: page.height, exact: true },
+      html: () => Promise.resolve(page.html),
+    }))
+  if (incoming.pdfs.length && !pages.length && !vectors.length && !images.length)
+    throw unreadable ? new Error('The PDF could not be read.') : new Error('The PDF has no pages to import.')
+  const prepared = [...vectors, ...pages, ...images]
+  const placed = rowSlots(
+    prepared.map((p) => p.size),
+    at,
+  )
+  /* a bitmap whose upload fails (too large, say) drops out on its own; the
+     others keep their slots */
+  const ready = await Promise.allSettled(
+    prepared.map(async (p, i) => {
+      const slot = placed[i]!
+      return {
+        kind: p.kind,
+        canvasId,
+        frame: { name: p.name, html: await p.html(), width: slot.width, height: slot.height, x: slot.x, y: slot.y },
+      }
+    }),
+  )
+  const requests = ready.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+  const upload = ready.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (upload) console.error(`${ready.length - requests.length} of ${ready.length} file(s) failed`, upload.reason)
+  const frames = await settleFrames(requests)
+  const landed: Landed = { images: 0, vectors: 0, pages: 0 }
+  const counted = { image: 'images', vector: 'vectors', page: 'pages' } as const
+  frames.forEach((frame, i) => {
+    if (frame) landed[counted[requests[i]!.kind]]++
+  })
+  if (!landed.images && !landed.vectors && !landed.pages && prepared.length) {
+    if (upload) throw upload.reason instanceof Error ? upload.reason : new Error(String(upload.reason))
+    throw new Error('Couldn’t add the files.')
+  }
+  return landed
+}
+
+export async function pasteFilesCentered(canvasId: string, incoming: IncomingFiles) {
+  const landed = await importIncoming(canvasId, incoming, { fallbackName: 'Pasted image' })
+  posthog.capture('files_pasted', landed)
+}
+
+/** Files dragged in from the desktop land centered on the drop point. */
+export async function dropFiles(canvasId: string, incoming: IncomingFiles, at: { x: number; y: number }) {
+  const landed = await importIncoming(canvasId, incoming, { fallbackName: 'Dropped image', at })
+  posthog.capture('files_dropped', landed)
 }
 
 /** Duplicate frames 40px down-right of the originals, keeping their layout;

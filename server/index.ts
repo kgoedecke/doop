@@ -1,9 +1,11 @@
 import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import { normalizePageBackground } from '../shared/pageBackground.ts'
+import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
-import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
+import { localAgentRouter, handleLocalAgentMcp, wake as wakeUserWork } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -28,10 +30,16 @@ import * as commentNotifications from './commentNotifications.ts'
 import { notificationsRouter } from './notifications.ts'
 import * as webhooks from './webhooks.ts'
 import { webhooksRouter } from './webhookRoutes.ts'
+import { fontsRouter } from './fontRoutes.ts'
+import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
+import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
+import { fontsForCanvas, hydrateFonts } from './fonts.ts'
+import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
   canManageCanvas,
   canvasRole,
+  guestCanvasRole,
   hasDurableCanvasAccess,
   isAdmin,
   roomMessageNeeds,
@@ -41,12 +49,15 @@ import { auth, initAuth, syncAdmins, getUserName, loginProvidersConfig } from '.
 import { adminRouter } from './admin.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
+import { startMcpTokenPrune } from './mcpTokens.ts'
 import { integrationsRouter, relayDesktopCallback } from './integrations.ts'
 import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
 import { db, initDb } from './db/index.ts'
+import { resealSecrets } from './secretBackfill.ts'
+import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
 import * as persist from './db/persist.ts'
 import { handleMcpRequest } from './mcp.ts'
@@ -60,18 +71,20 @@ import * as githubApp from './githubApp.ts'
 import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
-import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
+import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
-import { AGENT_MODELS } from './openaiAgent.ts'
+import { accountsView, listRunners, MODEL_MENUS } from './agentRunners.ts'
+import { setStoredDefault } from './agentDefaults.ts'
+import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
-import { ANTHROPIC_MODELS, GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
-import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
+import { emailShare } from './canvasShares.ts'
+import * as userEvents from './userEvents.ts'
 import type { Canvas, ClientMessage, Frame, Presence, ServerMessage } from '../shared/types.ts'
 
 const PORT = env.PORT
@@ -100,6 +113,7 @@ const data = await persist.hydrate()
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await webhooks.hydrateWebhooks()
+await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
 await seed()
@@ -149,8 +163,9 @@ interface Conn {
   ws: WebSocket
   canvasId: string
   /** the session's user — the role is re-read from it on every message, so
-   *  a link changed mid-visit takes effect without a reconnect */
-  userId: string
+   *  a link changed mid-visit takes effect without a reconnect. Unset for a
+   *  signed-out guest on a link-shared canvas. */
+  userId?: string
   presence: Presence
   /** an admin viewing as someone else: receives updates, emits nothing.
    *  Showing their borrowed identity as a live cursor would tell the room
@@ -161,16 +176,56 @@ interface Conn {
   unfollowFrames?: () => void
 }
 
+/* What a signed-out guest is not sent: the team's conversation (comments,
+   agent tasks and their feedback, the activity feed) and its memory. A guest
+   sees the frames; the rest is for people with an account. */
+const GUEST_HIDDEN: ReadonlySet<ServerMessage['type']> = new Set([
+  'task',
+  'feedback',
+  'comment',
+  'activity',
+  'decision',
+  'proposal',
+  'reference',
+  'guidelines',
+  /* an agent's status line is its task's summary (setAgentStatus) */
+  'status',
+] satisfies ServerMessage['type'][])
+
+/** A presence as a guest sees it: without the status line, which carries
+ *  the same task summary GUEST_HIDDEN keeps from them. */
+function guestPresence<P extends Presence>({ status: _status, ...presence }: P): Omit<P, 'status'> {
+  return presence
+}
+
+/** A room message as a guest may see it, or null when it is withheld. */
+function forGuest(msg: ServerMessage): ServerMessage | null {
+  if (GUEST_HIDDEN.has(msg.type)) return null
+  return msg.type === 'presence:join' ? { ...msg, presence: guestPresence(msg.presence) } : msg
+}
+
 const conns = new Map<WebSocket, Conn>()
 
 function room(canvasId: string): Conn[] {
   return [...conns.values()].filter((c) => c.canvasId === canvasId)
 }
 
+/** A changed profile photo reaches every room the person is in: their
+ *  presence is re-announced with the new face (a join for a known clientId
+ *  is an update on the client). */
+function refreshPresenceImage(userId: string, image: string | undefined): void {
+  for (const conn of conns.values()) {
+    if (conn.userId !== userId || conn.silent) continue
+    conn.presence = { ...conn.presence, image }
+    broadcast(conn.canvasId, { type: 'presence:join', presence: conn.presence }, conn.presence.clientId)
+  }
+}
+
 /** The live role of one room connection (null once access is gone). */
 function connRole(conn: Conn): CanvasRole | null {
   const canvas = store.getCanvasMetadata(conn.canvasId)
-  return canvas ? canvasRole(conn.userId, canvas) : null
+  if (!canvas) return null
+  return conn.userId ? canvasRole(conn.userId, canvas) : guestCanvasRole(canvas)
 }
 
 /* After a share-link change: everyone in the room learns their new role (the
@@ -200,7 +255,8 @@ function send(ws: WebSocket, msg: ServerMessage) {
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
-    send(c.ws, msg)
+    const shown = c.userId ? msg : forGuest(msg)
+    if (shown) send(c.ws, shown)
   }
 }
 
@@ -409,6 +465,9 @@ app.get('/a/:id.:ext', async (req, res) => {
     res.set('Content-Type', found.meta.mime)
     res.set('Cache-Control', 'public, max-age=31536000, immutable')
     res.set('X-Content-Type-Options', 'nosniff')
+    /* Fonts load with CORS from sandboxed frames with opaque origins.
+       Assets are public by unguessable id. */
+    res.set('Access-Control-Allow-Origin', '*')
     /* svg can script when opened as a document — neuter it; <img> embeds
        are unaffected */
     if (found.meta.mime === 'image/svg+xml')
@@ -626,6 +685,8 @@ interface SessionUser {
   id: string
   name: string
   email: string
+  /** the profile photo's URL; shown only when avatarUrl() admits it */
+  image?: string | null
   role?: string | null
 }
 declare global {
@@ -661,6 +722,9 @@ app.use('/api', async (req, res, next) => {
   }
 })
 
+/* Home's push channel: tells an open dashboard its canvas list changed */
+app.get('/api/me/events', userEvents.subscribe)
+
 /* Frames live in actors, so the canvas or frame a route names is loaded once
    here and the access helpers below stay synchronous. Routes that read frame
    HTML (imports inspecting embedded markers, the PDF export) get full frames;
@@ -687,11 +751,12 @@ app.use('/api/frames/:frameId', (req, res, next) => {
 })
 
 app.get('/api/me', async (req, res) => {
-  const { id, name, email } = req.user!
+  const { id, name, email, image } = req.user!
   res.json({
     id,
     name,
     email,
+    image: avatarUrl(image),
     admin: isAdmin(req.user),
     /* 'team' while a member of a live paid workspace — the account menu's plan line */
     plan: workspaces.planFor(id),
@@ -700,6 +765,33 @@ app.get('/api/me', async (req, res) => {
        being viewed, not the admin doing the viewing */
     impersonating: req.impersonatedBy ? { byName: (await getUserName(req.impersonatedBy)) ?? 'an admin' } : undefined,
   })
+})
+
+/* The profile photo: raw image bytes in, the face's URL out. Rooms the
+   person is in see the new face at once; the session the browser holds is
+   re-read by the page, since better-auth serves it from the row. */
+app.post('/api/me/avatar', express.raw({ type: () => true, limit: MAX_AVATAR_BYTES + 1024 }), async (req, res) => {
+  try {
+    const image = await setAvatar(req.user!.id, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0))
+    refreshPresenceImage(req.user!.id, image)
+    res.json({ image })
+  } catch (e) {
+    if (e instanceof AvatarInputError) res.status(400).json({ error: e.message })
+    else {
+      console.error('[avatar] upload failed', e)
+      res.status(500).json({ error: 'the photo could not be saved — try again' })
+    }
+  }
+})
+
+app.delete('/api/me/avatar', async (req, res, next) => {
+  try {
+    await clearAvatar(req.user!.id)
+    refreshPresenceImage(req.user!.id, undefined)
+    res.json({ ok: true })
+  } catch (e) {
+    next(e)
+  }
 })
 
 /* Resolve the application from the consent code itself, never a client name or
@@ -849,6 +941,13 @@ function requireFrame(
 app.use('/api/local-agent', localAgentRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
+app.use('/api/fonts', fontsRouter)
+
+/* the font library a canvas designs with: its workspace's, or its owner's */
+app.get('/api/canvases/:id/fonts', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (canvas) res.json(fontsForCanvas(canvas))
+})
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)
@@ -866,38 +965,49 @@ app.get('/api/agent-allowance', (req, res) => {
     .catch(() => res.status(500).json({ error: 'allowance unavailable' }))
 })
 
+/* the connections the composer may send a task to, and the Settings default */
+app.get('/api/agent-runners', (req, res) => {
+  listRunners(req.user!.id)
+    .then((runners) => res.json(runners))
+    .catch(() => res.status(500).json({ error: 'runners unavailable' }))
+})
+
+/* which connection comments, @mentions and automations run on; it has to be
+   one that is connected and on right now */
+app.put('/api/agent-runners/default', async (req, res) => {
+  const provider: unknown = req.body?.provider
+  if (!isRunnerProvider(provider)) return res.status(400).json({ error: 'unknown connection' })
+  try {
+    const userId = req.user!.id
+    const usable =
+      provider === 'claude-local'
+        ? (await getLocalAgentPreference(userId)).enabled
+        : (await modelAccounts.getAccount(userId, provider))?.enabled
+    if (!usable) return res.status(400).json({ error: 'connect and switch that on first' })
+    await setStoredDefault(userId, provider)
+    res.json(await accountsView(userId))
+    wakeUserWork(userId)
+  } catch {
+    res.status(500).json({ error: 'could not change the default' })
+  }
+})
+
 /* ---- the user's own model account: what keeps the Doop Agent running once
    the free tasks are gone. Tokens live server-side and are never returned. */
 
-/* one curated menu per account kind, with the vision flag the picker renders;
-   the pre-roster providers all see images */
-const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
-  chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'anthropic-key': ANTHROPIC_MODELS,
-  'openrouter-key': OPENROUTER_MODELS,
-  'gemini-key': GEMINI_MODELS,
-}
-
-/* Every route that returns an account status returns the SAME shape: the
-   client re-renders straight from the response, so dropping the menus on
-   a PATCH would collapse the picker until the next reload. */
-function accountView(status: modelAccounts.AccountStatus) {
-  return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
-}
-
+/* Every account route answers with the whole Settings view (every account,
+   on or off, and the default): the client re-renders straight from it. */
 app.get('/api/model-account', (req, res) => {
-  modelAccounts
-    .getStatus(req.user!.id)
-    .then((status) => res.json(accountView(status)))
+  accountsView(req.user!.id)
+    .then((view) => res.json(view))
     .catch(() => res.status(500).json({ error: 'account status unavailable' }))
 })
 
-/* the connected provider's live catalog, merged over its curated menu — asked
-   for when a picker opens, so a model released yesterday is already on it */
 app.get('/api/model-account/models', async (req, res) => {
   try {
-    const account = await modelAccounts.getAccount(req.user!.id)
+    const kind: unknown = req.query.kind
+    if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
+    const account = await modelAccounts.getAccount(req.user!.id, kind)
     if (!account) return res.json({ models: [], live: false })
     /* a ChatGPT token may have lapsed since the last run; a refresh that
        fails leaves the stale token to be refused, which the catalog reports
@@ -914,19 +1024,22 @@ app.get('/api/model-account/models', async (req, res) => {
   }
 })
 
-/* which model tier the connected account runs on */
-/* which model tier the connected account runs on, and (OpenAI kinds) how
-   hard it thinks — one field per request, the status comes back either way */
-app.patch('/api/model-account', async (req, res) => {
+/* one account's model tier, (OpenAI kinds) how hard it thinks, or whether
+   it is switched on — one field per request, the view comes back either way */
+app.patch('/api/model-account/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
   try {
-    const { model, effort } = (req.body ?? {}) as { model?: unknown; effort?: unknown }
-    const status =
-      effort !== undefined
-        ? await modelAccounts.setAccountEffort(req.user!.id, String(effort))
-        : await modelAccounts.setAccountModel(req.user!.id, String(model ?? ''))
-    res.json(accountView(status))
+    const userId = req.user!.id
+    const { model, effort, enabled } = (req.body ?? {}) as { model?: unknown; effort?: unknown; enabled?: unknown }
+    if (typeof enabled === 'boolean') await modelAccounts.setAccountEnabled(userId, kind, enabled)
+    else if (effort !== undefined) await modelAccounts.setAccountEffort(userId, kind, String(effort))
+    else await modelAccounts.setAccountModel(userId, kind, String(model ?? ''))
+    res.json(await accountsView(userId))
+    /* switching one on can make queued work runnable */
+    if (enabled === true) wakeUserWork(userId)
   } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the model' })
+    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change that account' })
   }
 })
 
@@ -958,7 +1071,8 @@ app.post('/api/model-account/chatgpt', async (req, res) => {
     return res.status(404).json({ error: 'ChatGPT connections are disabled on this server' })
   }
   try {
-    res.json(accountView(await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? ''))))
+    await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? ''))
+    res.json(await accountsView(req.user!.id))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not connect that ChatGPT account' })
   }
@@ -986,50 +1100,31 @@ app.delete('/api/model-account/chatgpt/device', (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/model-account/openai-key', async (req, res) => {
-  try {
-    res.json(accountView(await modelAccounts.connectApiKey(req.user!.id, String(req.body?.apiKey ?? ''))))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
-  }
-})
-
-app.post('/api/model-account/anthropic-key', async (req, res) => {
-  try {
-    const previous = await modelAccounts.getAccount(req.user!.id)
-    const status = await modelAccounts.connectAnthropicKey(req.user!.id, String(req.body?.apiKey ?? ''))
-    if (previous?.kind !== 'anthropic-key') {
-      const preference = await getLocalAgentPreference(req.user!.id)
-      await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
-    }
-    res.json(accountView(status))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
-  }
-})
-
-/* the two wide-roster keys share the anthropic-key route's shape, including
-   switching off the local-CLI preference so the new account is not shadowed */
-for (const kind of ['openrouter-key', 'gemini-key'] as const) {
-  const connect = kind === 'openrouter-key' ? modelAccounts.connectOpenRouterKey : modelAccounts.connectGeminiKey
+/* each key connects beside whatever else is connected: nothing is switched
+   off, and the default changes only when the person marks another one */
+const KEY_CONNECTS = {
+  'openai-key': modelAccounts.connectApiKey,
+  'anthropic-key': modelAccounts.connectAnthropicKey,
+  'openrouter-key': modelAccounts.connectOpenRouterKey,
+  'gemini-key': modelAccounts.connectGeminiKey,
+} as const
+for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {
     try {
-      const previous = await modelAccounts.getAccount(req.user!.id)
-      const status = await connect(req.user!.id, String(req.body?.apiKey ?? ''))
-      if (previous?.kind !== kind) {
-        const preference = await getLocalAgentPreference(req.user!.id)
-        await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
-      }
-      res.json(accountView(status))
+      await connect(req.user!.id, String(req.body?.apiKey ?? ''))
+      res.json(await accountsView(req.user!.id))
+      wakeUserWork(req.user!.id)
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
     }
   })
 }
 
-app.delete('/api/model-account', async (req, res) => {
-  await modelAccounts.disconnect(req.user!.id)
-  res.json(accountView({ connected: false }))
+app.delete('/api/model-account/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
+  await modelAccounts.disconnect(req.user!.id, kind)
+  res.json(await accountsView(req.user!.id))
 })
 
 /* ---- which image model generate_image draws with (the shared registry;
@@ -1084,13 +1179,13 @@ app.get(
      to names in one query — the home tiles wear them as an avatar stack */
     const peopleIds = new Set<string>()
     for (const c of list) for (const id of canvasPeopleIds(c.id)) peopleIds.add(id)
-    const names = new Map<string, string>()
+    const users = new Map<string, { name: string; image: string | null }>()
     if (peopleIds.size) {
       const rows = await db
-        .select({ id: authSchema.user.id, name: authSchema.user.name })
+        .select({ id: authSchema.user.id, name: authSchema.user.name, image: authSchema.user.image })
         .from(authSchema.user)
         .where(inArray(authSchema.user.id, [...peopleIds]))
-      for (const r of rows) names.set(r.id, r.name)
+      for (const r of rows) users.set(r.id, r)
     }
     res.json(
       list.map((c) => {
@@ -1103,7 +1198,11 @@ app.get(
         }
         return {
           ...c,
-          people: canvasPeopleIds(c.id).map((id) => ({ id, name: names.get(id) ?? 'Unknown' })),
+          people: canvasPeopleIds(c.id).map((id) => ({
+            id,
+            name: users.get(id)?.name ?? 'Unknown',
+            image: avatarUrl(users.get(id)?.image),
+          })),
           agents: [...seen].slice(0, 8).map(([name, v]) => ({ name, owner: v.owner, lastAt: v.lastAt })),
           activeTasks: activeAgentTasks(actions.getTasks(c.id)),
         }
@@ -1328,7 +1427,12 @@ app.get('/api/canvases/:id/members', async (req, res) => {
   const ids = [...(c.ownerId ? [c.ownerId] : []), ...(c.memberIds ?? [])]
   const rows = ids.length
     ? await db
-        .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+        .select({
+          id: authSchema.user.id,
+          name: authSchema.user.name,
+          email: authSchema.user.email,
+          image: authSchema.user.image,
+        })
         .from(authSchema.user)
         .where(inArray(authSchema.user.id, ids))
     : []
@@ -1338,6 +1442,7 @@ app.get('/api/canvases/:id/members', async (req, res) => {
       userId: id,
       name: byId.get(id)?.name ?? 'Unknown',
       email: byId.get(id)?.email ?? '',
+      image: avatarUrl(byId.get(id)?.image),
       owner: id === c.ownerId,
     })),
   )
@@ -1350,13 +1455,23 @@ app.post('/api/canvases/:id/members', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
   if (!email) return res.status(400).json({ error: 'email required' })
   const [row] = await db
-    .select({ id: authSchema.user.id, name: authSchema.user.name, email: authSchema.user.email })
+    .select({
+      id: authSchema.user.id,
+      name: authSchema.user.name,
+      email: authSchema.user.email,
+      image: authSchema.user.image,
+    })
     .from(authSchema.user)
     .where(eq(authSchema.user.email, email))
   if (!row) return res.status(404).json({ error: 'no doop account with that email — ask them to sign up first' })
   if (row.id === c.ownerId) return res.status(400).json({ error: 'the owner already has access' })
+  const isNew = !c.memberIds?.includes(row.id)
   store.addMember(c.id, row.id, req.user!.id)
-  res.json({ userId: row.id, name: row.name, email: row.email, owner: false })
+  if (isNew) {
+    void emailShare(req.user!, row.id, c)
+    userEvents.notifyUsers([row.id], { type: 'canvases' })
+  }
+  res.json({ userId: row.id, name: row.name, email: row.email, image: avatarUrl(row.image), owner: false })
 })
 
 app.delete(
@@ -1369,6 +1484,7 @@ app.delete(
     if (!(await store.removeMember(c.id, req.params.userId)))
       return res.status(404).json({ error: 'not a collaborator' })
     refreshRoomRoles(c.id)
+    userEvents.notifyUsers([req.params.userId], { type: 'canvases' })
     res.json({ ok: true })
   }),
 )
@@ -1438,17 +1554,16 @@ app.post('/api/canvases/:id/github', async (req, res) => {
   try {
     /* app mode: a signed pass from the install round-trip stands in for the
        token, binding the GitHub App installation to this canvas */
-    let installationId: string | undefined
+    let grants: githubApp.InstallationGrant[] | undefined
     if (typeof req.body?.pass === 'string') {
-      const verified = githubApp.verifyInstallPass(req.body.pass, c.id)
-      if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
-      installationId = verified.installationId
+      grants = githubApp.redeemInstallPass(req.body.pass, c.id)
+      if (!grants) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
     }
     const conn = await github.createConnection({
       canvasId: c.id,
       repo: String(req.body?.repo ?? ''),
       token: typeof req.body?.token === 'string' ? req.body.token : undefined,
-      installationId,
+      grants,
       branch: typeof req.body?.branch === 'string' ? req.body.branch : undefined,
       createdBy: req.user!.id,
     })
@@ -1471,15 +1586,30 @@ app.post('/api/canvases/:id/github/app/start', (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
   if (!githubApp.appEnabled()) return res.status(400).json({ error: 'the GitHub App is not configured' })
-  res.json({ url: githubApp.installUrl(githubApp.signInstallState(c.id, req.user!.id)) })
+  /* authorize first: it finds installations the user already has, so a new
+     canvas skips the install screen (see the setup callback) */
+  res.json({ url: githubApp.oauthBounceUrl(githubApp.signFindState(c.id, req.user!.id)) })
+})
+
+/* "Add repositories on GitHub" from the repo picker: a plain link the
+   picker opens in a new tab, straight to the install screen with a state
+   for this canvas, so a fresh install on another account returns here too. */
+app.get('/api/canvases/:id/github/app/install', (req, res) => {
+  const c = requireDurableCanvas(req, res, req.params.id)
+  if (!c) return
+  if (!githubApp.appEnabled()) return res.status(400).json({ error: 'the GitHub App is not configured' })
+  res.redirect(githubApp.installUrl(githubApp.signInstallState(c.id, req.user!.id)))
 })
 
 /* GitHub's post-install redirect (the app's callback URL, with "request
    user authorization during installation" on). Verifies the state minted at
    start AND that the OAuth code's user actually owns the installation —
    installation ids are guessable, and without the ownership proof a valid
-   state could bind someone else's installation. Then swaps state for a pass
-   and returns to the canvas, where the import modal shows the repo picker. */
+   state could bind someone else's installation. The same user token lists
+   the repos GitHub lets THIS user reach through it (an org installation
+   covers more than one member may see); that snapshot is what the pass
+   stands for. Then swaps state for the pass and returns to the canvas,
+   where the import modal shows the repo picker. */
 app.get('/api/github/app/setup', async (req, res) => {
   const rawState = String(req.query.state ?? '')
   const code = String(req.query.code ?? '')
@@ -1487,18 +1617,33 @@ app.get('/api/github/app/setup', async (req, res) => {
      homepage redirect reads as "nothing happened" */
   const fail = (canvasId: string, reason: string) =>
     res.redirect(`/c/${encodeURIComponent(canvasId)}?ghError=${encodeURIComponent(reason)}`)
-  const succeed = (canvasId: string, installationId: string) =>
+  const succeed = (canvasId: string, grants: githubApp.InstallationGrant[]) =>
     res.redirect(
-      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.signInstallPass(canvasId, installationId))}`,
+      `/c/${encodeURIComponent(canvasId)}?ghInstall=${encodeURIComponent(githubApp.issueInstallPass(canvasId, grants))}`,
     )
+
+  /* return leg of Connect's authorize step: the installations this GitHub
+     user already has go straight to the repo picker; none, on to install */
+  const find = githubApp.verifyFindState(rawState)
+  if (find) {
+    if (!code) return fail(find.canvasId, 'GitHub authorization was cancelled — connect again when you’re ready')
+    try {
+      const grants = await githubApp.userAccess(code)
+      if (grants?.length) return succeed(find.canvasId, grants)
+      if (grants) return res.redirect(githubApp.installUrl(githubApp.signInstallState(find.canvasId, find.userId)))
+    } catch {
+      /* fall through to the error redirect */
+    }
+    return fail(find.canvasId, 'GitHub couldn’t confirm your account — try connecting again')
+  }
 
   /* return leg of the already-installed bounce: the authorize round-trip
      produced the code the configure screen didn't */
   const oauth = githubApp.verifyOauthState(rawState)
   if (oauth) {
     try {
-      if (await githubApp.verifyInstallationOwner(code, oauth.installationId))
-        return succeed(oauth.canvasId, oauth.installationId)
+      const grants = await githubApp.userAccess(code, [oauth.installationId])
+      if (grants?.length) return succeed(oauth.canvasId, grants)
     } catch {
       /* fall through to the error redirect */
     }
@@ -1517,7 +1662,8 @@ app.get('/api/github/app/setup', async (req, res) => {
   if (!code) return res.redirect(githubApp.oauthBounceUrl(githubApp.signOauthState(state.canvasId, installationId)))
 
   try {
-    if (await githubApp.verifyInstallationOwner(code, installationId)) return succeed(state.canvasId, installationId)
+    const grants = await githubApp.userAccess(code, [installationId])
+    if (grants?.length) return succeed(state.canvasId, grants)
   } catch {
     /* fall through to the error redirect */
   }
@@ -1527,13 +1673,9 @@ app.get('/api/github/app/setup', async (req, res) => {
 app.get('/api/canvases/:id/github/app/repos', async (req, res) => {
   const c = requireDurableCanvas(req, res, req.params.id)
   if (!c) return
-  const verified = githubApp.verifyInstallPass(String(req.query.pass ?? ''), c.id)
-  if (!verified) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
-  try {
-    res.json(await githubApp.listInstallationRepos(verified.installationId))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not list the installation’s repositories' })
-  }
+  const grants = githubApp.redeemInstallPass(String(req.query.pass ?? ''), c.id)
+  if (!grants) return res.status(400).json({ error: 'the GitHub install handoff expired — connect again' })
+  res.json(githubApp.listReposAcross(grants))
 })
 
 app.delete('/api/canvases/:id/github/:connId', async (req, res) => {
@@ -1623,6 +1765,105 @@ app.get('/api/canvases/:id/guidelines/:name/history', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'view')) return
   const rows = await persist.listGuidelineVersions(req.params.id, req.params.name.toLowerCase())
   res.json(rows.map((v) => ({ markdown: v.markdown, savedAt: v.savedAt, savedBy: v.savedBy })))
+})
+
+/* design tokens (shared/designTokens.ts): the canvas's CSS custom properties.
+   `?format=css|tailwind|md` exports them for a codebase; the default is JSON. */
+app.get('/api/canvases/:id/tokens', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'view')) return
+  const tokens = store.getTokens(req.params.id)
+  const themes = store.getTokenThemes(req.params.id)
+  switch (req.query.format) {
+    case 'css':
+      return res.type('text/css').send(tokensCss(tokens, themes))
+    case 'tailwind':
+      return res.type('text/css').send(tokensTailwind(tokens, themes))
+    case 'md':
+      return res.type('text/markdown').send(tokensMarkdown(tokens, themes))
+    default:
+      return res.json(tokens)
+  }
+})
+
+/* the token themes (light, dark, …), in display order; a theme that leaves takes its values along */
+app.put(
+  '/api/canvases/:id/token-themes',
+  frameRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    try {
+      const themes = await actions.setTokenThemes(
+        req.params.id,
+        req.body?.themes,
+        userActor(req),
+        req.body?.renames ?? [],
+      )
+      if (!themes) return res.status(404).json({ error: 'not found' })
+      res.json({ themes, tokens: store.getTokens(req.params.id) })
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : 'invalid themes' })
+    }
+  }),
+)
+
+app.post(
+  '/api/canvases/:id/tokens',
+  frameRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const inputs = Array.isArray(req.body?.tokens) ? req.body.tokens : [req.body]
+    if (inputs.length > 200) return res.status(400).json({ error: 'at most 200 tokens per request' })
+    const results = await actions.createTokens(req.params.id, inputs, userActor(req))
+    if (!results) return res.status(404).json({ error: 'not found' })
+    res.json({ results, tokens: store.getTokens(req.params.id) })
+  }),
+)
+
+/* change, rename (newName) or delete (delete: true) one token by name */
+app.put(
+  '/api/canvases/:id/tokens/:name',
+  frameRoute<{ id: string; name: string }>(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const body = typeof req.body === 'object' && req.body !== null ? req.body : {}
+    const edit = { ...body, name: req.params.name }
+    const results = await actions.setTokens(req.params.id, [edit], userActor(req))
+    if (!results) return res.status(404).json({ error: 'not found' })
+    const [result] = results
+    if (result?.result === 'error') return res.status(400).json({ error: result.message })
+    res.json({ result, tokens: store.getTokens(req.params.id) })
+  }),
+)
+
+app.delete(
+  '/api/canvases/:id/tokens/:name',
+  frameRoute<{ id: string; name: string }>(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const results = await actions.setTokens(req.params.id, [{ name: req.params.name, delete: true }], userActor(req))
+    if (!results) return res.status(404).json({ error: 'not found' })
+    const [result] = results
+    if (result?.result === 'error') return res.status(400).json({ error: result.message })
+    res.json({ ok: true, tokens: store.getTokens(req.params.id) })
+  }),
+)
+
+/* the styleguide: the canvas's tokens and its guidelines as one markdown
+   document — what a coding agent pulls into a repo as its DESIGN.md */
+app.get('/api/canvases/:id/styleguide.md', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const tokens = store.getTokens(req.params.id)
+  const themes = store.getTokenThemes(req.params.id)
+  const docs = store.getGuidelines(req.params.id)
+  const parts = [
+    `# ${canvas.name} — styleguide`,
+    ...(tokens.length
+      ? [
+          `## Design tokens\n\nUse these as CSS custom properties (\`var(--name)\`); the Tailwind v4 \`@theme\` block and plain CSS are at \`/api/canvases/${canvas.id}/tokens?format=tailwind|css\`.`,
+          tokensMarkdown(tokens, themes),
+          '```css\n' + tokensCss(tokens, themes) + '\n```',
+        ]
+      : []),
+    ...docs.map((d) => `## ${actions.guidelineTitle(d)}\n\n${d.markdown}`),
+  ]
+  res.type('text/markdown').send(parts.join('\n\n') + '\n')
 })
 
 app.put('/api/canvases/:id/guidelines/:name', async (req, res) => {
@@ -1757,6 +1998,20 @@ app.put(
   }),
 )
 
+/* a page's own canvas colour (`#rrggbb`); null puts the theme paper back */
+app.put('/api/canvases/:id/pages/:pageId/background', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const color: unknown = req.body?.color
+  const background = color === null ? null : normalizePageBackground(color)
+  if (color !== null && !background)
+    return res.status(400).json({ error: 'color must be a hex colour such as #f5f5f5, or null' })
+  if (!canvasPages(canvas).some((p) => p.id === req.params.pageId))
+    return res.status(404).json({ error: 'page not found' })
+  const actor = userActor(req)
+  res.json(actions.setPageBackground(canvas.id, req.params.pageId, background, actor))
+})
+
 /* the frame a page's prototype flow starts on; null clears it */
 app.put(
   '/api/canvases/:id/pages/:pageId/flow-start',
@@ -1831,12 +2086,12 @@ app.post(
   frameRoute(async (req, res) => {
     const canvas = requireCanvas(req, res, req.params.id, 'edit')
     if (!canvas) return
-    const { name, pageId, x, y, width, height, html, hidden, locked } = req.body ?? {}
+    const { name, pageId, x, y, width, height, html, hidden, locked, z } = req.body ?? {}
     if (pageId !== undefined && !canvasPages(canvas).some((p) => p.id === pageId))
       return res.status(400).json({ error: 'page not found' })
     const actor = userActor(req)
-    /* `hidden` and `locked` let undo bring a deleted frame back as it was; a
-     client-chosen `id` makes a retried create land on the same frame */
+    /* `hidden`, `locked` and `z` let undo bring a deleted frame back as it
+     was; a client-chosen `id` makes a retried create land on the same frame */
     const frame = await actions.createFrame(
       req.params.id,
       {
@@ -1849,6 +2104,7 @@ app.post(
         html,
         hidden: hidden === true,
         locked: locked === true,
+        z: Number.isFinite(z) ? z : undefined,
       },
       actor,
       typeof req.body?.id === 'string' ? req.body.id : undefined,
@@ -1876,6 +2132,11 @@ app.patch(
     /* the eye in the Layers panel: anything but a literal true shows the frame */
     if (patch.hidden !== undefined) clean.hidden = patch.hidden === true
     if (patch.locked !== undefined) clean.locked = !!patch.locked
+    /* the stacking order the Layers panel sets */
+    if (patch.z !== undefined) {
+      if (!Number.isFinite(patch.z)) return res.status(400).json({ error: 'z must be a finite number' })
+      clean.z = patch.z
+    }
     try {
       const frame = await actions.updateFrame(req.params.id, clean, actor, {
         ...(typeof req.body?.expectedUpdatedAt === 'number' ? { expectedUpdatedAt: req.body.expectedUpdatedAt } : {}),
@@ -1886,6 +2147,30 @@ app.patch(
       if (!(e instanceof FrameConflictError)) throw e
       res.status(409).json({ error: 'The frame changed while you were editing. Please try again.', frame: e.frame })
     }
+  }),
+)
+
+/* the Layers panel's stacking order for several frames at once: all of
+   them or none */
+app.put(
+  '/api/canvases/:id/stack',
+  frameRoute(async (req, res) => {
+    if (!requireCanvas(req, res, req.params.id, 'edit')) return
+    const writes: unknown = req.body?.frames
+    if (
+      !Array.isArray(writes) ||
+      writes.length === 0 ||
+      writes.length > MAX_STACK_WRITES ||
+      !writes.every((w) => typeof w?.id === 'string' && Number.isFinite(w?.z))
+    )
+      return res.status(400).json({ error: 'frames must be a list of { id, z }' })
+    const frames = await actions.restackFrames(
+      req.params.id,
+      writes.map((w: StackWrite) => ({ id: w.id, z: w.z })),
+      userActor(req),
+    )
+    if (!frames) return res.status(404).json({ error: 'frame not found' })
+    res.json(frames)
   }),
 )
 
@@ -1961,7 +2246,7 @@ app.post('/api/frames/:id/versions/:versionId/restore', async (req, res) => {
 app.post('/api/frames/:id/comments', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'comment')
   if (!frame) return
-  const { selector, elementId, snippet, text, x, y } = req.body ?? {}
+  const { selector, elementId, snippet, text, x, y, elementOrigin } = req.body ?? {}
   if (refuseAgentMention(req, res, frame.canvasId, String(text ?? ''))) return
   /* a comment that @mentions a resident agent is a new command to the team,
      so it's metered like a card; plain comments and replies stay free */
@@ -1973,7 +2258,7 @@ app.post('/api/frames/:id/comments', async (req, res) => {
   }
   const comment = await actions.addElementComment(
     req.params.id,
-    { selector, elementId, snippet, text: String(text ?? ''), x, y },
+    { selector, elementId, snippet, text: String(text ?? ''), x, y, elementOrigin },
     req.user!.name,
     req.user!.id,
   )
@@ -2081,7 +2366,7 @@ app.patch('/api/comments/:id/anchor', async (req, res) => {
   const found = actions.findComment(req.params.id)
   if (!found) return res.status(404).json({ error: 'comment not found' })
   if (!requireCanvas(req, res, found.canvasId, 'comment')) return
-  const { frameId, selector, elementId, snippet, pageId, x, y } = req.body ?? {}
+  const { frameId, selector, elementId, snippet, pageId, x, y, elementOrigin } = req.body ?? {}
   let anchor: CommentAnchorInput
   if (typeof frameId === 'string') {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
@@ -2089,6 +2374,7 @@ app.patch('/api/comments/:id/anchor', async (req, res) => {
       frameId,
       ...(typeof selector === 'string' ? { selector } : {}),
       ...(typeof elementId === 'string' ? { elementId } : {}),
+      elementOrigin,
       snippet: String(snippet ?? ''),
       x: Number(x),
       y: Number(y),
@@ -2242,6 +2528,7 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
     req.body?.attachments,
     req.user!.id,
     req.body?.scope,
+    req.body?.runner,
   )
   if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
   res.json(card)
@@ -2416,6 +2703,40 @@ server.on('upgrade', (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
 })
 
+/* A signed-out visitor on a link-shared canvas watches it as a guest
+   (guestCanvasRole): view only, silent like a view-as session (no presence,
+   no cursor, nothing it sends is relayed) and without the team's
+   conversation (GUEST_HIDDEN). Anything else — a private canvas, a missing
+   one — is the same 4401, so the sign-in screen does not reveal which. */
+function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: Canvas | undefined) {
+  const role = canvas && guestCanvasRole(canvas)
+  if (!canvas || !role) {
+    ws.close(4401, 'unauthorized')
+    return
+  }
+  const presence: Presence = { clientId, name: '', color: colorFor(clientId), kind: 'user', activeFrameId: null }
+  conns.set(ws, { ws, canvasId, presence, silent: true })
+  const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
+  send(ws, {
+    type: 'init',
+    canvas: { ...shown, role },
+    presences: [
+      ...room(canvasId)
+        .filter((c) => c.ws !== ws && !c.silent)
+        .map((c) => guestPresence(c.presence)),
+      ...[...(agentPresences.get(canvasId)?.values() ?? [])].map(guestPresence),
+    ],
+    activity: [],
+    tasks: [],
+    feedback: [],
+    comments: [],
+    decisions: [],
+    proposals: [],
+    selfColor: presence.color,
+    serverBuild: BUILD_ID,
+  })
+}
+
 wss.on('connection', (ws, upgradeReq) => {
   /* the session cookie rides the upgrade request; resolve it once */
   const sessionPromise = auth.api.getSession({ headers: fromNodeHeaders(upgradeReq.headers) }).catch(() => null)
@@ -2431,15 +2752,15 @@ wss.on('connection', (ws, upgradeReq) => {
 
     if (msg.type === 'join') {
       const session = await sessionPromise
-      if (!session) {
-        ws.close(4401, 'unauthorized')
-        return
-      }
       let canvas
       try {
         canvas = await store.syncCanvas(msg.canvasId, 'index')
       } catch {
         ws.close(1013, 'canvas service unavailable')
+        return
+      }
+      if (!session) {
+        joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
         return
       }
       if (!canvas) {
@@ -2459,6 +2780,7 @@ wss.on('connection', (ws, upgradeReq) => {
         clientId: msg.clientId,
         userId: session.user.id,
         name: session.user.name, // session identity, not whatever the client claims
+        image: avatarUrl(session.user.image),
         color: colorFor(msg.clientId),
         kind: 'user',
         activeFrameId: null,
@@ -2600,6 +2922,18 @@ server.listen(PORT, () => {
       )
       .catch((err) => console.error('[comments] element id backfill failed:', err))
   }
+  /* credentials stored before encryption (or under a rotated-out key) are
+     sealed now; reads open either form, so serving need not wait for it */
+  if (encryptionConfigured()) {
+    resealSecrets(db)
+      .then(({ resealed, failed }) => {
+        if (resealed || failed)
+          console.log(`[secrets] ${resealed} credential(s) sealed, ${failed} left for the next boot`)
+      })
+      .catch((err) => console.error('[secrets] reseal failed:', err))
+  } else {
+    console.warn('⟡ secrets           SECRETS_ENCRYPTION_KEYS unset — user credentials are stored unencrypted')
+  }
   console.log(`⟡ mcp endpoint      http://localhost:${PORT}/mcp`)
   console.log(`⟡ websocket         ws://localhost:${PORT}/ws`)
   /* The Doop Agent failing silently is the one "why is nothing happening?"
@@ -2618,5 +2952,6 @@ server.listen(PORT, () => {
   )
   /* automations fire from here: one tick a minute over the due rows */
   startScheduler()
+  startMcpTokenPrune()
   for (const extension of extensions) extension.startWorker?.()
 })

@@ -38,6 +38,17 @@ export function canvasRole(userId: string | undefined, canvas: Canvas): CanvasRo
   return link === 'view' || link === 'comment' || link === 'edit' ? link : null
 }
 
+/** What a signed-out visitor may do: look, at most, and only at a canvas
+ *  the owner shared by link (any level; the link's comment and edit rights
+ *  need an account). An ownerless legacy canvas is left out, since anyone
+ *  signed in can claim it. Only the room grants this: REST and MCP still
+ *  need a session. */
+export function guestCanvasRole(canvas: Canvas): 'view' | null {
+  if (!canvas.ownerId) return null
+  const link = canvas.linkAccess
+  return link === 'view' || link === 'comment' || link === 'edit' ? 'view' : null
+}
+
 /** May this user read the canvas (open it, join its room, see its frames)? */
 export function canAccessCanvas(userId: string | undefined, canvas: Canvas): boolean {
   return canvasRole(userId, canvas) !== null

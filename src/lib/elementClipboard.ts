@@ -1,12 +1,25 @@
 import type { Frame } from '../../shared/types'
 import { elementsHtml, insertElements, isElementLocked } from './layers'
-import { saveFrameHtml } from './layerEdits'
+import { isStandalonePick, saveFrameHtml } from './layerEdits'
+import { copyFrames } from './frameClipboard'
 import { useStore } from './store'
 import { ELEMENT_CLIP_KEY, ELEMENT_CLIP_STYLE_KEY, FRAME_CLIP_KEY } from './clipboardKeys'
 import { carriedCss, newScope, renameInCss, SCOPE_ATTR, withCarriedCss } from './styleCarry'
 
 export function copyLayer(frame: Frame, selector: string): boolean {
   return copyLayers(frame, [selector])
+}
+
+/** Copy what is picked in `frame`. A standalone element's shape is the
+ *  element itself, so picking it and copying copies the frame it is: the
+ *  paste then lands a second element on the canvas, at the root, rather than
+ *  a second shape inside the original's shell. */
+export function copyPicked(frame: Frame, selectors: string[]): boolean {
+  if (isStandalonePick(frame, selectors)) {
+    copyFrames([frame])
+    return true
+  }
+  return copyLayers(frame, selectors)
 }
 
 /** Copy the elements in document order; a paste lands them together. */

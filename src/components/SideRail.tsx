@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import { useStore, type PanelTab } from '../lib/store'
+import { canEditOpenCanvas, useStore, type PanelTab } from '../lib/store'
 import { useOpenThreadCount } from '../lib/comments'
 import { navigate } from '../App'
 import { cn } from '@/lib/utils'
@@ -28,21 +28,27 @@ export function SideRail({
   onToggleAgents,
   inspectorOpen,
   inspectorAvailable,
+  inspectTarget = 'frame',
   onToggleInspector,
   me,
   onRenameSelf,
   docked = false,
+  guest = false,
 }: {
   /** carries `right`, so the islands follow the panels as they open */
   style: CSSProperties
   docked?: boolean
+  /** a signed-out visitor: no panels to open, no settings, no name to change */
+  guest?: boolean
   agentsOpen: boolean
   onToggleAgents: () => void
   inspectorOpen: boolean
-  /** a frame is selected — there is something to inspect */
+  /** the properties slot has something to show: a frame, or the page itself */
   inspectorAvailable: boolean
+  /** what the slot would open: the selected frame, or the page's settings */
+  inspectTarget?: 'frame' | 'page'
   onToggleInspector: () => void
-  me: { name: string; color: string }
+  me: { name: string; image?: string; color: string }
   onRenameSelf: () => void
 }) {
   const t = useT()
@@ -56,7 +62,7 @@ export function SideRail({
   const islandStyle = docked ? undefined : style
   const islands = (
     <>
-      {(showInspector || !agentsOpen) && (
+      {(showInspector || (!agentsOpen && !guest)) && (
         <Toolbar
           aria-label={t('canvas.canvasPanels')}
           orientation="vertical"
@@ -64,11 +70,14 @@ export function SideRail({
           style={islandStyle}
         >
           {showInspector && (
-            <ToolbarControl label={t('canvas.inspectFrame')} onClick={onToggleInspector}>
+            <ToolbarControl
+              label={inspectTarget === 'frame' ? t('canvas.inspectFrame') : t('canvas.pageSettings')}
+              onClick={onToggleInspector}
+            >
               <SlidersIcon />
             </ToolbarControl>
           )}
-          {!agentsOpen && <PanelTabButtons onOpen={openTab} />}
+          {!agentsOpen && !guest && <PanelTabButtons onOpen={openTab} />}
         </Toolbar>
       )}
       <Toolbar
@@ -77,9 +86,11 @@ export function SideRail({
         className={cn(docked ? cn(dockedIsland, 'mt-auto') : cn(island, 'bottom-3.5'), 'gap-1.5')}
         style={islandStyle}
       >
-        <ToolbarControl label={t('shell.settings')} onClick={() => navigate('/settings')}>
-          <GearIcon />
-        </ToolbarControl>
+        {!guest && (
+          <ToolbarControl label={t('shell.settings')} onClick={() => navigate('/settings')}>
+            <GearIcon />
+          </ToolbarControl>
+        )}
         <DropdownMenu>
           <Tooltip label={t('canvas.help')} side="left">
             <DropdownMenuTrigger asChild>
@@ -102,16 +113,25 @@ export function SideRail({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Tooltip label={t('canvas.youAre', { name: me.name })} side="left">
-          <button
-            type="button"
-            aria-label={t('canvas.changeDisplayName')}
-            className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
-            onClick={onRenameSelf}
-          >
-            <PresenceFace name={me.name} color={me.color} kind="user" size={26} className="text-[10px] shadow-none" />
-          </button>
-        </Tooltip>
+        {!guest && (
+          <Tooltip label={t('canvas.youAre', { name: me.name })} side="left">
+            <button
+              type="button"
+              aria-label={t('canvas.changeDisplayName')}
+              className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
+              onClick={onRenameSelf}
+            >
+              <PresenceFace
+                name={me.name}
+                image={me.image}
+                color={me.color}
+                kind="user"
+                size={26}
+                className="text-[10px] shadow-none"
+              />
+            </button>
+          </Tooltip>
+        )}
       </Toolbar>
     </>
   )
@@ -128,7 +148,8 @@ export function SideRail({
 
 /** One button per tab of the Agents panel — agents, comments, activity,
  *  memory — each opening the panel on that tab, with a live dot while an
- *  agent works or a message waits. The desktop island stacks them; on phones
+ *  agent works or a message waits. Someone who cannot edit gets comments
+ *  only: the agents, the activity feed and memory are the editors' tools. The desktop island stacks them; on phones
  *  they run along the top-right corner as their own island. */
 export function PanelTabButtons({
   onOpen,
@@ -141,6 +162,18 @@ export function PanelTabButtons({
   const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
   const proposalPending = useStore((s) => s.proposals.some((p) => p.status === 'pending'))
   const openThreads = useOpenThreadCount()
+  const canEdit = useStore(canEditOpenCanvas)
+  const comments = (
+    <ToolbarControl
+      side={tooltipSide}
+      label={openThreads ? t('canvas.commentsOpen', { open: openThreads }) : t('canvas.comments')}
+      onClick={() => onOpen('comments')}
+    >
+      <CommentIcon />
+      {openThreads > 0 && <ToolbarDot className="bg-brand" />}
+    </ToolbarControl>
+  )
+  if (!canEdit) return comments
   return (
     <>
       <ToolbarControl
@@ -151,14 +184,7 @@ export function PanelTabButtons({
         <SparkIcon />
         {working > 0 && <ToolbarDot className="bg-success" />}
       </ToolbarControl>
-      <ToolbarControl
-        side={tooltipSide}
-        label={openThreads ? t('canvas.commentsOpen', { open: openThreads }) : t('canvas.comments')}
-        onClick={() => onOpen('comments')}
-      >
-        <CommentIcon />
-        {openThreads > 0 && <ToolbarDot className="bg-brand" />}
-      </ToolbarControl>
+      {comments}
       <ToolbarControl side={tooltipSide} label={t('canvas.activity')} onClick={() => onOpen('activity')}>
         <PulseIcon />
       </ToolbarControl>

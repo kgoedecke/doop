@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { AgentIcon } from '@/components/AgentIcon'
 import { DoopMark, Logo } from '@/components/Logo'
 import { RadioTowerIcon, WebIcon } from '@/components/ui/icons'
-import { BRANDS, BrandMark } from '@/components/ui/brand-mark'
+import { APP_ICON_BRANDS, AppIcon, BRANDS, BrandMark } from '@/components/ui/brand-mark'
 import { MetaTile } from '@/components/AutomateShell'
 import { ClockTile } from '@/components/AutomateShell'
 import { colorFor } from '../../shared/types'
@@ -68,6 +68,21 @@ export const Brands: Story = {
         ))}
         <span className="ml-2 text-caption text-ink-faint">16px in logo rows, 24px on picker tiles</span>
       </div>
+    </div>
+  ),
+}
+
+/** Providers, import sources and export formats as app icons
+ *  (`<AppIcon brand size />`): 32px in a list row, 40px beside a modal title. */
+export const AppIcons: Story = {
+  render: () => (
+    <div className="flex flex-wrap items-center gap-4">
+      {APP_ICON_BRANDS.map((brand) => (
+        <span key={brand} className="flex flex-col items-center gap-1.5">
+          <AppIcon brand={brand} />
+          <span className="font-mono text-micro text-ink-faint">{brand}</span>
+        </span>
+      ))}
     </div>
   ),
 }

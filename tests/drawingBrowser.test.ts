@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
+import type { TextFormatCommand } from '../src/lib/richText'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, ElementComment, Frame } from '../shared/types'
+import type { ImportedSvg } from '../src/lib/svgImport'
 
 declare global {
   interface Window {
@@ -23,6 +25,9 @@ declare global {
       undo: () => Promise<void>
       redo: () => Promise<void>
       pick: (el: { frameId: string; selector: string } | null) => void
+      formatText: (command: TextFormatCommand) => boolean
+      /** an SVG file read the way a paste reads it, with the browser's computed styles */
+      importSvg: (markup: string, name: string) => ImportedSvg | null
     }
     delayedLayerProbe: MessageEvent | null
     heldMoveHits: MessageEvent[] | null
@@ -95,7 +100,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     commentMoves = []
     await page.setViewport({ width: 1200, height: 800 })
     await page.goto(fixtureUrl('drawing.html'))
-    await page.waitForFunction(() => !!window.drawingHarness)
+    /* a cold fixture load on a slow CI runner can pass the default 10s wait */
+    await page.waitForFunction(() => !!window.drawingHarness, { timeout: 30_000 })
     await page.evaluate(() =>
       window.drawingHarness.seed({
         id: 'c',
@@ -249,7 +255,7 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.screenshot({ path: '/tmp/doop-drawing-desktop.png' })
   })
 
-  it('types literal multiline text without triggering shortcuts, and cancels empty or escaped drafts', async () => {
+  it('types literal multiline text without triggering shortcuts, keeps escaped text and drops empty drafts', async () => {
     await page.keyboard.press('t')
     await page.mouse.click(220, 200)
     await page.waitForSelector('textarea[data-drawing-input]')
@@ -264,15 +270,21 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(frame!.html).toContain('&lt;b&gt;Rectangle &amp; circle&lt;/b&gt;\nSecond line')
     await page.keyboard.press('t')
     await page.mouse.click(800, 400)
-    await page.keyboard.type('discard me')
+    await page.keyboard.type('keep me')
     await page.keyboard.press('Escape')
     expect(await page.$('textarea[data-drawing-input]')).toBeNull()
-    expect(saved).toHaveLength(1)
+    expect((await waitForFrames(2))[1]!.html).toContain('keep me')
+    expect(await page.evaluate(() => window.drawingHarness.state().tool)).toBe('select')
     await page.keyboard.press('t')
-    await page.mouse.click(800, 400)
-    await page.mouse.click(800, 500)
+    await page.mouse.click(800, 600)
+    await page.keyboard.press('Escape')
     expect(await page.$('textarea[data-drawing-input]')).toBeNull()
-    expect(saved).toHaveLength(1)
+    expect(saved).toHaveLength(2)
+    await page.keyboard.press('t')
+    await page.mouse.click(800, 600)
+    await page.mouse.click(800, 700)
+    expect(await page.$('textarea[data-drawing-input]')).toBeNull()
+    expect(saved).toHaveLength(2)
   })
 
   it('draws smooth Bézier curves by dragging anchors, including a curved closed path', async () => {
@@ -361,11 +373,23 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(await page.$('[data-path-preview]')).toBeNull()
   })
 
+  /** Which of the pen cursors the stage wears (each SVG names itself). */
+  const stageCursor = () =>
+    page.$eval('.stage', (el) => decodeURIComponent(getComputedStyle(el).cursor).match(/data-cursor='([^']+)'/)?.[1])
+
   it('snaps to intermediate anchors and lets Alt place a point freely', async () => {
     await page.click('[aria-label="Vector path"]')
+    expect(await stageCursor()).toBe('pen')
     await page.mouse.click(220, 250)
     await page.mouse.click(420, 250)
     await page.mouse.click(420, 450)
+    await page.mouse.move(426, 250)
+    await page.waitForSelector('[data-path-anchor="1"][data-snapped="true"]')
+    /* the pen's badge says what a press does: land on that anchor, or close on the first */
+    expect(await stageCursor()).toBe('pen-anchor')
+    await page.mouse.move(222, 250)
+    await page.waitForSelector('[data-path-snap="close"]')
+    expect(await stageCursor()).toBe('pen-close')
     await page.mouse.move(426, 250)
     await page.waitForSelector('[data-path-anchor="1"][data-snapped="true"]')
     await page.mouse.click(426, 250)
@@ -522,6 +546,54 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       await page.keyboard.press('Escape')
     },
   )
+
+  it("resizes an edited standalone path through its shell's grips", async () => {
+    /* a standalone path's root fills its shell and wears only the shell's
+       grips: an edit must leave it filling the shell, or the grips would
+       grow the frame around a path that stays put */
+    const frame: Frame = {
+      id: 'pen',
+      updatedBy: 'User',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'Pen',
+      x: 30,
+      y: 30,
+      width: 140,
+      height: 100,
+      createdAt: 0,
+      updatedAt: 0,
+      html: '<body data-doop-canvas-element="true" style="margin:0"><svg id="pen" data-doop-drawing="path" viewBox="0 0 140 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;margin:0"><path d="M 10 50 C 30 0 80 100 120 50" stroke="black" fill="none" stroke-width="2" /></svg></body>',
+    }
+    await seedFrames([frame])
+    const rect = await visibleDrawing('Pen')
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2, { count: 2, delay: 60 })
+    const first = await editorPoint(0)
+    await drag(first, [first[0] - 30, first[1] + 40])
+    await page.waitForFunction((before) => window.drawingHarness.state().frames[0]!.html !== before, {}, frame.html)
+    await page.waitForFunction(() => !document.body.textContent?.includes('Saving path…'))
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[data-path-editor]'))
+    const edited = saved[0]!
+    expect(edited.html).toMatch(/width:\s*100%;\s*height:\s*100%/)
+    expect(edited.html).not.toContain('matrix(')
+    await page.evaluate(() => window.drawingHarness.selectFrames(['pen']))
+    const grip = await page.waitForSelector('[data-frame-resize-handle="se"]')
+    const box = (await grip!.boundingBox())!
+    await drag(
+      [box.x + box.width / 2, box.y + box.height / 2],
+      [box.x + box.width / 2 + 100, box.y + box.height / 2 + 60],
+    )
+    await page.waitForFunction((before) => window.drawingHarness.state().frames[0]!.width !== before, {}, edited.width)
+    const grown = await page.evaluate(() => window.drawingHarness.state().frames[0]!)
+    expect(grown.width).toBeGreaterThan(edited.width)
+    expect(grown.height).toBeGreaterThan(edited.height)
+    /* the rendered path follows the shell: no empty band, no clipping */
+    const after = await visibleDrawing('Pen', 'svg')
+    const shell = (await (await page.$('iframe[title="Pen"]'))!.boundingBox())!
+    expect(after.width).toBeCloseTo(shell.width, 0)
+    expect(after.height).toBeCloseTo(shell.height, 0)
+  })
 
   it('keeps a Layers pick when a save refreshes the element being text-edited', async () => {
     await seedFrames([
@@ -1273,6 +1345,86 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(saved[0]?.html).toContain('left:400px;top:60px;width:100px;height:80px;background:coral"></div>')
   })
 
+  it('drops the hover outline of a layer the document no longer has, without the pointer moving', async () => {
+    const box =
+      '<div id="box" style="position:absolute;left:50px;top:50px;width:100px;height:80px;background:teal"></div>'
+    await seedFrames([layerFrame(box)])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    const target = await visibleDrawing('Layers', '#box')
+    await page.mouse.move(target.x + 20, target.y + 20)
+    await page.waitForSelector('[data-hover-outline]')
+    /* the layer goes (⌫, a collaborator's save): the pointer has not moved,
+       and the outline it was wearing must not outlive it */
+    await seedFrames([layerFrame('')])
+    await page.waitForFunction(() => !document.querySelector('[data-hover-outline]'))
+    /* and what is under the pointer now gets the outline instead */
+    await seedFrames([
+      layerFrame('<p id="under" style="position:absolute;left:0;top:0;width:300px;height:200px">Under</p>'),
+    ])
+    await page.waitForFunction(() => document.querySelector('[data-hover-outline]')?.textContent === 'p')
+  })
+
+  it('formats selected text from the toolbar, saves it, and supports canvas undo after editing', async () => {
+    const source = layerFrame('<p id="text" style="width:200px;height:80px;margin:80px">Hello world</p>')
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 80, zoom: 1 }))
+    const text = await visibleDrawing('Layers', '#text')
+    await page.mouse.click(text.x + 20, text.y + 10, { count: 2, delay: 60 })
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    await iframe.waitForSelector('#text[contenteditable]')
+    await iframe.evaluate(() => {
+      const text = document.querySelector('#text')!.firstChild!
+      getSelection()!.setBaseAndExtent(text, 0, text, 5)
+    })
+    await page.waitForSelector('[aria-label="Text formatting"]')
+    await page.click('button[aria-label="Bold"]')
+    await iframe.waitForSelector('#text b')
+    expect(await iframe.$eval('#text b', (el) => el.textContent)).toBe('Hello')
+    expect(await iframe.evaluate(() => getSelection()!.toString())).toBe('Hello')
+    await page.waitForSelector('button[aria-label="Bold"][aria-pressed="true"]')
+    await expect.poll(() => saved[0]?.html).toContain('<b>Hello</b> world')
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[aria-label="Text formatting"]'))
+    await iframe.waitForFunction(() => !document.querySelector('[contenteditable]'))
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(() => saved[0]?.html).toBe(source.html)
+    await page.evaluate(() => window.drawingHarness.redo())
+    await expect.poll(() => saved[0]?.html).toContain('<b>Hello</b> world')
+  })
+
+  it('bolds a picked text layer whole from the canvas and undoes it in one step', async () => {
+    const source = layerFrame('<p style="width:200px;height:80px;margin:80px">Hello <b>world</b></p>')
+    await seedFrames([source])
+    const paragraph = 'body:nth-of-type(1) > p:nth-of-type(1)'
+    await page.evaluate((selector) => window.drawingHarness.pick({ frameId: 'layers', selector }), paragraph)
+    await page.waitForFunction(
+      (selector) => window.drawingHarness.state().selectedElement?.selector === selector,
+      {},
+      paragraph,
+    )
+    expect(await page.evaluate(() => window.drawingHarness.formatText('bold'))).toBe(true)
+    await expect.poll(() => saved[0]?.html).toContain('<b>Hello world</b>')
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(() => saved[0]?.html).toBe(source.html)
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe(paragraph)
+    // The paragraph becomes a div so the list survives reload; the selection follows it.
+    expect(await page.evaluate(() => window.drawingHarness.formatText('insertUnorderedList'))).toBe(true)
+    await expect.poll(() => saved[0]?.html).toContain('<li>Hello <b>world</b></li>')
+    await page.waitForFunction(
+      () => window.drawingHarness.state().selectedElement?.selector === 'body:nth-of-type(1) > div:nth-of-type(1)',
+    )
+  })
+
+  it('leaves a layer inside a locked frame alone on a format shortcut', async () => {
+    const source = { ...layerFrame('<p id="text" style="margin:80px">Hello</p>'), locked: true }
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#text' }))
+    await page.waitForFunction(() => window.drawingHarness.state().selectedElement?.selector === '#text')
+    expect(await page.evaluate(() => window.drawingHarness.formatText('bold'))).toBe(true)
+    await new Promise((r) => setTimeout(r, 400))
+    expect(saved[0]?.html).toBe(source.html)
+  })
+
   it('still enters text editing on double-click and moves the whole frame from its title', async () => {
     const source = layerFrame('<p id="text" style="width:100px;height:80px;margin:50px">Edit me</p>')
     await seedFrames([source])
@@ -1281,10 +1433,29 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.mouse.click(text.x + 20, text.y + 10, { count: 2, delay: 60 })
     const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
     await iframe.waitForSelector('style[data-v-edit]')
-    await iframe.click('#text')
+    /* the double-click itself opens the text with every character selected
+       (no second click to place a caret), outlined by the page's hairline
+       with no grips and no badge to dismiss */
     await iframe.waitForSelector('#text[contenteditable]')
+    expect(await iframe.evaluate(() => getSelection()?.toString())).toBe('Edit me')
+    await page.waitForSelector('[data-editing-outline]')
+    expect(await page.$('[data-element-outline]')).toBeNull()
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+    expect(await page.$$eval('button', (buttons) => buttons.some((b) => b.textContent?.trim() === 'Done'))).toBe(false)
     await page.keyboard.press('Escape')
     await iframe.waitForFunction(() => !document.querySelector('style[data-v-edit]'))
+    /* the edit's text selection does not outlive it */
+    expect(await iframe.evaluate(() => getSelection()?.toString() ?? '')).toBe('')
+    /* Escape hands the keyboard back to the page: the next key (⌫ on the
+       still-selected element) must reach the canvas's window, not the frame */
+    await page.waitForFunction(() => document.activeElement?.tagName !== 'IFRAME')
+    /* the listener is in place before the key is sent: an un-awaited
+       evaluate raced the key to the page on CI and never settled */
+    await page.evaluate(() =>
+      window.addEventListener('keydown', (e) => (document.documentElement.dataset.heard = e.key), { once: true }),
+    )
+    await page.keyboard.press('Backspace')
+    await page.waitForFunction(() => document.documentElement.dataset.heard === 'Backspace')
     const before = await page.$eval('iframe[title="Layers"]', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
     await drag([before.x + 20, before.y - 14], [before.x + 80, before.y + 16])
     await expect.poll(() => saved[0]?.x).toBe(source.x + 60)
@@ -1737,9 +1908,8 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       return (await pin.boundingBox())!
     }
     const home = await pinBox()
-    /* the pin hangs off the element's top-right corner, inside the frame */
-    expect(home.x + home.width / 2).toBeGreaterThan(box.x + 200)
-    expect(home.x + home.width / 2).toBeLessThan(box.x + 300)
+    /* a comment with no recorded origin sits at the element's top-left: the body's 8px margin, at zoom 2 */
+    expect(Math.abs(home.x + home.width / 2 - (box.x + 16))).toBeLessThan(8)
     let pin = home
 
     /* onto empty canvas, right of the frame: the ghost rides along, the pin hides */

@@ -8,6 +8,13 @@
       "when": 1793587289882,
       "tag": "0000_canvas",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794005546927,
+      "tag": "0001_frame_stack",
+      "breakpoints": true
     }
   ]
 }

@@ -1,14 +1,38 @@
 import { nanoid } from 'nanoid'
-import { FrameConflictError, store } from './store.ts'
+import { FrameConflictError, MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
+import type { StackWrite } from '../shared/frameStack.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
 import { canvasPages } from '../shared/pages.ts'
-import { FRAME_COMMENT_SELECTOR, isCanvasComment, isFrameComment, type CommentAnchorInput } from '../shared/comments.ts'
+import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
+import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunner.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
+import { fontsForCanvas } from './fonts.ts'
+import { withFontFaces } from '../shared/fonts.ts'
+import { withWebFontLinks } from '../shared/webFonts.ts'
+import {
+  MAX_TOKENS,
+  MAX_TOKEN_DESCRIPTION,
+  MAX_TOKEN_THEMES,
+  aliasOf,
+  isThemeName,
+  isTokenName,
+  isTokenType,
+  normalizeTokenName,
+  normalizeTokenValue,
+  renameThemeAttrs,
+  resolveToken,
+  usesToken,
+  withTokenBlock,
+  type DesignToken,
+  type TokenEdit,
+  type TokenResult,
+  type TokenType,
+} from '../shared/designTokens.ts'
 import { emitCanvasEvent } from './events.ts'
 import type {
   Actor,
@@ -201,27 +225,58 @@ export function pendingWorkAgents(canvasId: string): string[] {
   return names
 }
 
+/** The oldest claimable item's requester and the connection it asked for. */
+export interface NextWork {
+  /** '' when the item predates per-user attribution */
+  payer: string
+  /** the card's pick; absent (and `key` '') for work on the Settings default */
+  runner?: RunnerPick
+  /** `payer` and the pick together: what one run claims, and what a sweep skips */
+  key: string
+}
+
+export function workKey(payer: string, runner: RunnerPick | undefined): string {
+  return `${payer}\n${runnerKey(runner)}`
+}
+
+/** Feedback runs on what the task it answers ran on, so a reply to a card
+ *  sent to the Claude Plan stays on the Claude Plan. The pick is kept on the
+ *  feedback itself; the task history is only asked for feedback left before
+ *  that, while its task is still there. */
+function feedbackRunner(f: TaskFeedback): RunnerPick | undefined {
+  return f.runner ?? (taskLog.get(f.canvasId) ?? []).find((t) => t.id === f.taskId)?.runner
+}
+
 /**
- * Who pays for the next run: the account behind the OLDEST piece of work this
- * agent can claim. A run bills exactly one person, so the queue is worked one
- * requester at a time rather than sweeping several people's work into a single
- * model call on whichever account happened to be found first.
+ * Who pays for the next run, and on what: the account behind the OLDEST piece
+ * of work this agent can claim, and the connection that work asked for. A run
+ * bills exactly one person and calls one model, so the queue is worked one
+ * requester and one connection at a time rather than sweeping several
+ * people's work into a single model call on whichever account happened to
+ * be found first.
  *
- * Returns '' when the oldest item predates per-user attribution (the caller
- * falls back to the canvas owner), and undefined when nothing is claimable.
- * `skip` holds payers already found to have no usable model this sweep, so one
- * stalled requester never blocks everyone behind them.
+ * `payer` is '' when the oldest item predates per-user attribution (the
+ * caller falls back to the canvas owner); the result is undefined when
+ * nothing is claimable. `skip` holds work keys already found to have no
+ * usable model this sweep, so one stalled requester never blocks everyone
+ * behind them.
  */
-export function nextWorkPayer(canvasId: string, agentName: string, skip?: ReadonlySet<string>): string | undefined {
-  let oldest: { at: number; payer: string } | undefined
-  const consider = (at: number, userId: string | undefined) => {
+export function nextWork(canvasId: string, agentName: string, skip?: ReadonlySet<string>): NextWork | undefined {
+  return oldestWork(canvasId, agentName, (work) => !!skip?.has(work.key))
+}
+
+/** The oldest claimable work the predicate does not pass over. */
+function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWork) => boolean): NextWork | undefined {
+  let oldest: { at: number; work: NextWork } | undefined
+  const consider = (at: number, userId: string | undefined, runner: RunnerPick | undefined) => {
     const payer = userId ?? ''
-    if (skip?.has(payer)) return
-    if (!oldest || at < oldest.at) oldest = { at, payer }
+    const key = workKey(payer, runner)
+    if (passOver({ payer, key })) return
+    if (!oldest || at < oldest.at) oldest = { at, work: { payer, ...(runner ? { runner } : {}), key } }
   }
   for (const card of taskLog.get(canvasId) ?? []) {
     if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card) === agentName) {
-      consider(card.startedAt, card.queuedByUserId)
+      consider(card.startedAt, card.queuedByUserId, card.runner)
     }
   }
   for (const c of commentLog.get(canvasId) ?? []) {
@@ -232,15 +287,21 @@ export function nextWorkPayer(canvasId: string, agentName: string, skip?: Readon
       !c.resolvedAt &&
       (c.targetAgent ?? roleName(DEFAULT_ROLE_ID)) === agentName
     ) {
-      consider(c.at, c.fromUserId)
+      consider(c.at, c.fromUserId, undefined)
     }
   }
   for (const f of feedbackLog.get(canvasId) ?? []) {
     if (!f.deliveredAt && !f.failedAt && (!f.targetAgent || f.targetAgent === agentName)) {
-      consider(f.at, f.fromUserId)
+      consider(f.at, f.fromUserId, feedbackRunner(f))
     }
   }
-  return oldest?.payer
+  return oldest?.work
+}
+
+/** The requester behind the oldest work, for callers that bill but do not
+ *  run; `skip` holds requesters (not work keys) who cannot pay. */
+export function nextWorkPayer(canvasId: string, agentName: string, skip?: ReadonlySet<string>): string | undefined {
+  return oldestWork(canvasId, agentName, (work) => !!skip?.has(work.payer))?.payer
 }
 
 /* ------------------------------------------------------------------ */
@@ -340,6 +401,7 @@ export function addTaskFeedback(
       ...(target ? { targetAgent: target } : {}),
       from,
       ...(fromUserId ? { fromUserId } : {}),
+      ...(task.runner ? { runner: task.runner } : {}),
       text: clean,
       at: Date.now(),
     }
@@ -364,21 +426,23 @@ export function addTaskFeedback(
 
 /** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
  *  tools mention without assigning anything. */
-export function openFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
+export function openFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
   return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
       (!f.targetAgent || f.targetAgent === agentName) &&
-      (payer === undefined || (f.fromUserId ?? '') === payer),
+      (payer === undefined || (f.fromUserId ?? '') === payer) &&
+      (runner === undefined || runnerKey(feedbackRunner(f)) === runner),
   )
 }
 
 /** Open feedback this agent may take: everything addressed to it, plus
  *  untargeted feedback — that part stays a canvas-level queue where the first
- *  identified agent call wins. */
-export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
-  const pending = openFeedbackFor(canvasId, agentName, payer)
+ *  identified agent call wins. `runner` (a `runnerKey`) narrows the claim to
+ *  one connection, since a run calls one model. */
+export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+  const pending = openFeedbackFor(canvasId, agentName, payer, runner)
   for (const f of pending) {
     f.deliveredAt = Date.now()
     f.claimedBy = agentName
@@ -466,7 +530,13 @@ export function findComment(commentId: string): ElementComment | undefined {
  *  `data-doop-id`), on a frame as a whole at a design point, or at a world
  *  point on one page of the canvas. */
 type CommentAnchor =
-  | { frame: Frame; elementId?: string; snippet: string; point?: { x: number; y: number } }
+  | {
+      frame: Frame
+      elementId?: string
+      snippet: string
+      point?: { x: number; y: number }
+      elementOrigin?: { x: number; y: number }
+    }
   | { pageId: string; x: number; y: number }
 
 /** What a client knows about the element it is pointing at: the positional
@@ -478,6 +548,7 @@ export interface FrameAnchorInput {
   snippet?: unknown
   x?: unknown
   y?: unknown
+  elementOrigin?: unknown
 }
 
 export const MAX_ELEMENT_SELECTOR_CHARS = 1_000
@@ -530,15 +601,27 @@ export async function ensureElementId(
 async function frameAnchor(frame: Frame, input: FrameAnchorInput, by: string): Promise<CommentAnchor> {
   const point =
     Number.isFinite(input.x) && Number.isFinite(input.y) ? { x: Number(input.x), y: Number(input.y) } : undefined
+  const origin = input.elementOrigin
+  const elementOrigin =
+    point &&
+    origin &&
+    typeof origin === 'object' &&
+    'x' in origin &&
+    'y' in origin &&
+    Number.isFinite(origin.x) &&
+    Number.isFinite(origin.y)
+      ? { x: Number(origin.x), y: Number(origin.y) }
+      : undefined
+  const placement = { ...(point ? { point } : {}), ...(elementOrigin ? { elementOrigin } : {}) }
   const snippet = String(input.snippet ?? '').slice(0, 400)
   const selector = String(input.selector ?? '').trim()
   const onElement = selector !== '' && selector !== FRAME_COMMENT_SELECTOR
   if (isElementId(input.elementId) && hasElementId(frame.html, input.elementId)) {
-    return { frame, elementId: input.elementId, snippet }
+    return { frame, elementId: input.elementId, snippet, ...placement }
   }
   if (onElement) {
     const stamped = await ensureElementId(frame.id, selector, by, snippet || undefined)
-    if (stamped) return { frame: stamped.frame, elementId: stamped.id, snippet }
+    if (stamped) return { frame: stamped.frame, elementId: stamped.id, snippet, ...placement }
   }
   return { frame, snippet: '', ...(point ? { point } : {}) }
 }
@@ -561,13 +644,14 @@ export async function addElementComment(
  *  carry is absent, so a moved comment sheds its old frame, element or page. */
 function anchorFields(
   anchor: CommentAnchor,
-): Pick<ElementComment, 'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y'> {
+): Pick<ElementComment, 'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y' | 'elementOrigin'> {
   if ('frame' in anchor) {
     return {
       frameId: anchor.frame.id,
       ...(anchor.elementId ? { elementId: anchor.elementId } : {}),
       snippet: anchor.snippet,
       ...anchor.point,
+      ...(anchor.elementOrigin ? { elementOrigin: anchor.elementOrigin } : {}),
     }
   }
   return { snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }
@@ -680,7 +764,15 @@ export async function moveComment(
   let moved = root
   list.forEach((c, i) => {
     if (c.id !== root.id && c.parentId !== root.id) return
-    const { frameId: _frameId, elementId: _elementId, pageId: _pageId, x: _x, y: _y, ...rest } = c
+    const {
+      frameId: _frameId,
+      elementId: _elementId,
+      elementOrigin: _elementOrigin,
+      pageId: _pageId,
+      x: _x,
+      y: _y,
+      ...rest
+    } = c
     const next: ElementComment = { ...rest, ...fields }
     list[i] = next
     if (c.id === root.id) moved = next
@@ -731,8 +823,14 @@ export async function replyToComment(
 
 function replyAnchor({ root, frame }: { root: ElementComment; frame?: Frame }): CommentAnchor | undefined {
   if (frame) {
-    const point = isFrameComment(root) ? { point: { x: root.x, y: root.y } } : {}
-    return { frame, ...(root.elementId ? { elementId: root.elementId } : {}), snippet: root.snippet, ...point }
+    const point = root.x !== undefined && root.y !== undefined ? { point: { x: root.x, y: root.y } } : {}
+    return {
+      frame,
+      ...(root.elementId ? { elementId: root.elementId } : {}),
+      snippet: root.snippet,
+      ...point,
+      ...(root.elementOrigin ? { elementOrigin: root.elementOrigin } : {}),
+    }
   }
   return isCanvasComment(root) ? { pageId: root.pageId, x: root.x, y: root.y } : undefined
 }
@@ -825,7 +923,15 @@ export function commentThread(comment: ElementComment): ElementComment[] {
 }
 
 /** Open comments @mentioning this agent, claimed by it. */
-export function takeAgentCommentsFor(canvasId: string, agentName: string, payer?: string): ElementComment[] {
+/** A comment carries no pick, so it is claimed only by a run on the
+ *  Settings default (`runner` '' or unset). */
+export function takeAgentCommentsFor(
+  canvasId: string,
+  agentName: string,
+  payer?: string,
+  runner?: string,
+): ElementComment[] {
+  if (runner) return []
   const pending = (commentLog.get(canvasId) ?? []).filter(
     (c) =>
       c.forAgent &&
@@ -870,6 +976,30 @@ export function retryComment(commentId: string, by: string): ElementComment | un
     broadcast(canvasId, { type: 'comment', comment })
     logActivity(canvasId, resolveActor({ name: by, kind: 'user' }), 'retried a comment', comment.frameId)
     import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+    return comment
+  }
+  return undefined
+}
+
+/**
+ * The agent answered a request with a question: the request is handed back
+ * to the person as an ordinary open thread (no claim, no agent status), so
+ * their answer — an @mention reply — queues fresh work with the whole
+ * conversation, and nothing is resolved behind their back.
+ */
+export function handBackComment(commentId: string, by: string): ElementComment | undefined {
+  for (const [canvasId, list] of commentLog) {
+    const comment = list.find((c) => c.id === commentId)
+    if (!comment || comment.resolvedAt) continue
+    delete comment.claimedBy
+    delete comment.claimedAt
+    delete comment.failedAt
+    delete comment.failureReason
+    delete comment.forAgent
+    delete comment.targetAgent
+    persist.saveComment(comment)
+    broadcast(canvasId, { type: 'comment', comment })
+    logActivity(canvasId, resolveActor({ name: by, kind: 'agent' }), 'asked a question in a comment', comment.frameId)
     return comment
   }
   return undefined
@@ -1036,12 +1166,14 @@ export async function addQueuedCard(
   attachments?: unknown,
   fromUserId?: string,
   scope?: unknown,
+  runner?: unknown,
 ): Promise<AgentTask | undefined> {
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvasMetadata(canvasId)) return undefined
   const pipeline = normalizePipeline(agents)
   const frames = (await store.syncCanvas(canvasId, 'summary'))?.frames ?? []
   const target = normalizeScope(frames, scope)
+  const pick = parseRunnerPick(runner)
   /* reference-image frame ids: only frames that actually live on this canvas */
   const refs = (Array.isArray(attachments) ? attachments : [])
     .filter((a): a is string => typeof a === 'string')
@@ -1055,7 +1187,8 @@ export async function addQueuedCard(
       t.status === clean &&
       pipelineOf(t).join(',') === pipeline.join(',') &&
       (t.attachments ?? []).join(',') === refs.join(',') &&
-      JSON.stringify(t.scope ?? null) === JSON.stringify(target ?? null),
+      JSON.stringify(t.scope ?? null) === JSON.stringify(target ?? null) &&
+      runnerKey(t.runner) === runnerKey(pick),
   )
   if (duplicate) return duplicate
   const card: AgentTask = {
@@ -1070,6 +1203,7 @@ export async function addQueuedCard(
     stage: 0,
     ...(refs.length > 0 ? { attachments: refs } : {}),
     ...(target ? { scope: target } : {}),
+    ...(pick ? { runner: pick } : {}),
   }
   list.unshift(card)
   taskLog.set(canvasId, trimTaskLog(list))
@@ -1200,7 +1334,9 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
 
 /** Cards waiting on THIS agent's stage, claimed by it. A card at another
  *  stage is invisible here — that is what keeps a pipeline in order. */
-export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: string): AgentTask[] {
+/** `runner` (a `runnerKey`) narrows the claim to cards sent to one
+ *  connection; unset takes them all. */
+export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: string, runner?: string): AgentTask[] {
   const pending = (taskLog.get(canvasId) ?? []).filter(
     (t) =>
       t.queuedBy &&
@@ -1208,7 +1344,8 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
       !t.failedAt &&
       !t.endedAt &&
       stageAgent(t) === agentName &&
-      (payer === undefined || (t.queuedByUserId ?? '') === payer),
+      (payer === undefined || (t.queuedByUserId ?? '') === payer) &&
+      (runner === undefined || runnerKey(t.runner) === runner),
   )
   for (const c of pending) {
     c.agentName = agentName
@@ -1368,9 +1505,29 @@ function finishStream(frameId: string, logDone: boolean) {
   const s = streams.get(frameId)
   if (!s) return
   streams.delete(frameId)
+  /* a stream that ends without its done chunk (the agent went idle, or a
+     replace cut it off) still gets the faces of the library fonts it uses
+     and the token renames it missed; a finished one already has them, and
+     this is then a no-op */
+  const renames = pendingRenames.get(frameId) ?? []
+  pendingRenames.delete(frameId)
+  void orderedFrame(frameId, () => settleStreamedHtml(frameId, renames, s.actor)).catch((error) =>
+    console.error('[stream] settle failed', error),
+  )
   broadcast(s.canvasId, { type: 'frame:streaming', frameId, active: false, actor: s.actor })
   if (logDone) logActivity(s.canvasId, s.actor, `finished designing “${s.frameName}”`, frameId)
   endAutoTask(s.canvasId, s.taskId)
+}
+
+/** The renames a stream missed and the library faces it uses, written once
+ *  the document is whole. */
+async function settleStreamedHtml(frameId: string, renames: TokenRename[], actor: Actor) {
+  const current = await store.getFrame(frameId)
+  if (!current) return
+  let renamed = current.html
+  for (const rename of renames) renamed = applyRename(renamed, rename)
+  const html = withLibraryFaces(current.canvasId, renamed)
+  if (html !== current.html) await store.updateFrame(frameId, { html }, actor.name, actor)
 }
 
 // Content mutations run in the actor. Keep this server's stream/task side effects in the same order.
@@ -1391,6 +1548,19 @@ setInterval(() => {
     if (!frameOperations.has(frameId) && Date.now() - stream.lastActivity > STREAM_IDLE_MS) finishStream(frameId, false)
   }
 }, 1000).unref()
+
+/** A finished document with the @font-face rules for the canvas's library
+ *  fonts it uses (shared/fonts.ts) and the stylesheet link for the hosted
+ *  fonts it names (shared/webFonts.ts), so naming a family is all it takes. */
+function withLibraryFaces(canvasId: string, html: string): string {
+  const canvas = store.getCanvasMetadata(canvasId)
+  if (!canvas) return html
+  const library = fontsForCanvas(canvas)
+  /* tokens first: a family named only through a font token is then in the
+     document for the font scan to find */
+  const withTokens = withTokenBlock(html, canvas.tokens ?? [], canvas.tokenThemes ?? [])
+  return withWebFontLinks(withFontFaces(withTokens, library), library)
+}
 
 export async function appendFrameHtml(
   frameId: string,
@@ -1453,9 +1623,33 @@ export async function setCanvasPages(
   return result
 }
 
+/** Add one page at the end of the canvas, named `name`, with a fresh id; peers
+ *  get the page list. Returns the new page and the whole list. */
+export async function createCanvasPage(canvasId: string, name: string, actor: Actor) {
+  const page = { id: nanoid(10), name }
+  /* the canvas refuses a save made against an older list: read it again and retry */
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const canvas = await store.syncCanvas(canvasId, 'index')
+    if (!canvas) return undefined
+    const pages = canvasPages(canvas)
+    if (pages.length >= MAX_PAGES) throw new PageLimitError()
+    const result = await setCanvasPages(canvasId, [...pages, page], actor, pages)
+    if (!result || result.error === 'deleted') return undefined
+    if (!result.error) return { page, pages: result.pages }
+  }
+  throw new Error('Pages kept changing; try again')
+}
+
 /** Point a page's prototype flow at a frame (or clear it); peers get the page list. */
 export async function setFlowStart(canvasId: string, pageId: string, frameId: string | null, actor: Actor) {
   const pages = await store.setFlowStart(canvasId, pageId, frameId)
+  if (pages) broadcast(canvasId, { type: 'canvas:pages', pages, actor })
+  return pages
+}
+
+/** Paint a page's canvas a colour of its own (or clear it); peers get the page list. */
+export async function setPageBackground(canvasId: string, pageId: string, background: string | null, actor: Actor) {
+  const pages = await store.setPageBackground(canvasId, pageId, background)
   if (pages) broadcast(canvasId, { type: 'canvas:pages', pages, actor })
   return pages
 }
@@ -1499,11 +1693,12 @@ export async function createFrame(
     demo?: boolean
     hidden?: boolean
     locked?: boolean
+    z?: number
   },
   actor: Actor,
   id?: string,
 ): Promise<Frame | undefined> {
-  if (input.html !== undefined) input = { ...input, html: repairEscapedHtml(input.html) }
+  if (input.html !== undefined) input = { ...input, html: withLibraryFaces(canvasId, repairEscapedHtml(input.html)) }
   const frame = await store.createFrame(canvasId, input, actor.name, id, actor.kind)
   if (!frame) return undefined
   if (actor.kind === 'agent' && frame.html) {
@@ -1522,14 +1717,15 @@ export async function createFrame(
  *  the frame has moved on since the caller read it. */
 export async function updateFrame(
   frameId: string,
-  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked'>>,
+  patch: Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z'>>,
   actor: Actor,
   opts: { replace?: boolean; expectedUpdatedAt?: number } = {},
 ): Promise<Frame | undefined> {
   return orderedFrame(frameId, async () => {
     const before = await store.getFrame(frameId)
     if (!before) return undefined
-    if (patch.html !== undefined) patch = { ...patch, html: repairEscapedHtml(patch.html) }
+    if (patch.html !== undefined)
+      patch = { ...patch, html: withLibraryFaces(before.canvasId, repairEscapedHtml(patch.html)) }
     const prevName = before.name
     const prevHtml = before.html
     const prevHidden = !!before.hidden
@@ -1578,6 +1774,20 @@ export function replaceFrameHtml(
     touch(frame.canvasId, actor, frameId)
     return frame
   })
+}
+
+/** Several frames' places in the stack at once (the Layers panel renumbering
+ *  a page, or undoing that): the canvas checks every frame before it writes
+ *  any, so the order changes whole or not at all. Undefined when a frame is
+ *  gone or on another canvas. Not a design edit: no activity line. */
+export async function restackFrames(
+  canvasId: string,
+  writes: StackWrite[],
+  actor: Actor,
+): Promise<Frame[] | undefined> {
+  const frames = await store.restackFrames(canvasId, writes, actor)
+  if (frames) touch(canvasId, actor, frames[0]?.id)
+  return frames
 }
 
 /** Sign-off is a human action, separate from ordinary frame editing. The
@@ -1767,6 +1977,437 @@ export function markGuidelinesSeen(canvasId: string, agentName: string) {
 
 export function hasSeenGuidelines(canvasId: string, agentName: string): boolean {
   return guidelinesSeen.has(`${canvasId}:${agentName}`)
+}
+
+/* ------------------------------------------------------------------ */
+/* Design tokens: a canvas's named design values (shared/designTokens) */
+/* — CSS custom properties frames use as var(--name). A change rewrites */
+/* the managed block in every frame that names the token.              */
+/* ------------------------------------------------------------------ */
+
+function tokenError(name: string, message: string): TokenResult {
+  return { name, result: 'error', message }
+}
+
+/** Why a value cannot be written, or null when it can: the literal is one
+ *  clean declaration, an alias names a token that exists (in the canvas or
+ *  earlier in the same batch) and does not loop back. */
+function valueProblem(
+  tokens: readonly DesignToken[],
+  name: string,
+  value: string,
+  themes: Record<string, string> = {},
+): string | null {
+  for (const candidate of [value, ...Object.values(themes)]) {
+    const target = aliasOf(candidate)
+    if (!target) continue
+    if (target === name) return 'a token cannot alias itself'
+    if (!tokens.some((t) => t.name === target)) return `aliases ${target}, which does not exist — create it first`
+  }
+  const probe: DesignToken[] = [
+    ...tokens.filter((t) => t.name !== name),
+    { name, type: 'color', value, themes, order: 0, updatedAt: 0, updatedBy: '' },
+  ]
+  /* a chain is followed per theme, each token under its value there */
+  const every = new Set<string | undefined>([undefined])
+  for (const token of probe) for (const theme of Object.keys(token.themes ?? {})) every.add(theme)
+  for (const theme of every) {
+    if (resolveToken(probe, name, theme) === null)
+      return theme ? `aliasing would loop in ${theme}` : 'aliasing would loop'
+  }
+  return null
+}
+
+/** The theme values of an input, normalized: null when one is unusable or
+ *  the theme name is not one, undefined when none were given. A null entry
+ *  (an edit) removes that theme's value. */
+function cleanThemes(
+  value: unknown,
+): { themes: Record<string, string>; removed: string[] } | undefined | { error: string } {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { error: 'themes must be an object' }
+  const themes: Record<string, string> = {}
+  const removed: string[] = []
+  for (const [theme, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!isThemeName(theme)) return { error: `invalid theme name “${theme}” — use a lowercase slug like "dark"` }
+    if (raw === null) {
+      removed.push(theme)
+      continue
+    }
+    const text = normalizeTokenValue(raw)
+    if (text === null) return { error: `invalid value for theme ${theme} — one CSS value, no semicolons or braces` }
+    themes[theme] = text
+  }
+  return { themes, removed }
+}
+
+/** Declare any theme a token names that the canvas does not have yet. */
+function declareThemes(canvasId: string, themes: Record<string, string>, by: string): string | null {
+  const known = store.getTokenThemes(canvasId)
+  const fresh = Object.keys(themes).filter((theme) => !known.includes(theme))
+  if (!fresh.length) return null
+  if (known.length + fresh.length > MAX_TOKEN_THEMES) return `a canvas has at most ${MAX_TOKEN_THEMES} token themes`
+  store.setTokenThemes(canvasId, [...known, ...fresh], by)
+  return null
+}
+
+function cleanDescription(value: unknown): string | undefined | null {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') return null
+  const text = value.replace(/\s+/g, ' ').trim()
+  return text.length > MAX_TOKEN_DESCRIPTION ? null : text
+}
+
+/** Names of the tokens a frame uses, directly: what a token edit must restyle. */
+export async function tokenUsage(canvasId: string): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+  const canvas = await store.syncCanvas(canvasId)
+  if (!canvas) return counts
+  for (const token of canvas.tokens ?? []) {
+    counts.set(token.name, canvas.frames.filter((f) => usesToken(f.html, token.name)).length)
+  }
+  return counts
+}
+
+/** Rewrite every frame whose managed token block no longer matches the
+ *  canvas's tokens (and, on a rename, the references to the old name). An
+ *  annotation write: nothing a reviewer signed off on moved, so sign-off
+ *  stands and no version is filed. Returns how many frames changed. */
+type TokenRename = { kind: 'token' | 'theme'; from: string; to: string }
+
+/** Renames a frame with an open append stream still has to take: applied
+ *  when the stream closes, done chunk or idle. */
+const pendingRenames = new Map<string, TokenRename[]>()
+
+function applyRename(html: string, rename: TokenRename): string {
+  return rename.kind === 'token'
+    ? renameTokenRefs(html, rename.from, rename.to)
+    : renameThemeAttrs(html, rename.from, rename.to)
+}
+
+async function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename): Promise<number> {
+  const canvas = await store.syncCanvas(canvasId, 'summary')
+  if (!canvas) return 0
+  let changed = 0
+  for (const { id } of canvas.frames) {
+    /* an open append stream gets its block, and any rename, with its done chunk */
+    if (streams.has(id)) {
+      if (rename) pendingRenames.set(id, [...(pendingRenames.get(id) ?? []), rename])
+      continue
+    }
+    /* in the frame's queue, so the HTML read is the one this write replaces */
+    const restyled = await orderedFrame(id, async () => {
+      const frame = await store.getFrame(id)
+      if (!frame) return false
+      let html = frame.html
+      if (rename) html = applyRename(html, rename)
+      html = withLibraryFaces(canvasId, html)
+      if (html === frame.html) return false
+      const updated = await store.updateFrame(id, { html }, actor.name, actor, { annotation: true })
+      if (updated) thumbs.purge(id)
+      return !!updated
+    })
+    if (restyled) changed++
+  }
+  return changed
+}
+
+function renameTokenRefs(html: string, from: string, to: string): string {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return html.replace(new RegExp(`var\\(\\s*${escaped}(?=\\s*[,)])`, 'g'), `var(${to}`)
+}
+
+function tokenSummary(results: TokenResult[], verb: string): string {
+  const names = results.filter((r) => r.result !== 'error').map((r) => r.name)
+  if (!names.length) return ''
+  return names.length <= 3
+    ? `${verb} the design token${names.length > 1 ? 's' : ''} ${names.join(', ')}`
+    : `${verb} ${names.length} design tokens`
+}
+
+/** Add tokens; one result per entry, errors in-band so a batch with one bad
+ *  entry still lands the rest. Returns undefined when the canvas is missing. */
+export async function createTokens(
+  canvasId: string,
+  inputs: unknown[],
+  actor: Actor,
+): Promise<TokenResult[] | undefined> {
+  const canvas = await store.syncCanvas(canvasId, 'index')
+  if (!canvas) return undefined
+  const results: TokenResult[] = []
+  const accepted: {
+    name: string
+    type: TokenType
+    value: string
+    themes?: Record<string, string>
+    description?: string
+  }[] = []
+  const pending: DesignToken[] = [...(canvas.tokens ?? [])]
+  for (const raw of inputs) {
+    const input = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+    const name = normalizeTokenName(input.name)
+    if (!isTokenName(name)) {
+      results.push(tokenError(name || '?', `invalid name “${name}” — letters, digits, hyphens and underscores only`))
+      continue
+    }
+    if (!isTokenType(input.type)) {
+      results.push(tokenError(name, `unknown token type “${String(input.type)}”`))
+      continue
+    }
+    const value = normalizeTokenValue(input.value)
+    if (value === null) {
+      results.push(tokenError(name, 'invalid value — one CSS value, no semicolons or braces'))
+      continue
+    }
+    const description = cleanDescription(input.description)
+    if (description === null) {
+      results.push(tokenError(name, `description must be text under ${MAX_TOKEN_DESCRIPTION} characters`))
+      continue
+    }
+    if (pending.some((t) => t.name === name)) {
+      results.push(tokenError(name, 'a token with this name already exists — change it with set_tokens'))
+      continue
+    }
+    if (pending.length >= MAX_TOKENS) {
+      results.push(tokenError(name, `this canvas already has ${MAX_TOKENS} tokens`))
+      continue
+    }
+    const cleaned = cleanThemes(input.themes)
+    if (cleaned && 'error' in cleaned) {
+      results.push(tokenError(name, cleaned.error))
+      continue
+    }
+    const themes = cleaned?.themes ?? {}
+    const problem = valueProblem(pending, name, value, themes)
+    if (problem) {
+      results.push(tokenError(name, problem))
+      continue
+    }
+    const declared = declareThemes(canvasId, themes, actor.name)
+    if (declared) {
+      results.push(tokenError(name, declared))
+      continue
+    }
+    const token: DesignToken = { name, type: input.type, value, order: pending.length + 1, updatedAt: 0, updatedBy: '' }
+    pending.push(token)
+    accepted.push({
+      name,
+      type: input.type,
+      value,
+      ...(Object.keys(themes).length ? { themes } : {}),
+      ...(description ? { description } : {}),
+    })
+    results.push({ name, result: 'created' })
+  }
+  if (accepted.length) {
+    store.setTokens(canvasId, accepted, actor.name)
+    /* frames that already name the token (a recreate, an agent that wrote
+       var() first) start resolving it now */
+    const restyled = await restyleTokenFrames(canvasId, actor)
+    broadcast(canvasId, {
+      type: 'tokens',
+      tokens: store.getTokens(canvasId),
+      themes: store.getTokenThemes(canvasId),
+      actor,
+    })
+    const summary = tokenSummary(results, 'added')
+    logActivity(
+      canvasId,
+      actor,
+      restyled ? `${summary} (${restyled} frame${restyled === 1 ? '' : 's'} restyled)` : summary,
+    )
+    touch(canvasId, actor)
+  }
+  return results
+}
+
+/** Change, rename or delete tokens by name, in order; one result per entry.
+ *  Every frame naming a changed token is restyled before this returns. */
+export async function setTokens(
+  canvasId: string,
+  edits: TokenEdit[],
+  actor: Actor,
+): Promise<TokenResult[] | undefined> {
+  if (!(await store.syncCanvas(canvasId, 'index'))) return undefined
+  const results: TokenResult[] = []
+  const renames: TokenRename[] = []
+  let touched = 0
+  for (const edit of edits) {
+    const tokens = store.getTokens(canvasId)
+    const name = normalizeTokenName(edit.name)
+    const token = tokens.find((t) => t.name === name)
+    if (!token) {
+      results.push(tokenError(name || '?', `no token named “${name}”`))
+      continue
+    }
+    if (edit.delete) {
+      const dependant = tokens.find(
+        (t) => aliasOf(t.value) === name || Object.values(t.themes ?? {}).some((v) => aliasOf(v) === name),
+      )
+      if (dependant) {
+        results.push(tokenError(name, `${dependant.name} aliases it — change that token first`))
+        continue
+      }
+      store.deleteToken(canvasId, name)
+      results.push({ name, result: 'deleted' })
+      touched++
+      continue
+    }
+    const type = edit.type === undefined ? token.type : edit.type
+    if (!isTokenType(type)) {
+      results.push(tokenError(name, `unknown token type “${String(edit.type)}”`))
+      continue
+    }
+    const value = edit.value === undefined ? token.value : normalizeTokenValue(edit.value)
+    if (value === null) {
+      results.push(tokenError(name, 'invalid value — one CSS value, no semicolons or braces'))
+      continue
+    }
+    const description = cleanDescription(edit.description)
+    if (description === null) {
+      results.push(tokenError(name, `description must be text under ${MAX_TOKEN_DESCRIPTION} characters`))
+      continue
+    }
+    const cleaned = cleanThemes(edit.themes)
+    if (cleaned && 'error' in cleaned) {
+      results.push(tokenError(name, cleaned.error))
+      continue
+    }
+    const themes = { ...(token.themes ?? {}), ...(cleaned?.themes ?? {}) }
+    for (const theme of cleaned?.removed ?? []) delete themes[theme]
+    const problem = valueProblem(tokens, name, value, themes)
+    if (problem) {
+      results.push(tokenError(name, problem))
+      continue
+    }
+    /* every check before any write: a refused edit changes nothing */
+    let newName = name
+    if (edit.newName !== undefined && normalizeTokenName(edit.newName) !== name) {
+      newName = normalizeTokenName(edit.newName)
+      if (!isTokenName(newName)) {
+        results.push(tokenError(name, `invalid name “${newName}” — letters, digits, hyphens and underscores only`))
+        continue
+      }
+      if (tokens.some((t) => t.name === newName)) {
+        results.push(tokenError(name, `a token named ${newName} already exists`))
+        continue
+      }
+    }
+    const declared = declareThemes(canvasId, themes, actor.name)
+    if (declared) {
+      results.push(tokenError(name, declared))
+      continue
+    }
+    if (newName !== name) {
+      store.renameToken(canvasId, name, newName, actor.name)
+      /* every var() reference to the old name in another token's values
+         follows it, whole-value aliases and references inside expressions alike */
+      const referencing = store
+        .getTokens(canvasId)
+        .filter((t) => [t.value, ...Object.values(t.themes ?? {})].some((v) => usesToken(v, name)))
+        .map((t) => ({
+          name: t.name,
+          type: t.type,
+          value: renameTokenRefs(t.value, name, newName),
+          themes: Object.fromEntries(
+            Object.entries(t.themes ?? {}).map(([theme, v]) => [theme, renameTokenRefs(v, name, newName)]),
+          ),
+          description: t.description,
+        }))
+      if (referencing.length) store.setTokens(canvasId, referencing, actor.name)
+      renames.push({ kind: 'token', from: name, to: newName })
+    }
+    store.setTokens(
+      canvasId,
+      [
+        {
+          name: newName,
+          type,
+          value,
+          themes,
+          description: description === undefined ? token.description : description,
+          ...(typeof edit.order === 'number' && Number.isFinite(edit.order) ? { order: edit.order } : {}),
+        },
+      ],
+      actor.name,
+    )
+    results.push({ name: newName, result: 'updated' })
+    touched++
+  }
+  if (touched) {
+    let restyled = 0
+    for (const rename of renames) restyled += await restyleTokenFrames(canvasId, actor, rename)
+    restyled += await restyleTokenFrames(canvasId, actor)
+    broadcast(canvasId, {
+      type: 'tokens',
+      tokens: store.getTokens(canvasId),
+      themes: store.getTokenThemes(canvasId),
+      actor,
+    })
+    const summary = tokenSummary(results, 'changed')
+    logActivity(
+      canvasId,
+      actor,
+      restyled ? `${summary} (${restyled} frame${restyled === 1 ? '' : 's'} restyled)` : summary,
+    )
+    touch(canvasId, actor)
+  }
+  return results
+}
+
+/** Replace the canvas's token themes (order included): a theme that leaves
+ *  takes its values with it, and every frame is restyled. Throws on bad
+ *  input with a message for the caller's error channel. */
+export async function setTokenThemes(
+  canvasId: string,
+  themes: unknown,
+  actor: Actor,
+  renames: unknown = [],
+): Promise<string[] | undefined> {
+  if (!(await store.syncCanvas(canvasId, 'index'))) return undefined
+  if (!Array.isArray(themes)) throw new Error('themes must be an array of names')
+  if (!Array.isArray(renames)) throw new Error('renames must be an array of { from, to }')
+  /* every check runs against a simulated list before anything is written,
+     so a bad request changes nothing */
+  const before = store.getTokenThemes(canvasId)
+  let simulated = [...before]
+  const moves: { from: string; to: string }[] = []
+  for (const raw of renames) {
+    const entry = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+    const from = typeof entry.from === 'string' ? entry.from.trim().toLowerCase() : ''
+    const to = typeof entry.to === 'string' ? entry.to.trim().toLowerCase() : ''
+    if (!isThemeName(to)) throw new Error(`invalid theme name “${String(entry.to)}” — use a lowercase slug like "dark"`)
+    if (from === to) continue
+    if (!simulated.includes(from)) throw new Error(`no theme named “${from}”`)
+    if (simulated.includes(to)) throw new Error(`a theme named “${to}” already exists`)
+    simulated = simulated.map((theme) => (theme === from ? to : theme))
+    moves.push({ from, to })
+  }
+  const names: string[] = []
+  for (const raw of themes) {
+    const theme = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+    if (!isThemeName(theme)) throw new Error(`invalid theme name “${String(raw)}” — use a lowercase slug like "dark"`)
+    if (!names.includes(theme)) names.push(theme)
+  }
+  if (names.length > MAX_TOKEN_THEMES) throw new Error(`a canvas has at most ${MAX_TOKEN_THEMES} token themes`)
+  const same = simulated.length === names.length && simulated.every((theme, i) => theme === names[i])
+  if (same && !moves.length) return names
+
+  let restyled = 0
+  for (const move of moves) {
+    store.renameTokenTheme(canvasId, move.from, move.to, actor.name)
+    restyled += await restyleTokenFrames(canvasId, actor, { kind: 'theme', ...move })
+  }
+  if (!same) store.setTokenThemes(canvasId, names, actor.name)
+  restyled += await restyleTokenFrames(canvasId, actor)
+  broadcast(canvasId, { type: 'tokens', tokens: store.getTokens(canvasId), themes: names, actor })
+  logActivity(
+    canvasId,
+    actor,
+    `set the token themes to ${names.length ? names.join(', ') : 'none'}${restyled ? ` (${restyled} frame${restyled === 1 ? '' : 's'} restyled)` : ''}`,
+  )
+  touch(canvasId, actor)
+  return names
 }
 
 /* ------------------------------------------------------------------ */

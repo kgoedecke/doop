@@ -7,8 +7,16 @@ export const settings: Catalog['settings'] = {
   canvases: 'Canvases',
   canvas: 'Canvas',
 
+  generalTitle: 'Geral',
+  generalBlurb: 'Deixe o Doop do jeito que você gosta neste navegador.',
+  homeDashboardTitle: 'Painel inicial',
+  homeDashboardDescription: 'Escolha o que aparece no seu painel inicial neste navegador.',
+  showPromptBox: 'Mostrar a caixa de prompt',
+  showPromptBoxHint: 'Comece um design a partir de um prompt no painel inicial.',
   agentTitle: 'Doop Agent',
-  agentBlurb: 'Em qual conta de modelo o agente roda, em todos os canvases em que você trabalha.',
+  agentBlurb: 'Suas conexões, e a que o agente usa quando ninguém escolhe: comentários, @menções e automações.',
+  fontsTitle: 'Fontes',
+  fontsBlurb: 'Suas próprias fontes, para criar nos seus canvases pessoais.',
   keysTitle: 'Chaves de agente',
   keysBlurb: 'Credenciais bearer que deixam agentes sem interface desenharem em seu nome.',
   webhooksTitle: 'Webhooks',
@@ -20,13 +28,8 @@ export const settings: Catalog['settings'] = {
   appearanceBlurb:
     'Como o Doop aparece neste navegador: claro ou escuro, o idioma em que ele fala e como o editor do canvas organiza seus painéis.',
 
-  agentCardDescription:
-    'Escolha como o Doop Agent roda nos seus canvases: uma conta de modelo conectada ou o Claude CLI no seu computador. Os limites de uso e as cobranças do seu provedor se aplicam.',
   freeTasksLeftLabel: 'Tarefas gratuitas restantes do Doop Agent',
   meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado — conexão gerenciada pelo seu operador.',
-  meterClaudeLocal: 'Claude CLI selecionado — roda no seu computador conectado.',
-  meterChatgpt: 'Rodando na sua assinatura do ChatGPT.',
-  meterProviderKey: 'Rodando na sua chave da {provider}.',
   meterNoFreeTasks: 'Este servidor não oferece tarefas gratuitas — conecte uma conta para usar o Doop Agent.',
   meterUsedUp: 'Suas tarefas gratuitas acabaram.',
   meterLeft: {

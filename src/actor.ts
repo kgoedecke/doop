@@ -1,9 +1,10 @@
-import { and, desc, eq, getTableColumns, notInArray, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, ne, notInArray, sql } from 'drizzle-orm'
 import { Actor, Compute, Emittable, Ephemeral, Persisted, type ActorContext, type ActorSocketOf } from 'terse-sdk/actor'
 import { drizzle, migrate, type DurableActorsDatabase } from 'terse-sdk/drizzle'
 import { repairEscapedHtml } from '../server/escapedHtml.js'
 import { validateFrame } from '../shared/frame-validation.js'
 import { samePages } from '../shared/pages.js'
+import type { StackWrite } from '../shared/frameStack.js'
 import type {
   ActivityItem,
   Actor as Attribution,
@@ -18,9 +19,9 @@ import * as schema from './actor-db/schema.js'
 const { frames, versions } = schema
 
 export type FrameInput = Pick<Frame, 'name'> &
-  Partial<Pick<Frame, 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'demo' | 'hidden' | 'locked'>>
+  Partial<Pick<Frame, 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'demo' | 'hidden' | 'locked' | 'z'>>
 export type FramePatch = Partial<
-  Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'approval'>
+  Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'approval' | 'z'>
 >
 /** Rejected writes that a caller can act on, rather than errors. */
 export type FrameWriteConflict = { type: 'conflict'; frame: Frame }
@@ -83,10 +84,12 @@ function toFrame<T extends Omit<typeof frames.$inferSelect, 'position' | 'html'>
   hidden,
   locked,
   approval,
+  z,
   ...row
 }: T) {
   return {
     ...row,
+    ...(z === null ? {} : { z }),
     ...(demo === null ? {} : { demo }),
     ...(hidden ? { hidden: true } : {}),
     ...(locked ? { locked: true } : {}),
@@ -110,6 +113,7 @@ function toRow(frame: Frame) {
     hidden: frame.hidden ? true : null,
     locked: frame.locked ? true : null,
     approval: frame.approval ?? null,
+    z: frame.z ?? null,
     html: frame.html,
   }
 }
@@ -117,6 +121,17 @@ async function readFrame(orm: Orm, id: string): Promise<Frame | null> {
   const row = await orm.select(frameColumns).from(frames).where(eq(frames.id, id)).get()
   return row ? toFrame(row) : null
 }
+/** The `z` that puts a frame in front of every other one on its page, or
+ *  undefined on an empty page (shared/frameStack.ts `frontOf`). */
+async function frontOfPage(orm: Orm, pageId: string, except?: string): Promise<number | undefined> {
+  const row = await orm
+    .select({ top: sql<number | null>`MAX(COALESCE(${frames.z}, ${frames.createdAt}))` })
+    .from(frames)
+    .where(except === undefined ? eq(frames.pageId, pageId) : and(eq(frames.pageId, pageId), ne(frames.id, except)))
+    .get()
+  return row?.top === null || row?.top === undefined ? undefined : row.top + 1
+}
+
 /** Add a frame after every other one; the caller has validated it and checked its page. */
 async function insertFrame(orm: Orm, frame: Frame) {
   await orm
@@ -379,6 +394,7 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
         const edge = placed?.edge ?? null
         frame = { ...frame, x: edge === null ? 120 : edge + 80 }
       }
+      if (frame.z === undefined) frame = { ...frame, z: (await frontOfPage(this.orm, frame.pageId!)) ?? frame.createdAt }
       validateFrame(frame)
       await insertFrame(this.orm, frame)
       this.bursts = { ...this.bursts, [frame.id]: creatorBurst(frame, by.kind) }
@@ -422,12 +438,17 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
             : Object.fromEntries(
                 Object.entries(write.patch).filter(
                   ([key, value]) =>
-                    ['name', 'pageId', 'x', 'y', 'width', 'height', 'html', 'hidden', 'locked', 'approval'].includes(
+                    ['name', 'pageId', 'x', 'y', 'width', 'height', 'html', 'hidden', 'locked', 'approval', 'z'].includes(
                       key,
                     ) && value !== undefined,
                 ),
               )
       if (write.type !== 'append' && patch.html !== undefined) patch.html = repairEscapedHtml(patch.html)
+      /* a frame moved to another page lands in front there, as Figma does */
+      if (patch.pageId !== undefined && patch.pageId !== before.pageId && patch.z === undefined) {
+        const front = await frontOfPage(this.orm, patch.pageId, frameId)
+        if (front !== undefined) patch.z = front
+      }
       const frame: Frame = {
         ...before,
         ...patch,
@@ -512,10 +533,16 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
     const kept = new Set(pages.map((page) => page.id))
     const occupied = await this.orm.selectDistinct({ pageId: frames.pageId }).from(frames)
     if (occupied.some(({ pageId }) => !kept.has(pageId))) return { pages: current, error: 'occupied' }
-    // A page-list save renames, reorders, adds or deletes pages; only setFlowStart moves a flow start.
-    this.pages = pages.map(({ startFrameId: _ignored, ...page }) => {
-      const startFrameId = current.find((existing) => existing.id === page.id)?.startFrameId
-      return startFrameId ? { ...page, startFrameId } : page
+    /* a page-list save renames, reorders, adds or deletes pages — it never
+       moves a flow start or recolours a page, which only setFlowStart and
+       setPageBackground change */
+    this.pages = pages.map(({ startFrameId: _start, background: _background, ...page }) => {
+      const kept = current.find((existing) => existing.id === page.id)
+      return {
+        ...page,
+        ...(kept?.startFrameId ? { startFrameId: kept.startFrameId } : {}),
+        ...(kept?.background ? { background: kept.background } : {}),
+      }
     })
     this.committed = { type: 'pages-change', revision: ++this.revision, pages: this.pages }
     return { pages: this.pages }
@@ -556,6 +583,56 @@ export class CanvasActor extends Actor<SocketMetadata, CanvasCommand, CanvasSnap
     })
     this.committed = { type: 'pages-change', revision: ++this.revision, pages: this.pages }
     return this.pages
+  }
+
+  /** Set (a `#rrggbb`) or clear (null) a page's own canvas colour. */
+  async setPageBackground(pageId: string, background: string | null): Promise<CanvasPageInfo[] | null> {
+    if (this.deleted || !this.pages.some((page) => page.id === pageId)) return null
+    this.pages = this.pages.map((page) => {
+      if (page.id !== pageId) return page
+      const { background: _previous, ...rest } = page
+      return background ? { ...rest, background } : rest
+    })
+    this.committed = { type: 'pages-change', revision: ++this.revision, pages: this.pages }
+    return this.pages
+  }
+
+  /** Several frames' places in their page's stack, in one transaction: every
+   *  frame is checked before any is written. Null when one is gone. */
+  async restack(writes: StackWrite[], by: Attribution): Promise<Frame[] | null> {
+    if (!this.initialized || this.deleted) return null
+    if (!writes.length) return []
+    if (!writes.every((write) => Number.isFinite(write.z))) throw new Error('Each z must be a finite number')
+    return this.db.transaction(async () => {
+      const ids = writes.map((write) => write.id)
+      const found = await this.orm.select({ id: frames.id }).from(frames).where(inArray(frames.id, ids))
+      if (found.length !== new Set(ids).size) return null
+      const now = Date.now()
+      const restacked: Frame[] = []
+      for (const { id, z } of writes) {
+        const before = (await readFrame(this.orm, id))!
+        const frame: Frame = { ...before, z, updatedAt: Math.max(now, before.updatedAt + 1), updatedBy: by.name }
+        await this.orm
+          .update(frames)
+          .set({ z, updatedAt: frame.updatedAt, updatedBy: frame.updatedBy })
+          .where(eq(frames.id, id))
+        restacked.push(frame)
+      }
+      /* one change for one frame; a renumbered page arrives whole */
+      if (restacked.length === 1)
+        this.committed = {
+          type: 'frame-change',
+          revision: ++this.revision,
+          frame: restacked[0]!,
+          operation: 'update',
+          actor: by,
+        }
+      else {
+        this.revision++
+        this.committed = await this.snapshot()
+      }
+      return restacked
+    })
   }
 
   /** Newest first, without the HTML. */

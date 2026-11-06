@@ -134,6 +134,16 @@ export default tseslint.config(
     rules: { 'no-undef': 'error' },
   },
   {
+    files: ['chrome-extension/**/*.js'],
+    languageOptions: {
+      globals: Object.fromEntries(
+        'chrome window document navigator Node Element getComputedStyle HTMLImageElement HTMLInputElement HTMLTextAreaElement TextEncoder'
+          .split(' ')
+          .map((g) => [g, 'readonly']),
+      ),
+    },
+  },
+  {
     /* repo maintenance scripts and the iOS dev helpers: plain ESM run directly
        by node, so they get node globals rather than the browser set */
     files: ['scripts/**/*.{js,mjs}', 'ios/scripts/**/*.{js,mjs}'],

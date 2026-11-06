@@ -1,6 +1,7 @@
 import type { Catalog } from '..'
 
 export const admin: Catalog['admin'] = {
+  searchFeedback: 'Buscar feedback dos agentes',
   notFound: 'Não encontrado',
   notFoundBody: 'Esta página não existe para esta conta.',
   back: 'Voltar',
@@ -39,4 +40,22 @@ export const admin: Catalog['admin'] = {
   banTitle: 'Banir {name} ({email})?',
   unbanTitle: 'Desbanir {name} ({email})?',
   banDescription: 'A pessoa é desconectada de todos os lugares e não pode entrar nem usar o MCP até ser desbanida.',
+
+  feedbackNav: 'Feedback dos agentes',
+  feedbackTab: 'Feedback · {count}',
+  feedbackEmpty:
+    'Nenhum agente enviou nada ainda. Os agentes chamam report_issue quando o Doop atrapalha e share_feedback com ideias.',
+  feedbackKind: 'Tipo',
+  feedbackAll: 'Todos · {count}',
+  feedbackIssues: 'Problemas · {count}',
+  feedbackIdeas: 'Ideias · {count}',
+  feedbackIssue: 'problema',
+  feedbackIdea: 'ideia',
+  unnamedAgent: 'agente sem nome',
+  feedbackNoMatch: 'Nada corresponde a esta busca.',
+  feedbackLoadFailed: 'Não foi possível carregar o feedback dos agentes.',
+  tryAgain: 'Tentar de novo',
+  loading: 'Carregando…',
+  showingNewest: 'Mostrando os {shown} mais recentes de {total}',
+  loadOlder: 'Carregar mais antigos',
 }

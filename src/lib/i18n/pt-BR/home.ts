@@ -2,10 +2,13 @@ import type { Catalog } from '..'
 
 export const home: Catalog['home'] = {
   /* header */
-  manage: 'Gerenciar',
   import: 'Importar',
   newCanvas: 'Novo canvas',
   newShort: 'Novo',
+  hidePromptBox: 'Ocultar a caixa de prompt',
+  hidePromptBoxTitle: 'Ocultar a caixa de prompt?',
+  hidePromptBoxLede:
+    'Isso remove a caixa de prompt do seu painel inicial. Você pode ativá-la de novo quando quiser em Configurações → Geral.',
 
   /* failures and toasts */
   createCanvasFailed: 'Não foi possível criar o canvas',

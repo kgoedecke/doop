@@ -179,15 +179,20 @@ afterAll(async () => {
   await new Promise<void>((resolve) => provider.close(() => resolve()))
 })
 
+const accountIn = (view: { accounts: { kind: string }[] }, kind: string) => view.accounts.find((a) => a.kind === kind)
+
 it('serves nothing until an account is connected', async () => {
-  expect(await (await alice.get('/api/model-account/models')).json()).toEqual({ models: [], live: false })
+  expect(await (await alice.get('/api/model-account/models?kind=anthropic-key')).json()).toEqual({
+    models: [],
+    live: false,
+  })
 })
 
 it('Claude API: lists the models the key can run, curated first, and lets a discovered one be chosen', async () => {
   const key = 'sk-ant-catalog-test-key'
   expect((await alice.post('/api/model-account/anthropic-key', { apiKey: key })).status).toBe(200)
 
-  const catalog = await (await alice.get('/api/model-account/models')).json()
+  const catalog = await (await alice.get('/api/model-account/models?kind=anthropic-key')).json()
   expect(catalog.live).toBe(true)
   expect(catalog.error).toBeUndefined()
   expect(ids(catalog)).toEqual([
@@ -210,16 +215,18 @@ it('Claude API: lists the models the key can run, curated first, and lets a disc
   expect(JSON.stringify(catalog)).not.toContain(key)
 
   /* choosing a discovered id runs as that id, not the curated default */
-  expect((await alice.patch('/api/model-account', { model: 'claude-opus-5-20260901' })).status).toBe(200)
-  expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ model: 'claude-opus-5-20260901' })
+  expect((await alice.patch('/api/model-account/anthropic-key', { model: 'claude-opus-5-20260901' })).status).toBe(200)
+  expect(accountIn(await (await alice.get('/api/model-account')).json(), 'anthropic-key')).toMatchObject({
+    model: 'claude-opus-5-20260901',
+  })
   /* an id that is not shaped like a Claude model is still refused */
-  expect((await alice.patch('/api/model-account', { model: 'gpt-5.6-sol' })).status).toBe(400)
-  expect((await alice.patch('/api/model-account', { model: 'claude-' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/anthropic-key', { model: 'gpt-5.6-sol' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/anthropic-key', { model: 'claude-' })).status).toBe(400)
 })
 
 it('falls back to the curated menu when the provider is down, and says so', async () => {
   mode = 'down'
-  const catalog = await (await alice.get('/api/model-account/models')).json()
+  const catalog = await (await alice.get('/api/model-account/models?kind=anthropic-key')).json()
   expect(catalog.live).toBe(false)
   expect(catalog.error).toMatch(/could not load models from Claude API/i)
   expect(ids(catalog)).toContain('claude-sonnet-5')
@@ -228,7 +235,7 @@ it('falls back to the curated menu when the provider is down, and says so', asyn
 
 it('tells the user to reconnect when the provider rejects the key', async () => {
   mode = 'rejects'
-  const catalog = await (await alice.get('/api/model-account/models')).json()
+  const catalog = await (await alice.get('/api/model-account/models?kind=anthropic-key')).json()
   expect(catalog.live).toBe(false)
   expect(catalog.error).toMatch(/rejected the connected key/i)
   mode = 'catalog'
@@ -237,21 +244,23 @@ it('tells the user to reconnect when the provider rejects the key', async () => 
 it('OpenAI: lists the GPT and o-series chat families, newest first after the curated tiers', async () => {
   seen.length = 0
   await alice.post('/api/model-account/openai-key', { apiKey: 'sk-openai-test' })
-  const catalog = await (await alice.get('/api/model-account/models')).json()
+  const catalog = await (await alice.get('/api/model-account/models?kind=openai-key')).json()
   expect(catalog.live).toBe(true)
   expect(ids(catalog)).toEqual(['gpt-6-astra', 'gpt-5.6-terra', 'gpt-6.1-sol', 'o4-mini'])
   expect(catalog.models[2]).toMatchObject({ name: 'GPT-6.1-sol', vision: true })
   expect(seen.map((r) => r.auth)).toEqual(['Bearer sk-openai-test'])
-  expect((await alice.patch('/api/model-account', { model: 'gpt-6.1-sol' })).status).toBe(200)
-  expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ model: 'gpt-6.1-sol' })
-  expect((await alice.patch('/api/model-account', { model: 'claude-opus-5' })).status).toBe(400)
-  expect((await alice.patch('/api/model-account', { model: 'gpt-4.1' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/openai-key', { model: 'gpt-6.1-sol' })).status).toBe(200)
+  expect(accountIn(await (await alice.get('/api/model-account')).json(), 'openai-key')).toMatchObject({
+    model: 'gpt-6.1-sol',
+  })
+  expect((await alice.patch('/api/model-account/openai-key', { model: 'claude-opus-5' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/openai-key', { model: 'gpt-4.1' })).status).toBe(400)
 })
 
 it('Gemini: pages through the catalog and keeps the generateContent models with room for a turn', async () => {
   seen.length = 0
   await alice.post('/api/model-account/gemini-key', { apiKey: 'AIzaSyGeminiTestKey0123456789abcdefghij' })
-  const catalog = await (await alice.get('/api/model-account/models')).json()
+  const catalog = await (await alice.get('/api/model-account/models?kind=gemini-key')).json()
   expect(catalog.live).toBe(true)
   expect(ids(catalog)).toEqual(['gemini-3.7-flash', 'gemini-4-argon'])
   expect(catalog.models[0]).toMatchObject({ recommended: true, vision: true })
@@ -260,18 +269,20 @@ it('Gemini: pages through the catalog and keeps the generateContent models with 
     '/gemini/v1beta/models?pageSize=1000',
     '/gemini/v1beta/models?pageSize=1000&pageToken=page-2',
   ])
-  expect((await alice.patch('/api/model-account', { model: 'gemini-4-argon' })).status).toBe(200)
-  expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ model: 'gemini-4-argon' })
+  expect((await alice.patch('/api/model-account/gemini-key', { model: 'gemini-4-argon' })).status).toBe(200)
+  expect(accountIn(await (await alice.get('/api/model-account')).json(), 'gemini-key')).toMatchObject({
+    model: 'gemini-4-argon',
+  })
 })
 
 it('keeps the curated roster, and no catalog call, for OpenRouter', async () => {
   seen.length = 0
   await alice.post('/api/model-account/openrouter-key', { apiKey: 'sk-or-v1-openroutertestkey' })
-  const catalog = await (await alice.get('/api/model-account/models')).json()
+  const catalog = await (await alice.get('/api/model-account/models?kind=openrouter-key')).json()
   expect(catalog.live).toBe(false)
   expect(catalog.error).toBeUndefined()
   expect(ids(catalog)).toContain('moonshotai/kimi-k2.6')
   expect(catalog.models.some((m: { vision: boolean }) => m.vision === false)).toBe(true)
-  expect((await alice.patch('/api/model-account', { model: 'acme/designer-9' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/openrouter-key', { model: 'acme/designer-9' })).status).toBe(400)
   expect(seen).toEqual([])
 })

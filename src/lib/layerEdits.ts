@@ -1,16 +1,26 @@
+import type { TextFormatCommand } from './richText'
 import type { Frame } from '../../shared/types'
-import { pickedSelectors, useStore } from './store'
+import type { ReorderMove } from './keys'
+import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
+import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
+import { t } from './i18n'
 import { api, ApiError, errorMessage } from './api'
-import { inspectElement, nudgeElements, requestFrame } from './frameBridge'
+import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
+import { duplicateFrames } from './frameClipboard'
 import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from './styleCarry'
 import {
   deleteFramesTracked,
   dropEntry,
+  historyEpoch,
   keepTransferDestination,
   recordDrawingTransfer,
+  recordLayerName,
+  recordStack,
   recordUpdate,
   recordUpdates,
+  saveStack,
+  saveLayerName,
   trackSave,
 } from './history'
 import {
@@ -18,6 +28,10 @@ import {
   duplicateElements,
   elementFate,
   elementHtml,
+  elementIdAt,
+  elementName,
+  freshElementId,
+  htmlWithoutLayerNames,
   isElementHidden,
   isElementLocked,
   moveElement,
@@ -26,6 +40,7 @@ import {
   replaceElement,
   setElementLocked,
   setElementsHidden,
+  reorderElements,
   shiftElement,
   type DropTarget,
   type FlowPlacement,
@@ -33,6 +48,81 @@ import {
 } from './layers'
 
 /* ---- element edits shared by the Layers rail and the element panel ---- */
+
+/* Serializing renames gives each save a confirmed predecessor. A second
+   failed rename must never roll back to the first failed, optimistic name. */
+const pendingRenames = new Map<string, Promise<void>>()
+function queueRename(frameId: string, edit: (frame: Frame) => Promise<void>) {
+  const canvasId = useStore.getState().canvas?.id
+  const started = historyEpoch()
+  const run = async () => {
+    const s = useStore.getState()
+    if (s.canvas?.id !== canvasId || historyEpoch() !== started || !canEditOpenCanvas(s)) return
+    const frame = s.canvas?.frames.find((f) => f.id === frameId)
+    if (frame) await edit(frame)
+  }
+  const prior = pendingRenames.get(frameId)
+  const pending = (prior ? prior.then(run) : run()).finally(() => {
+    if (pendingRenames.get(frameId) === pending) pendingRenames.delete(frameId)
+  })
+  pendingRenames.set(frameId, pending)
+  trackSave(pending)
+}
+
+export function renameFrame(frameId: string, value: string) {
+  const name = value.trim()
+  if (!name) return
+  queueRename(frameId, async (frame) => {
+    if (isStackLocked(frame) || name === frame.name) return
+    const entry = recordUpdate(frame.id, { name: frame.name }, { name }, true)
+    const started = historyEpoch()
+    useStore.getState().patchFrameLocal(frame.id, { name })
+    try {
+      await api.updateFrame(frame.id, { name })
+    } catch (err) {
+      if (entry) dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id !== frame.canvasId || historyEpoch() !== started) return
+      // A failed save must not overwrite a newer name from another edit.
+      if (s.canvas.frames.find((f) => f.id === frame.id)?.name === name) {
+        s.patchFrameLocal(frame.id, { name: frame.name })
+      }
+      s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name: frame.name })))
+    }
+  })
+}
+
+export function renameLayer(frameId: string, selector: string, value: string) {
+  const name = value.trim()
+  const original = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
+  if (!name || !original) return
+  const expected = htmlWithoutLayerNames(original.html)
+  queueRename(frameId, async (frame) => {
+    // A positional selector can now name a different sibling. Fail closed
+    // when anything except another rename changed while this edit waited.
+    if (htmlWithoutLayerNames(frame.html) !== expected) {
+      useStore.getState().pushNotice(t('panels.layersRenameChanged'))
+      return
+    }
+    if (isLayerLocked(frame, selector)) return
+    const before = elementName(frame.html, selector)
+    if (before === name) return
+    /* the element's identity for undo and redo: the id it wears, else one
+       stamped with the name, so a sibling added later cannot shift the target */
+    const elementId = elementIdAt(frame.html, selector) ?? freshElementId(frame.html)
+    const entry = recordLayerName(frame.id, selector, before, name, elementId)
+    const started = historyEpoch()
+    try {
+      await saveLayerName(frame.id, selector, name, elementId)
+    } catch (err) {
+      dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id === frame.canvasId && historyEpoch() === started) {
+        s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name })))
+      }
+    }
+  })
+}
 
 export function saveFrameHtml(frame: Frame, html: string) {
   // Layer commands each need their own undo step, even when invoked rapidly.
@@ -125,11 +215,22 @@ export function deleteLayer(frame: Frame, selector: string): boolean {
 }
 
 /** Remove the elements together, as one undo step; as for one element, a
- *  locked one keeps the whole set (and the pick) in place. */
+ *  locked one keeps the whole set (and the pick) in place. A standalone
+ *  element's shell was only ever that one layer: deleting the layer deletes
+ *  the shell frame with it, whichever surface asked (the canvas's ⌫, the
+ *  element's context menu, the Layers rail), rather than leaving an empty,
+ *  invisible frame on the canvas. */
 export function deleteLayers(frame: Frame, selectors: string[]): boolean {
   if (selectors.some((selector) => isLayerLocked(frame, selector))) return false
-  const html = removeElements(frame.html, selectors)
   const store = useStore.getState()
+  const standalone = standaloneSelector(frame)
+  if (standalone && selectors.includes(standalone)) {
+    store.setSelectedElement(null)
+    store.setElementPanelOpen(false)
+    deleteFramesTracked([frame])
+    return true
+  }
+  const html = removeElements(frame.html, selectors)
   store.setSelectedElement(null)
   store.setElementPanelOpen(false)
   if (html === null) return false
@@ -178,6 +279,12 @@ export function duplicateLayer(frame: Frame, selector: string) {
  *  originals' positional paths would now point at shifted elements. */
 export function duplicateLayers(frame: Frame, selectors: string[]) {
   if (frame.locked || selectors.some((selector) => isLayerLocked(frame, selector))) return
+  /* a standalone element's shape is the element: its copy is a second
+     element on the canvas, not a second shape inside its shell */
+  if (isStandalonePick(frame, selectors)) {
+    duplicateFrames([frame])
+    return
+  }
   const duplicated = duplicateElements(frame.html, selectors)
   if (!duplicated) return
   saveFrameHtml(frame, duplicated.html)
@@ -186,6 +293,65 @@ export function duplicateLayers(frame: Frame, selectors: string[]) {
   if (!picked.some((selector) => selectors.includes(selector))) return
   store.pickElement(null)
   for (const selector of duplicated.selectors) store.toggleElement({ frameId: frame.id, selector })
+}
+
+/* ---- stacking: which frame or shape is in front ---- */
+
+/** A frame, or a standalone element, locked against moving in the stack:
+ *  the frame's lock, or the shape's own (⌘⇧L sets that one). */
+export function isStackLocked(frame: Frame): boolean {
+  const shape = standaloneSelector(frame)
+  return !!frame.locked || (!!shape && isElementLocked(frame.html, shape))
+}
+
+/** Move a frame (or a standalone element, which is one) to `index` of its
+ *  page's back-to-front order, `frames` — the page's frames as the stage
+ *  paints them. One undo step and one request, however many frames had to
+ *  be renumbered to make room; a refused save puts every frame back. A
+ *  locked frame or shape stays where it is. */
+export function restackFrame(frames: Frame[], frameId: string, index: number) {
+  const frame = frames.find((f) => f.id === frameId)
+  if (!frame || isStackLocked(frame)) return
+  const after = restack(frames, frameId, index)
+  if (!after.length) return
+  const before = after.map(({ id }) => ({ id, z: stackOf(frames.find((f) => f.id === id)!) }))
+  recordStack(frame.canvasId, before, after)
+  trackSave(
+    saveStack(frame.canvasId, before, after).catch((err: unknown) => {
+      useStore.getState().pushNotice(errorMessage(err, 'Couldn’t change the layer order'))
+    }),
+  )
+}
+
+/** Room for a new frame at `index` of a page's back-to-front order: the
+ *  `z` that puts it there (undefined on an empty page, where the server
+ *  puts it in front), and the renumbering the page needed first when its
+ *  neighbours left none, which is saved already and belongs in the undo
+ *  step of whatever the room was made for. */
+export type StackRoom = { z: number | undefined; stack: { before: StackWrite[]; after: StackWrite[] } | null }
+
+/** Make room for a new frame at `index` of the page's back-to-front order
+ *  (`frames`): when its neighbours leave none, the page is renumbered
+ *  first, keeping its order, so the frame lands where it was dropped
+ *  rather than in front. Null when the renumbering was refused. */
+export async function stackRoom(frames: Frame[], index: number): Promise<StackRoom | null> {
+  const { z, renumber } = roomAt(frames, index)
+  if (!renumber.length) return { z, stack: null }
+  const before = renumber.map(({ id }) => ({ id, z: stackOf(frames.find((f) => f.id === id)!) }))
+  try {
+    await saveStack(frames[0]!.canvasId, before, renumber)
+    return { z, stack: { before, after: renumber } }
+  } catch (err) {
+    useStore.getState().pushNotice(errorMessage(err, 'Couldn’t change the layer order'))
+    return null
+  }
+}
+
+/** ⌥↑ / ⌥↓ on a frame row: one step toward the front (-1, up the list) or
+ *  the back (1, down it). */
+export function shiftFrame(frames: Frame[], frameId: string, dir: 1 | -1) {
+  const index = frames.findIndex((f) => f.id === frameId)
+  if (index !== -1) restackFrame(frames, frameId, index - dir)
 }
 
 /* ---- the eye: hiding and showing, frames and elements alike ---- */
@@ -238,6 +404,34 @@ export function setLayersHidden(frame: Frame, selectors: string[], hidden: boole
 /** ⌘⇧H: picked elements move together — all shown when every one is
  *  hidden, hidden otherwise; with nothing picked the selected frames do the
  *  same. False when the key had nothing to act on. */
+/** ⌘B, ⌘I, ⌘U, ⌘⇧X and ⌘⇧7 / ⌘⇧8 on picked text layers: the format toggles
+ *  over each whole layer. True when an element was picked, whether or not it
+ *  held text; the selection follows a layer whose tag changed. */
+export function formatSelectionText(command: TextFormatCommand): boolean {
+  const s = useStore.getState()
+  const picked = s.selectedElement
+  if (!picked) return false
+  const frame = s.canvas?.frames.find((f) => f.id === picked.frameId)
+  if (!frame) return false
+  if (frame.locked) return true
+  const selectors = pickedSelectors(s)
+  formatElementText(picked.frameId, selectors, command)
+    .then((after) => {
+      /* the frame focused its layer for the command; the canvas's shortcuts listen on this window */
+      const active = document.activeElement
+      if (active instanceof HTMLIFrameElement) active.blur()
+      const primary = after?.[selectors.indexOf(picked.selector)]
+      const now = useStore.getState()
+      const unchanged =
+        now.selectedElement?.frameId === picked.frameId && pickedSelectors(now).join() === selectors.join()
+      if (!after || !primary || after.join() === selectors.join() || !unchanged) return
+      /* the whole picked set follows its layers' new selectors, the primary staying primary */
+      useStore.setState({ selectedElement: { frameId: picked.frameId, selector: primary }, selectedElements: after })
+    })
+    .catch(console.error)
+  return true
+}
+
 export function toggleSelectionHidden(): boolean {
   const s = useStore.getState()
   const frames = s.canvas?.frames ?? []
@@ -308,6 +502,12 @@ export function standaloneSelector(frame: Frame): string | null {
   if (!isCanvasElement(frame.html)) return null
   const [only, ...more] = buildLayerTree(frame.html)
   return only && !more.length ? only.selector : null
+}
+
+/** The pick is a standalone element's one shape, and nothing else. */
+export function isStandalonePick(frame: Frame, selectors: string[]): boolean {
+  const shape = standaloneSelector(frame)
+  return !!shape && selectors.length === 1 && selectors[0] === shape
 }
 
 /** Move the element out of `source` and next to, or into, a layer of
@@ -418,9 +618,18 @@ function sizedToShell(outerHtml: string, shell: Frame): string {
  *  document measures it; a frame not rendered yet places it at the frame's
  *  corner). The new frame is created first and the source emptied only
  *  once that landed; one undo step removes the element and puts the source
- *  back. False when the element is locked, already standalone, or its
- *  frame changed since the press. */
-export async function detachLayer(pressed: Frame, selector: string): Promise<boolean> {
+ *  back, and takes back the renumbering `room` (where it was dropped in the
+ *  Layers list; in front when unset) may have saved first. False when the
+ *  element is locked, already standalone, or its frame changed since the
+ *  press; a renumbering already saved then stands as an undo step of its
+ *  own. */
+export async function detachLayer(pressed: Frame, selector: string, room?: StackRoom): Promise<boolean> {
+  const lifted = await lift(pressed, selector, room)
+  if (!lifted && room?.stack) recordStack(pressed.canvasId, room.stack.before, room.stack.after)
+  return lifted
+}
+
+async function lift(pressed: Frame, selector: string, room?: StackRoom): Promise<boolean> {
   const source = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
   if (!source || source.html !== pressed.html) return false
   if (isLayerLocked(source, selector) || standaloneSelector(source) === selector) return false
@@ -450,6 +659,7 @@ export async function detachLayer(pressed: Frame, selector: string): Promise<boo
       width: Math.max(1, Math.round(rect.width)),
       height: Math.max(1, Math.round(rect.height)),
       html,
+      z: room?.z,
     })
   } catch (err) {
     useStore.getState().pushNotice(errorMessage(err, 'Couldn’t move the layer onto the canvas'))
@@ -478,6 +688,7 @@ export async function detachLayer(pressed: Frame, selector: string): Promise<boo
   const entry = recordDrawingTransfer(
     { before: null, after: created },
     { before: source, after: { ...source, html: emptied } },
+    room?.stack ?? undefined,
   )
   trackSave(
     api.updateFrame(source.id, { html: emptied }, source.updatedAt).catch(async (err: unknown) => {
@@ -491,6 +702,8 @@ export async function detachLayer(pressed: Frame, selector: string): Promise<boo
         return
       }
       dropEntry(entry)
+      /* the lift is off, but the room made for it was saved: undoable alone */
+      if (room?.stack) recordStack(source.canvasId, room.stack.before, room.stack.after)
       s.patchFrameLocal(source.id, { html: source.html })
       if (remote?.id === source.id) s.upsertFrame(remote)
       s.pushNotice(errorMessage(err, `Couldn’t take the layer out of “${source.name}”`))
@@ -545,4 +758,18 @@ function standaloneDocument(markup: string): string {
 export function shiftLayer(frame: Frame, selector: string, dir: -1 | 1): boolean {
   if (isLayerLocked(frame, selector)) return false
   return commitMove(frame, shiftElement(frame.html, selector, dir))
+}
+
+/** ⌘] / ⌘[ / ⌘⌥] / ⌘⌥[: restack the picked elements together among their
+ *  siblings, one undo step; the pick follows them. False when any is
+ *  locked or nothing could move. */
+export function reorderLayers(frame: Frame, selectors: string[], move: ReorderMove): boolean {
+  if (!selectors.length || selectors.some((sel) => isLayerLocked(frame, sel))) return false
+  const moved = reorderElements(frame.html, selectors, move)
+  if (!moved) return false
+  saveFrameHtml(frame, moved.html)
+  const store = useStore.getState()
+  store.select(frame.id)
+  store.pickElements(frame.id, moved.selectors)
+  return true
 }

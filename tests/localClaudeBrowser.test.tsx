@@ -29,10 +29,9 @@ afterEach(() => {
   container.remove()
 })
 it('points a browser at the desktop app instead of offering controls it cannot run', () => {
-  expect(container.textContent).toContain('Desktop app')
-  expect(container.textContent).toContain('Use this plan in the Doop desktop app.')
+  expect(container.textContent).toContain('Desktop app only')
   expect(container.querySelectorAll('button')).toHaveLength(0)
   const link = container.querySelector('a')
-  expect(link?.textContent).toBe('Download desktop app')
-  expect(link?.getAttribute('href')).toBe('https://doop.design/download/mac')
+  expect(link?.textContent).toBe('Get the app')
+  expect(link?.getAttribute('href')).toBe('https://doop.design/download')
 })

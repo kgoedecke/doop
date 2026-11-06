@@ -1,4 +1,4 @@
-import { ELEMENT_ID_ATTR } from '../../shared/elementId'
+import { ELEMENT_ID_ATTR, newElementId } from '../../shared/elementId'
 
 /**
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
@@ -28,6 +28,7 @@ export interface LayerNode {
 /** The attribute a locked layer carries in the frame's HTML. It travels with
  *  the markup, so every collaborator (and agent) sees the same lock. */
 export const LOCK_ATTR = 'data-doop-locked'
+export const NAME_ATTR = 'data-doop-name'
 
 /* markup that renders nothing of its own has no place in a layer list */
 const HIDDEN_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'TITLE', 'NOSCRIPT', 'TEMPLATE', 'BR', 'WBR'])
@@ -142,6 +143,12 @@ function detailOf(el: Element): string {
 }
 
 function toNode(el: Element): LayerNode {
+  const node = defaultNode(el)
+  const name = el.getAttribute(NAME_ATTR)?.trim()
+  return name ? { ...node, label: name, detail: '' } : node
+}
+
+function defaultNode(el: Element): LayerNode {
   const tag = el.tagName.toLowerCase()
   const drawingName = el.hasAttribute('data-doop-drawing') ? el.getAttribute('data-name') : null
   const base = {
@@ -165,7 +172,8 @@ function toNode(el: Element): LayerNode {
 function layerChildren(el: Element): LayerNode[] {
   const out: LayerNode[] = []
   for (const child of el.children) {
-    if (!HIDDEN_TAGS.has(child.tagName)) out.push(toNode(child))
+    /* an imported file's gradients and clips ride in a hidden defs host */
+    if (!HIDDEN_TAGS.has(child.tagName) && !child.hasAttribute('data-doop-defs')) out.push(toNode(child))
   }
   return out
 }
@@ -210,6 +218,55 @@ function find(doc: Document, selector: string): Element | null {
 
 export function elementHtml(html: string, selector: string): string | null {
   return find(parse(html), selector)?.outerHTML ?? null
+}
+
+export function elementName(html: string, selector: string): string | null {
+  return find(parse(html), selector)?.getAttribute(NAME_ATTR) ?? null
+}
+
+/** Compare a queued rename's document while allowing earlier renames to
+ *  finish or roll back (a rename stamps the element's id too). Any other
+ *  change can invalidate positional paths. */
+export function htmlWithoutLayerNames(html: string): string {
+  const doc = parse(html)
+  for (const el of doc.querySelectorAll(`[${NAME_ATTR}]`)) el.removeAttribute(NAME_ATTR)
+  for (const el of doc.querySelectorAll(`[${ELEMENT_ID_ATTR}]`)) el.removeAttribute(ELEMENT_ID_ATTR)
+  return serialize(doc)
+}
+
+/** The `data-doop-id` the element at `selector` carries, or null. */
+export function elementIdAt(html: string, selector: string): string | null {
+  return find(parse(html), selector)?.getAttribute(ELEMENT_ID_ATTR) ?? null
+}
+
+/** An element id no element in `html` carries yet. */
+export function freshElementId(html: string): string {
+  let id = newElementId()
+  while (html.includes(`${ELEMENT_ID_ATTR}="${id}"`)) id = newElementId()
+  return id
+}
+
+/** The frame's HTML with the element's `data-doop-id` taken off again: a
+ *  stamp rolled back with the write that made it. */
+export function clearElementId(html: string, selector: string): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  el.removeAttribute(ELEMENT_ID_ATTR)
+  return serialize(doc)
+}
+
+/** Store a layer caption without changing its text, alt text, id or styles.
+ *  `stamp` is the `data-doop-id` the element gets if it has none yet, so a
+ *  later undo or redo finds it by identity rather than by position. */
+export function setElementName(html: string, selector: string, name: string | null, stamp?: string): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  if (name === null) el.removeAttribute(NAME_ATTR)
+  else el.setAttribute(NAME_ATTR, name)
+  if (stamp && !el.hasAttribute(ELEMENT_ID_ATTR)) el.setAttribute(ELEMENT_ID_ATTR, stamp)
+  return serialize(doc)
 }
 
 /** True when the element, or anything above it, carries the lock — a lock
@@ -562,6 +619,58 @@ export function shiftElement(html: string, selector: string, dir: -1 | 1): Moved
   const sibling = el && visibleSibling(el, dir)
   if (!el || !sibling) return null
   return move(doc, el, sibling, dir === -1 ? 'before' : 'after')
+}
+
+/** Restack the elements among their siblings, as Figma does for a set:
+ *  forward and backward step each over the next or previous sibling outside
+ *  the set (so the set stays together and a member already at the end
+ *  stays), front and back put each at its parent's end, keeping their
+ *  order. Elements in several parents move within their own. Null when
+ *  nothing changed or a parent is locked. Returns the elements' selectors
+ *  after the move, in the order given. */
+export function reorderElements(
+  html: string,
+  selectors: string[],
+  move: 'forward' | 'backward' | 'front' | 'back',
+): { html: string; selectors: string[] } | null {
+  const doc = parse(html)
+  const els = selectors.map((sel) => find(doc, sel))
+  if (els.some((el) => !el)) return null
+  const set = new Set(els as Element[])
+  for (const el of set) if (!el.parentElement || el.parentElement.closest(`[${LOCK_ATTR}]`)) return null
+  /* document order; a step forward is applied from the last member back, so
+     a member never leaps over another */
+  const ordered = [...set].sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+  const toFront = move === 'forward' || move === 'front'
+  let changed = false
+  if (move === 'front' || move === 'back') {
+    /* each parent's members go to its edge as one group, keeping their
+       order; a group that already fills that edge stays */
+    const groups = new Map<Element, Element[]>()
+    for (const el of ordered) {
+      const parent = el.parentElement!
+      groups.set(parent, [...(groups.get(parent) ?? []), el])
+    }
+    for (const [parent, members] of groups) {
+      const visible = [...parent.children].filter((c) => !HIDDEN_TAGS.has(c.tagName))
+      const edge = toFront ? visible.slice(-members.length) : visible.slice(0, members.length)
+      if (edge.every((c) => set.has(c))) continue
+      if (toFront) parent.append(...members)
+      else parent.prepend(...members)
+      changed = true
+    }
+  } else {
+    if (toFront) ordered.reverse()
+    for (const el of ordered) {
+      const over = visibleSibling(el, toFront ? 1 : -1)
+      if (!over || set.has(over)) continue
+      if (toFront) over.after(el)
+      else over.before(el)
+      changed = true
+    }
+  }
+  if (!changed) return null
+  return { html: serialize(doc), selectors: (els as Element[]).map(elementPath) }
 }
 
 /* attributes whose value is an id, or a space-separated list of ids */

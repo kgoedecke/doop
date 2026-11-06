@@ -1,0 +1,77 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      @page {
+        size: 600px 400px;
+        margin: 0;
+      }
+      body {
+        margin: 0;
+        width: 600px;
+        height: 400px;
+        font-family: Georgia, serif;
+        position: relative;
+      }
+      h1 {
+        position: absolute;
+        left: 40px;
+        top: 30px;
+        font:
+          700 28px Helvetica,
+          Arial,
+          sans-serif;
+        color: #0177d3;
+        margin: 0;
+      }
+      p {
+        position: absolute;
+        left: 40px;
+        top: 80px;
+        width: 300px;
+        font-size: 14px;
+        line-height: 20px;
+        color: #111;
+      }
+      .card {
+        position: absolute;
+        left: 380px;
+        top: 40px;
+        width: 180px;
+        height: 120px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #ff8a00, #e52e71);
+      }
+      .btn {
+        position: absolute;
+        left: 40px;
+        top: 200px;
+        width: 160px;
+        height: 44px;
+        border-radius: 22px;
+        background: #111;
+        color: #fff;
+        font:
+          500 14px Helvetica,
+          sans-serif;
+        text-align: center;
+        line-height: 44px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Quarterly report</h1>
+    <p>Revenue grew <b>24%</b> year over year while <i>churn</i> fell to a record low. Lorem ipsum dolor sit amet.</p>
+    <div class="card"></div>
+    <div class="btn">Get started</div>
+    <svg style="position: absolute; left: 380px; top: 200px" width="180" height="150" viewBox="0 0 180 150">
+      <circle cx="40" cy="40" r="30" fill="#2ecc71" stroke="#111" stroke-width="3" />
+      <path d="M90 20 L170 20 L130 90 Z" fill="none" stroke="#e52e71" stroke-width="4" />
+      <rect x="20" y="100" width="140" height="30" rx="6" fill="#dcdcdc" />
+    </svg>
+    <img
+      style="position: absolute; left: 40px; top: 280px; width: 120px; height: 80px"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR4nGP4z8DwHwyBFJAFYQEAZuoH+Y3+p5YAAAAASUVORK5CYII="
+    />
+  </body>
+</html>

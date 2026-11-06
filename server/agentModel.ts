@@ -1,10 +1,11 @@
 import { env } from './env.ts'
-import { getLocalAgentPreference } from './localAgentPreferences.ts'
+import { readConnections, usableAccount, type Connections } from './agentDefaults.ts'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
-import type { LocalAgentResult } from '../shared/localAgent.ts'
+import { isClaudeEffort, isClaudeModel, type LocalAgentResult } from '../shared/localAgent.ts'
+import type { RunnerPick } from '../shared/agentRunner.ts'
 import Anthropic from '@anthropic-ai/sdk'
-import { getAccount, withFreshToken, accountModelFor, accountVisionFor } from './modelAccounts.ts'
+import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick } from './modelAccounts.ts'
 import type { AccountKind, ModelAccount } from './modelAccounts.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
@@ -291,44 +292,57 @@ function byoModel(account: ModelAccount): AgentModel {
  * subscription expects the very next task to run on it, and the free tier is a
  * trial to get them here, not a balance to spend down first. It also means
  * connecting stops costing us anything from that moment on.
+ *
+ * `pick` is what the card asked for (the composer's choice): one of the
+ * person's connections — the Claude Plan on their desktop or one of their
+ * model accounts — and the model and effort on it. Work without a pick (a
+ * comment, an automation), or with one naming a connection that is gone or
+ * switched off, runs on their default (agentDefaults.ts).
  */
-export async function pickModel(payerId?: string): Promise<AgentModel | null> {
-  if (payerId) {
-    const worker = geminiCloudWorkerFor(payerId)
-    if (worker) {
-      return {
-        provider: 'gemini-cloud',
-        label: 'Gemini CLI (cloud pilot)',
-        userId: payerId,
-        runHarness: (req) => geminiCloudRuns.start(payerId, worker, req),
-        run: () =>
-          Promise.reject(
-            new Error('Gemini cloud pilot supports canvas tasks only. Repository imports require a server provider.'),
-          ),
-      }
-    }
-    const local = await getLocalAgentPreference(payerId)
-    if (local.enabled) {
-      if (!localAgentRuns.online(payerId)) return null
-      return {
-        provider: 'claude-local',
-        label: `Claude CLI (${local.model}${local.effort ? `, ${local.effort} effort` : ''})`,
-        userId: payerId,
-        runHarness: (req) => localAgentRuns.start(payerId, local, req),
-        run: () =>
-          Promise.reject(
-            new Error('Repository imports require a server provider. Select your connected account in Settings.'),
-          ),
-      }
+export async function pickModel(payerId?: string, pick?: RunnerPick): Promise<AgentModel | null> {
+  if (!payerId) return serverTiers[serverProvider()]()
+  const worker = geminiCloudWorkerFor(payerId)
+  if (worker) {
+    return {
+      provider: 'gemini-cloud',
+      label: 'Gemini CLI (cloud pilot)',
+      userId: payerId,
+      runHarness: (req) => geminiCloudRuns.start(payerId, worker, req),
+      run: () =>
+        Promise.reject(
+          new Error('Gemini cloud pilot supports canvas tasks only. Repository imports require a server provider.'),
+        ),
     }
   }
-
-  const account = payerId
-    ? await getAccount(payerId).catch((err) => {
-        console.error('[doop-agent] could not read the connected model account', err)
-        return null
-      })
-    : null
-  if (account) return byoModel(account)
+  const connections = await readConnections(payerId).catch((err): Connections => {
+    console.error('[doop-agent] could not read the connected model accounts', err)
+    return { plan: { enabled: false, model: 'default' }, accounts: [], default: undefined }
+  })
+  const picked =
+    pick && (pick.provider === 'claude-local' ? connections.plan.enabled : usableAccount(connections, pick.provider))
+  const provider = picked ? pick.provider : connections.default
+  /* the pick's model and effort apply only to the connection it named */
+  const own = picked ? pick : undefined
+  if (provider === 'claude-local') {
+    /* the Plan never hands its work to another connection while the desktop is away */
+    if (!localAgentRuns.online(payerId)) return null
+    const plan = connections.plan
+    const run = {
+      model: own && isClaudeModel(own.model) ? own.model : plan.model,
+      effort: own && isClaudeEffort(own.effort) ? own.effort : plan.effort,
+    }
+    return {
+      provider: 'claude-local',
+      label: `Claude CLI (${run.model}${run.effort ? `, ${run.effort} effort` : ''})`,
+      userId: payerId,
+      runHarness: (req) => localAgentRuns.start(payerId, run, req),
+      run: () =>
+        Promise.reject(
+          new Error('Repository imports require a server provider. Select your connected account in Settings.'),
+        ),
+    }
+  }
+  const account = usableAccount(connections, provider)
+  if (account) return byoModel(accountWithPick(account, own))
   return serverTiers[serverProvider()]()
 }

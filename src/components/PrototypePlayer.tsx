@@ -19,7 +19,7 @@ import {
 } from '../lib/prototypePlayer'
 import { prototypePath } from '../lib/prototype'
 import { IconButton } from './ui/icon-button'
-import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, SlidersIcon, XIcon } from './ui/icons'
+import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, ScalingIcon, XIcon } from './ui/icons'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -550,7 +550,7 @@ function ScalingMenu({ scaling, onChange }: { scaling: ProtoScaling; onChange: (
     <DropdownMenu>
       <DropdownMenuTrigger asChild data-proto-menu-trigger="" onKeyDown={(e) => e.stopPropagation()}>
         <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoScaling')}>
-          <SlidersIcon size="rail" />
+          <ScalingIcon size="rail" />
         </IconButton>
       </DropdownMenuTrigger>
       {/* above the player, which sits over every other layer of the editor */}
@@ -559,7 +559,14 @@ function ScalingMenu({ scaling, onChange }: { scaling: ProtoScaling; onChange: (
         className="z-[90]"
         data-proto-menu=""
         onKeyDown={(e) => e.stopPropagation()}
-        onCloseAutoFocus={(e) => e.preventDefault()}
+        /* a closed menu hands the keys back to the prototype: the screen that
+           takes them gets the focus; with none up, the button keeps it */
+        onCloseAutoFocus={(e) => {
+          const screen = interactiveScreen()
+          if (!screen) return
+          e.preventDefault()
+          screen.focus()
+        }}
       >
         <DropdownMenuRadioGroup value={scaling} onValueChange={pick}>
           <DropdownMenuCaption>{t('panels.protoScalingRecommended')}</DropdownMenuCaption>
@@ -580,6 +587,18 @@ function readState(): Record<string, unknown> {
   const state: unknown = history.state
   return state && typeof state === 'object' ? (state as Record<string, unknown>) : {}
 }
+/** The screen whose turn it is to take the keys: the topmost overlay, else
+ *  the base screen that is not on its way out. */
+function interactiveScreen(): HTMLIFrameElement | null {
+  const overlays = document.querySelectorAll<HTMLIFrameElement>('[data-prototype-player] [data-proto-overlay] iframe')
+  return (
+    overlays[overlays.length - 1] ??
+    document.querySelector<HTMLIFrameElement>(
+      '[data-prototype-player] [data-proto-screen]:not([data-proto-role="from"]) iframe',
+    )
+  )
+}
+
 /** Whether one of the player's screens holds the keyboard focus. */
 function screenHasFocus(): boolean {
   const focused = document.activeElement
@@ -590,6 +609,8 @@ const KEY_REPLY_MS = 400
 let keyRequests = 0
 
 /** Offer a key to the screen's own key interactions; true when one took it. */
+let switchRequests = 0
+
 function askKey(win: Window, key: string): Promise<boolean> {
   const reqId = `proto-key-${++keyRequests}`
   return new Promise((resolve) => {
@@ -640,13 +661,16 @@ function ProtoScreen({
     latest.current = { onReady, onMessage, register, takeFocus }
   })
 
+  /* the `doop:proto` switch this screen is waiting on, when its reply is
+     also the moment the screen should take the focus */
+  const focusOnSwitch = useRef<string | null>(null)
   useEffect(() => {
     const key = entry.key
     let first = true
     function onMsg(ev: MessageEvent) {
       const win = iframeRef.current?.contentWindow
       if (!win || ev.source !== win) return
-      const data = ev.data as { type?: string } | null
+      const data = ev.data as { type?: string; reqId?: string } | null
       if (!data?.type) return
       if (data.type === 'doop:frame-ready') {
         latest.current.register(key, win)
@@ -656,6 +680,11 @@ function ProtoScreen({
         first = false
         setShown(true)
         latest.current.onReady(key)
+      } else if (data.type === 'doop:proto-result') {
+        if (data.reqId === focusOnSwitch.current) {
+          focusOnSwitch.current = null
+          iframeRef.current?.focus()
+        }
       } else latest.current.onMessage(data)
     }
     window.addEventListener('message', onMsg)
@@ -673,13 +702,17 @@ function ProtoScreen({
   useEffect(() => {
     const iframe = iframeRef.current
     if (!shown || !iframe) return
-    iframe.contentWindow?.postMessage({ type: 'doop:proto', on: interactive }, '*')
+    const reqId = `proto-switch-${++switchRequests}`
     /* keys go to the focused document: take the focus over from the screen
        this one now covers, or back from the overlay that closed over it, so
-       its key interactions and controls answer instead of that screen's */
-    if (!interactive) return
+       its key interactions and controls answer instead of that screen's.
+       The focus moves on the runtime's reply, not now: the switch travels
+       as a message, and a key pressed into a focused screen whose runtime
+       had not yet heard it was dropped. */
     const focused = document.activeElement
-    if ((screenHasFocus() && focused !== iframe) || latest.current.takeFocus()) iframe.focus()
+    const takesFocus = interactive && ((screenHasFocus() && focused !== iframe) || latest.current.takeFocus())
+    focusOnSwitch.current = takesFocus ? reqId : null
+    iframe.contentWindow?.postMessage({ type: 'doop:proto', on: interactive, reqId }, '*')
   }, [shown, interactive])
 
   if (!frame || !layout) return <div className="text-body text-code-ink/70">{t('panels.protoDeleted')}</div>

@@ -4,6 +4,7 @@ import { db } from './db/index.ts'
 import { githubConnections } from './db/schema.ts'
 import { sanitizeSnapshotHtml } from './ingest.ts'
 import * as githubApp from './githubApp.ts'
+import { env } from './env.ts'
 import type { Frame } from '../shared/types.ts'
 
 /**
@@ -58,10 +59,8 @@ const REPO_RE = /^[\w.-]+\/[\w.-]+$/
 /* ------------------------------------------------------------------ */
 /* GitHub API client — thin fetch wrappers, no SDK                     */
 
-const GH_API = 'https://api.github.com'
-
 async function gh(token: string, path: string, accept = 'application/vnd.github+json'): Promise<Response> {
-  return fetch(GH_API + path, {
+  return fetch(env.GITHUB_API_URL + path, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: accept,
@@ -90,8 +89,10 @@ export async function createConnection(input: {
   repo: string
   /** PAT mode; mutually exclusive with installationId */
   token?: string
-  /** app mode — the caller must have verified the install handoff (pass) */
-  installationId?: string
+  /** app mode — the grants of a verified install handoff (pass): the repos
+   *  GitHub lets the connecting user reach through each installation; the
+   *  installation that grants the repo is bound */
+  grants?: githubApp.InstallationGrant[]
   branch?: string
   createdBy: string
 }): Promise<GithubConnection> {
@@ -101,16 +102,15 @@ export async function createConnection(input: {
     .replace(/\.git$/, '')
   if (!REPO_RE.test(repo)) throw new Error('repository must be "owner/name"')
   const token = input.token?.trim() || null
-  const installationId = input.installationId?.trim() || null
-  if (!token && !installationId) throw new Error('a fine-grained personal access token is required')
-
-  /* App mode grants exactly the installation's repos — refuse anything the
-     user did not select on GitHub's install screen. */
-  if (installationId) {
-    const repos = await githubApp.listInstallationRepos(installationId)
-    if (!repos.some((r) => r.fullName.toLowerCase() === repo.toLowerCase()))
-      throw new Error('that repository is not part of the GitHub App installation')
+  /* App mode grants exactly what GitHub showed the user — refuse anything
+     the install did not select, or that the user may not reach even though
+     the installation covers it. */
+  let installationId: string | null = null
+  if (input.grants?.length) {
+    installationId = githubApp.installationForRepo(input.grants, repo) ?? null
+    if (!installationId) throw new Error('that repository is not part of the GitHub App installation')
   }
+  if (!token && !installationId) throw new Error('a fine-grained personal access token is required')
 
   /* Verify reachability up front and pick up the default branch when none
      was given. Import is a one-time, code-only job: what lands on the canvas

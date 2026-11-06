@@ -26,7 +26,7 @@ const MENUS = {
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
 vi.mock('../src/lib/api', () => ({
   api: {
-    modelAccount: mocks.account,
+    modelAccounts: mocks.account,
     agentModels: async () => ({ models: [], live: false }),
     connectOpenRouterKey: mocks.connectOpenRouter,
     connectGeminiKey: mocks.connectGemini,
@@ -59,14 +59,18 @@ afterEach(() => {
 
 it('shows the connected OpenRouter roster as a dropdown with the text-only label', async () => {
   mocks.account.mockResolvedValue({
-    connected: true,
-    kind: 'openrouter-key',
-    model: 'z-ai/glm-5.3',
+    accounts: [{ kind: 'openrouter-key', enabled: true, model: 'z-ai/glm-5.3', connectedAt: 1 }],
+    default: 'openrouter-key',
+    chatgptEnabled: true,
     menus: MENUS,
   })
   await render()
   expect(container.textContent).toContain('OpenRouter API key')
-  expect(container.textContent).toContain('Active · Connected')
+  const row = Array.from(container.querySelectorAll('[role="listitem"]')).find((r) =>
+    r.textContent?.includes('OpenRouter API key'),
+  )!
+  expect(row.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true')
+  expect(row.textContent).toContain('Default')
   /* the picker is a dropdown trigger naming the current model, not a chip row */
   const trigger = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('GLM-5.3'))
   expect(trigger).toBeDefined()
@@ -76,16 +80,16 @@ it('shows the connected OpenRouter roster as a dropdown with the text-only label
 })
 
 it('posts a new Gemini key to its own connect route', async () => {
-  mocks.account.mockResolvedValue({ connected: false, menus: MENUS })
+  mocks.account.mockResolvedValue({ accounts: [], chatgptEnabled: true, menus: MENUS })
   mocks.connectGemini.mockResolvedValue({
-    connected: true,
-    kind: 'gemini-key',
-    model: 'gemini-3.7-flash',
+    accounts: [{ kind: 'gemini-key', enabled: true, model: 'gemini-3.7-flash', connectedAt: 1 }],
+    default: 'gemini-key',
+    chatgptEnabled: true,
     menus: MENUS,
   })
   await render()
-  const geminiSection = Array.from(container.querySelectorAll('section')).find((s) =>
-    s.textContent?.includes('Gemini API key'),
+  const geminiSection = Array.from(container.querySelectorAll('[role="listitem"]')).find((r) =>
+    r.textContent?.includes('Gemini API key'),
   )!
   await act(async () => {
     Array.from(geminiSection.querySelectorAll('button'))

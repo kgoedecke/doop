@@ -274,6 +274,62 @@
       "when": 1793303436354,
       "tag": "0039_comment_element_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1793499824743,
+      "tag": "0040_agent_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793521728824,
+      "tag": "0041_custom_fonts",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793692495440,
+      "tag": "0042_comment_element_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1793693135674,
+      "tag": "0043_frame_stack",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1793762567006,
+      "tag": "0044_design_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1793826097552,
+      "tag": "0045_agent_runner_pick",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793924448927,
+      "tag": "0046_multiple_model_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793932055532,
+      "tag": "0047_feedback_runner",
+      "breakpoints": true
     }
   ]
 }

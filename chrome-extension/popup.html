@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Doop Cature</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="logo.png" width="36" height="36" alt="Doop" /><span class="wordmark">Doop <span>Cature</span></span>
+    </header>
+    <main>
+      <p class="intro">Bring any page into Doop as editable layers.</p>
+      <div class="actions">
+        <button id="section" class="capture primary">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8-5 5 2-3 1-1 3-2-6Z" />
+            <path d="M10 21h1M21 10v1" /></svg
+          ><span><strong>Select a section</strong><small>Pick exactly what catches your eye</small></span>
+        </button>
+        <button id="page" class="capture">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="4" y="3" width="16" height="18" rx="2" />
+            <path d="M4 8h16M8 12h8M8 16h5" /></svg
+          ><span><strong>Capture entire page</strong><small>Bring the full layout with you</small></span>
+        </button>
+      </div>
+      <p id="status" role="status" aria-live="polite">
+        After copying, paste into your Doop canvas <kbd id="paste-key">⌘ V</kbd>
+      </p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -42,7 +42,9 @@ localAgentRouter.put('/', (req, res, next) => {
   })().catch(next)
 })
 
-function wake(userId: string) {
+/** Re-run the resident on every canvas this person can edit: a connection
+ *  that just came on can make their queued work runnable. */
+export function wake(userId: string) {
   for (const canvas of store.canvases.values()) if (canEditCanvas(userId, canvas)) onFeedback(canvas.id)
 }
 

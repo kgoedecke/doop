@@ -91,6 +91,10 @@ let idp: HttpServer
 let server: Server
 
 let restricted: Server
+/* SMTP "configured" (nothing listens on the port, so every send fails fast)
+   with REQUIRE_EMAIL_VERIFICATION at its default: a password account cannot
+   sign in until its address is verified — the production shape */
+let verifying: Server
 
 beforeAll(async () => {
   idp = await startFakeIdp(codeToClaims)
@@ -100,9 +104,10 @@ beforeAll(async () => {
     OIDC_CLIENT_ID: 'test-client',
     OIDC_CLIENT_SECRET: 'test-secret',
   }
-  ;[server, restricted] = await Promise.all([
+  ;[server, restricted, verifying] = await Promise.all([
     startServer(oidcEnv),
     startServer({ ...oidcEnv, SIGNUP_EMAIL_DOMAINS: 'jointhetroops.com' }),
+    startServer({ ...oidcEnv, SMTP_HOST: '127.0.0.1', SMTP_PORT: '9', REQUIRE_EMAIL_VERIFICATION: 'true' }),
   ])
 }, 70_000)
 
@@ -110,6 +115,7 @@ afterAll(() => {
   idp?.close()
   server?.stop()
   restricted?.stop()
+  verifying?.stop()
 })
 
 async function driveSsoCallback(client: Client, code: string): Promise<Response> {
@@ -137,6 +143,53 @@ describe('OIDC account linking against a real (faked-IdP) callback', () => {
     const after = await (await client.get('/api/me')).json()
     expect(after.id).toBe(before.id) // same account, not a second one
     expect(after.email).toBe('carol@test.dev')
+  })
+
+  it('keeps a password set before verification working when verification was never required', async () => {
+    /* the migration case this linking exists for: an SMTP-less instance,
+       where the password account was always a working login for its owner */
+    const client = new Client(server)
+    await client.signUp('erin@test.dev', 'Erin')
+    codeToClaims.set('code-erin', { sub: 'oidc-sub-erin', email: 'erin@test.dev', email_verified: true, name: 'Erin' })
+    expect((await driveSsoCallback(client, 'code-erin')).status).toBe(302)
+
+    const password = new Client(server)
+    const signIn = await password.post('/api/auth/sign-in/email', { email: 'erin@test.dev', password: 'password12345' })
+    expect(signIn.status).toBe(200)
+  })
+
+  it('drops a password nobody could use yet when the IdP, not that password, verifies the address', async () => {
+    /* pre-account takeover: a stranger signs up with the victim's email and
+       a password of their choosing, which verification keeps unusable — then
+       the real owner's SSO sign-in links to that row and must not turn the
+       stranger's password into a working login */
+    const squatter = new Client(verifying)
+    await squatter.signUp('victim@test.dev', 'Victim')
+    const blocked = await squatter.post('/api/auth/sign-in/email', {
+      email: 'victim@test.dev',
+      password: 'password12345',
+    })
+    expect(blocked.status).not.toBe(200) // unverified, as required
+
+    const owner = new Client(verifying)
+    codeToClaims.set('code-victim', {
+      sub: 'oidc-sub-victim',
+      email: 'victim@test.dev',
+      email_verified: true,
+      name: 'V',
+    })
+    const callback = await driveSsoCallback(owner, 'code-victim')
+    expect(callback.status).toBe(302)
+    expect(new URL(callback.headers.get('location') ?? '', 'http://x').searchParams.get('error')).toBeNull()
+    const me = await (await owner.get('/api/me')).json()
+    expect(me.email).toBe('victim@test.dev')
+
+    const retry = await squatter.post('/api/auth/sign-in/email', {
+      email: 'victim@test.dev',
+      password: 'password12345',
+    })
+    expect(retry.status).not.toBe(200)
+    expect((await squatter.get('/api/me')).status).not.toBe(200)
   })
 
   it('creates a new account via SSO when no local account exists for the email', async () => {

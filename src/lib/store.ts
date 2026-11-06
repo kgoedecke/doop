@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
+import { sortByStack } from '../../shared/frameStack'
+import type { DesignToken } from '../../shared/designTokens'
 import type {
   ActivityItem,
   AgentTask,
@@ -77,6 +79,9 @@ interface State {
   /** the Inspector panel is showing — opened by clicking a frame's name, not
    *  by mere selection, so clicking around a frame doesn't slide the panel in */
   inspectorOpen: boolean
+  /** the Page panel (the page's own settings) has the properties slot while
+   *  nothing is selected; opened from the rail, it stays until closed */
+  pagePanelOpen: boolean
   /** open frame context menu; deferPanel hides the Inspector until it closes
    *  (right-click selecting a frame must not slide a panel in under the menu) */
   ctxMenu: { frameId: string; deferPanel: boolean } | null
@@ -102,6 +107,8 @@ interface State {
   elementPanelOpen: boolean
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
+  /** which face the Layers panel shows: the layer tree, or the design tokens */
+  layersTab: 'layers' | 'tokens'
   /** ⌘. — every panel and toolbar is off screen, leaving only the canvas.
    *  A plain overlay flag: the panels' own open/closed state is untouched
    *  underneath, so toggling back shows exactly what was open before */
@@ -121,6 +128,9 @@ interface State {
    *  or the id in the URL was never one) — CanvasPage shows a not-found
    *  screen instead of an unusable, unresponsive canvas UI */
   canvasNotFound: boolean
+  /** a signed-out guest's join was refused (a private canvas, or the owner
+   *  turned the link off mid-visit) — App shows the sign-in form instead */
+  signInRequired: boolean
   /** a reconnect revealed a newer client bundle on the server — offer a reload */
   updateReady: boolean
   /** frameId -> color, set briefly when a remote actor updates a frame */
@@ -158,10 +168,13 @@ interface State {
   activePageId: string | null
   setActivePage(id: string): void
   setPages(pages: import('../../shared/types').CanvasPageInfo[], canvasId?: string): void
+  /** paint one page locally (this client's own edit, before or after its save) */
+  setPageBackgroundLocal(pageId: string, background: string | null): void
   setCanvas(c: Canvas | null): void
   setFrameIndex(frames: string[] | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
+  setSignInRequired(v: boolean): void
   setUpdateReady(v: boolean): void
   setPresences(list: Presence[]): void
   upsertPresence(p: Presence): void
@@ -188,6 +201,8 @@ interface State {
   renameCanvasLocal(name: string): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
+  /** replace the open canvas's design tokens and themes (the room sends the whole list) */
+  setTokensLocal(tokens: DesignToken[], themes: string[]): void
   /** pin (reference set) or unpin (null) a Memory reference on the open canvas */
   setReferenceLocal(id: string, reference: MemoryReference | null): void
   setDecisions(decisions: DesignDecision[]): void
@@ -225,6 +240,7 @@ interface State {
   setPanMode(v: boolean): void
   setFileDragging(v: boolean): void
   setInspectorOpen(v: boolean): void
+  setPagePanelOpen(v: boolean): void
   openCtxMenu(menu: { frameId: string; deferPanel: boolean }): void
   closeCtxMenu(): void
   setSelectedElement(el: { frameId: string; selector: string } | null): void
@@ -237,8 +253,12 @@ interface State {
   /** add the element to the picked set of its frame, or drop it from the
    *  set; an element in another frame starts a new set */
   toggleElement(el: { frameId: string; selector: string }): void
+  /** replace the picked set with these elements of one frame, the last
+   *  the primary (⌘A inside a frame, a keyboard walk of the tree) */
+  pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
+  setLayersTab(tab: 'layers' | 'tokens'): void
   toggleUiHidden(): void
   setPrototypeMode(on: boolean): void
   setViewport(v: Viewport): void
@@ -310,6 +330,7 @@ export const useStore = create<State>((set, get) => ({
   panMode: false,
   fileDragging: false,
   inspectorOpen: false,
+  pagePanelOpen: false,
   ctxMenu: null,
   selectedElement: null,
   selectedElements: [],
@@ -317,6 +338,7 @@ export const useStore = create<State>((set, get) => ({
   commentDrag: null,
   elementPanelOpen: false,
   layersOpen: readLayersOpen(),
+  layersTab: 'layers',
   uiHidden: false,
   prototypeMode: false,
   viewport: { x: 0, y: 0, zoom: 1 },
@@ -325,6 +347,7 @@ export const useStore = create<State>((set, get) => ({
   selectedGuideId: null,
   connected: false,
   canvasNotFound: false,
+  signInRequired: false,
   updateReady: false,
   notice: null,
   flashes: {},
@@ -332,7 +355,8 @@ export const useStore = create<State>((set, get) => ({
 
   setCanvas: (canvas) =>
     set((s) => ({
-      canvas,
+      /* the stage paints frames in array order: back to front */
+      canvas: canvas && { ...canvas, frames: sortByStack(canvas.frames) },
       frameMotion: {},
       frameIndex: s.canvas?.id === canvas?.id ? s.frameIndex : null,
       /* leaving a canvas (CanvasPage unmounts or its id changes) ends ⌘.
@@ -361,6 +385,16 @@ export const useStore = create<State>((set, get) => ({
         selectedGuideId: null,
         viewport: { x: 0, y: 0, zoom: 1 },
       }
+    }),
+  setPageBackgroundLocal: (pageId, background) =>
+    set((s) => {
+      if (!s.canvas) return {}
+      const pages = canvasPages(s.canvas).map((page) => {
+        if (page.id !== pageId) return page
+        const { background: _previous, ...rest } = page
+        return background ? { ...rest, background } : rest
+      })
+      return { canvas: { ...s.canvas, pages } }
     }),
   setPages: (pages, canvasId) =>
     set((s) => {
@@ -392,10 +426,11 @@ export const useStore = create<State>((set, get) => ({
   setFrameIndex: (frameIndex) =>
     set((state) => ({
       frameIndex,
-      canvas: state.canvas ? { ...state.canvas, frames: orderFrames([...state.canvas.frames], frameIndex) } : null,
+      canvas: state.canvas ? { ...state.canvas, frames: sortByStack(orderFrames([...state.canvas.frames], frameIndex)) } : null,
     })),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
+  setSignInRequired: (signInRequired) => set({ signInRequired }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) =>
     set((s) => ({
@@ -471,9 +506,11 @@ export const useStore = create<State>((set, get) => ({
   upsertFrame: (f) =>
     set((s) => {
       if (!s.canvas || f.canvasId !== s.canvas.id) return {}
-      const frames = s.canvas.frames.some((x) => x.id === f.id)
-        ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
-        : orderFrames([...s.canvas.frames, f], s.frameIndex)
+      const frames = sortByStack(
+        s.canvas.frames.some((x) => x.id === f.id)
+          ? s.canvas.frames.map((x) => (x.id === f.id ? f : x))
+          : orderFrames([...s.canvas.frames, f], s.frameIndex),
+      )
       const hidden = s.selectedIds.includes(f.id) && framePageId(s.canvas, f) !== s.activePageId
       return {
         canvas: { ...s.canvas, frames },
@@ -491,12 +528,10 @@ export const useStore = create<State>((set, get) => ({
   patchFrameLocal: (frameId, patch, animate = false) =>
     set((s) => {
       if (!s.canvas) return {}
+      const frames = s.canvas.frames.map((f) => (f.id === frameId ? { ...f, ...patch } : f))
       return {
         frameMotion: { ...s.frameMotion, [frameId]: animate },
-        canvas: {
-          ...s.canvas,
-          frames: s.canvas.frames.map((f) => (f.id === frameId ? { ...f, ...patch } : f)),
-        },
+        canvas: { ...s.canvas, frames: 'z' in patch ? sortByStack(frames) : frames },
       }
     }),
   removeFrame: (frameId) =>
@@ -528,6 +563,8 @@ export const useStore = create<State>((set, get) => ({
       }
       return { canvas: { ...s.canvas, guidelines: docs } }
     }),
+  setTokensLocal: (tokens, themes) =>
+    set((s) => (s.canvas ? { canvas: { ...s.canvas, tokens, tokenThemes: themes } } : {})),
   setReferenceLocal: (id, reference) =>
     set((s) => {
       if (!s.canvas) return {}
@@ -641,6 +678,7 @@ export const useStore = create<State>((set, get) => ({
   setPanMode: (panMode) => set({ panMode }),
   setFileDragging: (fileDragging) => set({ fileDragging }),
   setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
+  setPagePanelOpen: (pagePanelOpen) => set({ pagePanelOpen }),
   openCtxMenu: (ctxMenu) => set({ ctxMenu }),
   closeCtxMenu: () => set({ ctxMenu: null }),
   setCommentDrag: (commentDrag) => set({ commentDrag }),
@@ -686,6 +724,11 @@ export const useStore = create<State>((set, get) => ({
         ? { selectedElement: { frameId: el.frameId, selector: primary }, selectedElements: rest }
         : { selectedElement: null, selectedElements: [], elementPanelOpen: false }
     }),
+  pickElements: (frameId, selectors) => {
+    const primary = selectors.at(-1)
+    if (!primary) return
+    set({ selectedElement: { frameId, selector: primary }, selectedElements: selectors, elementPanelOpen: true })
+  },
   setElementPanelOpen: (elementPanelOpen) => set({ elementPanelOpen }),
   setLayersOpen: (layersOpen) => {
     try {
@@ -695,6 +738,7 @@ export const useStore = create<State>((set, get) => ({
     }
     set({ layersOpen })
   },
+  setLayersTab: (layersTab) => set({ layersTab }),
   /* hidden guides cannot stay selected: Delete would remove one unseen */
   toggleUiHidden: () => set((s) => ({ uiHidden: !s.uiHidden, ...(s.uiHidden ? {} : { selectedGuideId: null }) })),
   setPrototypeMode: (prototypeMode) => set({ prototypeMode }),

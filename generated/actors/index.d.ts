@@ -95,6 +95,10 @@ export declare namespace actors {
                 Args: Parameters<Stub["pageOf"]>
                 Result: Awaited<ReturnType<Stub["pageOf"]>>
             }
+            ["restack"]: {
+                Args: Parameters<Stub["restack"]>
+                Result: Awaited<ReturnType<Stub["restack"]>>
+            }
             ["revokeAccess"]: {
                 Args: Parameters<Stub["revokeAccess"]>
                 Result: Awaited<ReturnType<Stub["revokeAccess"]>>
@@ -102,6 +106,10 @@ export declare namespace actors {
             ["setFlowStart"]: {
                 Args: Parameters<Stub["setFlowStart"]>
                 Result: Awaited<ReturnType<Stub["setFlowStart"]>>
+            }
+            ["setPageBackground"]: {
+                Args: Parameters<Stub["setPageBackground"]>
+                Result: Awaited<ReturnType<Stub["setPageBackground"]>>
             }
             ["setPages"]: {
                 Args: Parameters<Stub["setPages"]>
@@ -172,6 +180,10 @@ export declare namespace actors {
                 type Args = $MethodTypes["pageOf"]["Args"]
                 type Result = $MethodTypes["pageOf"]["Result"]
             }
+            namespace restack {
+                type Args = $MethodTypes["restack"]["Args"]
+                type Result = $MethodTypes["restack"]["Result"]
+            }
             namespace revokeAccess {
                 type Args = $MethodTypes["revokeAccess"]["Args"]
                 type Result = $MethodTypes["revokeAccess"]["Result"]
@@ -179,6 +191,10 @@ export declare namespace actors {
             namespace setFlowStart {
                 type Args = $MethodTypes["setFlowStart"]["Args"]
                 type Result = $MethodTypes["setFlowStart"]["Result"]
+            }
+            namespace setPageBackground {
+                type Args = $MethodTypes["setPageBackground"]["Args"]
+                type Result = $MethodTypes["setPageBackground"]["Result"]
             }
             namespace setPages {
                 type Args = $MethodTypes["setPages"]["Args"]

@@ -14,6 +14,8 @@ import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
 import { colorFor } from '../shared/types.ts'
+import { sortByStack, stackOf, type StackWrite } from '../shared/frameStack.ts'
+import type { DesignToken } from '../shared/designTokens.ts'
 import type {
   ActivityItem,
   Actor,
@@ -151,7 +153,8 @@ class Store {
     if (!canvas || !summary) return undefined
     const state = mode === 'full' ? await canvasActor(id).snapshot() : summary
     if (state.deleted) return undefined
-    const frames: Frame[] = mode === 'index' ? [] : state.frames.map((frame) => ({ html: '', ...frame }))
+    /* back to front, as the canvas paints them (shared/frameStack.ts) */
+    const frames: Frame[] = mode === 'index' ? [] : sortByStack(state.frames.map((frame) => ({ html: '', ...frame })))
     return {
       ...canvas,
       pages: state.pages,
@@ -272,17 +275,20 @@ class Store {
     const canvasId = nanoid(10)
     const sourceFrames = options.dropDemo ? source.frames.filter((frame) => !frame.demo) : source.frames
     const frameIds = new Map(sourceFrames.map((frame) => [frame.id, `${canvasId}.${nanoid(10)}`]))
+    /* the copies share one createdAt, so each keeps its place in the stack */
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
       html: remapFrameTargets(frame.html, frameIds),
       approval: null,
+      z: stackOf(frame),
       canvasId,
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
     }))
     const guidelines = source.guidelines?.map((doc) => ({ ...doc, updatedAt: now, updatedBy: by }))
+    const tokens = source.tokens?.map((token) => ({ ...token, updatedAt: now, updatedBy: by }))
     const references = source.references?.map((ref) => ({
       ...ref,
       id: nanoid(10),
@@ -304,6 +310,8 @@ class Store {
       ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
+      ...(tokens?.length ? { tokens } : {}),
+      ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
     const actor = canvasActor(canvasId)
@@ -354,6 +362,7 @@ class Store {
       id: nanoid(10),
       name: copyPageName(source.name, names(pages)),
       ...(start ? { startFrameId: start } : {}),
+      ...(source.background ? { background: source.background } : {}),
     }
     const guides: CanvasGuide[] = (canvas.guides ?? [])
       .filter((guide) => guide.pageId === pageId)
@@ -367,6 +376,7 @@ class Store {
       html: remapFrameTargets(frame.html, frameIds),
       pageId: page.id,
       approval: null,
+      z: stackOf(frame),
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
@@ -418,6 +428,22 @@ class Store {
     const canvas = await this.loadCanvasMetadata(canvasId)
     if (!canvas || !(await this.openCanvas(canvasId))) return undefined
     const pages = await canvasActor(canvasId).setFlowStart(pageId, frameId)
+    if (!pages) return undefined
+    canvas.pages = pages
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return pages
+  }
+
+  /** Set (a `#rrggbb`) or clear (null) a page's own canvas colour. */
+  async setPageBackground(
+    canvasId: string,
+    pageId: string,
+    background: string | null,
+  ): Promise<CanvasPageInfo[] | undefined> {
+    const canvas = await this.loadCanvasMetadata(canvasId)
+    if (!canvas || !(await this.openCanvas(canvasId))) return undefined
+    const pages = await canvasActor(canvasId).setPageBackground(pageId, background)
     if (!pages) return undefined
     canvas.pages = pages
     canvas.updatedAt = Date.now()
@@ -674,6 +700,128 @@ class Store {
     return true
   }
 
+  getTokens(canvasId: string): DesignToken[] {
+    return this.canvases.get(canvasId)?.tokens ?? []
+  }
+
+  /** Upsert tokens by name: a new one lands at the end of its canvas's
+   *  order, an existing one keeps its place unless the patch moves it. */
+  setTokens(
+    canvasId: string,
+    inputs: (Pick<DesignToken, 'name' | 'type' | 'value'> & {
+      themes?: Record<string, string>
+      description?: string
+      order?: number
+    })[],
+    by: string,
+  ): DesignToken[] | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    const tokens = (c.tokens ??= [])
+    const now = Date.now()
+    const written: DesignToken[] = []
+    for (const input of inputs) {
+      let token = tokens.find((t) => t.name === input.name)
+      if (token) {
+        token.type = input.type
+        token.value = input.value
+        token.themes = input.themes && Object.keys(input.themes).length ? input.themes : undefined
+        token.description = input.description || undefined
+        if (input.order !== undefined) token.order = input.order
+        token.updatedAt = now
+        token.updatedBy = by
+      } else {
+        const last = tokens.reduce((max, t) => Math.max(max, t.order), 0)
+        token = {
+          name: input.name,
+          type: input.type,
+          value: input.value,
+          ...(input.themes && Object.keys(input.themes).length ? { themes: input.themes } : {}),
+          ...(input.description ? { description: input.description } : {}),
+          order: input.order ?? last + 1,
+          updatedAt: now,
+          updatedBy: by,
+        }
+        tokens.push(token)
+      }
+      persist.saveToken(canvasId, token)
+      written.push(token)
+    }
+    tokens.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return written
+  }
+
+  /** Rename a token in place: its order and description ride along. */
+  renameToken(canvasId: string, name: string, newName: string, by: string): DesignToken | undefined {
+    const c = this.canvases.get(canvasId)
+    const token = c?.tokens?.find((t) => t.name === name)
+    if (!c || !token) return undefined
+    persist.deleteToken(canvasId, name)
+    token.name = newName
+    token.updatedAt = Date.now()
+    token.updatedBy = by
+    persist.saveToken(canvasId, token)
+    c.updatedAt = token.updatedAt
+    persist.saveCanvas(c)
+    return token
+  }
+
+  getTokenThemes(canvasId: string): string[] {
+    return this.canvases.get(canvasId)?.tokenThemes ?? []
+  }
+
+  /** Replace the theme list; tokens drop the values of themes that left. */
+  setTokenThemes(canvasId: string, themes: string[], by: string): string[] | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    c.tokenThemes = themes.length ? [...themes] : undefined
+    const now = Date.now()
+    for (const token of c.tokens ?? []) {
+      if (!token.themes) continue
+      const kept = Object.fromEntries(Object.entries(token.themes).filter(([theme]) => themes.includes(theme)))
+      if (Object.keys(kept).length === Object.keys(token.themes).length) continue
+      token.themes = Object.keys(kept).length ? kept : undefined
+      token.updatedAt = now
+      token.updatedBy = by
+      persist.saveToken(canvasId, token)
+    }
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return themes
+  }
+
+  /** Rename a theme: the list entry and every token's value under it. */
+  renameTokenTheme(canvasId: string, from: string, to: string, by: string): boolean {
+    const c = this.canvases.get(canvasId)
+    if (!c || !c.tokenThemes?.includes(from)) return false
+    c.tokenThemes = c.tokenThemes.map((theme) => (theme === from ? to : theme))
+    const now = Date.now()
+    for (const token of c.tokens ?? []) {
+      if (!token.themes || !(from in token.themes)) continue
+      const { [from]: moved, ...rest } = token.themes
+      token.themes = { ...rest, ...(moved === undefined ? {} : { [to]: moved }) }
+      token.updatedAt = now
+      token.updatedBy = by
+      persist.saveToken(canvasId, token)
+    }
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return true
+  }
+
+  deleteToken(canvasId: string, name: string): boolean {
+    const c = this.canvases.get(canvasId)
+    const idx = c?.tokens?.findIndex((t) => t.name === name) ?? -1
+    if (!c || idx === -1) return false
+    c.tokens!.splice(idx, 1)
+    c.updatedAt = Date.now()
+    persist.deleteToken(canvasId, name)
+    persist.saveCanvas(c)
+    return true
+  }
+
   getReferences(canvasId: string): MemoryReference[] {
     return this.canvases.get(canvasId)?.references ?? []
   }
@@ -767,6 +915,9 @@ class Store {
       ...(input.demo === undefined ? {} : { demo: input.demo }),
       ...(input.hidden ? { hidden: true } : {}),
       ...(input.locked ? { locked: true } : {}),
+      /* where it stacks (undo brings a deleted frame back to its place); the
+         actor puts it in front of the page when unset */
+      ...(input.z === undefined ? {} : { z: input.z }),
     }
     // Without a position the actor places the frame, in the same queue as every other create.
     const frame = await canvasActor(canvasId).createFrame(candidate, attribution(by, kind), input.x === undefined)
@@ -795,6 +946,12 @@ class Store {
     )
     if (isConflict(change)) throw new FrameConflictError(change.frame)
     return change?.frame
+  }
+
+  /** Several frames' places in their page's stack, written together. */
+  async restackFrames(canvasId: string, writes: StackWrite[], actor: Actor): Promise<Frame[] | undefined> {
+    if (!(await this.loadCanvasMetadata(canvasId)) || !(await this.openCanvas(canvasId))) return undefined
+    return (await canvasActor(canvasId).restack(writes, actor)) ?? undefined
   }
 
   async replaceFrameHtml(frameId: string, find: string, replacement: string, actor: Actor): Promise<Frame | undefined> {

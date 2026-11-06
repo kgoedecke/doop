@@ -24,6 +24,9 @@ export const frames = sqliteTable('frames', {
   hidden: integer({ mode: 'boolean' }),
   locked: integer({ mode: 'boolean' }),
   approval: text({ mode: 'json' }).$type<FrameApproval>(),
+  /** stacking order on its page (shared/frameStack.ts); unset on frames made
+   *  before stacking existed, which stack by createdAt */
+  z: real(),
   html: text().notNull(),
 })
 

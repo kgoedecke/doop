@@ -5,6 +5,8 @@ import * as t from './schema.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
+import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
+import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import type {
   ActivityItem,
   ActorKind,
@@ -50,6 +52,7 @@ function canvasColumns(c: Canvas) {
     name: c.name,
     pages: c.pages ?? null,
     guides: c.guides?.length ? c.guides : null,
+    tokenThemes: c.tokenThemes?.length ? c.tokenThemes : null,
     ownerId: c.ownerId ?? null,
     linkAccess: storedLinkAccess(c.linkAccess) ?? null,
     publishedAt: c.publishedAt ?? null,
@@ -88,6 +91,10 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
           y: doc.y ?? null,
         })),
       )
+    }
+
+    if (c.tokens?.length) {
+      await tx.insert(t.designTokens).values(c.tokens.map((token) => tokenRow(c.id, token)))
     }
 
     if (c.references?.length) {
@@ -150,6 +157,66 @@ export function saveGuideline(canvasId: string, doc: GuidelineDoc) {
 
 export function deleteGuideline(canvasId: string, name: string) {
   swallow(db.delete(t.guidelines).where(and(eq(t.guidelines.canvasId, canvasId), eq(t.guidelines.name, name))))
+}
+
+function tokenRow(canvasId: string, token: DesignToken) {
+  return {
+    canvasId,
+    name: token.name,
+    type: token.type,
+    value: token.value,
+    themes: token.themes && Object.keys(token.themes).length ? token.themes : null,
+    description: token.description ?? null,
+    order: token.order,
+    updatedAt: token.updatedAt,
+    updatedBy: token.updatedBy,
+  }
+}
+
+/* Writes to one token run in order: a rename followed by an edit of the
+   same row must not let the earlier write land last on a pooled connection. */
+const tokenWrites = new Map<string, Promise<unknown>>()
+
+function queueTokenWrite(canvasId: string, name: string, write: () => Promise<unknown>) {
+  const key = `${canvasId}\0${name}`
+  const prior = tokenWrites.get(key) ?? Promise.resolve()
+  const next = prior.then(write, write)
+  tokenWrites.set(key, next)
+  swallow(next.finally(() => tokenWrites.get(key) === next && tokenWrites.delete(key)))
+}
+
+/** Every queued token write of a canvas, settled: what a canvas delete waits
+ *  for, so a save still in the queue cannot put a row back afterwards. */
+function pendingTokenWrites(canvasId: string): Promise<unknown> {
+  const prefix = `${canvasId}\0`
+  return Promise.allSettled([...tokenWrites].filter(([key]) => key.startsWith(prefix)).map(([, write]) => write))
+}
+
+export function saveToken(canvasId: string, token: DesignToken) {
+  const row = tokenRow(canvasId, token)
+  queueTokenWrite(canvasId, token.name, () =>
+    db
+      .insert(t.designTokens)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [t.designTokens.canvasId, t.designTokens.name],
+        set: {
+          type: row.type,
+          value: row.value,
+          themes: row.themes,
+          description: row.description,
+          order: row.order,
+          updatedAt: row.updatedAt,
+          updatedBy: row.updatedBy,
+        },
+      }),
+  )
+}
+
+export function deleteToken(canvasId: string, name: string) {
+  queueTokenWrite(canvasId, name, () =>
+    db.delete(t.designTokens).where(and(eq(t.designTokens.canvasId, canvasId), eq(t.designTokens.name, name))),
+  )
 }
 
 /* Append-only doc history: a snapshot per save, '' marks a deletion. */
@@ -392,6 +459,9 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
+    pendingTokenWrites(canvasId).then(() => db.delete(t.designTokens).where(eq(t.designTokens.canvasId, canvasId))),
+  )
+  swallow(
     pendingVersionWrites((_, c) => c === canvasId).then(() =>
       db.delete(t.frameVersions).where(eq(t.frameVersions.canvasId, canvasId)),
     ),
@@ -417,6 +487,18 @@ function scopeField(scope: string | null): Pick<AgentTask, 'scope'> {
   try {
     const parsed = JSON.parse(scope) as CardScope
     return typeof parsed?.frameId === 'string' ? { scope: parsed } : {}
+  } catch {
+    return {}
+  }
+}
+
+/** The connection a card was sent to, or nothing when the row carries none
+ *  or it no longer parses (the card then runs on the Settings default). */
+function runnerField(runner: string | null): Pick<AgentTask, 'runner'> {
+  if (!runner) return {}
+  try {
+    const parsed = parseRunnerPick(JSON.parse(runner))
+    return parsed ? { runner: parsed } : {}
   } catch {
     return {}
   }
@@ -461,6 +543,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     payload: task.payload ? JSON.stringify(task.payload) : null,
     scope: task.scope ? JSON.stringify(task.scope) : null,
     frameIds: task.frameIds?.join(',') ?? null,
+    runner: task.runner ? JSON.stringify(task.runner) : null,
   }
   const write = () =>
     db
@@ -502,6 +585,7 @@ export function saveFeedback(fb: TaskFeedback) {
     completedAt: fb.completedAt ?? null,
     failedAt: fb.failedAt ?? null,
     failureReason: fb.failureReason ?? null,
+    runner: fb.runner ? JSON.stringify(fb.runner) : null,
   }
   swallow(
     db
@@ -535,6 +619,7 @@ async function writeComment(c: ElementComment): Promise<void> {
     canvasId: c.canvasId,
     frameId: c.frameId ?? null,
     elementId: c.elementId ?? null,
+    elementOrigin: c.elementOrigin ?? null,
     /* the pre-element-id anchor is spent once the comment is saved again */
     selector: null,
     snippet: c.snippet,
@@ -564,11 +649,14 @@ async function writeComment(c: ElementComment): Promise<void> {
         /* a moved thread keeps its id and takes a new anchor */
         frameId: row.frameId,
         elementId: row.elementId,
+        elementOrigin: row.elementOrigin,
         selector: row.selector,
         snippet: row.snippet,
         pageId: row.pageId,
         x: row.x,
         y: row.y,
+        /* a request handed back to the person is no longer the agent's */
+        forAgent: row.forAgent,
         claimedBy: row.claimedBy,
         claimedAt: row.claimedAt,
         failedAt: row.failedAt,
@@ -626,9 +714,10 @@ export async function loadLegacyFrameIds(canvasId: string): Promise<string[]> {
 export async function loadLegacyFrame(id: string): Promise<Frame | undefined> {
   const [row] = await db.select().from(t.frames).where(eq(t.frames.id, id))
   if (!row) return undefined
-  const { demo, pageId, hidden, locked, approval, ...frame } = row
+  const { demo, pageId, hidden, locked, approval, z, ...frame } = row
   return {
     ...frame,
+    ...(z === null ? {} : { z }),
     ...(demo === null ? {} : { demo }),
     ...(pageId === null ? {} : { pageId }),
     ...(hidden ? { hidden } : {}),
@@ -692,6 +781,7 @@ export async function hydrate(): Promise<Hydrated> {
     commentRows,
     activityRows,
     guidelineRows,
+    tokenRows,
     referenceRows,
     decisionRows,
     proposalRows,
@@ -703,6 +793,7 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
     db.select().from(t.activity).orderBy(desc(t.activity.at)),
     db.select().from(t.guidelines).orderBy(t.guidelines.name),
+    db.select().from(t.designTokens).orderBy(t.designTokens.order, t.designTokens.name),
     db.select().from(t.memoryReferences).orderBy(desc(t.memoryReferences.pinnedAt)),
     db.select().from(t.decisions).orderBy(desc(t.decisions.at)),
     db.select().from(t.memoryProposals).orderBy(desc(t.memoryProposals.at)),
@@ -714,6 +805,7 @@ export async function hydrate(): Promise<Hydrated> {
     name: c.name,
     pages: c.pages ?? undefined,
     ...(c.guides?.length ? { guides: c.guides } : {}),
+    ...(c.tokenThemes?.length ? { tokenThemes: c.tokenThemes } : {}),
     ownerId: c.ownerId ?? undefined,
     /* 'view' / 'comment' / 'edit'; null and anything unknown read as private */
     linkAccess: storedLinkAccess(c.linkAccess),
@@ -758,6 +850,20 @@ export async function hydrate(): Promise<Hydrated> {
       ...(g.y != null ? { y: g.y } : {}),
     })
   }
+  for (const row of tokenRows) {
+    const c = byId.get(row.canvasId)
+    if (!c) continue
+    ;(c.tokens ??= []).push({
+      name: row.name,
+      type: row.type as TokenType,
+      value: row.value,
+      ...(row.themes && Object.keys(row.themes).length ? { themes: row.themes } : {}),
+      ...(row.description != null ? { description: row.description } : {}),
+      order: row.order,
+      updatedAt: row.updatedAt,
+      updatedBy: row.updatedBy,
+    })
+  }
 
   const now = Date.now()
   const interruptedReason = 'The agent stopped before finishing. Retry when you are ready.'
@@ -800,6 +906,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...repoCardFields(row.kind, row.payload),
       ...scopeField(row.scope),
       ...(row.frameIds ? { frameIds: row.frameIds.split(',').filter(Boolean) } : {}),
+      ...runnerField(row.runner),
     })
     tasks.set(row.canvasId, list)
   }
@@ -826,6 +933,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.targetAgent != null ? { targetAgent: row.targetAgent } : {}),
       from: row.fromName,
       ...(row.fromUserId != null ? { fromUserId: row.fromUserId } : {}),
+      ...runnerField(row.runner),
       text: row.text,
       at: row.at,
       ...(row.deliveredAt != null ? { deliveredAt: row.deliveredAt } : {}),
@@ -854,6 +962,7 @@ export async function hydrate(): Promise<Hydrated> {
       canvasId: row.canvasId,
       ...(row.frameId != null ? { frameId: row.frameId } : {}),
       ...(row.elementId != null ? { elementId: row.elementId } : {}),
+      ...(row.elementOrigin != null ? { elementOrigin: row.elementOrigin } : {}),
       snippet: row.snippet,
       ...(row.pageId != null ? { pageId: row.pageId } : {}),
       ...(row.x != null ? { x: row.x } : {}),

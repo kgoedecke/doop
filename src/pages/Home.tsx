@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Canvas, CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
+import { useUserEvents } from '../hooks/use-user-events'
 import { navigate } from '../App'
 import { timeAgo } from '../lib/time'
 import { useStore } from '../lib/store'
 import { isResidentLimit } from '../components/TeamAllowance'
 import { canvasNameFromPrompt, draftsCardTitle, type DraftCount } from '../lib/homePrompt'
+import { currentRunnerPick } from '../lib/runnerPick'
 import { AgentIcon } from '../components/AgentIcon'
 import { AppRail, railLayout } from '../components/AppRail'
 import { ConnectModal } from '../components/ConnectModal'
@@ -55,6 +57,7 @@ import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Toast } from '../components/ui/toast'
 import { DashContent, DashHeader, DashLayout, DashMain } from '../components/ui/dash'
 import { useT, type PlainMessageKey } from '../lib/i18n'
+import { prefetchWorkspace } from '../lib/workspaceCache'
 import { cn } from '@/lib/utils'
 
 /** the three fixed views, or one workspace (`ws:<id>`) */
@@ -76,6 +79,8 @@ function workspaceOf(scope: Scope): string | undefined {
 export function Home() {
   const [canvases, setCanvases] = useState<CanvasMeta[] | null>(null)
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
+  /* an empty list is an answer too: someone removed from their last workspace */
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false)
   const [scope, setScope] = useState<Scope>(() => {
     const wanted = new URLSearchParams(location.search).get('scope')
     return wanted === 'mine' || wanted === 'shared' || wanted?.startsWith('ws:') ? (wanted as Scope) : 'all'
@@ -112,6 +117,12 @@ export function Home() {
     }
     reload()
   }, [])
+
+  /* a canvas shared with (or taken from) this account, elsewhere: refetch so
+     "Shared with me" follows without a reload */
+  useUserEvents((event) => {
+    if (event.type === 'canvases') reload()
+  })
 
   /* ⌘/ hands the keyboard to the composer; ⌘K opens the rail's search */
   useEffect(() => {
@@ -151,7 +162,7 @@ export function Home() {
     try {
       const canvas = await api.createCanvas(canvasNameFromPrompt(text), workspaceId)
       try {
-        await api.addCard(canvas.id, draftsCardTitle(text, drafts), ['doop'])
+        await api.addCard(canvas.id, draftsCardTitle(text, drafts), ['doop'], undefined, undefined, currentRunnerPick())
         posthog.capture('home_prompt_submitted', { drafts, workspace: !!workspaceId })
       } catch (error) {
         /* the brief — with its draft count — rides along as the canvas
@@ -249,10 +260,19 @@ export function Home() {
     if (!openCanvasTab(id, title)) navigate(`/c/${id}`)
   }
 
+  /* pings can start overlapping reloads; a response older than one already
+     shown is dropped, or an invite's slow answer would bring back a canvas
+     removed after it */
+  const reloadSeq = useRef(0)
+  const shown = useRef({ canvases: 0, workspaces: 0 })
+
   function reload() {
+    const seq = ++reloadSeq.current
     api
       .listCanvases()
       .then((list) => {
+        if (seq < shown.current.canvases) return
+        shown.current.canvases = seq
         setCanvases(list)
         /* every fresh list is a chance to drop tabs for canvases that are
            gone — deleted here, in another session, or by someone else */
@@ -261,15 +281,25 @@ export function Home() {
       .catch(console.error)
     api
       .listWorkspaces()
-      .then((res) => setWorkspaces(res.workspaces))
+      .then((res) => {
+        if (seq < shown.current.workspaces) return
+        shown.current.workspaces = seq
+        setWorkspaces(res.workspaces)
+        setWorkspacesLoaded(true)
+      })
       .catch(console.error)
   }
 
   const first = session?.user.name?.split(' ')[0]
   const scopedWorkspace = workspaceOf(scope)
   const currentWorkspace = scopedWorkspace ? workspaces.find((w) => w.id === scopedWorkspace) : undefined
+  /* its settings are one rail row away: have them ready to draw */
+  const currentWorkspaceId = currentWorkspace?.id
+  useEffect(() => {
+    if (currentWorkspaceId) prefetchWorkspace(currentWorkspaceId)
+  }, [currentWorkspaceId])
   /* a workspace that vanished (deleted, or left) drops the view back to all */
-  const scopeGone = !!scopedWorkspace && workspaces.length > 0 && !currentWorkspace
+  const scopeGone = !!scopedWorkspace && workspacesLoaded && !currentWorkspace
   const [seenScopeGone, setSeenScopeGone] = useState(false)
   if (scopeGone !== seenScopeGone) {
     setSeenScopeGone(scopeGone)
@@ -299,23 +329,14 @@ export function Home() {
     <DashLayout className={railLayout}>
       <AppRail
         active={scope}
-        canvases={canvases ?? []}
-        workspaces={workspaces}
+        canvases={canvases}
+        workspaces={workspacesLoaded ? workspaces : null}
         onScope={setScope}
         onCreateWorkspace={() => setCreatingWorkspace(true)}
       />
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare">
           <span className="flex-1" />
-          {currentWorkspace && (
-            <Button
-              variant="ghost"
-              className="min-h-10 max-md:hidden md:min-h-0"
-              onClick={() => navigate(`/w/${currentWorkspace.id}`)}
-            >
-              <BuildingIcon /> {t('home.manage')}
-            </Button>
-          )}
           <Button variant="default" size="bar" disabled={starting} onClick={() => setImporting(true)}>
             <UploadIcon width={15} height={15} className="text-ink-soft" /> {t('home.import')}
           </Button>
@@ -528,7 +549,13 @@ export function Home() {
           onClose={() => setCreatingWorkspace(false)}
           onCreated={(ws) => {
             setCreatingWorkspace(false)
+            /* listed before it is picked, or the vanished-scope check would
+               send the view back to all until the reload lands */
+            setWorkspaces((list) => (list.some((w) => w.id === ws.id) ? list : [...list, ws]))
             reload()
+            /* only the list just asked for counts: one still in flight from
+               before predates the workspace and would take it away again */
+            shown.current.workspaces = reloadSeq.current
             setScope(`ws:${ws.id}`)
             /* a workspace that cannot grow yet goes straight to the plan picker */
             if (!ws.active)
@@ -618,7 +645,12 @@ function AgentStack({ canvas }: { canvas: CanvasMeta }) {
 /** the people on a canvas — owner first — as overlapping initial discs */
 function PeopleStack({ canvas }: { canvas: CanvasMeta }) {
   const people = canvas.people ?? []
-  return <AvatarStack size={18} people={people.map((p) => ({ id: p.id, name: p.name, color: colorFor(p.id) }))} />
+  return (
+    <AvatarStack
+      size={18}
+      people={people.map((p) => ({ id: p.id, name: p.name, image: p.image, color: colorFor(p.id) }))}
+    />
+  )
 }
 
 function Meta({ canvas: c, onClaim, workspace }: { canvas: CanvasMeta; onClaim: () => void; workspace?: string }) {

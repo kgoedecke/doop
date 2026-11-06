@@ -34,9 +34,14 @@ interface $CanvasActorContract {
         listVersions(frameId: string): Promise<FrameVersionInfo[]>
         /** The page a frame is on, or null when the canvas has no such frame. */
         pageOf(id: string): Promise<string | null>
+        /** Several frames' places in their page's stack, in one transaction: every
+         *  frame is checked before any is written. Null when one is gone. */
+        restack(writes: StackWrite[], by: Actor): Promise<Frame[] | null>
         revokeAccess(): Promise<void>
         /** Set (frameId) or clear (null) the frame a page's prototype starts on. */
         setFlowStart(pageId: string, frameId: string | null): Promise<CanvasPageInfo[] | null>
+        /** Set (a `#rrggbb`) or clear (null) a page's own canvas colour. */
+        setPageBackground(pageId: string, background: string | null): Promise<CanvasPageInfo[] | null>
         /** Rename, reorder, add or delete pages. A page that still holds frames stays. */
         setPages(pages: CanvasPageInfo[], expectedPages: CanvasPageInfo[]): Promise<PageUpdate>
         snapshot(): Promise<CanvasSnapshot>
@@ -74,6 +79,11 @@ interface CanvasPageInfo {
      *  Set only through the flow-start route or MCP tool; page-list saves keep
      *  whatever the server already has. */
     startFrameId?: string
+    /** the page's own canvas colour (`#rrggbb`, shared/pageBackground.ts),
+     *  shown in place of the viewer's theme paper. Set only through the
+     *  background route or MCP tool; page-list saves keep it, as they keep
+     *  the flow start. */
+    background?: string
 }
 interface Frame {
     id: string
@@ -99,6 +109,9 @@ interface Frame {
      *  deleted from the stage until it is unlocked (Layers panel, Inspector,
      *  ⌘⇧L, or an agent via update_frame) */
     locked?: boolean
+    /** Stacking order on its page (back to front; see shared/frameStack.ts).
+     *  Unset on frames made before stacking existed: they stack by createdAt. */
+    z?: number
     /** Human sign-off for implementation. Missing/null means draft. Design
      * edits retain the attribution but change the status to needs_review. */
     approval?: FrameApproval | null
@@ -190,7 +203,7 @@ type FrameEdit =
           done?: boolean
       }
 type FramePatch = Partial<
-    Pick<Frame, "name" | "pageId" | "x" | "y" | "width" | "height" | "html" | "hidden" | "locked" | "approval">
+    Pick<Frame, "name" | "pageId" | "x" | "y" | "width" | "height" | "html" | "hidden" | "locked" | "approval" | "z">
 >
 type FrameRemoval = {
     type: "frame-removal"
@@ -215,6 +228,10 @@ type SocketMetadata = {
     actor: Actor
     readOnly: boolean
     accessVersion?: number
+}
+type StackWrite = {
+    id: string
+    z: number
 }
 type SyncError = {
     type: "error"

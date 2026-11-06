@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+  <body>
+    <script type="module">
+      import { rasterizeFrame } from '/src/lib/frameRaster.ts'
+      import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
+      import { registerFrameWindow, requestFrame } from '/src/lib/frameBridge.ts'
+
+      /* a frame with a painted block, an image from the fixture server
+         and a web font from the fixture fonts */
+      const HTML = `<!doctype html><html><head><style>
+        @font-face { font-family: Fixture; src: url(/tests/fixtures/fonts/nunito-sans-bold-italic.woff2) }
+        * { margin: 0 }
+        body { background: #fff; font-family: Fixture, sans-serif }
+        .block { position: absolute; left: 0; top: 0; width: 100px; height: 100px; background: rgb(255, 0, 0) }
+        .pic { position: absolute; left: 200px; top: 0; width: 100px; height: 100px; display: block }
+      </style></head><body><div class="block"></div><img class="pic" src="/tests/fixtures/raster/blue.svg"></body></html>`
+
+      /* a frame whose document is partly made by its own script, as the
+         runtime shows it */
+      const LIVE_HTML =
+        `<!doctype html><html><head><style>
+        * { margin: 0 }
+        body { background: #fff }
+        .made { position: absolute; left: 0; top: 100px; width: 100px; height: 100px; background: rgb(0, 128, 0) }
+        .chart { position: absolute; left: 100px; top: 100px; width: 100px; height: 100px }
+        .adopted { position: absolute; left: 200px; top: 100px; width: 100px; height: 100px }
+        .picked { position: absolute; left: 100px; top: 0; width: 100px; height: 100px; display: block }
+        .blobbed { position: absolute; left: 0; top: 200px; width: 100px; height: 100px; display: block }
+      </style></head><body><img class="picked" srcset="/tests/fixtures/raster/blue.svg 1x"><script>
+        document.body.appendChild(Object.assign(document.createElement('div'), { className: 'made' }))
+        var chart = Object.assign(document.createElement('canvas'), { className: 'chart', width: 10, height: 10 })
+        var ctx = chart.getContext('2d'); ctx.fillStyle = 'rgb(128, 0, 128)'; ctx.fillRect(0, 0, 10, 10)
+        document.body.appendChild(chart)
+        var sheet = new CSSStyleSheet(); sheet.replaceSync('.adopted { background: rgb(255, 128, 0) }')
+        document.adoptedStyleSheets = document.adoptedStyleSheets.concat(sheet)
+        document.body.appendChild(Object.assign(document.createElement('div'), { className: 'adopted' }))
+        var blob = new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="rgb(0,128,128)"/></svg>'], { type: 'image/svg+xml' })
+        document.body.appendChild(Object.assign(document.createElement('img'), { className: 'blobbed', src: URL.createObjectURL(blob) }))
+      </scr` + `ipt></body></html>`
+
+      /* mount the runtime the way FrameView does and hand it the document */
+      async function mountLive() {
+        const iframe = document.createElement('iframe')
+        iframe.sandbox = 'allow-scripts'
+        iframe.style.cssText = 'display:block;border:0;width:300px;height:300px'
+        const ready = new Promise((resolve) => {
+          window.addEventListener('message', function onMessage(ev) {
+            if (ev.source === iframe.contentWindow && ev.data?.type === 'doop:frame-ready') {
+              window.removeEventListener('message', onMessage)
+              resolve()
+            }
+          })
+        })
+        iframe.srcdoc = FRAME_BOOTSTRAP
+        document.body.appendChild(iframe)
+        await ready
+        registerFrameWindow('live', iframe.contentWindow)
+        await requestFrame('live', 'doop:html', { html: LIVE_HTML })
+        /* until the script has run AND the srcset image has a picked source:
+           currentSrc stays empty until the browser resolves srcset, a beat
+           after the script on a slow runner, and the snapshot then carries
+           no src for it, so the export (rightly) paints nothing there */
+        for (let i = 0; i < 50; i++) {
+          const reply = await requestFrame('live', 'doop:snapshot', {})
+          if (reply?.html?.includes('class="made"') && /class="picked"[^>]*src="[^"]*blue\.svg"/.test(reply.html))
+            return
+          await new Promise((r) => setTimeout(r, 50))
+        }
+        throw new Error('the runtime never ran the script, or never picked the srcset image')
+      }
+
+      window.render = async ({ scale = 1, type = 'png', html = HTML, live = false, clip } = {}) => {
+        if (live) await mountLive()
+        const frame = {
+          id: live ? 'live' : 'raster',
+          canvasId: 'c',
+          name: 'Raster',
+          x: 0,
+          y: 0,
+          width: 300,
+          height: 300,
+          html,
+        }
+        const blob = await rasterizeFrame(frame, { scale, type, clip })
+        const bitmap = await createImageBitmap(blob)
+        const canvas = document.createElement('canvas')
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(bitmap, 0, 0)
+        const at = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data)
+        return {
+          type: blob.type,
+          topLeft: at(0, 0),
+          width: bitmap.width,
+          height: bitmap.height,
+          block: at(50 * scale, 50 * scale),
+          pic: at(250 * scale, 50 * scale),
+          paper: at(150 * scale, 150 * scale),
+          made: at(50 * scale, 150 * scale),
+          chart: at(150 * scale, 150 * scale),
+          adopted: at(250 * scale, 150 * scale),
+          picked: at(150 * scale, 50 * scale),
+          blobbed: at(50 * scale, 250 * scale),
+        }
+      }
+    </script>
+  </body>
+</html>

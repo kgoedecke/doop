@@ -6,6 +6,8 @@ export const shell = {
   settings: 'Settings',
   admin: 'Admin',
   helpDocs: 'Help & docs',
+  desktopApp: 'Get desktop app',
+  website: 'Doop website',
   appearance: 'Appearance',
   language: 'Language',
   logOut: 'Log out',
