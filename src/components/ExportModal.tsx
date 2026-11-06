@@ -3,7 +3,6 @@ import type { Frame } from '../../shared/types'
 import { readingOrder } from '../../shared/frameOrder'
 import { MAX_PDF_FRAMES } from '../../shared/pdfLimits'
 import { downloadFramesPdf } from '../lib/frameExport'
-import { posthog } from '../lib/posthog'
 import { ImportStepHeader } from './ImportSources'
 import { Button } from './ui/button'
 import { FrameThumb } from './FramePreview'
@@ -13,6 +12,7 @@ import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { SelectionBar, SelectionBarAction } from './ui/selection-bar'
 import { useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
+import { trackExport } from '../lib/exportEvents'
 
 /**
  * The top bar's Export: the page's frames as a checklist (the canvas
@@ -56,7 +56,7 @@ export function ExportModal({
   function run() {
     const [first] = chosen
     if (!first || overPdfLimit) return
-    posthog.capture('frames_exported', { destination: 'pdf', frame_count: chosen.length })
+    trackExport('pdf', chosen.length, 'export_modal')
     void downloadFramesPdf(first.canvasId, chosen)
     onClose()
   }
