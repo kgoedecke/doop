@@ -6,6 +6,7 @@ import {
   RendererBusyError,
   createRenderer,
   isBrowserFailure,
+  remoteConnectFailure,
   type RendererTuning,
 } from '../server/renderBrowser.ts'
 import { MAX_RENDER_PIXELS, renderedHeight } from '../server/renderLimits.ts'
@@ -37,14 +38,15 @@ interface FakeBrowser {
   stallContextClose: boolean
   contextsOpen: number
   close: ReturnType<typeof vi.fn>
+  disconnect: ReturnType<typeof vi.fn>
   child: { pid: undefined; exitCode: number | null; signalCode: string | null; kill: ReturnType<typeof vi.fn> }
   createBrowserContext: () => Promise<unknown>
-  process: () => FakeBrowser['child']
+  process: () => FakeBrowser['child'] | null
 }
 
 function fakeBrowser(
   label: string,
-  options: { stallContexts?: boolean; stallClose?: boolean; stallContextClose?: boolean } = {},
+  options: { stallContexts?: boolean; stallClose?: boolean; stallContextClose?: boolean; remote?: boolean } = {},
 ): FakeBrowser {
   const browser: FakeBrowser = {
     label,
@@ -56,6 +58,7 @@ function fakeBrowser(
     /* pid undefined: the kill falls back to child.kill, never a real group */
     child: { pid: undefined, exitCode: null, signalCode: null, kill: vi.fn(() => true) },
     close: vi.fn(() => (browser.stallClose ? never() : Promise.resolve())),
+    disconnect: vi.fn(() => Promise.resolve()),
     createBrowserContext: () => {
       if (browser.stallContexts) return never()
       browser.contextsOpen++
@@ -70,7 +73,8 @@ function fakeBrowser(
         },
       })
     },
-    process: () => browser.child,
+    /* a remote browser (REMOTE_BROWSER_URL) has no local process */
+    process: () => (options.remote ? null : browser.child),
   }
   return browser
 }
@@ -246,6 +250,58 @@ describe('a page that will not close', () => {
     const second = await renderer.openPage()
     expect(label(second.page)).toBe('fresh')
     await second.close()
+  })
+})
+
+describe('a remote browser', () => {
+  it('is closed once it has had no page for its idle time, and the next page connects afresh', async () => {
+    const first = fakeBrowser('first', { remote: true })
+    const second = fakeBrowser('second', { remote: true })
+    const { renderer, launch } = rig([first, second], { idleCloseMs: 30 })
+
+    const a = await renderer.openPage()
+    await a.close()
+    const b = await renderer.openPage()
+    await tick(50)
+    /* a page is open: the idle clock does not run */
+    expect(first.close).not.toHaveBeenCalled()
+    await b.close()
+    await tick(50)
+    expect(first.close).toHaveBeenCalled()
+
+    const c = await renderer.openPage()
+    expect(label(c.page)).toBe('second')
+    expect(launch).toHaveBeenCalledTimes(2)
+    await c.close()
+  })
+
+  it('is disconnected when closing its session stalls, having no process to kill', async () => {
+    const stuck = fakeBrowser('stuck', { remote: true, stallContexts: true, stallClose: true })
+    const { renderer } = rig([stuck, fakeBrowser('fresh', { remote: true })])
+
+    const handle = await renderer.openPage()
+    await tick(40)
+
+    expect(stuck.disconnect).toHaveBeenCalled()
+    await handle.close()
+  })
+})
+
+describe('remoteConnectFailure', () => {
+  /* what the ws library rejects with when the provider answers the upgrade
+     with an HTTP error: an ErrorEvent, not an Error */
+  const refused = (status: number) => ({ type: 'error', message: `Unexpected server response: ${status}` })
+
+  it('turns a provider rate limit into a busy renderer', () => {
+    expect(remoteConnectFailure(refused(429))).toBeInstanceOf(RendererBusyError)
+  })
+
+  it('keeps the message of any other refusal, and passes real errors through', () => {
+    const error = remoteConnectFailure(refused(401))
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toBe('could not connect to the remote browser: Unexpected server response: 401')
+    const timeout = new RenderTimeoutError('connecting to the remote browser', 30_000)
+    expect(remoteConnectFailure(timeout)).toBe(timeout)
   })
 })
 
