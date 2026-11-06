@@ -1,3 +1,5 @@
+import { framePageId } from '../../shared/pages'
+import { MAX_LOAD_FRAME_IDS } from '../../shared/frameHtml'
 import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
@@ -12,24 +14,83 @@ let retryTimer: number | null = null
 /* the server build this page first connected under; survives reconnects */
 let loadedBuild: string | null = null
 
+/* the frames whose HTML this connection has asked for, so a store change
+   never asks twice; every `init` starts the count again */
+const requested = new Set<string>()
+let stopLoading: (() => void) | null = null
+
 export function connect(canvasId: string, guest = false) {
   currentCanvasId = canvasId
   joinedAsGuest = guest
   /* a fresh attempt for a (possibly different) id — any not-found from a
      previous canvas must not leak into this one */
   useStore.getState().setCanvasNotFound(false)
+  stopLoading?.()
+  stopLoading = watchOpenPage()
   open()
 }
 
 export function disconnect() {
   currentCanvasId = null
   if (retryTimer) window.clearTimeout(retryTimer)
+  stopLoading?.()
+  stopLoading = null
+  requested.clear()
   socket?.close()
   socket = null
 }
 
-export function sendWs(msg: ClientMessage) {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg))
+/** false when the socket is not open: the message went nowhere */
+export function sendWs(msg: ClientMessage): boolean {
+  if (socket?.readyState !== WebSocket.OPEN) return false
+  socket.send(JSON.stringify(msg))
+  return true
+}
+
+/** Ask the room for the HTML of frames that arrived deferred (`htmlDeferred`);
+ *  it lands through `mergeFrameHtml`. A frame already asked for is not asked
+ *  again. Everything that needs the HTML of a frame off the open page (the
+ *  prototype player) calls this; the open page loads itself. */
+export function requestFrameHtml(frameIds: readonly string[]) {
+  const wanted = frameIds.filter((id) => !requested.has(id))
+  for (let i = 0; i < wanted.length; i += MAX_LOAD_FRAME_IDS) {
+    const batch = wanted.slice(i, i + MAX_LOAD_FRAME_IDS)
+    if (!sendWs({ type: 'frames:load', frameIds: batch })) return
+    for (const id of batch) requested.add(id)
+  }
+}
+
+/* The open page always has its HTML: switching to a page (or landing on one
+   by a link, a comment, a followed peer) is what loads it. */
+function watchOpenPage(): () => void {
+  return useStore.subscribe((s, prev) => {
+    const { canvas, activePageId } = s
+    if (!canvas || !activePageId || !s.connected) return
+    if (canvas === prev.canvas && activePageId === prev.activePageId && s.connected === prev.connected) return
+    requestFrameHtml(
+      canvas.frames.filter((f) => f.htmlDeferred && framePageId(canvas, f) === activePageId).map((f) => f.id),
+    )
+  })
+}
+
+/* The join says what this client is about to look at, so the room sends that
+   page's HTML with the canvas and defers the rest: the page it is on when it
+   reconnects, else the page or frame a link names (`?page=`, `?frame=`). */
+function joinMessage(canvasId: string, clientId: string, name: string): ClientMessage {
+  const open = useStore.getState()
+  const link = new URLSearchParams(location.search)
+  const pageId = (open.canvas?.id === canvasId ? open.activePageId : null) ?? link.get('page')
+  const frameId = link.get('frame')
+  return {
+    type: 'join',
+    canvasId,
+    clientId,
+    name,
+    kind: 'user',
+    deferHtml: true,
+    ...(pageId ? { pageId } : {}),
+    ...(frameId ? { frameId } : {}),
+  }
 }
 
 function open() {
@@ -44,7 +105,7 @@ function open() {
     const { clientId, name } = getIdentity()
     /* join first: flipping `connected` makes the Stage announce its camera,
        and the server drops anything sent before the socket has a canvas */
-    sendWs({ type: 'join', canvasId, clientId, name, kind: 'user' })
+    sendWs(joinMessage(canvasId, clientId, name))
     useStore.getState().setConnected(true)
   }
 
@@ -110,7 +171,9 @@ function handle(msg: ServerMessage) {
       }
       {
         const firstJoin = s.canvas?.id !== msg.canvas.id
-        s.setCanvas(msg.canvas)
+        /* a new canvas state: nothing asked for before it is still on its way */
+        requested.clear()
+        s.setCanvas(msg.canvas, msg.pageId)
         /* drops a tool the role does not allow, e.g. on a rejoin after the
          owner turned the link to view-only */
         s.setRole(msg.canvas.role ?? 'edit')
@@ -125,6 +188,9 @@ function handle(msg: ServerMessage) {
       s.setComments(msg.comments)
       s.setDecisions(msg.decisions)
       s.setProposals(msg.proposals)
+      break
+    case 'frames:html':
+      s.mergeFrameHtml(msg.frames)
       break
     case 'role':
       s.setRole(msg.role)

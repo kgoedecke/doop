@@ -14,6 +14,7 @@ import {
   editElementGeometry,
   elementMoveTarget,
   frameShows,
+  hasFrameWindow,
   requestFrame,
   styleGesture,
   type ElementInfo,
@@ -69,7 +70,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     onDoubleClick: (selector: string) => void,
     onLayerHit: (hit: ElementMoveHit) => void,
   ): boolean {
-    if (e.altKey || !e.isPrimary || !frame.html) return false
+    /* a frame without a live document (off screen, see lib/frameCulling.ts) has no
+       element to pick up: the press is the frame's own */
+    if (e.altKey || !e.isPrimary || !frame.html || !hasFrameWindow(frame.id)) return false
     const s = useStore.getState()
     if (!e.shiftKey && s.selectedIds.includes(frame.id) && s.selectedIds.length > 1) return false
     const standalone = isCanvasElement(frame.html)

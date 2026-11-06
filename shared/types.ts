@@ -13,6 +13,7 @@ export interface Frame {
   y: number
   width: number
   height: number
+  /** The document. Empty while `htmlDeferred` is set. */
   html: string
   createdAt: number
   updatedAt: number
@@ -33,6 +34,16 @@ export interface Frame {
   /** Human sign-off for implementation. Missing/null means draft. Design
    * edits retain the attribution but change the status to needs_review. */
   approval?: FrameApproval | null
+  /** Set on a frame sent without its HTML: it lives on a page the receiver
+   *  is not looking at. The HTML follows on request (`frames:load`); a frame
+   *  carrying its HTML never has this. */
+  htmlDeferred?: boolean
+}
+
+/** The HTML of one frame that arrived deferred. */
+export interface FrameHtml {
+  id: string
+  html: string
 }
 
 export interface FrameApproval {
@@ -539,15 +550,33 @@ export interface PeerViewport {
 /* ---- websocket protocol ---- */
 
 export type ClientMessage =
-  | { type: 'join'; canvasId: string; clientId: string; name: string; kind: ActorKind }
+  /** `deferHtml` opts in to deferred HTML (`Frame.htmlDeferred`): `init` then
+   *  carries the HTML of one page only. That is `pageId`, else the page of
+   *  `frameId` (a deep link), else the first. A client that does not ask gets
+   *  every frame complete, as before. */
+  | {
+      type: 'join'
+      canvasId: string
+      clientId: string
+      name: string
+      kind: ActorKind
+      deferHtml?: boolean
+      pageId?: string
+      frameId?: string
+    }
   | { type: 'cursor'; x: number; y: number }
   | { type: 'viewport'; viewport: PeerViewport }
   | { type: 'editing'; frameId: string | null }
   | { type: 'frame:drag'; frameId: string; x: number; y: number; width: number; height: number }
+  /** Ask for the HTML of frames that arrived deferred: every frame on `pageId`,
+   *  and/or the named frames (any page). Answered by `frames:html` messages. */
+  | { type: 'frames:load'; pageId?: string; frameIds?: string[] }
 
 export type ServerMessage =
   | {
       type: 'init'
+      /** set when the join asked for deferred HTML: the one page whose frames carry theirs */
+      pageId?: string
       canvas: Canvas
       presences: Presence[]
       activity: ActivityItem[]
@@ -560,6 +589,8 @@ export type ServerMessage =
       /** id of the client bundle the server is serving; 'dev' outside production */
       serverBuild: string
     }
+  /** HTML for deferred frames, in batches so a big page fills in progressively */
+  | { type: 'frames:html'; frames: FrameHtml[] }
   /** the share link changed: the receiver's role on this canvas now */
   | { type: 'role'; role: CanvasRole }
   | { type: 'presence:join'; presence: Presence }

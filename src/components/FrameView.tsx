@@ -208,11 +208,15 @@ export const FrameView = memo(function FrameView({
   frame,
   stack,
   layoutZoom,
+  live = true,
 }: {
   frame: Frame
   /** its place in the page's paint order (the Stage's z-index), front highest */
   stack?: number
   layoutZoom: number
+  /** false: off screen or too small to read, so a placeholder stands in for the
+   *  document and no iframe is mounted (src/lib/frameCulling.ts) */
+  live?: boolean
 }) {
   const t = useT()
   const [menuTarget, setMenuTarget] = useState<
@@ -625,9 +629,19 @@ export const FrameView = memo(function FrameView({
      flipped or shifted it away from a viewport edge */
   const menuAt = useRef({ x: 0, y: 0 })
   const [runtimeReady, setRuntimeReady] = useState(false)
+  /* the document is mounted while the frame is live and has its HTML; going
+     without it takes the iframe, and the runtime with it */
+  const mounted = live && !frame.htmlDeferred
+  const [wasMounted, setWasMounted] = useState(mounted)
+  if (mounted !== wasMounted) {
+    setWasMounted(mounted)
+    if (!mounted) setRuntimeReady(false)
+  }
   useEffect(() => {
     function onMsg(ev: MessageEvent) {
       if (ev.data?.type === 'doop:frame-ready' && ev.source === iframeRef.current?.contentWindow) {
+        /* a fresh document has shown nothing yet, whatever an earlier one did */
+        localHtml.current = null
         setRuntimeReady(true)
       }
     }
@@ -1127,6 +1141,7 @@ export const FrameView = memo(function FrameView({
 
   async function enterElementEdit(where: { x: number; y: number } | { selector: string }) {
     if (
+      !runtimeReady ||
       !frame.html ||
       stream ||
       frame.locked ||
@@ -1540,14 +1555,15 @@ export const FrameView = memo(function FrameView({
             }}
             onPointerLeave={leaveHover}
           >
-            <iframe
-              ref={iframeRef}
-              className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
-              title={frame.name}
-              data-doop-frame=""
-              sandbox="allow-scripts"
-              srcDoc={FRAME_BOOTSTRAP}
-              /* The world is laid out at CSS zoom k (Stage), which an iframe
+            {mounted ? (
+              <iframe
+                ref={iframeRef}
+                className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
+                title={frame.name}
+                data-doop-frame=""
+                sandbox="allow-scripts"
+                srcDoc={FRAME_BOOTSTRAP}
+                /* The world is laid out at CSS zoom k (Stage), which an iframe
                  passes into its document. Chromium takes it as pixel density:
                  the document keeps its design-px viewport and rasterizes at
                  k×, even out of process, where a transform on this element
@@ -1555,22 +1571,29 @@ export const FrameView = memo(function FrameView({
                  document out at the zoomed width, so there the zoom is undone
                  here (keeping viewport, vh/vw, media queries and runtime rects
                  in design px) and the scale restores the box. */
-              style={{
-                width: frame.width,
-                height: frame.height,
-                ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
-                  ? null
-                  : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
-                transformOrigin: '0 0',
-                /* Chromium paints an opaque backdrop behind an iframe whose
+                style={{
+                  width: frame.width,
+                  height: frame.height,
+                  ...(FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY
+                    ? null
+                    : { zoom: counterZoom(layoutZoom), transform: `scale(${layoutZoom})` }),
+                  transformOrigin: '0 0',
+                  /* Chromium paints an opaque backdrop behind an iframe whose
                    colour scheme differs from its document's; the page's dark
                    scheme reaches this element by inheritance while a
                    standalone element's document is light, so a shape on the
                    dark canvas sat on a white square */
-                ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
-              }}
-            />
-            {!frame.html && (
+                  ...(isCanvasElement(frame.html) ? { colorScheme: 'light' } : null),
+                }}
+              />
+            ) : (
+              /* no document behind it: the frame's box, hatched like an empty one */
+              <div
+                data-frame-placeholder=""
+                className="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)]"
+              />
+            )}
+            {!frame.html && !frame.htmlDeferred && (
               <div className="absolute inset-0 grid place-items-center bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)] text-[13px] text-ink-faint">
                 empty frame — add HTML
               </div>

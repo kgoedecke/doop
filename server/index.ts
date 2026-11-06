@@ -1,5 +1,6 @@
 import { env } from './env.ts'
-import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, pageFrames, samePages } from '../shared/pages.ts'
+import { canvasOpenedOn, frameHtmlBatches, MAX_LOAD_FRAME_IDS, openingPageId } from '../shared/frameHtml.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
@@ -1242,10 +1243,19 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
   }
 })
 
+/* `?pageId=<id>` opens the canvas on one page: only its frames carry their HTML,
+   the rest arrive `htmlDeferred` (GET /api/frames/:id has the HTML of any). With
+   no `pageId` every frame is complete, as it always was. */
 app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'view')
+  if (!c) return
   /* the caller's own role rides along, so the editor knows to go read-only */
-  if (c) res.json({ ...c, role: canvasRole(req.user!.id, c) })
+  const role = canvasRole(req.user!.id, c)
+  const { pageId } = req.query
+  if (pageId === undefined) return res.json({ ...c, role })
+  if (typeof pageId !== 'string' || !canvasPages(c).some((page) => page.id === pageId))
+    return res.status(400).json({ error: 'page not found' })
+  res.json({ ...canvasOpenedOn(c, pageId), role })
 })
 
 /* Community gallery listing — the owner's call alone, like link access.
@@ -2022,6 +2032,11 @@ app.put('/api/canvases/:id/stack', (req, res) => {
   res.json(frames)
 })
 
+app.get('/api/frames/:id', (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'view')
+  if (frame) res.json(frame)
+})
+
 app.patch('/api/frames/:id', (req, res) => {
   const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
   if (!current) return
@@ -2610,6 +2625,25 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
   })
 }
 
+/** Answer a `frames:load`: the HTML of every frame on the page it names and of
+ *  the frames it lists, in batches so the client can paint as they land. A
+ *  frame deleted meanwhile is simply not answered; its `frame:deleted` says so. */
+function sendFrameHtml(conn: Conn, msg: Extract<ClientMessage, { type: 'frames:load' }>) {
+  const canvas = store.getCanvas(conn.canvasId)
+  if (!canvas || !canvasRole(conn.userId, canvas)) {
+    conn.ws.close(4403, 'no access')
+    return
+  }
+  const ids = new Set(
+    (Array.isArray(msg.frameIds) ? msg.frameIds : [])
+      .filter((id) => typeof id === 'string')
+      .slice(0, MAX_LOAD_FRAME_IDS),
+  )
+  const onPage = typeof msg.pageId === 'string' ? new Set(pageFrames(canvas, msg.pageId).map((f) => f.id)) : undefined
+  const frames = canvas.frames.filter((f) => ids.has(f.id) || onPage?.has(f.id))
+  for (const batch of frameHtmlBatches(frames)) send(conn.ws, { type: 'frames:html', frames: batch })
+}
+
 wss.on('connection', (ws, upgradeReq) => {
   /* the session cookie rides the upgrade request; resolve it once */
   const sessionPromise = auth.api.getSession({ headers: fromNodeHeaders(upgradeReq.headers) }).catch(() => null)
@@ -2658,9 +2692,11 @@ wss.on('connection', (ws, upgradeReq) => {
         .filter((c) => c.ws !== ws && !c.silent)
         .map((c) => c.presence)
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
+      const pageId = msg.deferHtml === true ? openingPageId(canvas, msg) : undefined
       send(ws, {
         type: 'init',
-        canvas: { ...canvas, role },
+        ...(pageId === undefined ? {} : { pageId }),
+        canvas: { ...(pageId === undefined ? canvas : canvasOpenedOn(canvas, pageId)), role },
         presences: [...others, ...agents],
         activity: actions.getActivity(msg.canvasId),
         tasks: actions.getTasks(msg.canvasId),
@@ -2690,6 +2726,11 @@ wss.on('connection', (ws, upgradeReq) => {
     }
 
     if (!conn) return
+    /* reading is not editing: a view-as connection may load HTML too */
+    if (msg.type === 'frames:load') {
+      sendFrameHtml(conn, msg)
+      return
+    }
     if (conn.silent) return // view-as connections receive updates but never emit
     const { canvasId, presence } = conn
     /* view and comment visitors share cursors and viewports; claiming a

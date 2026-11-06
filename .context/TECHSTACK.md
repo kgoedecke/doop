@@ -130,6 +130,22 @@
   and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
+- Big canvases (`shared/frameHtml.ts`, `server/index.ts`, `src/lib/ws.ts`): a canvas opens on one
+  page. The web client's `join` carries `deferHtml: true` plus the page it is on (a reconnect) or
+  the `?page=` / `?frame=` its link names, and `init` answers with `pageId` and the HTML of that
+  page's frames only; every other frame arrives with `html: ''` and `htmlDeferred: true` (a
+  client that does not ask, such as the iOS app, still gets every frame whole). The client asks
+  for the rest with `frames:load` (`pageId` and/or `frameIds`, at most `MAX_LOAD_FRAME_IDS`),
+  answered by `frames:html` batches of about 1M characters, and `store.mergeFrameHtml` fills in
+  the frames still deferred. `ws.ts` loads the open page's deferred frames whenever the canvas or
+  the page changes, so everything off the stage may assume the open page is complete; what reads
+  another page's HTML (the prototype player) calls `requestFrameHtml`. Live `frame:created` /
+  `frame:updated` always carry their HTML, for any page. `GET /api/canvases/:id` stays whole
+  unless `?pageId=` opens it on one page, and `GET /api/frames/:id` returns one frame with its
+  HTML. The room socket negotiates `permessage-deflate` (1 KB threshold, no context takeover),
+  and `/api` responses go through `compression` (gzip/brotli; the SSE stream asks for
+  `no-transform`). Tests: `deferredHtml.test.ts`, `deferredHtmlRoom.test.ts`,
+  `wsDeferredHtml.test.ts`.
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
   per workspace (used on its canvases) and one per person (used on their personal canvases),
   managed in Settings → Fonts and Workspace → Fonts (`FontLibrary.tsx`, strings in the `fonts`
