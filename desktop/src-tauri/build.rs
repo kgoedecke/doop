@@ -14,6 +14,8 @@ fn main() {
             "fonts_choose_local",
             "fonts_read_local",
             "view_menu_state",
+            "update_card_ready",
+            "update_restart",
         ]),
     ))
     .expect("failed to build desktop permissions");
