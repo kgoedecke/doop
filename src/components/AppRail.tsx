@@ -103,9 +103,10 @@ export function AppRail({
   children,
 }: {
   active: RailActive
-  /** the lists the rail counts and reads agents from; fetched here when a page has none */
-  canvases?: CanvasMeta[]
-  workspaces?: WorkspaceSummary[]
+  /** the lists the rail counts and reads agents from: fetched here when a page passes none
+   *  (undefined); null while the page is still loading its own, which shows the last lists drawn */
+  canvases?: CanvasMeta[] | null
+  workspaces?: WorkspaceSummary[] | null
   /** Home filters in place; any other page goes home with the scope in the URL */
   onScope?: (scope: 'all' | 'mine' | 'shared' | `ws:${string}`) => void
   onCreateWorkspace?: () => void
@@ -128,6 +129,7 @@ export function AppRail({
   }, [needsOwn])
   const list = useMemo(() => canvases ?? own?.canvases ?? [], [canvases, own])
   const spaces = useMemo(() => workspaces ?? own?.workspaces ?? [], [workspaces, own])
+  /* only real lists are kept: a page still loading passes null, never an empty stand-in */
   useEffect(() => {
     if ((canvases ?? own?.canvases) && (workspaces ?? own?.workspaces))
       lastLists = { canvases: list, workspaces: spaces }

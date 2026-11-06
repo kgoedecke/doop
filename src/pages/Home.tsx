@@ -329,8 +329,8 @@ export function Home() {
     <DashLayout className={railLayout}>
       <AppRail
         active={scope}
-        canvases={canvases ?? []}
-        workspaces={workspaces}
+        canvases={canvases}
+        workspaces={workspacesLoaded ? workspaces : null}
         onScope={setScope}
         onCreateWorkspace={() => setCreatingWorkspace(true)}
       />
