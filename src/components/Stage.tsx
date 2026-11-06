@@ -96,6 +96,9 @@ function linkedCanvasComment(id: string | null): CanvasComment | null {
   return c && isCanvasComment(c) && !c.parentId ? c : null
 }
 
+/* controls that space presses natively */
+const PRESSABLE = 'button, [role="button"], [role="switch"], [role="checkbox"], [role="tab"]'
+
 /* a drag that starts on the stage (pan, marquee) keeps the browser from
    selecting text in the chrome it passes over: pointer capture redirects the
    events, not the selection. Counted, since two fingers can pan at once.
@@ -761,19 +764,50 @@ export function Stage({
       const t = e.target as HTMLElement
       return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
     }
-    function onDown(e: KeyboardEvent) {
-      if (e.key !== ' ' || isTyping(e)) return
+    function startPan(e: KeyboardEvent) {
       e.preventDefault()
       if (!useStore.getState().panMode) useStore.getState().setPanMode(true)
+    }
+    /* a chrome button keeps focus after a click (a layer's eye), and space
+       would press it again on keyup. Clicked there, space is still the pan, as
+       in Figma: the button lets go of focus before its own handlers run, since
+       some (the layer row's eye) keep space from bubbling. Reached by the
+       keyboard, space is the keyboard's press and no pan. `:focus-visible`
+       cannot tell the two apart: Chromium turns it on at the keydown itself,
+       so the last input is tracked instead. Only controls are caught this
+       early: Radix menus skip their own space once it is default-prevented. */
+    let byPointer = false
+    function onPointerDownCapture() {
+      byPointer = true
+    }
+    function onDownCapture(e: KeyboardEvent) {
+      if (e.key !== ' ') {
+        byPointer = false
+        return
+      }
+      if (isTyping(e) || !byPointer) return
+      const control = (e.target as HTMLElement).closest<HTMLElement>(PRESSABLE)
+      if (!control) return
+      control.blur()
+      startPan(e)
+    }
+    function onDown(e: KeyboardEvent) {
+      if (e.key !== ' ' || isTyping(e)) return
+      if (!byPointer && (e.target as HTMLElement).closest(PRESSABLE)) return
+      startPan(e)
     }
     function onUp(e: KeyboardEvent) {
       if (e.key === ' ') useStore.getState().setPanMode(false)
     }
     const reset = () => useStore.getState().setPanMode(false)
+    window.addEventListener('pointerdown', onPointerDownCapture, true)
+    window.addEventListener('keydown', onDownCapture, true)
     window.addEventListener('keydown', onDown)
     window.addEventListener('keyup', onUp)
     window.addEventListener('blur', reset)
     return () => {
+      window.removeEventListener('pointerdown', onPointerDownCapture, true)
+      window.removeEventListener('keydown', onDownCapture, true)
       window.removeEventListener('keydown', onDown)
       window.removeEventListener('keyup', onUp)
       window.removeEventListener('blur', reset)
