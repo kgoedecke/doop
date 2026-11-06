@@ -644,7 +644,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
   they switch its pane in place, elsewhere they go to `/w/<id>?pane=…`, and the page keeps the
   pane in its URL. The rail keeps the last lists it drew (`lastLists`), so a page change does not
-  blink its rows out, and fades only when collapsed or expanded.
+  blink its rows out, and fades only when collapsed or expanded. Home warms the Workspace page's
+  detail while a workspace's canvases are in view (`src/lib/workspaceCache.ts`), so its panes draw on
+  the first frame instead of a skeleton; the page refetches on arrival.
 
 ## 11. Developer Experience Tooling
 

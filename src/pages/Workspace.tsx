@@ -5,6 +5,7 @@ import { navigate } from '../App'
 import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
+import { cachedWorkspace, loadWorkspace } from '../lib/workspaceCache'
 import { AppRail, railLayout, workspacePanesFor, type WorkspacePane } from '../components/AppRail'
 import { UpgradeModal } from '../components/WorkspaceModals'
 import { Avatar } from '../components/ui/avatar'
@@ -71,7 +72,7 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
   const t = useT()
   const { data: session } = authClient.useSession()
   const meId = session?.user.id
-  const [ws, setWs] = useState<WorkspaceDetail | null>(null)
+  const [ws, setWs] = useState<WorkspaceDetail | null>(() => cachedWorkspace(workspaceId))
   const [missing, setMissing] = useState(false)
   const [upgrade, setUpgrade] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -99,8 +100,7 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
   const [spaces, setSpaces] = useState<WorkspaceSummary[] | undefined>(undefined)
 
   const reload = useCallback(() => {
-    api
-      .getWorkspace(workspaceId)
+    loadWorkspace(workspaceId)
       .then(setWs)
       .catch(() => setMissing(true))
     api

@@ -57,6 +57,7 @@ import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Toast } from '../components/ui/toast'
 import { DashContent, DashHeader, DashLayout, DashMain } from '../components/ui/dash'
 import { useT, type PlainMessageKey } from '../lib/i18n'
+import { prefetchWorkspace } from '../lib/workspaceCache'
 import { cn } from '@/lib/utils'
 
 /** the three fixed views, or one workspace (`ws:<id>`) */
@@ -292,6 +293,11 @@ export function Home() {
   const first = session?.user.name?.split(' ')[0]
   const scopedWorkspace = workspaceOf(scope)
   const currentWorkspace = scopedWorkspace ? workspaces.find((w) => w.id === scopedWorkspace) : undefined
+  /* its settings are one rail row away: have them ready to draw */
+  const currentWorkspaceId = currentWorkspace?.id
+  useEffect(() => {
+    if (currentWorkspaceId) prefetchWorkspace(currentWorkspaceId)
+  }, [currentWorkspaceId])
   /* a workspace that vanished (deleted, or left) drops the view back to all */
   const scopeGone = !!scopedWorkspace && workspacesLoaded && !currentWorkspace
   const [seenScopeGone, setSeenScopeGone] = useState(false)
