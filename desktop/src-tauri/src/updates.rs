@@ -38,9 +38,11 @@ enum Trigger {
 
 /// Official installers point at doop.design. Replacing a self-hosted shell
 /// with one would silently change its server, and a debug build would be
-/// replaced by a release.
+/// replaced by a release. The Chromium shell has no feed of its own yet, and
+/// the WebKit one would replace it with the WebKit shell.
 fn updates_enabled() -> bool {
     !cfg!(debug_assertions)
+        && !cfg!(chromium)
         && matches!(
             crate::APP_URL.trim_end_matches('/'),
             "https://doop.design" | "https://www.doop.design"
@@ -236,9 +238,9 @@ pub mod menu {
     pub const MENU_ID: &str = "check-for-updates";
     const LABEL: &str = "Check for Updates…";
 
-    struct UpdateMenu(MenuItem<tauri::Wry>);
+    struct UpdateMenu(MenuItem<crate::ShellRuntime>);
 
-    pub fn item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
+    pub fn item(app: &AppHandle) -> tauri::Result<MenuItem<crate::ShellRuntime>> {
         let item = MenuItem::with_id(app, MENU_ID, LABEL, true, None::<&str>)?;
         app.manage(UpdateMenu(item.clone()));
         Ok(item)

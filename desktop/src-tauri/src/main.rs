@@ -33,6 +33,12 @@
 // same thread) seeded with wry's default of ~/Downloads/<server filename>,
 // then reveals the finished file in Finder / Explorer, since the webview
 // has no download bar of its own.
+//
+// The same sources also build a Chromium shell (../src-tauri-chromium, Tauri
+// 3's CEF runtime, opt-in and unreleased): WebKit runs every sandboxed frame
+// iframe in the editor's own process, Chromium runs them out of process. Its
+// differences are the `cfg(chromium)` blocks, set by build.rs when the CEF
+// runtime is linked.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(target_os = "macos")]
@@ -55,6 +61,13 @@ use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
+
+/// The runtime the shell's menu items are typed over: Tauri 2's system
+/// webview, or Tauri 3's type-erased runtime, which carries CEF.
+#[cfg(not(chromium))]
+type ShellRuntime = tauri::Wry;
+#[cfg(chromium)]
+type ShellRuntime = tauri::DynRuntime;
 
 /// Bring the (only) window forward: after a doop:// link, or when a second
 /// instance was launched to deliver one.
@@ -146,7 +159,7 @@ const CLOSE_TAB: &str = "close-tab";
 /// are what make Cmd+C/V/Z reach the webview at all), View (the canvas's
 /// view toggles and zoom, src/view_menu.rs) and Window.
 #[cfg(target_os = "macos")]
-fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+fn build_menu(app: &AppHandle) -> tauri::Result<Menu<ShellRuntime>> {
     let pkg = app.package_info();
     let about = AboutMetadata {
         name: Some(pkg.name.clone()),
@@ -208,11 +221,38 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])
 }
 
+/// The Chromium shell's runtime settings. Session cookies outlive a restart
+/// (CEF drops them on exit by default), so quitting never signs anyone out. A
+/// debug build opens Chrome's remote debugging on the port named by
+/// DOOP_CEF_DEBUG_PORT (chrome://inspect, or a CDP client), which is how the
+/// frames' renderer processes are inspected; release builds never listen.
+#[cfg(chromium)]
+fn chromium_runtime() -> tauri_runtime_cef::Cef {
+    let cef = tauri_runtime_cef::Cef::default().persist_session_cookies(true);
+    let port = std::env::var("DOOP_CEF_DEBUG_PORT")
+        .ok()
+        .and_then(|port| port.parse().ok())
+        .filter(|_| cfg!(debug_assertions));
+    match port {
+        Some(port) => cef.remote_debugging(tauri_runtime_cef::RemoteDebugging::Port {
+            port,
+            allowed_origins: Vec::new(),
+        }),
+        None => cef,
+    }
+}
+
+// CEF starts its renderer, GPU and utility processes from this same binary;
+// the entry point hands those to Chromium before any of main() runs.
+#[cfg_attr(chromium, tauri_runtime_cef::cef_entry_point)]
 fn main() {
+    let builder = tauri::Builder::default();
+    #[cfg(chromium)]
+    let builder = builder.runtime(chromium_runtime());
     // single-instance must be the first plugin so a second launch is caught
     // before anything else initialises; it hands the launch's URL args to
     // the deep-link plugin through the `deep-link` feature.
-    let builder = tauri::Builder::default()
+    let builder = builder
         .manage(claude::ClaudeState::default())
         .manage(fonts::LocalFonts::default())
         .invoke_handler(tauri::generate_handler![
@@ -317,7 +357,14 @@ fn main() {
                         match event {
                             DownloadEvent::Requested { url, destination } => {
                                 let mut picker = rfd::FileDialog::new().set_title("Save export");
-                                if let Some(dir) = destination.parent() {
+                                // wry suggests ~/Downloads/<name>, CEF the bare
+                                // name; both panels open in Downloads.
+                                let dir = destination
+                                    .parent()
+                                    .filter(|dir| !dir.as_os_str().is_empty())
+                                    .map(PathBuf::from)
+                                    .or_else(|| download_handle.path().download_dir().ok());
+                                if let Some(dir) = dir {
                                     picker = picker.set_directory(dir);
                                 }
                                 if let Some(name) = destination.file_name().and_then(|n| n.to_str()) {

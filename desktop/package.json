@@ -5,7 +5,9 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "dev:chromium": "cd src-tauri-chromium && bunx @tauri-apps/cli@3.0.0-alpha.5 dev",
+    "build:chromium": "cd src-tauri-chromium && bunx @tauri-apps/cli@3.0.0-alpha.5 build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0"

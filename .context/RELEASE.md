@@ -81,6 +81,14 @@ in `.github/actions/setup-desktop`:
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
+- The Chromium (CEF) shell in `desktop/src-tauri-chromium` is not released: no workflow builds,
+  signs or publishes it, and it never self-updates. release-please bumps its `tauri.conf.json`
+  and `Cargo.toml` with the WebKit shell's. Build it locally with
+  `bun run build:chromium` in `desktop/` (macOS, cmake + ninja installed): an arm64 `doop Chromium.app` and DMG under
+  `src-tauri-chromium/target/release/bundle/`, unsigned unless `APPLE_SIGNING_IDENTITY` is
+  set. Shipping it would need its own job on a macOS runner (CEF cached under
+  `~/Library/Caches/tauri-cef`), signing and notarizing the framework and its five helper apps
+  with the JIT entitlements, its own updater feed, and a Chromium security-update cadence.
 
 ## Claude Desktop extension
 
