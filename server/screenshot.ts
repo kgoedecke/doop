@@ -5,7 +5,14 @@ import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { renderedHeight } from './renderLimits.ts'
-import { createRenderer, type PageOptions, type RenderPage, type RendererStatus } from './renderBrowser.ts'
+import {
+  createRenderer,
+  remoteConnectFailure,
+  withDeadline,
+  type PageOptions,
+  type RenderPage,
+  type RendererStatus,
+} from './renderBrowser.ts'
 
 /**
  * Render a frame's HTML in headless Chrome so agents can *see* their work.
@@ -39,6 +46,12 @@ export function findBrowserPath(): string | null {
     }
   }
   return null
+}
+
+/** Whether the server has a browser to render with: a remote one
+ *  (REMOTE_BROWSER_URL) or a local executable. */
+export function rendererAvailable(): boolean {
+  return !!env.REMOTE_BROWSER_URL || findBrowserPath() !== null
 }
 
 function findBrowser(): string {
@@ -77,9 +90,45 @@ const PROTOCOL_TIMEOUT_MS = 60_000
 /** One render attempt, page open to encoded bytes. */
 const RENDER_TIMEOUT_MS = 45_000
 
+/* a remote session is billed while it is open: close it this long after its
+   last page, well inside the provider's own idle timeout (Cloudflare: 60s) */
+const REMOTE_IDLE_CLOSE_MS = 30_000
+const REMOTE_CONNECT_TIMEOUT_MS = 30_000
+/* closing a heavy page's context is a round trip that waits on the page's
+   teardown: a remote one took over 5s after a full website import */
+const REMOTE_CLOSE_TIMEOUT_MS = 15_000
+
+/** A Chrome somewhere else, over the DevTools protocol (REMOTE_BROWSER_URL).
+ *  Everything past the connect is the same puppeteer API a local one has. */
+export function connectRemoteBrowser(url: string, token: string | undefined): Promise<Browser> {
+  const connecting = puppeteer.connect({
+    browserWSEndpoint: url,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    protocolTimeout: PROTOCOL_TIMEOUT_MS,
+  })
+  return withDeadline(connecting, REMOTE_CONNECT_TIMEOUT_MS, 'connecting to the remote browser').catch(
+    (error: unknown) => {
+      /* a session that opens after its deadline is still billed: close it */
+      connecting.then(
+        (late) => void late.close().catch(() => {}),
+        () => {},
+      )
+      throw remoteConnectFailure(error)
+    },
+  )
+}
+
+const remoteBrowserUrl = env.REMOTE_BROWSER_URL
+
 const renderer = createRenderer({
-  launch: () => launchBrowser(undefined, PROTOCOL_TIMEOUT_MS),
-  tuning: { maxConcurrent: Math.max(1, env.RENDER_CONCURRENCY) },
+  launch: () =>
+    remoteBrowserUrl
+      ? connectRemoteBrowser(remoteBrowserUrl, env.REMOTE_BROWSER_TOKEN)
+      : launchBrowser(undefined, PROTOCOL_TIMEOUT_MS),
+  tuning: {
+    maxConcurrent: Math.max(1, env.RENDER_CONCURRENCY),
+    ...(remoteBrowserUrl ? { idleCloseMs: REMOTE_IDLE_CLOSE_MS, closeTimeoutMs: REMOTE_CLOSE_TIMEOUT_MS } : {}),
+  },
 })
 
 /** The live shared browser, launched if need be. */
