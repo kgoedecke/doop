@@ -148,7 +148,8 @@ export interface Allowance {
   onOwnAccount: boolean
 }
 
-export type ModelAccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
+export type ModelAccountKind =
+  'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'custom-key'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -182,6 +183,8 @@ export interface ModelAccountStatus {
   kind?: ModelAccountKind
   email?: string
   plan?: string
+  /** custom-key only: the active saved profile; never a secret */
+  profileId?: string
   /** the model tier this account runs on right now */
   model?: string
   /** the reasoning effort in effect; only the OpenAI kinds have one */
@@ -191,6 +194,37 @@ export interface ModelAccountStatus {
   chatgptEnabled?: boolean
   /** the curated menu each provider's picker offers */
   menus?: Record<ModelAccountKind, AgentModelOption[]>
+}
+
+/** A saved OpenAI-compatible endpoint. The server never returns its key. */
+export interface CustomModelProfile {
+  id: string
+  name: string
+  baseUrl: string
+  model: string
+  supportsVision: boolean
+  /** true when this profile is the active model account */
+  active: boolean
+  connectedAt: number
+  updatedAt: number
+}
+
+export interface CustomModelProfileInput {
+  name: string
+  baseUrl: string
+  /** omitted on edit preserves the stored key; null clears it */
+  apiKey?: string | null
+  model: string
+  supportsVision: boolean
+}
+
+export type CustomModelProfilePatch = Partial<CustomModelProfileInput>
+
+export interface CustomEndpointTestResult {
+  reachable: boolean
+  models?: string[]
+  errorCode?: string
+  error?: string
 }
 
 /** One image-model registry entry's availability for this user. */
@@ -560,6 +594,20 @@ export const api = {
   connectGeminiKey: (apiKey: string) =>
     req<ModelAccountStatus>('/api/model-account/gemini-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: () => req<ModelAccountStatus>('/api/model-account', { method: 'DELETE' }),
+  modelProfiles: () => req<CustomModelProfile[]>('/api/model-profiles'),
+  createModelProfile: (input: CustomModelProfileInput) =>
+    req<CustomModelProfile>('/api/model-profiles', { method: 'POST', body: JSON.stringify(input) }),
+  updateModelProfile: (id: string, patch: CustomModelProfilePatch) =>
+    req<CustomModelProfile>(`/api/model-profiles/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteModelProfile: (id: string) =>
+    req<{ ok: boolean }>(`/api/model-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  activateModelProfile: (id: string) =>
+    req<ModelAccountStatus>(`/api/model-profiles/${encodeURIComponent(id)}/activate`, { method: 'POST' }),
+  testModelProfile: (input: { baseUrl: string; apiKey?: string | null; model?: string; profileId?: string }) =>
+    req<CustomEndpointTestResult>('/api/model-profiles/test', { method: 'POST', body: JSON.stringify(input) }),
   setAgentModel: (model: string) =>
     req<ModelAccountStatus>('/api/model-account', { method: 'PATCH', body: JSON.stringify({ model }) }),
   setAgentEffort: (effort: string) =>

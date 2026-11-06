@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
@@ -25,6 +25,15 @@ import sharp from 'sharp'
 
 const mockedGetAccount = vi.mocked(getAccount)
 const mockedGetImagePref = vi.mocked(getImagePref)
+
+beforeEach(() => {
+  /* These tests assert the no-server-key path; don't let the developer's
+     configured provider credentials change that baseline. Individual cases
+     opt in to server keys with stubEnv. */
+  stubEnv('OPENAI_API_KEY', undefined)
+  stubEnv('GEMINI_API_KEY', undefined)
+  stubEnv('ARK_API_KEY', undefined)
+})
 
 async function tinyPng(): Promise<string> {
   const buf = await sharp({ create: { width: 8, height: 6, channels: 4, background: '#e5533c' } })

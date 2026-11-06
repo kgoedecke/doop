@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { DoopMark } from './Logo'
 import { useAgentModels, useModelAccount } from './ModelAccount'
+import { useLocalAgent } from '../lib/localAgent'
+import { activeModelTarget } from '../lib/activeModelTarget'
 import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
 import { useT, type PlainMessageKey } from '@/lib/i18n'
 import {
@@ -50,10 +52,23 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const t = useT()
   const catalog = useAgentModels(account, open)
-  const kind = account?.connected ? account.kind : undefined
-  const menu = (catalog?.live ? catalog.models : undefined) ?? (kind && account?.menus?.[kind]) ?? []
-  const current = menu.find((m) => m.id === account?.model)
-  const label = current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : 'Doop Agent')
+  const localPreference = useLocalAgent((state) => state.preference)
+  const localEnabled = localPreference?.enabled ?? false
+  const activeTarget = activeModelTarget(localEnabled, account)
+  const kind = activeTarget === 'claude-local' ? undefined : (activeTarget ?? undefined)
+  const catalogMenu = catalog && kind && (catalog.live || kind === 'custom-key') ? catalog.models : undefined
+  const menu = catalogMenu ?? (kind && account?.menus?.[kind]) ?? []
+  const isMissingModel =
+    kind === 'custom-key' && Boolean(account?.model) && !menu.some((model) => model.id === account?.model)
+  /* a custom endpoint's saved model stays selectable while its live catalog
+     is still loading — the picker must never open on an empty list */
+  const items =
+    isMissingModel && account?.model ? [...menu, { id: account.model, name: account.model, blurb: '' }] : menu
+  const current = items.find((m) => m.id === account?.model)
+  const label =
+    activeTarget === 'claude-local'
+      ? `Claude CLI (${localPreference?.model ?? 'default'})`
+      : (current?.name ?? (account?.connected ? (account.model ?? t('panels.modelFallback')) : 'Doop Agent'))
   const mark = kind ? PROVIDER_MARK[kind] : undefined
 
   async function pick(model: string) {
@@ -107,17 +122,27 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
         </MenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="end" width="lg">
-        {menu.length > 0 ? (
+        {items.length > 0 ? (
           <>
             <DropdownMenuCaption>{t('panels.modelCaption')}</DropdownMenuCaption>
             <DropdownMenuRadioGroup value={account?.model ?? ''} onValueChange={(model) => void pick(model)}>
-              {menu.map((m) => (
+              {items.map((m) => (
                 <DropdownMenuRadioItem key={m.id} value={m.id} description={m.blurb}>
                   {m.name}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
-            {catalog?.error && (
+            {catalog && !catalog.live && kind === 'custom-key' && (
+              <DropdownMenuCaption className="pb-2 text-ink-faint">
+                {t('models.customCatalogFallback')}
+              </DropdownMenuCaption>
+            )}
+            {isMissingModel && catalog?.live !== false && (
+              <DropdownMenuCaption className="pb-2 text-ink-faint">
+                {t('models.customModelMissing', { model: account?.model ?? '' })}
+              </DropdownMenuCaption>
+            )}
+            {catalog?.error && kind !== 'custom-key' && (
               <DropdownMenuCaption className="pb-2 text-ink-faint">{catalog.error}</DropdownMenuCaption>
             )}
             {/* OpenAI models think as hard as asked; the others have no such dial */}

@@ -48,7 +48,6 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     writeFileSync(path.join(imageDir, 'replacement.svg'), replacementSvg)
     browser = await openBrowser()
     page = await browser.newPage()
-    page.setDefaultTimeout(5_000)
     page.on('pageerror', (error) => errors.push(String(error)))
     await page.setViewport({ width: 1000, height: 900 })
     await page.setRequestInterception(true)

@@ -1,0 +1,681 @@
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { sql } from 'drizzle-orm'
+import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Client, startServer, type Server } from './harness.ts'
+import { db } from '../server/db/index.ts'
+import { customModelProfiles, modelAccounts } from '../server/db/schema.ts'
+import { resealSecrets } from '../server/secretBackfill.ts'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
+import {
+  MAX_DISCOVERED_MODELS,
+  activeCustomProfileId,
+  createProfile,
+  deleteProfile,
+  getProfile,
+  listProfiles,
+  listProfileViews,
+  profileView,
+  testCustomEndpoint,
+  updateProfile,
+} from '../server/customModelProfiles.ts'
+import {
+  activateCustomProfile,
+  connectApiKey,
+  disconnectCustomProfile,
+  getAccount,
+  getStatus,
+  setAccountEffort,
+  setAccountModel,
+  takesReasoningEffort,
+} from '../server/modelAccounts.ts'
+import { CustomInferenceError } from '../server/customInference.ts'
+import { modelCatalogFor } from '../server/modelCatalog.ts'
+import { pickModel } from '../server/agentModel.ts'
+
+vi.mock('../server/db/index.ts', async () => {
+  const { PGlite } = await import('@electric-sql/pglite')
+  const { drizzle } = await import('drizzle-orm/pglite')
+  const schema = await import('../server/db/schema.ts')
+  return { db: drizzle(new PGlite(), { schema }) }
+})
+
+beforeAll(async () => {
+  const { migrate } = await import('drizzle-orm/pglite/migrator')
+  await migrate(db as unknown as ReturnType<typeof pgliteDrizzle>, { migrationsFolder: 'server/db/migrations' })
+}, 30_000)
+
+beforeEach(async () => {
+  stubEnv('CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS', '1')
+  await db.delete(modelAccounts)
+  await db.delete(customModelProfiles)
+})
+
+afterEach(unstubAllEnvs)
+
+const input = (overrides: Partial<Parameters<typeof createProfile>[1]> = {}) => ({
+  name: 'Local Ollama',
+  baseUrl: 'http://127.0.0.1:11434/v1/',
+  model: 'qwen3.8-coder',
+  supportsVision: false,
+  ...overrides,
+})
+
+async function storedKey(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ stored: sql<string>`${customModelProfiles.apiKey}` })
+    .from(customModelProfiles)
+    .where(sql`${customModelProfiles.id} = ${id}`)
+  return row?.stored ?? null
+}
+
+describe('custom model profiles', () => {
+  it('isolates profiles by user and normalizes the base URL', async () => {
+    const alice = await createProfile('alice', input({ apiKey: 'sk-alice-key' }))
+    await createProfile('bob', input({ name: 'Bob endpoint', model: 'bob-model' }))
+
+    expect(alice.baseUrl).toBe('http://127.0.0.1:11434/v1')
+    expect((await listProfiles('alice')).map((p) => p.name)).toEqual(['Local Ollama'])
+    expect(await getProfile('alice', (await listProfiles('bob'))[0]!.id)).toBeNull()
+    expect((await listProfiles('alice')).some((p) => p.userId === 'bob')).toBe(false)
+  })
+
+  it('seals the API key and never puts it in a view', async () => {
+    const profile = await createProfile('alice', input({ apiKey: 'sk-super-secret' }))
+    expect(await getProfile('alice', profile.id)).toMatchObject({ apiKey: 'sk-super-secret' })
+    const stored = await storedKey(profile.id)
+    expect(stored).not.toContain('sk-super-secret')
+    expect(stored).toMatch(/^enc:v1:/)
+
+    const views = await listProfileViews('alice')
+    expect(JSON.stringify(views)).not.toContain('sk-super-secret')
+    expect(views[0]).not.toHaveProperty('apiKey')
+    expect(profileView(profile, profile.id)).toMatchObject({ active: true, supportsVision: false })
+  })
+
+  it('preserves an omitted key, replaces a supplied one, and clears on null', async () => {
+    const profile = await createProfile('alice', input({ apiKey: 'sk-first' }))
+    await updateProfile('alice', profile.id, { name: 'Renamed' })
+    expect((await getProfile('alice', profile.id))?.apiKey).toBe('sk-first')
+
+    await updateProfile('alice', profile.id, { apiKey: 'sk-second' })
+    expect((await getProfile('alice', profile.id))?.apiKey).toBe('sk-second')
+    expect(await storedKey(profile.id)).not.toContain('sk-second')
+
+    await updateProfile('alice', profile.id, { apiKey: null })
+    const cleared = await getProfile('alice', profile.id)
+    expect(cleared?.apiKey).toBeUndefined()
+    expect(await storedKey(profile.id)).toBeNull()
+  })
+
+  it('rejects empty/overlong names and unsafe model ids', async () => {
+    await expect(createProfile('alice', input({ name: '   ' }))).rejects.toThrow(/name/i)
+    await expect(createProfile('alice', input({ name: 'x'.repeat(81) }))).rejects.toThrow(/80/)
+    await expect(createProfile('alice', input({ model: '' }))).rejects.toThrow(/model id/i)
+    await expect(createProfile('alice', input({ model: 'has spaces' }))).rejects.toThrow(/model id/i)
+    await expect(createProfile('alice', input({ model: 'new\nline' }))).rejects.toThrow(/model id/i)
+    expect((await listProfiles('alice')).length).toBe(0)
+  })
+
+  it('surfaces endpoint policy errors with stable codes', async () => {
+    stubEnv('CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS', 'false')
+    const error = await createProfile('alice', input()).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(CustomInferenceError)
+    expect((error as CustomInferenceError).code).toBe('private_url_blocked')
+  })
+
+  it('deletes only the requested profile, and disconnects the account pointing at an active one', async () => {
+    const one = await createProfile('alice', input({ name: 'One' }))
+    const two = await createProfile('alice', input({ name: 'Two', model: 'model-two' }))
+    await db.insert(modelAccounts).values({
+      userId: 'alice',
+      kind: 'custom-key',
+      profileId: two.id,
+      model: two.model,
+      connectedAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+    expect(await activeCustomProfileId('alice')).toBe(two.id)
+
+    await deleteProfile('alice', one.id)
+    expect((await listProfiles('alice')).map((p) => p.id)).toEqual([two.id])
+    expect(await activeCustomProfileId('alice')).toBe(two.id)
+
+    await deleteProfile('alice', two.id)
+    expect(await listProfiles('alice')).toEqual([])
+    expect(await activeCustomProfileId('alice')).toBeUndefined()
+  })
+
+  it('does not delete another user’s profile even with a guessed id', async () => {
+    const bob = await createProfile('bob', input())
+    await expect(deleteProfile('alice', bob.id)).rejects.toThrow(/not found/i)
+    await expect(updateProfile('alice', bob.id, { name: 'Stolen' })).rejects.toThrow(/not found/i)
+    expect((await getProfile('bob', bob.id))?.name).toBe('Local Ollama')
+  })
+
+  it('activates a profile as the one account, stores only its pointer, and reports its model', async () => {
+    const profile = await createProfile('alice', input({ model: 'alice-model', supportsVision: false }))
+    await connectApiKey('alice', 'sk-alice-openai-key')
+    expect((await getAccount('alice'))?.kind).toBe('openai-key')
+
+    const status = await activateCustomProfile('alice', profile.id)
+    expect(status).toMatchObject({ connected: true, kind: 'custom-key', model: 'alice-model', profileId: profile.id })
+    expect(status).not.toHaveProperty('apiKey')
+    expect(JSON.stringify(status)).not.toContain('sk-alice-openai-key')
+
+    const account = await getAccount('alice')
+    expect(account).toMatchObject({ kind: 'custom-key', profileId: profile.id, model: 'alice-model' })
+    /* the endpoint and key live in the profile, never copied onto the account */
+    expect(account?.apiKey).toBeUndefined()
+    expect(account).not.toHaveProperty('baseUrl')
+    expect(takesReasoningEffort('custom-key')).toBe(false)
+  })
+
+  it('keeps the selected custom model and its vision flag when the catalog is down', async () => {
+    const profile = await createProfile(
+      'alice',
+      input({ baseUrl: 'http://127.0.0.1:1/v1', model: 'text-only', supportsVision: false }),
+    )
+    await activateCustomProfile('alice', profile.id)
+    const account = await getAccount('alice')
+
+    const catalog = await modelCatalogFor(account!, [])
+    expect(catalog).toMatchObject({
+      live: false,
+      models: [{ id: 'text-only', name: 'text-only', blurb: '', vision: false }],
+    })
+    expect(catalog.error).toContain('Enter the model id manually')
+  })
+
+  it('refuses to activate another user’s profile', async () => {
+    const bob = await createProfile('bob', input())
+    await expect(activateCustomProfile('alice', bob.id)).rejects.toThrow(/not found/i)
+    expect(await getAccount('alice')).toBeNull()
+  })
+
+  it('writes a model pick through to the active profile and rejects unsafe ids', async () => {
+    const profile = await createProfile('alice', input({ model: 'first-model' }))
+    await activateCustomProfile('alice', profile.id)
+
+    const status = await setAccountModel('alice', 'second-model')
+    expect(status).toMatchObject({ kind: 'custom-key', model: 'second-model' })
+    expect((await getProfile('alice', profile.id))?.model).toBe('second-model')
+    expect((await getAccount('alice'))?.model).toBe('second-model')
+
+    await expect(setAccountModel('alice', 'not a model')).rejects.toThrow(/unknown model/)
+    await expect(setAccountEffort('alice', 'high')).rejects.toThrow(/only OpenAI/i)
+  })
+
+  it('keeps the active account in step when its profile model is edited', async () => {
+    const profile = await createProfile('alice', input({ model: 'first-model' }))
+    await activateCustomProfile('alice', profile.id)
+    await updateProfile('alice', profile.id, { model: 'edited-model' })
+    expect(await getStatus('alice')).toMatchObject({ kind: 'custom-key', model: 'edited-model' })
+  })
+
+  it('disconnects a custom account only when it still points at the deleted profile', async () => {
+    const one = await createProfile('alice', input({ name: 'One' }))
+    const two = await createProfile('alice', input({ name: 'Two', model: 'two-model' }))
+    await activateCustomProfile('alice', one.id)
+
+    await disconnectCustomProfile('alice', two.id)
+    expect((await getStatus('alice')).kind).toBe('custom-key')
+
+    await disconnectCustomProfile('alice', one.id)
+    expect(await getAccount('alice')).toBeNull()
+  })
+
+  it('keeps independent profile updates made concurrently', async () => {
+    const profile = await createProfile('alice', input({ name: 'A', model: 'm-a' }))
+
+    await Promise.all([
+      updateProfile('alice', profile.id, { model: 'm-b' }),
+      updateProfile('alice', profile.id, { name: 'B' }),
+    ])
+
+    expect(await getProfile('alice', profile.id)).toMatchObject({ name: 'B', model: 'm-b' })
+  })
+
+  it('activation and deletion cannot leave an account pointing at a deleted profile', async () => {
+    const profile = await createProfile('alice', input())
+
+    const outcomes = await Promise.allSettled([
+      activateCustomProfile('alice', profile.id),
+      deleteProfile('alice', profile.id),
+    ])
+
+    const account = await getAccount('alice')
+    if (account?.profileId) {
+      expect(await getProfile('alice', account.profileId)).not.toBeNull()
+    }
+    expect(outcomes.length).toBe(2)
+  })
+
+  it('reseals legacy plaintext keys in the custom profile table on boot', async () => {
+    const now = Date.now()
+    await db.execute(sql`
+      INSERT INTO custom_model_profiles
+        (id, user_id, name, base_url, api_key, model, supports_vision, connected_at, updated_at)
+      VALUES
+        ('legacy-profile', 'alice', 'Legacy', 'https://provider.example/v1', 'legacy-plaintext-key',
+         'legacy-model', true, ${now}, ${now})
+    `)
+    const before = await storedKey('legacy-profile')
+    expect(before).toBe('legacy-plaintext-key')
+    await resealSecrets(db)
+    const after = await storedKey('legacy-profile')
+    expect(after).toMatch(/^enc:v1:/)
+    expect(after).not.toContain('legacy-plaintext-key')
+  })
+
+  interface ModelFixture {
+    status?: number
+    body?: unknown
+    contentType?: string
+  }
+
+  async function withModelFixture(body: ModelFixture, run: (baseUrl: string) => Promise<void>) {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(body.status ?? 200, { 'content-type': body.contentType ?? 'application/json' })
+      res.end(body.body === undefined ? '' : String(body.body))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`)
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    }
+  }
+
+  it('returns deduplicated model ids and no key echo', async () => {
+    await withModelFixture(
+      { body: JSON.stringify({ data: [{ id: 'a' }, { id: 'b' }, { id: 'a' }] }) },
+      async (baseUrl) => {
+        const result = await testCustomEndpoint('alice', { baseUrl, apiKey: 'sk-never-returned' })
+        expect(result).toEqual({ reachable: true, models: ['a', 'b'] })
+        expect(JSON.stringify(result)).not.toContain('sk-never-returned')
+      },
+    )
+  })
+
+  it('caps parsed model ids at a bounded limit', async () => {
+    const entries = Array.from({ length: 600 }, (_, i) => ({ id: `m-${i}` }))
+    await withModelFixture({ body: JSON.stringify({ data: entries }) }, async (baseUrl) => {
+      const result = await testCustomEndpoint('alice', { baseUrl })
+      expect(result.models?.length).toBe(MAX_DISCOVERED_MODELS)
+    })
+  })
+
+  it('maps malformed models JSON to not_compatible', async () => {
+    await withModelFixture({ body: 'not-json' }, async (baseUrl) => {
+      await expect(testCustomEndpoint('alice', { baseUrl })).resolves.toMatchObject({
+        reachable: false,
+        errorCode: 'not_compatible',
+      })
+    })
+  })
+
+  it('does not send chat requests while testing models', async () => {
+    const paths: string[] = []
+    const server = http.createServer((req, res) => {
+      paths.push(req.url ?? '')
+      if ((req.url ?? '').endsWith('/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'm' }] }))
+        return
+      }
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'no chat here' }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`
+      const result = await testCustomEndpoint('alice', { baseUrl })
+      expect(result).toMatchObject({ reachable: true, models: ['m'] })
+      expect(paths).toHaveLength(1)
+      expect(paths[0]).toMatch(/\/models$/)
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+    }
+  })
+})
+
+describe('custom profile end to end', () => {
+  let provider: http.Server
+  let base: string
+  const seen: { auth: string; body: Record<string, unknown> }[] = []
+  let turns = 0
+  let catalogMode: 'models' | 'missing' = 'models'
+
+  beforeAll(async () => {
+    provider = http.createServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => (raw += chunk))
+      req.on('end', () => {
+        const json = (value: unknown) =>
+          res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(value))
+        if (new URL(req.url ?? '/', 'http://x').pathname.endsWith('/models')) {
+          if (catalogMode === 'missing') return res.writeHead(404).end(JSON.stringify({ error: 'missing' }))
+          return json({ data: [{ id: 'local-e2e-model' }, { id: 'model-a' }, { id: 'model-b' }] })
+        }
+        seen.push({
+          auth: String(req.headers.authorization ?? ''),
+          body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {},
+        })
+        turns += 1
+        if (turns === 1) {
+          return json({
+            choices: [
+              {
+                finish_reason: 'tool_calls',
+                message: {
+                  content: 'looking',
+                  tool_calls: [{ id: 'call-e2e', function: { name: 'create_frame', arguments: '{"name":"Hero"}' } }],
+                },
+              },
+            ],
+          })
+        }
+        return json({ choices: [{ finish_reason: 'stop', message: { content: 'done' } }] })
+      })
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    base = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`
+  }, 30_000)
+
+  afterAll(() => new Promise<void>((resolve) => provider.close(() => resolve())))
+
+  beforeEach(() => {
+    seen.length = 0
+    turns = 0
+    catalogMode = 'models'
+  })
+
+  it('activates a keyless local profile and runs the resident turn through it', async () => {
+    const profile = await createProfile(
+      'alice',
+      input({ name: 'Local fixture', baseUrl: `${base}/v1`, model: 'local-e2e-model', supportsVision: false }),
+    )
+    await activateCustomProfile('alice', profile.id)
+
+    const model = await pickModel('alice')
+    expect(model).toMatchObject({
+      provider: 'custom-key',
+      userId: 'alice',
+      vision: false,
+      label: `Local fixture (local-e2e-model)`,
+    })
+
+    const req = {
+      system: [{ text: 'be a designer' }],
+      tools: [
+        {
+          name: 'create_frame',
+          description: 'Make a frame',
+          input_schema: { type: 'object' as const, properties: { name: { type: 'string' } } },
+        },
+      ],
+      messages: [{ role: 'user' as const, content: 'make a hero' }],
+      maxTokens: 2_000,
+    }
+    const first = await model!.run(req)
+    expect(first).toMatchObject({
+      stop_reason: 'tool_use',
+      content: [
+        { type: 'text', text: 'looking' },
+        { type: 'tool_use', id: 'call-e2e', name: 'create_frame', input: { name: 'Hero' } },
+      ],
+    })
+    expect(seen[0]).toMatchObject({ auth: '' })
+    expect(seen[0]!.body).toMatchObject({ model: 'local-e2e-model', tool_choice: 'auto' })
+    expect(seen[0]!.body.messages).toEqual([
+      { role: 'system', content: 'be a designer' },
+      { role: 'user', content: 'make a hero' },
+    ])
+
+    const second = await model!.run(req)
+    expect(second).toMatchObject({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'done' }] })
+  })
+
+  it('discovers, saves, activates, switches, and sends the selected model to chat', async () => {
+    const baseUrl = `${base}/v1`
+    const tested = await testCustomEndpoint('alice', { baseUrl, apiKey: 'journey-test-key' })
+    expect(tested).toEqual({ reachable: true, models: ['local-e2e-model', 'model-a', 'model-b'] })
+
+    const profile = await createProfile(
+      'alice',
+      input({ name: 'Discovered journey', baseUrl, apiKey: 'journey-test-key', model: 'model-b' }),
+    )
+    await activateCustomProfile('alice', profile.id)
+    await setAccountModel('alice', 'model-a')
+
+    const model = await pickModel('alice')
+    await model!.run({
+      system: [{ text: 'be a designer' }],
+      tools: [],
+      messages: [{ role: 'user', content: 'make a hero' }],
+      maxTokens: 2_000,
+    })
+    expect(seen[0]?.body).toMatchObject({ model: 'model-a' })
+    expect((await getProfile('alice', profile.id))?.model).toBe('model-a')
+  })
+
+  it('keeps an explicitly selected manual id when the endpoint has no /models route', async () => {
+    catalogMode = 'missing'
+    const profile = await createProfile(
+      'alice',
+      input({
+        name: 'Unverified journey',
+        baseUrl: `${base}/v1`,
+        model: 'manual/unverified-model',
+      }),
+    )
+    await activateCustomProfile('alice', profile.id)
+
+    const account = await getAccount('alice')
+    const catalog = await modelCatalogFor(account!, [])
+    expect(catalog).toMatchObject({
+      live: false,
+      models: [{ id: 'manual/unverified-model', name: 'manual/unverified-model' }],
+    })
+    const model = await pickModel('alice')
+    await model!.run({ system: [], tools: [], messages: [{ role: 'user', content: 'hello' }], maxTokens: 100 })
+    expect(seen[0]?.body).toMatchObject({ model: 'manual/unverified-model' })
+  })
+})
+
+describe('custom profile HTTP routes', () => {
+  let provider: http.Server
+  let providerBase: string
+  let server: Server
+  let alice: Client
+  let bob: Client
+
+  beforeAll(async () => {
+    provider = http.createServer((req, res) => {
+      const url = new URL(req.url ?? '/', 'http://x')
+      const json = (status: number, body: unknown) =>
+        res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
+      if (url.pathname.endsWith('/models')) {
+        return json(200, { data: [{ id: 'route-model' }, { id: 'route-model-two', display_name: 'Two' }] })
+      }
+      return json(404, { error: 'not a chat completion' })
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    providerBase = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`
+
+    server = await startServer({
+      ANTHROPIC_API_KEY: '',
+      OPENAI_API_KEY: '',
+      DATABASE_URL: '',
+      SMTP_HOST: '',
+      CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS: '1',
+    })
+    alice = await new Client(server).signUp('profile-alice@example.test', 'Alice')
+    bob = await new Client(server).signUp('profile-bob@example.test', 'Bob')
+  }, 60_000)
+
+  afterAll(async () => {
+    server?.stop()
+    await new Promise<void>((resolve) => provider.close(() => resolve()))
+  })
+
+  it('requires a session for every profile route', async () => {
+    const anonymous = new Client(server)
+    expect((await anonymous.get('/api/model-profiles')).status).toBe(401)
+    expect((await anonymous.post('/api/model-profiles', {})).status).toBe(401)
+    expect((await anonymous.post('/api/model-profiles/test', {})).status).toBe(401)
+    expect((await anonymous.delete('/api/model-profiles/nope')).status).toBe(401)
+  })
+
+  it('creates, lists, edits and deletes profiles without leaking the key', async () => {
+    const secret = 'sk-route-secret-never-returned'
+    const created = await alice.post('/api/model-profiles', {
+      name: 'Route endpoint',
+      baseUrl: `${providerBase}/v1/`,
+      apiKey: secret,
+      model: 'route-model',
+      supportsVision: false,
+    })
+    expect(created.status).toBe(200)
+    const profile = await created.json()
+    expect(profile).toMatchObject({
+      name: 'Route endpoint',
+      baseUrl: `${providerBase}/v1`,
+      model: 'route-model',
+      supportsVision: false,
+      active: false,
+    })
+    expect(profile).not.toHaveProperty('apiKey')
+    expect(JSON.stringify(profile)).not.toContain(secret)
+
+    const list = await (await alice.get('/api/model-profiles')).json()
+    expect(list).toHaveLength(1)
+    expect(JSON.stringify(list)).not.toContain(secret)
+
+    const patched = await alice.patch(`/api/model-profiles/${profile.id}`, {
+      name: 'Renamed endpoint',
+      model: 'route-model-two',
+    })
+    expect(patched.status).toBe(200)
+    expect(await patched.json()).toMatchObject({ name: 'Renamed endpoint', model: 'route-model-two' })
+
+    /* other users cannot see, edit, activate or delete a guessed id */
+    expect(await (await bob.get('/api/model-profiles')).json()).toEqual([])
+    expect((await bob.patch(`/api/model-profiles/${profile.id}`, { name: 'Stolen' })).status).toBe(404)
+    expect((await bob.delete(`/api/model-profiles/${profile.id}`)).status).toBe(404)
+    expect((await bob.post(`/api/model-profiles/${profile.id}/activate`)).status).toBe(404)
+    expect(await (await alice.get('/api/model-profiles')).json()).toHaveLength(1)
+
+    expect((await alice.delete(`/api/model-profiles/${profile.id}`)).status).toBe(200)
+    expect(await (await alice.get('/api/model-profiles')).json()).toEqual([])
+  })
+
+  it('validates payloads with stable codes and messages', async () => {
+    const missingName = await alice.post('/api/model-profiles', {
+      baseUrl: `${providerBase}/v1`,
+      model: 'route-model',
+      supportsVision: true,
+    })
+    expect(missingName.status).toBe(400)
+    expect(await missingName.json()).toMatchObject({ code: 'invalid_input' })
+
+    const badUrl = await alice.post('/api/model-profiles', {
+      name: 'Bad',
+      baseUrl: 'ftp://provider.example/v1',
+      model: 'route-model',
+      supportsVision: true,
+    })
+    expect(badUrl.status).toBe(400)
+    expect(await badUrl.json()).toMatchObject({ code: 'invalid_url' })
+
+    const badModel = await alice.post('/api/model-profiles', {
+      name: 'Bad',
+      baseUrl: `${providerBase}/v1`,
+      model: 'has spaces',
+      supportsVision: true,
+    })
+    expect(badModel.status).toBe(400)
+    expect(await badModel.json()).toMatchObject({ code: 'invalid_input' })
+
+    const created = await (
+      await alice.post('/api/model-profiles', {
+        name: 'Typed',
+        baseUrl: `${providerBase}/v1`,
+        model: 'route-model',
+        supportsVision: true,
+      })
+    ).json()
+    const badPatch = await alice.patch(`/api/model-profiles/${created.id}`, { supportsVision: 'yes' })
+    expect(badPatch.status).toBe(400)
+    expect(await badPatch.json()).toMatchObject({ code: 'invalid_input' })
+    await alice.delete(`/api/model-profiles/${created.id}`)
+  })
+
+  it('tests an unsaved endpoint, reports its models and never echoes the key', async () => {
+    const secret = 'sk-tested-but-never-returned'
+    const ok = await alice.post('/api/model-profiles/test', {
+      baseUrl: `${providerBase}/v1`,
+      apiKey: secret,
+      model: 'route-model',
+    })
+    expect(ok.status).toBe(200)
+    const result = await ok.json()
+    expect(result).toMatchObject({ reachable: true, models: ['route-model', 'route-model-two'] })
+    expect(JSON.stringify(result)).not.toContain(secret)
+
+    const bad = await alice.post('/api/model-profiles/test', { baseUrl: 'not a url' })
+    expect(bad.status).toBe(200)
+    expect(await bad.json()).toMatchObject({ reachable: false, errorCode: 'invalid_url' })
+
+    expect((await alice.post('/api/model-profiles/test', {})).status).toBe(400)
+  })
+
+  it('activates a profile, switches off the local agent, lists its live models and writes picks through', async () => {
+    const secret = 'sk-active-secret'
+    const created = await (
+      await alice.post('/api/model-profiles', {
+        name: 'Active',
+        baseUrl: `${providerBase}/v1`,
+        apiKey: secret,
+        model: 'route-model',
+        supportsVision: true,
+      })
+    ).json()
+
+    await alice.req('/api/local-agent', { method: 'PUT', body: JSON.stringify({ enabled: true, model: 'opus' }) })
+    const activated = await alice.post(`/api/model-profiles/${created.id}/activate`)
+    expect(activated.status).toBe(200)
+    const status = await activated.json()
+    expect(status).toMatchObject({
+      connected: true,
+      kind: 'custom-key',
+      profileId: created.id,
+      model: 'route-model',
+    })
+    expect(status.menus['custom-key']).toEqual([])
+    expect(JSON.stringify(status)).not.toContain(secret)
+    expect(await (await alice.get('/api/local-agent')).json()).toMatchObject({ enabled: false })
+
+    const catalog = await (await alice.get('/api/model-account/models')).json()
+    expect(catalog).toMatchObject({
+      live: true,
+      models: [
+        { id: 'route-model', name: 'route-model', vision: true },
+        { id: 'route-model-two', name: 'Two', vision: true },
+      ],
+    })
+
+    const picked = await alice.patch('/api/model-account', { model: 'route-model-two' })
+    expect(await picked.json()).toMatchObject({ kind: 'custom-key', model: 'route-model-two' })
+    expect((await (await alice.get('/api/model-profiles')).json())[0]).toMatchObject({
+      id: created.id,
+      active: true,
+      model: 'route-model-two',
+    })
+
+    expect((await alice.delete(`/api/model-profiles/${created.id}`)).status).toBe(200)
+    expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ connected: false })
+  })
+})

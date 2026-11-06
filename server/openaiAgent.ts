@@ -445,7 +445,7 @@ export async function runAzureTurn(config: AzureConfig, req: TurnRequest): Promi
 }
 
 const transports: Record<
-  Exclude<ModelAccount['kind'], 'anthropic-key' | 'openrouter-key' | 'gemini-key'>,
+  Exclude<ModelAccount['kind'], 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'custom-key'>,
   (account: ModelAccount, req: TurnRequest) => Promise<TurnResult>
 > = {
   chatgpt: runChatgpt,
@@ -453,7 +453,12 @@ const transports: Record<
 }
 
 export function runOpenAiTurn(account: ModelAccount, req: TurnRequest): Promise<TurnResult> {
-  if (account.kind === 'anthropic-key' || account.kind === 'openrouter-key' || account.kind === 'gemini-key') {
+  if (
+    account.kind === 'anthropic-key' ||
+    account.kind === 'openrouter-key' ||
+    account.kind === 'gemini-key' ||
+    account.kind === 'custom-key'
+  ) {
     throw new Error(`${account.kind} accounts do not use the OpenAI transport`)
   }
   return transports[account.kind](account, req)

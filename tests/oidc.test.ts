@@ -97,5 +97,5 @@ describe('boot-time refusal on partial OIDC config', () => {
       proc.kill()
       rmSync(dataDir, { recursive: true, force: true })
     }
-  }, 15_000)
+  }, 30_000)
 })

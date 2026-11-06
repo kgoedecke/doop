@@ -2,7 +2,9 @@ import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-
 import { BrandMark } from './ui/brand-mark'
 import { AgentIcon } from './AgentIcon'
 import { LocalClaudeRow } from './LocalClaude'
+import { CustomModelProfiles } from './CustomModelProfiles'
 import { authClient } from '../lib/auth'
+import { activeModelTarget } from '../lib/activeModelTarget'
 import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
 import { isDesktopShell } from '../lib/shell'
 import { useCallback, useEffect, useState } from 'react'
@@ -145,6 +147,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const local = useLocalAgent((s) => s.preference)
   const userId = session?.user.id
   const localModel = local?.model ?? 'default'
+  const localEnabled = local?.enabled ?? false
+  const activeTarget = activeModelTarget(localEnabled, account)
   const localEffort = local?.effort
   /* switching to a server provider keeps the local choices for a switch back */
   const selectServer = useCallback(async () => {
@@ -502,8 +506,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   }) => {
     const live = account.connected && account.kind === cfg.kind
     return (
-      <section className={planRow(live && !local?.enabled)} key={cfg.kind}>
-        <span className={planMark(live && !local?.enabled)}>{cfg.mark}</span>
+      <section className={planRow(live && activeTarget === cfg.kind)} key={cfg.kind}>
+        <span className={planMark(live && activeTarget === cfg.kind)}>{cfg.mark}</span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
             <h3 className="font-display text-heading font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-heading">
@@ -511,9 +515,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
             </h3>
             <span className={planPill(live)}>
               {live && showKey !== cfg.kind
-                ? local?.enabled
-                  ? t('models.connected')
-                  : t('models.activeConnected')
+                ? activeTarget === cfg.kind
+                  ? t('models.activeConnected')
+                  : t('models.connected')
                 : t('models.notConnected')}
             </span>
           </div>
@@ -533,7 +537,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                   >
                     {t('models.rotateKey')}
                   </Button>
-                  {local?.enabled && (
+                  {activeTarget === 'claude-local' && (
                     <Button
                       disabled={busy}
                       onClick={() => {
@@ -601,8 +605,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   return (
     <div className="flex flex-col">
       {account.chatgptEnabled !== false && (
-        <section className={planRow(onChatgpt && !local?.enabled)}>
-          <span className={planMark(onChatgpt && !local?.enabled)}>
+        <section className={planRow(onChatgpt && activeTarget === 'chatgpt')}>
+          <span className={planMark(onChatgpt && activeTarget === 'chatgpt')}>
             <OpenAiMark />
           </span>
           <div className="min-w-0 flex-1">
@@ -612,9 +616,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
               </h3>
               <span className={planPill(onChatgpt)}>
                 {onChatgpt
-                  ? local?.enabled
-                    ? t('models.connected')
-                    : t('models.activeConnected')
+                  ? activeTarget === 'chatgpt'
+                    ? t('models.activeConnected')
+                    : t('models.connected')
                   : t('models.notConnected')}
               </span>
             </div>
@@ -641,7 +645,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
                 <div className={actionsRow}>
                   {modelPicker(true, 'chatgpt')}
                   <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-                    {(local?.enabled || switchFailed) && (
+                    {(activeTarget === 'claude-local' || switchFailed) && (
                       <Button disabled={busy} onClick={() => activateChatgpt(account)}>
                         {switchFailed ? t('models.retrySwitch') : t('models.useInstead')}
                       </Button>
@@ -780,6 +784,8 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         mark: <GeminiMark />,
         placeholder: 'AIza…',
       })}
+
+      <CustomModelProfiles account={account} onAccountChange={settle} />
 
       {desktop && <LocalClaudeRow />}
       {keySection({

@@ -130,6 +130,8 @@ const GEMINI_PAGE_TWO = {
 }
 
 let mode: 'catalog' | 'down' | 'rejects' = 'catalog'
+let customMode: 'models' | 'empty' | 'rejects' = 'models'
+let base: string
 const seen: { path: string; auth: string }[] = []
 
 let provider: http.Server
@@ -147,6 +149,10 @@ beforeAll(async () => {
     })
     const json = (status: number, body: unknown) =>
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
+    if (url.pathname === '/custom/v1/models') {
+      if (customMode === 'rejects') return json(401, { error: 'bad key' })
+      return json(200, { data: customMode === 'empty' ? [] : [{ id: 'listed-model' }] })
+    }
     if (mode === 'down') return json(500, { error: 'boom' })
     if (mode === 'rejects') return json(401, { error: { type: 'authentication_error' } })
     switch (url.pathname) {
@@ -161,13 +167,14 @@ beforeAll(async () => {
     }
   })
   await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
-  const base = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`
+  base = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`
   server = await startServer({
     ANTHROPIC_API_KEY: '',
     ANTHROPIC_BASE_URL: base,
     OPENAI_API_KEY: '',
     OPENAI_MODELS_URL: `${base}/openai/v1/models`,
     GEMINI_MODELS_URL: `${base}/gemini/v1beta/models`,
+    CUSTOM_INFERENCE_ALLOW_PRIVATE_URLS: '1',
     DATABASE_URL: '',
     SMTP_HOST: '',
   })
@@ -274,4 +281,44 @@ it('keeps the curated roster, and no catalog call, for OpenRouter', async () => 
   expect(catalog.models.some((m: { vision: boolean }) => m.vision === false)).toBe(true)
   expect((await alice.patch('/api/model-account', { model: 'acme/designer-9' })).status).toBe(400)
   expect(seen).toEqual([])
+})
+
+it('keeps the saved custom model when the live catalog is empty', async () => {
+  customMode = 'empty'
+  const secret = 'sk-custom-catalog-secret'
+  const profile = await (
+    await alice.post('/api/model-profiles', {
+      name: 'Empty catalog',
+      baseUrl: `${base}/custom/v1`,
+      apiKey: secret,
+      model: 'saved-model',
+      supportsVision: true,
+    })
+  ).json()
+  await alice.post(`/api/model-profiles/${profile.id}/activate`)
+
+  const catalog = await (await alice.get('/api/model-account/models')).json()
+  expect(catalog).toMatchObject({ live: false, models: [{ id: 'saved-model', name: 'saved-model' }] })
+  expect(seen.some((request) => request.path === '/custom/v1/models')).toBe(true)
+  expect(JSON.stringify(catalog)).not.toContain(secret)
+})
+
+it('keeps the saved custom model when /models rejects the credential', async () => {
+  customMode = 'rejects'
+  const profile = await (
+    await alice.post('/api/model-profiles', {
+      name: 'Rejected catalog',
+      baseUrl: `${base}/custom/v1`,
+      apiKey: 'sk-custom-rejected-secret',
+      model: 'saved-after-reject',
+      supportsVision: false,
+    })
+  ).json()
+  await alice.post(`/api/model-profiles/${profile.id}/activate`)
+
+  const catalog = await (await alice.get('/api/model-account/models')).json()
+  expect(catalog).toMatchObject({ live: false, models: [{ id: 'saved-after-reject', vision: false }] })
+  expect(catalog.error).toMatch(/rejected the API key/i)
+  expect(JSON.stringify(catalog)).not.toContain('sk-custom-rejected-secret')
+  customMode = 'models'
 })

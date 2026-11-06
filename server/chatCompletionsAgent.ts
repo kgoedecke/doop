@@ -1,8 +1,10 @@
 import { env } from './env.ts'
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
+import { CustomInferenceError, customEndpointUrl, fetchCustomJson } from './customInference.ts'
 import {
   IMAGE_NOTE,
+  ModelAuthError,
   ModelUnavailableError,
   flattenToolResult,
   imagePart,
@@ -42,7 +44,7 @@ export const IMAGE_OMITTED_NOTE = '[image omitted — the selected model cannot 
 const APP_ORIGIN = env.BETTER_AUTH_URL
 
 export interface ChatCompletionsConfig {
-  /** one of the fixed URL constants above — never user input */
+  /** the URL a fixed provider request goes to — never user input for those */
   url: string
   headers: Record<string, string>
   model: string
@@ -50,6 +52,9 @@ export interface ChatCompletionsConfig {
   label: string
   /** false = strip every image into a text note before sending */
   vision: boolean
+  /** present only for a user-supplied endpoint: the request goes through the
+   *  SSRF-safe custom boundary instead of plain fetch */
+  customBaseUrl?: URL
 }
 
 export function openrouterConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
@@ -70,6 +75,26 @@ export function geminiConfig(apiKey: string, model: string, vision: boolean): Ch
     model,
     label: 'Gemini',
     vision,
+  }
+}
+
+/** A saved custom endpoint. The base URL is already normalized; the actual
+ *  request URL is derived per call so a profile edit cannot leave a stale
+ *  path behind. No key means no Authorization header (local servers). */
+export function customConfig(
+  baseUrl: URL,
+  apiKey: string | undefined,
+  model: string,
+  vision: boolean,
+  label: string,
+): ChatCompletionsConfig {
+  return {
+    url: customEndpointUrl(baseUrl, 'chat/completions').href,
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    model,
+    label,
+    vision,
+    customBaseUrl: baseUrl,
   }
 }
 
@@ -195,8 +220,9 @@ interface CompletionBody {
   }[]
 }
 
-function fromCompletion(body: CompletionBody, label: string): TurnResult {
+function fromCompletion(body: CompletionBody, label: string, sanitizeEndpointErrors = false): TurnResult {
   if (body.error?.message) {
+    if (sanitizeEndpointErrors) throw new ModelUnavailableError('The custom model endpoint returned an error response.')
     throw isModelUnavailable(body.error.message)
       ? new ModelUnavailableError(`${label}: ${body.error.message}`)
       : new Error(`${label}: ${body.error.message}`)
@@ -237,16 +263,45 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
 /* ---------------------------------------------------------------- */
 
 export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req: TurnRequest): Promise<TurnResult> {
+  const body = JSON.stringify({
+    model: config.model,
+    messages: toMessages(req.system, req.messages, config.vision),
+    tools: toTools(req.tools),
+    tool_choice: 'auto',
+    max_tokens: req.maxTokens,
+  })
+  if (config.customBaseUrl) {
+    let parsed: CompletionBody
+    try {
+      parsed = (await fetchCustomJson(
+        customEndpointUrl(config.customBaseUrl, 'chat/completions'),
+        {
+          method: 'POST',
+          headers: { ...config.headers, 'Content-Type': 'application/json' },
+          body,
+        },
+        /* a design turn can legitimately take minutes; the request signal is
+           still the hard stop, this is only the outer safety bound */
+        { timeoutMs: 10 * 60_000, signal: req.signal },
+      )) as CompletionBody
+    } catch (error) {
+      if (error instanceof CustomInferenceError) {
+        if (error.code === 'auth_failed')
+          throw new ModelAuthError(`${config.label} rejected the API key. Check it in Settings.`)
+        if (error.code === 'not_compatible')
+          throw new ModelUnavailableError(
+            `${config.label} did not return an OpenAI-compatible chat completion. Check the base URL and model.`,
+          )
+        throw new ModelUnavailableError(`${config.label} could not be reached.`)
+      }
+      throw error
+    }
+    return fromCompletion(parsed, config.label, true)
+  }
   const res = await fetch(config.url, {
     method: 'POST',
     headers: { ...config.headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: config.model,
-      messages: toMessages(req.system, req.messages, config.vision),
-      tools: toTools(req.tools),
-      tool_choice: 'auto',
-      max_tokens: req.maxTokens,
-    }),
+    body,
     signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, config.label)

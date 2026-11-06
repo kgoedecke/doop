@@ -77,6 +77,14 @@ describe('translateIn', () => {
     const missing = 'settings.notThere' as MessageKey
     expect(i18n.translateIn('pt-BR', missing)).toBe('settings.notThere')
   })
+
+  it('translates and interpolates the missing custom model caption in both locales', () => {
+    expect(i18n.translateIn('en', 'models.customModelMissing', { model: 'm-missing' })).toContain('m-missing')
+    expect(i18n.translateIn('pt-BR', 'models.customModelMissing', { model: 'm-missing' })).toContain('m-missing')
+    expect(i18n.translateIn('pt-BR', 'models.customModelMissing', { model: 'm-missing' })).not.toBe(
+      i18n.translateIn('en', 'models.customModelMissing', { model: 'm-missing' }),
+    )
+  })
 })
 
 describe('locale', () => {
