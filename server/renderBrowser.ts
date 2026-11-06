@@ -52,6 +52,9 @@ export interface RendererTuning {
   maxPagesPerBrowser: number
   /** how long one browser lives before it is recycled */
   maxBrowserAgeMs: number
+  /** close a browser that has had no page open this long; unset keeps it.
+   *  A remote browser is billed while its session is open, so it gets one */
+  idleCloseMs?: number
 }
 
 export const DEFAULT_RENDERER_TUNING: RendererTuning = {
@@ -80,6 +83,20 @@ export class RendererBusyError extends Error {
     super(`The renderer is busy (${reason}); try again in a few seconds`)
     this.name = 'RendererBusyError'
   }
+}
+
+/** A remote browser that would not connect. The WebSocket library rejects
+ *  with an event, not an Error, so its message would be lost on the way to
+ *  the caller; a provider turning new sessions away (HTTP 429) is the
+ *  renderer being busy, which callers already answer with a 503. */
+export function remoteConnectFailure(error: unknown): Error {
+  if (error instanceof Error) return error
+  const message =
+    typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+      ? error.message
+      : String(error)
+  if (/\b429\b/.test(message)) return new RendererBusyError('the remote browser is refusing new sessions')
+  return new Error(`could not connect to the remote browser: ${message}`)
 }
 
 /** Did the failure come from the browser rather than the frame? A stall, a
@@ -208,6 +225,7 @@ interface Generation {
   pagesServed: number
   state: GenerationState
   probing: Promise<boolean> | null
+  idleTimer: ReturnType<typeof setTimeout> | null
 }
 
 export interface RenderPage {
@@ -280,6 +298,7 @@ export function createRenderer(deps: RendererDeps): Renderer {
       pagesServed: 0,
       state: 'live',
       probing: null,
+      idleTimer: null,
     }
     current = generation
     generation.browser.then(
@@ -334,6 +353,7 @@ export function createRenderer(deps: RendererDeps): Renderer {
   }
 
   function retire(generation: Generation): void {
+    if (generation.idleTimer) clearTimeout(generation.idleTimer)
     generation.state = 'dead'
     if (current === generation) current = null
     if (generation.resolved) void terminate(generation.resolved)
@@ -341,13 +361,32 @@ export function createRenderer(deps: RendererDeps): Renderer {
 
   async function terminate(browser: Browser): Promise<void> {
     const child = browser.process()
-    await withDeadline(browser.close(), tuning.closeTimeoutMs, 'closing the browser').catch(() => {})
+    const closed = await withDeadline(browser.close(), tuning.closeTimeoutMs, 'closing the browser').then(
+      () => true,
+      () => false,
+    )
     if (child && child.exitCode === null && child.signalCode === null) killProcessTree(child)
+    /* a remote browser has no process to kill: drop the socket, and its
+       session ends on the provider's idle timeout */
+    if (!child && !closed) await browser.disconnect().catch(() => {})
   }
 
   function releasePage(generation: Generation): void {
     generation.pagesOpen--
-    if (generation.state === 'draining' && generation.pagesOpen === 0) retire(generation)
+    if (generation.pagesOpen > 0) return
+    if (generation.state === 'draining') retire(generation)
+    else if (generation.state === 'live') scheduleIdleClose(generation)
+  }
+
+  function scheduleIdleClose(generation: Generation): void {
+    const idleMs = tuning.idleCloseMs
+    if (idleMs === undefined) return
+    if (generation.idleTimer) clearTimeout(generation.idleTimer)
+    generation.idleTimer = setTimeout(() => {
+      generation.idleTimer = null
+      if (generation.state === 'live' && generation.pagesOpen === 0) drain(generation)
+    }, idleMs)
+    generation.idleTimer.unref?.()
   }
 
   /** Is the browser still able to make a page? Runs outside the gate, since
