@@ -255,11 +255,16 @@ function feedbackRunner(f: TaskFeedback): RunnerPick | undefined {
  * behind them.
  */
 export function nextWork(canvasId: string, agentName: string, skip?: ReadonlySet<string>): NextWork | undefined {
+  return oldestWork(canvasId, agentName, (work) => !!skip?.has(work.key))
+}
+
+/** The oldest claimable work the predicate does not pass over. */
+function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWork) => boolean): NextWork | undefined {
   let oldest: { at: number; work: NextWork } | undefined
   const consider = (at: number, userId: string | undefined, runner: RunnerPick | undefined) => {
     const payer = userId ?? ''
     const key = workKey(payer, runner)
-    if (skip?.has(key)) return
+    if (passOver({ payer, key })) return
     if (!oldest || at < oldest.at) oldest = { at, work: { payer, ...(runner ? { runner } : {}), key } }
   }
   for (const card of taskLog.get(canvasId) ?? []) {
@@ -286,9 +291,10 @@ export function nextWork(canvasId: string, agentName: string, skip?: ReadonlySet
   return oldest?.work
 }
 
-/** `nextWork` reduced to the requester, for callers that bill but do not run. */
+/** The requester behind the oldest work, for callers that bill but do not
+ *  run; `skip` holds requesters (not work keys) who cannot pay. */
 export function nextWorkPayer(canvasId: string, agentName: string, skip?: ReadonlySet<string>): string | undefined {
-  return nextWork(canvasId, agentName, skip)?.payer
+  return oldestWork(canvasId, agentName, (work) => !!skip?.has(work.payer))?.payer
 }
 
 /* ------------------------------------------------------------------ */
