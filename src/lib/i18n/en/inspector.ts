@@ -10,9 +10,8 @@ export const inspector = {
   groupDevelopment: 'Development',
   groupExport: 'Export',
   groupMemory: 'Memory',
-  downloadPng: 'Download as PNG (2×)',
-  downloadJpg: 'Download as JPG (2×)',
-  copyPngTitle: 'Copy the image (2×) to paste anywhere',
+  exportImageTitle: 'Download the frame at the scale and format picked above',
+  copyPngTitle: 'Copy the image ({scale}) to paste anywhere',
   copyPng: 'Copy as PNG',
   copyImageUrlTitle:
     'Public image URL — always renders the current design; paste it as og:image or a blog featured image',

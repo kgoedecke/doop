@@ -50,6 +50,25 @@ export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise
   return drawSvg(svg, { width: frame.width, height: frame.height, ...opts })
 }
 
+/** The frame as an SVG file: the same self-contained document the raster
+ *  draws (an HTML page inside a `foreignObject`, every resource inlined), so
+ *  it opens anywhere a browser renders SVG but is not editable vector art.
+ *  `clip` crops it by its viewBox; the white ground matches the PNG. */
+export async function frameSvg(frame: Frame, opts: { clip?: ClipRect; signal?: AbortSignal } = {}): Promise<Blob> {
+  const signal = opts.signal ?? AbortSignal.timeout(RESOURCE_FETCH_MS)
+  const snapshot = await snapshotFrame(frame.id)
+  if (snapshot && snapshot.html === null) throw new Error('the frame cannot be drawn here')
+  const svg = await inlineDocument(snapshot?.html ?? frame.html, {
+    width: frame.width,
+    height: frame.height,
+    signal,
+    clip: opts.clip,
+    background: '#fff',
+    pinViewport: true,
+  })
+  return new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+}
+
 /** The part of the frame a rendered box covers, in whole frame pixels
  *  (rounded outward, so an edge at a fraction is kept), or null when the
  *  box lies outside the frame: what the frame clips away is not in any
@@ -87,6 +106,33 @@ interface InlineOptions {
   width: number
   height: number
   signal: AbortSignal
+  /** the part of the document the SVG shows, by its viewBox; all of it when unset */
+  clip?: ClipRect
+  /** painted under the document; transparent when unset */
+  background?: string
+  /** write viewport units as the frame's px: drawn as an image, `vh` is
+   *  the frame's height, but an SVG file opened as a page (a browser tab,
+   *  Quick Look) resolves it against the viewer's window */
+  pinViewport?: boolean
+}
+
+/* a number glued to a viewport unit, not inside a word or a base64 run */
+const VIEWPORT_UNIT = /(?<![\w+/=.-])(-?\d*\.?\d+)(s|l|d)?(vh|vw|vmin|vmax)(?![\w+/=])/gi
+
+/** `100vh` as the frame's px, `50vw` as half its width, and so on. */
+export function pinViewportUnits(css: string, size: { width: number; height: number }): string {
+  return css.replace(VIEWPORT_UNIT, (_whole, amount: string, _kind: string | undefined, unit: string) => {
+    const lower = unit.toLowerCase()
+    const side =
+      lower === 'vh'
+        ? size.height
+        : lower === 'vw'
+          ? size.width
+          : lower === 'vmin'
+            ? Math.min(size.width, size.height)
+            : Math.max(size.width, size.height)
+    return `${Math.round(Number(amount) * side * 100) / 10_000}px`
+  })
 }
 
 /** One SVG, sized to the frame, holding the document with every external
@@ -95,6 +141,8 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
   const doc = new DOMParser().parseFromString(html, 'text/html')
   const base = new URL(doc.querySelector('base[href]')?.getAttribute('href') ?? '', document.baseURI).href
   const resources = new ResourceCache(opts.signal)
+  /* before url()s are inlined, so no data: URL is ever rewritten */
+  const viewport = (css: string) => (opts.pinViewport ? pinViewportUnits(css, opts) : css)
 
   /* nothing embeds inside an SVG image: a nested document would be a hole
      in the picture, so a frame holding one is for the server's browser */
@@ -111,7 +159,7 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
         const style = doc.createElement('style')
         const media = link.getAttribute('media')
         if (media) style.setAttribute('media', media)
-        style.textContent = await inlineCssUrls(css, href, resources)
+        style.textContent = await inlineCssUrls(viewport(css), href, resources)
         link.replaceWith(style)
       })(),
     )
@@ -119,12 +167,13 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
   for (const style of doc.querySelectorAll('style')) {
     work.push(
       (async () => {
-        style.textContent = await inlineCssUrls(style.textContent ?? '', base, resources)
+        style.textContent = await inlineCssUrls(viewport(style.textContent ?? ''), base, resources)
       })(),
     )
   }
   for (const el of doc.querySelectorAll('[style]')) {
-    const inline = el.getAttribute('style') ?? ''
+    const inline = viewport(el.getAttribute('style') ?? '')
+    el.setAttribute('style', inline)
     if (!/url\(/i.test(inline)) continue
     work.push(
       (async () => {
@@ -149,10 +198,12 @@ export async function inlineDocument(html: string, opts: InlineOptions): Promise
 
   /* the XML serializer gives an HTML document's root its xhtml namespace */
   const body = new XMLSerializer().serializeToString(doc.documentElement)
-  const { width, height } = opts
+  const { width, height, clip } = opts
+  const box = clip ? ` viewBox="${clip.x} ${clip.y} ${clip.width} ${clip.height}"` : ''
+  const ground = opts.background ? `<rect width="${width}" height="${height}" fill="${opts.background}"/>` : ''
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
-    `<foreignObject width="${width}" height="${height}">${body}</foreignObject></svg>`
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${clip?.width ?? width}" height="${clip?.height ?? height}"${box}>` +
+    `${ground}<foreignObject width="${width}" height="${height}">${body}</foreignObject></svg>`
   )
 }
 

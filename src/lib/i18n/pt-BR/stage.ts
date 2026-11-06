@@ -70,8 +70,6 @@ export const stage: Catalog['stage'] = {
   copySelector: 'Copiar seletor',
   copyLink: 'Copiar link',
   copyLinkToElement: 'Copiar link do elemento',
-  exportPng: 'Exportar como PNG',
-  exportJpg: 'Exportar como JPG',
   moveUp: 'Mover para cima',
   moveDown: 'Mover para baixo',
   deleteElement: 'Excluir elemento',

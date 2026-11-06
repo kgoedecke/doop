@@ -54,6 +54,34 @@ describe.skipIf(!findBrowserPath())('rasterizing a frame in the browser', () => 
     expect(out.pic).toEqual([0, 0, 255, 255])
   })
 
+  it('renders at any picked scale, 3x included', async () => {
+    const out = await render({ scale: 3 })
+    expect([out.width, out.height]).toEqual([900, 900])
+    expect(out.block).toEqual([255, 0, 0, 255])
+    expect(out.pic).toEqual([0, 0, 255, 255])
+  })
+
+  it('saves an SVG that draws the frame wherever it is opened, cropped by a clip', async () => {
+    const svg = (opts: Record<string, unknown>) =>
+      page.evaluate(
+        (o) =>
+          (
+            window as unknown as {
+              renderSvg: (o: unknown) => Promise<{ type: string; width: number; height: number } & Rendered>
+            }
+          ).renderSvg(o),
+        opts,
+      )
+    const whole = await svg({})
+    expect(whole.type).toBe('image/svg+xml;charset=utf-8')
+    expect([whole.width, whole.height]).toEqual([300, 300])
+    expect(whole.block).toEqual([255, 0, 0, 255])
+    expect(whole.paper).toEqual([255, 255, 255, 255])
+    const piece = await svg({ clip: { x: 200, y: 0, width: 100, height: 100 } })
+    expect([piece.width, piece.height]).toEqual([100, 100])
+    expect(piece.topLeft).toEqual([0, 0, 255, 255])
+  })
+
   it('keeps only the clipped box, drawn from the whole document, for an element export', async () => {
     const out = await render({ scale: 2, clip: { x: 200, y: 0, width: 100, height: 100 } })
     expect([out.width, out.height]).toEqual([200, 200])
