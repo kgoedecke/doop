@@ -96,6 +96,28 @@ function linkedCanvasComment(id: string | null): CanvasComment | null {
   return c && isCanvasComment(c) && !c.parentId ? c : null
 }
 
+/* a drag that starts on the stage (pan, marquee) keeps the browser from
+   selecting text in the chrome it passes over: pointer capture redirects the
+   events, not the selection. Counted, since two fingers can pan at once.
+   Returns the release for when the drag ends. */
+let selectionLocks = 0
+function lockTextSelection(): () => void {
+  const root = document.documentElement
+  if (selectionLocks++ === 0) {
+    root.style.userSelect = 'none'
+    root.style.webkitUserSelect = 'none'
+    window.getSelection()?.removeAllRanges()
+  }
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    if (--selectionLocks > 0) return
+    root.style.removeProperty('user-select')
+    root.style.removeProperty('-webkit-user-select')
+  }
+}
+
 /* zoom to an absolute level pivoting on the view center — the world point in
    the middle of the stage stays in the middle */
 function zoomCentered(el: HTMLElement, next: number) {
@@ -830,6 +852,7 @@ export function Stage({
   function startPan(e: React.PointerEvent, isBackground: boolean) {
     e.currentTarget.setPointerCapture(e.pointerId)
     setPanning(true)
+    const unlockSelection = lockTextSelection()
     let last = { x: e.clientX, y: e.clientY }
     let moved = false
 
@@ -849,6 +872,7 @@ export function Stage({
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       setPanning(false)
+      unlockSelection()
       if (!moved && isBackground) select(null)
     }
     window.addEventListener('pointermove', onMove)
@@ -860,6 +884,7 @@ export function Stage({
     const origin = toWorld(e.clientX, e.clientY)
     /* ⇧-marquee adds to what is already selected */
     const keep = e.shiftKey ? useStore.getState().selectedIds : []
+    const unlockSelection = lockTextSelection()
     let moved = false
 
     function onMove(ev: PointerEvent) {
@@ -894,6 +919,7 @@ export function Stage({
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       setMarquee(null)
+      unlockSelection()
       /* a plain click on empty canvas clears the selection */
       if (!moved && !e.shiftKey) select(null)
     }
