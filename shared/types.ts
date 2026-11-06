@@ -1,6 +1,7 @@
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { DesignToken } from './designTokens.ts'
+import type { RunnerPick } from './agentRunner.ts'
 
 export interface Frame {
   id: string
@@ -405,6 +406,9 @@ export interface AgentTask {
    *  handing the title to the chat agent. Absent on prompt cards. */
   kind?: RepoCardKind
   payload?: RepoCardPayload
+  /** board cards: the connection and model the composer picked for this
+   *  card; absent runs on the requester's Settings default */
+  runner?: RunnerPick
 }
 
 export interface CardScope {

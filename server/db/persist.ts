@@ -9,6 +9,7 @@ import { roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
+import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { byStack } from '../../shared/frameStack.ts'
 import type {
   ActivityItem,
@@ -636,6 +637,18 @@ function scopeField(scope: string | null): Pick<AgentTask, 'scope'> {
   }
 }
 
+/** The connection a card was sent to, or nothing when the row carries none
+ *  or it no longer parses (the card then runs on the Settings default). */
+function runnerField(runner: string | null): Pick<AgentTask, 'runner'> {
+  if (!runner) return {}
+  try {
+    const parsed = parseRunnerPick(JSON.parse(runner))
+    return parsed ? { runner: parsed } : {}
+  } catch {
+    return {}
+  }
+}
+
 /** A structured card's kind + payload, or nothing when the row is a prompt
  *  card or its payload no longer parses (the card then reads as a plain one). */
 function repoCardFields(kind: string | null, payload: string | null): Pick<AgentTask, 'kind' | 'payload'> {
@@ -675,6 +688,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     payload: task.payload ? JSON.stringify(task.payload) : null,
     scope: task.scope ? JSON.stringify(task.scope) : null,
     frameIds: task.frameIds?.join(',') ?? null,
+    runner: task.runner ? JSON.stringify(task.runner) : null,
   }
   const write = () =>
     db
@@ -991,6 +1005,7 @@ export async function hydrate(): Promise<Hydrated> {
       ...repoCardFields(row.kind, row.payload),
       ...scopeField(row.scope),
       ...(row.frameIds ? { frameIds: row.frameIds.split(',').filter(Boolean) } : {}),
+      ...runnerField(row.runner),
     })
     tasks.set(row.canvasId, list)
   }

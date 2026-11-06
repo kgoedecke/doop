@@ -85,10 +85,42 @@
   its curated roster (the run-time vision check knows only the roster's flags).
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
-  high / xhigh), set through `PATCH /api/model-account { effort }`, read by `effortFor` in
+  high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+- Connections and the default (`server/agentDefaults.ts`, `server/modelAccounts.ts`): a person can
+  connect every provider at once, one `model_accounts` row per user and kind (composite key and an
+  `enabled` flag, migration 0046), plus the Claude Plan on their desktop (`local_agent_preferences`,
+  whose `enabled` is the Plan's on/off). Settings → Doop Agent (`ConnectionTable.tsx`) is grouped
+  lists: "Connected" (provider tile, name with a Default or Off badge, a short line, then the model
+  dropdown with the effort as a `StepSlider`, the on/off switch and a "…" menu: Make default,
+  Replace key (a modal) or Claude Code settings (a modal: which CLI, a pinned model), Disconnect),
+  "Add an agent" (every provider not connected, each with Connect; the one being connected shows
+  its key field or sign-in under it) and "Image model" (`ImageModelCard.tsx`, a pickable list);
+  `agent_defaults`
+  stores the marked provider (`PUT /api/agent-runners/default`, connected and on only).
+  `resolveDefault` passes over a mark on a connection that is gone or off, then falls back to the
+  Plan while on, then the account
+  connected first that is on. Account routes are per kind (`/api/model-account/:kind` takes
+  `PATCH` and `DELETE`; `GET /api/model-account/models?kind=`) and every one answers with
+  the whole view (`accountsView`: every account on or off, the default, the menus). The meter
+  counts any connection that is on and names the default; image generation uses the enabled
+  account matching the image provider (ChatGPT before an OpenAI key), server keys only for
+  someone with none. Tests: `anthropicAccount.test.ts` (end to end), `defaultRouting.test.ts`,
+  `agentRunners.test.ts`, `chatgptProviderSwitch.test.tsx`, `localClaudeConnection.test.tsx`.
+- Which connection runs a task (`shared/agentRunner.ts`, `server/agentRunners.ts`):
+  `GET /api/agent-runners` lists every connection that is on, with its menus, plus `default`.
+  The composer's `ModelPicker` offers each one and its models; the pick is this browser's
+  (`src/lib/runnerPick.ts`, `doop:agent-runner`), rides on the card as `runner` (a `RunnerPick`:
+  provider, model, effort; `tasks.runner` JSON, migration 0045) and the send button's meter names
+  it. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
+  model the provider does not know runs on the connection's configured one, and anything else
+  runs on the default. One resident run claims work that agrees on the pick (`actions.nextWork`,
+  the `runner` filter on the take functions): comments and automations carry none and run on
+  the default, feedback runs on what its task ran on. Tests: `agentRunner.test.ts`,
+  `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
+  `localAgentRouting.test.ts`.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)

@@ -180,10 +180,8 @@ export const panels = {
   promptSend: 'Send',
   promptSent: 'The Doop Agent is on it — watch the canvas',
 
-  modelFallback: 'Model',
   modelAria: 'Model: {label}',
-  modelCaption: 'Doop Agent model',
-  modelNoAccount: 'No model account connected — the Doop Agent runs on the server’s model when one is set up.',
+  modelNoAccount: 'Nothing connected yet — the Doop Agent runs on the server’s model when one is set up.',
   modelSettings: 'Model settings…',
   modelConnect: 'Connect a model…',
 

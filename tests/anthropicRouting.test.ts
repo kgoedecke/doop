@@ -1,11 +1,19 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import Anthropic from '@anthropic-ai/sdk'
 const mocks = vi.hoisted(() => ({ account: vi.fn(), stream: vi.fn(), key: vi.fn(), headers: vi.fn() }))
+/* no default marked: the fallback order decides */
+vi.mock('../server/db/index.ts', () => ({ db: { select: () => ({ from: () => ({ where: async () => [] }) }) } }))
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: async () => ({ enabled: false }) }))
 vi.mock('../server/modelAccounts.ts', () => ({
   getAccount: mocks.account,
+  /* the routing reads every account; a test connects one (or none) */
+  getAccounts: async (userId: string) => {
+    const account = (await mocks.account(userId)) as Record<string, unknown> | null | undefined
+    return account ? [{ enabled: true, connectedAt: 1, ...account }] : []
+  },
   withFreshToken: vi.fn(),
   accountModelFor: (account: { model: string }) => account.model,
+  accountWithPick: (account: unknown) => account,
 }))
 vi.mock('@anthropic-ai/sdk', async (importOriginal) => {
   const original = await importOriginal<typeof import('@anthropic-ai/sdk')>()

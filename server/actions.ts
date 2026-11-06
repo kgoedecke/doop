@@ -8,6 +8,7 @@ import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, rol
 import { canvasPages } from '../shared/pages.ts'
 import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
+import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunner.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -219,27 +220,51 @@ export function pendingWorkAgents(canvasId: string): string[] {
   return names
 }
 
+/** The oldest claimable item's requester and the connection it asked for. */
+export interface NextWork {
+  /** '' when the item predates per-user attribution */
+  payer: string
+  /** the card's pick; absent (and `key` '') for work on the Settings default */
+  runner?: RunnerPick
+  /** `payer` and the pick together: what one run claims, and what a sweep skips */
+  key: string
+}
+
+export function workKey(payer: string, runner: RunnerPick | undefined): string {
+  return `${payer}\n${runnerKey(runner)}`
+}
+
+/** Feedback runs on what the task it answers ran on, so a reply to a card
+ *  sent to the Claude Plan stays on the Claude Plan. */
+function feedbackRunner(f: TaskFeedback): RunnerPick | undefined {
+  return (taskLog.get(f.canvasId) ?? []).find((t) => t.id === f.taskId)?.runner
+}
+
 /**
- * Who pays for the next run: the account behind the OLDEST piece of work this
- * agent can claim. A run bills exactly one person, so the queue is worked one
- * requester at a time rather than sweeping several people's work into a single
- * model call on whichever account happened to be found first.
+ * Who pays for the next run, and on what: the account behind the OLDEST piece
+ * of work this agent can claim, and the connection that work asked for. A run
+ * bills exactly one person and calls one model, so the queue is worked one
+ * requester and one connection at a time rather than sweeping several
+ * people's work into a single model call on whichever account happened to
+ * be found first.
  *
- * Returns '' when the oldest item predates per-user attribution (the caller
- * falls back to the canvas owner), and undefined when nothing is claimable.
- * `skip` holds payers already found to have no usable model this sweep, so one
- * stalled requester never blocks everyone behind them.
+ * `payer` is '' when the oldest item predates per-user attribution (the
+ * caller falls back to the canvas owner); the result is undefined when
+ * nothing is claimable. `skip` holds work keys already found to have no
+ * usable model this sweep, so one stalled requester never blocks everyone
+ * behind them.
  */
-export function nextWorkPayer(canvasId: string, agentName: string, skip?: ReadonlySet<string>): string | undefined {
-  let oldest: { at: number; payer: string } | undefined
-  const consider = (at: number, userId: string | undefined) => {
+export function nextWork(canvasId: string, agentName: string, skip?: ReadonlySet<string>): NextWork | undefined {
+  let oldest: { at: number; work: NextWork } | undefined
+  const consider = (at: number, userId: string | undefined, runner: RunnerPick | undefined) => {
     const payer = userId ?? ''
-    if (skip?.has(payer)) return
-    if (!oldest || at < oldest.at) oldest = { at, payer }
+    const key = workKey(payer, runner)
+    if (skip?.has(key)) return
+    if (!oldest || at < oldest.at) oldest = { at, work: { payer, ...(runner ? { runner } : {}), key } }
   }
   for (const card of taskLog.get(canvasId) ?? []) {
     if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card) === agentName) {
-      consider(card.startedAt, card.queuedByUserId)
+      consider(card.startedAt, card.queuedByUserId, card.runner)
     }
   }
   for (const c of commentLog.get(canvasId) ?? []) {
@@ -250,15 +275,20 @@ export function nextWorkPayer(canvasId: string, agentName: string, skip?: Readon
       !c.resolvedAt &&
       (c.targetAgent ?? roleName(DEFAULT_ROLE_ID)) === agentName
     ) {
-      consider(c.at, c.fromUserId)
+      consider(c.at, c.fromUserId, undefined)
     }
   }
   for (const f of feedbackLog.get(canvasId) ?? []) {
     if (!f.deliveredAt && !f.failedAt && (!f.targetAgent || f.targetAgent === agentName)) {
-      consider(f.at, f.fromUserId)
+      consider(f.at, f.fromUserId, feedbackRunner(f))
     }
   }
-  return oldest?.payer
+  return oldest?.work
+}
+
+/** `nextWork` reduced to the requester, for callers that bill but do not run. */
+export function nextWorkPayer(canvasId: string, agentName: string, skip?: ReadonlySet<string>): string | undefined {
+  return nextWork(canvasId, agentName, skip)?.payer
 }
 
 /* ------------------------------------------------------------------ */
@@ -382,21 +412,23 @@ export function addTaskFeedback(
 
 /** The feedback takeFeedbackFor would claim, left unclaimed: what read-only
  *  tools mention without assigning anything. */
-export function openFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
+export function openFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
   return (feedbackLog.get(canvasId) ?? []).filter(
     (f) =>
       !f.deliveredAt &&
       !f.failedAt &&
       (!f.targetAgent || f.targetAgent === agentName) &&
-      (payer === undefined || (f.fromUserId ?? '') === payer),
+      (payer === undefined || (f.fromUserId ?? '') === payer) &&
+      (runner === undefined || runnerKey(feedbackRunner(f)) === runner),
   )
 }
 
 /** Open feedback this agent may take: everything addressed to it, plus
  *  untargeted feedback — that part stays a canvas-level queue where the first
- *  identified agent call wins. */
-export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string): TaskFeedback[] {
-  const pending = openFeedbackFor(canvasId, agentName, payer)
+ *  identified agent call wins. `runner` (a `runnerKey`) narrows the claim to
+ *  one connection, since a run calls one model. */
+export function takeFeedbackFor(canvasId: string, agentName: string, payer?: string, runner?: string): TaskFeedback[] {
+  const pending = openFeedbackFor(canvasId, agentName, payer, runner)
   for (const f of pending) {
     f.deliveredAt = Date.now()
     f.claimedBy = agentName
@@ -925,7 +957,15 @@ export function commentThread(comment: ElementComment): ElementComment[] {
 }
 
 /** Open comments @mentioning this agent, claimed by it. */
-export function takeAgentCommentsFor(canvasId: string, agentName: string, payer?: string): ElementComment[] {
+/** A comment carries no pick, so it is claimed only by a run on the
+ *  Settings default (`runner` '' or unset). */
+export function takeAgentCommentsFor(
+  canvasId: string,
+  agentName: string,
+  payer?: string,
+  runner?: string,
+): ElementComment[] {
+  if (runner) return []
   const pending = (commentLog.get(canvasId) ?? []).filter(
     (c) =>
       c.forAgent &&
@@ -1147,11 +1187,13 @@ export function addQueuedCard(
   attachments?: unknown,
   fromUserId?: string,
   scope?: unknown,
+  runner?: unknown,
 ): AgentTask | undefined {
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvas(canvasId)) return undefined
   const pipeline = normalizePipeline(agents)
   const target = normalizeScope(canvasId, scope)
+  const pick = parseRunnerPick(runner)
   /* reference-image frame ids: only frames that actually live on this canvas */
   const refs = (Array.isArray(attachments) ? attachments : [])
     .filter((a): a is string => typeof a === 'string')
@@ -1165,7 +1207,8 @@ export function addQueuedCard(
       t.status === clean &&
       pipelineOf(t).join(',') === pipeline.join(',') &&
       (t.attachments ?? []).join(',') === refs.join(',') &&
-      JSON.stringify(t.scope ?? null) === JSON.stringify(target ?? null),
+      JSON.stringify(t.scope ?? null) === JSON.stringify(target ?? null) &&
+      runnerKey(t.runner) === runnerKey(pick),
   )
   if (duplicate) return duplicate
   const card: AgentTask = {
@@ -1180,6 +1223,7 @@ export function addQueuedCard(
     stage: 0,
     ...(refs.length > 0 ? { attachments: refs } : {}),
     ...(target ? { scope: target } : {}),
+    ...(pick ? { runner: pick } : {}),
   }
   list.unshift(card)
   taskLog.set(canvasId, trimTaskLog(list))
@@ -1310,7 +1354,9 @@ export function addRepoCards(canvasId: string, input: RepoImportInput, from: str
 
 /** Cards waiting on THIS agent's stage, claimed by it. A card at another
  *  stage is invisible here — that is what keeps a pipeline in order. */
-export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: string): AgentTask[] {
+/** `runner` (a `runnerKey`) narrows the claim to cards sent to one
+ *  connection; unset takes them all. */
+export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: string, runner?: string): AgentTask[] {
   const pending = (taskLog.get(canvasId) ?? []).filter(
     (t) =>
       t.queuedBy &&
@@ -1318,7 +1364,8 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
       !t.failedAt &&
       !t.endedAt &&
       stageAgent(t) === agentName &&
-      (payer === undefined || (t.queuedByUserId ?? '') === payer),
+      (payer === undefined || (t.queuedByUserId ?? '') === payer) &&
+      (runner === undefined || runnerKey(t.runner) === runner),
   )
   for (const c of pending) {
     c.agentName = agentName

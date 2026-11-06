@@ -5,7 +5,7 @@ import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
-import { localAgentRouter, handleLocalAgentMcp } from './localAgent.ts'
+import { localAgentRouter, handleLocalAgentMcp, wake as wakeUserWork } from './localAgent.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -74,14 +74,14 @@ import * as githubApp from './githubApp.ts'
 import { seed } from './seed.ts'
 import * as allowance from './allowance.ts'
 import * as modelAccounts from './modelAccounts.ts'
-import { getLocalAgentPreference, saveLocalAgentPreference } from './localAgentPreferences.ts'
+import { getLocalAgentPreference } from './localAgentPreferences.ts'
 import { serverTierInfo } from './agentModel.ts'
 import { imageModelAvailability, serverImageGenEnabled } from './imageGen.ts'
 import { setImagePref } from './imagePrefs.ts'
-import { AGENT_MODELS } from './openaiAgent.ts'
+import { accountsView, listRunners, MODEL_MENUS } from './agentRunners.ts'
+import { setStoredDefault } from './agentDefaults.ts'
+import { isRunnerProvider } from '../shared/agentRunner.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
-import { ANTHROPIC_MODELS, GEMINI_MODELS, OPENROUTER_MODELS } from '../shared/modelMenu.ts'
-import type { ModelOption } from '../shared/modelMenu.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
@@ -914,38 +914,49 @@ app.get('/api/agent-allowance', (req, res) => {
     .catch(() => res.status(500).json({ error: 'allowance unavailable' }))
 })
 
+/* the connections the composer may send a task to, and the Settings default */
+app.get('/api/agent-runners', (req, res) => {
+  listRunners(req.user!.id)
+    .then((runners) => res.json(runners))
+    .catch(() => res.status(500).json({ error: 'runners unavailable' }))
+})
+
+/* which connection comments, @mentions and automations run on; it has to be
+   one that is connected and on right now */
+app.put('/api/agent-runners/default', async (req, res) => {
+  const provider: unknown = req.body?.provider
+  if (!isRunnerProvider(provider)) return res.status(400).json({ error: 'unknown connection' })
+  try {
+    const userId = req.user!.id
+    const usable =
+      provider === 'claude-local'
+        ? (await getLocalAgentPreference(userId)).enabled
+        : (await modelAccounts.getAccount(userId, provider))?.enabled
+    if (!usable) return res.status(400).json({ error: 'connect and switch that on first' })
+    await setStoredDefault(userId, provider)
+    res.json(await accountsView(userId))
+    wakeUserWork(userId)
+  } catch {
+    res.status(500).json({ error: 'could not change the default' })
+  }
+})
+
 /* ---- the user's own model account: what keeps the Doop Agent running once
    the free tasks are gone. Tokens live server-side and are never returned. */
 
-/* one curated menu per account kind, with the vision flag the picker renders;
-   the pre-roster providers all see images */
-const MODEL_MENUS: Record<modelAccounts.AccountKind, ModelOption[]> = {
-  chatgpt: AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'openai-key': AGENT_MODELS.map((m) => ({ ...m, vision: true })),
-  'anthropic-key': ANTHROPIC_MODELS,
-  'openrouter-key': OPENROUTER_MODELS,
-  'gemini-key': GEMINI_MODELS,
-}
-
-/* Every route that returns an account status returns the SAME shape: the
-   client re-renders straight from the response, so dropping the menus on
-   a PATCH would collapse the picker until the next reload. */
-function accountView(status: modelAccounts.AccountStatus) {
-  return { ...status, chatgptEnabled: modelAccounts.chatgptConnectEnabled(), menus: MODEL_MENUS }
-}
-
+/* Every account route answers with the whole Settings view (every account,
+   on or off, and the default): the client re-renders straight from it. */
 app.get('/api/model-account', (req, res) => {
-  modelAccounts
-    .getStatus(req.user!.id)
-    .then((status) => res.json(accountView(status)))
+  accountsView(req.user!.id)
+    .then((view) => res.json(view))
     .catch(() => res.status(500).json({ error: 'account status unavailable' }))
 })
 
-/* the connected provider's live catalog, merged over its curated menu — asked
-   for when a picker opens, so a model released yesterday is already on it */
 app.get('/api/model-account/models', async (req, res) => {
   try {
-    const account = await modelAccounts.getAccount(req.user!.id)
+    const kind: unknown = req.query.kind
+    if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
+    const account = await modelAccounts.getAccount(req.user!.id, kind)
     if (!account) return res.json({ models: [], live: false })
     /* a ChatGPT token may have lapsed since the last run; a refresh that
        fails leaves the stale token to be refused, which the catalog reports
@@ -962,19 +973,22 @@ app.get('/api/model-account/models', async (req, res) => {
   }
 })
 
-/* which model tier the connected account runs on */
-/* which model tier the connected account runs on, and (OpenAI kinds) how
-   hard it thinks — one field per request, the status comes back either way */
-app.patch('/api/model-account', async (req, res) => {
+/* one account's model tier, (OpenAI kinds) how hard it thinks, or whether
+   it is switched on — one field per request, the view comes back either way */
+app.patch('/api/model-account/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
   try {
-    const { model, effort } = (req.body ?? {}) as { model?: unknown; effort?: unknown }
-    const status =
-      effort !== undefined
-        ? await modelAccounts.setAccountEffort(req.user!.id, String(effort))
-        : await modelAccounts.setAccountModel(req.user!.id, String(model ?? ''))
-    res.json(accountView(status))
+    const userId = req.user!.id
+    const { model, effort, enabled } = (req.body ?? {}) as { model?: unknown; effort?: unknown; enabled?: unknown }
+    if (typeof enabled === 'boolean') await modelAccounts.setAccountEnabled(userId, kind, enabled)
+    else if (effort !== undefined) await modelAccounts.setAccountEffort(userId, kind, String(effort))
+    else await modelAccounts.setAccountModel(userId, kind, String(model ?? ''))
+    res.json(await accountsView(userId))
+    /* switching one on can make queued work runnable */
+    if (enabled === true) wakeUserWork(userId)
   } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change the model' })
+    res.status(400).json({ error: e instanceof Error ? e.message : 'could not change that account' })
   }
 })
 
@@ -1006,7 +1020,8 @@ app.post('/api/model-account/chatgpt', async (req, res) => {
     return res.status(404).json({ error: 'ChatGPT connections are disabled on this server' })
   }
   try {
-    res.json(accountView(await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? ''))))
+    await modelAccounts.completeChatgptAuth(req.user!.id, String(req.body?.redirect ?? ''))
+    res.json(await accountsView(req.user!.id))
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'could not connect that ChatGPT account' })
   }
@@ -1034,50 +1049,31 @@ app.delete('/api/model-account/chatgpt/device', (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/model-account/openai-key', async (req, res) => {
-  try {
-    res.json(accountView(await modelAccounts.connectApiKey(req.user!.id, String(req.body?.apiKey ?? ''))))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
-  }
-})
-
-app.post('/api/model-account/anthropic-key', async (req, res) => {
-  try {
-    const previous = await modelAccounts.getAccount(req.user!.id)
-    const status = await modelAccounts.connectAnthropicKey(req.user!.id, String(req.body?.apiKey ?? ''))
-    if (previous?.kind !== 'anthropic-key') {
-      const preference = await getLocalAgentPreference(req.user!.id)
-      await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
-    }
-    res.json(accountView(status))
-  } catch (e) {
-    res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
-  }
-})
-
-/* the two wide-roster keys share the anthropic-key route's shape, including
-   switching off the local-CLI preference so the new account is not shadowed */
-for (const kind of ['openrouter-key', 'gemini-key'] as const) {
-  const connect = kind === 'openrouter-key' ? modelAccounts.connectOpenRouterKey : modelAccounts.connectGeminiKey
+/* each key connects beside whatever else is connected: nothing is switched
+   off, and the default changes only when the person marks another one */
+const KEY_CONNECTS = {
+  'openai-key': modelAccounts.connectApiKey,
+  'anthropic-key': modelAccounts.connectAnthropicKey,
+  'openrouter-key': modelAccounts.connectOpenRouterKey,
+  'gemini-key': modelAccounts.connectGeminiKey,
+} as const
+for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {
     try {
-      const previous = await modelAccounts.getAccount(req.user!.id)
-      const status = await connect(req.user!.id, String(req.body?.apiKey ?? ''))
-      if (previous?.kind !== kind) {
-        const preference = await getLocalAgentPreference(req.user!.id)
-        await saveLocalAgentPreference(req.user!.id, { ...preference, enabled: false })
-      }
-      res.json(accountView(status))
+      await connect(req.user!.id, String(req.body?.apiKey ?? ''))
+      res.json(await accountsView(req.user!.id))
+      wakeUserWork(req.user!.id)
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : 'could not save that API key' })
     }
   })
 }
 
-app.delete('/api/model-account', async (req, res) => {
-  await modelAccounts.disconnect(req.user!.id)
-  res.json(accountView({ connected: false }))
+app.delete('/api/model-account/:kind', async (req, res) => {
+  const kind = req.params.kind
+  if (!modelAccounts.isAccountKind(kind)) return res.status(400).json({ error: 'unknown account kind' })
+  await modelAccounts.disconnect(req.user!.id, kind)
+  res.json(await accountsView(req.user!.id))
 })
 
 /* ---- which image model generate_image draws with (the shared registry;
@@ -2358,6 +2354,7 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
     req.body?.attachments,
     req.user!.id,
     req.body?.scope,
+    req.body?.runner,
   )
   if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
   res.json(card)
