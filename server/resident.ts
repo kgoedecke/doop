@@ -18,6 +18,7 @@ import * as actions from './actions.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole } from '../shared/agents.ts'
+import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
@@ -364,14 +365,18 @@ function framesAround(frames: Frame[], x: number, y: number): Frame[] {
  */
 async function runAgent(canvasId: string, agentName: string, stalled: Set<string>): Promise<RunOutcome> {
   const role = roleByAgentName(agentName) ?? roleById(DEFAULT_ROLE_ID)!
-  const payer = actions.nextWorkPayer(canvasId, role.name, stalled)
-  if (payer === undefined) return 'idle'
+  const work = actions.nextWork(canvasId, role.name, stalled)
+  if (work === undefined) return 'idle'
+  const { payer, runner, key } = work
+  /* the run claims only work that agrees on the connection: a card sent to
+     the Claude Plan and one sent to ChatGPT are two runs */
+  const runnerFilter = runnerKey(runner)
   /* Only work that predates per-user attribution falls back to the canvas
      owner — a real requester never bills a collaborator or the owner. */
   const canvasOwner = store.getCanvas(canvasId)?.ownerId
-  const model = await pickModel(payer || canvasOwner)
+  const model = await pickModel(payer || canvasOwner, runner)
   if (!model) {
-    stalled.add(payer)
+    stalled.add(key)
     return 'no-model'
   }
   /* With no free tier, the server's key never pays for resident work. Work
@@ -382,21 +387,24 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
       'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini or Claude API key in Settings, then retry.'
-    for (const f of actions.takeFeedbackFor(canvasId, role.name, payer)) actions.failTaskFeedback(f.id, reason)
-    for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer)) actions.failComment(c.id, reason)
-    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer)) actions.failCard(canvasId, c.id, reason)
-    stalled.add(payer)
+    for (const f of actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter))
+      actions.failTaskFeedback(f.id, reason)
+    for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter))
+      actions.failComment(c.id, reason)
+    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer, runnerFilter))
+      actions.failCard(canvasId, c.id, reason)
+    stalled.add(key)
     return 'no-model'
   }
   /* claim this agent's open work — the UI flips to "picked up" instantly.
      Claiming happens before the try so an agent with nothing to do never
      shows up in presence. */
-  const claimed = actions.takeFeedbackFor(canvasId, role.name, payer)
-  const comments = actions.takeAgentCommentsFor(canvasId, role.name, payer)
-  const allCards = actions.takeQueuedCardsFor(canvasId, role.name, payer)
+  const claimed = actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter)
+  const comments = actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter)
+  const allCards = actions.takeQueuedCardsFor(canvasId, role.name, payer, runnerFilter)
   if (claimed.length === 0 && comments.length === 0 && allCards.length === 0) {
     /* nothing actually claimable for this payer — do not re-pick them */
-    stalled.add(payer)
+    stalled.add(key)
     return 'no-model'
   }
   /* structured repo cards (the GitHub import) have their own runner with

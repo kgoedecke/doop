@@ -9,6 +9,7 @@ import { timeAgo } from '../lib/time'
 import { useStore } from '../lib/store'
 import { isResidentLimit } from '../components/TeamAllowance'
 import { canvasNameFromPrompt, draftsCardTitle, type DraftCount } from '../lib/homePrompt'
+import { currentRunnerPick } from '../lib/runnerPick'
 import { AgentIcon } from '../components/AgentIcon'
 import { AppRail, railLayout } from '../components/AppRail'
 import { ConnectModal } from '../components/ConnectModal'
@@ -160,7 +161,7 @@ export function Home() {
     try {
       const canvas = await api.createCanvas(canvasNameFromPrompt(text), workspaceId)
       try {
-        await api.addCard(canvas.id, draftsCardTitle(text, drafts), ['doop'])
+        await api.addCard(canvas.id, draftsCardTitle(text, drafts), ['doop'], undefined, undefined, currentRunnerPick())
         posthog.capture('home_prompt_submitted', { drafts, workspace: !!workspaceId })
       } catch (error) {
         /* the brief — with its draft count — rides along as the canvas

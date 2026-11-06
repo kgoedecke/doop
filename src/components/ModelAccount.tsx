@@ -1,27 +1,23 @@
-import { planRow, planMark, planPill, planAsCode, actionsRow } from './ui/model-plan'
-import { BrandMark } from './ui/brand-mark'
-import { AgentIcon } from './AgentIcon'
+import { AppIcon } from './ui/brand-mark'
 import { LocalClaudeRow } from './LocalClaude'
-import { authClient } from '../lib/auth'
-import { selectLocalAgent, useLocalAgent } from '../lib/localAgent'
 import { isDesktopShell } from '../lib/shell'
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
-import type { AgentModelCatalog, AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccountStatus } from '../lib/api'
+import type { AgentModelCatalog, AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccounts } from '../lib/api'
+import type { RunnerProvider } from '../../shared/agentRunner'
+import { AvailableRow, ConnectionRow, FieldError, ConnectionSection, ModelSelect } from './ConnectionTable'
+import { useLocalAgent } from '../lib/localAgent'
 import { posthog } from '../lib/posthog'
 import { useStore } from '../lib/store'
 import { CodeBlock } from './ui/code-block'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
+import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { Dot } from './ui/dot'
-import { ToggleChip, ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
-import { Segmented, SegmentedItem } from './ui/segmented'
 import { isReasoningEffort, reasoningEffortOptions, type ReasoningEffort } from '../../shared/modelMenu'
 import { t as translate, useT, type PlainMessageKey } from '../lib/i18n'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import { CheckIcon, ChevronDownIcon } from './ui/icons'
 
 /**
  * "Keep the Doop Agent running on my own subscription."
@@ -38,49 +34,82 @@ import { CheckIcon, ChevronDownIcon } from './ui/icons'
  * The code exchange always happens on the server; no token touches this file.
  */
 
-export function useModelAccount(): {
-  account: ModelAccountStatus | null
+export function useModelAccounts(): {
+  view: ModelAccounts | null
   refresh: () => void
-  set: (next: ModelAccountStatus) => void
+  set: (next: ModelAccounts) => void
 } {
-  const [account, setAccount] = useState<ModelAccountStatus | null>(null)
+  const [view, setView] = useState<ModelAccounts | null>(null)
   const refresh = useCallback(() => {
-    api.modelAccount().then(setAccount, () => {})
+    api.modelAccounts().then(setView, () => {})
   }, [])
   useEffect(refresh, [refresh])
-  return { account, refresh, set: setAccount }
+  return { view, refresh, set: setView }
 }
 
 /**
- * The connected provider's live model list, asked for while `wanted` is true
- * (the picker is open, or the Settings pane is mounted) and again whenever
- * the provider changes or `generation` is bumped: the Settings panel bumps it
- * on every connect, rotation and disconnect, since a rotated key keeps the
- * account's kind and `connectedAt` and would otherwise keep showing the old
- * key's models. Null until it arrives and whenever it belongs to another
- * account than the one on screen, so callers fall back to the curated menu.
+ * One account's live model list, asked for while `wanted` is true (the
+ * composer's picker is open) and again whenever the kind changes. Null until
+ * it arrives and whenever it belongs to another account, so callers fall back
+ * to the curated menu.
  */
-export function useAgentModels(
-  account: ModelAccountStatus | null,
-  wanted: boolean,
-  generation = 0,
-): AgentModelCatalog | null {
-  const kind = account?.connected ? account.kind : undefined
-  const [loaded, setLoaded] = useState<{ kind: ModelAccountKind; generation: number; catalog: AgentModelCatalog }>()
+export function useAgentModels(kind: ModelAccountKind | undefined, wanted: boolean): AgentModelCatalog | null {
+  const [loaded, setLoaded] = useState<{ kind: ModelAccountKind; catalog: AgentModelCatalog }>()
   useEffect(() => {
     if (!kind || !wanted) return
     let stale = false
-    api.agentModels().then(
+    api.agentModels(kind).then(
       (catalog) => {
-        if (!stale) setLoaded({ kind, generation, catalog })
+        if (!stale) setLoaded({ kind, catalog })
       },
       () => {},
     )
     return () => {
       stale = true
     }
-  }, [kind, generation, wanted])
-  return loaded && loaded.kind === kind && loaded.generation === generation ? loaded.catalog : null
+  }, [kind, wanted])
+  return loaded && loaded.kind === kind ? loaded.catalog : null
+}
+
+/**
+ * Every connected account's live model list, for the Settings pane, asked for
+ * again whenever the set of accounts changes or `generation` is bumped: the
+ * pane bumps it on every connect, rotation and disconnect, since a rotated
+ * key keeps the account's kind and would otherwise keep showing the old key's
+ * models. A kind missing from the result shows its curated menu.
+ */
+export function useAgentCatalogs(
+  kinds: readonly ModelAccountKind[],
+  generation: number,
+): Partial<Record<ModelAccountKind, AgentModelCatalog>> {
+  const key = kinds.join(',')
+  const [loaded, setLoaded] = useState<{
+    key: string
+    generation: number
+    catalogs: Partial<Record<ModelAccountKind, AgentModelCatalog>>
+  }>()
+  useEffect(() => {
+    if (!key) return
+    let stale = false
+    const wanted = key.split(',') as ModelAccountKind[]
+    void Promise.all(
+      wanted.map((kind) =>
+        api.agentModels(kind).then(
+          (catalog) => [kind, catalog] as const,
+          () => undefined,
+        ),
+      ),
+    ).then((entries) => {
+      if (stale) return
+      const catalogs: Partial<Record<ModelAccountKind, AgentModelCatalog>> = {}
+      for (const entry of entries) if (entry) catalogs[entry[0]] = entry[1]
+      setLoaded({ key, generation, catalogs })
+    })
+    return () => {
+      stale = true
+    }
+  }, [key, generation])
+  return loaded && loaded.key === key && loaded.generation === generation ? loaded.catalogs : {}
 }
 
 /**
@@ -123,38 +152,37 @@ const EFFORT_LABELS: Record<ReasoningEffort, { name: PlainMessageKey; blurb: Pla
   xhigh: { name: 'models.effortXhigh', blurb: 'models.effortXhighBlurb' },
 }
 
-const planFlow = 'mt-[14px]'
 const maSteps = 'mb-3 ml-[18px] mt-[10px] text-body leading-[1.7] text-ink-soft [&_code]:font-mono [&_code]:text-label'
 const maWaiting = 'mt-[10px] flex items-center gap-[9px] text-body text-ink-soft'
 const maActions = 'mt-3 flex items-center gap-[10px] max-md:flex-col max-md:items-stretch'
 /* the "or paste the redirect instead" style link under a flow */
 const maToggle = 'mt-4 block px-0 py-0 text-left text-body font-normal text-ink-faint hover:bg-transparent'
 /* the paste-your-redirect field: ink-bordered so it reads as the live step */
-const maInput = 'rounded-pill border-ink px-3 py-[10px] font-mono focus:ring-0 md:text-xs'
+const maInput =
+  'rounded-pill border-ink px-3 py-[10px] font-mono focus:ring-0 aria-invalid:border-accent-ink md:text-xs'
 /* buttons in the responsive action rows centre their label once stacked */
 const rowBtn = 'max-md:justify-center'
+
+/** One provider: a row of the table once connected, a card to connect before. */
+interface Entry {
+  connected: boolean
+  node: ReactNode
+}
 
 export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const t = useT()
   const desktop = isDesktopShell()
-  const { account, refresh, set } = useModelAccount()
+  const { view, refresh, set } = useModelAccounts()
+  const localState = useLocalAgent()
+  const [showKey, setShowKey] = useState<false | Exclude<ModelAccountKind, 'chatgpt'>>(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  /* the connection a failure belongs to, so it shows under that row or
+     field; unset, it shows under the lists */
+  const [errorAt, setErrorAt] = useState<ModelAccountKind | null>(null)
   /* bumped by `settle`, so a rotated key reloads the catalog it unlocks */
   const [catalogGeneration, setCatalogGeneration] = useState(0)
-  const catalog = useAgentModels(account, true, catalogGeneration)
-  const { data: session } = authClient.useSession()
-  const local = useLocalAgent((s) => s.preference)
-  const userId = session?.user.id
-  const localModel = local?.model ?? 'default'
-  const localEffort = local?.effort
-  /* switching to a server provider keeps the local choices for a switch back */
-  const selectServer = useCallback(async () => {
-    if (userId)
-      await selectLocalAgent(userId, {
-        enabled: false,
-        model: localModel,
-        ...(localEffort ? { effort: localEffort } : {}),
-      })
-  }, [userId, localModel, localEffort])
+  const catalogs = useAgentCatalogs(view?.accounts.map((a) => a.kind) ?? [], catalogGeneration)
   const [authUrl, setAuthUrl] = useState('')
   /* true while the server is listening on the loopback callback port for us —
      the user approves in the other tab and this one just flips */
@@ -162,13 +190,9 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const [device, setDevice] = useState<DeviceFlow | null>(null)
   const [redirect, setRedirect] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [showKey, setShowKey] = useState<false | Exclude<ModelAccountKind, 'chatgpt'>>(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [switchFailed, setSwitchFailed] = useState(false)
 
   const settle = useCallback(
-    (next: ModelAccountStatus) => {
+    (next: ModelAccounts) => {
       set(next)
       setCatalogGeneration((generation) => generation + 1)
       setAuthUrl('')
@@ -178,31 +202,11 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       setApiKey('')
       setShowKey(false)
       setError('')
-      setSwitchFailed(false)
       onChange?.()
-      /* every allowance meter and wall on screen re-reads, not just this pane */
+      /* every allowance meter, wall and composer picker on screen re-reads */
       useStore.getState().allowanceChanged()
     },
     [set, onChange],
-  )
-
-  const activateChatgpt = useCallback(
-    async (next: ModelAccountStatus) => {
-      // Authorization is complete even if selecting the provider subsequently fails.
-      // Keep the connected account visible so retry never exchanges the OAuth code again.
-      settle(next)
-      setBusy(true)
-      try {
-        await selectServer()
-      } catch {
-        setSwitchFailed(true)
-        /* the free translator keeps this callback stable for the polling effect */
-        setError(translate('models.chatgptSwitchFailed'))
-      } finally {
-        setBusy(false)
-      }
-    },
-    [settle, selectServer],
   )
 
   /* poll only while a sign-in is actually in flight */
@@ -212,12 +216,11 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     let cancelled = false
     const id = window.setInterval(() => {
       api
-        .modelAccount()
-        .then(async (next) => {
-          // An existing API-key account is not evidence that OAuth succeeded.
-          if (cancelled || !next.connected || next.kind !== 'chatgpt') return
+        .modelAccounts()
+        .then((next) => {
+          if (cancelled || !next.accounts.some((a) => a.kind === 'chatgpt')) return
           cancelled = true
-          await activateChatgpt(next)
+          settle(next)
         })
         .catch(() => {})
       /* the device flow can also fail server-side (expired, refused) — that
@@ -238,11 +241,28 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [waiting, pendingDevice, activateChatgpt])
+  }, [waiting, pendingDevice, settle])
 
-  const fail = (e: unknown) => {
+  const fail = (e: unknown, at: ModelAccountKind | null = null) => {
     const body = (e as { body?: { error?: string } })?.body
     setError(body?.error || (e instanceof Error ? e.message : t('models.failedRetry')))
+    setErrorAt(at)
+  }
+
+  /* one request that answers with the whole view; a failure re-reads it and
+     shows under the connection it was about */
+  const act = async (at: ModelAccountKind | null, request: () => Promise<ModelAccounts>, done?: () => void) => {
+    setBusy(true)
+    setError('')
+    try {
+      settle(await request())
+      done?.()
+    } catch (e) {
+      fail(e, at)
+      refresh()
+    } finally {
+      setBusy(false)
+    }
   }
 
   const start = async () => {
@@ -262,7 +282,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       setDevice(await api.startDeviceAuth())
       posthog.capture('chatgpt_connect_started', { flow: 'device' })
     } catch (e) {
-      fail(e)
+      fail(e, 'chatgpt')
     } finally {
       setBusy(false)
     }
@@ -285,559 +305,461 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       setWaiting(false)
       window.open(url, '_blank', 'noopener')
     } catch (e) {
-      fail(e)
+      fail(e, 'chatgpt')
     } finally {
       setBusy(false)
     }
   }
 
-  const finish = async () => {
-    setBusy(true)
-    setError('')
-    try {
-      const next = await api.connectChatgpt(redirect)
-      await activateChatgpt(next)
-      posthog.capture('chatgpt_connected')
-    } catch (e) {
-      fail(e)
-    } finally {
-      setBusy(false)
-    }
-  }
+  const finish = () =>
+    act(
+      'chatgpt',
+      () => api.connectChatgpt(redirect),
+      () => posthog.capture('chatgpt_connected'),
+    )
 
-  const saveKey = async () => {
-    setBusy(true)
-    setError('')
-    try {
-      const connect =
-        showKey === 'anthropic-key'
-          ? api.connectAnthropicKey
-          : showKey === 'openrouter-key'
-            ? api.connectOpenRouterKey
-            : showKey === 'gemini-key'
-              ? api.connectGeminiKey
-              : api.connectOpenAiKey
-      const next = await connect(apiKey)
-      if (account?.kind !== showKey) await selectServer()
-      settle(next)
-      posthog.capture('model_account_connected', { kind: showKey || 'openai-key' })
-    } catch (e) {
-      fail(e)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const pickModel = async (model: string) => {
-    setBusy(true)
-    setError('')
-    try {
-      set(await api.setAgentModel(model))
-      posthog.capture('agent_model_changed', { model })
-    } catch (e) {
-      fail(e)
-      refresh()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const pickEffort = async (effort: string) => {
-    setBusy(true)
-    setError('')
-    try {
-      set(await api.setAgentEffort(effort))
-      posthog.capture('agent_effort_changed', { effort })
-    } catch (e) {
-      fail(e)
-      refresh()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async () => {
-    setBusy(true)
-    try {
-      settle(await api.disconnectModelAccount())
-      posthog.capture('model_account_disconnected')
-    } catch (e) {
-      fail(e)
-      refresh()
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (!account) return null
-
-  /* the connected row offers the provider's live list once it has arrived;
-     every other row advertises its curated menu */
-  const menuFor = (kind: ModelAccountKind): AgentModelOption[] =>
-    (account.connected && kind === account.kind && catalog?.live ? catalog.models : undefined) ??
-    account.menus?.[kind] ??
-    []
-  const activeMenu = account.kind ? menuFor(account.kind) : []
-  const chosen = activeMenu.find((m) => m.id === account.model)
-  const onChatgpt = account.connected && account.kind === 'chatgpt'
-  /* only one account is stored per user, so connecting one replaces the other */
-  const replaces = account.connected
-
-  /* OpenAI models think as hard as asked: a one-of-four switch under the
-     connected OpenAI row, absent elsewhere (the status carries no effort). */
-  const effortPicker = () =>
-    account.effort ? (
-      <div className="mt-[10px] flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="text-body text-ink-soft">{t('models.reasoningEffort')}</span>
-        <Segmented
-          aria-label={t('models.reasoningEffort')}
-          value={account.effort}
-          onValueChange={pickEffort}
-          disabled={busy}
-        >
-          {reasoningEffortOptions(account.effort).map((e) => {
-            /* a server default outside the four keeps its raw id as its name */
-            const labels = isReasoningEffort(e.id) ? EFFORT_LABELS[e.id] : undefined
-            return (
-              <SegmentedItem key={e.id} value={e.id} title={labels ? t(labels.blurb) : t('models.effortServerDefault')}>
-                {labels ? t(labels.name) : e.name}
-              </SegmentedItem>
-            )
-          })}
-        </Segmented>
-      </div>
-    ) : null
-
-  /* On the connected row the picker changes the model; on any other row it
-     only advertises what that plan can run, so it stays inert. A roster too
-     big for a chip row (OpenRouter) becomes a dropdown instead. */
-  const modelPicker = (live: boolean, kind: ModelAccountKind) => {
-    const models = menuFor(kind)
-    if (models.length > 5) {
-      if (!live) {
-        return (
-          <p className="self-center text-body leading-[1.55] text-ink-faint">
-            {models
-              .slice(0, 6)
-              .map((m) => m.name)
-              .join(' · ')}
-            {models.length > 6 ? t('models.andMore') : ''}
-          </p>
-        )
-      }
-      const current = models.find((m) => m.id === account.model)
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              disabled={busy}
-              className="gap-[7px] rounded-pill border border-line px-3 text-body font-medium text-ink"
-            >
-              {current?.name ?? account.model ?? t('models.pickModel')}
-              {current?.vision === false && <NoVisionBadge />}
-              <ChevronDownIcon width={14} height={14} aria-hidden />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {models.map((m) => (
-              <DropdownMenuItem key={m.id} onSelect={() => void pickModel(m.id)}>
-                <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
-                  <span className="flex items-center gap-[7px] text-ink">
-                    {m.name}
-                    {m.vision === false && <NoVisionBadge />}
-                  </span>
-                  <span className="text-label leading-[1.45] text-ink-faint">{m.blurb}</span>
-                </span>
-                {m.id === account.model && <Tick />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )
-    }
-    return live ? (
-      <ToggleChipGroup
-        aria-label={t('models.model')}
-        value={account.model ?? ''}
-        onValueChange={pickModel}
-        disabled={busy}
-      >
-        {models.map((m) => (
-          <ToggleChipItem
-            key={m.id}
-            value={m.id}
-            title={m.vision === false ? `${m.blurb} ${t('models.visionNote')}` : m.blurb}
-          >
-            {m.id === account.model && <Tick />}
-            {m.name}
-          </ToggleChipItem>
-        ))}
-        {/* a server override outside the known tiers still has to be visible */}
-        {account.model && !models.some((m) => m.id === account.model) && (
-          <ToggleChip state="on">{account.model}</ToggleChip>
-        )}
-      </ToggleChipGroup>
-    ) : (
-      /* inert on a row that is not the connected one — a capability list, not a control */
-      <div className="flex flex-wrap gap-[9px]">
-        {models.map((m) => (
-          <ToggleChip key={m.id} state="idle">
-            {m.name}
-          </ToggleChip>
-        ))}
-      </div>
+  const saveKey = () => {
+    const kind = showKey || 'openai-key'
+    const connect =
+      kind === 'anthropic-key'
+        ? api.connectAnthropicKey
+        : kind === 'openrouter-key'
+          ? api.connectOpenRouterKey
+          : kind === 'gemini-key'
+            ? api.connectGeminiKey
+            : api.connectOpenAiKey
+    return act(
+      kind,
+      () => connect(apiKey),
+      () => posthog.capture('model_account_connected', { kind }),
     )
   }
 
-  /* Every key-connected provider wears the same section: title + pill, lede,
-     then either the live picker/rotate row, the key-entry flow, or the inert
-     capability row with a Connect button. */
-  const keySection = (cfg: {
+  const pickModel = (kind: ModelAccountKind, model: string) =>
+    act(
+      kind,
+      () => api.setAgentModel(kind, model),
+      () => posthog.capture('agent_model_changed', { kind, model }),
+    )
+  const pickEffort = (kind: ModelAccountKind, effort: string) =>
+    act(
+      kind,
+      () => api.setAgentEffort(kind, effort),
+      () => posthog.capture('agent_effort_changed', { kind, effort }),
+    )
+  const toggle = (kind: ModelAccountKind, enabled: boolean) =>
+    act(
+      kind,
+      () => api.setModelAccountEnabled(kind, enabled),
+      () => posthog.capture('model_account_toggled', { kind, enabled }),
+    )
+  const remove = (kind: ModelAccountKind) =>
+    act(
+      kind,
+      () => api.disconnectModelAccount(kind),
+      () => posthog.capture('model_account_disconnected', { kind }),
+    )
+  const makeDefault = (provider: RunnerProvider) =>
+    act(
+      provider === 'claude-local' ? null : provider,
+      () => api.setDefaultRunner(provider),
+      () => posthog.capture('agent_default_changed', { provider }),
+    )
+
+  if (!view) return null
+
+  /* the failure that belongs to this connection, if any */
+  const errorFor = (kind: ModelAccountKind) => (error && errorAt === kind ? error : undefined)
+  const typeKey = (value: string) => {
+    setApiKey(value)
+    /* a fresh attempt: the old complaint no longer describes the field */
+    setError('')
+  }
+
+  const accountOf = (kind: ModelAccountKind) => view.accounts.find((a) => a.kind === kind)
+  /* a connected row offers the provider's live list once it has arrived;
+     every other row advertises its curated menu */
+  const menuFor = (kind: ModelAccountKind): AgentModelOption[] => {
+    const catalog = catalogs[kind]
+    return (accountOf(kind) && catalog?.live ? catalog.models : undefined) ?? view.menus[kind] ?? []
+  }
+
+  /* the dropdown of a connected account: its models and, on the OpenAI
+     kinds, the reasoning effort */
+  const modelCell = (kind: ModelAccountKind, title: string) => {
+    const account = accountOf(kind)
+    const models = menuFor(kind)
+    if (!account) return null
+    return (
+      <ModelSelect
+        name={title}
+        models={models}
+        model={account.model}
+        onModel={(model) => void pickModel(kind, model)}
+        {...(account.effort
+          ? {
+              effort: account.effort,
+              onEffort: (effort: string) => pickEffort(kind, effort),
+              efforts: reasoningEffortOptions(account.effort).map((e) => {
+                /* a server default outside the four keeps its raw id as its name */
+                const labels = isReasoningEffort(e.id) ? EFFORT_LABELS[e.id] : undefined
+                return {
+                  id: e.id,
+                  name: labels ? t(labels.name) : e.name,
+                  blurb: labels ? t(labels.blurb) : t('models.effortServerDefault'),
+                }
+              }),
+            }
+          : {})}
+        disabled={busy}
+      />
+    )
+  }
+
+  /* the line under a name: the text-only warning when the chosen model has
+     no eyes, else what the provider is */
+  const subFor = (kind: ModelAccountKind, lede: string) => {
+    const account = accountOf(kind)
+    const chosen = menuFor(kind).find((m) => m.id === account?.model)
+    return chosen?.vision === false ? t('models.visionNote') : lede
+  }
+
+  /* the key form, under a row being connected or having its key replaced */
+  const keyForm = (kind: ModelAccountKind, placeholder: string) => (
+    <>
+      <p className="leading-[1.55]">{t('models.keyStoredNote')}</p>
+      <div className="mt-[10px] flex gap-2 max-md:flex-col">
+        <Input
+          className={cn(maInput, 'flex-1')}
+          value={apiKey}
+          onChange={(e) => typeKey(e.target.value)}
+          aria-invalid={!!errorFor(kind)}
+          aria-describedby={errorFor(kind) ? `${kind}-key-error` : undefined}
+          placeholder={placeholder}
+          type="password"
+          aria-label={t('models.apiKeyAria')}
+          autoFocus
+          spellCheck={false}
+        />
+        <Button variant="primary" className={rowBtn} onClick={() => void saveKey()} disabled={busy || !apiKey.trim()}>
+          {busy ? t('models.saving') : t('models.saveKey')}
+        </Button>
+      </div>
+      <FieldError id={`${kind}-key-error`}>{errorFor(kind)}</FieldError>
+    </>
+  )
+
+  const keyRow = (cfg: {
     kind: Exclude<ModelAccountKind, 'chatgpt'>
     title: string
-    lede: string
+    /** the card's one line, before it is connected */
+    short: string
     mark: ReactNode
     placeholder: string
-  }) => {
-    const live = account.connected && account.kind === cfg.kind
-    return (
-      <section className={planRow(live && !local?.enabled)} key={cfg.kind}>
-        <span className={planMark(live && !local?.enabled)}>{cfg.mark}</span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
-            <h3 className="font-display text-heading font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-heading">
-              {cfg.title}
-            </h3>
-            <span className={planPill(live)}>
-              {live && showKey !== cfg.kind
-                ? local?.enabled
-                  ? t('models.connected')
-                  : t('models.activeConnected')
-                : t('models.notConnected')}
-            </span>
-          </div>
-          <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">{cfg.lede}</p>
-
-          {live && showKey !== cfg.kind ? (
-            <>
-              <div className={actionsRow}>
-                {modelPicker(true, cfg.kind)}
-                <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-                  <Button
-                    disabled={busy}
-                    onClick={() => {
-                      setApiKey('')
-                      setShowKey(cfg.kind)
-                    }}
-                  >
-                    {t('models.rotateKey')}
-                  </Button>
-                  {local?.enabled && (
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        selectServer().catch(fail)
-                      }}
-                    >
-                      {t('models.useInstead')}
-                    </Button>
-                  )}
-                  <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                    {t('models.disconnect')}
-                  </Button>
-                </div>
-              </div>
-              {chosen && (chosen.blurb || chosen.vision === false) && (
-                <p className="mt-[10px] text-body text-ink-faint">
-                  {chosen.blurb}
-                  {chosen.vision === false && ` ${t('models.visionNote')}`}
-                </p>
-              )}
-              {catalog?.error && <p className="mt-[10px] text-body text-ink-faint">{catalog.error}</p>}
-              {effortPicker()}
-            </>
-          ) : showKey === cfg.kind ? (
-            <div className={planFlow}>
-              <p className="mb-3 mt-2 text-body leading-[1.55] text-ink-soft">{t('models.keyStoredNote')}</p>
+  }): Entry => {
+    const account = accountOf(cfg.kind)
+    const entering = showKey === cfg.kind
+    const catalogError = account ? catalogs[cfg.kind]?.error : undefined
+    const openKeyForm = () => {
+      setApiKey('')
+      setError('')
+      setShowKey(cfg.kind)
+    }
+    if (!account) {
+      return {
+        connected: false,
+        node: (
+          <AvailableRow
+            key={cfg.kind}
+            mark={cfg.mark}
+            name={cfg.title}
+            sub={cfg.short}
+            action={
+              entering ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setShowKey(false)
+                    setError('')
+                  }}
+                >
+                  {t('common.cancel')}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={openKeyForm} disabled={busy}>
+                  {t('models.connect')}
+                </Button>
+              )
+            }
+            panel={keyForm(cfg.kind, cfg.placeholder)}
+            open={entering}
+          />
+        ),
+      }
+    }
+    return {
+      connected: true,
+      node: (
+        <Fragment key={cfg.kind}>
+          <ConnectionRow
+            mark={cfg.mark}
+            name={cfg.title}
+            sub={catalogError ?? subFor(cfg.kind, cfg.short)}
+            state={account.enabled ? 'on' : 'off'}
+            isDefault={view.default === cfg.kind}
+            busy={busy}
+            model={modelCell(cfg.kind, cfg.title)}
+            onToggle={(on) => void toggle(cfg.kind, on)}
+            onMakeDefault={() => void makeDefault(cfg.kind)}
+            onDisconnect={() => void remove(cfg.kind)}
+            menuItems={[{ label: t('models.replaceKey'), onSelect: openKeyForm }]}
+            error={entering ? undefined : errorFor(cfg.kind)}
+          />
+          {entering && (
+            <Modal size="sm" onClose={() => setShowKey(false)}>
+              <ModalTitle>{t('models.replaceKeyTitle', { name: cfg.title })}</ModalTitle>
+              <ModalLede>{t('models.keyStoredNote')}</ModalLede>
               <Input
-                className={maInput}
+                className={cn(maInput, 'mt-5 w-full')}
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => typeKey(e.target.value)}
                 placeholder={cfg.placeholder}
                 type="password"
+                aria-label={t('models.apiKeyAria')}
+                aria-invalid={!!errorFor(cfg.kind)}
+                aria-describedby={errorFor(cfg.kind) ? `${cfg.kind}-replace-error` : undefined}
                 autoFocus
                 spellCheck={false}
               />
-              <div className={maActions}>
-                <Button variant="primary" className={rowBtn} onClick={saveKey} disabled={busy || !apiKey.trim()}>
-                  {busy ? t('models.saving') : live ? t('models.rotateKey') : t('models.saveKey')}
-                </Button>
-                <Button variant="ghost" className={rowBtn} onClick={() => setShowKey(false)}>
+              <FieldError id={`${cfg.kind}-replace-error`}>{errorFor(cfg.kind)}</FieldError>
+              <ModalActions>
+                <Button variant="ghost" onClick={() => setShowKey(false)}>
                   {t('common.cancel')}
                 </Button>
-              </div>
-            </div>
-          ) : (
-            <div className={actionsRow}>
-              {modelPicker(false, cfg.kind)}
-              <Button
-                className={rowBtn}
-                onClick={() => {
-                  setApiKey('')
-                  setShowKey(cfg.kind)
-                }}
-                disabled={busy}
-              >
-                {replaces ? t('models.useInstead') : t('models.connect')}
-              </Button>
-            </div>
+                <Button variant="primary" onClick={() => void saveKey()} disabled={busy || !apiKey.trim()}>
+                  {busy ? t('models.saving') : t('models.replaceKey')}
+                </Button>
+              </ModalActions>
+            </Modal>
           )}
-        </div>
-      </section>
-    )
+        </Fragment>
+      ),
+    }
   }
 
-  return (
-    <div className="flex flex-col">
-      {account.chatgptEnabled !== false && (
-        <section className={planRow(onChatgpt && !local?.enabled)}>
-          <span className={planMark(onChatgpt && !local?.enabled)}>
-            <OpenAiMark />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-[10px] max-md:flex-wrap max-md:items-start max-md:gap-x-[9px] max-md:gap-y-[6px]">
-              <h3 className="font-display text-heading font-extrabold normal-case tracking-[-0.02em] text-ink max-md:text-heading">
-                {t('models.codexPlan')}
-              </h3>
-              <span className={planPill(onChatgpt)}>
-                {onChatgpt
-                  ? local?.enabled
-                    ? t('models.connected')
-                    : t('models.activeConnected')
-                  : t('models.notConnected')}
-              </span>
-            </div>
-            <p className="mt-1.5 text-copy leading-[1.55] text-ink-soft max-md:text-copy">{t('models.codexLede')}</p>
-            {onChatgpt && account.email && (
-              <dl className="mt-[14px] grid grid-cols-[auto_auto] items-center justify-start gap-x-[14px] gap-y-2 text-body text-ink-soft max-md:grid-cols-1 max-md:gap-[3px]">
-                <dt>{t('models.connectedAs')}</dt>
-                <dd className="min-w-0">
-                  <code className={planAsCode}>{account.email}</code>
-                </dd>
-                {account.plan && (
-                  <>
-                    <dt className="max-md:mt-2">{t('models.plan')}</dt>
-                    <dd className="min-w-0">
-                      <code className={planAsCode}>{planName(account.plan)}</code>
-                    </dd>
-                  </>
-                )}
-              </dl>
-            )}
+  const chatgpt = accountOf('chatgpt')
+  /* the ChatGPT sign-in, under its row while it is under way */
+  const chatgptFlow = device ? (
+    <>
+      <ol className={maSteps}>
+        <li>
+          {t('models.deviceStep1Before')}
+          <b>{t('models.deviceStep1Bold')}</b>
+          {t('models.deviceStep1After')}
+        </li>
+        <li>
+          {t('models.deviceStep2Before')}{' '}
+          <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
+            {device.verificationUrl.replace(/^https:\/\//, '')}
+          </a>{' '}
+          {t('models.deviceStep2After')}
+        </li>
+      </ol>
+      <CodeBlock text={device.userCode} />
+      <p className={maWaiting}>
+        <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" /> {t('models.waitingApproval')}
+      </p>
+      <div className={maActions}>
+        <Button asChild variant="primary" className={rowBtn}>
+          <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
+            {t('models.openVerificationPage')}
+          </a>
+        </Button>
+      </div>
+      <Button variant="bare" size="sm" className={maToggle} onClick={usePasteFlow} disabled={busy}>
+        {t('models.useBrowserSignIn')}
+      </Button>
+    </>
+  ) : waiting ? (
+    <>
+      {/* Doop holds the loopback port itself, so approving is the whole job —
+          this row flips on its own. */}
+      <p className={cn(maWaiting, 'mt-0')}>
+        <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" /> {t('models.waitingOtherTab')}
+      </p>
+      <div className={maActions}>
+        <Button asChild variant="ghost" className={rowBtn}>
+          <a href={authUrl} target="_blank" rel="noreferrer noopener">
+            {t('models.reopenSignIn')}
+          </a>
+        </Button>
+        <Button variant="bare" size="sm" className={cn(maToggle, 'mt-0 underline')} onClick={() => setWaiting(false)}>
+          {t('models.pasteRedirectInstead')}
+        </Button>
+      </div>
+    </>
+  ) : authUrl ? (
+    <>
+      <ol className={maSteps}>
+        <li>{t('models.pasteStep1')}</li>
+        <li>
+          {t('models.pasteStep2Before')}
+          <code>localhost:1455</code>
+          {t('models.pasteStep2Middle')}
+          <b>{t('models.pasteStep2Bold')}</b>
+          {t('models.pasteStep2After')}
+        </li>
+        <li>{t('models.pasteStep3')}</li>
+      </ol>
+      <Input
+        className={maInput}
+        value={redirect}
+        onChange={(e) => setRedirect(e.target.value)}
+        placeholder="http://localhost:1455/auth/callback?code=…"
+        autoFocus
+        spellCheck={false}
+      />
+      <div className={maActions}>
+        <Button variant="primary" className={rowBtn} onClick={() => void finish()} disabled={busy || !redirect.trim()}>
+          {busy ? t('models.connecting') : t('models.finishConnecting')}
+        </Button>
+        <Button asChild variant="ghost" className={rowBtn}>
+          <a href={authUrl} target="_blank" rel="noreferrer noopener">
+            {t('models.reopenSignIn')}
+          </a>
+        </Button>
+      </div>
+    </>
+  ) : undefined
+  const signingIn = !!device || waiting || !!authUrl
+  const cancelSignIn = () => {
+    setError('')
+    if (device) cancelDevice()
+    setAuthUrl('')
+    setWaiting(false)
+  }
 
-            {onChatgpt ? (
-              <>
-                <div className={actionsRow}>
-                  {modelPicker(true, 'chatgpt')}
-                  <div className="flex flex-wrap gap-2 max-md:[&>button]:flex-1">
-                    {(local?.enabled || switchFailed) && (
-                      <Button disabled={busy} onClick={() => activateChatgpt(account)}>
-                        {switchFailed ? t('models.retrySwitch') : t('models.useInstead')}
-                      </Button>
-                    )}
-                    <Button variant="danger" className={rowBtn} onClick={remove} disabled={busy}>
-                      {t('models.disconnect')}
+  /* the Plan is connected when this desktop may run it; a browser never can */
+  const planConnected = desktop && !!localState.native?.connected && !!localState.native.enabled
+  /* the Plan's own row tells the pane when it switched on or became default */
+  const planRowProps = {
+    isDefault: view.default === 'claude-local',
+    onMakeDefault: () => void makeDefault('claude-local'),
+    onChange: refresh,
+  }
+
+  const entries: Entry[] = []
+  if (view.chatgptEnabled !== false) {
+    entries.push(
+      chatgpt
+        ? {
+            connected: true,
+            node: (
+              <ConnectionRow
+                key="chatgpt"
+                mark={<AppIcon brand="openai" />}
+                name={t('models.chatgptName')}
+                sub={
+                  chatgpt.plan ? `${t('models.chatgptShort')} · ${planName(chatgpt.plan)}` : t('models.chatgptShort')
+                }
+                state={chatgpt.enabled ? 'on' : 'off'}
+                isDefault={view.default === 'chatgpt'}
+                busy={busy}
+                model={modelCell('chatgpt', t('models.chatgptName'))}
+                onToggle={(on) => void toggle('chatgpt', on)}
+                onMakeDefault={() => void makeDefault('chatgpt')}
+                onDisconnect={() => void remove('chatgpt')}
+                error={errorFor('chatgpt')}
+              />
+            ),
+          }
+        : {
+            connected: false,
+            node: (
+              <AvailableRow
+                key="chatgpt"
+                mark={<AppIcon brand="openai" />}
+                name={t('models.chatgptName')}
+                sub={t('models.chatgptShort')}
+                action={
+                  signingIn ? (
+                    <Button size="sm" variant="ghost" onClick={cancelSignIn}>
+                      {t('common.cancel')}
                     </Button>
-                  </div>
-                </div>
-                {chosen && <p className="mt-[10px] text-body text-ink-faint">{chosen.blurb}</p>}
-                {effortPicker()}
-              </>
-            ) : device ? (
-              <div className={planFlow}>
-                <ol className={maSteps}>
-                  <li>
-                    {t('models.deviceStep1Before')}
-                    <b>{t('models.deviceStep1Bold')}</b>
-                    {t('models.deviceStep1After')}
-                  </li>
-                  <li>
-                    {t('models.deviceStep2Before')}{' '}
-                    <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
-                      {device.verificationUrl.replace(/^https:\/\//, '')}
-                    </a>{' '}
-                    {t('models.deviceStep2After')}
-                  </li>
-                </ol>
-                <CodeBlock text={device.userCode} />
-                <p className={maWaiting}>
-                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" />{' '}
-                  {t('models.waitingApproval')}
-                </p>
-                <div className={maActions}>
-                  <Button asChild variant="primary" className={rowBtn}>
-                    <a href={device.verificationUrl} target="_blank" rel="noreferrer noopener">
-                      {t('models.openVerificationPage')}
-                    </a>
-                  </Button>
-                  <Button variant="ghost" className={rowBtn} onClick={cancelDevice}>
-                    {t('common.cancel')}
-                  </Button>
-                </div>
-                <Button variant="bare" size="sm" className={maToggle} onClick={usePasteFlow} disabled={busy}>
-                  {t('models.useBrowserSignIn')}
-                </Button>
-              </div>
-            ) : waiting ? (
-              <div className={planFlow}>
-                {/* Doop holds the loopback port itself, so approving is the
-                    whole job — this row flips on its own. */}
-                <p className={maWaiting}>
-                  <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" />{' '}
-                  {t('models.waitingOtherTab')}
-                </p>
-                <div className={maActions}>
-                  <Button asChild variant="ghost" className={rowBtn}>
-                    <a href={authUrl} target="_blank" rel="noreferrer noopener">
-                      Reopen sign-in
-                    </a>
-                  </Button>
-                  <Button
-                    variant="bare"
-                    size="sm"
-                    className={cn(maToggle, 'mt-0 underline')}
-                    onClick={() => setWaiting(false)}
-                  >
-                    {t('models.pasteRedirectInstead')}
-                  </Button>
-                </div>
-              </div>
-            ) : authUrl ? (
-              <div className={planFlow}>
-                <ol className={maSteps}>
-                  <li>{t('models.pasteStep1')}</li>
-                  <li>
-                    {t('models.pasteStep2Before')}
-                    <code>localhost:1455</code>
-                    {t('models.pasteStep2Middle')}
-                    <b>{t('models.pasteStep2Bold')}</b>
-                    {t('models.pasteStep2After')}
-                  </li>
-                  <li>{t('models.pasteStep3')}</li>
-                </ol>
-                <Input
-                  className={maInput}
-                  value={redirect}
-                  onChange={(e) => setRedirect(e.target.value)}
-                  placeholder="http://localhost:1455/auth/callback?code=…"
-                  autoFocus
-                  spellCheck={false}
-                />
-                <div className={maActions}>
-                  <Button variant="primary" className={rowBtn} onClick={finish} disabled={busy || !redirect.trim()}>
-                    {busy ? t('models.connecting') : t('models.finishConnecting')}
-                  </Button>
-                  <Button asChild variant="ghost" className={rowBtn}>
-                    <a href={authUrl} target="_blank" rel="noreferrer noopener">
-                      Reopen sign-in
-                    </a>
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className={actionsRow}>
-                {modelPicker(false, 'chatgpt')}
-                <Button className={rowBtn} onClick={start} disabled={busy}>
-                  {busy ? t('models.opening') : replaces ? t('models.useInstead') : t('models.connect')}
-                </Button>
-              </div>
-            )}
-          </div>
-        </section>
+                  ) : (
+                    <Button size="sm" onClick={() => void start()} disabled={busy}>
+                      {t('models.connect')}
+                    </Button>
+                  )
+                }
+                panel={
+                  chatgptFlow || errorFor('chatgpt') ? (
+                    <>
+                      {chatgptFlow}
+                      <FieldError>{errorFor('chatgpt')}</FieldError>
+                    </>
+                  ) : undefined
+                }
+                open={signingIn || !!errorFor('chatgpt')}
+              />
+            ),
+          },
+    )
+  }
+  entries.push(
+    keyRow({
+      kind: 'openai-key',
+      title: t('models.openaiKeyTitle'),
+      short: t('models.openaiKeyShort'),
+      mark: <AppIcon brand="openai" />,
+      placeholder: 'sk-…',
+    }),
+    keyRow({
+      kind: 'openrouter-key',
+      title: t('models.openrouterKeyTitle'),
+      short: t('models.openrouterKeyShort'),
+      mark: <AppIcon brand="openrouter" />,
+      placeholder: 'sk-or-…',
+    }),
+    keyRow({
+      kind: 'gemini-key',
+      title: t('models.geminiKeyTitle'),
+      short: t('models.geminiKeyShort'),
+      mark: <AppIcon brand="gemini" />,
+      placeholder: 'AIza…',
+    }),
+    /* the Plan's row decides for itself whether it is a row or a card; the
+       pane only needs to know which part it belongs in */
+    { connected: planConnected, node: <LocalClaudeRow key="claude-local" {...planRowProps} /> },
+    keyRow({
+      kind: 'anthropic-key',
+      title: t('models.claudeKeyTitle'),
+      short: t('models.claudeKeyShort'),
+      mark: <AppIcon brand="claude" />,
+      placeholder: 'sk-ant-…',
+    }),
+  )
+  const connected = entries.filter((entry) => entry.connected)
+  const unconnected = entries.filter((entry) => !entry.connected)
+
+  return (
+    <div className="mt-4 flex flex-col gap-7 sm:mt-5">
+      {connected.length > 0 ? (
+        <ConnectionSection title={t('models.connectedTitle')}>{connected.map((entry) => entry.node)}</ConnectionSection>
+      ) : (
+        <p className="ml-1 text-body text-ink-soft">{t('models.noConnections')}</p>
       )}
-
-      {keySection({
-        kind: 'openai-key',
-        title: t('models.openaiKeyTitle'),
-        lede: t('models.openaiKeyLede'),
-        mark: <OpenAiMark />,
-        placeholder: 'sk-…',
-      })}
-
-      {keySection({
-        kind: 'openrouter-key',
-        title: t('models.openrouterKeyTitle'),
-        lede: t('models.openrouterKeyLede'),
-        mark: <OpenRouterMark />,
-        placeholder: 'sk-or-…',
-      })}
-
-      {keySection({
-        kind: 'gemini-key',
-        title: t('models.geminiKeyTitle'),
-        lede: t('models.geminiKeyLede'),
-        mark: <GeminiMark />,
-        placeholder: 'AIza…',
-      })}
-
-      {desktop && <LocalClaudeRow />}
-      {keySection({
-        kind: 'anthropic-key',
-        title: t('models.claudeKeyTitle'),
-        lede: t('models.claudeKeyLede'),
-        mark: <AgentIcon name="claude" size={20} />,
-        placeholder: 'sk-ant-…',
-      })}
-
-      {/* the browser cannot run the local CLI, so the plan closes the list as a pointer to the desktop app */}
-      {!desktop && <LocalClaudeRow />}
-      {error && <p className="mt-[10px] text-body text-accent-ink">{error}</p>}
+      {unconnected.length > 0 && (
+        <ConnectionSection title={t('models.addConnection')}>
+          {unconnected.map((entry) => entry.node)}
+        </ConnectionSection>
+      )}
+      {error && !errorAt && (
+        <p role="alert" className="ml-1 text-body text-accent-ink">
+          {error}
+        </p>
+      )}
     </div>
   )
-}
-
-function Tick() {
-  return <CheckIcon width={13} height={13} strokeWidth={2.5} color="var(--success-ink)" aria-hidden />
-}
-
-function NoVisionBadge() {
-  const t = useT()
-  return (
-    <span className="rounded-[5px] bg-paper-deep px-[6px] py-[1px] text-micro font-medium uppercase tracking-[0.04em] text-ink-faint">
-      {t('models.noVisualReview')}
-    </span>
-  )
-}
-
-/** A forked-route glyph for OpenRouter, inlined like the other marks. */
-function OpenRouterMark() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="18"
-      height="18"
-      aria-hidden
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.1"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M2 12h3.5c3 0 4.5-4.5 7.5-4.5h3" />
-      <path d="M2 12h3.5c3 0 4.5 4.5 7.5 4.5h3" />
-      <path d="M15 4.5l4 3-4 3" />
-      <path d="M15 13.5l4 3-4 3" />
-    </svg>
-  )
-}
-
-/* 18 in a 36px tile — the same mark-to-tile ratio the presence avatars use on
-   a canvas, so the brand tile reads identically wherever it appears */
-function GeminiMark() {
-  return <BrandMark brand="gemini" size={18} />
-}
-
-function OpenAiMark() {
-  return <BrandMark brand="openai" size={18} />
 }

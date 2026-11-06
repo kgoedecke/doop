@@ -1,4 +1,4 @@
-import type { JSX } from 'react'
+import { useId, type JSX } from 'react'
 import { cn } from '@/lib/utils'
 import canvaLogo from './brand/canva.svg'
 import linearLogo from './brand/linear.svg'
@@ -7,9 +7,9 @@ import slackLogo from './brand/slack.svg'
 /**
  * Every third-party logo the product wears, from one place. A mark is a
  * square `size` px box with the brand's glyph centred in it, drawn in the
- * brand's own colours where it has them (Figma, Google, Meta, Photoshop,
- * Canva, Slack, Linear, Microsoft) and in `currentColor` where the brand
- * itself asks for the text colour (GitHub, OpenAI, Cursor, Gemini, Apple).
+ * brand's own colours where it has them (Figma, Google, Gemini, Meta,
+ * Photoshop, Canva, Slack, Linear, Microsoft) and in `currentColor` where the brand
+ * itself asks for the text colour (GitHub, OpenAI, Cursor, OpenRouter, Apple).
  * Claude's default is Anthropic's terracotta; `color` overrides any of the
  * single-colour marks.
  *
@@ -29,6 +29,7 @@ export type Brand =
   | 'openai'
   | 'cursor'
   | 'gemini'
+  | 'openrouter'
   | 'google'
   | 'apple'
   | 'microsoft'
@@ -52,6 +53,14 @@ const CLAUDE_PATH =
 
 const OPENAI_PATH =
   'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z'
+
+/** OpenRouter's "OR" mark, the one its site and app icon wear (Iconify logos, MIT). */
+const OPENROUTER_PATH =
+  'M198.973 0c29.97 0 54.265 24.296 54.265 54.265s-24.294 54.266-54.265 54.266l53.826 53.826c6.838 6.837 1.995 18.528-7.673 18.528H90.442C40.492 180.885 0 140.392 0 90.442S40.492 0 90.442 0zM90.443 36.177c-29.97 0-54.266 24.295-54.266 54.265s24.295 54.265 54.265 54.265s54.265-24.295 54.265-54.265s-24.295-54.265-54.265-54.265'
+
+/** ByteDance's four bars, which its Seed lab (Seedream) wears in a blue-teal blend. */
+const BYTEDANCE_PATH =
+  'M19.877 1.469L24 2.532v18.942l-4.123 1.056zM6.53 10.897l4.115 1.064v8.978L6.53 22.003zM0 2.572l4.115 1.064v16.736L0 21.428zm17.455 5.62V19.3l-4.122-1.065V9.257z'
 
 const CURSOR_PATH =
   'M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23'
@@ -171,6 +180,40 @@ function Microsoft({ size, className }: GlyphProps) {
   )
 }
 
+/** Gemini's star in its gradient, blue through violet to rose, as doop.design
+ *  draws it. The gradient needs an id of its own, so two marks on one page do
+ *  not share one. */
+function Gemini({ size, className }: GlyphProps) {
+  const id = useId()
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={cn('flex-none', className)} aria-hidden>
+      <GeminiGradient id={id} />
+      <path fill={`url(#${id})`} d={GEMINI_PATH} />
+    </svg>
+  )
+}
+
+function GeminiGradient({ id }: { id: string }) {
+  return (
+    <defs>
+      <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#4F8BFF" />
+        <stop offset="0.6" stopColor="#9B72F6" />
+        <stop offset="1" stopColor="#D96570" />
+      </linearGradient>
+    </defs>
+  )
+}
+
+/** OpenRouter's OR in the text colour; its black tile is the AppIcon's. */
+function OpenRouter({ size, color = 'currentColor', className }: GlyphProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={cn('flex-none', className)} aria-hidden>
+      <path fill={color} transform="translate(0 3.52) scale(0.09375)" d={OPENROUTER_PATH} />
+    </svg>
+  )
+}
+
 /** Adobe's Ps app mark (the 2025 icon from adobe.com): the dark tile with
  *  the two letters as a vector. */
 function Photoshop({ size, className }: GlyphProps) {
@@ -192,7 +235,8 @@ const MARKS: Record<Brand, (props: GlyphProps) => JSX.Element> = {
   claude: path(CLAUDE_PATH, CLAUDE_COLOR),
   openai: path(OPENAI_PATH),
   cursor: path(CURSOR_PATH),
-  gemini: path(GEMINI_PATH),
+  gemini: Gemini,
+  openrouter: OpenRouter,
   google: Google,
   apple: path(APPLE_PATH),
   microsoft: Microsoft,
@@ -205,4 +249,67 @@ export const BRANDS = Object.keys(MARKS) as Brand[]
 export function BrandMark({ brand, size = 16, color, className }: BrandMarkProps) {
   const Glyph = MARKS[brand]
   return <Glyph size={size} color={color} className={className} />
+}
+
+/** The providers an agent can run on, as app icons. */
+export type AppIconBrand = 'claude' | 'claude-code' | 'openai' | 'gemini' | 'openrouter' | 'seedream'
+
+/* the tile's light: a hairline edge, a highlight along the top, a soft drop */
+const APP_TILE_SHADOW =
+  'inset 0 0 0 0.5px rgba(0,0,0,.1), inset 0 1px 0 rgba(255,255,255,.28), 0 1px 2px rgba(0,0,0,.12), 0 4px 10px -4px rgba(0,0,0,.22)'
+
+/** Each tile's fill and the glyph it carries, after doop.design's "Works with" row. */
+const APP_TILES: Record<AppIconBrand, { tile: string; glyph: (gradientId: string) => JSX.Element }> = {
+  claude: { tile: CLAUDE_COLOR, glyph: () => <path fill="#fff" d={CLAUDE_PATH} /> },
+  'claude-code': { tile: '#262624', glyph: () => <path fill={CLAUDE_COLOR} d={CLAUDE_PATH} /> },
+  openai: { tile: '#fff', glyph: () => <path fill="#111" d={OPENAI_PATH} /> },
+  gemini: {
+    tile: '#fff',
+    glyph: (id) => (
+      <>
+        <GeminiGradient id={id} />
+        <path fill={`url(#${id})`} d={GEMINI_PATH} />
+      </>
+    ),
+  },
+  seedream: {
+    tile: '#fff',
+    glyph: (id) => (
+      <>
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#3C8CFF" />
+            <stop offset="1" stopColor="#2BC4C9" />
+          </linearGradient>
+        </defs>
+        <path fill={`url(#${id})`} d={BYTEDANCE_PATH} />
+      </>
+    ),
+  },
+  /* the OR is wider than tall: scaled into the 24 box and centred */
+  openrouter: {
+    tile: '#111',
+    glyph: () => <path fill="#fff" transform="translate(0 3.52) scale(0.09375)" d={OPENROUTER_PATH} />,
+  },
+}
+
+/**
+ * A provider as an app icon, the way doop.design shows the agents it works
+ * with: the brand's tile (corners at 23% of the side) with its glyph at 56%.
+ */
+export function AppIcon({ brand, size = 32, className }: { brand: AppIconBrand; size?: number; className?: string }) {
+  const id = useId()
+  const { tile, glyph } = APP_TILES[brand]
+  const inner = Math.round(size * 0.56)
+  return (
+    <span
+      aria-hidden
+      className={cn('grid flex-none place-items-center', className)}
+      style={{ width: size, height: size, borderRadius: '23%', background: tile, boxShadow: APP_TILE_SHADOW }}
+    >
+      <svg width={inner} height={inner} viewBox="0 0 24 24">
+        {glyph(id)}
+      </svg>
+    </span>
+  )
 }

@@ -1,6 +1,7 @@
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { DesignToken } from './designTokens.ts'
+import type { RunnerPick } from './agentRunner.ts'
 
 export interface Frame {
   id: string
@@ -405,6 +406,9 @@ export interface AgentTask {
    *  handing the title to the chat agent. Absent on prompt cards. */
   kind?: RepoCardKind
   payload?: RepoCardPayload
+  /** board cards: the connection and model the composer picked for this
+   *  card; absent runs on the requester's Settings default */
+  runner?: RunnerPick
 }
 
 export interface CardScope {
@@ -449,6 +453,9 @@ export interface TaskFeedback {
   from: string
   /** account id of the human who left it — decides which model credential runs it */
   fromUserId?: string
+  /** the connection the task it answers ran on, kept from when it was left,
+   *  so the reply runs there even after the task leaves the history */
+  runner?: RunnerPick
   text: string
   at: number
   /** set once the feedback has been included in some agent's tool result */

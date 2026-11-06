@@ -126,6 +126,8 @@ Each has a story.
   (`ring` 30px pill, `bar` the palette's 48px top line; `size="header"` puts the ring on its own
   40px row on a phone and caps it at 320px from md) wrapping a bare Input, with a `trailing` slot
   for a `Kbd`; `Kbd` - a 20px key cap in mono micro type with an inset hairline.
+  `StepSlider` - one pick from a short ordered scale (reasoning effort): the level named above a
+  pill track filled to a round thumb, a dot per step, a native range input underneath.
 - `Card` (`tone` default/flat/raised/dashed, `shape` hero for the 18px empty-state corner),
   `SettingsCard` - one section of a settings pane (Settings, Workspace): a `Card` at the 1000px
   settings width with the section spacing, any `tone`; `CardRow` - its labelled row, whose
@@ -177,7 +179,9 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   component under the canvas chrome's name. `AvatarStack` (the first `max` people plus a "+N"
   disc), `tone="ink"` (the account's own face: initials on an ink disc, no collar), `initials()`
   (the one first-and-last-letter rule), `BrandMark` - every third-party logo (`<BrandMark brand="figma" size={16} />`; figma, github,
-  canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear),
+  canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear, openrouter);
+  `AppIcon` is a model provider as doop.design's "Works with" row draws it: the brand tile (23% corners,
+  inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`, `gemini`, `openrouter`, `seedream`),
   `Wordmark`, `Logo` / `DoopMark` (the bare Disc-D; `animated` hops its dot, as the home greeting
   wears it), `icons.tsx` - identity. Feature tiles (`FigmaTile`, `MetaTile`, the integrations'
   `Tile`s, `AgentIcon`) compose a `BrandMark`; nothing else inlines a logo path.
