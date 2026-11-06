@@ -539,6 +539,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     for (var i = 0; i < parent.children.length && rects.length < 80; i++) {
       var sibling = parent.children[i]
       if (sibling === el || sibling.hasAttribute('data-doop-defs')) continue
+      if (getComputedStyle(sibling).visibility !== 'visible') continue
       var r = designRect(sibling)
       if (r.width > 0 && r.height > 0) rects.push(r)
     }

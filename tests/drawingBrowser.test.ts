@@ -1644,8 +1644,11 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
       createdAt: 0,
       updatedAt: 0,
       html:
-        '<div data-doop-drawing="rectangle" data-name="Rectangle" style="position:absolute;left:40px;top:40px;width:60px;height:40px;background:red"></div>' +
-        '<div data-doop-drawing="rectangle" data-name="Sibling" style="position:absolute;left:150px;top:180px;width:50px;height:50px;background:blue"></div>',
+        '<style>.tinted{background:rgb(0, 128, 0)}</style>' +
+        '<div class="tinted" data-doop-drawing="rectangle" data-name="Rectangle" style="position:absolute;left:40px;top:40px;width:60px;height:40px"></div>' +
+        '<div data-doop-drawing="rectangle" data-name="Sibling" style="position:absolute;left:150px;top:180px;width:50px;height:50px;background:blue"></div>' +
+        // nearer on both axes than what it snaps to, but nobody sees it
+        '<div data-doop-drawing="rectangle" data-name="Hidden" style="position:absolute;left:152px;top:178px;width:50px;height:50px;visibility:hidden"></div>',
     }
     await seedFrames([source])
     await page.evaluate(async () => {
@@ -1660,7 +1663,11 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     /* the centre lands 2px short of the frame's (125) and the top 3px short
        of the sibling's (180): both pull on */
     await page.mouse.move(from.x + 53, from.y + 137, { steps: 6 })
-    await page.waitForSelector('iframe[title="Moving drawing"]')
+    const moving = (await (await page.waitForSelector('iframe[title="Moving drawing"]'))!.contentFrame())!
+    // the copy keeps the look its frame's stylesheet gives it
+    await expect
+      .poll(() => moving.$eval('[data-doop-drawing]', (el) => getComputedStyle(el).backgroundColor))
+      .toBe('rgb(0, 128, 0)')
     expect(await page.$('[data-element-outline]')).toBeNull()
     expect(await page.$('[data-resize-handles]')).toBeNull()
     expect(await page.$('[data-element-size]')).toBeNull()

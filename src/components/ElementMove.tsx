@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
+import { elementPath } from '../lib/layers'
 import {
   drawingDropFrame,
+  drawingPreview,
   movableDrawing,
   moveDrawing,
   placeDrawing,
@@ -306,10 +308,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       const complete = moved && !gesture.pinching && !closed
       const landed =
         !layer && hit && complete && rect ? moveDrawing(frame, hit.selector, rect, target?.id, hit) : undefined
-      cancel(
-        complete && !!layer,
-        landed?.then(() => shown(target)),
-      )
+      cancel(complete && !!layer, landed?.then(shown))
       // A Shift press remains a selection toggle until it actually drags.
       if (!complete && press.shiftKey) {
         lastClick.current = null
@@ -336,10 +335,10 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       }
     }
     /** until the source, and the frame it went into, show what was saved */
-    async function shown(into: Frame | null) {
+    async function shown(into: string | undefined) {
       const frames = useStore.getState().canvas?.frames ?? []
       await Promise.all(
-        [frame.id, into?.id].map((id) => {
+        [frame.id, into].map((id) => {
           const live = id ? frames.find((f) => f.id === id) : undefined
           return live ? frameShows(live.id, live.html) : undefined
         }),
@@ -415,8 +414,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       bounds = { ...hit.rect, x: frame.x + hit.rect.x, y: frame.y + hit.rect.y }
       snapTargets = toSnapTargets(hit.snapRects)
       rect = bounds
+      const path = elementPath(el)
       placeDrawing(el, bounds, undefined, hit.geometry)
-      html = `<!doctype html><html><body style="margin:0">${el.outerHTML}</body></html>`
+      html = drawingPreview(live!.html, path, el)
       if (!press.shiftKey) pickHit()
       if (lastMove) onMove(lastMove)
       if (released) onUp(released)
