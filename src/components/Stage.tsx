@@ -868,15 +868,22 @@ export function Stage({
       const vp = useStore.getState().viewport
       useStore.getState().setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy })
     }
-    function onUp() {
+    /* a cancelled pointer (touch or pen taken by the system) ends the pan
+       too, but is not a click */
+    function end() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', end)
       setPanning(false)
       unlockSelection()
+    }
+    function onUp() {
+      end()
       if (!moved && isBackground) select(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', end)
   }
 
   function startMarquee(e: React.PointerEvent) {
@@ -915,16 +922,21 @@ export function Stage({
         .map((f) => f.id)
       useStore.getState().selectMany([...keep, ...hits.filter((id) => !keep.includes(id))])
     }
-    function onUp() {
+    function end() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', end)
       setMarquee(null)
       unlockSelection()
+    }
+    function onUp() {
+      end()
       /* a plain click on empty canvas clears the selection */
       if (!moved && !e.shiftKey) select(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', end)
   }
 
   function onPointerMove(e: React.PointerEvent) {
