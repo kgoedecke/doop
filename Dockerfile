@@ -35,9 +35,14 @@ RUN bun install --frozen-lockfile --production
 FROM node:22-slim
 WORKDIR /app
 
-# Chromium for get_frame_screenshot (puppeteer-core drives the system browser)
+# Chromium for get_frame_screenshot (puppeteer-core drives the system browser).
+# Its fonts are what screenshots, thumbnails and PDF exports fall back to when a
+# frame's own font lacks a glyph: Liberation for the metric-compatible basics,
+# DejaVu for symbols (arrows, geometric shapes, dingbats; without it ✕ □ ⟶ draw
+# as empty boxes and ↗ as an emoji), Noto Color Emoji for emoji.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji \
+  && apt-get install -y --no-install-recommends chromium \
+    fonts-liberation fonts-dejavu-core fonts-noto-color-emoji \
   && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
