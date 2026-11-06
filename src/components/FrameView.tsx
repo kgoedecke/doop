@@ -1602,13 +1602,10 @@ export const FrameView = memo(function FrameView({
             {/* the element's hover and selection furniture: outlines, grips and
               the size badge sit outside the surface, whose overflow clips the
               document to the frame, so a layer wider or taller than its frame
-              is outlined in full while its content stays clipped. The layer is
-              inset by the surface's border, where the document starts, so a
-              rect in design px lands on the element it measures */}
-            <div
-              data-element-furniture=""
-              className={cn('pointer-events-none absolute', isCanvasElement(frame.html) ? 'inset-0' : 'inset-px')}
-            >
+              is outlined in full while its content stays clipped. The layer
+              covers the surface, where the document starts, so a rect in
+              design px lands on the element it measures */}
+            <div data-element-furniture="" className="pointer-events-none absolute inset-0">
               {/* above the selection outline (z-[3]), or that outline covers the
               hovered element's tag */}
               {hover && !hoverOnSelected && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
