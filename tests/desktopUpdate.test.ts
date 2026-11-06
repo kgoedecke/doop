@@ -44,6 +44,16 @@ it('tells the shell it draws the card only once it is listening', async () => {
   expect(shell.unlisten).toHaveBeenCalled()
 })
 
+it('takes the card down when the shell withdraws the offer', async () => {
+  const shell = stubShell()
+  const onOffer = vi.fn()
+  listenForUpdates(onOffer)
+  await flush()
+  shell.handlers.get(UPDATE_READY_EVENT)?.({ payload: { version: '0.11.0', current: '0.10.0' } })
+  shell.handlers.get(UPDATE_READY_EVENT)?.({ payload: null })
+  expect(onOffer.mock.calls).toEqual([[{ version: '0.11.0', current: '0.10.0' }], [null]])
+})
+
 it('shows a download already waiting when a reloaded page claims the card', async () => {
   stubShell({ version: '0.11.0', current: '0.10.0' })
   const onOffer = vi.fn()

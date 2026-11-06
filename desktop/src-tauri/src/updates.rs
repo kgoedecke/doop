@@ -135,7 +135,9 @@ async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, Stri
     let update = match newest(app).await {
         Ok(Some(update)) => update,
         Ok(None) => {
-            take_kept(app, |_| true);
+            if take_kept(app, |_| true).is_some() {
+                withdraw(app);
+            }
             return Ok(None);
         }
         Err(error) => return take_kept(app, |_| true).map(Some).ok_or(error),
@@ -267,8 +269,18 @@ pub fn update_card_ready(app: AppHandle) -> Option<serde_json::Value> {
 /// installed on quit.
 #[tauri::command]
 pub async fn update_restart(app: AppHandle) -> Result<(), String> {
-    let kept = take_kept(&app, |_| true).ok_or("No update is ready")?;
+    let Some(kept) = take_kept(&app, |_| true) else {
+        withdraw(&app);
+        return Err("No update is ready".into());
+    };
     install(&app, kept.0, kept.1).await
+}
+
+/// The kept download is gone (the feed no longer names it, or it was
+/// already taken): a card still showing it would offer nothing, so the page
+/// is told to take it down.
+fn withdraw(app: &AppHandle) {
+    let _ = app.emit(READY_EVENT, serde_json::Value::Null);
 }
 
 /// Windows shows custom labels only with comctl v6 and otherwise answers
