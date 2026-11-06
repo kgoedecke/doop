@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/kgoedecke/doop/compare/desktop-v0.12.0...desktop-v0.13.0) (2026-11-06)
+
+
+### Features
+
+* **desktop:** offer downloaded updates in an in-app card ([#297](https://github.com/kgoedecke/doop/issues/297)) ([c089fd6](https://github.com/kgoedecke/doop/commit/c089fd61b4bb2bc2cfb013c2f950050010d60b05))
+
+
+### Bug Fixes
+
+* **desktop:** give up on a stalled update download ([#430](https://github.com/kgoedecke/doop/issues/430)) ([0b1c1e1](https://github.com/kgoedecke/doop/commit/0b1c1e11becdf299df9a3edeebdb553f6c9748cb))
+
 ## [0.12.0](https://github.com/kgoedecke/doop/compare/desktop-v0.11.0...desktop-v0.12.0) (2026-11-04)
 
 
