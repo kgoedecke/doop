@@ -232,6 +232,8 @@ const schema = {
   /* ---------------------------------------------------- screenshots */
   CHROME_PATH: str({ default: undefined }),
   CHROME_NO_SANDBOX: bool({ default: false }),
+  /* pages the shared Chromium renders at once (renderBrowser.ts) */
+  RENDER_CONCURRENCY: nonNegativeInt({ default: 4 }),
 
   /* ------------------------------------------------------ analytics */
   POSTHOG_KEY: str({ default: undefined }),
