@@ -76,6 +76,7 @@ import {
   LayoutTemplate,
   Link2,
   Lock,
+  LockOpen,
   LogOut,
   Menu,
   Minus,
@@ -283,6 +284,7 @@ export const BrainIcon = icon(Brain)
 export const BuildingIcon = icon(Building2)
 export const CreditCardIcon = icon(CreditCard)
 export const LockIcon = icon(Lock)
+export const LockOpenIcon = icon(LockOpen)
 export const DesktopIcon = icon(Monitor)
 export const DownloadIcon = icon(Download)
 export const PuzzleIcon = icon(Puzzle)

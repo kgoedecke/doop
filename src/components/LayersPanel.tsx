@@ -77,6 +77,7 @@ import {
   LayersIcon,
   BracesIcon,
   LockIcon,
+  LockOpenIcon,
   PanelCollapseIcon,
   PanelExpandIcon,
   PlusIcon,
@@ -1108,7 +1109,7 @@ function Row({
               on={!!locked}
               selected={selected}
               onToggle={onToggleLocked}
-              icon={<LockIcon className="size-3" />}
+              icon={locked ? <LockIcon className="size-3" /> : <LockOpenIcon className="size-3" />}
             />
           )}
         </span>
