@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "doop Chromium",
-  "mainBinaryName": "doop-desktop-chromium",
+  "productName": "doop",
+  "mainBinaryName": "doop-desktop",
   "version": "0.12.0",
-  "identifier": "design.doop.desktop.chromium",
+  "identifier": "design.doop.desktop",
   "build": {
     "devUrl": "http://localhost:4300",
     "frontendDist": "https://doop.design"

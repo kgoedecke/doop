@@ -51,11 +51,10 @@ enum Trigger {
 
 /// Official installers point at doop.design. Replacing a self-hosted shell
 /// with one would silently change its server, and a debug build would be
-/// replaced by a release. The Chromium shell has no feed of its own yet, and
-/// the WebKit one would replace it with the WebKit shell.
+/// replaced by a release. On macOS the feed names the Chromium build, so the
+/// WebKit app updates into it and the Chromium app keeps updating from it.
 fn updates_enabled() -> bool {
     !cfg!(debug_assertions)
-        && !cfg!(chromium)
         && matches!(
             crate::APP_URL.trim_end_matches('/'),
             "https://doop.design" | "https://www.doop.design"

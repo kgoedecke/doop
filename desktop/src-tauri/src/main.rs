@@ -34,8 +34,8 @@
 // then reveals the finished file in Finder / Explorer, since the webview
 // has no download bar of its own.
 //
-// The same sources also build a Chromium shell (../src-tauri-chromium, Tauri
-// 3's CEF runtime, opt-in and unreleased): WebKit runs every sandboxed frame
+// The same sources also build the Chromium shell (../src-tauri-chromium, Tauri
+// 3's CEF runtime), which is the macOS app: WebKit runs every sandboxed frame
 // iframe in the editor's own process, Chromium runs them out of process. Its
 // differences are the `cfg(chromium)` blocks, set by build.rs when the CEF
 // runtime is linked.
@@ -53,6 +53,8 @@ mod codex;
 mod fonts;
 mod updates;
 mod view_menu;
+#[cfg(all(chromium, target_os = "macos"))]
+mod webkit_migration;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -222,13 +224,20 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<ShellRuntime>> {
 }
 
 /// The Chromium shell's runtime settings. Session cookies outlive a restart
-/// (CEF drops them on exit by default), so quitting never signs anyone out. A
-/// debug build opens Chrome's remote debugging on the port named by
-/// DOOP_CEF_DEBUG_PORT (chrome://inspect, or a CDP client), which is how the
-/// frames' renderer processes are inspected; release builds never listen.
+/// (CEF drops them on exit by default), so quitting never signs anyone out.
+/// The profile lives in the app's data directory rather than CEF's default
+/// under Caches, which cache cleaners and low-disk purges empty; debug builds
+/// keep their own, since they encrypt cookies with a mock keychain a release
+/// build cannot read (and the reverse). A debug build opens Chrome's remote
+/// debugging on the port named by DOOP_CEF_DEBUG_PORT (chrome://inspect, or a
+/// CDP client), which is how the frames' renderer processes are inspected;
+/// release builds never listen.
 #[cfg(chromium)]
 fn chromium_runtime() -> tauri_runtime_cef::Cef {
-    let cef = tauri_runtime_cef::Cef::default().persist_session_cookies(true);
+    let mut cef = tauri_runtime_cef::Cef::default().persist_session_cookies(true);
+    if let Some(profile) = chromium_profile_dir() {
+        cef = cef.root_cache_path(profile);
+    }
     let port = std::env::var("DOOP_CEF_DEBUG_PORT")
         .ok()
         .and_then(|port| port.parse().ok())
@@ -240,6 +249,26 @@ fn chromium_runtime() -> tauri_runtime_cef::Cef {
         }),
         None => cef,
     }
+}
+
+/// Application Support/<identifier>/cef, worked out by hand: the runtime is
+/// configured before the app (and its path resolver) exists. Keep the
+/// identifier in step with both tauri.conf.json files.
+#[cfg(chromium)]
+fn chromium_profile_dir() -> Option<PathBuf> {
+    const IDENTIFIER: &str = "design.doop.desktop";
+    let home = std::env::var_os("HOME")?;
+    let profile = if cfg!(debug_assertions) {
+        "cef-dev"
+    } else {
+        "cef"
+    };
+    Some(
+        PathBuf::from(home)
+            .join("Library/Application Support")
+            .join(IDENTIFIER)
+            .join(profile),
+    )
 }
 
 // CEF starts its renderer, GPU and utility processes from this same binary;
@@ -319,6 +348,25 @@ fn main() {
 
             let handle = app.handle().clone();
             let entry = format!("{}/auth", base_url());
+            // The first Chromium launch after the WebKit app opens hidden on
+            // the app's origin and brings the WebKit storage over before the
+            // app loads (src/webkit_migration.rs).
+            #[cfg(all(chromium, target_os = "macos"))]
+            let migrating = webkit_migration::pending(app.handle());
+            #[cfg(not(all(chromium, target_os = "macos")))]
+            let migrating = false;
+            let first_url: Url = if migrating {
+                #[cfg(all(chromium, target_os = "macos"))]
+                {
+                    let origin = Url::parse(&base_url())?;
+                    webkit_migration::start(app.handle(), origin.clone(), entry.parse()?);
+                    webkit_migration::landing(&origin)
+                }
+                #[cfg(not(all(chromium, target_os = "macos")))]
+                unreachable!()
+            } else {
+                entry.parse()?
+            };
             // Hosts that stay inside the shell; any other http(s) target opens
             // in the system browser. Hostless web schemes (about:, blob:) stay
             // in — sandboxed frame content depends on them — but mailto: and
@@ -353,7 +401,7 @@ fn main() {
             let downloads: Mutex<HashMap<String, VecDeque<PathBuf>>> =
                 Mutex::new(HashMap::new());
             let builder =
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::External(entry.parse()?))
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::External(first_url))
                     .initialization_script(&desktop_marker)
                     .on_download(move |_webview, event| {
                         match event {
@@ -405,12 +453,24 @@ fn main() {
                         }
                         true
                     })
-                    .on_page_load(|window, payload| {
+                    .on_page_load(move |window, payload| {
                         if payload.event() == PageLoadEvent::Started {
                             updates::page_loading(window.app_handle());
                         }
+                        #[cfg(all(chromium, target_os = "macos"))]
+                        if migrating {
+                            let on_landing = payload.url().path() == webkit_migration::LANDING_PATH;
+                            match payload.event() {
+                                PageLoadEvent::Finished if on_landing => webkit_migration::landed(window),
+                                PageLoadEvent::Started if !on_landing => {
+                                    let _ = window.show();
+                                }
+                                _ => {}
+                            }
+                        }
                     })
                     .title("doop")
+                    .visible(!migrating)
                     .inner_size(1440.0, 900.0)
                     .min_inner_size(900.0, 600.0)
                     .on_navigation(move |url| {

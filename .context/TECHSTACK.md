@@ -614,13 +614,16 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
-- Chromium shell (opt-in, macOS, unreleased): `desktop/src-tauri-chromium` builds the same sources
-  (its `[[bin]]` and build script point into `desktop/src-tauri`) on Tauri 3.0.0-alpha.5 with
+- Chromium shell (the macOS app): `desktop/src-tauri-chromium` builds the same sources (its
+  `[[bin]]` and build script point into `desktop/src-tauri`) on Tauri 3.0.0-alpha.5 with
   `tauri-runtime-cef` 3.0.0-alpha.6 (CEF 154, Chromium 154), so frame iframes render out of the
-  editor's process. Linking the CEF runtime makes `build.rs` set `cfg(chromium)`, which selects the
-  runtime in `main()` and disables self-update; menu types go through `ShellRuntime`. Run it with
-  `bun run dev:chromium` or `build:chromium` in `desktop/` (Tauri 3 CLI, needs cmake + ninja); see
-  `desktop/README.md`.
+  editor's process. Same name, bundle id and executable as the WebKit app it replaces, so the
+  WebKit app updates into it. Linking the CEF runtime makes `build.rs` set `cfg(chromium)`, which
+  selects the runtime in `main()`, keeps the profile in `Application Support/design.doop.desktop/cef`
+  (`cef-dev` for debug builds) and, on the first launch, moves the WebKit app's cookies and
+  localStorage over (`src/webkit_migration.rs`, read in-process through WebKit's own API); menu
+  types go through `ShellRuntime`. Run it with `bun run dev:chromium` or `build:chromium` in
+  `desktop/` (Tauri 3 CLI, needs cmake + ninja); see `desktop/README.md`.
 - Interface language (`src/lib/i18n/`, no library): English (`en/`, the source catalog, one
   `as const` namespace per area) and Brazilian Portuguese (`pt-BR/`, typed `Catalog`, so a missing
   key fails typecheck). Components call `useT()` and `t('namespace.key', vars)`; `{name}`

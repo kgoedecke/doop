@@ -4,8 +4,11 @@
 # tauri-runtime-cef is what switches the code over: build.rs sees the runtime
 # and sets `cfg(chromium)` (see the cfg(chromium) blocks in main.rs).
 #
-# Tauri 3 and its CEF runtime are alphas; this build is opt-in and nothing
-# releases it. Keep the shared dependencies below in step with ../src-tauri.
+# On macOS this is the app that ships: the release workflow builds it as
+# `doop` (design.doop.desktop), the same bundle the WebKit build was, so the
+# WebKit app updates into it in place. Windows and Linux stay on the WebKit
+# build. Tauri 3 and its CEF runtime are alphas, pinned exactly. Keep the
+# shared dependencies below in step with ../src-tauri.
 [package]
 name = "doop-desktop-chromium"
 version = "0.12.0"
@@ -14,8 +17,10 @@ edition = "2021"
 build = "../src-tauri/build.rs"
 autobins = false
 
+# the executable keeps the WebKit app's name: the updater relaunches the
+# bundle by its old executable path once it has swapped the bundle
 [[bin]]
-name = "doop-desktop-chromium"
+name = "doop-desktop"
 path = "../src-tauri/src/main.rs"
 
 [build-dependencies]
@@ -36,6 +41,11 @@ tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
+# reading the WebKit app's cookies and localStorage on the first launch (src/webkit_migration.rs)
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSGeometry", "NSHTTPCookie", "NSString", "NSURL", "block2"] }
+objc2-web-kit = { version = "0.3", features = ["WKHTTPCookieStore", "WKNavigation", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "block2", "objc2-app-kit"] }
 
 [profile.release]
 strip = true

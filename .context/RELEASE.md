@@ -87,14 +87,18 @@ in `.github/actions/setup-desktop`:
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
-- The Chromium (CEF) shell in `desktop/src-tauri-chromium` is not released: no workflow builds,
-  signs or publishes it, and it never self-updates. release-please bumps its `tauri.conf.json`
-  and `Cargo.toml` with the WebKit shell's. Build it locally with
-  `bun run build:chromium` in `desktop/` (macOS, cmake + ninja installed): an arm64 `doop Chromium.app` and DMG under
-  `src-tauri-chromium/target/release/bundle/`, unsigned unless `APPLE_SIGNING_IDENTITY` is
-  set. Shipping it would need its own job on a macOS runner (CEF cached under
-  `~/Library/Caches/tauri-cef`), signing and notarizing the framework and its five helper apps
-  with the JIT entitlements, its own updater feed, and a Chromium security-update cadence.
+- The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux
+  stay on the WebKit build. It ships as `doop` / `design.doop.desktop` with the executable
+  `doop-desktop`, exactly as the WebKit app did, so the updater swaps the bundle in place and
+  relaunches it by its old path. `dmg-macos` builds it universal with the Tauri 3 CLI
+  (`bun run build:chromium`, ninja from brew, CEF cached under `~/Library/Caches/tauri-cef`),
+  which signs and notarizes CEF's framework and five helper apps with the JIT entitlements; its
+  `doop.app.tar.gz` is the feed's macOS entry, as before. The first Chromium launch brings the
+  WebKit app's cookies and localStorage over (`src/webkit_migration.rs`), so the switch keeps
+  people signed in. Each Chromium security release needs a CEF bump (`tauri-runtime-cef`) and a
+  desktop release. Rolling back means publishing a WebKit macOS build with a higher version to
+  the feed; it starts from its old WebKit store, as it was before the switch.
+  release-please bumps the Chromium `tauri.conf.json` and `Cargo.toml` with the WebKit shell's.
 
 ## Claude Desktop extension
 
