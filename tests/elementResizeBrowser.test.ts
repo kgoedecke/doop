@@ -675,8 +675,8 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
       )
 
     await select('#box')
-    /* the document starts inside the surface's border: the outline sits on
-       the element's own box, as it does when the element fits the frame */
+    /* the outline sits on the element's own box, as it does when the
+       element fits the frame */
     const doc = await box('iframe')
     const outline = await box('[data-element-outline]')
     expect(outline.left).toBeCloseTo(doc.left + 20, 0)
