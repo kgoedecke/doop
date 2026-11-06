@@ -8,10 +8,12 @@ import { api } from './api'
  * rail row away; the page still refetches on arrival and replaces it.
  *
  * Every fetch is its own request: a refresh after an edit must not ride on
- * one that left before the edit. Each is numbered, and an answer older than
- * the one already kept never replaces it.
+ * one that left before the edit. Each is numbered, and an answer (or a
+ * failure) older than the one already kept never replaces it.
  */
-const details = new Map<string, { detail: WorkspaceDetail; seq: number }>()
+/* a failed fetch leaves `detail: null` at its number, so an older answer
+   landing after it cannot bring the dropped detail back */
+const details = new Map<string, { detail: WorkspaceDetail | null; seq: number }>()
 const warming = new Set<string>()
 let lastSeq = 0
 
@@ -22,12 +24,15 @@ export function cachedWorkspace(id: string): WorkspaceDetail | null {
 /** Fetches a workspace's detail afresh and keeps it unless a newer answer already landed. */
 export async function fetchWorkspace(id: string): Promise<WorkspaceDetail> {
   const seq = ++lastSeq
+  const keep = (detail: WorkspaceDetail | null) => {
+    if (seq > (details.get(id)?.seq ?? 0)) details.set(id, { detail, seq })
+  }
   try {
     const detail = await api.getWorkspace(id)
-    if (seq > (details.get(id)?.seq ?? 0)) details.set(id, { detail, seq })
+    keep(detail)
     return detail
   } catch (error) {
-    details.delete(id)
+    keep(null)
     throw error
   }
 }
