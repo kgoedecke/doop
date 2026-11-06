@@ -8,6 +8,7 @@ import { Button } from './ui/button'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { cn } from '@/lib/utils'
 import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
+import type { RunnerProvider } from '../../shared/agentRunner'
 import { t as translate, useT, type Translate } from '../lib/i18n'
 
 /**
@@ -36,18 +37,25 @@ export function isResidentLimit(err: unknown): boolean {
 }
 
 /** Which of their own accounts the agent runs on, as one line. */
-function byoText(allowance: Allowance, t: Translate): string {
-  if (allowance.byoKind === 'gemini-cloud') return t('home.meterGeminiCloud')
-  if (allowance.byoKind === 'claude-local') return t('home.meterClaudeLocal')
-  if (allowance.byoKind === 'chatgpt' || !allowance.byoKind) return t('home.meterChatgpt')
-  return t('home.meterProviderKey', { provider: ACCOUNT_KIND_LABELS[allowance.byoKind] })
+function byoText(allowance: Allowance, t: Translate, provider: RunnerProvider | undefined): string {
+  const kind = provider ?? allowance.byoKind
+  if (kind === 'gemini-cloud') return t('home.meterGeminiCloud')
+  if (kind === 'claude-local') return t('home.meterClaudeLocal')
+  if (kind === 'chatgpt' || !kind) return t('home.meterChatgpt')
+  return t('home.meterProviderKey', { provider: ACCOUNT_KIND_LABELS[kind] })
 }
 
 /** The meter as one plain sentence, for a tooltip. A component passes its
- *  own `useT()` translator so the line follows a language switch. */
-export function meterText(allowance: Allowance | null, t: Translate = translate): string | null {
+ *  own `useT()` translator so the line follows a language switch, and the
+ *  composer passes the connection it picked, since that is what its next
+ *  task runs on rather than the Settings default. */
+export function meterText(
+  allowance: Allowance | null,
+  t: Translate = translate,
+  provider?: RunnerProvider,
+): string | null {
   if (!allowance) return null
-  if (allowance.byoModel) return byoText(allowance, t)
+  if (allowance.byoModel) return byoText(allowance, t, provider)
   if (allowance.limit <= 0) return t('home.meterNoFreeTier')
   const left = Math.max(0, allowance.limit - allowance.used)
   return left === 0 ? t('home.meterUsedUp') : t('home.meterLeft', { left, count: allowance.limit })
@@ -59,7 +67,7 @@ export function MeterLine({ allowance }: { allowance: Allowance | null }) {
   /* their own account is behind the agent now — say so instead of counting,
      and say it even where there is no free tier to count (limit 0) */
   if (allowance.byoModel) {
-    return <span className="text-[12px] text-success-ink">{byoText(allowance, t)}</span>
+    return <span className="text-[12px] text-success-ink">{byoText(allowance, t, undefined)}</span>
   }
   /* no free tier on this server: say what connecting gets them instead of
      counting tasks that don't exist */

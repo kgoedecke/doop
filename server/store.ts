@@ -4,6 +4,8 @@ import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
+import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
+import type { DesignToken } from '../shared/designTokens.ts'
 import type {
   Canvas,
   CanvasGuide,
@@ -165,17 +167,20 @@ class Store {
     const canvasId = nanoid(10)
     const sourceFrames = options.dropDemo ? source.frames.filter((frame) => !frame.demo) : source.frames
     const frameIds = new Map(sourceFrames.map((frame) => [frame.id, nanoid(10)]))
+    /* the copies share one createdAt, so each keeps its place in the stack */
     const frames = sourceFrames.map((frame) => ({
       ...frame,
       id: frameIds.get(frame.id)!,
       html: remapFrameTargets(frame.html, frameIds),
       approval: null,
+      z: stackOf(frame),
       canvasId,
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
     }))
     const guidelines = source.guidelines?.map((doc) => ({ ...doc, updatedAt: now, updatedBy: by }))
+    const tokens = source.tokens?.map((token) => ({ ...token, updatedAt: now, updatedBy: by }))
     const references = source.references?.map((ref) => ({
       ...ref,
       id: nanoid(10),
@@ -197,6 +202,8 @@ class Store {
       ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
+      ...(tokens?.length ? { tokens } : {}),
+      ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
     await persist.saveCanvasCopy(canvas)
@@ -240,6 +247,7 @@ class Store {
       id: nanoid(10),
       name: copyPageName(source.name, names(pages)),
       ...(start ? { startFrameId: start } : {}),
+      ...(source.background ? { background: source.background } : {}),
     }
     /* links within the page follow the copy; links to other pages stay */
     const frames: Frame[] = sourceFrames.map((frame) => ({
@@ -248,6 +256,7 @@ class Store {
       html: remapFrameTargets(frame.html, frameIds),
       pageId: page.id,
       approval: null,
+      z: stackOf(frame),
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
@@ -273,6 +282,7 @@ class Store {
     canvas.pages = [...live]
     canvas.pages.splice(at === -1 ? live.length : at + 1, 0, page)
     canvas.frames.push(...frames)
+    canvas.frames.sort(byStack)
     for (const frame of frames) this.frameIndex.set(frame.id, canvasId)
     /* guides placed while the copy was being written stay alongside; the
        copy keeps only as many of its own as the limit still has room for */
@@ -302,11 +312,16 @@ class Store {
       }
     }
     /* a page-list save renames, reorders, adds or deletes pages — it never
-       moves a flow start, which only setFlowStart changes */
+       moves a flow start or recolours a page, which only setFlowStart and
+       setPageBackground change */
     const current = canvasPages(canvas)
-    const merged = pages.map(({ startFrameId: _ignored, ...page }) => {
-      const startFrameId = current.find((p) => p.id === page.id)?.startFrameId
-      return startFrameId ? { ...page, startFrameId } : page
+    const merged = pages.map(({ startFrameId: _start, background: _background, ...page }) => {
+      const kept = current.find((p) => p.id === page.id)
+      return {
+        ...page,
+        ...(kept?.startFrameId ? { startFrameId: kept.startFrameId } : {}),
+        ...(kept?.background ? { background: kept.background } : {}),
+      }
     })
     canvas.pages = merged
     /* a deleted page takes its guides with it */
@@ -328,6 +343,22 @@ class Store {
       if (page.id !== pageId) return page
       const { startFrameId: _previous, ...rest } = page
       return frameId ? { ...rest, startFrameId: frameId } : rest
+    })
+    canvas.updatedAt = Date.now()
+    persist.saveCanvas(canvas)
+    return canvas.pages
+  }
+
+  /** Set (a `#rrggbb`) or clear (null) a page's own canvas colour. */
+  setPageBackground(canvasId: string, pageId: string, background: string | null) {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return undefined
+    const pages = canvasPages(canvas)
+    if (!pages.some((p) => p.id === pageId)) return undefined
+    canvas.pages = pages.map((page) => {
+      if (page.id !== pageId) return page
+      const { background: _previous, ...rest } = page
+      return background ? { ...rest, background } : rest
     })
     canvas.updatedAt = Date.now()
     persist.saveCanvas(canvas)
@@ -565,6 +596,128 @@ class Store {
     return true
   }
 
+  getTokens(canvasId: string): DesignToken[] {
+    return this.canvases.get(canvasId)?.tokens ?? []
+  }
+
+  /** Upsert tokens by name: a new one lands at the end of its canvas's
+   *  order, an existing one keeps its place unless the patch moves it. */
+  setTokens(
+    canvasId: string,
+    inputs: (Pick<DesignToken, 'name' | 'type' | 'value'> & {
+      themes?: Record<string, string>
+      description?: string
+      order?: number
+    })[],
+    by: string,
+  ): DesignToken[] | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    const tokens = (c.tokens ??= [])
+    const now = Date.now()
+    const written: DesignToken[] = []
+    for (const input of inputs) {
+      let token = tokens.find((t) => t.name === input.name)
+      if (token) {
+        token.type = input.type
+        token.value = input.value
+        token.themes = input.themes && Object.keys(input.themes).length ? input.themes : undefined
+        token.description = input.description || undefined
+        if (input.order !== undefined) token.order = input.order
+        token.updatedAt = now
+        token.updatedBy = by
+      } else {
+        const last = tokens.reduce((max, t) => Math.max(max, t.order), 0)
+        token = {
+          name: input.name,
+          type: input.type,
+          value: input.value,
+          ...(input.themes && Object.keys(input.themes).length ? { themes: input.themes } : {}),
+          ...(input.description ? { description: input.description } : {}),
+          order: input.order ?? last + 1,
+          updatedAt: now,
+          updatedBy: by,
+        }
+        tokens.push(token)
+      }
+      persist.saveToken(canvasId, token)
+      written.push(token)
+    }
+    tokens.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return written
+  }
+
+  /** Rename a token in place: its order and description ride along. */
+  renameToken(canvasId: string, name: string, newName: string, by: string): DesignToken | undefined {
+    const c = this.canvases.get(canvasId)
+    const token = c?.tokens?.find((t) => t.name === name)
+    if (!c || !token) return undefined
+    persist.deleteToken(canvasId, name)
+    token.name = newName
+    token.updatedAt = Date.now()
+    token.updatedBy = by
+    persist.saveToken(canvasId, token)
+    c.updatedAt = token.updatedAt
+    persist.saveCanvas(c)
+    return token
+  }
+
+  getTokenThemes(canvasId: string): string[] {
+    return this.canvases.get(canvasId)?.tokenThemes ?? []
+  }
+
+  /** Replace the theme list; tokens drop the values of themes that left. */
+  setTokenThemes(canvasId: string, themes: string[], by: string): string[] | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    c.tokenThemes = themes.length ? [...themes] : undefined
+    const now = Date.now()
+    for (const token of c.tokens ?? []) {
+      if (!token.themes) continue
+      const kept = Object.fromEntries(Object.entries(token.themes).filter(([theme]) => themes.includes(theme)))
+      if (Object.keys(kept).length === Object.keys(token.themes).length) continue
+      token.themes = Object.keys(kept).length ? kept : undefined
+      token.updatedAt = now
+      token.updatedBy = by
+      persist.saveToken(canvasId, token)
+    }
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return themes
+  }
+
+  /** Rename a theme: the list entry and every token's value under it. */
+  renameTokenTheme(canvasId: string, from: string, to: string, by: string): boolean {
+    const c = this.canvases.get(canvasId)
+    if (!c || !c.tokenThemes?.includes(from)) return false
+    c.tokenThemes = c.tokenThemes.map((theme) => (theme === from ? to : theme))
+    const now = Date.now()
+    for (const token of c.tokens ?? []) {
+      if (!token.themes || !(from in token.themes)) continue
+      const { [from]: moved, ...rest } = token.themes
+      token.themes = { ...rest, ...(moved === undefined ? {} : { [to]: moved }) }
+      token.updatedAt = now
+      token.updatedBy = by
+      persist.saveToken(canvasId, token)
+    }
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return true
+  }
+
+  deleteToken(canvasId: string, name: string): boolean {
+    const c = this.canvases.get(canvasId)
+    const idx = c?.tokens?.findIndex((t) => t.name === name) ?? -1
+    if (!c || idx === -1) return false
+    c.tokens!.splice(idx, 1)
+    c.updatedAt = Date.now()
+    persist.deleteToken(canvasId, name)
+    persist.saveCanvas(c)
+    return true
+  }
+
   getReferences(canvasId: string): MemoryReference[] {
     return this.canvases.get(canvasId)?.references ?? []
   }
@@ -616,6 +769,9 @@ class Store {
       demo?: boolean
       hidden?: boolean
       locked?: boolean
+      /** where it stacks (undo brings a deleted frame back to its place);
+       *  in front of everything on the page when unset */
+      z?: number
     },
     by: string,
   ): Frame | undefined {
@@ -646,11 +802,13 @@ class Store {
       createdAt: now,
       updatedAt: now,
       updatedBy: by,
+      z: input.z ?? frontOf(frames) ?? now,
     }
     if (input.demo) frame.demo = true
     if (input.hidden) frame.hidden = true
     if (input.locked) frame.locked = true
     c.frames.push(frame)
+    c.frames.sort(byStack)
     c.updatedAt = now
     this.frameIndex.set(frame.id, canvasId)
     persist.saveFrame(frame, true)
@@ -661,7 +819,7 @@ class Store {
   updateFrame(
     frameId: string,
     patch: Partial<
-      Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'approval'>
+      Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z' | 'approval'>
     >,
     by: string,
     opts: {
@@ -680,7 +838,12 @@ class Store {
     const designChanged =
       !opts.annotation &&
       (['html', 'width', 'height'] as const).some((key) => patch[key] !== undefined && patch[key] !== frame[key])
+    const c = this.canvases.get(frame.canvasId)!
+    /* a frame moved to another page lands in front there, as Figma does */
+    if (patch.pageId !== undefined && patch.pageId !== frame.pageId && patch.z === undefined)
+      patch = { ...patch, z: frontOf(pageFrames(c, patch.pageId)) ?? frame.z }
     Object.assign(frame, patch)
+    if (patch.z !== undefined) c.frames.sort(byStack)
     // All writers (including streams, sync and restores) invalidate sign-off.
     if (designChanged && frame.approval?.status === 'ready_for_dev') {
       frame.approval = { ...frame.approval, status: 'needs_review' }
@@ -688,7 +851,6 @@ class Store {
     // Also serves as the optimistic-save version, including writes in the same millisecond.
     frame.updatedAt = Math.max(Date.now(), frame.updatedAt + 1)
     frame.updatedBy = by
-    const c = this.canvases.get(frame.canvasId)!
     c.updatedAt = frame.updatedAt
     persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
     persist.saveCanvas(c)

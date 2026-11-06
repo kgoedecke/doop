@@ -6,8 +6,16 @@ export const settings = {
   canvases: 'Canvases',
   canvas: 'Canvas',
 
+  generalTitle: 'General',
+  generalBlurb: 'Make Doop work the way you like in this browser.',
+  homeDashboardTitle: 'Home dashboard',
+  homeDashboardDescription: 'Choose what appears on your home dashboard in this browser.',
+  showPromptBox: 'Show Prompt Box',
+  showPromptBoxHint: 'Start a design from a prompt on the home dashboard.',
   agentTitle: 'Doop Agent',
-  agentBlurb: 'Which model account the agent runs on, for every canvas you work on.',
+  agentBlurb: 'Your connections, and the one the agent runs on when nobody picks: comments, @mentions and automations.',
+  fontsTitle: 'Fonts',
+  fontsBlurb: 'Your own fonts, for designing on your personal canvases.',
   keysTitle: 'Agent keys',
   keysBlurb: 'Bearer credentials that let headless agents design as you.',
   webhooksTitle: 'Webhooks',
@@ -19,13 +27,8 @@ export const settings = {
   appearanceBlurb:
     'How Doop looks in this browser: light or dark, the language it speaks, and how the canvas editor lays out its panels.',
 
-  agentCardDescription:
-    'Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your desktop. Your provider’s usage limits and charges apply.',
   freeTasksLeftLabel: 'Free Doop Agent tasks left',
   meterGeminiCloud: 'Gemini cloud pilot selected — connection managed by your operator.',
-  meterClaudeLocal: 'Claude CLI selected — runs on your connected desktop.',
-  meterChatgpt: 'Running on your ChatGPT subscription.',
-  meterProviderKey: 'Running on your {provider} key.',
   meterNoFreeTasks: 'No free tasks on this server — connect an account to use the Doop Agent.',
   meterUsedUp: 'Your free tasks are used up.',
   meterLeft: { one: '{left} of {count} free task left.', other: '{left} of {count} free tasks left.' },

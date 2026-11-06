@@ -8,6 +8,7 @@ import { MenuButton } from '@/components/ui/menu-button'
 import { Pressable } from '@/components/ui/pressable'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { StepSlider } from '@/components/ui/step-slider'
 import { Toolbar, ToolbarControl, ToolbarDot } from '@/components/ui/toolbar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
@@ -297,6 +298,26 @@ function SelectDemo() {
 
 /** One value from a short list. `value=""` shows the placeholder; no item may use the empty string. */
 export const Selects: Story = { name: 'Select', render: () => <SelectDemo /> }
+
+const EFFORTS = [
+  { id: 'low', name: 'Low' },
+  { id: 'medium', name: 'Medium' },
+  { id: 'high', name: 'High' },
+  { id: 'xhigh', name: 'Extra high' },
+  { id: 'max', name: 'Max' },
+]
+
+/* one pick from a short ordered scale: the reasoning effort in a model dropdown */
+function StepSliderDemo() {
+  const [effort, setEffort] = useState('high')
+  return (
+    <div className="w-[300px]">
+      <StepSlider label="Reasoning effort" steps={EFFORTS} value={effort} onValueChange={setEffort} />
+    </div>
+  )
+}
+
+export const StepSliders: Story = { name: 'StepSlider', render: () => <StepSliderDemo /> }
 
 /** The canvas editor's floating toolbar. `vertical` is the 40px column pinned
  *  to the editor's sides (and the automation editor's collapsed Runs panel);

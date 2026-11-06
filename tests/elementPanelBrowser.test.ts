@@ -16,7 +16,10 @@ declare global {
       select: (selector: string) => void
       selectFrame: () => void
       deselect: () => void
+      panelOpen: () => boolean
       picked: () => string[]
+      pickAlso: (selector: string) => void
+      nudge: (dx: number, dy: number) => boolean
       setTool: (tool: 'select' | 'hand') => void
       setZoom: (zoom: number) => void
       undo: () => Promise<void>
@@ -30,6 +33,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   let browser: TestBrowser
   let page: Page
   let saved: Frame
+  const framePatches: Partial<Frame>[] = []
   let seedId = 0
   let uploadStatus = 200
   let uploadGate: Promise<void> | null = null
@@ -64,8 +68,21 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
       }
       // The delayed-font test releases this stylesheet after the panel's first read.
       if (new URL(request.url()).pathname === '/tests/fixtures/late-font.css') return
+      if (new URL(request.url()).pathname === '/api/canvases/c/tokens' && request.method() === 'POST') {
+        const { tokens } = JSON.parse(request.postData()!)
+        await request.respond({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            results: tokens.map((t: { name: string }) => ({ name: t.name, result: 'created' })),
+            tokens,
+          }),
+        })
+        return
+      }
       if (new URL(request.url()).pathname === '/api/frames/f' && request.method() === 'PATCH') {
-        saved = { ...saved, ...JSON.parse(request.postData()!) }
+        framePatches.push(JSON.parse(request.postData()!))
+        saved = { ...saved, ...framePatches.at(-1) }
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
       } else await request.continue()
     })
@@ -122,11 +139,12 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     ).toBe(1)
     expect(await page.$eval('[aria-label="Align left"]', (el) => el.getAttribute('data-state'))).toBe('on')
 
-    await page.select(selector, 'Georgia, serif')
-    await frame.waitForFunction(
-      () => getComputedStyle(document.querySelector('#text')!).fontFamily === 'Georgia, serif',
-    )
-    await expect.poll(() => saved.html).toContain('font-family: Georgia, serif')
+    await page.select(selector, '"Lora", serif')
+    await frame.waitForFunction(() => getComputedStyle(document.querySelector('#text')!).fontFamily === 'Lora, serif')
+    await expect.poll(() => saved.html).toContain('font-family: Lora, serif')
+    /* a hosted font rides along as its stylesheet link */
+    await expect.poll(() => saved.html).toContain('data-doop-webfonts')
+    expect(saved.html).toContain('family=Lora:')
     await page.evaluate(() => window.elementPanelHarness.undo())
     await page.waitForFunction(
       (value) => document.querySelector<HTMLSelectElement>('select[aria-label="Font family"]')?.value === value,
@@ -144,7 +162,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await frame.waitForFunction(() =>
       getComputedStyle(document.querySelector('#text')!).fontFamily.includes('Display Face'),
     )
-    await page.select(selector, 'Georgia, serif')
+    await page.select(selector, '"Lora", serif')
     await page.click('[aria-label="Align center"]')
     await frame.waitForFunction(() => getComputedStyle(document.querySelector('#text')!).textAlign === 'center')
     await page.keyboard.press('ArrowRight')
@@ -993,7 +1011,7 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
   }
 
   async function startScrub(label: string) {
-    const unit = (await page.$(`label:has(input[aria-label="${label}"]) > span:last-child`))!
+    const unit = (await page.$(`label:has(input[aria-label="${label}"]) > span[data-unit]`))!
     await unit.scrollIntoView()
     expect(await unit.evaluate((el) => getComputedStyle(el).cursor)).toBe('ew-resize')
     const box = (await unit.boundingBox())!
@@ -1040,6 +1058,28 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await expect.poll(() => saved.html).toContain('translate: -20px 5px')
     await page.evaluate(() => window.elementPanelHarness.undo())
     await frame.waitForFunction(() => (document.querySelector('#box') as HTMLElement).style.translate === '10px 5px')
+  }, 15_000)
+
+  it('scrubs a fractional position onto whole values, zoomed in too', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+        body { margin: 0 } #box { width: 120px; height: 80px }
+      </style></head><body><div id="box" style="translate: 9.94px 5px">Move</div></body></html>`,
+      '#box',
+    )
+    await page.waitForFunction(
+      () => document.querySelector<HTMLInputElement>('[aria-label="X position"]')?.value === '9.94',
+    )
+    await page.evaluate(() => window.elementPanelHarness.setZoom(2.5))
+    const point = await startScrub('X position')
+    for (let i = 1; i <= 12; i++) await page.mouse.move(point.x + 3 + i * 0.5, point.y)
+    await frame.waitForFunction(() => (document.querySelector('#box') as HTMLElement).style.translate === '19px 5px')
+    await page.mouse.up()
+    await expect.poll(() => saved.html).toContain('translate: 19px 5px')
+    await page.waitForFunction(
+      () => document.querySelector<HTMLInputElement>('[aria-label="X position"]')?.value === '19',
+    )
+    await page.evaluate(() => window.elementPanelHarness.setZoom(1))
   }, 15_000)
 
   it('scrubs live in both directions, saves, and undoes/redoes the edit', async () => {
@@ -1366,6 +1406,117 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     15_000,
   )
 
+  it('adds up a fast run of nudges sent before any of them lands', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #nudged { position: absolute; left: 20px; top: 30px; width: 120px; height: 40px }
+    </style></head><body><div id="nudged"></div></body></html>`,
+      '#nudged',
+    )
+    await page.evaluate(() =>
+      Promise.all(
+        Array.from({ length: 5 }, () =>
+          window.elementPanelHarness.geometry('#nudged', { kind: 'nudge', dx: 1, dy: -10 }),
+        ),
+      ),
+    )
+    const position = () => frame.$eval('#nudged', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
+    expect(await position()).toEqual([25, -20])
+    await expect.poll(() => saved.html).toContain('translate: 5px -50px')
+    await page.evaluate(() => window.elementPanelHarness.undo())
+    await expect.poll(position).toEqual([20, 30])
+  })
+
+  it('nudges every picked element once, a picked child only with its parent, even one added by a script', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #a, #b, #inner { position: absolute; width: 120px; height: 40px }
+      #a { left: 20px; top: 30px }
+      #b { left: 200px; top: 30px }
+      #inner { left: 10px; top: 10px }
+    </style></head><body><div id="a"></div><div id="b"></div>
+    <script>document.getElementById('a').appendChild(Object.assign(document.createElement('div'), { id: 'inner' }))</script>
+    </body></html>`,
+      '#a',
+    )
+    await page.evaluate(() => {
+      window.elementPanelHarness.pickAlso('#inner')
+      window.elementPanelHarness.pickAlso('#b')
+      window.elementPanelHarness.nudge(3, 4)
+    })
+    const position = (selector: string) =>
+      frame.$eval(selector, (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
+    await expect.poll(() => position('#b')).toEqual([203, 34])
+    expect(await position('#a')).toEqual([23, 34])
+    expect(await position('#inner')).toEqual([33, 44])
+  })
+
+  it('nudges a picked child whose picked parent cannot move', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #wrap { display: contents }
+      #inner { position: absolute; left: 20px; top: 30px; width: 120px; height: 40px }
+    </style></head><body><div id="wrap"><div id="inner"></div></div></body></html>`,
+      '#inner',
+    )
+    await page.evaluate(() => {
+      window.elementPanelHarness.pickAlso('#wrap')
+      window.elementPanelHarness.nudge(3, 4)
+    })
+    await expect
+      .poll(() => frame.$eval('#inner', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y]))
+      .toEqual([23, 34])
+  })
+
+  it('undoes a nudge whose save is still pending', async () => {
+    const frame = await seedPanel(
+      `<!doctype html><html><head><style>
+      body { margin: 0 }
+      #nudged { position: absolute; left: 20px; top: 30px; width: 120px; height: 40px }
+    </style></head><body><div id="nudged"></div></body></html>`,
+      '#nudged',
+    )
+    await page.evaluate(async () => {
+      window.elementPanelHarness.nudge(0, 7)
+      await window.elementPanelHarness.undo()
+    })
+    const position = () => frame.$eval('#nudged', (el) => [el.getBoundingClientRect().x, el.getBoundingClientRect().y])
+    await expect.poll(position).toEqual([20, 30])
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(await position()).toEqual([20, 30])
+    expect(saved.html).not.toContain('translate: 0px 7px')
+  })
+
+  it('keeps the element picked when its panel is closed', async () => {
+    await seedPanel(
+      `<!doctype html><html><head><style>#box { width: 120px; height: 40px }</style></head><body><div id="box"></div></body></html>`,
+      '#box',
+    )
+    await page.click('button[aria-label="Close"]')
+    await page.waitForSelector('[aria-label="Width"]', { hidden: true })
+    expect(await page.evaluate(() => window.elementPanelHarness.panelOpen())).toBe(false)
+    expect(await page.evaluate(() => window.elementPanelHarness.picked())).toEqual(['#box'])
+    /* picking it again reopens the panel */
+    await page.evaluate(() => window.elementPanelHarness.select('#box'))
+    await page.waitForSelector('[aria-label="Width"]')
+  })
+
+  it('leaves a standalone canvas element in place', async () => {
+    saved = { ...saved, html: '<body data-doop-canvas-element="rect"><div id="shape"></div></body>' }
+    framePatches.length = 0
+    const handled = await page.evaluate((frame) => {
+      window.elementPanelHarness.seed(frame)
+      window.elementPanelHarness.select('#shape')
+      return window.elementPanelHarness.nudge(-10, 1)
+    }, saved)
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(handled).toBe(false)
+    expect(framePatches).toEqual([])
+  })
+
   it('preserves stylesheet-derived image dimensions when unlinking', async () => {
     const src = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>')}`
     const frame = await seedScrubTarget('', {
@@ -1414,4 +1565,33 @@ describe.skipIf(!findBrowserPath())('element design controls', () => {
     await frame.waitForFunction(() => (document.querySelector('#scrub') as HTMLElement).style.aspectRatio === '80 / 40')
     await expect.poll(() => saved.html).toContain('aspect-ratio: 80 / 40')
   }, 15_000)
+  it("creates a token from a field with that field's value, and binds the field", async () => {
+    const frame = await seedScrubTarget()
+    await page.click('label:has(input[aria-label="Corner radius"]) button[aria-label="Use a token"]')
+    await page.click('[data-slot="popover-content"] button[aria-label="Create a token from this value"]')
+    const name = await page.waitForSelector('[data-slot="popover-content"] input[aria-label="New token name"]')
+    /* the field's value is what the token is made from, and it can be edited first */
+    expect(
+      await page.$eval(
+        '[data-slot="popover-content"] input[aria-label="Value"]',
+        (el) => (el as HTMLInputElement).value,
+      ),
+    ).toBe('3px')
+    /* the name comes prefilled (radius-1); replace it */
+    await name!.click({ count: 3 })
+    await name!.type('card')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => !document.querySelector('[data-slot="popover-content"]'), { timeout: 10_000 })
+    await frame.waitForFunction(
+      () => (document.querySelector('#scrub') as HTMLElement).style.getPropertyValue('border-radius') === 'var(--card)',
+    )
+    await expect.poll(() => saved.html).toContain('border-radius: var(--card)')
+    /* bound: the field shows the token's name, and the broken chain detaches it */
+    await page.waitForSelector('label:has(span[title="Bound to card"])')
+    await page.click('button[aria-label="Detach from card"]')
+    /* detached to the computed literal (the fixture's frame carries no token block, so 0px here) */
+    await frame.waitForFunction(
+      () => !(document.querySelector('#scrub') as HTMLElement).style.getPropertyValue('border-radius').includes('var('),
+    )
+  }, 20_000)
 })

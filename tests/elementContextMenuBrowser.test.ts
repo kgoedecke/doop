@@ -14,6 +14,7 @@ declare global {
       updateHtml: (html: string) => void
       selectMany: (ids: string[]) => void
       undo: () => Promise<void>
+      redo: () => Promise<void>
     }
   }
 }
@@ -140,6 +141,77 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     expect(errors).toEqual([])
   })
 
+  it.each(['frame', 'image'])('renames a %s from the Layers panel without losing editor focus', async (kind) => {
+    if (kind === 'image') {
+      saved = {
+        ...saved,
+        html: '<body data-doop-canvas-element="true"><img id="photo" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /></body>',
+      }
+      await page.evaluate((frame) => window.contextMenuHarness.seed([frame]), saved)
+    }
+    const row = kind === 'image' ? '[data-row-key="f|#photo"]' : '[role="treeitem"][data-row-key="f"]'
+    const editor = 'input[aria-label="Item name"]'
+    await page.click(`${row} > span:nth-of-type(3)`, { count: 2 })
+    await page.waitForSelector(editor)
+    await page.keyboard.type('Double-click name')
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(
+      (row) => document.querySelector(row)?.textContent?.includes('Double-click name'),
+      {},
+      row,
+    )
+    await expect.poll(() => saved.name).toBe('Double-click name')
+
+    await page.click(row, { button: 'right' })
+    await choose('Rename')
+    await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
+    await page.keyboard.type('Menu name')
+    await page.keyboard.press('Tab')
+    await expect.poll(() => saved.name).toBe('Menu name')
+    await page.evaluate(() => window.contextMenuHarness.undo())
+    await page.waitForFunction(
+      (row) => document.querySelector(row)?.textContent?.includes('Double-click name'),
+      {},
+      row,
+    )
+  })
+
+  it.each(['#photo', '#text', '#box'])(
+    'renames nested layer %s and restores its name after reload',
+    async (selector) => {
+      saved.html = saved.html.replace(
+        '</body>',
+        '<img id="photo" alt="Original alt" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" /></body>',
+      )
+      await page.evaluate((frame) => window.contextMenuHarness.seed([frame]), saved)
+      await (await frameDoc())!.waitForSelector('#photo')
+      await page.click('[role="treeitem"][data-row-key="f"]')
+      const row = `[data-row-key="f|${selector}"]`
+      const editor = 'input[aria-label="Item name"]'
+      await page.click(`${row} > span:nth-of-type(3)`, { count: 2 })
+      await page.waitForSelector(editor)
+      await page.keyboard.type('Nested label')
+      await page.keyboard.press('Enter')
+      await expect.poll(() => saved.html).toContain('data-doop-name="Nested label"')
+      const doc = (await frameDoc())!
+      await doc.waitForSelector(`${selector}[data-doop-name="Nested label"]`)
+      expect(await doc.$eval('#text', (el) => el.textContent)).toBe('Second element')
+      expect(await doc.$eval('#photo', (el) => el.getAttribute('alt'))).toBe('Original alt')
+
+      await page.click(row, { button: 'right' })
+      await choose('Rename')
+      await page.waitForFunction((selector) => document.activeElement === document.querySelector(selector), {}, editor)
+      await page.keyboard.type('Saved label')
+      await page.keyboard.press('Enter')
+      await expect.poll(() => saved.html).toContain('data-doop-name="Saved label"')
+      await page.reload()
+      await page.waitForFunction(() => !!window.contextMenuHarness)
+      await page.evaluate((frame) => window.contextMenuHarness.seed([frame]), saved)
+      await page.click('[role="treeitem"][data-row-key="f"]')
+      await page.waitForFunction((row) => document.querySelector(row)?.textContent?.includes('Saved label'), {}, row)
+    },
+  )
+
   it('opens the frame menu only from its title, and targets the clicked element', async () => {
     await page.click('[data-frame-title]', { button: 'right' })
     expect(await items()).toContain('Delete frame')
@@ -154,6 +226,9 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
       'Copy HTML',
       'Copy selector',
       'Copy link to element',
+      'Export as PNG',
+      'Export as JPG',
+      'Copy as PNG',
       'Move up',
       'Move down',
       'Lock',
@@ -215,6 +290,31 @@ describe.skipIf(!findBrowserPath())('frame and element context menus', () => {
     expect(await page.evaluate(() => window.contextMenuHarness.selection())).toEqual({ frameId: 'f', selector: '#art' })
     await choose('Lock')
     await expect.poll(() => saved.html).toContain('<svg id="art" width="80" height="50" data-doop-locked="true">')
+  })
+
+  it('keeps rename undo and redo in sync with an actively edited text layer', async () => {
+    const doc = (await frameDoc())!
+    const box = await (await doc.$('#text'))!.boundingBox()
+    await page.mouse.click(box!.x + 20, box!.y + 10, { count: 2 })
+    await doc.waitForSelector('style[data-v-edit]')
+    const row = '[data-row-key="f|#text"]'
+    await page.click(`${row} > span:nth-of-type(3)`, { count: 2 })
+    await page.waitForSelector('input[aria-label="Item name"]')
+    await page.keyboard.type('Renamed text')
+    await page.keyboard.press('Enter')
+    await expect.poll(() => saved.html).toContain('data-doop-name="Renamed text"')
+    await page.evaluate(() => window.contextMenuHarness.undo())
+    expect(await doc.$eval('#text', (el) => el.getAttribute('data-doop-name'))).toBeNull()
+    await page.evaluate(() => window.contextMenuHarness.redo())
+    expect(await doc.$eval('#text', (el) => el.getAttribute('data-doop-name'))).toBe('Renamed text')
+    await page.evaluate(() => window.contextMenuHarness.undo())
+    expect(await doc.$('style[data-v-edit]')).not.toBeNull()
+    await doc.$eval('#text', (el) => {
+      el.textContent = 'Typed after undo'
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await expect.poll(() => saved.html).toContain('Typed after undo')
+    expect(saved.html).not.toContain('data-doop-name')
   })
 
   it('opens the element menu during inline text editing and preserves the final text', async () => {

@@ -1,10 +1,14 @@
 import { readingOrder } from '../../shared/frameOrder'
 import type { Frame } from '../../shared/types'
 import { downloadFrameExport, downloadFramesPdf, type FrameExportFormat } from '../lib/frameExport'
+import { AppIcon } from './ui/brand-mark'
 import { Button } from './ui/button'
+import { ChoiceList, ChoiceRow } from './ui/choice-list'
+import { ImportIcon } from './ui/icons'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { useT } from '@/lib/i18n'
 
+/** A frame's own export: its formats as a list, each row downloads. */
 export function FrameExportModal({
   frame,
   groupFrames = [frame],
@@ -28,32 +32,38 @@ export function FrameExportModal({
     onClose()
   }
 
+  const downloadMark = <ImportIcon size="rail" />
   return (
     <Modal size="sm" onClose={onClose}>
       <ModalTitle className="break-words">{t('panels.frameExportTitle', { name: frame.name })}</ModalTitle>
       <ModalLede>{t('panels.frameExportLede')}</ModalLede>
-      <div className="mt-5 grid gap-2">
-        <Button variant="ghost" className="justify-start" onClick={() => download('png')}>
-          {t('panels.frameExportPng')}
-        </Button>
-        <Button variant="ghost" className="justify-start" onClick={() => download('jpg')}>
-          {t('panels.frameExportJpg')}
-        </Button>
-        <Button
-          variant="ghost"
-          className="h-auto flex-col items-start gap-1 whitespace-normal text-left"
-          onClick={downloadPdf}
-        >
-          <span>
-            {groupFrames.length > 1
+      <ChoiceList className="mt-5">
+        <ChoiceRow
+          icon={<AppIcon brand="png" />}
+          title={t('panels.frameExportPng')}
+          description={t('panels.frameExportPngHint')}
+          trailing={downloadMark}
+          onClick={() => download('png')}
+        />
+        <ChoiceRow
+          icon={<AppIcon brand="jpg" />}
+          title={t('panels.frameExportJpg')}
+          description={t('panels.frameExportJpgHint')}
+          trailing={downloadMark}
+          onClick={() => download('jpg')}
+        />
+        <ChoiceRow
+          icon={<AppIcon brand="pdf" />}
+          title={
+            groupFrames.length > 1
               ? t('panels.frameExportPdfGroup', { count: groupFrames.length })
-              : t('panels.exportDownloadPdf')}
-          </span>
-          <span className="text-xs font-normal text-ink-soft">
-            {groupFrames.length > 1 ? t('panels.frameExportPdfGroupHint') : t('panels.frameExportPdfHint')}
-          </span>
-        </Button>
-      </div>
+              : t('panels.exportDownloadPdf')
+          }
+          description={groupFrames.length > 1 ? t('panels.frameExportPdfGroupHint') : t('panels.frameExportPdfHint')}
+          trailing={downloadMark}
+          onClick={downloadPdf}
+        />
+      </ChoiceList>
       <ModalActions>
         <Button variant="ghost" onClick={onClose}>
           {t('common.cancel')}

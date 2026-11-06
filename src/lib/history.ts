@@ -1,6 +1,11 @@
+import { stackOf, type StackWrite } from '../../shared/frameStack'
 import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
+import { pageBackground } from '../../shared/pageBackground'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
+import { requestFrame, settleFrames } from './frameBridge'
+import { clearElementId, elementIdAt, elementName, setElementName } from './layers'
+import { elementIdSelector } from '../../shared/elementId'
 import { useStore } from './store'
 import { posthog } from './posthog'
 
@@ -8,10 +13,12 @@ import { posthog } from './posthog'
  *  inverse through the normal API, so every collaborator sees it live —
  *  remote actors' work is never undone from here. */
 
-type Patch = Partial<Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked'>>
+type Patch = Partial<
+  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'>
+>
 type Snapshot = Pick<
   Frame,
-  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked'
+  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'
 >
 
 type Entry =
@@ -27,9 +34,24 @@ type Entry =
       guides?: CanvasGuide[]
     }
   | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean }
+  /* a layer's caption: `elementId` is the `data-doop-id` the rename stamped,
+     what undo and redo find the element by once a sibling moves it */
+  | {
+      type: 'layer-name'
+      frameId: string
+      selector: string
+      elementId?: string
+      before: string | null
+      after: string | null
+    }
   | { type: 'create'; frameId: string; snapshot: Snapshot }
+  /* frames restacked together (the Layers panel renumbering a page): saved
+     as one request, so undo and redo change the order whole or not at all */
+  | { type: 'stack'; canvasId: string; before: StackWrite[]; after: StackWrite[] }
   /* a ruler guide added (before null), moved, or removed (after null) */
   | { type: 'guide'; canvasId: string; before: CanvasGuide | null; after: CanvasGuide | null }
+  /* a page's canvas colour set (after), changed or cleared (after null) */
+  | { type: 'page-background'; canvasId: string; pageId: string; before: string | null; after: string | null }
   | { type: 'delete'; frameId: string; snapshot: Snapshot }
   /* Destination first, then source removal; reverse that order on undo so
      a failed request can never remove the only copy of a drawing. */
@@ -89,6 +111,8 @@ function snapshot(f: Frame): Snapshot {
     /* a hidden or locked frame comes back as it was when its deletion is undone */
     hidden: f.hidden,
     locked: f.locked,
+    /* and back to its place in the stack */
+    z: stackOf(f),
   }
 }
 
@@ -124,9 +148,85 @@ export function recordUpdate(frameId: string, before: Patch, after: Patch, discr
     top.after = { ...top.after, ...entry.after }
     top.at = Date.now()
     redoStack = []
-    return
+    return top
   }
   push(entry)
+  return entry
+}
+
+export function recordLayerName(
+  frameId: string,
+  selector: string,
+  before: string | null,
+  after: string,
+  elementId?: string,
+): HistoryEntry {
+  const entry: Entry = { type: 'layer-name', frameId, selector, before, after, ...(elementId ? { elementId } : {}) }
+  push(entry)
+  return entry
+}
+
+/** A name is metadata, not an HTML snapshot. Undo and rollback must update
+ *  the live attribute even while the frame is being text-edited.
+ *  `stamp` is the `data-doop-id` the first rename gives the element it
+ *  reaches by position; undo and redo pass the id's own selector and no
+ *  stamp, so a layer whose id is gone is refused, never a neighbour renamed. */
+export async function saveLayerName(frameId: string, selector: string, name: string | null, stamp?: string) {
+  const store = useStore.getState()
+  const frame = store.canvas?.frames.find((f) => f.id === frameId)
+  if (!frame) throw new Error('Frame removed')
+  const before = elementName(frame.html, selector)
+  const stamping = !!stamp && elementIdAt(frame.html, selector) === null
+  const html = setElementName(frame.html, selector, name, stamp)
+  if (html === null) throw new Error('Layer removed')
+  const started = epoch
+  store.patchFrameLocal(frameId, { html })
+  const mirrored = requestFrame(frameId, 'doop:rename', { selector, name, ...(stamping ? { elementId: stamp } : {}) })
+  try {
+    await api.updateFrame(frameId, { html })
+    await mirrored
+  } catch (err) {
+    const s = useStore.getState()
+    const current = s.canvas?.frames.find((f) => f.id === frameId)
+    if (
+      s.canvas?.id === frame.canvasId &&
+      epoch === started &&
+      current &&
+      elementName(current.html, selector) === name
+    ) {
+      /* a stamp this write made goes with it, in the saved and the live document */
+      const named = setElementName(current.html, selector, before)
+      const rollback = named !== null && stamping ? clearElementId(named, selector) : named
+      if (rollback !== null) {
+        s.patchFrameLocal(frameId, { html: rollback })
+        await requestFrame(frameId, 'doop:rename', { selector, name: before, ...(stamping ? { elementId: null } : {}) })
+      }
+    }
+    throw err
+  }
+}
+
+/** Frames restacked together: one undo step, saved as one request. */
+export function recordStack(canvasId: string, before: StackWrite[], after: StackWrite[]) {
+  if (after.length) push({ type: 'stack', canvasId, before, after })
+}
+
+/** Write a stacking order: locally at once, then to the server as one
+ *  request; a refusal puts every frame back, so the order is never half
+ *  changed. Rejects with the server's error after rolling back. */
+export async function saveStack(canvasId: string, before: StackWrite[], after: StackWrite[]) {
+  const set = (writes: StackWrite[]) => {
+    const s = useStore.getState()
+    if (s.canvas?.id !== canvasId) return
+    for (const { id, z } of writes) s.patchFrameLocal(id, { z })
+  }
+  set(after)
+  try {
+    await api.restackFrames(canvasId, after)
+  } catch (err) {
+    set(before)
+    throw err
+  }
 }
 
 /** Several frames moved together (a group drag): one undo step. */
@@ -170,6 +270,58 @@ function rememberGuides(kept: CanvasGuide[] = [], departing: string[], now: Canv
   return [...kept.filter((g) => !departing.includes(g.pageId)), ...now]
 }
 
+/* Update the entry's copies of the pages a list change removes with the
+   colour each wears now (a teammate may have repainted a page since the
+   step was recorded), so the opposite direction restores that one. */
+function rememberBackgrounds(e: Extract<Entry, { type: 'pages' }>, current: CanvasPageInfo[], next: CanvasPageInfo[]) {
+  for (const page of current) {
+    if (next.some((p) => p.id === page.id)) continue
+    for (const list of [e.before, e.after]) {
+      const copy = list.find((p) => p.id === page.id)
+      if (!copy) continue
+      delete copy.background
+      if (page.background) copy.background = page.background
+    }
+  }
+}
+
+/* A page comes back from the page route without its colour (page-list saves
+   never carry one): paint the pages that just came back the colour the
+   entry remembers for them, at once locally and then on the server. Each
+   is its own request; one that fails does not hold the page change back,
+   and a reply never repaints, so an edit made meanwhile stands. A failed
+   request takes its colour off again (the server shows the theme paper),
+   unless the page already shows a newer one, and says so. */
+async function restoreBackgrounds(canvasId: string, remembered: CanvasPageInfo[], restored: CanvasPageInfo[]) {
+  const painted = restored.flatMap((page) => {
+    const background = pageBackground(remembered.find((p) => p.id === page.id))
+    return background ? [{ id: page.id, background }] : []
+  })
+  const s = useStore.getState()
+  if (s.canvas?.id !== canvasId) return
+  for (const { id, background } of painted) s.setPageBackgroundLocal(id, background)
+  const started = epoch
+  const results = await Promise.allSettled(
+    painted.map(({ id, background }) => api.setPageBackground(canvasId, id, background)),
+  )
+  const failed = painted.filter((_, i) => results[i]!.status === 'rejected')
+  if (!failed.length) return
+  const current = useStore.getState()
+  /* the canvas was left (or revisited, under a fresh history) meanwhile:
+     whatever it shows now is that visit's, not this restore's */
+  if (current.canvas?.id !== canvasId || epoch !== started) return
+  for (const { id, background } of failed) {
+    const page = canvasPages(current.canvas).find((p) => p.id === id)
+    if (page && pageBackground(page) === background) current.setPageBackgroundLocal(id, null)
+  }
+  const reason = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')?.reason
+  current.pushNotice(
+    `${failed.length === 1 ? 'A page’s background' : `${failed.length} pages’ backgrounds`} could not be put back: ${
+      reason instanceof Error ? reason.message : 'request failed'
+    }`,
+  )
+}
+
 /* Put back the remembered guides of pages that just came back, those not
    already there. Each guide is its own request; one that fails (the canvas
    reached its guide limit meanwhile) does not hold the page change back. */
@@ -198,6 +350,11 @@ export function recordGuide(canvasId: string, before: CanvasGuide | null, after:
   push({ type: 'guide', canvasId, before, after })
 }
 
+export function recordPageBackground(canvasId: string, pageId: string, before: string | null, after: string | null) {
+  if (before === after) return
+  push({ type: 'page-background', canvasId, pageId, before, after })
+}
+
 export type HistoryEntry = Entry
 
 export function recordCreate(frame: Frame): HistoryEntry {
@@ -219,12 +376,16 @@ export function dropEntry(entry: HistoryEntry) {
  *  was saved rather than writing the pre-move source over it. The entry
  *  keeps its place among the edits around it. */
 export function keepTransferDestination(entry: HistoryEntry) {
-  if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, 1)
+  if (entry.type === 'transfer') entry.entries = entry.entries.slice(0, -1)
 }
 
 export function recordDrawingTransfer(
   destination: { before: Frame | null; after: Frame },
   source: { before: Frame; after: Frame | null },
+  /** a restack the move needed first (a page renumbered to make room for
+   *  the destination): undone after the destination goes, redone before
+   *  it comes back */
+  stack?: { before: StackWrite[]; after: StackWrite[] },
 ): HistoryEntry {
   const added: Entry = destination.before
     ? updateEntry(destination.after.id, { html: destination.before.html }, { html: destination.after.html })!
@@ -232,7 +393,10 @@ export function recordDrawingTransfer(
   const removed: Entry = source.after
     ? updateEntry(source.before.id, { html: source.before.html }, { html: source.after.html })!
     : { type: 'delete', frameId: source.before.id, snapshot: snapshot(source.before) }
-  const entry: Entry = { type: 'transfer', canvasId: source.before.canvasId, entries: [added, removed] }
+  const canvasId = source.before.canvasId
+  const entries: Entry[] = [added, removed]
+  if (stack?.after.length) entries.unshift({ type: 'stack', canvasId, before: stack.before, after: stack.after })
+  const entry: Entry = { type: 'transfer', canvasId, entries }
   push(entry)
   return entry
 }
@@ -293,7 +457,10 @@ export function deleteFramesTracked(frames: Frame[]) {
 function remapId(oldId: string, newId: string) {
   const visit = (e: Entry) => {
     if (e.type === 'group' || e.type === 'transfer') e.entries.forEach(visit)
-    else if (e.type !== 'pages' && e.type !== 'guide' && e.frameId === oldId) e.frameId = newId
+    else if (e.type === 'stack') {
+      for (const w of [...e.before, ...e.after]) if (w.id === oldId) w.id = newId
+    } else if (e.type !== 'pages' && e.type !== 'guide' && e.type !== 'page-background' && e.frameId === oldId)
+      e.frameId = newId
   }
   for (const e of [...undoStack, ...redoStack]) visit(e)
 }
@@ -314,7 +481,7 @@ async function recreate(e: { frameId: string; snapshot: Snapshot }) {
    so undo/redo displays the page where the affected designs now live. */
 function selectionIds(e: Entry, direction: 'undo' | 'redo'): string[] {
   if (e.type === 'group' || e.type === 'transfer') return e.entries.flatMap((child) => selectionIds(child, direction))
-  if (e.type === 'pages' || e.type === 'guide') return []
+  if (e.type === 'pages' || e.type === 'guide' || e.type === 'page-background' || e.type === 'stack') return []
   if (e.type === 'update' && 'pageId' in (direction === 'redo' ? e.after : e.before)) return [e.frameId]
   const recreated = e.type === (direction === 'redo' ? 'create' : 'delete')
   return recreated ? [e.frameId] : []
@@ -419,6 +586,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     const expected = canvasPages(canvas)
     const next = applyPageChanges(expected, forward ? e.before : e.after, forward ? e.after : e.before)
     const leaving = guidesLeaving(canvas, next)
+    /* the colours the departing pages wear now, so the way back brings
+       those, not the ones remembered when the step was recorded */
+    rememberBackgrounds(e, expected, next)
     const saved = await api.setPages(canvas.id, next, expected)
     const departing = expected.filter((page) => !next.some((p) => p.id === page.id)).map((page) => page.id)
     if (departing.length) e.guides = rememberGuides(e.guides, departing, leaving)
@@ -430,9 +600,23 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
       if (active) current.setActivePage(active)
     }
     const restored = saved.filter((page) => !expected.some((p) => p.id === page.id))
-    if (e.guides?.length && restored.length) await restoreGuides(canvas.id, e.guides, restored)
+    if (restored.length) {
+      await restoreBackgrounds(canvas.id, forward ? e.after : e.before, restored)
+      if (e.guides?.length) await restoreGuides(canvas.id, e.guides, restored)
+    }
   } else if (e.type === 'guide') {
     await applyGuide(e, forward ? e.after : e.before)
+  } else if (e.type === 'page-background') {
+    await applyPageBackground(e, forward ? e.after : e.before)
+  } else if (e.type === 'stack') {
+    if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
+    await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
+  } else if (e.type === 'layer-name') {
+    await saveLayerName(
+      e.frameId,
+      e.elementId ? elementIdSelector(e.elementId) : e.selector,
+      forward ? e.after : e.before,
+    )
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
     const canvas = useStore.getState().canvas
@@ -477,11 +661,34 @@ async function applyGuide(e: Extract<Entry, { type: 'guide' }>, target: CanvasGu
   if (target && !canvasPages(canvas).some((page) => page.id === target.pageId)) throw new Error('Page removed')
   const current = canvas.guides?.find((guide) => guide.id === id) ?? null
   useStore.getState().setGuideLocal(id, target)
+  const started = epoch
   try {
     if (target) await api.putGuide(canvas.id, target)
     else await api.deleteGuide(canvas.id, id)
   } catch (err) {
-    if (useStore.getState().canvas?.id === canvas.id) useStore.getState().setGuideLocal(id, current)
+    if (useStore.getState().canvas?.id === canvas.id && epoch === started)
+      useStore.getState().setGuideLocal(id, current)
+    throw err
+  }
+}
+
+/* Paint the page the colour the entry says, keeping the local copy in step
+   with the server either way. A page that is gone has nothing to paint. */
+async function applyPageBackground(e: Extract<Entry, { type: 'page-background' }>, target: string | null) {
+  const canvas = useStore.getState().canvas
+  if (!canvas || canvas.id !== e.canvasId) throw new Error('Canvas changed')
+  if (!canvasPages(canvas).some((page) => page.id === e.pageId)) throw new Error('Page removed')
+  const current = pageBackground(canvasPages(canvas).find((page) => page.id === e.pageId))
+  useStore.getState().setPageBackgroundLocal(e.pageId, target)
+  const started = epoch
+  try {
+    await api.setPageBackground(canvas.id, e.pageId, target)
+  } catch (err) {
+    /* the colour goes back only where this step's is still showing: a
+       teammate's newer one, or a fresh visit's, is theirs to keep */
+    const s = useStore.getState()
+    const page = s.canvas?.id === canvas.id && epoch === started && canvasPages(s.canvas).find((p) => p.id === e.pageId)
+    if (page && pageBackground(page) === target) s.setPageBackgroundLocal(e.pageId, current)
     throw err
   }
 }
@@ -491,6 +698,7 @@ async function step(direction: 'undo' | 'redo') {
   busy = true
   let entry: Entry | undefined
   try {
+    await settleFrames()
     await inflight
     const from = direction === 'undo' ? undoStack : redoStack
     entry = from.pop()

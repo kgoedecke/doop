@@ -37,7 +37,10 @@ runs on **GPT, Claude, Gemini, DeepSeek, Kimi or Qwen** models
   drag to reorder, double-click to rename, or right-click to rename and delete empty pages.
   Page edits support Undo/Redo; selected frames can move between pages. Agents can list pages
   with `get_canvas`, manage them with `set_canvas_pages` (passing the original list as
-  `expectedPages` to protect collaborators), and target frames with `pageId`.
+  `expectedPages` to protect collaborators), and target frames with `pageId`. Each page can wear
+  a canvas colour of its own, as in Figma: with nothing selected, the sliders icon on the right
+  opens the Page panel with its Background swatch (agents: `set_page_background`); cleared, the
+  page shows the theme paper again.
 - **Clickable prototypes** — wire elements to other frames (click, hover, press, key or delay;
   navigate, overlay, back, scroll or link, with transitions) in Prototype mode or straight in the
   HTML, then click through the flow with Play or share `/c/<id>/proto`. Agents use the same
@@ -149,6 +152,14 @@ layers of that frame, so agents read and edit them like any other markup.
   alignment), opacity, corner radius, rotation, position, flex layout (direction, gap, padding,
   wrap, alignment) and image fills; **HTML** shows its source; **Prototype** wires interactions. The
   floating toolbar adds Comment, **Ask AI** (pre-fills an `@mention`), Code, Edit text and Copy link.
+- **Rich text** — double-click text to edit it. Select words and use the formatting toolbar for
+  bold, italic, underline, strikethrough, bulleted lists or numbered lists. ⌘/Ctrl+B, I and U toggle
+  inline formatting; ⌘/Ctrl+⇧+7 or 8 toggles numbered or bulleted lists. Enter continues a list;
+  Enter on an empty item leaves it. With a text layer selected on the canvas, ⌘/Ctrl+B, I, U and
+  ⌘/Ctrl+⇧+X toggle the whole layer and ⌘/Ctrl+⇧+7 or 8 make it a list, as in Figma. Esc finishes editing; formatting saves with the frame and
+  supports undo/redo. With words selected, the Design panel's font, size, weight and colour edit
+  that run alone; selecting the whole layer shows **Mixed** where its runs differ, and a value set
+  there applies to all of them, as in Figma.
 - **Path editing** — double-click a path to drag its anchors and Bézier handles, switch points
   between corner and curve, or delete them. Alt moves one handle on its own; ⇧ constrains its angle.
 - **Layers** — a searchable tree of pages, frames and elements: drag to reorder or reparent, hide,
@@ -175,6 +186,7 @@ layers of that frame, so agents read and edit them like any other markup.
 | ⌘0 / ⌘+ / ⌘−     | Zoom to 100%, in, out                                  |
 | ⇧R               | Toggle rulers                                          |
 | ⌘.               | Hide or show all UI                                    |
+| ⌘⌥↩              | Present from the selected frame (Ctrl+Alt+↩ elsewhere) |
 | ⌘K               | Open the Agents composer (on Home: the search palette) |
 | Esc              | Deselect, stop following                               |
 
@@ -836,7 +848,7 @@ tools; `tests/agentToolParity.test.ts` lists the MCP tools it does not have yet.
 
 ### MCP tools
 
-40 tools: 38 built in ([`server/mcp.ts`](server/mcp.ts)) plus the two Linear tools its extension
+42 tools: 40 built in ([`server/mcp.ts`](server/mcp.ts)) plus the two Linear tools its extension
 registers ([`server/linear/extension.ts`](server/linear/extension.ts)). Every tool carries
 read-only / destructive / idempotent annotations; the server registers no MCP prompts.
 
@@ -850,6 +862,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `create_canvas`          | Create a canvas (optionally in a workspace), returns its shareable id                                               |
 | `get_canvas`             | Canvas layout: every frame's position/size/meta                                                                     |
 | `set_canvas_pages`       | Create, rename, reorder or delete canvas pages                                                                      |
+| `set_page_background`    | Paint one page's canvas a colour of its own, or clear it back to the theme paper                                    |
 | **Frames**               |                                                                                                                     |
 | `create_frame`           | Add a frame with HTML (auto-placed if no x/y)                                                                       |
 | `get_frame`              | Read a frame including its HTML                                                                                     |
@@ -870,6 +883,8 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `get_comments`           | Read element and canvas comments with their replies, optionally filtered by frame or resolution state, no claiming  |
 | `reply_to_comment`       | Reply inside an element-comment thread; `@mention` of a resident role is metered like a browser comment             |
 | `resolve_comment`        | Resolve an element-comment thread; resolving an `@mention` thread records the exchange in canvas Memory             |
+| `report_issue`           | Report a tool failure or missing capability to the instance admins                                                  |
+| `share_feedback`         | Share suggestions and feedback with the instance admins                                                             |
 | **Design memory**        |                                                                                                                     |
 | `list_guidelines`        | List a canvas's style guides (brand rules, style recipes) with one-line summaries                                   |
 | `get_guidelines`         | Read one style guide in full — the rules every frame on the canvas must follow                                      |
@@ -881,7 +896,7 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | `search_icons`           | 200,000+ open-source icons (Iconify) as hotlinkable SVGs                                                            |
 | `search_logos`           | Real company logos by brand name or domain (Brandfetch, vector marks)                                               |
 | `list_backgrounds`       | Curated hero/section/bento backgrounds (glows, grainy meshes, aurora, painterly) as thumbnails                      |
-| `search_inspiration`     | Curated real landing pages with palette, fonts and a mood line (Refero Styles)                                      |
+| `search_inspiration`     | Curated live landing pages with style, colour, fonts and sections (One Page Love)                                   |
 | `generate_image`         | Generate an image with the model the user picked in Settings (GPT Image, Nano Banana or Seedream) → asset URL       |
 | `upload_asset`           | Store your own file — from a URL, a one-time local-file upload URL, or inline base64                                |
 | **Web**                  |                                                                                                                     |

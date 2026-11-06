@@ -1,10 +1,11 @@
-import { useState, type MutableRefObject } from 'react'
+import { useRef, useState, type MutableRefObject } from 'react'
 import type { Frame } from '../../shared/types'
 import { errorMessage } from '../lib/api'
 import { copyFrames, duplicateFrames, hasFrameClip, pasteFrameAtScreen } from '../lib/frameClipboard'
+import { writeCanvasClipboard } from '../lib/canvasClipboard'
 import { copyFramePng } from '../lib/frameExport'
 import { deleteFramesTracked } from '../lib/history'
-import { setFramesHidden, setFramesLocked } from '../lib/layerEdits'
+import { isStackLocked, setFramesHidden, setFramesLocked } from '../lib/layerEdits'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { setFramesApproval } from '../lib/frameApproval'
 import { useFrameSaves } from '../lib/frameSaves'
@@ -27,8 +28,17 @@ async function copyImageUrl(frame: Frame) {
 
 /** Right-click menu for a frame. FrameView owns the trigger, and passes the
  *  point the right-click happened at — Paste lands there. */
-export function FrameContextMenu({ frame, at }: { frame: Frame; at: MutableRefObject<{ x: number; y: number }> }) {
+export function FrameContextMenu({
+  frame,
+  at,
+  onRename,
+}: {
+  frame: Frame
+  at: MutableRefObject<{ x: number; y: number }>
+  onRename?: () => void
+}) {
   const t = useT()
+  const renameRequested = useRef(false)
   /* the frames Export… acts on: this one, or the selection it belongs to */
   const [exportFrames, setExportFrames] = useState<Frame[] | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -79,16 +89,32 @@ export function FrameContextMenu({ frame, at }: { frame: Frame; at: MutableRefOb
     <>
       <ContextMenuContent
         onCloseAutoFocus={(event) => {
+          // Mount the editor after the menu releases focus, so it stays focused.
+          if (renameRequested.current) {
+            event.preventDefault()
+            renameRequested.current = false
+            onRename?.()
+          }
           // The export dialog owns focus once the menu closes.
           if (exportFrames || historyOpen) event.preventDefault()
         }}
       >
-        <ContextMenuItem onSelect={() => copyFrames(groupFrames())}>
+        <ContextMenuItem
+          onSelect={() => {
+            const frames = groupFrames()
+            if (frames.length) writeCanvasClipboard(() => copyFrames(frames))
+          }}
+        >
           {groupSize > 1 ? t('stage.copyFrames', { count: groupSize }) : t('common.copy')}
           <MenuHint>{MOD_KEY}C</MenuHint>
         </ContextMenuItem>
         {!readOnly && (
           <>
+            {onRename && (
+              <ContextMenuItem disabled={isStackLocked(frame)} onSelect={() => (renameRequested.current = true)}>
+                {t('panels.layersRename')}
+              </ContextMenuItem>
+            )}
             <ContextMenuItem
               disabled={!hasFrameClip()}
               onSelect={() => pasteFrameAtScreen(frame.canvasId, at.current.x, at.current.y)}

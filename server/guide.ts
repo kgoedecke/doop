@@ -44,11 +44,12 @@ export const DESIGN_QUALITY = `- Commit to ONE clear aesthetic direction per fra
 export const DESIGN_BRIEF = `Before creating frames on a canvas whose style is not already established, commit to a
 brief. It is part of the deliverable, not private scratch work:
 
-1. **Look at real pages first.** Call search_inspiration with the page archetype plus
-   the register you are aiming for — "B2B SaaS landing page, editorial", "dark fintech
-   dashboard", "consumer app landing, playful" — not the product noun on its own
-   ("AI meeting notes" matches on "AI" and returns noise). You SEE real, curated live
-   pages as thumbnails, each with its mood line, palette and fonts. Read them like a
+1. **Look at real pages first.** Call search_inspiration with the genre plus the look
+   you are aiming for, in the words the catalog is tagged with — "saas landing page,
+   editorial", "finance, dark minimal", "app, illustrative" — not the product noun on
+   its own ("AI meeting notes" matches nothing useful). You SEE real, curated live
+   pages as thumbnails, each tagged with its style, colour, fonts and sections; read
+   the palette off the thumbnail. Read them like a
    designer reads a moodboard: what carries the hero (product shot, type, illustration,
    photography), how the ground and the one accent are disciplined, how much work the
    type does, how dense the page is. If the set all looks alike, run a second query in a
@@ -223,10 +224,18 @@ Viewers watch designs assemble live. Stream with append_frame_html:
   assign an implementation job — follow the human's request.
 - A frame renders a complete HTML document in a sandboxed iframe. Inline <style> and
   <script> work; Google Fonts via <link> work.
+- Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
+  family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
+  rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
 - Always reset: * { margin: 0; box-sizing: border-box; } and design to the exact frame size.
 - Size frames to their content: mobile screen 390×844, desktop page 1280×800, card or
   component 480×360, square social post 640×640. Set width/height on create_frame, or
   adjust later with update_frame.
+- Pages: a canvas is a set of pages, each its own board, listed by get_canvas with every
+  frame's pageId. Put one screen in a frame and a body of work on a page: a second product
+  surface, a platform (web vs. mobile), a round of explorations. create_canvas_page adds one
+  and returns its id for create_frame's pageId; get_canvas with page_id reads one page; a
+  frame moves between pages with update_frame; set_canvas_pages renames, reorders or deletes.
 
 ## GitHub-imported frames — the repo is the source of truth
 
@@ -319,9 +328,11 @@ any public image URL. Source images in this order:
 - **When to use them.** Enumerated content — feature cards, step lists, capability
   grids, value rows — needs a visual anchor per item: an icon (search_icons), a big
   number, or a mono label. Naked text lists read as drafts. Pick ONE anchor style per
-  section and never use emoji as icons. Logos: always real marks from search_logos —
-  integrations, platforms, payment methods, and the customer walls and testimonial
-  cards too. Pick real brands the product's audience would recognize; invented quotes
+  section and never use emoji or Unicode symbols (✕ □ ▸ ⟶ ↗) as icons: they draw from
+  whatever fonts the viewer has, so they show up as empty boxes or colour emoji in
+  screenshots and exports — use search_icons or an inline SVG. Logos: always real marks
+  from search_logos — integrations, platforms, payment methods, and the customer walls
+  and testimonial cards too. Pick real brands the product's audience would recognize; invented quotes
   can sit beside a real company mark, but a placeholder mark is never acceptable.
 - **Nothing fits — draw it.** Inline SVG or pure CSS (gradients, patterns, shapes) in
   the frame. Never ship a gray "image goes here" box, and never guess an image URL
@@ -381,7 +392,7 @@ commit to directions, then deliver a choice:
   "Direction B — further out": same product, same real copy and facts, but freer —
   reinterpret the palette and push the aesthetic somewhere genuinely different.
   Direction B must NOT be invented from vibes: retrieve category inspiration with
-  search_inspiration (live exemplars with their mood, palette and fonts), pick ONE
+  search_inspiration (live exemplars with their style, colour and fonts), pick ONE
   exemplar and follow it, and name it in the redesign doc so the direction is traceable.
 - Deliver TWO new frames side by side, named "<source> — A (on-brand)" and
   "<source> — B (departure)", each executing its direction precisely; screenshot both.

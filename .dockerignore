@@ -1,6 +1,7 @@
 node_modules
 dist
 data
+data.*/
 .git
 .env
 .env.local

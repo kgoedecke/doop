@@ -11,6 +11,12 @@ const apiPort = Number(process.env.PORT || 4400)
 const webPort = Number(process.env.VITE_PORT || 4300)
 const api = `http://localhost:${apiPort}`
 
+const clipboardTests = [
+  'tests/canvasClipboardBrowser.test.ts',
+  'tests/elementContextMenuBrowser.test.ts',
+  'tests/pageCanvasBrowser.test.ts',
+]
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   test: {
@@ -19,6 +25,11 @@ export default defineConfig({
     exclude: ['**/node_modules/**', '**/.claude/**'],
     setupFiles: ['tests/setup.ts'],
     globalSetup: ['tests/globalSetup.ts'],
+    projects: [
+      { test: { name: 'parallel', exclude: clipboardTests } },
+      // Browser contexts share the system clipboard, so these files must run one at a time.
+      { test: { name: 'clipboard', include: clipboardTests, fileParallelism: false } },
+    ],
     /* seven files drive a real Chromium; closing one under a full parallel
        run can outlast the 10s default */
     hookTimeout: 30_000,
@@ -27,6 +38,9 @@ export default defineConfig({
      each bundle. The source is public (AGPL), so the maps are too; browsers
      only fetch them when devtools open. */
   build: { sourcemap: true },
+  /* mupdf finds its .wasm next to its own module through `import.meta.url`;
+     pre-bundling would move the module and lose the file */
+  optimizeDeps: { exclude: ['mupdf'] },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

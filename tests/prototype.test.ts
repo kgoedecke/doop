@@ -15,6 +15,7 @@ import {
   protoHistoryState,
   readProtoHistory,
   sanitizeInteraction,
+  screenLayout,
   transitionFrames,
 } from '../src/lib/prototypePlayer'
 import { elementInteractions, withElementInteractions } from '../src/lib/prototype'
@@ -256,6 +257,17 @@ describe('player helpers', () => {
     expect(readProtoHistory(null)).toBeNull()
     expect(readProtoHistory({ doopProto: true })).toBeNull()
     expect(readProtoHistory({ doopProto: true, frameId: 'a', depth: -1 })).toBeNull()
+  })
+
+  it('sizes a screen by the picked scaling', () => {
+    const frame = { width: 400, height: 300 }
+    const viewport = { w: 800, h: 300 }
+    expect(screenLayout(frame, viewport, 'actual')).toEqual({ width: 400, height: 300, scale: 1 })
+    expect(screenLayout(frame, viewport, 'responsive')).toEqual({ width: 800, height: 300, scale: 1 })
+    expect(screenLayout(frame, viewport, 'fit-width')).toEqual({ width: 400, height: 300, scale: 2 })
+    expect(screenLayout(frame, viewport, 'fit')).toEqual({ width: 400, height: 300, scale: 1 })
+    expect(screenLayout(frame, viewport, 'fill')).toEqual({ width: 400, height: 300, scale: 2 })
+    expect(screenLayout({ width: 0, height: 300 }, viewport, 'fill').scale).toBe(1)
   })
 })
 

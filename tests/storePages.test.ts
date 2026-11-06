@@ -12,6 +12,7 @@ vi.mock('../server/db/persist.ts', () => {
     deleteCanvas: noop,
     deleteFrame: noop,
     deleteGuideline: noop,
+    deleteToken: noop,
     deleteMember: noop,
     deleteReference: noop,
     saveCanvas: noop,
@@ -19,6 +20,7 @@ vi.mock('../server/db/persist.ts', () => {
     saveFrame: (frame: Frame, immediate?: boolean) =>
       rig.savedFrames.push({ id: frame.id, pageId: frame.pageId, immediate }),
     saveGuideline: noop,
+    saveToken: noop,
     savePageCopy: async () => rig.duringCopy?.(),
     saveMember: noop,
     saveReference: noop,
@@ -152,4 +154,29 @@ it('points a copied canvas’s prototype links and flow starts at the copied fra
   const copiedTarget = copy.frames.find((f) => f.name === 'Target')!
   expect(copy.frames.find((f) => f.name === 'Start')!.html).toContain(`overlay:${copiedTarget.id}`)
   expect(canvasPages(copy)[0]!.startFrameId).toBe(copiedTarget.id)
+})
+
+it('keeps a page’s background across page-list saves and gives it to copies of the page and the canvas', async () => {
+  const canvas = store.createCanvas('Painted', 'alice')
+  const [page] = canvasPages(canvas)
+  expect(store.setPageBackground(canvas.id, 'missing', '#1e1e1e')).toBeUndefined()
+  expect(store.setPageBackground(canvas.id, page!.id, '#1e1e1e')).toEqual([{ ...page, background: '#1e1e1e' }])
+  /* a rename or reorder never touches the colour, whatever the client sends for it */
+  const saved = store.setPages(canvas.id, [
+    { id: page!.id, name: 'Renamed', background: '#ffffff' },
+    { id: 'second', name: 'Second', background: '#ff0000' },
+  ])
+  expect(saved!.pages).toEqual([
+    { id: page!.id, name: 'Renamed', background: '#1e1e1e' },
+    { id: 'second', name: 'Second' },
+  ])
+  const copy = await store.duplicatePage(canvas.id, page!.id, 'alice')
+  expect(copy!.page.background).toBe('#1e1e1e')
+  const twin = await store.duplicateCanvas(canvas.id, 'alice', 'alice')
+  expect(canvasPages(twin!).map((p) => p.background)).toEqual(['#1e1e1e', '#1e1e1e', undefined])
+  expect(store.setPageBackground(canvas.id, page!.id, null)).toEqual([
+    { id: page!.id, name: 'Renamed' },
+    { id: copy!.page.id, name: 'Renamed copy', background: '#1e1e1e' },
+    { id: 'second', name: 'Second' },
+  ])
 })

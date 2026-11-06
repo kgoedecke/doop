@@ -3,7 +3,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { useValueScrub } from '@/hooks/use-value-scrub'
-import { ChevronDownIcon } from './icons'
+import { ChevronDownIcon, UnlinkIcon } from './icons'
 
 /* The dense property controls of an inspector rail: a 26px row with a label
    column and one or more 26px fields, each carrying a faint unit at its
@@ -11,7 +11,7 @@ import { ChevronDownIcon } from './icons'
    commits on blur or Enter; a new value from outside replaces the draft. */
 
 const fieldCls =
-  'flex h-[26px] min-h-[26px] min-w-0 flex-1 shrink-0 items-center gap-1 rounded-[7px] bg-sub px-2 font-mono text-[11px] text-ink focus-within:bg-surface focus-within:shadow-elevation-1-focus'
+  'group relative flex h-[26px] min-h-[26px] min-w-0 flex-1 shrink-0 items-center gap-1 rounded-[7px] bg-sub px-2 font-mono text-[11px] text-ink focus-within:bg-surface focus-within:shadow-elevation-1-focus'
 const unitCls = 'ml-auto flex-none font-sans text-[10.5px] text-ink-ghost'
 const scrubUnitCls =
   'self-stretch content-center -mr-2 pr-2 pl-1 cursor-ew-resize touch-none select-none hover:text-ink'
@@ -60,11 +60,47 @@ export function PropertyRow({ label, children }: { label: string; children: Reac
   )
 }
 
+/** A design token the field's property is bound to (`var(--name)` inline):
+ *  the field shows the name in place of the value, and a click detaches it. */
+export interface FieldToken {
+  name: string
+  /** the resolved colour, for a swatch */
+  swatch?: string
+  onDetach: () => void
+}
+
+/** The bound token's name, read-only, and the broken-chain control that
+ *  detaches the field from it. */
+function TokenChip({ token }: { token: FieldToken }) {
+  const t = useT()
+  return (
+    <>
+      <span
+        className="min-w-0 flex-1 truncate rounded-[4px] bg-paper-deep px-1 font-mono text-[10.5px] text-ink"
+        title={t('inspector.tokenBound', { name: token.name })}
+      >
+        {token.name}
+      </span>
+      <button
+        type="button"
+        aria-label={t('inspector.tokenDetach', { name: token.name })}
+        title={t('inspector.tokenDetach', { name: token.name })}
+        className="ml-auto grid size-5 flex-none place-items-center rounded-[5px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+        onClick={token.onDetach}
+      >
+        <UnlinkIcon size={11} />
+      </button>
+    </>
+  )
+}
+
 export function NumberField({
   label,
   value,
   unit: u,
   prefix,
+  trailing,
+  token,
   disabled,
   placeholder,
   className,
@@ -76,6 +112,9 @@ export function NumberField({
   value: number | null
   unit: string
   prefix?: ReactNode
+  /** a control after the unit: the token menu */
+  trailing?: ReactNode
+  token?: FieldToken
   disabled?: boolean
   placeholder?: string
   className?: string
@@ -128,35 +167,47 @@ export function NumberField({
             {prefix}
           </span>
         )}
-        <input
-          aria-label={label}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-faint"
-          value={draft}
-          inputMode="decimal"
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-              e.preventDefault()
-              const n = Number(draft) || 0
-              const next = Math.min(max, Math.max(min, n + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)))
-              setDraft(String(next))
-              onCommit(next)
-            }
-          }}
-        />
+        {token ? (
+          <TokenChip token={token} />
+        ) : (
+          <input
+            aria-label={label}
+            disabled={disabled}
+            placeholder={placeholder}
+            className={cn(
+              'w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none placeholder:text-ink-faint',
+              trailing && 'group-hover:pr-5',
+            )}
+            value={draft}
+            inputMode="decimal"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault()
+                const n = Number(draft) || 0
+                const next = Math.min(max, Math.max(min, n + (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)))
+                setDraft(String(next))
+                onCommit(next)
+              }
+            }}
+          />
+        )}
       </span>
-      <span
-        className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
-        title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
-        onPointerDown={scrub.onPointerDown}
-        onClick={(e) => scrub.canScrub && e.preventDefault()}
-      >
-        {u}
-      </span>
+      {!token && (
+        <span
+          data-unit
+          className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
+          title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
+          onPointerDown={scrub.onPointerDown}
+          onClick={(e) => scrub.canScrub && e.preventDefault()}
+        >
+          {u}
+        </span>
+      )}
+      {/* over the value's tail, left of the unit, so the unit stays where a scrub finds it */}
+      {trailing && <span className="absolute inset-y-0 right-7 flex items-center">{trailing}</span>}
     </label>
   )
 }
@@ -211,6 +262,7 @@ export function TextField({
       />
       {u && (
         <span
+          data-unit
           className={cn(unitCls, scrub.canScrub && scrubUnitCls)}
           title={scrub.canScrub ? t('inspector.scrubHint') : undefined}
           onPointerDown={scrub.onPointerDown}
@@ -254,29 +306,54 @@ export function SelectField<T extends string>({
   value,
   options,
   label,
+  placeholder,
   className,
   onChange,
 }: {
-  value: T
-  options: { value: T; label: string }[]
+  /** null shows `placeholder` (a mixed value) until an option is picked */
+  value: T | null
+  /* consecutive options sharing a `group` render under one <optgroup> */
+  options: { value: T; label: string; group?: string }[]
   label?: string
+  placeholder?: string
   className?: string
   onChange: (v: T) => void
 }) {
+  const runs: { group?: string; options: typeof options }[] = []
+  for (const o of options) {
+    const last = runs.at(-1)
+    if (last && last.group === o.group) last.options.push(o)
+    else runs.push({ group: o.group, options: [o] })
+  }
+  const items = (list: typeof options) =>
+    list.map((o) => (
+      <option key={o.value} value={o.value}>
+        {o.label}
+      </option>
+    ))
   return (
     <span className={cn(fieldCls, 'relative font-sans text-[11.5px]', className)}>
       <select
         aria-label={label}
         className="w-full min-w-0 appearance-none bg-transparent pr-3 text-ink outline-none"
-        value={value}
+        value={value ?? ''}
         /* a native select only ever reports one of the options it was given */
-        onChange={(e) => onChange(e.target.value as T)}
+        onChange={(e) => e.target.value !== '' && onChange(e.target.value as T)}
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
+        {value === null && (
+          <option value="" disabled>
+            {placeholder}
           </option>
-        ))}
+        )}
+        {runs.map((run, i) =>
+          run.group ? (
+            <optgroup key={`${run.group}-${i}`} label={run.group}>
+              {items(run.options)}
+            </optgroup>
+          ) : (
+            items(run.options)
+          ),
+        )}
       </select>
       <ChevronDownIcon width={10} height={10} className="pointer-events-none absolute right-[7px] text-ink-faint" />
     </span>
@@ -288,12 +365,20 @@ export function SelectField<T extends string>({
 export function ColorField({
   value,
   label,
+  placeholder,
   className,
+  trailing,
+  token,
   onCommit,
 }: {
   value: string | null
   label?: string
+  /** shown for a null value in place of "none" (a mixed colour) */
+  placeholder?: string
   className?: string
+  /** a control after the hex: the token menu */
+  trailing?: ReactNode
+  token?: FieldToken
   onCommit: (v: string | null) => void
 }) {
   const t = useT()
@@ -318,24 +403,39 @@ export function ColorField({
   return (
     <label className={cn(fieldCls, 'gap-1.5', className)}>
       <span className="relative size-3 flex-none overflow-hidden rounded-[3px] border border-line">
-        <span className="absolute inset-0" style={{ background: value ?? 'transparent' }} />
-        <input
-          type="color"
-          aria-label={label ? t('inspector.pickLabel', { label: label.toLowerCase() }) : t('inspector.pickColour')}
-          className="absolute -inset-1 cursor-pointer opacity-0"
-          value={value ?? '#ffffff'}
-          onChange={(e) => onCommit(e.target.value)}
+        <span
+          className="absolute inset-0"
+          style={{ background: token ? (token.swatch ?? 'transparent') : (value ?? 'transparent') }}
         />
+        {!token && (
+          <input
+            type="color"
+            aria-label={label ? t('inspector.pickLabel', { label: label.toLowerCase() }) : t('inspector.pickColour')}
+            className="absolute -inset-1 cursor-pointer opacity-0"
+            value={value ?? '#ffffff'}
+            onChange={(e) => onCommit(e.target.value)}
+          />
+        )}
       </span>
-      <input
-        aria-label={label}
-        className="w-full min-w-0 bg-transparent font-mono text-[11px] uppercase text-ink outline-none placeholder:normal-case placeholder:text-ink-faint"
-        value={draft}
-        placeholder={t('inspector.colorNone')}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      />
+      {token ? (
+        <TokenChip token={token} />
+      ) : (
+        <input
+          aria-label={label}
+          className={cn(
+            'w-full min-w-0 bg-transparent font-mono text-[11px] uppercase text-ink outline-none placeholder:normal-case placeholder:text-ink-faint',
+            trailing && 'group-hover:pr-5',
+          )}
+          value={draft}
+          placeholder={placeholder ?? t('inspector.colorNone')}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        />
+      )}
+      {trailing && (
+        <span className={cn('absolute inset-y-0 flex items-center', token ? 'right-7' : 'right-1')}>{trailing}</span>
+      )}
     </label>
   )
 }

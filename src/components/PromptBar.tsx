@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { useStore, type ComposerSend } from '../lib/store'
 import { api, type Allowance } from '../lib/api'
 import { posthog } from '../lib/posthog'
@@ -11,11 +11,14 @@ import { Tooltip } from './ui/tooltip'
 import { DoopMark } from './Logo'
 import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
+import { currentRunnerPick, useRunnerPick } from '../lib/runnerPick'
+import { resolveRunnerPick } from '../../shared/agentRunner'
 import { LayerKindIcon } from './LayerKindIcon'
 import { buildLayerTree, findLayer, layerName } from '../lib/layers'
 import type { CardScope } from '../../shared/types'
 import type { LayerKind } from '../lib/layers'
 import { t as translate, useT } from '@/lib/i18n'
+import { cn } from '@/lib/utils'
 
 /**
  * The canvas's front door to the resident team: the prompt composer
@@ -134,17 +137,22 @@ async function sendPrompt(args: {
        the card carries the frame ids so the agent views them before
        designing. Known-ids include them so the camera saves its flight for
        the agent's deliverable, not the user's own screenshots. */
-    const refFrames = await uploadImageFrames(canvasId, files, 'Attached image')
+    const refFrames = await uploadImageFrames(canvasId, files, { fallbackName: 'Attached image' })
+    /* the composer's pick rides on the card, so the task runs on what the
+       picker beside the send button shows */
+    const runner = currentRunnerPick()
     await api.addCard(
       canvasId,
       text,
       ['doop'],
       refFrames.map((f) => f.id),
       scope,
+      runner,
     )
     posthog.capture('prompt_bar_submitted', {
       attachments: refFrames.length,
       scope: scope ? (scope.selector ? 'element' : 'frame') : 'none',
+      runner: runner?.provider ?? 'default',
     })
     flyToNextFrame(
       canvasId,
@@ -202,6 +210,9 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const sent = send?.status === 'sent'
   const sendError = send?.status === 'error' ? send.message : null
   const { allowance } = useAllowance()
+  /* the meter names the connection the next task goes to: the composer's pick */
+  const runnerStore = useRunnerPick()
+  const pickedProvider = resolveRunnerPick(runnerStore.runners, runnerStore.stored)?.pick.provider
   /* the selection is the prompt's scope until the chip is dismissed — × or
      Esc drops it entirely, no stepping up to the frame. Keyed on the scope
      so a new selection brings the chip back. */
@@ -225,10 +236,13 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   /* attachment slips (too big, too many) — local and brief, unlike a failed
      send, which the store keeps until the draft changes */
   const [attachError, setAttachError] = useState<string | null>(null)
+  /* an image file is being dragged over the composer */
+  const [dropping, setDropping] = useState(false)
   const error = attachError ?? sendError
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const t = useT()
+  const meter = meterText(allowance, t, pickedProvider)
 
   useLayoutEffect(() => {
     if (inputRef.current) autosize(inputRef.current)
@@ -299,8 +313,36 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
     }
   }
 
+  /* dropped images attach like pasted ones; claiming the drag keeps the
+     canvas, which listens on the window, from turning it into frames */
+  function onDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = busy ? 'none' : 'copy'
+    setDropping(!busy)
+  }
+
+  function onDragLeave(e: DragEvent<HTMLDivElement>) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false)
+  }
+
+  function onDrop(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setDropping(false)
+    if (!busy) addFiles(e.dataTransfer.files)
+  }
+
   return (
-    <div className="flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2">
+    <div
+      className={cn(
+        'flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2',
+        dropping && 'bg-paper-deep',
+      )}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {attachments.map((a) => (
@@ -406,13 +448,13 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           <ModelPicker disabled={busy} />
           {/* the meter rides on the send button; a disabled button takes no
               pointer events, so the span under it is what the tooltip hangs on */}
-          <Tooltip label={meterText(allowance, t) ?? t('panels.promptSendTooltip')} side="top" align="end">
+          <Tooltip label={meter ?? t('panels.promptSendTooltip')} side="top" align="end">
             <span
               className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
               /* while the button is disabled the wrapper takes its tab stop,
                  so the meter can be reached and read without a pointer */
               tabIndex={busy || !text.trim() ? 0 : -1}
-              aria-label={meterText(allowance, t) ?? undefined}
+              aria-label={meter ?? undefined}
             >
               <Button
                 variant="primary"

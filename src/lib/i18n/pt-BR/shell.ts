@@ -7,6 +7,8 @@ export const shell: Catalog['shell'] = {
   settings: 'Configurações',
   admin: 'Admin',
   helpDocs: 'Ajuda e documentação',
+  desktopApp: 'Baixar o app para desktop',
+  website: 'Site do Doop',
   appearance: 'Aparência',
   language: 'Idioma',
   logOut: 'Sair',

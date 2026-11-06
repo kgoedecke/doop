@@ -4,7 +4,7 @@ import { useStore } from '../lib/store'
 import { api, errorMessage } from '../lib/api'
 import { beginFrameSave } from '../lib/frameSaves'
 import { copyFramePng, downloadFrameExport, downloadFrameHtml } from '../lib/frameExport'
-import { deleteFrameTracked, recordUpdate } from '../lib/history'
+import { deleteFrameTracked, recordUpdate, trackSave } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
@@ -15,13 +15,24 @@ import { CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
+import { NumberField, PropertyScrubContext } from './ui/property-field'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
-import { t as translate, useT, type PlainMessageKey } from '../lib/i18n'
+import { t as translate, useT } from '../lib/i18n'
 
 const HTML_OPEN_KEY = 'doop:inspector-html'
 
 /* the rail's filled buttons: a grey well, 28px, tall enough to hit on a phone */
 const fillBtn = 'h-7 rounded-[7px] bg-sub px-2 text-[12px] font-normal text-ink hover:bg-paper-deep max-md:min-h-10'
+/* the position and size fields, tall enough to hit on a phone */
+const boxField = 'max-md:h-10 max-md:min-h-10'
+
+type BoxKey = 'x' | 'y' | 'width' | 'height'
+type FrameBox = Pick<Frame, BoxKey>
+const BOX_KEYS: readonly BoxKey[] = ['x', 'y', 'width', 'height']
+
+function boxOf(frame: Frame): FrameBox {
+  return { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+}
 
 export function Inspector({
   frame,
@@ -49,6 +60,9 @@ export function Inspector({
   const queuedSave = useRef<{ timer: number; finish: () => void } | null>(null)
   const copyTimer = useRef<number | null>(null)
   const frameId = useRef(frame.id)
+  /* the frame as it was when a scrub began: the drag previews in the store
+     and this is what one undo step and one save are measured against */
+  const scrubStart = useRef<{ id: string; box: FrameBox; key: BoxKey | null; value: number | undefined } | null>(null)
 
   /* switching frames resets the draft; otherwise pull in remote html
      updates unless the user is typing */
@@ -121,7 +135,53 @@ export function Inspector({
   function commitMeta(patch: Partial<Frame>) {
     recordUpdate(frame.id, frame, patch)
     useStore.getState().patchFrameLocal(frame.id, patch)
-    api.updateFrame(frame.id, patch).catch(console.error)
+    const save = api.updateFrame(frame.id, patch)
+    trackSave(save)
+    save.catch(console.error)
+  }
+
+  /* a typed value commits at once; a scrubbed one only previews, and the
+     gesture's end commits the whole drag. Only the scrubbed field belongs to
+     the gesture: a teammate's move of the same frame meanwhile is theirs, and
+     another field committed mid-drag (Tab out of a typed X) is its own edit */
+  function editBox(patch: Partial<FrameBox>) {
+    const scrub = scrubStart.current
+    const key = BOX_KEYS.find((k) => k in patch)
+    if (!key) return
+    if (scrub) scrub.key ??= key
+    if (scrub?.key === key) {
+      scrub.value = patch[key]
+      useStore.getState().patchFrameLocal(scrub.id, { [key]: patch[key] })
+    } else commitMeta(patch)
+  }
+  const boxScrub = {
+    onStart: () => {
+      scrubStart.current = { id: frame.id, box: boxOf(frame), key: null, value: undefined }
+    },
+    onEnd: (cancel: boolean) => {
+      const scrub = scrubStart.current
+      scrubStart.current = null
+      if (!scrub?.key) return
+      const { id, key } = scrub
+      const from = scrub.box[key]
+      const store = useStore.getState()
+      if (cancel) {
+        store.patchFrameLocal(id, { [key]: from })
+        return
+      }
+      /* the gesture's own latest value, not the store's: a save or broadcast
+         landing mid-drag (another field's commit, a teammate) puts the
+         server's frame in the store, and that still carries the old size */
+      const to = scrub.value
+      if (to === undefined || to === from) return
+      /* a frame a teammate deleted mid-drag has nothing to commit to */
+      if (!store.canvas?.frames.some((f) => f.id === id)) return
+      store.patchFrameLocal(id, { [key]: to })
+      recordUpdate(id, { [key]: from }, { [key]: to }, true)
+      const save = api.updateFrame(id, { [key]: to })
+      trackSave(save)
+      save.catch(console.error)
+    },
   }
 
   return (
@@ -164,26 +224,52 @@ export function Inspector({
         <InspectorGroup title={t('inspector.groupDevelopment')}>
           <FrameApprovalControl key={frame.id} frame={frame} hasUnsavedChanges={saveState === 'dirty'} />
         </InspectorGroup>
-        <InspectorGroup title={t('inspector.sectionPosition')}>
-          <div className="grid grid-cols-2 gap-1.5">
-            <NumInput label="X" value={frame.x} onCommit={(v) => commitMeta({ x: v })} />
-            <NumInput label="Y" value={frame.y} onCommit={(v) => commitMeta({ y: v })} />
-          </div>
-        </InspectorGroup>
-        <InspectorGroup title={t('inspector.sectionLayout')}>
-          <div className="grid grid-cols-2 gap-1.5">
-            <NumInput
-              label="W"
-              value={frame.width}
-              onCommit={(v) => commitMeta({ width: Math.max(MIN_FRAME_SIZE, v) })}
-            />
-            <NumInput
-              label="H"
-              value={frame.height}
-              onCommit={(v) => commitMeta({ height: Math.max(MIN_FRAME_SIZE, v) })}
-            />
-          </div>
-        </InspectorGroup>
+        <PropertyScrubContext.Provider value={boxScrub}>
+          <InspectorGroup title={t('inspector.sectionPosition')}>
+            <div className="grid grid-cols-2 gap-1.5">
+              <NumberField
+                label={t('inspector.xPosition')}
+                prefix="X"
+                unit="px"
+                min={-Infinity}
+                value={frame.x}
+                className={boxField}
+                onCommit={(x) => editBox({ x })}
+              />
+              <NumberField
+                label={t('inspector.yPosition')}
+                prefix="Y"
+                unit="px"
+                min={-Infinity}
+                value={frame.y}
+                className={boxField}
+                onCommit={(y) => editBox({ y })}
+              />
+            </div>
+          </InspectorGroup>
+          <InspectorGroup title={t('inspector.sectionLayout')}>
+            <div className="grid grid-cols-2 gap-1.5">
+              <NumberField
+                label={t('inspector.width')}
+                prefix="W"
+                unit="px"
+                min={MIN_FRAME_SIZE}
+                value={frame.width}
+                className={boxField}
+                onCommit={(width) => editBox({ width })}
+              />
+              <NumberField
+                label={t('inspector.height')}
+                prefix="H"
+                unit="px"
+                min={MIN_FRAME_SIZE}
+                value={frame.height}
+                className={boxField}
+                onCommit={(height) => editBox({ height })}
+              />
+            </div>
+          </InspectorGroup>
+        </PropertyScrubContext.Provider>
         <InspectorGroup title={t('inspector.groupExport')}>
           <div className="grid grid-cols-2 gap-1.5">
             <Button
@@ -349,41 +435,5 @@ function NameInput({ value, onCommit }: { value: string; onCommit: (v: string) =
       onBlur={() => draft !== value && onCommit(draft)}
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
     />
-  )
-}
-
-const NUM_INPUT_LABELS: Record<string, PlainMessageKey> = {
-  X: 'inspector.xPosition',
-  Y: 'inspector.yPosition',
-  W: 'inspector.width',
-  H: 'inspector.height',
-}
-
-function NumInput({ label, value, onCommit }: { label: string; value: number; onCommit: (v: number) => void }) {
-  const t = useT()
-  const ariaKey = NUM_INPUT_LABELS[label]
-  const [draft, setDraft] = useState(String(value))
-  const [seen, setSeen] = useState(value)
-  if (seen !== value) {
-    setSeen(value)
-    setDraft(String(value))
-  }
-  return (
-    <label className="flex h-7 min-w-0 items-center gap-[7px] rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus max-md:h-10">
-      <span className="flex-none text-[10.5px] text-ink-ghost">{label}</span>
-      <input
-        aria-label={ariaKey ? t(ariaKey) : label}
-        className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
-        inputMode="numeric"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          const n = Math.round(Number(draft))
-          if (!Number.isNaN(n) && n !== value) onCommit(n)
-          else setDraft(String(value))
-        }}
-        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      />
-    </label>
   )
 }

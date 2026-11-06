@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react'
-import { adminApi, type AdminCanvas, type AdminUser } from '../lib/api'
+import {
+  adminApi,
+  type AdminAgentFeedback,
+  type AdminAgentFeedbackPage,
+  type AdminCanvas,
+  type AdminStats,
+  type AdminUser,
+} from '../lib/api'
 import { navigate } from '../App'
 import { timeAgo } from '../lib/time'
 import { AppRail, railLayout } from '../components/AppRail'
-import { ChevronRightIcon, GridIcon, UsersIcon } from '../components/ui/icons'
+import { ChevronRightIcon, GridIcon, MessageSquareIcon, UsersIcon } from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
 import { ConfirmDialog } from '../components/ui/alert-dialog'
 import { Badge } from '../components/ui/badge'
+import { ToggleChipGroup, ToggleChipItem } from '../components/ui/toggle-chip'
+import type { AgentFeedbackKind } from '../../shared/agentFeedback'
 import { SearchField } from '../components/ui/search-field'
 import { MetaLine, Tile, TileBody, TileCover } from '../components/ui/tile'
 import { Skeleton } from '../components/ui/skeleton'
@@ -40,6 +49,14 @@ const LINK_TITLE = {
   edit: 'admin.linkAccessEdit',
 } as const satisfies Record<SharedAccess, PlainMessageKey>
 
+type Tab = 'canvases' | 'users' | 'feedback'
+
+const SEARCH_LABEL: Record<Tab, PlainMessageKey> = {
+  canvases: 'admin.searchCanvases',
+  users: 'admin.searchAccounts',
+  feedback: 'admin.searchFeedback',
+}
+
 /**
  * The instance index: every canvas, every account. Read-only — the way to
  * look inside someone's canvas is "view as", which hands you a real (but
@@ -52,8 +69,8 @@ export function Admin() {
   const t = useT()
   const [data, setData] = useState<{ total: number; canvases: AdminCanvas[] } | null>(null)
   const [users, setUsers] = useState<AdminUser[] | null>(null)
-  const [stats, setStats] = useState<{ users: number; canvases: number; frames: number } | null>(null)
-  const [tab, setTab] = useState<'canvases' | 'users'>('canvases')
+  const [stats, setStats] = useState<AdminStats | null>(null)
+  const [tab, setTab] = useState<Tab>('canvases')
   /* the ban/unban awaiting "are you sure" — an in-app dialog, since
      window.confirm is a silent "cancel" in the desktop shell's webview */
   const [confirmBan, setConfirmBan] = useState<{ user: AdminUser; banned: boolean } | null>(null)
@@ -142,6 +159,15 @@ export function Admin() {
           >
             {t('admin.accounts')}
           </DashNavItem>
+          <DashNavItem
+            density="rail"
+            icon={<MessageSquareIcon size="rail" />}
+            count={stats?.agentFeedback ?? ''}
+            active={tab === 'feedback'}
+            onClick={() => setTab('feedback')}
+          >
+            {t('admin.feedbackNav')}
+          </DashNavItem>
         </nav>
       </AppRail>
 
@@ -163,10 +189,8 @@ export function Admin() {
             size="header"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder={
-              tab === 'canvases' ? t('admin.searchCanvasesPlaceholder') : t('admin.searchAccountsPlaceholder')
-            }
-            aria-label={tab === 'canvases' ? t('admin.searchCanvases') : t('admin.searchAccounts')}
+            placeholder={`${t(SEARCH_LABEL[tab])}…`}
+            aria-label={t(SEARCH_LABEL[tab])}
           />
         </DashHeader>
 
@@ -187,17 +211,16 @@ export function Admin() {
             </div>
           </div>
 
-          <Tabs
-            value={tab}
-            onValueChange={(next) => setTab(next as 'canvases' | 'users')}
-            className="mt-4 flex md:hidden"
-          >
+          <Tabs value={tab} onValueChange={(next) => setTab(next as Tab)} className="mt-4 flex md:hidden">
             <TabsList variant="card">
               <TabsTrigger value="canvases">
                 <GridIcon size="rail" /> {t('admin.canvasesTab', { count: stats?.canvases ?? '…' })}
               </TabsTrigger>
               <TabsTrigger value="users">
                 <UsersIcon size="rail" /> {t('admin.accountsTab', { count: stats?.users ?? '…' })}
+              </TabsTrigger>
+              <TabsTrigger value="feedback">
+                <MessageSquareIcon size="rail" /> {t('admin.feedbackTab', { count: stats?.agentFeedback ?? '…' })}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -248,6 +271,8 @@ export function Admin() {
                 ))}
               </div>
             </>
+          ) : tab === 'feedback' ? (
+            <AgentFeedbackList q={q} />
           ) : (
             <div className="mt-4 overflow-hidden rounded-panel border border-line bg-surface shadow-card">
               {users === null && <p className="mt-7 text-copy text-ink-soft">…</p>}
@@ -309,5 +334,130 @@ export function Admin() {
         }}
       />
     </DashLayout>
+  )
+}
+
+type KindFilter = 'all' | AgentFeedbackKind
+
+/** What agents sent the Doop team: issues (report_issue) and ideas or praise
+ *  (share_feedback). Search and the kind filter run on the server, so older
+ *  reports stay findable; the list loads a page at a time. */
+function AgentFeedbackList({ q }: { q: string }) {
+  const [kind, setKind] = useState<KindFilter>('all')
+  const [search, setSearch] = useState(q.trim())
+  /* one request per pause in typing, not per keystroke */
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(q.trim()), 250)
+    return () => clearTimeout(timer)
+  }, [q])
+  /* a new filter or search starts the pages over: a fresh FeedbackPages */
+  return <FeedbackPages key={`${kind}\n${search}`} kind={kind} search={search} onKind={setKind} />
+}
+
+function FeedbackPages({
+  kind,
+  search,
+  onKind,
+}: {
+  kind: KindFilter
+  search: string
+  onKind: (kind: KindFilter) => void
+}) {
+  const t = useT()
+  const [reports, setReports] = useState<AdminAgentFeedback[]>([])
+  const [page, setPage] = useState<AdminAgentFeedbackPage | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+
+  function load(before?: AdminAgentFeedback) {
+    setLoading(true)
+    setFailed(false)
+    adminApi
+      .agentFeedback({ kind: kind === 'all' ? undefined : kind, q: search || undefined, before })
+      .then((next) => {
+        setPage(next)
+        setReports((shown) => (before ? [...shown, ...next.reports] : next.reports))
+      })
+      .catch(() => setFailed(true))
+      .finally(() => setLoading(false))
+  }
+
+  // eslint-disable-next-line react/exhaustive-deps -- the first page loads once; a new filter remounts this component
+  useEffect(() => load(), [])
+
+  const counts = page?.counts
+  const total = counts ? counts.issue + counts.feedback : null
+  if (total === 0 && !search) return <p className="mt-7 text-copy text-ink-soft">{t('admin.feedbackEmpty')}</p>
+  return (
+    <>
+      <ToggleChipGroup
+        className="mt-4 gap-1.5"
+        aria-label={t('admin.feedbackKind')}
+        value={kind}
+        onValueChange={(next) => next && onKind(next as KindFilter)}
+      >
+        <ToggleChipItem value="all" size="sm">
+          {t('admin.feedbackAll', { count: total ?? '…' })}
+        </ToggleChipItem>
+        <ToggleChipItem value="issue" size="sm">
+          {t('admin.feedbackIssues', { count: counts?.issue ?? '…' })}
+        </ToggleChipItem>
+        <ToggleChipItem value="feedback" size="sm">
+          {t('admin.feedbackIdeas', { count: counts?.feedback ?? '…' })}
+        </ToggleChipItem>
+      </ToggleChipGroup>
+      {reports.length > 0 && (
+        <div className="mt-3 overflow-hidden rounded-panel border border-line bg-surface shadow-card">
+          {reports.map((f) => (
+            <div key={f.id} className="border-b border-line-soft p-3.5 last:border-b-0 md:px-[18px] md:py-[13px]">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone={f.kind === 'issue' ? 'accent' : 'success'}>
+                  {f.kind === 'issue' ? t('admin.feedbackIssue') : t('admin.feedbackIdea')}
+                </Badge>
+                <Badge tone="outline">{f.category.replaceAll('_', ' ')}</Badge>
+                {f.tool && <span className="font-mono text-caption text-ink-soft">{f.tool}</span>}
+              </div>
+              <p className="mt-1.5 text-copy whitespace-pre-wrap text-ink">{f.message}</p>
+              <MetaLine className="mt-1.5">
+                <span>{f.agentName ?? t('admin.unnamedAgent')}</span>
+                <span>{f.source === 'resident' ? 'Doop Agent' : (f.client ?? 'MCP')}</span>
+                {f.user && <span>{f.user.email}</span>}
+                {f.canvasId && <span className="font-mono">{f.canvasId}</span>}
+                <span>{timeAgo(f.at)}</span>
+              </MetaLine>
+            </div>
+          ))}
+        </div>
+      )}
+      {page && !loading && !failed && reports.length === 0 && (
+        <p className="mt-4 text-copy text-ink-soft">{t('admin.feedbackNoMatch')}</p>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2.5 text-body text-ink-faint">
+        {failed ? (
+          <>
+            <span className="text-accent-ink">{t('admin.feedbackLoadFailed')}</span>
+            <Button variant="ghost" size="sm" onClick={() => load(reports.at(-1))}>
+              {t('admin.tryAgain')}
+            </Button>
+          </>
+        ) : loading ? (
+          <span>{t('admin.loading')}</span>
+        ) : (
+          page?.hasMore && (
+            <>
+              <span>
+                {t('admin.showingNewest', {
+                  shown: reports.length,
+                  total: (kind === 'all' ? total : kind === 'issue' ? counts?.issue : counts?.feedback) ?? '…',
+                })}
+              </span>
+              <Button variant="ghost" size="sm" onClick={() => load(reports.at(-1))}>
+                {t('admin.loadOlder')}
+              </Button>
+            </>
+          )
+        )}
+      </div>
+    </>
   )
 }

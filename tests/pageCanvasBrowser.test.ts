@@ -9,6 +9,7 @@ declare global {
     seedPages: (canvas: Canvas) => void
     pickElement: (frameId: string, selector: string) => void
     frameHtml: (frameId: string) => string | undefined
+    trace: unknown[]
     pageState: () => {
       activePageId: string
       viewport: { x: number; y: number; zoom: number }
@@ -61,6 +62,19 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
     await page?.close()
     await browser?.close()
   })
+
+  /* a page-state wait that, when it never comes true, says what the page did */
+  async function waitState(label: string, check: () => boolean) {
+    try {
+      await page.waitForFunction(check)
+    } catch (error) {
+      const trace = await page.evaluate(() => window.trace).catch(() => 'unavailable')
+      const state = await page.evaluate(() => window.pageState()).catch(() => 'unavailable')
+      throw new Error(`${label}: ${String(error)}\nstate ${JSON.stringify(state)}\ntrace ${JSON.stringify(trace)}`, {
+        cause: error,
+      })
+    }
+  }
 
   async function load(data: Canvas, query = '') {
     await page.goto(fixtureUrl(`pages.html${query}`))
@@ -232,20 +246,20 @@ describe.skipIf(!findBrowserPath())('page camera and snapping', { timeout: 30_00
       html: '<h1 id="one" data-doop-id="one000">One</h1><h2 id="two" data-doop-id="two000">Two</h2>',
     }
     await load(canvas([target]), '?frame=target&element=one000')
-    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#one')
+    await waitState('first link', () => window.pageState().selectedElement?.selector === '#one')
     await page.evaluate(() => {
       history.pushState(null, '', '?frame=target&element=two000')
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
-    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#two')
+    await waitState('second link', () => window.pageState().selectedElement?.selector === '#two')
     await page.waitForSelector('button[aria-label="Copy link to element"]')
     await page.evaluate(() => history.back())
-    await page.waitForFunction(() => window.pageState().selectedElement?.selector === '#one')
+    await waitState('back to the first link', () => window.pageState().selectedElement?.selector === '#one')
     await page.evaluate(() => {
       history.pushState(null, '', '?frame=target')
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
-    await page.waitForFunction(() => window.pageState().inspectorOpen && !window.pageState().selectedElement)
+    await waitState('frame-only link', () => window.pageState().inspectorOpen && !window.pageState().selectedElement)
     await page.waitForSelector('button[aria-label="Copy link to element"]', { hidden: true })
   })
 

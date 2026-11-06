@@ -72,9 +72,9 @@ describe('canvas access model', () => {
     const list = await rpc('resources/list')
     expect(list.status).toBe(200)
     expect((await list.json()).result.resources.map((r: { uri: string }) => r.uri)).toContain(
-      'ui://doop/frame-preview-2.html',
+      'ui://doop/frame-preview-3.html',
     )
-    const read = await rpc('resources/read', { uri: 'ui://doop/frame-preview-2.html' })
+    const read = await rpc('resources/read', { uri: 'ui://doop/frame-preview-3.html' })
     expect(read.status).toBe(200)
     expect((await read.json()).result.contents[0].text).toContain('<!doctype html>')
     expect((await rpc('tools/list')).status).toBe(401)

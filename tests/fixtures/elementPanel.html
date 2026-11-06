@@ -17,6 +17,7 @@
       import { pickedSelectors, useStore } from '/src/lib/store.ts'
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
       import { editElementGeometry } from '/src/lib/frameBridge.ts'
+      import { nudgeSelection } from '/src/lib/layerEdits.ts'
       import '/src/styles.css'
       window.elementPanelHarness = {
         /* one frame, or several stacked in order (later ones on top) */
@@ -31,12 +32,18 @@
             updatedAt: 0,
           })
         },
+        /* the canvas's design tokens, as the room would send them */
+        tokens: (tokens, modes) => useStore.getState().setTokensLocal(tokens, modes ?? []),
         remote: (frame) => useStore.getState().setCanvas({ ...useStore.getState().canvas, frames: [frame] }),
-        select: (selector) => useStore.getState().setSelectedElement({ frameId: 'f', selector }),
+        select: (selector) => useStore.getState().pickElement({ frameId: 'f', selector }),
+        panelOpen: () => useStore.getState().elementPanelOpen,
         geometry: (selector, edit) => editElementGeometry('f', selector, edit),
         selectFrame: () => useStore.getState().select('f'),
+        deselectFrame: () => useStore.getState().select(null),
         deselect: () => useStore.getState().setSelectedElement(null),
         picked: () => pickedSelectors(useStore.getState()),
+        pickAlso: (selector) => useStore.getState().toggleElement({ frameId: 'f', selector }),
+        nudge: nudgeSelection,
         setTool: (tool) => useStore.getState().setTool(tool),
         setZoom: (zoom) => {
           useStore.getState().setViewport({ x: 0, y: 0, zoom })
@@ -49,6 +56,8 @@
         const frames = useStore((s) => s.canvas?.frames)
         const frame = frames?.[0]
         const selected = useStore((s) => s.selectedElement)
+        /* the panel shows while open, as CanvasPage mounts it */
+        const panelOpen = useStore((s) => s.elementPanelOpen)
         const zoom = useStore((s) => s.viewport.zoom)
         /* size badges render into a screen-space layer, as the Stage provides */
         const [labelLayer, setLabelLayer] = React.useState(null)
@@ -68,10 +77,15 @@
             React.createElement(
               FrameLabelLayer.Provider,
               { value: labelLayer },
-              frames.map((f) => React.createElement(FrameView, { key: f.id, frame: f, layoutZoom: k })),
+              /* ranked in paint order, the way the Stage's FrameStack stacks them */
+              frames.map((f, i) =>
+                React.createElement(FrameView, { key: f.id, frame: f, stack: i + 1, layoutZoom: k }),
+              ),
             ),
           ),
-          selected && React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
+          selected &&
+            panelOpen &&
+            React.createElement(ElementPanel, { frame, selector: selected.selector, style: { right: 12 } }),
         )
       }
       createRoot(document.getElementById('root')).render(React.createElement(Fixture))

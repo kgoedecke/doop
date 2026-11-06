@@ -1,10 +1,13 @@
 /** Home: the hero and composer, the canvas list, the workspace dialogs and the agent allowance. */
 export const home = {
   /* header */
-  manage: 'Manage',
   import: 'Import',
   newCanvas: 'New canvas',
   newShort: 'New',
+  hidePromptBox: 'Hide Prompt Box',
+  hidePromptBoxTitle: 'Hide Prompt Box?',
+  hidePromptBoxLede:
+    'This removes the prompt box from your home dashboard. You can turn it back on anytime in Settings → General.',
 
   /* failures and toasts */
   createCanvasFailed: 'Couldn’t create the canvas',

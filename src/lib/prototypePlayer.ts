@@ -71,6 +71,68 @@ export function fitScale(frame: { width: number; height: number }, viewport: { w
   return Math.min(viewport.w / frame.width, viewport.h / frame.height)
 }
 
+/** How the player sizes a screen against its viewport: at its design size,
+ *  resized to the viewport (the document reflows), scaled to the width
+ *  (scrolling down), scaled to fit whole (letterboxed) or scaled to cover
+ *  (cropped). */
+export const PROTO_SCALINGS = ['actual', 'responsive', 'fit-width', 'fit', 'fill'] as const
+export type ProtoScaling = (typeof PROTO_SCALINGS)[number]
+
+export const DEFAULT_PROTO_SCALING: ProtoScaling = 'fit'
+
+export function isProtoScaling(value: unknown): value is ProtoScaling {
+  return (PROTO_SCALINGS as readonly unknown[]).includes(value)
+}
+
+/* Per browser, like the panel layout: it is how this device plays prototypes. */
+const PROTO_SCALING_STORAGE_KEY = 'doop:proto-scaling'
+
+export function readProtoScaling(): ProtoScaling {
+  try {
+    const stored = localStorage.getItem(PROTO_SCALING_STORAGE_KEY)
+    if (isProtoScaling(stored)) return stored
+  } catch {
+    /* storage unavailable: the default stands */
+  }
+  return DEFAULT_PROTO_SCALING
+}
+
+export function saveProtoScaling(scaling: ProtoScaling): void {
+  try {
+    localStorage.setItem(PROTO_SCALING_STORAGE_KEY, scaling)
+  } catch {
+    /* the pick holds for this player only */
+  }
+}
+
+/** A screen's document size (design px) and the scale it is drawn at. */
+export interface ScreenLayout {
+  width: number
+  height: number
+  scale: number
+}
+
+export function screenLayout(
+  frame: { width: number; height: number },
+  viewport: { w: number; h: number },
+  scaling: ProtoScaling,
+): ScreenLayout {
+  const size = { width: frame.width, height: frame.height }
+  if (frame.width <= 0 || frame.height <= 0) return { ...size, scale: 1 }
+  switch (scaling) {
+    case 'actual':
+      return { ...size, scale: 1 }
+    case 'responsive':
+      return { width: Math.max(1, viewport.w), height: Math.max(1, viewport.h), scale: 1 }
+    case 'fit-width':
+      return { ...size, scale: viewport.w / frame.width }
+    case 'fill':
+      return { ...size, scale: Math.max(viewport.w / frame.width, viewport.h / frame.height) }
+    case 'fit':
+      return { ...size, scale: fitScale(frame, viewport) }
+  }
+}
+
 /** Where a player screen sits in the flow, as its browser history entry
  *  records it: the frame shown and how many screens deep it is. */
 export interface ProtoPlace {

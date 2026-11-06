@@ -2,6 +2,7 @@
  *  the desktop app's browser hand-offs, and the "view as" banner. */
 export const auth = {
   networkError: 'Could not reach doop — check your connection and try again.',
+  unreachable: 'doop could not be reached — it may be restarting. Try again in a moment.',
   somethingWentWrong: 'Something went wrong',
   somethingWentWrongTitle: 'Something went wrong.',
 

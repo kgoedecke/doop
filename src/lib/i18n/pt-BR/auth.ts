@@ -2,6 +2,7 @@ import type { Catalog } from '..'
 
 export const auth: Catalog['auth'] = {
   networkError: 'Não foi possível acessar o doop — verifique sua conexão e tente de novo.',
+  unreachable: 'Não foi possível acessar o doop — ele pode estar reiniciando. Tente de novo em instantes.',
   somethingWentWrong: 'Algo deu errado',
   somethingWentWrongTitle: 'Algo deu errado.',
 

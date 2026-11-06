@@ -4,17 +4,26 @@ import { useT, type PlainMessageKey } from '../lib/i18n'
 import { ModelAccountPanel } from '../components/ModelAccount'
 import { ImageModelCard } from '../components/ImageModelCard'
 import { useAllowance } from '../components/TeamAllowance'
-import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import { AccountSettings } from '../components/AccountSettings'
 import { AppearanceSettings } from '../components/AppearanceSettings'
+import { GeneralSettings } from '../components/GeneralSettings'
 import { AgentKeys } from '../components/AgentKeys'
 import { Webhooks } from '../components/Webhooks'
+import { FontLibrary } from '../components/FontLibrary'
 import { AccountMenu } from '../components/DashShell'
 import { railLayout } from '../components/AppRail'
-import { BellIcon, ChevronLeftIcon, KeyIcon, MoonIcon, SparkIcon, UserIcon } from '../components/ui/icons'
+import {
+  BellIcon,
+  ChevronLeftIcon,
+  KeyIcon,
+  MoonIcon,
+  GearIcon,
+  SparkIcon,
+  TextIcon,
+  UserIcon,
+} from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
-import { CardDescription, CardHeader, CardTitle, SettingsCard } from '../components/ui/card'
 import { Progress } from '../components/ui/progress'
 import {
   DashContent,
@@ -29,11 +38,13 @@ import {
   DashTitle,
 } from '../components/ui/dash'
 
-type Pane = 'agent' | 'keys' | 'webhooks' | 'account' | 'appearance'
+type Pane = 'general' | 'agent' | 'fonts' | 'keys' | 'webhooks' | 'account' | 'appearance'
 
 /* the heading over each pane, and the line under it */
 const panes: Record<Pane, { title: PlainMessageKey; blurb: PlainMessageKey }> = {
+  general: { title: 'settings.generalTitle', blurb: 'settings.generalBlurb' },
   agent: { title: 'settings.agentTitle', blurb: 'settings.agentBlurb' },
+  fonts: { title: 'settings.fontsTitle', blurb: 'settings.fontsBlurb' },
   keys: { title: 'settings.keysTitle', blurb: 'settings.keysBlurb' },
   webhooks: { title: 'settings.webhooksTitle', blurb: 'settings.webhooksBlurb' },
   account: { title: 'settings.accountTitle', blurb: 'settings.accountBlurb' },
@@ -71,15 +82,13 @@ export function Settings() {
   const from = new URLSearchParams(location.search).get('from')
   const back = from && /^\/c\/[A-Za-z0-9_-]+$/.test(from) ? from : '/'
 
+  /* with a connection of their own the table below says what runs; the
+     line only counts free tasks, or names the operator's pilot */
   const meter = allowance
     ? allowance.byoModel
       ? allowance.byoKind === 'gemini-cloud'
         ? t('settings.meterGeminiCloud')
-        : allowance.byoKind === 'claude-local'
-          ? t('settings.meterClaudeLocal')
-          : allowance.byoKind === 'chatgpt' || !allowance.byoKind
-            ? t('settings.meterChatgpt')
-            : t('settings.meterProviderKey', { provider: ACCOUNT_KIND_LABELS[allowance.byoKind] })
+        : null
       : allowance.limit <= 0
         ? t('settings.meterNoFreeTasks')
         : left === 0
@@ -101,11 +110,27 @@ export function Settings() {
         <nav className="flex flex-col gap-0.5">
           <DashNavItem
             density="rail"
+            icon={<GearIcon size="rail" />}
+            active={pane === 'general'}
+            onClick={() => setPane('general')}
+          >
+            {t('settings.generalTitle')}
+          </DashNavItem>
+          <DashNavItem
+            density="rail"
             icon={<SparkIcon size="rail" />}
             active={pane === 'agent'}
             onClick={() => setPane('agent')}
           >
             {t('settings.agentTitle')}
+          </DashNavItem>
+          <DashNavItem
+            density="rail"
+            icon={<TextIcon size="rail" />}
+            active={pane === 'fonts'}
+            onClick={() => setPane('fonts')}
+          >
+            {t('settings.fontsTitle')}
           </DashNavItem>
           <DashNavItem
             density="rail"
@@ -163,9 +188,18 @@ export function Settings() {
           </div>
 
           <Tabs value={pane} onValueChange={(next) => setPane(next as Pane)} className="mt-4 flex md:hidden">
-            <TabsList variant="card">
+            <TabsList
+              variant="card"
+              className="grid h-auto grid-cols-2 group-data-horizontal/tabs:h-auto sm:grid-cols-3 [&>*]:h-8"
+            >
+              <TabsTrigger value="general">
+                <GearIcon size="rail" /> {t('settings.generalTitle')}
+              </TabsTrigger>
               <TabsTrigger value="agent">
                 <SparkIcon size="rail" /> {t('settings.agentTitle')}
+              </TabsTrigger>
+              <TabsTrigger value="fonts">
+                <TextIcon size="rail" /> {t('settings.fontsTitle')}
               </TabsTrigger>
               <TabsTrigger value="keys">
                 <KeyIcon size="rail" /> {t('settings.keysTitle')}
@@ -182,30 +216,29 @@ export function Settings() {
             </TabsList>
           </Tabs>
 
-          {pane === 'agent' ? (
+          {pane === 'general' ? (
+            <GeneralSettings />
+          ) : pane === 'agent' ? (
             <>
-              <SettingsCard>
-                <CardHeader>
-                  <CardTitle>{t('settings.agentTitle')}</CardTitle>
-                  <CardDescription>{t('settings.agentCardDescription')}</CardDescription>
-                  {meter && (
-                    <div className="mt-[11px] flex flex-col items-start gap-[7px] text-caption text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
-                      {allowance && allowance.limit > 0 && !allowance.byoModel && (
-                        <Progress
-                          className="w-[min(100%,240px)] sm:w-[180px]"
-                          value={left ?? 0}
-                          max={allowance.limit}
-                          aria-label={t('settings.freeTasksLeftLabel')}
-                        />
-                      )}
-                      <span>{meter}</span>
-                    </div>
+              {/* the free-task count, while no connection of the person's own carries the agent */}
+              {meter && (
+                <div className="mt-4 flex max-w-[1000px] flex-col items-start gap-[7px] text-caption text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
+                  {allowance && allowance.limit > 0 && !allowance.byoModel && (
+                    <Progress
+                      className="w-[min(100%,240px)] sm:w-[180px]"
+                      value={left ?? 0}
+                      max={allowance.limit}
+                      aria-label={t('settings.freeTasksLeftLabel')}
+                    />
                   )}
-                </CardHeader>
-                <ModelAccountPanel onChange={refresh} />
-              </SettingsCard>
+                  <span>{meter}</span>
+                </div>
+              )}
+              <ModelAccountPanel onChange={refresh} />
               <ImageModelCard />
             </>
+          ) : pane === 'fonts' ? (
+            <FontLibrary />
           ) : pane === 'keys' ? (
             <AgentKeys />
           ) : pane === 'webhooks' ? (

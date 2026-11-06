@@ -196,7 +196,8 @@ describe('backfillElementIds', () => {
     store.init([{ ...canvas, frames: [frame('f1', deep)] }])
     const counts = await actions.backfillElementIds(new Map([['k1', '#nothing > p']]))
     expect(counts).toEqual({ stamped: 0, lost: 1, failed: 0 })
-  })
+    /* parsing 20,000 levels takes ~1s here and several on a busy CI runner */
+  }, 30_000)
 })
 
 describe('stamping an element for a new comment', () => {

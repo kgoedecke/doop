@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Canvas, ElementComment, Frame } from '../shared/types'
 import { frameAtPoint, resolveCommentDrop } from '../src/lib/commentMove'
-import { sameCommentAnchor } from '../shared/comments'
+import { sameCommentAnchor, elementCommentPosition } from '../shared/comments'
 
 /** Dropping a comment pin: which frame is under it, what it re-anchors to. */
 
@@ -63,8 +63,14 @@ describe('resolveCommentDrop', () => {
       selector: '#cta',
       elementId: 'cta000',
       snippet: '<button id="cta">Go</button>',
+      rect: { x: 10, y: 15 },
     }))
-    expect(stamped).toMatchObject({ frameId: 'over', selector: '#cta', elementId: 'cta000' })
+    expect(stamped).toMatchObject({
+      frameId: 'over',
+      selector: '#cta',
+      elementId: 'cta000',
+      elementOrigin: { x: 10, y: 15 },
+    })
   })
 
   it('anchors to the frame as a whole, at the point, when nothing is under it', async () => {
@@ -96,7 +102,7 @@ describe('resolveCommentDrop', () => {
 describe('sameCommentAnchor', () => {
   const base: ElementComment = { id: 'k', canvasId: 'c', snippet: '', from: 'A', text: 'T', at: 0 }
   it('tells a drop back onto the same anchor from a move', () => {
-    const onElement = { ...base, frameId: 'f', elementId: 'aaaaaa', snippet: '<p id="a">' }
+    const onElement = { ...base, frameId: 'f', elementId: 'aaaaaa', snippet: '<p id="a">', x: 3, y: 4 }
     const at = { x: 3, y: 4 }
     /* the same element wears the same id; an unstamped element is another one */
     expect(
@@ -111,6 +117,10 @@ describe('sameCommentAnchor', () => {
     ).toBe(false)
     expect(sameCommentAnchor(onElement, { frameId: 'f', snippet: '', ...at })).toBe(false)
     expect(sameCommentAnchor(onElement, { pageId: 'first', x: 1, y: 2 })).toBe(false)
+    expect(sameCommentAnchor(onElement, { frameId: 'f', elementId: 'aaaaaa', x: 30, y: 40 })).toBe(false)
+    expect(
+      sameCommentAnchor(onElement, { frameId: 'f', elementId: 'aaaaaa', ...at, elementOrigin: { x: 1, y: 2 } }),
+    ).toBe(false)
     const onFrame = { ...base, frameId: 'f', x: 10, y: 20 }
     expect(sameCommentAnchor(onFrame, { frameId: 'f', snippet: '', x: 10, y: 20 })).toBe(true)
     expect(sameCommentAnchor(onFrame, { frameId: 'f', snippet: '', x: 11, y: 20 })).toBe(false)
@@ -119,5 +129,46 @@ describe('sameCommentAnchor', () => {
     expect(sameCommentAnchor(onCanvas, { pageId: 'first', x: 1, y: 2 })).toBe(true)
     expect(sameCommentAnchor(onCanvas, { pageId: 'first', x: 1, y: 3 })).toBe(false)
     expect(sameCommentAnchor(onCanvas, { frameId: 'f', selector: 'body', snippet: '', x: 1, y: 2 })).toBe(false)
+  })
+})
+
+describe('elementCommentPosition', () => {
+  const comment: ElementComment = {
+    id: 'c',
+    canvasId: 'canvas',
+    frameId: 'f',
+    elementId: 'aaaaaa',
+    snippet: '',
+    text: 'Here',
+    from: 'Ada',
+    at: 0,
+    x: 145,
+    y: 87,
+    elementOrigin: { x: 100, y: 50 },
+  }
+
+  it('keeps the exact clicked point after loading, including near the frame edge', () => {
+    expect(elementCommentPosition(comment, { x: 100, y: 50 })).toEqual({ x: 145, y: 87 })
+    expect(elementCommentPosition({ ...comment, x: 1, y: 2, elementOrigin: { x: 0, y: 0 } }, { x: 0, y: 0 })).toEqual({
+      x: 1,
+      y: 2,
+    })
+  })
+
+  it('uses the top-left when the element moves, even if the old point still overlaps it', () => {
+    expect(elementCommentPosition(comment, { x: 110, y: 50 })).toEqual({ x: 110, y: 50 })
+    expect(elementCommentPosition(comment, { x: 100, y: 55 })).toEqual({ x: 100, y: 55 })
+  })
+
+  it('ignores subpixel layout noise and hides a missing element', () => {
+    expect(elementCommentPosition(comment, { x: 100.1, y: 50 })).toEqual({ x: 145, y: 87 })
+    expect(elementCommentPosition(comment, null)).toBeNull()
+  })
+
+  it('supports older comments without a saved placement', () => {
+    expect(elementCommentPosition({ ...comment, elementOrigin: undefined }, { x: 100, y: 50 })).toEqual({
+      x: 100,
+      y: 50,
+    })
   })
 })

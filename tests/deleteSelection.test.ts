@@ -57,6 +57,51 @@ describe('deleteSelection (the canvas ⌫ shortcut)', () => {
   })
 })
 
+describe('deleteSelection on a standalone element', () => {
+  const shell: Frame = {
+    ...frame,
+    id: 'f3',
+    html: '<!doctype html><html><head></head><body data-doop-canvas-element="true"><svg><rect></rect></svg></body></html>',
+  }
+  const SVG = 'body:nth-of-type(1) > svg:nth-of-type(1)'
+  const RECT = `${SVG} > rect:nth-of-type(1)`
+
+  beforeEach(() => {
+    updateFrame.mockClear()
+    deleteFrame.mockClear()
+    const canvas: Canvas = { id: 'c1', name: 'Canvas', frames: [shell] } as Canvas
+    useStore.setState({ canvas, selectedId: 'f3', selectedIds: ['f3'], selectedElement: null })
+  })
+
+  it('deletes the shell frame along with its one layer, leaving no empty frame behind', () => {
+    useStore.getState().pickElement({ frameId: 'f3', selector: SVG })
+    expect(deleteSelection()).toBe(true)
+    expect(deleteFrame).toHaveBeenCalledTimes(1)
+    expect(updateFrame).not.toHaveBeenCalled()
+    expect(useStore.getState().selectedElement).toBeNull()
+  })
+
+  it('removes only a picked child, keeping the shell and its layer', () => {
+    useStore.getState().pickElement({ frameId: 'f3', selector: RECT })
+    expect(deleteSelection()).toBe(true)
+    expect(deleteFrame).not.toHaveBeenCalled()
+    expect(updateFrame).toHaveBeenCalledTimes(1)
+    const html = useStore.getState().canvas?.frames[0]?.html ?? ''
+    expect(html).toContain('<svg>')
+    expect(html).not.toContain('<rect>')
+  })
+
+  it('keeps a locked standalone element and its shell', () => {
+    const locked: Frame = { ...shell, html: shell.html.replace('<svg>', '<svg data-doop-locked="true">') }
+    const canvas: Canvas = { id: 'c1', name: 'Canvas', frames: [locked] } as Canvas
+    useStore.setState({ canvas })
+    useStore.getState().pickElement({ frameId: 'f3', selector: SVG })
+    expect(deleteSelection()).toBe(true)
+    expect(deleteFrame).not.toHaveBeenCalled()
+    expect(updateFrame).not.toHaveBeenCalled()
+  })
+})
+
 describe('deleteSelection with locked frames', () => {
   beforeEach(() => {
     updateFrame.mockClear()

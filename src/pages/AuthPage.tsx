@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { authClient } from '../lib/auth'
+import { authErrorCode, authErrorMessage } from '../lib/authError'
 import { BrandMark } from '../components/ui/brand-mark'
 import { setName } from '../lib/identity'
 import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
 import type { DesktopSignInProvider, ProviderRedirects } from '../lib/desktopAuth'
 import { safeRelativeTarget } from '../lib/safeTarget'
 import { CODEX_SETUP_PATH } from '../lib/codexConnection'
-import { FIRST_CANVAS_PATH, firstCanvasPathAfterSignup } from '../../shared/firstCanvas'
+import { signupLanding } from '../../shared/firstCanvas'
 import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
@@ -41,12 +42,6 @@ async function accountExists(email: string): Promise<boolean> {
   }
 }
 
-/* better-auth types the error code as a string, but what arrives is whatever
-   the response carried, and a non-string code crashed the signup form */
-function isUserAlreadyExists(code: unknown): boolean {
-  return typeof code === 'string' && code.startsWith('USER_ALREADY_EXISTS')
-}
-
 function interruptedTarget(): string | null {
   if (location.pathname === '/oauth/consent' || location.pathname === CODEX_SETUP_PATH)
     return location.pathname + location.search
@@ -58,10 +53,11 @@ function interruptedTarget(): string | null {
 }
 
 /* Where the verification link lands a signup that had to confirm its email
-   first (SMTP on): the interrupted flow if there was one, else the first
-   canvas — the same landing an instantly signed-in signup gets below. */
+   first (SMTP on): the interrupted flow if there was one, else the shared
+   link the person opened, else the first canvas — the same landing an
+   instantly signed-in signup gets below. */
 function verifiedLanding(): string {
-  return interruptedTarget() ?? FIRST_CANVAS_PATH
+  return interruptedTarget() ?? signupLanding(location.pathname, location.search)
 }
 
 function resumeOAuthFlow(): boolean {
@@ -146,13 +142,17 @@ function ssoErrorFromUrl(): SsoError | null {
    carrying a session, so this component's own resumeOAuthFlow() never gets
    to run for this path; the equivalent logic has to travel with the
    request instead. An interrupted flow wins for everyone; otherwise a
-   returning user comes back to this page and a new account lands on its
-   first canvas, the same place the email signup goes, tagged with the
-   provider so the app can report the signup once it lands (App.tsx). */
+   returning user comes back to this page and a new account lands on the
+   shared link it opened or else its first canvas, the same place the email
+   signup goes, tagged with the provider so the app can report the signup
+   once it lands (App.tsx). */
 function ssoRedirects(provider: DesktopSignInProvider): ProviderRedirects {
   const target = interruptedTarget()
   if (target) return { callbackURL: target, newUserCallbackURL: target }
-  return { callbackURL: location.pathname + location.search, newUserCallbackURL: firstCanvasPathAfterSignup(provider) }
+  return {
+    callbackURL: location.pathname + location.search,
+    newUserCallbackURL: signupLanding(location.pathname, location.search, provider),
+  }
 }
 
 /** Matches server/auth.ts loginProvidersConfig's response shape. */
@@ -191,12 +191,14 @@ function useOidcConfig(): OidcClientConfig {
    gone before anyone read it. A page load (the sign-in landing) resets it. */
 let browserSignInNotice: string | null = null
 
-export function AuthPage() {
+/** `initialMode` opens the form on sign-up or sign-in, for a guest on a
+ *  shared canvas who pressed one of the two (src/components/AccessBanner.tsx). */
+export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } = {}) {
   const t = useT()
   const oidc = useOidcConfig()
   /* better-auth lands password-reset links on /auth/reset?token=… */
   const resetToken = location.pathname === '/auth/reset' ? new URLSearchParams(location.search).get('token') : null
-  const [mode, setMode] = useState<AuthMode>(resetToken ? 'reset' : 'signin')
+  const [mode, setMode] = useState<AuthMode>(resetToken ? 'reset' : (initialMode ?? 'signin'))
   const [name, setNameField] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -254,7 +256,7 @@ export function AuthPage() {
         return
       }
       const res = await start({ ...ssoRedirects(provider), errorCallbackURL: '/auth' })
-      if (res.error) setError(res.error.message ?? startFailed)
+      if (res.error) setError(authErrorMessage(res.error, startFailed, t('auth.unreachable')))
     } catch {
       setError(t(NETWORK_ERROR))
     } finally {
@@ -301,7 +303,8 @@ export function AuthPage() {
       if (mode === 'reset') {
         const res = await authClient.resetPassword({ newPassword: password, token: resetToken ?? '' })
         if (res.error) {
-          setError(res.error.message ?? t('auth.resetLinkInvalid'))
+          /* a platform error must not be reported as an expired link */
+          setError(authErrorMessage(res.error, t('auth.resetLinkInvalid'), t('auth.unreachable')))
         } else {
           history.replaceState(null, '', '/auth')
           switchMode('signin')
@@ -319,18 +322,22 @@ export function AuthPage() {
             })
           : await authClient.signIn.email({ email, password })
       if (res.error) {
-        if (mode === 'signin' && res.error.code === 'EMAIL_NOT_VERIFIED') {
+        /* authErrorCode, not res.error.code: only our own API sends a string
+           code, and matching whatever the platform sent instead must not
+           throw in here — see src/lib/authError.ts */
+        const code = authErrorCode(res.error)
+        if (mode === 'signin' && code === 'EMAIL_NOT_VERIFIED') {
           setError(t('auth.emailNotVerified'))
           setUnverified(true)
         } else if (mode === 'signin' && !(await accountExists(email))) {
           setError(t('auth.noAccountFound'))
           setSuggestMode('signup')
           posthog.capture('login_no_account_found')
-        } else if (mode === 'signup' && isUserAlreadyExists(res.error.code)) {
+        } else if (mode === 'signup' && code.startsWith('USER_ALREADY_EXISTS')) {
           setError(t('auth.accountExists'))
           setSuggestMode('signin')
         } else {
-          setError(res.error.message ?? t('auth.somethingWentWrong'))
+          setError(authErrorMessage(res.error, t('auth.somethingWentWrong'), t('auth.unreachable')))
         }
       } else if (res.data?.user) {
         /* signup with verification required: the account exists but there is
@@ -343,9 +350,10 @@ export function AuthPage() {
         if (mode === 'signup') posthog.capture('account_signed_up', { method: 'email' })
         else posthog.capture('account_signed_in')
         setName(res.data.user.name) // keep cursor/feed identity in sync with the account
-        /* land new users on their auto-created first canvas, where the
-           demo agent is waiting to perform */
-        if (!resumeOAuthFlow() && mode === 'signup') location.href = FIRST_CANVAS_PATH
+        /* land new users on the shared link they opened, else on their
+           auto-created first canvas, where the demo agent is waiting to
+           perform */
+        if (!resumeOAuthFlow() && mode === 'signup') location.href = verifiedLanding()
       }
     } catch {
       setError(t(NETWORK_ERROR))

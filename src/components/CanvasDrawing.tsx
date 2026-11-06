@@ -6,6 +6,7 @@ import { visibleGuides } from '../lib/guides'
 import { snapPointToGuides } from '../lib/snap'
 import { isTypingTarget } from '../lib/keys'
 import { useT } from '../lib/i18n'
+import { usePaper } from '../lib/paper'
 import {
   defaultDrawing,
   drawingBounds,
@@ -15,7 +16,7 @@ import {
   pathDrawing,
   saveDrawing,
   DRAWING_FILL,
-  DRAWING_INK,
+  drawingInk,
   type Drawing,
   type DrawingTarget,
   type Point,
@@ -76,8 +77,13 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       } else if (e.key === 'Escape') {
         e.preventDefault()
         e.stopImmediatePropagation()
-        cancel()
-        useStore.getState().setTool('select')
+        // Esc leaves text editing the way a blur does: what was typed stays
+        // (an empty draft still vanishes); a shape or path mid-gesture is dropped.
+        if (current.typing) finish()
+        else {
+          cancel()
+          useStore.getState().setTool('select')
+        }
       } else if (
         e.key === 'Enter' &&
         (current.drawing.tool === 'path' || (current.typing && (e.metaKey || e.ctrlKey)))
@@ -272,8 +278,18 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       onFinish={() => finish()}
     />
   )
+  const penZoom = useStore((s) => s.viewport.zoom)
+  /* what the pen's badge says a press would do: close the path, land on an
+     anchor it already placed, or just add the next point */
+  const penCursor = (() => {
+    const points = draft?.drawing.tool === 'path' ? (draft.drawing.points ?? []) : []
+    const snapped = hover && !hover.unsnapped && points.length ? nearestPathAnchor(points, hover, penZoom) : null
+    if (snapped === null) return 'pen' as const
+    return snapped === 0 && points.length >= 2 ? ('pen-close' as const) : ('pen-anchor' as const)
+  })()
   return {
     preview,
+    penCursor,
     pathActive: draft?.drawing.tool === 'path',
     canFinishPath: (draft?.drawing.points?.length ?? 0) >= 2,
     finish: () => finish(),
@@ -308,7 +324,9 @@ function DrawingPreview({
 }) {
   const zoom = useStore((s) => s.viewport.zoom)
   const t = useT()
+  const paper = usePaper()
   const d = draft.drawing
+  const ink = drawingInk(draft.target, paper.tone)
   if (draft.typing)
     return (
       <textarea
@@ -319,8 +337,11 @@ function DrawingPreview({
         value={d.text ?? ''}
         onChange={(e) => onText(e.target.value, Math.max(d.height, e.target.scrollHeight))}
         onBlur={onFinish}
-        className="absolute z-30 resize-none border-0 bg-white/90 p-0 text-[#202124] outline-2 outline-brand"
+        /* the box is see-through, like the text it becomes: the ring and the
+           placeholder are all that mark it on the canvas */
+        className="absolute z-30 resize-none border-0 bg-transparent p-0 outline-2 outline-brand placeholder:text-ink-faint"
         style={{
+          color: ink,
           left: d.x,
           top: d.y,
           width: d.width,
@@ -344,7 +365,7 @@ function DrawingPreview({
         width={preview.width}
         height={preview.height}
       >
-        <path d={pathData(preview)} fill="none" stroke={DRAWING_INK} strokeWidth={2} strokeLinejoin="round" />
+        <path d={pathData(preview)} fill="none" stroke={ink} strokeWidth={2} strokeLinejoin="round" />
         {points
           .filter((p) => p.handle)
           .map((p, i) => (

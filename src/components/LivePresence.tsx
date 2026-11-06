@@ -21,7 +21,7 @@ export function LivePresence({
   others,
   onRenameSelf,
 }: {
-  me: { name: string; color: string }
+  me: { name: string; image?: string; color: string }
   others: Presence[]
   onRenameSelf: () => void
 }) {
@@ -51,7 +51,7 @@ export function LivePresence({
           title={t('canvas.youAre', { name: me.name })}
           onClick={onRenameSelf}
         >
-          <PresenceFace name={me.name} color={me.color} kind="user" />
+          <PresenceFace name={me.name} image={me.image} color={me.color} kind="user" />
         </button>
         {others.length > 0 && (
           <span className="-ml-[7px] flex items-center">
