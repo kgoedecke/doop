@@ -268,7 +268,10 @@ export function CanvasPage({
      no property panels, no edit shortcuts. The server refuses those writes
      regardless; this keeps the UI from offering them. */
   const role = useStore(roleOf)
-  const readOnly = useStore((s) => !canEditOpenCanvas(s))
+  /* a guest is read-only from the first paint; anyone else until their role
+     arrives with the canvas (roleOf reads a missing canvas as edit) */
+  const readOnly = useStore((s) => guest || !canEditOpenCanvas(s))
+  const editorReady = useStore((s) => !guest && s.canvas?.id === canvasId && canEditOpenCanvas(s))
   const isMobile = useIsMobile()
   const prototypeMode = useStore((s) => s.prototypeMode)
   const [panelWidths, setPanelWidths] = useState(readPanelWidths)
@@ -397,7 +400,8 @@ export function CanvasPage({
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         /* the composer is an editor's: readers (and guests) have none */
-        if (!canEditOpenCanvas(useStore.getState())) return
+        const state = useStore.getState()
+        if (guest || !state.canvas || !canEditOpenCanvas(state)) return
         setShowActivity(true)
         if (useStore.getState().uiHidden) useStore.getState().toggleUiHidden()
         useStore.getState().setPanelTab('tasks')
@@ -514,7 +518,7 @@ export function CanvasPage({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [canvasId, hideUiActive, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canvasId, guest, hideUiActive, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Native copy/paste events let us write the selection's token and read
      clipboard images without asking for clipboard-read permission. */
@@ -1268,7 +1272,7 @@ export function CanvasPage({
 
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
       {/* ?connect=1 and ?import=1 can ask for these on any link; only an editor gets them */}
-      {showConnect && !readOnly && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
+      {showConnect && editorReady && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
       {presenting && <PresentMode frameId={presenting} onClose={() => setPresenting(null)} />}
       {showShare && canvas && (
         <ShareModal
@@ -1303,7 +1307,7 @@ export function CanvasPage({
           onClose={() => setExporting(null)}
         />
       )}
-      {showImport && !readOnly && (
+      {showImport && editorReady && (
         <ImportModal
           canvasId={canvasId}
           installPass={ghInstallPass}
