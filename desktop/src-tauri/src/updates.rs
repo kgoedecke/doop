@@ -18,6 +18,10 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 const FIRST_CHECK: Duration = Duration::from_secs(15);
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long the feed or a download may go silent before it is given up. Not
+/// a deadline: a slow connection that keeps delivering never hits it, while
+/// a dead one no longer holds `busy` (and every later check) until restart.
+const STALL: Duration = Duration::from_secs(60);
 const RESTART: &str = "Restart Now";
 const LATER: &str = "Later";
 
@@ -144,6 +148,7 @@ async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, Stri
 async fn newest(app: &AppHandle) -> Result<Option<Update>, String> {
     let handle = app.clone();
     app.updater_builder()
+        .configure_client(|client| client.connect_timeout(STALL).read_timeout(STALL))
         // Windows: the installer is launched and the process exits at once.
         .on_before_exit(move || {
             crate::claude::shutdown(&handle.state::<crate::claude::ClaudeState>())
