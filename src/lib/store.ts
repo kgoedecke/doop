@@ -124,6 +124,9 @@ interface State {
    *  or the id in the URL was never one) — CanvasPage shows a not-found
    *  screen instead of an unusable, unresponsive canvas UI */
   canvasNotFound: boolean
+  /** a signed-out guest's join was refused (a private canvas, or the owner
+   *  turned the link off mid-visit) — App shows the sign-in form instead */
+  signInRequired: boolean
   /** a reconnect revealed a newer client bundle on the server — offer a reload */
   updateReady: boolean
   /** frameId -> color, set briefly when a remote actor updates a frame */
@@ -166,6 +169,7 @@ interface State {
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
+  setSignInRequired(v: boolean): void
   setUpdateReady(v: boolean): void
   setPresences(list: Presence[]): void
   upsertPresence(p: Presence): void
@@ -327,6 +331,7 @@ export const useStore = create<State>((set, get) => ({
   selectedGuideId: null,
   connected: false,
   canvasNotFound: false,
+  signInRequired: false,
   updateReady: false,
   notice: null,
   flashes: {},
@@ -402,6 +407,7 @@ export const useStore = create<State>((set, get) => ({
     }),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
+  setSignInRequired: (signInRequired) => set({ signInRequired }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) =>
     set((s) => ({

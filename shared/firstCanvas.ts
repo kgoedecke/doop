@@ -23,3 +23,19 @@ export function parseSignupMethod(raw: string | null | undefined): SignupMethod 
 export function firstCanvasPathAfterSignup(method: SignupMethod): string {
   return `${FIRST_CANVAS_PATH}?${SIGNUP_PARAM}=${method}`
 }
+
+/* A share link opened signed out renders the sign-in form at the link's own
+   URL (src/App.tsx), so the path a signup starts on is where the person was
+   going: a canvas, its prototype or a workspace someone sent them. */
+const SHARED_LINK = /^\/(c|w)\/[^/]/
+
+/** Where a new account lands from the page its signup started on: back on
+ *  the shared link it opened, else FIRST_CANVAS_PATH. A provider signup's
+ *  method rides along either way, so the app can still report it. */
+export function signupLanding(pathname: string, search: string, method?: SignupMethod): string {
+  if (!SHARED_LINK.test(pathname)) return method ? firstCanvasPathAfterSignup(method) : FIRST_CANVAS_PATH
+  if (!method) return pathname + search
+  const params = new URLSearchParams(search)
+  params.set(SIGNUP_PARAM, method)
+  return `${pathname}?${params}`
+}

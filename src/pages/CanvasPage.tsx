@@ -51,6 +51,7 @@ import { WorkingNow } from '../components/WorkingNow'
 import { MobilePanelTabs, SideRail } from '../components/SideRail'
 import { LayersPanel, LayersRailToggle } from '../components/LayersPanel'
 import { Onboarding } from '../components/Onboarding'
+import { AccessBanner } from '../components/AccessBanner'
 import { ShareModal } from '../components/ShareModal'
 import { ExportModal } from '../components/ExportModal'
 import { pageFrames } from '../../shared/pages'
@@ -244,7 +245,19 @@ const STARTER_HTML = `<!doctype html>
 const importNoteCls = 'mt-2.5 text-[11.5px] leading-[1.4] text-ink-faint'
 const errorNoteCls = 'mt-2.5 text-[13px] text-accent-ink'
 
-export function CanvasPage({ canvasId }: { canvasId: string }) {
+export function CanvasPage({
+  canvasId,
+  guest = false,
+  onSignUp,
+  onSignIn,
+}: {
+  canvasId: string
+  /** a signed-out visitor on a link-shared canvas: view only, no account
+   *  chrome, and a banner asking them to sign up (AccessBanner) */
+  guest?: boolean
+  onSignUp?: () => void
+  onSignIn?: () => void
+}) {
   const t = useT()
   const canvas = useStore((s) => s.canvas)
   const connected = useStore((s) => s.connected)
@@ -272,7 +285,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       /* Resizing still works when preferences cannot be saved. */
     }
   }, [panelWidths])
-  const [showActivity, setShowActivity] = useState(() => !window.matchMedia('(max-width: 900px)').matches)
+  /* open on desktop for anyone signed in: an editor gets the Agents panel,
+     a viewer or commenter its Comments tab alone (ActivityPanel). A guest has
+     no panel at all — the team's conversation is not sent to them. */
+  const [showActivity, setShowActivity] = useState(() => !guest && !window.matchMedia('(max-width: 900px)').matches)
   /* ?connect=1 (the "connect your agent" email) lands on the Connect AI
      modal; the flag comes off the URL once the page is up so a reload or a
      copied link does not reopen it */
@@ -339,7 +355,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   }, [canvas, canvasId])
 
   useEffect(() => {
-    connect(canvasId)
+    connect(canvasId, guest)
     return () => {
       disconnect()
       useStore.getState().setCanvas(null)
@@ -349,7 +365,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       useStore.getState().setTool('select')
       clearHistory()
     }
-  }, [canvasId, select])
+  }, [canvasId, guest, select])
 
   /* the font library, again when the canvas moves between workspaces (its
      library is the workspace's) and on return to the tab, so a font
@@ -357,14 +373,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
   const loadedCanvasId = canvas?.id === canvasId ? canvasId : null
   const fontScope = canvas?.workspaceId ?? null
   useEffect(() => {
-    if (!loadedCanvasId) return
+    /* a guest's frames carry their faces already; the library is for the Design panel */
+    if (!loadedCanvasId || guest) return
     loadCanvasFonts(loadedCanvasId)
     const refresh = () => {
       if (document.visibilityState === 'visible') loadCanvasFonts(loadedCanvasId)
     }
     document.addEventListener('visibilitychange', refresh)
     return () => document.removeEventListener('visibilitychange', refresh)
-  }, [loadedCanvasId, fontScope])
+  }, [loadedCanvasId, fontScope, guest])
 
   /* broadcast which frame I'm focused on */
   useEffect(() => {
@@ -827,17 +844,19 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
       >
         <div className="flex min-w-0 items-center gap-2 max-xs:basis-full">
           <BarPill className="min-w-0 gap-1 pr-3 pl-1">
-            <Tooltip label={t('canvas.allCanvases')} side="bottom" align="start">
-              <Button
-                variant="bare"
-                size="icon-sm"
-                className={barPillIconBtn}
-                aria-label={t('canvas.allCanvases')}
-                onClick={() => navigate('/')}
-              >
-                <FolderIcon className="size-3.5" />
-              </Button>
-            </Tooltip>
+            {!guest && (
+              <Tooltip label={t('canvas.allCanvases')} side="bottom" align="start">
+                <Button
+                  variant="bare"
+                  size="icon-sm"
+                  className={barPillIconBtn}
+                  aria-label={t('canvas.allCanvases')}
+                  onClick={() => navigate('/')}
+                >
+                  <FolderIcon className="size-3.5" />
+                </Button>
+              </Tooltip>
+            )}
             <CanvasName readOnly={readOnly} />
             {readOnly && (
               <Badge tone="outline" title={t('canvas.readOnlyBadgeTitle')}>
@@ -846,7 +865,10 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             )}
             <CanvasIdMenu canvasId={canvasId} onCopied={showToast} />
             {connected ? (
-              <span className="ml-1 whitespace-nowrap text-ink-faint max-lg:hidden">{t('canvas.autoSaved')}</span>
+              /* nothing to save for someone who can only look */
+              !readOnly && (
+                <span className="ml-1 whitespace-nowrap text-ink-faint max-lg:hidden">{t('canvas.autoSaved')}</span>
+              )
             ) : (
               <span className="ml-1 whitespace-nowrap text-accent-ink">{t('canvas.reconnecting')}</span>
             )}
@@ -867,31 +889,35 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <PeerAvatars others={others} />
             </span>
           </div>
+          {!guest && (
+            <BarPill>
+              {!readOnly && (
+                <>
+                  <Button
+                    variant="bare"
+                    className={barPillBtn}
+                    onClick={() => setShowImport(true)}
+                    title={t('canvas.importTitle')}
+                  >
+                    <ImportIcon className="size-3.5" />
+                    {t('canvas.import')}
+                  </Button>
+                  <BarDivider className="mx-0.5" />
+                </>
+              )}
+              <Button variant="bare" className={barPillBtn} onClick={openExport} title={t('canvas.exportTitle')}>
+                <ExportIcon className="size-3.5" />
+                {t('canvas.export')}
+              </Button>
+            </BarPill>
+          )}
           <BarPill>
-            {!readOnly && (
-              <>
-                <Button
-                  variant="bare"
-                  className={barPillBtn}
-                  onClick={() => setShowImport(true)}
-                  title={t('canvas.importTitle')}
-                >
-                  <ImportIcon className="size-3.5" />
-                  {t('canvas.import')}
-                </Button>
-                <BarDivider className="mx-0.5" />
-              </>
+            {!guest && (
+              <Button variant="bare" className={barPillBtn} onClick={() => setShowShare(true)}>
+                <ShareUpIcon className="size-3.5" />
+                {t('canvas.share')}
+              </Button>
             )}
-            <Button variant="bare" className={barPillBtn} onClick={openExport} title={t('canvas.exportTitle')}>
-              <ExportIcon className="size-3.5" />
-              {t('canvas.export')}
-            </Button>
-          </BarPill>
-          <BarPill>
-            <Button variant="bare" className={barPillBtn} onClick={() => setShowShare(true)}>
-              <ShareUpIcon className="size-3.5" />
-              {t('canvas.share')}
-            </Button>
             <Tooltip
               label={
                 selectedId
@@ -916,15 +942,19 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               </span>
             </Tooltip>
           </BarPill>
-          {/* the bar's one black action — it opens the MCP connection modal */}
-          <Button
-            variant="primary"
-            className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
-            onClick={openConnect}
-          >
-            <PlusIcon className="size-3.5" strokeWidth={1.4} />
-            {t('canvas.connectAi')}
-          </Button>
+          {/* the bar's one black action — it opens the MCP connection modal;
+              an agent connected through a view or comment link could not
+              change anything, so readers are not offered it */}
+          {!readOnly && (
+            <Button
+              variant="primary"
+              className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
+              onClick={openConnect}
+            >
+              <PlusIcon className="size-3.5" strokeWidth={1.4} />
+              {t('canvas.connectAi')}
+            </Button>
+          )}
         </div>
         <div className="ml-auto hidden items-center gap-1.5 max-md:flex max-xs:order-3">
           <div
@@ -936,15 +966,17 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               <PeerAvatars others={others} />
             </span>
           </div>
-          <Button
-            variant="primary"
-            className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
-            onClick={openConnect}
-          >
-            <PlusIcon className="size-3.5" strokeWidth={1.4} />
-            <span className="max-sm:hidden">{t('canvas.connectAi')}</span>
-            <span className="sm:hidden">{t('canvas.connectAiShort')}</span>
-          </Button>
+          {!readOnly && (
+            <Button
+              variant="primary"
+              className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
+              onClick={openConnect}
+            >
+              <PlusIcon className="size-3.5" strokeWidth={1.4} />
+              <span className="max-sm:hidden">{t('canvas.connectAi')}</span>
+              <span className="sm:hidden">{t('canvas.connectAiShort')}</span>
+            </Button>
+          )}
           <Tooltip label={t('canvas.canvasActions')} side="bottom" align="end">
             <Button
               variant="ghost"
@@ -1020,7 +1052,8 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
           {/* the presence pill in the bar already carries each agent's status
               line; this per-agent stack is only for windows too narrow for it */}
           <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
-          <Onboarding canvasId={canvasId} />
+          {!readOnly && <Onboarding canvasId={canvasId} />}
+          <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />
           {!isMobile &&
             (layersOpen ? (
               <LayersPanel
@@ -1041,7 +1074,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
             ) : (
               <LayersRailToggle docked={docked} />
             ))}
-          {isMobile && !showActivity && (
+          {isMobile && !showActivity && !guest && (
             <MobilePanelTabs
               onOpen={(tab) => {
                 useStore.getState().setPanelTab(tab)
@@ -1105,6 +1138,7 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
               }}
               me={meFace}
               onRenameSelf={() => setRenaming(true)}
+              guest={guest}
             />
           )}
         </div>
@@ -1148,16 +1182,18 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                     <ImportIcon /> {t('canvas.importWebsite')}
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  className="h-11 justify-start gap-2.5 border-line bg-surface px-4"
-                  onClick={() => {
-                    setShowMobileActions(false)
-                    setShowShare(true)
-                  }}
-                >
-                  <ShareIcon /> {t('canvas.shareCanvas')}
-                </Button>
+                {!guest && (
+                  <Button
+                    variant="ghost"
+                    className="h-11 justify-start gap-2.5 border-line bg-surface px-4"
+                    onClick={() => {
+                      setShowMobileActions(false)
+                      setShowShare(true)
+                    }}
+                  >
+                    <ShareIcon /> {t('canvas.shareCanvas')}
+                  </Button>
+                )}
                 {/* the phone's tool strip has no room for the Edit / Prototype
                     switch, so Prototype mode toggles here */}
                 <Button
@@ -1171,13 +1207,15 @@ export function CanvasPage({ canvasId }: { canvasId: string }) {
                 >
                   <PrototypeModeIcon /> {prototypeMode ? t('canvas.leavePrototypeMode') : t('canvas.prototypeMode')}
                 </Button>
-                <Button
-                  variant="ghost"
-                  className="h-11 justify-start gap-2.5 px-4 text-ink-soft"
-                  onClick={() => navigate('/settings')}
-                >
-                  <GearIcon /> {t('shell.settings')}
-                </Button>
+                {!guest && (
+                  <Button
+                    variant="ghost"
+                    className="h-11 justify-start gap-2.5 px-4 text-ink-soft"
+                    onClick={() => navigate('/settings')}
+                  >
+                    <GearIcon /> {t('shell.settings')}
+                  </Button>
+                )}
               </div>
             </SheetContent>
           </Sheet>
