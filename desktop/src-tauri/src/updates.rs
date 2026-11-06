@@ -135,9 +135,7 @@ async fn ready_update(app: &AppHandle) -> Result<Option<(Update, Vec<u8>)>, Stri
     let update = match newest(app).await {
         Ok(Some(update)) => update,
         Ok(None) => {
-            if take_kept(app, |_| true).is_some() {
-                withdraw(app);
-            }
+            withdraw(app, true);
             return Ok(None);
         }
         Err(error) => return take_kept(app, |_| true).map(Some).ok_or(error),
@@ -178,10 +176,11 @@ async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
     let state = app.state::<UpdateState>();
     if state.page_card.load(Ordering::Acquire) {
         let ready = card_offer(app, &update);
+        // announced under the lock, in order with `withdraw`
         if let Ok(mut kept) = state.ready.lock() {
             *kept = Some((update, bytes));
+            let _ = app.emit(READY_EVENT, ready);
         }
-        let _ = app.emit(READY_EVENT, ready);
         return;
     }
     let later = if cfg!(target_os = "macos") {
@@ -270,17 +269,29 @@ pub fn update_card_ready(app: AppHandle) -> Option<serde_json::Value> {
 #[tauri::command]
 pub async fn update_restart(app: AppHandle) -> Result<(), String> {
     let Some(kept) = take_kept(&app, |_| true) else {
-        withdraw(&app);
+        withdraw(&app, false);
         return Err("No update is ready".into());
     };
     install(&app, kept.0, kept.1).await
 }
 
-/// The kept download is gone (the feed no longer names it, or it was
-/// already taken): a card still showing it would offer nothing, so the page
-/// is told to take it down.
-fn withdraw(app: &AppHandle) {
-    let _ = app.emit(READY_EVENT, serde_json::Value::Null);
+/// Tells the page to take its card down when no download is kept, after
+/// dropping the kept one first when `drop` says so. Both happen under the
+/// `ready` lock, which `offer` also holds while it saves and announces a
+/// download, so the page hears the two in the order the slot changed: a
+/// check that takes the download out for a moment and puts it back is never
+/// followed by a stale withdrawal.
+fn withdraw(app: &AppHandle, drop: bool) {
+    let state = app.state::<UpdateState>();
+    let Ok(mut ready) = state.ready.lock() else {
+        return;
+    };
+    if drop {
+        *ready = None;
+    }
+    if ready.is_none() {
+        let _ = app.emit(READY_EVENT, serde_json::Value::Null);
+    }
 }
 
 /// Windows shows custom labels only with comctl v6 and otherwise answers
