@@ -103,7 +103,7 @@ export function AppRail({
   children,
 }: {
   active: RailActive
-  /** the lists the rail counts and reads agents from: fetched here when a page passes none
+  /** the lists the rail reads agents and the search palette from: fetched here when a page passes none
    *  (undefined); null while the page is still loading its own, which shows the last lists drawn */
   canvases?: CanvasMeta[] | null
   workspaces?: WorkspaceSummary[] | null
@@ -241,12 +241,6 @@ export function AppRail({
   function openCanvas(c: CanvasMeta) {
     if (!openCanvasTab(c.id, c.name)) navigate(`/c/${c.id}`)
   }
-
-  const workspaceCounts = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const c of list) if (c.workspaceId) map.set(c.workspaceId, (map.get(c.workspaceId) ?? 0) + 1)
-    return map
-  }, [list])
 
   /* every agent that has worked on these canvases, aggregated across them */
   const agents = useMemo(() => {
@@ -430,9 +424,7 @@ export function AppRail({
               density="rail"
               icon={<BuildingIcon size="rail" />}
               count={
-                w.active ? (
-                  <em className="not-italic">{workspaceCounts.get(w.id) ?? 0}</em>
-                ) : (
+                w.active ? undefined : (
                   <span className="inline-flex items-center gap-1" title={t('rail.noPlanYet')}>
                     <LockIcon width={12} height={12} aria-hidden />
                   </span>
