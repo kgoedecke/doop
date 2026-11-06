@@ -145,7 +145,7 @@ Each has a story.
   caption, `tone` done/muted: the "connected / not connected" line), `Progress`, `Skeleton` (`shape="tile"` takes the
   Tile's `aspect` and matches its footprint, `row` a 56px list row, `card` a 150px card),
   `CodeBlock`, `List` (`PersonRow` is one person on a line: `avatar`, `name`, `detail`,
-  `trailing`), `SelectionBar` (`count`, `total`, `actions` of `SelectionBarAction`s: the "N of M
+  `trailing`), `ChoiceList` / `ChoiceRow` (a ringed panel of rows to go to, as Settings → Doop Agent lists its connections: `icon` an `AppIcon`, `title`, `description`, a chevron unless `trailing`; the import picker's sources, a frame's export formats), `SelectionBar` (`count`, `total`, `actions` of `SelectionBarAction`s: the "N of M
   selected · Clear" line over a checklist), `Steps` / `Step` (a numbered how-to, numbered by a CSS
   counter), `Tabs` (`TabsList variant="card"` is the phone's full-width pane
   switcher), `Dash*` (the dashboard frame; on a phone `DashHeader` draws the
@@ -183,8 +183,10 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   disc), `tone="ink"` (the account's own face: initials on an ink disc, no collar), `initials()`
   (the one first-and-last-letter rule), `BrandMark` - every third-party logo (`<BrandMark brand="figma" size={16} />`; figma, github,
   canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear, openrouter);
-  `AppIcon` is a model provider as doop.design's "Works with" row draws it: the brand tile (23% corners,
-  inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`, `gemini`, `openrouter`, `seedream`),
+  `AppIcon` is a model provider, import source or export format as doop.design's "Works with" row draws it:
+  the brand tile (23% corners, inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`,
+  `gemini`, `openrouter`, `seedream`, `codex`, `cursor`, `mcp`, `headless`, `github`, `figma`, `photoshop`, `canva`, `website`, `live-app`, `pdf`, `png`,
+  `jpg`), 32px in a list row and 40px beside a modal title,
   `Wordmark`, `Logo` / `DoopMark` (the bare Disc-D; `animated` hops its dot, as the home greeting
   wears it), `icons.tsx` - identity. Feature tiles (`FigmaTile`, `MetaTile`, the integrations'
   `Tile`s, `AgentIcon`) compose a `BrandMark`; nothing else inlines a logo path.
