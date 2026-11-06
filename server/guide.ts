@@ -234,8 +234,11 @@ Viewers watch designs assemble live. Stream with append_frame_html:
 - Pages: a canvas is a set of pages, each its own board, listed by get_canvas with every
   frame's pageId. Put one screen in a frame and a body of work on a page: a second product
   surface, a platform (web vs. mobile), a round of explorations. create_canvas_page adds one
-  and returns its id for create_frame's pageId; get_canvas with page_id reads one page; a
-  frame moves between pages with update_frame; set_canvas_pages renames, reorders or deletes.
+  and returns its id for create_frame's pageId; get_canvas with page_id reads one page;
+  set_canvas_pages renames, reorders or deletes pages.
+- Rearranging: update_frame is one call for a frame's name, x/y, size, lock, or its page
+  (pageId; it keeps its x/y unless you pass new ones). Move a frame with it; never recreate
+  or copy a frame's HTML to move it, which loses its comments, versions and approval.
 
 ## GitHub-imported frames — the repo is the source of truth
 

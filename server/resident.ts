@@ -37,7 +37,8 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
+import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
@@ -204,6 +205,10 @@ interface RunState {
   /** token writes that took (a token created, changed or deleted, the theme
    *  list set): work a card can ask for on its own, delivered without a frame */
   tokenWrites: number
+  /** page and frame-arrangement writes that took (a page added, renamed,
+   *  reordered or deleted, a frame renamed or moved): work a card can ask
+   *  for on its own, delivered without a design change */
+  arrangeWrites: number
 }
 
 export interface FramePlacement {
@@ -272,9 +277,12 @@ function deliverableFrameIds(runState: RunState): string[] {
 }
 
 /** Whether the run has delivered anything a card can ask for: a frame of its
- *  own changed or created, or a token write that took. Exported for tests. */
-export function deliveredWork(runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites'>): boolean {
-  return deliverableFrameIds(runState as RunState).length > 0 || runState.tokenWrites > 0
+ *  own changed or created, or a token or arrangement write that took.
+ *  Exported for tests. */
+export function deliveredWork(
+  runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites' | 'arrangeWrites'>,
+): boolean {
+  return deliverableFrameIds(runState as RunState).length > 0 || runState.tokenWrites > 0 || runState.arrangeWrites > 0
 }
 
 /** How many of a token call's results took. Exported for tests. */
@@ -462,10 +470,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        content, not user work — hidden so agents never mistake them for
        the canvas's established style */
     const visibleFrames = (canvas?.frames ?? []).filter((f) => !f.demo)
+    const pages = canvas ? pageList(canvas) : []
     const frameList = visibleFrames
       .map(
         (f, index) =>
-          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
+          `- Frame ${index + 1}: id=${f.id}, name="${f.name}", page=${canvas ? framePageId(canvas, f) : '?'}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`,
       )
       .join('\n')
 
@@ -576,6 +585,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         : ''
     const kickoff =
       sections.join('\n\n') +
+      `\n\nPages, in order (pass this exact list as expectedPages to set_canvas_pages):\n${JSON.stringify(pages)}` +
       `\n\nFrames currently on the canvas:\n${frameList}` +
       referenceList +
       `\n\nExecution strategy selected by the harness:\n${strategyFor(workText, visibleFrames)}` +
@@ -608,6 +618,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       repliedThreads: new Set(),
       awaitingThreads: new Set(),
       tokenWrites: 0,
+      arrangeWrites: 0,
     }
     let refused = false
     let crashed = false
@@ -879,7 +890,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (noMutation) actions.setAgentStatus(canvasId, actor, 'Nothing changed — waiting for a retry')
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
@@ -1461,6 +1472,56 @@ const TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ['themes'],
+    },
+  },
+  {
+    name: 'update_frame',
+    description:
+      "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        frame_id: { type: 'string' },
+        pageId: { type: 'string', description: 'The page to move the frame to, from the page list' },
+        name: { type: 'string' },
+        x: { type: 'number', description: 'Canvas position in px' },
+        y: { type: 'number', description: 'Canvas position in px' },
+        width: { type: 'number', description: 'px; the design is not rescaled' },
+        height: { type: 'number', description: 'px; the design is not rescaled' },
+        locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
+      },
+      required: ['frame_id'],
+    },
+  },
+  {
+    name: 'create_canvas_page',
+    description:
+      'Add a new, empty page at the end of this canvas and get its id back. Use a page when a body of work deserves its own board (a second product surface, web vs. mobile, a round of explorations) and a frame when it is one screen. Move frames onto it with update_frame, or reorder it with set_canvas_pages.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The page name shown in the Pages panel' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'set_canvas_pages',
+    description:
+      'Rename, reorder or delete pages by sending the complete ordered page list. expectedPages is the list as you last saw it (the kickoff, or the last page tool result); if a collaborator changed it since, the call is refused with the current list. A page that still holds frames cannot be deleted: move its frames with update_frame first. To add a page, use create_canvas_page.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        expectedPages: {
+          type: 'array',
+          description: 'The ordered pages as you last saw them',
+          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+        },
+        pages: {
+          type: 'array',
+          description: 'The new ordered list; keep each page id, change names and order, leave out a page to delete it',
+          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+        },
+      },
+      required: ['expectedPages', 'pages'],
     },
   },
   {
@@ -2097,6 +2158,71 @@ export async function execTool(
         } catch (e) {
           return fail(e instanceof Error ? e.message : 'invalid themes')
         }
+      }
+      case 'update_frame': {
+        const raw = block.input as Record<string, unknown>
+        const canvas = store.getCanvas(canvasId)
+        const f = store.getFrame(input.frame_id)
+        if (!canvas || !f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        /* the store updates the frame object in place, so what it was is read first */
+        const arrangement = (frame: typeof f) =>
+          [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
+            '\u0000',
+          )
+        const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
+        const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const updated = updateFrameMeta(
+          canvas,
+          f.id,
+          {
+            name: text(raw.name),
+            pageId: text(raw.pageId),
+            x: num(raw.x),
+            y: num(raw.y),
+            width: num(raw.width),
+            height: num(raw.height),
+            locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
+          },
+          actor,
+        )
+        if (!updated.ok) return fail(updated.error)
+        const frame = updated.value
+        /* a new size changes what renders, so it is a design change to verify */
+        if (frame.width !== before.width || frame.height !== before.height) {
+          runState.mutatedFrames.add(frame.id)
+          runState.verifiedFrames.delete(frame.id)
+        }
+        /* a save that changed nothing has not delivered anything */
+        if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
+        return ok(
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
+        )
+      }
+      case 'create_canvas_page': {
+        const name = typeof input.name === 'string' ? input.name.trim() : ''
+        if (!name || name.length > MAX_PAGE_NAME) return fail(`name must be 1-${MAX_PAGE_NAME} characters`)
+        const created = addPage(canvasId, name, actor)
+        if (!created.ok) return fail(created.error)
+        runState.arrangeWrites += 1
+        return ok(
+          JSON.stringify({
+            page: created.value.page,
+            pages: created.value.pages.map(({ id, name }) => ({ id, name })),
+          }),
+        )
+      }
+      case 'set_canvas_pages': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as { expectedPages?: unknown; pages?: unknown }
+        const pages = parsePageList(raw.pages)
+        if (typeof pages === 'string') return fail(pages)
+        const previous = pageList(canvas)
+        const saved = savePages(canvas, raw.expectedPages, pages, actor)
+        if (!saved.ok) return fail(saved.error)
+        if (!samePages(previous, saved.value)) runState.arrangeWrites += 1
+        return ok(JSON.stringify({ pages: saved.value.map(({ id, name }) => ({ id, name })) }))
       }
       case 'get_prototype': {
         const canvas = store.getCanvas(canvasId)
