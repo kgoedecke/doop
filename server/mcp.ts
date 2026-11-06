@@ -37,6 +37,7 @@ import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
+import { renderedHeight } from './renderLimits.ts'
 import {
   MAX_PDF_FRAMES,
   PDF_UNAVAILABLE_MESSAGE,
@@ -190,6 +191,12 @@ function editFrameSource(frame: Frame, find: string, replace: string): { html: s
 
 /** A PDF returned inline as base64; beyond this, export fewer frames. */
 const MAX_MCP_PDF_BYTES = 15_000_000
+
+/** Tells the agent a very tall frame's screenshot stops short of its bottom. */
+function croppedNote(frame: Frame, scale: number): string {
+  const height = renderedHeight(frame, scale)
+  return height < Math.round(frame.height) ? ` — cropped to the top ${height}px (pixel budget)` : ''
+}
 
 function err(message: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true }
@@ -2152,7 +2159,7 @@ export function buildMcpServer(
                 { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
                 {
                   type: 'text' as const,
-                  text: `Screenshot of “${f.name}” (${f.width}×${f.height}@${scale ?? 1}x, html ${f.html.length} bytes)`,
+                  text: `Screenshot of “${f.name}” (${f.width}×${f.height}@${scale ?? 1}x, html ${f.html.length} bytes)${croppedNote(f, scale ?? 1)}`,
                 },
               ],
             },
