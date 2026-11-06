@@ -337,12 +337,17 @@ describe('MCP ChatGPT app contract', () => {
       expect(html.text).toContain('var MAX_SHOWN = 6')
       /* an empty frame shows a placeholder, never a blank render */
       expect(html.text).toContain('Design in progress')
-      /* the retired v1 URI stays served for chats that still hold it */
-      expect(resources.map((r) => r.uri)).toContain('ui://doop/frame-preview-1.html')
+      /* retired URIs stay served for chats that still hold them */
+      expect(resources.map((r) => r.uri)).toEqual(
+        expect.arrayContaining(['ui://doop/frame-preview-1.html', 'ui://doop/frame-preview-2.html']),
+      )
       expect(html.text).toContain('class="retry"')
       const meta = html._meta as Record<string, unknown>
       expect(meta['openai/widgetCSP']).toMatchObject({ resource_domains: [expect.stringMatching(/^http/)] })
       expect(meta.ui).toMatchObject({ csp: { resourceDomains: [expect.stringMatching(/^http/)] } })
+      /* Claude refuses to render a card whose ui.domain is not its own sandbox origin */
+      expect(meta.ui).not.toHaveProperty('domain')
+      expect(meta['openai/widgetDomain']).toMatch(/^http/)
     } finally {
       await close()
     }
