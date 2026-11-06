@@ -1,0 +1,10 @@
+/* imported by the standalone-SVG test: its viewport units and media rule
+   must be settled against the frame, as the page's own sheets are */
+.tall {
+  height: 100vh;
+}
+@media (min-width: 600px) {
+  .imported {
+    background: rgb(0, 0, 255);
+  }
+}

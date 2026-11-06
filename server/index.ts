@@ -87,6 +87,7 @@ import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
+import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
 import * as userEvents from './userEvents.ts'
 import type { Canvas, ClientMessage, Presence, ServerMessage } from '../shared/types.ts'
@@ -428,11 +429,14 @@ app.get('/i/:id.:ext', async (req, res) => {
   const frame = store.getFrame(id)
   if (!frame) return res.status(404).end()
 
+  /* any multiplier the export picker offers; a missing or unreadable one
+     is 1x, as before there was a picker */
+  const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
   let result: Awaited<ReturnType<typeof getImage>>
   try {
     result = await getImage(frame, {
       ext,
-      scale: req.query.scale === '2' ? 2 : 1,
+      scale,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
       preview: req.query.preview !== undefined,
@@ -457,7 +461,7 @@ app.get('/i/:id.:ext', async (req, res) => {
   res.set('Cache-Control', 'public, max-age=60')
   if (req.query.download !== undefined) {
     const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
-    res.set('Content-Disposition', `attachment; filename="${safe}.${ext}"`)
+    res.set('Content-Disposition', `attachment; filename="${safe}${exportScaleSuffix(scale)}.${ext}"`)
   }
   res.send(buf)
 })
@@ -2448,7 +2452,7 @@ app.get('/api/frames/:id/screenshot.png', async (req, res) => {
   if (!frame) return
   try {
     const { renderFrame } = await import('./screenshot.ts')
-    const png = await renderFrame(frame, req.query.scale === '2' ? 2 : 1)
+    const png = await renderFrame(frame, fitExportScale(frame, parseExportScale(req.query.scale) ?? 1))
     res.type('png').send(png)
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : 'render failed' })

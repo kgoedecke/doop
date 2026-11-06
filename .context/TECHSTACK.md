@@ -220,13 +220,29 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Chromium) and encoded. A resource the browser cannot fetch (an image host without CORS)
   rejects the whole render and the export falls back to `/i/<id>.<ext>` as before, so what the
   person sees on the canvas is never the export's blocker. An element inside a frame exports
-  too (the element menu's Export as PNG / JPG and Copy as PNG, `downloadElementExport` /
+  too (the element menu's Export… dialog and Copy as PNG, `downloadElementExport` /
   `copyElementPng`): the frame is rendered whole and cut to the element's live box
   (`doop:inspect` rect, `clipToFrame`, the raster's `clip` option), so every style it inherits
   and whatever paints behind it stay in the picture; a server render is cropped here the same
   way (`cropRaster`), and a frame off screen says so. Tests: `frameRaster.test.ts`,
   `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
-  `frameExport.test.ts`.
+  `frameExport.test.ts`. Scale and format (`shared/exportScale.ts`, `src/lib/exportSettings.ts`,
+  `ExportOptions.tsx`): the Inspector's Export group and the Export… dialog (frames, and elements
+  from their menu) pick 0.5x / 1x / 2x / 3x / 4x or a typed multiplier (0.1-4, two decimals) and
+  PNG / JPG / SVG, remembered per browser under `doop:export-settings` (2x PNG by default) and
+  named `Name@2x.png` as Figma does. Up to 2x a scale is honoured as before; above it,
+  `fitExportScale` brings a huge frame down to 16,384 px a side and 64 MP, the same limit
+  for the browser render, `/i/<id>.png?scale=` (any parsed scale, 1x when unreadable) and MCP
+  `export_frame`'s `scale`, and the toast says so. SVG is `frameSvg`: the inlined document
+  `inlineDocument` already builds, cropped by `viewBox` for an element, on white, settled for
+  a file opened as a page, where the viewer's window would be the viewport (`standalone`,
+  `FrameViewport`): viewport units become the frame's px, `@media` rules and `<style media>` are
+  kept or dropped by a hidden iframe of the frame's size, imported sheets included, and inline
+  handlers and `javascript:` URLs are stripped; HTML in a
+  `foreignObject`, so it opens in browsers but is not editable vector art, and it has no server
+  fallback. Tests: `exportScale.test.ts`, the scale and SVG cases in `frameExport.test.ts`,
+  `frameRasterBrowser.test.ts` (the SVG opened as a page in a wide window), `exportOptions.test.tsx`
+  and `mcpPdfExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
   each frame onto a page of its own size (inside an iframe of the frame's size, as the canvas shows
   it, so content taller than the frame is clipped rather than paginated: bare, Chrome moved a block

@@ -2,7 +2,7 @@
 <html>
   <body>
     <script type="module">
-      import { rasterizeFrame } from '/src/lib/frameRaster.ts'
+      import { frameSvg, rasterizeFrame } from '/src/lib/frameRaster.ts'
       import { FRAME_BOOTSTRAP } from '/src/lib/frameRuntime.ts'
       import { registerFrameWindow, requestFrame } from '/src/lib/frameBridge.ts'
 
@@ -103,6 +103,36 @@
           adopted: at(250 * scale, 150 * scale),
           picked: at(150 * scale, 50 * scale),
           blobbed: at(50 * scale, 250 * scale),
+        }
+      }
+
+      /* the SVG file's text, for a test that opens it as a page */
+      window.svgText = async ({ html, width = 300, height = 300 }) => {
+        const frame = { id: 'svg-text', canvasId: 'c', name: 'Svg', x: 0, y: 0, width, height, html }
+        return (await frameSvg(frame)).text()
+      }
+
+      /* the SVG file as a person opening it would see it: loaded as an image */
+      window.renderSvg = async ({ clip } = {}) => {
+        const frame = { id: 'svg', canvasId: 'c', name: 'Svg', x: 0, y: 0, width: 300, height: 300, html: HTML }
+        const blob = await frameSvg(frame, { clip })
+        const text = await blob.text()
+        const image = new Image()
+        image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(image, 0, 0)
+        const at = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data)
+        return {
+          type: blob.type,
+          width: image.naturalWidth,
+          height: image.naturalHeight,
+          topLeft: at(0, 0),
+          block: at(50, 50),
+          paper: at(150, 150),
         }
       }
     </script>
