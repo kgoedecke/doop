@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-card-ready"
+description = "Enables the update_card_ready command without any pre-configured scope."
+commands.allow = ["update_card_ready"]
+
+[[permission]]
+identifier = "deny-update-card-ready"
+description = "Denies the update_card_ready command without any pre-configured scope."
+commands.deny = ["update_card_ready"]

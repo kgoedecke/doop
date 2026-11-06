@@ -23,8 +23,13 @@ fn main() {
             "fonts_choose_local",
             "fonts_read_local",
             "view_menu_state",
+            "update_card_ready",
+            "update_restart",
         ]));
     let attributes = if chromium {
+        // tauri-build watches only its default capabilities path, so a
+        // capability removed here would otherwise survive an incremental build
+        println!("cargo:rerun-if-changed=../src-tauri/capabilities");
         attributes.capabilities_path_pattern("../src-tauri/capabilities/**/*")
     } else {
         attributes
