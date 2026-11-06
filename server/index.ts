@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import express from 'express'
+import compression from 'compression'
 import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
@@ -714,6 +715,9 @@ declare global {
    whose session (if any) is not the app's: relay it back to the app before
    the gate looks at that session (shared/desktopConnect.ts) */
 app.get('/api/integrations/:provider/callback', relayDesktopCallback)
+/* canvas reads are megabytes of JSON; the event stream asks for no transform
+   and is left alone by the middleware */
+app.use('/api', compression())
 app.use('/api/live-activities', logLiveActivityRequests)
 app.use('/api', async (req, res, next) => {
   try {
@@ -2555,7 +2559,22 @@ if (env.isProduction) {
 /* ------------------------------------------------- websocket */
 
 const server = http.createServer(app)
-const wss = new WebSocketServer({ server, path: '/ws' })
+/* Room messages that carry a document are text a deflate shrinks several-fold;
+   the cursors, viewports and presence that make up the rest are under a
+   hundred bytes, where the framing costs more than it saves — hence the
+   threshold. No context takeover either way: a context is a few hundred KB
+   per socket for the life of the connection, and the messages worth
+   compressing are big enough to fill a window on their own. */
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  perMessageDeflate: {
+    threshold: 1024,
+    serverNoContextTakeover: true,
+    clientNoContextTakeover: true,
+    zlibDeflateOptions: { level: 3 },
+  },
+})
 
 /* A signed-out visitor on a link-shared canvas watches it as a guest
    (guestCanvasRole): view only, silent like a view-as session (no presence,
