@@ -48,9 +48,9 @@ webhooks, automations and live activities stay out of reach of link visitors.
 `comment` or `edit`, else `null`. Only the WebSocket room honours it (`joinAsGuest` in
 `server/index.ts`): REST and MCP still answer 401. A guest joins silent, like a view-as session (no
 presence, nothing it sends is relayed), and is sent the frames without the team's conversation:
-`init` carries no comments, tasks, feedback, activity, decisions or proposals and a canvas without
+`init` carries no comments, tasks, feedback, activity, decisions or proposals, presences without their `status` line (an agent's status is its task summary) and a canvas without
 `guidelines`, `references` or `memberIds`, and `broadcast` skips the matching messages
-(`GUEST_HIDDEN`). A private or missing canvas closes the join with the same 4401; turning the link
+(`GUEST_HIDDEN`, `status` included) and strips `status` from `presence:join`. A private or missing canvas closes the join with the same 4401; turning the link
 off closes a guest with 4403. On either, the client sets `signInRequired` and `App.tsx` swaps in
 the sign-in form at the same URL.
 

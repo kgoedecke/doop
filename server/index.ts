@@ -203,7 +203,21 @@ const GUEST_HIDDEN: ReadonlySet<ServerMessage['type']> = new Set([
   'proposal',
   'reference',
   'guidelines',
+  /* an agent's status line is its task's summary (setAgentStatus) */
+  'status',
 ] satisfies ServerMessage['type'][])
+
+/** A presence as a guest sees it: without the status line, which carries
+ *  the same task summary GUEST_HIDDEN keeps from them. */
+function guestPresence<P extends Presence>({ status: _status, ...presence }: P): Omit<P, 'status'> {
+  return presence
+}
+
+/** A room message as a guest may see it, or null when it is withheld. */
+function forGuest(msg: ServerMessage): ServerMessage | null {
+  if (GUEST_HIDDEN.has(msg.type)) return null
+  return msg.type === 'presence:join' ? { ...msg, presence: guestPresence(msg.presence) } : msg
+}
 
 const conns = new Map<WebSocket, Conn>()
 
@@ -256,8 +270,8 @@ function send(ws: WebSocket, msg: ServerMessage) {
 function broadcast(canvasId: string, msg: ServerMessage, excludeClientId?: string) {
   for (const c of room(canvasId)) {
     if (excludeClientId && c.presence.clientId === excludeClientId) continue
-    if (!c.userId && GUEST_HIDDEN.has(msg.type)) continue
-    send(c.ws, msg)
+    const shown = c.userId ? msg : forGuest(msg)
+    if (shown) send(c.ws, shown)
   }
 }
 
@@ -2563,8 +2577,8 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
     presences: [
       ...room(canvasId)
         .filter((c) => c.ws !== ws && !c.silent)
-        .map((c) => c.presence),
-      ...(agentPresences.get(canvasId)?.values() ?? []),
+        .map((c) => guestPresence(c.presence)),
+      ...[...(agentPresences.get(canvasId)?.values() ?? [])].map(guestPresence),
     ],
     activity: [],
     tasks: [],

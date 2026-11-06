@@ -155,6 +155,44 @@ describe('signed-out guests on a share link', () => {
     watcher.close()
   })
 
+  it("keeps an agent's status line, its task summary, from a guest", async () => {
+    expect((await setLink('view')).status).toBe(200)
+    const key = (await (await owner.post('/api/agent-keys', { name: 'guest-test-agent' })).json()).secret as string
+    const setStatus = (status: string) =>
+      fetch(`${server.base}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'set_status', arguments: { canvas_id: canvasId, status, agent_name: 'Scout' } },
+        }),
+      })
+    const watcher = await Room.join(canvasId, owner)
+    const live = await Room.join(canvasId)
+    expect((await setStatus('Redesigning the secret pricing page')).status).toBe(200)
+    await watcher.waitFor(
+      (m) => m.type === 'status' || (m.type === 'presence:join' && !!(m.presence as { status?: string }).status),
+    )
+    /* a frame update both rooms get is the barrier for anything sent before it */
+    expect((await owner.patch(`/api/frames/${frameId}`, { name: 'Hero status barrier' })).status).toBe(200)
+    await live.waitFor(
+      (m) => m.type === 'frame:updated' && (m.frame as { name: string }).name === 'Hero status barrier',
+    )
+    const late = await Room.join(canvasId)
+
+    for (const guest of [live, late]) {
+      expect(JSON.stringify(guest.messages)).not.toContain('secret pricing')
+      guest.close()
+    }
+    watcher.close()
+  })
+
   it('closes a guest when the owner turns the link off', async () => {
     expect((await setLink('view')).status).toBe(200)
     const guest = await Room.join(canvasId)

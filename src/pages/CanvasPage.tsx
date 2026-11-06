@@ -396,6 +396,8 @@ export function CanvasPage({
          composer ends ⌘. hide-UI — a field under `hidden` cannot take focus. */
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        /* the composer is an editor's: readers (and guests) have none */
+        if (!canEditOpenCanvas(useStore.getState())) return
         setShowActivity(true)
         if (useStore.getState().uiHidden) useStore.getState().toggleUiHidden()
         useStore.getState().setPanelTab('tasks')
@@ -1265,7 +1267,8 @@ export function CanvasPage({
       )}
 
       {renaming && <RenameSelfModal current={me.name} onClose={() => setRenaming(false)} />}
-      {showConnect && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
+      {/* ?connect=1 and ?import=1 can ask for these on any link; only an editor gets them */}
+      {showConnect && !readOnly && <ConnectModal canvasId={canvasId} onClose={() => setShowConnect(false)} />}
       {presenting && <PresentMode frameId={presenting} onClose={() => setPresenting(null)} />}
       {showShare && canvas && (
         <ShareModal
@@ -1300,7 +1303,7 @@ export function CanvasPage({
           onClose={() => setExporting(null)}
         />
       )}
-      {showImport && (
+      {showImport && !readOnly && (
         <ImportModal
           canvasId={canvasId}
           installPass={ghInstallPass}
