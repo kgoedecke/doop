@@ -1,0 +1,4 @@
+# Written by tools (actor generator, drizzle-kit): collapsed in GitHub diffs.
+generated/** linguist-generated=true
+server/db/migrations/meta/*.json linguist-generated=true
+src/actor-db/migrations/** linguist-generated=true
