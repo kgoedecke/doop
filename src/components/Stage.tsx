@@ -46,13 +46,13 @@ import {
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
-import { layoutZoomFor } from '../lib/layoutZoom'
+import { settledLayoutZoom } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 import { spaceWouldScroll } from '../lib/spaceScroll'
 
 const MIN_ZOOM = 0.08
-/* The settled world is laid out at up to this zoom too (layoutZoomFor), so
+/* The settled world is laid out at up to this zoom too (settledLayoutZoom), so
    the desktop app stays sharp all the way in. That costs little: WebKit and
    Chromium both tile what is on screen, so backing memory follows the
    viewport rather than the zoom, and frame documents never re-lay out (each
@@ -254,7 +254,8 @@ export function Stage({
   /* where the background menu opened, so Paste drops the frame there */
   const bgAt = useRef({ x: 0, y: 0 })
   /* the world's layout zoom (see worldTransform) — caught up with the camera
-     only once the zoom settles, and never below 1, where scaling down a 1×
+     only once the zoom settles (and kept while still enough: settledLayoutZoom),
+     and never below 1, where scaling down a 1×
      raster stays sharp and nothing needs a relayout; the ref serves the
      per-frame viewport writes */
   const [layoutZoom, setLayoutZoom] = useState(1)
@@ -320,7 +321,7 @@ export function Stage({
       if (ref.current) sendViewport(s.viewport, ref.current)
       window.clearTimeout(settle)
       settle = window.setTimeout(() => {
-        setLayoutZoom(layoutZoomFor(useStore.getState().viewport.zoom, MAX_ZOOM))
+        setLayoutZoom(settledLayoutZoom(layoutZoomRef.current, useStore.getState().viewport.zoom, MAX_ZOOM))
       }, 250)
     })
     return () => {

@@ -60,3 +60,25 @@ export function layoutZoomFor(zoom: number, max: number, density = FRAME_DOCUMEN
 export function counterZoom(k: number): number {
   return exactInverse(Math.fround(k)) ?? 1 / k
 }
+
+/* how far above a settled zoom a kept layout zoom may sit: k / zoom stays
+   under 2, the most a whole-number round-up already gives (101% lays out at
+   2), so holding a k never costs more raster than settling just past a
+   boundary does today */
+const KEEP_RATIO = 2
+
+/** The layout zoom after a camera zoom settles, given the one in use. A new
+ *  k means a world re-layout and a fresh raster of every frame document, so
+ *  the current k is kept while it is still enough for the zoom (never below
+ *  what layoutZoomFor asks) and at most KEEP_RATIO above it; zooming in past
+ *  it goes up at once, zooming well out comes back down. */
+export function settledLayoutZoom(
+  current: number,
+  zoom: number,
+  max: number,
+  density = FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY,
+): number {
+  const needed = layoutZoomFor(zoom, max, density)
+  if (current >= needed && current <= max && current <= KEEP_RATIO * zoom) return current
+  return needed
+}
