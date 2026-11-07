@@ -1967,8 +1967,12 @@ wireActorFrames({
   restore(canvasId, frames, by) {
     const added = store.restoreFrames(canvasId, frames)
     if (!added) return false
-    /* people who opened the canvas while its frames were missing see them arrive */
-    for (const frame of added) broadcast(canvasId, { type: 'frame:created', frame, actor: by })
+    /* people who opened the canvas while its frames were missing see them
+       arrive, and the boot rebuild of asset_refs, which missed them, catches up */
+    for (const frame of added) {
+      broadcast(canvasId, { type: 'frame:created', frame, actor: by })
+      persist.adoptActorFrame(frame)
+    }
     return true
   },
 })

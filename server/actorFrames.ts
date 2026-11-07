@@ -109,8 +109,9 @@ export function removeActorFrames(canvasId: string, frames: readonly Frame[]) {
   }
 }
 
-/** The canvas was deleted: its actor drops every frame and closes its sockets. */
-export function destroyActorCanvas(canvasId: string) {
+/** The canvas was deleted: its actor drops every frame and closes its sockets.
+ *  Returns the IDs of the frames it held. */
+export function destroyActorCanvas(canvasId: string): string[] {
   const state = followed.get(canvasId)
   if (state) {
     state.stopped = true
@@ -118,8 +119,10 @@ export function destroyActorCanvas(canvasId: string) {
     state.socket?.close()
     followed.delete(canvasId)
   }
+  const frameIds: string[] = []
   for (const [frameId, owner] of frameCanvas) {
     if (owner !== canvasId) continue
+    frameIds.push(frameId)
     frameCanvas.delete(frameId)
     saved.delete(frameId)
     outbox.delete(frameId)
@@ -127,6 +130,7 @@ export function destroyActorCanvas(canvasId: string) {
   stub(canvasId)
     .destroy()
     .catch((error: unknown) => console.error('[canvas actors] destroy failed', canvasId, error))
+  return frameIds
 }
 
 /** Every write still on its way has landed (shutdown). */

@@ -623,7 +623,7 @@ async function syncAssetRefs(frameId: string, html: string) {
 }
 
 export function deleteCanvas(canvasId: string) {
-  if (isActorCanvas(canvasId)) destroyActorCanvas(canvasId)
+  if (isActorCanvas(canvasId)) destroyOnActor(canvasId)
   /* refs must go before the frames rows the subquery reads */
   swallow(
     db
@@ -1248,6 +1248,17 @@ function deleteOnActor(frameId: string) {
   clearTimeout(assetRefTimers.get(frameId))
   assetRefTimers.delete(frameId)
   deleteActorFrame(frameId)
+}
+
+/** A deleted canvas on an actor has no frames rows for deleteCanvas to find
+ *  its asset refs by, so they go by the IDs of the frames its actor held. */
+function destroyOnActor(canvasId: string) {
+  const frameIds = destroyActorCanvas(canvasId)
+  for (const frameId of frameIds) {
+    clearTimeout(assetRefTimers.get(frameId))
+    assetRefTimers.delete(frameId)
+  }
+  if (frameIds.length) swallow(db.delete(t.assetRefs).where(inArray(t.assetRefs.frameId, frameIds)))
 }
 
 const assetRefTimers = new Map<string, ReturnType<typeof setTimeout>>()
