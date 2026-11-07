@@ -278,15 +278,17 @@ export function useCanvasDrawing(stage: RefObject<HTMLDivElement>) {
       onFinish={() => finish()}
     />
   )
-  const penZoom = useStore((s) => s.viewport.zoom)
   /* what the pen's badge says a press would do: close the path, land on an
-     anchor it already placed, or just add the next point */
-  const penCursor = (() => {
-    const points = draft?.drawing.tool === 'path' ? (draft.drawing.points ?? []) : []
-    const snapped = hover && !hover.unsnapped && points.length ? nearestPathAnchor(points, hover, penZoom) : null
+     anchor it already placed, or just add the next point. The selector
+     returns the badge, not the zoom, so a zoom gesture re-renders the Stage
+     only when the badge changes (it would otherwise render once per frame). */
+  const points = draft?.drawing.tool === 'path' ? (draft.drawing.points ?? []) : []
+  const penCursor = useStore((s) => {
+    const snapped =
+      hover && !hover.unsnapped && points.length ? nearestPathAnchor(points, hover, s.viewport.zoom) : null
     if (snapped === null) return 'pen' as const
     return snapped === 0 && points.length >= 2 ? ('pen-close' as const) : ('pen-anchor' as const)
-  })()
+  })
   return {
     preview,
     penCursor,
