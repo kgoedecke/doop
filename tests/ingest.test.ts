@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
-import { describeSyncFlow } from '../server/ingest.ts'
+import { describeSyncFlow, wrapSnapshotHtml } from '../server/ingest.ts'
 import type { Frame } from '../shared/types.ts'
 
 /**
@@ -308,6 +308,19 @@ describe('describeSyncFlow', () => {
 
   it('returns nothing for canvases without flow data', () => {
     expect(describeSyncFlow({ links: [], edges: [] }, [])).toEqual([])
+  })
+})
+
+describe('wrapSnapshotHtml', () => {
+  it('keeps $ replacement patterns in the page URL as written', () => {
+    const html = wrapSnapshotHtml(
+      '<html><head><title>x</title></head><body>hi</body></html>',
+      'marker',
+      "https://app.example.com/a$'b?q=1$&p=$$&r=$`",
+    )
+    expect(html).toContain(
+      '<base href="https://app.example.com/a$\'b?q=1$&amp;p=$$&amp;r=$`"><title>x</title></head><body>hi</body></html>',
+    )
   })
 })
 

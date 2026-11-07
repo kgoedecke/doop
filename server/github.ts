@@ -431,7 +431,7 @@ function markerMeta(connId: string, screen: { kind: ScreenKind; route: string; s
 
 function injectHead(html: string, inject: string): string {
   const headMatch = html.match(/<head[^>]*>/i)
-  let out = headMatch ? html.replace(headMatch[0], headMatch[0] + inject) : inject + html
+  let out = headMatch ? html.replace(headMatch[0], (head) => head + inject) : inject + html
   if (!/^\s*<!doctype/i.test(out)) out = '<!doctype html>\n' + out
   return out
 }
