@@ -352,7 +352,7 @@ fn main() {
             // the app's origin and brings the WebKit storage over before the
             // app loads (src/webkit_migration.rs).
             #[cfg(all(chromium, target_os = "macos"))]
-            let migrating = webkit_migration::pending(app.handle());
+            let migrating = webkit_migration::pending();
             #[cfg(not(all(chromium, target_os = "macos")))]
             let migrating = false;
             let first_url: Url = if migrating {

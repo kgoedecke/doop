@@ -14,10 +14,14 @@
 //! manager, with the expiry and SameSite WebKit had (Tauri's set_cookie drops
 //! both, and Chromium does not keep a cookie without an expiry across a
 //! restart), and are flushed to disk; the localStorage entries are written in
-//! that document; then the window goes to the app, showing itself as it does. A marker file in the app data directory makes
-//! this a first-launch-only step; a read that fails or outlasts READ_TIMEOUT
-//! only costs a sign-in.
+//! that document; then the window goes to the app, showing itself as it does.
+//! A marker file in the Chromium profile it filled makes this a first-launch
+//! step (a debug build's cef-dev profile has its own). A read that fails or
+//! outlasts READ_TIMEOUT only costs a sign-in; a landing document that never
+//! loads (offline) gives up after LANDING_TIMEOUT and opens the app without
+//! migrating, and the next launch tries again.
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -38,6 +42,9 @@ use tauri::{AppHandle, Manager, Url, WebviewWindow};
 pub const LANDING_PATH: &str = "/favicon.ico";
 const MARKER: &str = "webkit-migrated";
 const READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the hidden window waits for the landing document before it
+/// shows the app without migrating.
+const LANDING_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL: Duration = Duration::from_millis(100);
 /// How long Chromium gets to report the migrated cookies before the app loads
 /// anyway (setting them is fire-and-forget).
@@ -97,12 +104,15 @@ pub struct Migration {
     progress: Mutex<Progress>,
 }
 
-/// True until the move has run once on this machine.
-pub fn pending(app: &AppHandle) -> bool {
-    app.path()
-        .app_data_dir()
-        .map(|dir| !dir.join(MARKER).exists())
-        .unwrap_or(false)
+/// The marker sits in the profile it describes, so a debug build's
+/// migration into cef-dev leaves the release profile's own still to come.
+fn marker() -> Option<PathBuf> {
+    crate::chromium_profile_dir().map(|profile| profile.join(MARKER))
+}
+
+/// True until the move has run once into this build's profile.
+pub fn pending() -> bool {
+    marker().is_some_and(|marker| !marker.exists())
 }
 
 /// The URL the window opens on while migrating.
@@ -132,6 +142,39 @@ pub fn start(app: &AppHandle, origin: Url, entry: Url) {
             progress.data = Some(data);
         }
         apply_when_ready(&handle);
+    });
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(LANDING_TIMEOUT);
+        give_up(&handle);
+    });
+}
+
+/// The landing document never loaded (offline, a server error): show the
+/// app without migrating, leaving the marker for the next launch to retry.
+fn give_up(app: &AppHandle) {
+    let state = app.state::<Migration>();
+    {
+        let Ok(mut progress) = state.progress.lock() else {
+            return;
+        };
+        if progress.applied {
+            return;
+        }
+        progress.applied = true;
+    }
+    eprintln!("WebKit migration: the landing page did not load; opening the app without it");
+    let entry = state.entry.clone();
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(window) = handle.get_webview_window("main") else {
+            eprintln!("WebKit migration: no main window to show");
+            return;
+        };
+        if let Err(error) = window.show() {
+            eprintln!("WebKit migration: could not show the window: {error}");
+        }
+        let _ = window.navigate(entry);
     });
 }
 
@@ -167,15 +210,16 @@ fn apply_when_ready(app: &AppHandle) {
     let origin = state.origin.clone();
     set_cookies(&window, &origin, data.cookies.clone());
     let entry = state.entry.clone();
-    let app = app.clone();
     // cookies_for_url waits on the main thread, so the wait runs off it
     std::thread::spawn(move || {
         wait_for_cookies(&window, &origin, &data.cookies);
         // marked before the hand-over: a crash in between costs a sign-in,
         // never a second migration over what Chromium has since stored
-        if let Ok(dir) = app.path().app_data_dir() {
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(dir.join(MARKER), b"");
+        if let Some(marker) = marker() {
+            if let Some(profile) = marker.parent() {
+                let _ = std::fs::create_dir_all(profile);
+            }
+            let _ = std::fs::write(marker, b"");
         }
         let _ = window.eval(restore_script(&data.storage, &entry));
         // the script navigates itself; this only rescues a script that never ran

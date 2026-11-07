@@ -285,16 +285,18 @@ origin's localStorage, read by a hidden WKWebView at that origin. The cookies
 go straight into the webview's Chromium cookie manager with their expiry and
 SameSite (Tauri's `set_cookie` drops both, and Chromium forgets a cookie
 without an expiry on restart) and are flushed to disk; the page gets the
-entries, and the window shows itself as the app loads. A marker file in the app data directory makes it run once;
-nothing is written to the WebKit store, so a rollback to a WebKit build
-starts from it as it was. A read that fails or takes over five seconds only
-means signing in again.
+entries, and the window shows itself as the app loads. A `webkit-migrated` marker in the profile it filled makes it
+run once (a debug build's `cef-dev` has its own); nothing is written to the
+WebKit store, so a rollback to a WebKit build starts from it as it was. A
+read that fails or takes over five seconds only means signing in again, and a
+landing page that does not load within fifteen (offline) opens the app
+without migrating and leaves the next launch to try again.
 
 To test it on a machine with the WebKit app installed: quit the WebKit app
 (both share the bundle id, so a running one takes the launch over), build
 the Chromium app against the same server, and launch it. Delete
-`~/Library/Application Support/design.doop.desktop/{cef,webkit-migrated}` to
-run the migration again.
+`~/Library/Application Support/design.doop.desktop/cef` (`cef-dev` for a
+debug build) to run the migration again.
 
 `DOOP_CEF_DEBUG_PORT=9333 bun run dev:chromium` opens Chrome's remote
 debugging on that port in a debug build (never in a release), for
