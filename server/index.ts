@@ -87,7 +87,7 @@ import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
-import { actorFrameGrant, isActorCanvas, revokeActorAccess } from './actorFrames.ts'
+import { actorFrameGrant, isActorCanvas } from './actorFrames.ts'
 import { featureFlags } from './featureFlags.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
@@ -252,8 +252,6 @@ function connRole(conn: Conn): CanvasRole | null {
    editor goes read-only, or back), and anyone left with no access at all is
    disconnected rather than kept on the live feed. */
 function refreshRoomRoles(canvasId: string) {
-  /* canvas-actors: actor sockets close too, and reconnect with the new role */
-  if (isActorCanvas(canvasId)) revokeActorAccess(canvasId)
   for (const conn of room(canvasId)) {
     const role = connRole(conn)
     if (!role) {
@@ -1262,11 +1260,19 @@ app.get('/api/canvases/:id/actor', (req, res) => {
   if (!canvas) return
   if (!isActorCanvas(canvas.id)) return res.status(404).json({ error: 'this canvas has no actor' })
   const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 64) : undefined
-  actorFrameGrant(canvas.id, {
-    by: { name: req.user!.name, kind: 'user', color: colorFor(req.user!.name), ...(clientId ? { clientId } : {}) },
-    readOnly: !!req.impersonatedBy || !canEditCanvas(req.user!.id, canvas),
+  const user = req.user!
+  actorFrameGrant(canvas.id, () => {
+    const current = store.getCanvas(canvas.id)
+    if (!current || !canvasRole(user.id, current)) return undefined
+    return {
+      by: { name: user.name, kind: 'user', color: colorFor(user.name), ...(clientId ? { clientId } : {}) },
+      readOnly: !!req.impersonatedBy || !canEditCanvas(user.id, current),
+    }
   }).then(
-    (grant) => res.set('Cache-Control', 'no-store').json(grant),
+    (grant) =>
+      grant
+        ? res.set('Cache-Control', 'no-store').json(grant)
+        : res.status(403).json({ error: 'this canvas is private — ask the owner for access' }),
     (error: unknown) => {
       console.error('[canvas actors] grant failed', canvas.id, error)
       res.status(503).json({ error: 'canvas actor unavailable' })

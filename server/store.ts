@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
 import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
-import { placeCanvas } from './actorFrames.ts'
+import { placeCanvas, revokeActorAccess } from './actorFrames.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
@@ -140,16 +140,18 @@ class Store {
     }
   }
 
-  /** canvas-actors: frames of a canvas whose actor answered only after boot. */
-  restoreFrames(canvasId: string, frames: Frame[]) {
+  /** canvas-actors: frames of a canvas whose actor answered only after boot.
+   *  Returns the ones it added, or undefined before the store has the canvas. */
+  restoreFrames(canvasId: string, frames: Frame[]): Frame[] | undefined {
     const c = this.canvases.get(canvasId)
-    if (!c) return
-    for (const frame of frames) {
-      if (this.frameIndex.has(frame.id)) continue
+    if (!c) return undefined
+    const added = frames.filter((frame) => !this.frameIndex.has(frame.id))
+    for (const frame of added) {
       c.frames.push(frame)
       this.frameIndex.set(frame.id, canvasId)
     }
     c.frames.sort(byStack)
+    return added
   }
 
   createCanvas(name: string, ownerId?: string, workspaceId?: string): Canvas {
@@ -434,6 +436,7 @@ class Store {
     if (mode === 'none') delete c.linkAccess
     else c.linkAccess = mode
     persist.saveCanvas(c)
+    revokeActorAccess(id) // canvas-actors: actor sockets reconnect with the new role
     return c
   }
 
@@ -448,6 +451,7 @@ class Store {
     if (workspaceId) c.workspaceId = workspaceId
     else delete c.workspaceId
     persist.saveCanvas(c)
+    revokeActorAccess(id) // canvas-actors: the old workspace's members lose their actor sockets
     return c
   }
 
@@ -463,6 +467,7 @@ class Store {
       if (c.workspaceId === workspaceId) {
         delete c.workspaceId
         persist.saveCanvas(c)
+        revokeActorAccess(c.id) // canvas-actors
       }
     }
   }
@@ -527,6 +532,7 @@ class Store {
     if (!c || idx === -1) return false
     c.memberIds!.splice(idx, 1)
     persist.deleteMember(canvasId, userId)
+    revokeActorAccess(canvasId) // canvas-actors: the removed member's actor socket closes
     return true
   }
 
@@ -886,7 +892,8 @@ class Store {
     frame.updatedAt = opts.adopted?.updatedAt ?? Math.max(Date.now(), frame.updatedAt + 1)
     frame.updatedBy = by
     c.updatedAt = frame.updatedAt
-    if (!opts.adopted) persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
+    if (opts.adopted) persist.adoptActorFrame(frame)
+    else persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
     persist.saveCanvas(c)
     return frame
   }

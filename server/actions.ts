@@ -1957,10 +1957,24 @@ export function adoptActorEdit(next: Frame, by: Actor) {
   if (!!next.hidden !== !!before.hidden) patch.hidden = !!next.hidden
   if (!!next.locked !== !!before.locked) patch.locked = !!next.locked
   if (next.z !== undefined && next.z !== before.z) patch.z = next.z
-  if (Object.keys(patch).length) updateFrame(next.id, patch, by, { adopted: { updatedAt: next.updatedAt } })
+  if (!Object.keys(patch).length) return
+  /* HTML the server would complete (library fonts, tokens, escaped markup) is
+     taken as an ordinary edit instead, which saves the completed HTML back */
+  const completes =
+    patch.html !== undefined && withLibraryFaces(next.canvasId, repairEscapedHtml(patch.html)) !== patch.html
+  updateFrame(next.id, patch, by, completes ? {} : { adopted: { updatedAt: next.updatedAt } })
 }
 
-wireActorFrames({ adopt: adoptActorEdit, restore: (canvasId, frames) => store.restoreFrames(canvasId, frames) })
+wireActorFrames({
+  adopt: adoptActorEdit,
+  restore(canvasId, frames, by) {
+    const added = store.restoreFrames(canvasId, frames)
+    if (!added) return false
+    /* people who opened the canvas while its frames were missing see them arrive */
+    for (const frame of added) broadcast(canvasId, { type: 'frame:created', frame, actor: by })
+    return true
+  },
+})
 
 /** Several frames' places in the stack at once (the Layers panel renumbering
  *  a page, or undoing that): every frame is checked before any is written,

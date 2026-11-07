@@ -269,7 +269,10 @@ list|enable|disable|move-back`), or copied by them, is marked `canvases.frame_st
   to its actor (`src/lib/actorFrames.ts`, ticket from `GET /api/canvases/:id/actor`) and falls back to the
   app API. The server follows each actor's socket and folds those edits in through `actions.updateFrame`
   with `adopted` (no save back); while one of its own writes to a frame is on the way it skips that frame's
-  events and reads the frame back afterwards. Canvases never move automatically: existing ones stay put,
+  events and reads the frame back afterwards. Actor sockets are checked only when they open, so every access
+  change (`store.setLinkAccess`, `removeMember`, `setWorkspace`, `detachWorkspace`, and
+  `workspaces.removeMember`) calls `revokeActorAccess`, retried until the actor confirms. Canvases never move
+  automatically: existing ones stay put,
   turning the flag off only affects new canvases, and `move-back` copies an owner's actor canvases into
   `frames` (restart after). Unset `TERSE_ACTOR_URL`, the flag does nothing and the server never reads
   `feature_flags`; a failed read at boot leaves every flag off. Tooling: `bun run dev:actors` /
