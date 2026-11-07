@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
@@ -142,6 +143,25 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
     )
   })
 
+  it('drops a deleted canvas’s asset refs, though its frames have no rows in Postgres', async () => {
+    const doomed = await json<Canvas>(ada.post('/api/canvases', { name: 'Doomed' }))
+    const pictured = await json<Frame>(
+      ada.post(`/api/canvases/${doomed.id}/frames`, { name: 'Pictured', html: '<img src="/a/kept.png">' }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await reboot(() => expect(assetRefs(pictured.id)).toEqual(['kept']))
+    /* a browser edit leaves its refs to be written after a debounce; the canvas goes first */
+    const socket = await actorSocket(ada, doomed.id)
+    await socket.edit(pictured.id, { html: '<img src="/a/pending.png">' })
+    socket.close()
+    await until(async () =>
+      (await json<Canvas>(ada.get(`/api/canvases/${doomed.id}`))).frames.some((f) => f.html.includes('pending')),
+    )
+    expect((await ada.delete(`/api/canvases/${doomed.id}`)).status).toBe(200)
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await reboot(() => expect(assetRefs(pictured.id)).toEqual([]))
+  }, 60_000)
+
   it('loads the canvas’s frames from its actor after a restart', async () => {
     await reboot()
     const read = await json<Canvas>(ada.get(`/api/canvases/${canvas.id}`))
@@ -174,20 +194,39 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
 
   /** `bun run flags …` against the stopped server's PGlite. */
   function flags(...args: string[]) {
-    const run = spawnSync(
-      path.join(ROOT, 'node_modules', '.bin', 'tsx'),
-      [path.join(ROOT, 'scripts', 'feature-flags.ts'), ...args],
-      {
-        cwd: server.dataDir,
-        env: { ...process.env, DATABASE_URL: '' },
-        encoding: 'utf8',
-      },
-    )
-    if (run.status !== 0) throw new Error(`flags ${args.join(' ')} failed: ${run.stderr}`)
+    runScript(path.join(ROOT, 'scripts', 'feature-flags.ts'), args)
   }
 
-  async function actorSocket(client: Client) {
-    const { websocketUrl } = await json<{ websocketUrl: string }>(client.get(`/api/canvases/${canvas.id}/actor`))
+  /** The assets asset_refs ties to a frame, read from the stopped server's PGlite. */
+  function assetRefs(frameId: string): string[] {
+    const script = path.join(server.dataDir, 'asset-refs.mts')
+    writeFileSync(
+      script,
+      [
+        `import { db, initDb } from ${JSON.stringify(path.join(ROOT, 'server', 'db', 'index.ts'))}`,
+        `import { assetRefs } from ${JSON.stringify(path.join(ROOT, 'server', 'db', 'schema.ts'))}`,
+        'await initDb()',
+        'const rows = await db.select().from(assetRefs)',
+        `const ids = rows.filter((row) => row.frameId === ${JSON.stringify(frameId)}).map((row) => row.assetId)`,
+        'console.log(JSON.stringify(ids))',
+        'process.exit()',
+      ].join('\n'),
+    )
+    return JSON.parse(runScript(script).trim().split('\n').at(-1)!) as string[]
+  }
+
+  function runScript(script: string, args: string[] = []): string {
+    const run = spawnSync(path.join(ROOT, 'node_modules', '.bin', 'tsx'), [script, ...args], {
+      cwd: server.dataDir,
+      env: { ...process.env, DATABASE_URL: '' },
+      encoding: 'utf8',
+    })
+    if (run.status !== 0) throw new Error(`${path.basename(script)} ${args.join(' ')} failed: ${run.stderr}`)
+    return run.stdout
+  }
+
+  async function actorSocket(client: Client, canvasId = canvas.id) {
+    const { websocketUrl } = await json<{ websocketUrl: string }>(client.get(`/api/canvases/${canvasId}/actor`))
     const socket = new WebSocket(websocketUrl)
     const messages: unknown[] = []
     socket.on('message', (data) => messages.push(JSON.parse(String(data))))
