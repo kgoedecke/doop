@@ -444,4 +444,19 @@ PDF; pages follow the order given (frame_id first, then frame_ids as listed).
   counts as being asked).
 - Put new work in new frames beside existing ones; omit x/y to auto-place.
 - Keep the SAME agent_name for your whole session. It is your identity in the room.
+
+## Problems with Doop itself — report_issue and share_feedback
+
+Two tools reach the Doop team, never the humans on the canvas, and change no canvas:
+
+- report_issue — Doop got in your way: a tool errored or did something other than its
+  description says, this guide or a tool description left you guessing, a capability you
+  needed was missing, or you had to invent a workaround. Call it after a retry fails, when
+  you fall back to a workaround, or when you give up on part of a task, then carry on.
+  Say what you tried (tool and arguments in brief), what happened and what you expected.
+- share_feedback — what would make Doop better for agents (a tool you wish existed, a
+  result field that would have saved calls, a clumsy workflow) or something that worked
+  well and should stay.
+
+Never include secrets. A human's design feedback is not this: record that with save_decision.
 `
