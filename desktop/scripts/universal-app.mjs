@@ -9,11 +9,13 @@ import { mkdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { makeUniversalApp } from '@electron/universal'
 
-const [arm64AppPath, x64AppPath, outAppPath] = process.argv.slice(2)
-if (!arm64AppPath || !x64AppPath || !outAppPath) {
+const args = process.argv.slice(2)
+if (args.length !== 3) {
   console.error('usage: universal-app.mjs <arm64 app> <x64 app> <out app>')
   process.exit(2)
 }
+// @electron/universal takes absolute paths only
+const [arm64AppPath, x64AppPath, outAppPath] = args.map((app) => path.resolve(app))
 
 /* its last step compares an Electron app's JavaScript in Contents/Resources/app;
    a Tauri app has none, so an empty one on each side makes that a no-op */
