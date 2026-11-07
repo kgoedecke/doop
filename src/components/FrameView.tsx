@@ -1481,7 +1481,11 @@ export const FrameView = memo(function FrameView({
             ref={surfaceRef}
             className={cn(
               'absolute inset-0 overflow-hidden',
-              isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white',
+              /* the white a design without a background sits on, one screen
+                 pixel in from the edge: painted to the edge, it showed past the
+                 scaled iframe's antialiased edge as a light seam */
+              !isCanvasElement(frame.html) &&
+                "before:absolute before:inset-[calc(1px/var(--zoom,1))] before:bg-white before:content-['']",
               /* Select keeps the arrow, like Figma: the frame is a thing to
                  point at, not a handle. The Hand tool's grab and the Comment
                  tool's bubble come from the Stage, which overrides every
@@ -1542,7 +1546,7 @@ export const FrameView = memo(function FrameView({
           >
             <iframe
               ref={iframeRef}
-              className={cn('block border-none', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
+              className="relative block border-none bg-transparent"
               title={frame.name}
               data-doop-frame=""
               sandbox="allow-scripts"
