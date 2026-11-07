@@ -103,6 +103,17 @@ describe('provenance marker', () => {
   it('returns undefined for unmarked frames', () => {
     expect(githubFrameMarker('<html><body>plain</body></html>')).toBeUndefined()
   })
+
+  it('escapes the branch and directory inside the base href', () => {
+    const html = wrapRepoHtml(
+      '<html><head></head><body>hi</body></html>',
+      { ...conn, branch: 'a"><b>x&amp;' },
+      { ...screen, sourcePath: 'my "site"/index.html' },
+    )
+    expect(html).toContain(
+      '<base href="https://raw.githubusercontent.com/acme/app/a&quot;><b>x&amp;amp;/my &quot;site&quot;/"></head><body>hi</body>',
+    )
+  })
 })
 
 describe('selection matching', () => {
