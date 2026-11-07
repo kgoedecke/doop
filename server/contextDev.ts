@@ -235,6 +235,6 @@ export function prepareContextHtmlForRendering(html: string, finalUrl: string): 
     .replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)[^>]*>/gi, '')
     .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/gi, '')
   const head = prepared.match(/<head\b[^>]*>/i)
-  if (head) return prepared.replace(head[0], head[0] + base)
+  if (head) return prepared.replace(head[0], (tag) => tag + base)
   return base + prepared
 }
