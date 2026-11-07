@@ -90,10 +90,17 @@ in `.github/actions/setup-desktop`:
 - The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux
   stay on the WebKit build. It ships as `doop` / `design.doop.desktop` with the executable
   `doop-desktop`, exactly as the WebKit app did, so the updater swaps the bundle in place and
-  relaunches it by its old path. `dmg-macos` builds it universal with the Tauri 3 CLI
-  (`bun run build:chromium`, ninja from brew, CEF cached under `~/Library/Caches/tauri-cef`),
-  which signs and notarizes CEF's framework and five helper apps with the JIT entitlements; its
-  `doop.app.tar.gz` is the feed's macOS entry, as before. The first Chromium launch brings the
+  relaunches it by its old path. The Tauri 3 CLI bundles CEF for one architecture at a time
+  (its universal target ships one architecture's framework), so `dmg-macos` runs
+  `desktop/scripts/macos-universal.sh` as Electron apps do: an unsigned app per architecture
+  (`bun run build:chromium --target … --no-sign`, ninja from brew, CEF cached under
+  `~/Library/Caches/tauri-cef`), merged by `@electron/universal` (`scripts/universal-app.mjs`),
+  signed inside out (framework libraries, framework, five helpers, app) with the CEF entitlements
+  (allow-jit, allow-unsigned-executable-memory, disable-library-validation) under the hardened
+  runtime, notarized, packed with `create-dmg`, and tarred and signed with `tauri signer` for the
+  updater. The outputs keep the WebKit build's names (`doop_<version>_universal.dmg`,
+  `doop.app.tar.gz`), so the release job and the download link are unchanged; the app is about
+  600 MB, Chromium for both architectures. The first Chromium launch brings the
   WebKit app's cookies and localStorage over (`src/webkit_migration.rs`), so the switch keeps
   people signed in. Each Chromium security release needs a CEF bump (`tauri-runtime-cef`) and a
   desktop release. Rolling back means publishing a WebKit macOS build with a higher version to

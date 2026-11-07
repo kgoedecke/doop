@@ -263,7 +263,11 @@ The first build downloads the CEF binary distribution (Chromium 154, about
 puts them, with `Chromium Embedded Framework.framework`, in
 `Contents/Frameworks`; `tauri dev` runs from that bundle too, since CEF finds
 its helpers by bundle path. Without `--target` the build is for the machine's
-own architecture; the release builds `universal-apple-darwin`.
+own architecture. The CLI cannot bundle CEF universal (it ships one
+architecture's framework), so the release runs `scripts/macos-universal.sh`:
+both architectures built unsigned, merged with `@electron/universal`
+(`scripts/universal-app.mjs`), then signed with the CEF entitlements,
+notarized and packed (`brew install create-dmg` to run it locally).
 
 ### Replacing the WebKit app
 

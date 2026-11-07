@@ -48,6 +48,9 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
           workspace: desktop/src-tauri-chromium
+      # macos-universal.sh packs the DMG with create-dmg (the Tauri CLI's own
+      # DMG step only sees one architecture's app)
+      - run: brew install create-dmg
       - name: Build DMG (signed + notarized when APPLE_* secrets are set)
         working-directory: desktop
         env:
@@ -68,10 +71,9 @@ jobs:
           if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
             echo "::warning::APPLE_* secrets not set — building an UNSIGNED dmg (System Settings → Open Anyway required)"
           fi
-          updater=$(bash scripts/updater-config.sh)
-          # the Tauri 3 CLI signs CEF's framework and five helper apps with
-          # the JIT entitlements Chromium needs, then notarizes the whole app
-          bun run build:chromium --target universal-apple-darwin --bundles app,dmg --config "$updater"
+          # one app per architecture, merged into a universal one, signed,
+          # notarized, packed (the Tauri 3 CLI cannot bundle CEF universal)
+          bash scripts/macos-universal.sh
       - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: doop-dmg
