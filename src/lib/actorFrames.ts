@@ -28,87 +28,106 @@ export function editOnActor(canvasId: string, frameId: string, patch: BrowserPat
   return edit
 }
 
-type Connection = { canvasId: string; socket: Promise<WebSocket> }
-type Pending = { resolve: (frame: Frame) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+type Connection = {
+  canvasId: string
+  socket: Promise<WebSocket>
+  /** edits sent on this connection: only its own failure fails them */
+  pending: Map<string, Pending>
+  /** stops the ticket request, the socket and the wait for it to open */
+  abort: AbortController
+}
+type Pending = { resolve: (frame: Frame) => void; reject: (error: Error) => void }
 type Received =
   | { type: 'state_update'; changes: { committed?: FramesEvent | null } }
   | { type: 'error'; requestId: string; message: string }
   | { type: string }
 
 const EDITABLE = new Set(['name', 'x', 'y', 'width', 'height', 'html', 'hidden', 'locked', 'z'])
-const TIMEOUT_MS = 30_000
+/** from asking for a ticket to the actor confirming the edit; after that the app API saves it */
+const DEADLINE_MS = 10_000
 let connection: Connection | undefined
-const pending = new Map<string, Pending>()
 const queues = new Map<string, Promise<Frame>>()
 
-async function send(canvasId: string, frameId: string, patch: BrowserPatch): Promise<Frame> {
-  const socket = await connect(canvasId)
+function send(canvasId: string, frameId: string, patch: BrowserPatch): Promise<Frame> {
+  const current = connect(canvasId)
   const requestId = crypto.randomUUID()
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pending.delete(requestId)
-      reject(new Error('The canvas did not confirm the edit in time'))
-    }, TIMEOUT_MS)
-    pending.set(requestId, { resolve, reject, timer })
-    socket.send(JSON.stringify({ type: 'edit', frameId, patch, requestId } satisfies FrameCommand))
+    /* a connection that cannot confirm in time is dropped, so the next edit opens a fresh one */
+    const timer = setTimeout(() => drop(current, new Error('The canvas did not confirm the edit in time')), DEADLINE_MS)
+    current.pending.set(requestId, {
+      resolve: (frame) => {
+        clearTimeout(timer)
+        resolve(frame)
+      },
+      reject: (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    })
+    current.socket.then(
+      (socket) => {
+        if (current.pending.has(requestId))
+          socket.send(JSON.stringify({ type: 'edit', frameId, patch, requestId } satisfies FrameCommand))
+      },
+      (error: unknown) =>
+        settle(current, requestId)?.reject(error instanceof Error ? error : new Error('Could not reach the canvas')),
+    )
   })
 }
 
-/** The open socket to this canvas's actor, opened on the first edit. */
-function connect(canvasId: string): Promise<WebSocket> {
-  if (connection?.canvasId === canvasId) return connection.socket
-  close()
-  const current: Connection = { canvasId, socket: open(canvasId) }
+/** The connection to this canvas's actor, opened on the first edit. */
+function connect(canvasId: string): Connection {
+  if (connection?.canvasId === canvasId) return connection
+  if (connection) drop(connection, new Error('The canvas changed'))
+  const abort = new AbortController()
+  const current: Connection = { canvasId, pending: new Map(), abort, socket: open(canvasId, abort.signal) }
+  current.socket.then(
+    (socket) => {
+      socket.onmessage = ({ data }) => receive(current, JSON.parse(String(data)) as Received)
+      socket.onclose = () => drop(current, new Error('The canvas connection closed'))
+    },
+    () => drop(current, new Error('Could not reach the canvas')),
+  )
   connection = current
-  current.socket.catch(() => {
-    if (connection === current) connection = undefined
-  })
-  return current.socket
+  return current
 }
 
-async function open(canvasId: string): Promise<WebSocket> {
+async function open(canvasId: string, signal: AbortSignal): Promise<WebSocket> {
   const query = `clientId=${encodeURIComponent(getIdentity().clientId)}`
-  const response = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}/actor?${query}`)
+  const response = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}/actor?${query}`, { signal })
   if (!response.ok) throw new Error(`Canvas actor unavailable (${response.status})`)
   const { websocketUrl } = (await response.json()) as { websocketUrl: string }
+  signal.throwIfAborted()
   const socket = new WebSocket(websocketUrl)
-  socket.onmessage = ({ data }) => receive(JSON.parse(String(data)) as Received)
-  socket.onclose = () => {
-    if (connection?.canvasId === canvasId) connection = undefined
-    failPending(new Error('The canvas connection closed'))
-  }
+  signal.addEventListener('abort', () => socket.close(), { once: true })
   await new Promise<void>((resolve, reject) => {
     socket.onopen = () => resolve()
     socket.onerror = () => reject(new Error('Could not reach the canvas'))
+    signal.addEventListener('abort', () => reject(new Error('The canvas connection closed')), { once: true })
   })
   return socket
 }
 
-function receive(message: Received) {
+/** Close a connection and fail the edits waiting on it; each then saves through the app API. */
+function drop(current: Connection, error: Error) {
+  if (connection === current) connection = undefined
+  current.abort.abort()
+  for (const requestId of [...current.pending.keys()]) settle(current, requestId)?.reject(error)
+}
+
+function receive(current: Connection, message: Received) {
   if (message.type === 'error') {
     const { requestId, message: text } = message as { requestId: string; message: string }
-    settle(requestId)?.reject(new Error(text))
+    settle(current, requestId)?.reject(new Error(text))
     return
   }
   if (message.type !== 'state_update') return
   const event = (message as { changes: { committed?: FramesEvent | null } }).changes.committed
-  if (event?.type === 'frame-edit') settle(event.requestId)?.resolve(event.frame)
+  if (event?.type === 'frame-edit') settle(current, event.requestId)?.resolve(event.frame)
 }
 
-function settle(requestId: string): Pending | undefined {
-  const request = pending.get(requestId)
-  if (!request) return undefined
-  clearTimeout(request.timer)
-  pending.delete(requestId)
+function settle(current: Connection, requestId: string): Pending | undefined {
+  const request = current.pending.get(requestId)
+  current.pending.delete(requestId)
   return request
-}
-
-function close() {
-  const previous = connection
-  connection = undefined
-  previous?.socket.then((socket) => socket.close()).catch(() => {})
-}
-
-function failPending(error: Error) {
-  for (const requestId of [...pending.keys()]) settle(requestId)?.reject(error)
 }

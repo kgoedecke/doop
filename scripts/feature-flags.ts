@@ -34,7 +34,12 @@ import {
 } from '../server/featureFlags.ts'
 
 /* the database pool would keep the process alive */
-await main(process.argv.slice(2)).finally(() => process.exit())
+await main(process.argv.slice(2))
+  .catch((error: unknown) => {
+    console.error(error)
+    process.exitCode = 1
+  })
+  .finally(() => process.exit())
 
 async function main([command, flag, ...emails]: string[]) {
   if (command === 'list') {

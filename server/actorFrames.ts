@@ -53,7 +53,7 @@ export async function loadActorCanvases(canvases: readonly Canvas[]): Promise<vo
   const onActors = canvases.filter((canvas) => canvas.frameStore === 'actor')
   await Promise.all(
     onActors.map(async (canvas) => {
-      const state = follow(canvas.id)
+      const state = followed.get(canvas.id) ?? track(canvas.id)
       try {
         const snapshot = await withTimeout(stub(canvas.id).snapshot(), BOOT_TIMEOUT_MS)
         state.revision = snapshot.revision
@@ -62,6 +62,8 @@ export async function loadActorCanvases(canvases: readonly Canvas[]): Promise<vo
         console.error('[canvas actors] could not load', canvas.id, error)
         state.missing = true
       }
+      /* only now: the socket's first snapshot then fills in a canvas the read above missed */
+      void connect(state)
     }),
   )
 }
@@ -99,6 +101,14 @@ export async function insertActorFrames(canvasId: string, frames: readonly Frame
   }
 }
 
+/** A copy that failed: its frames come off the actor, retried like any write. */
+export function removeActorFrames(canvasId: string, frames: readonly Frame[]) {
+  for (const frame of frames) {
+    frameCanvas.set(frame.id, canvasId)
+    deleteActorFrame(frame.id)
+  }
+}
+
 /** The canvas was deleted: its actor drops every frame and closes its sockets. */
 export function destroyActorCanvas(canvasId: string) {
   const state = followed.get(canvasId)
@@ -124,28 +134,35 @@ export async function flushActorFrames(): Promise<void> {
   await Promise.allSettled([...outbox.keys()].map(settled))
 }
 
-/** A browser's socket to the canvas's actor, after the route checked its role. */
+/** A socket to the canvas's actor, or undefined when `access` finds none.
+ *  `access` is asked only after the actor's access version is read: rights
+ *  that change in between are either seen here or void the ticket. */
 export async function actorFrameGrant(
   canvasId: string,
-  metadata: Omit<SocketMetadata, 'accessVersion'>,
-): Promise<SocketGrant> {
+  access: () => Omit<SocketMetadata, 'accessVersion'> | undefined,
+): Promise<SocketGrant | undefined> {
   const accessVersion = await stub(canvasId).accessVersion()
+  const metadata = access()
+  if (!metadata) return undefined
   return actors.CanvasActor.prepareWebsocket({ actorId: canvasId, metadata: { ...metadata, accessVersion } })
 }
 
-/** Someone's access changed: open sockets close and older tickets stop working. */
+/** Someone's access to the canvas changed: its actor closes open sockets and
+ *  voids older tickets. Retried until the actor confirms, since only it can. */
 export function revokeActorAccess(canvasId: string) {
-  stub(canvasId)
-    .revokeAccess()
-    .catch((error: unknown) => console.error('[canvas actors] revoke failed', canvasId, error))
+  if (!followed.has(canvasId)) return
+  let revocation = revocations.get(canvasId)
+  if (!revocation) revocations.set(canvasId, (revocation = { running: false, again: false, attempts: 0 }))
+  revocation.again = true
+  revoke(canvasId, revocation)
 }
 
 /** How the store takes frames in from an actor without saving them back. */
 export interface ActorFrameHooks {
   /** a browser's edit, as the actor committed it */
   adopt(frame: Frame, by: Actor): void
-  /** frames of a canvas whose actor answered after boot */
-  restore(canvasId: string, frames: Frame[]): void
+  /** frames of a canvas whose actor answered after boot; false while the store does not have the canvas yet */
+  restore(canvasId: string, frames: Frame[], by: Actor): boolean
 }
 
 type Followed = {
@@ -157,6 +174,13 @@ type Followed = {
   revision: number
   /** boot could not read its frames; they are restored on the next snapshot */
   missing: boolean
+}
+
+type Revocation = {
+  running: boolean
+  /** an access change came after the running call started, or the call failed */
+  again: boolean
+  attempts: number
 }
 
 type Outgoing = {
@@ -177,8 +201,10 @@ const frameCanvas = new Map<string, string>()
 const saved = new Map<string, Frame>()
 /** frames with a write pending or on its way, at most one write each */
 const outbox = new Map<string, Outgoing>()
+const revocations = new Map<string, Revocation>()
 
 const BOOT_TIMEOUT_MS = 5000
+const RESTORE_RETRY_MS = 1000
 const MAX_RETRY_MS = 30_000
 const BATCH_BYTES = 4_000_000
 const SERVER: Actor = { name: 'Doop', kind: 'user', color: '#9c9b99' }
@@ -227,7 +253,11 @@ function send(frameId: string) {
       () => {
         entry.attempts = 0
         if (sentFrame) saved.set(frameId, sentFrame)
-        else saved.delete(frameId)
+        else {
+          saved.delete(frameId)
+          /* gone from the actor: unless it was saved again meanwhile (an undo), nothing is left to send */
+          if (!entry.frame) frameCanvas.delete(frameId)
+        }
       },
       (error: unknown) => {
         console.error('[canvas actors] save failed; retrying', frameId, error)
@@ -266,6 +296,29 @@ function finish(frameId: string, entry: Outgoing) {
     .catch((error: unknown) => console.error('[canvas actors] read back failed', frameId, error))
 }
 
+function revoke(canvasId: string, revocation: Revocation) {
+  if (revocation.running) return
+  if (!followed.has(canvasId)) return void revocations.delete(canvasId)
+  revocation.running = true
+  revocation.again = false
+  stub(canvasId)
+    .revokeAccess()
+    .then(
+      () => (revocation.attempts = 0),
+      (error: unknown) => {
+        console.error('[canvas actors] revoke failed; retrying', canvasId, error)
+        revocation.again = true
+        revocation.attempts++
+      },
+    )
+    .finally(() => {
+      revocation.running = false
+      if (!revocation.again) return void revocations.delete(canvasId)
+      if (!revocation.attempts) return revoke(canvasId, revocation)
+      setTimeout(() => revoke(canvasId, revocation), Math.min(MAX_RETRY_MS, 500 * 2 ** revocation.attempts))
+    })
+}
+
 function settled(frameId: string): Promise<void> {
   const entry = outbox.get(frameId)
   return entry ? new Promise((resolve) => entry.waiters.push(resolve)) : Promise.resolve()
@@ -275,16 +328,21 @@ function settled(frameId: string): Promise<void> {
 function follow(canvasId: string): Followed {
   let state = followed.get(canvasId)
   if (state) return state
-  state = { canvasId, attempts: 0, stopped: false, revision: -1, missing: false }
-  followed.set(canvasId, state)
+  state = track(canvasId)
   void connect(state)
+  return state
+}
+
+function track(canvasId: string): Followed {
+  const state: Followed = { canvasId, attempts: 0, stopped: false, revision: -1, missing: false }
+  followed.set(canvasId, state)
   return state
 }
 
 async function connect(state: Followed) {
   try {
-    const grant = await actorFrameGrant(state.canvasId, { by: SERVER, readOnly: true })
-    if (state.stopped) return
+    const grant = await actorFrameGrant(state.canvasId, () => ({ by: SERVER, readOnly: true }))
+    if (state.stopped || !grant) return
     const socket = new WebSocket(grant.websocketUrl)
     state.socket = socket
     socket.on('open', () => (state.attempts = 0))
@@ -335,11 +393,16 @@ function reconcile(state: Followed, snapshot: FramesSnapshot) {
   if (snapshot.revision < state.revision) return
   state.revision = snapshot.revision
   if (state.missing) {
+    const frames = snapshot.frames.map(toFrame)
+    /* the store takes the canvas in after boot: until it has, ask again */
+    if (!storeHooks?.restore(state.canvasId, frames, SERVER)) {
+      setTimeout(() => {
+        if (state.socket?.readyState === WebSocket.OPEN) state.socket.send(JSON.stringify({ type: 'snapshot' }))
+      }, RESTORE_RETRY_MS).unref()
+      return
+    }
     state.missing = false
-    storeHooks?.restore(
-      state.canvasId,
-      snapshot.frames.map((frame) => remember(toFrame(frame))),
-    )
+    for (const frame of frames) remember(frame)
     return
   }
   for (const frame of snapshot.frames) consider(frame, undefined)

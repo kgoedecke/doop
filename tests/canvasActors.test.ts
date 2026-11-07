@@ -76,6 +76,47 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
     expect((await bob.get(`/api/canvases/${canvas.id}/actor`)).status).toBe(403)
   })
 
+  it('closes a removed member’s actor socket and refuses them a new one', async () => {
+    await json(ada.post(`/api/canvases/${canvas.id}/members`, { email: 'bob@example.com' }))
+    const socket = await actorSocket(bob)
+    const members = await json<{ userId: string; name: string }[]>(ada.get(`/api/canvases/${canvas.id}/members`))
+    const bobId = members.find((member) => member.name === 'Bob')!.userId
+    expect((await ada.delete(`/api/canvases/${canvas.id}/members/${bobId}`)).status).toBe(200)
+    await socket.closed
+    expect((await bob.get(`/api/canvases/${canvas.id}/actor`)).status).toBe(403)
+  })
+
+  it('completes HTML a browser writes straight to the actor, as the app API would', async () => {
+    await json(ada.post(`/api/canvases/${canvas.id}/tokens`, { name: '--brand', type: 'color', value: '#ff0000' }))
+    const styled = await json<Frame>(
+      ada.post(`/api/canvases/${canvas.id}/frames`, { name: 'Styled', html: '<p>plain</p>' }),
+    )
+    const socket = await actorSocket(ada)
+    await socket.edit(styled.id, { html: '<p style="color: var(--brand)">branded</p>' })
+    socket.close()
+    /* the token's definition is added, on the server and back on the actor */
+    const completed = (html: string | undefined) => !!html?.includes('data-doop-tokens') && html.includes('branded')
+    await until(async () =>
+      completed(
+        (await json<Canvas>(ada.get(`/api/canvases/${canvas.id}`))).frames.find((f) => f.id === styled.id)?.html,
+      ),
+    )
+    await until(async () => completed((await actorSnapshot(ada)).frames.find((f) => f.id === styled.id)?.html))
+  })
+
+  it('sends a deleted frame’s deletion to the actor once', async () => {
+    const doomed = await json<Frame>(
+      ada.post(`/api/canvases/${canvas.id}/frames`, { name: 'Doomed', html: '<p>x</p>' }),
+    )
+    await until(async () => (await actorSnapshot(ada)).frames.some((f) => f.id === doomed.id))
+    expect((await ada.delete(`/api/frames/${doomed.id}`)).status).toBe(200)
+    await until(async () => !(await actorSnapshot(ada)).frames.some((f) => f.id === doomed.id))
+    /* every save moves the actor's revision on; a repeating delete would keep moving it */
+    const settledAt = (await actorSnapshot(ada)).revision
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    expect((await actorSnapshot(ada)).revision).toBe(settledAt)
+  })
+
   it('ends with the server and the actor agreeing when a browser and the server edit one frame at once', async () => {
     const socket = await actorSocket(ada)
     const writes: Promise<unknown>[] = []
@@ -151,9 +192,11 @@ describe.skipIf(!ACTORS)('canvas-actors', () => {
     const messages: unknown[] = []
     socket.on('message', (data) => messages.push(JSON.parse(String(data))))
     socket.on('error', () => {})
+    const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()))
     await new Promise<void>((resolve) => socket.once('open', () => resolve()))
     return {
       messages,
+      closed,
       async edit(frameId: string, patch: Partial<ActorFrame>): Promise<ActorFrame> {
         const requestId = crypto.randomUUID()
         socket.send(JSON.stringify({ type: 'edit', frameId, patch, requestId }))
