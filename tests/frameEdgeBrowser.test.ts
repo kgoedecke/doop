@@ -5,13 +5,11 @@ import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
 import type { Canvas, Frame } from '../shared/types'
 
-declare global {
-  interface Window {
-    rulersHarness: {
-      seed: (canvas: Canvas) => void
-      viewport: (viewport: { x: number; y: number; zoom: number }) => void
-    }
-  }
+/* the part of the rulers fixture's harness used here (rulersBrowser.test.ts
+   declares the whole of it on Window) */
+type Harness = {
+  seed: (canvas: Canvas) => void
+  viewport: (viewport: { x: number; y: number; zoom: number }) => void
 }
 
 /**
@@ -74,8 +72,8 @@ describe.skipIf(!findBrowserPath())('frame edge', { timeout: 60_000 }, () => {
 
   async function settle(zoom: number, offset = 0) {
     await page.evaluate(
-      ([zoom, x]) => window.rulersHarness.viewport({ x, y: 80, zoom }),
-      [zoom, 300 - 1560 * zoom + offset],
+      (viewport) => (window as unknown as { rulersHarness: Harness }).rulersHarness.viewport(viewport),
+      { x: 300 - 1560 * zoom + offset, y: 80, zoom },
     )
     /* the layout zoom follows 250ms after the camera stops */
     await new Promise((r) => setTimeout(r, 450))
@@ -86,11 +84,11 @@ describe.skipIf(!findBrowserPath())('frame edge', { timeout: 60_000 }, () => {
     page = await browser.newPage()
     await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 1 })
     await page.goto(fixtureUrl('rulers.html'))
-    await page.waitForFunction(() => !!window.rulersHarness)
+    await page.waitForFunction(() => !!(window as unknown as { rulersHarness?: unknown }).rulersHarness)
     await page.evaluate(() => document.documentElement.classList.add('dark'))
     await page.evaluate(
       (frames) =>
-        window.rulersHarness.seed({
+        (window as unknown as { rulersHarness: Harness }).rulersHarness.seed({
           id: 'c',
           name: 'Edges',
           frames,
