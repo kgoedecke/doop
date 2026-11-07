@@ -54,6 +54,15 @@ function Panel({
   /* marks the panel while its edge is dragged; styles.css pauses the chrome's
      position transitions then, so neighbours follow the pointer in step */
   const [dragging, setDragging] = React.useState(false)
+  /* mirrored on <body>, which the rule keys on: a `body:has(…) *` rule
+     restyled the whole page on every DOM insertion anywhere (each pan tick) */
+  React.useEffect(() => {
+    if (!dragging) return
+    document.body.toggleAttribute('data-panel-resizing', true)
+    return () => {
+      document.body.toggleAttribute('data-panel-resizing', false)
+    }
+  }, [dragging])
   const endDrag = () => {
     drag.current = null
     setDragging(false)
