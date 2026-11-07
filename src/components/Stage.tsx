@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
 import { roleOf, toolAllowed, useStore, type Viewport } from '../lib/store'
 import { usePaper, type Paper } from '../lib/paper'
 import { roleAllows } from '../../shared/canvasRole'
@@ -7,6 +16,7 @@ import type { Frame } from '../../shared/types'
 import { usePageCanvas, currentPageCanvas } from '../lib/pages'
 import { sendWs } from '../lib/ws'
 import { throttle } from '../lib/throttle'
+import { useLiveFrameIds } from '../lib/frameCulling'
 import { FrameView, HiddenFrameView } from './FrameView'
 import { CanvasComments, type CanvasComposeAt } from './CanvasComments'
 import { placeComposer } from '../lib/composerPlacement'
@@ -1055,7 +1065,7 @@ export function Stage({
               ref={worldRef}
             >
               <FrameLabelLayer.Provider value={labelLayer}>
-                <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} />
+                <FrameStack frames={canvas?.frames ?? []} layoutZoom={layoutZoom} stage={ref} />
               </FrameLabelLayer.Provider>
               <GhostFrames />
               <FlowOverlay />
@@ -1260,17 +1270,27 @@ function byCreation(a: Frame, b: Frame) {
  *  keeps them). They mount in creation order and stack by z-index: moving
  *  an iframe in the DOM reloads it, so a restack must not move any. The
  *  layer isolates the stack, so the overlays after it (cursors, guides, the
- *  marquee) stay above every frame. */
-function FrameStack({ frames, layoutZoom }: { frames: Frame[]; layoutZoom: number }) {
+ *  marquee) stay above every frame. Only the frames in view are live
+ *  documents; the rest are placeholders (`lib/frameCulling.ts`). */
+function FrameStack({
+  frames,
+  layoutZoom,
+  stage,
+}: {
+  frames: Frame[]
+  layoutZoom: number
+  stage: RefObject<HTMLElement | null>
+}) {
   const mounted = useMemo(() => [...frames].sort(byCreation), [frames])
   const rank = useMemo(() => new Map(frames.map((f, i) => [f.id, i + 1])), [frames])
+  const live = useLiveFrameIds(frames, stage)
   return (
     <div className="absolute top-0 left-0 isolate">
       {mounted.map((f) =>
         f.hidden ? (
           <HiddenFrameView key={f.id} frame={f} stack={rank.get(f.id)} />
         ) : (
-          <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} />
+          <FrameView key={f.id} frame={f} stack={rank.get(f.id)} layoutZoom={layoutZoom} live={live.has(f.id)} />
         ),
       )}
     </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import type { Frame } from '../../shared/types'
 import type { Interaction, ProtoTransition } from '../../shared/prototype'
 import { useStore } from '../lib/store'
+import { requestFrameHtml } from '../lib/ws'
 import { FRAME_BOOTSTRAP } from '../lib/frameRuntime'
 import {
   fitScale,
@@ -92,6 +93,12 @@ export function PrototypePlayer({
   const [move, setMoveState] = useState<Move | null>(null)
   const [readyOverlays, setReadyOverlays] = useState<ReadonlySet<number>>(() => new Set())
   const [notice, setNotice] = useState<string | null>(null)
+  /* a screen on another page than the one the room opened on arrives without
+     its HTML (`htmlDeferred`): ask for it as the flow reaches it */
+  useEffect(() => {
+    const shown = new Set([...stack, ...overlays].map((entry) => entry.frameId))
+    requestFrameHtml(frames?.filter((f) => f.htmlDeferred && shown.has(f.id)).map((f) => f.id) ?? [])
+  }, [frames, stack, overlays])
   /* the handlers below run from message listeners: they read the latest
      state through these refs, written together with the state */
   const stackRef = useRef(stack)
@@ -695,9 +702,14 @@ function ProtoScreen({
   }, [entry.key])
 
   const html = frame?.html ?? ''
+  /* a screen still waiting for its HTML stays unready, so a transition never
+     plays over a blank page */
+  const loading = !!frame?.htmlDeferred
   useEffect(() => {
-    if (booted) iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html, reqId: 'proto' }, '*')
-  }, [booted, html])
+    if (booted && !loading) {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'doop:html', html, reqId: 'proto' }, '*')
+    }
+  }, [booted, loading, html])
 
   useEffect(() => {
     const iframe = iframeRef.current

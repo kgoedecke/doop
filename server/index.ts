@@ -1,5 +1,6 @@
 import { env } from './env.ts'
-import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
+import { canvasPages, framePageId, pageFrames, samePages } from '../shared/pages.ts'
+import { canvasOpenedOn, frameHtmlBatches, MAX_LOAD_FRAME_IDS, openingPageId } from '../shared/frameHtml.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
@@ -13,6 +14,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import express from 'express'
+import compression from 'compression'
 import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
@@ -714,6 +716,9 @@ declare global {
    whose session (if any) is not the app's: relay it back to the app before
    the gate looks at that session (shared/desktopConnect.ts) */
 app.get('/api/integrations/:provider/callback', relayDesktopCallback)
+/* canvas reads are megabytes of JSON; the event stream asks for no transform
+   and is left alone by the middleware */
+app.use('/api', compression())
 app.use('/api/live-activities', logLiveActivityRequests)
 app.use('/api', async (req, res, next) => {
   try {
@@ -1238,10 +1243,19 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
   }
 })
 
+/* `?pageId=<id>` opens the canvas on one page: only its frames carry their HTML,
+   the rest arrive `htmlDeferred` (GET /api/frames/:id has the HTML of any). With
+   no `pageId` every frame is complete, as it always was. */
 app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'view')
+  if (!c) return
   /* the caller's own role rides along, so the editor knows to go read-only */
-  if (c) res.json({ ...c, role: canvasRole(req.user!.id, c) })
+  const role = canvasRole(req.user!.id, c)
+  const { pageId } = req.query
+  if (pageId === undefined) return res.json({ ...c, role })
+  if (typeof pageId !== 'string' || !canvasPages(c).some((page) => page.id === pageId))
+    return res.status(400).json({ error: 'page not found' })
+  res.json({ ...canvasOpenedOn(c, pageId), role })
 })
 
 /* Community gallery listing — the owner's call alone, like link access.
@@ -2018,6 +2032,11 @@ app.put('/api/canvases/:id/stack', (req, res) => {
   res.json(frames)
 })
 
+app.get('/api/frames/:id', (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'view')
+  if (frame) res.json(frame)
+})
+
 app.patch('/api/frames/:id', (req, res) => {
   const current = requireFrame(req, res, req.params.id, 'edit', req.body?.expectedUpdatedAt)
   if (!current) return
@@ -2555,7 +2574,22 @@ if (env.isProduction) {
 /* ------------------------------------------------- websocket */
 
 const server = http.createServer(app)
-const wss = new WebSocketServer({ server, path: '/ws' })
+/* Room messages that carry a document are text a deflate shrinks several-fold;
+   the cursors, viewports and presence that make up the rest are under a
+   hundred bytes, where the framing costs more than it saves — hence the
+   threshold. No context takeover either way: a context is a few hundred KB
+   per socket for the life of the connection, and the messages worth
+   compressing are big enough to fill a window on their own. */
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  perMessageDeflate: {
+    threshold: 1024,
+    serverNoContextTakeover: true,
+    clientNoContextTakeover: true,
+    zlibDeflateOptions: { level: 3 },
+  },
+})
 
 /* A signed-out visitor on a link-shared canvas watches it as a guest
    (guestCanvasRole): view only, silent like a view-as session (no presence,
@@ -2589,6 +2623,25 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
     selfColor: presence.color,
     serverBuild: BUILD_ID,
   })
+}
+
+/** Answer a `frames:load`: the HTML of every frame on the page it names and of
+ *  the frames it lists, in batches so the client can paint as they land. A
+ *  frame deleted meanwhile is simply not answered; its `frame:deleted` says so. */
+function sendFrameHtml(conn: Conn, msg: Extract<ClientMessage, { type: 'frames:load' }>) {
+  const canvas = store.getCanvas(conn.canvasId)
+  if (!canvas || !canvasRole(conn.userId, canvas)) {
+    conn.ws.close(4403, 'no access')
+    return
+  }
+  const ids = new Set(
+    (Array.isArray(msg.frameIds) ? msg.frameIds : [])
+      .filter((id) => typeof id === 'string')
+      .slice(0, MAX_LOAD_FRAME_IDS),
+  )
+  const onPage = typeof msg.pageId === 'string' ? new Set(pageFrames(canvas, msg.pageId).map((f) => f.id)) : undefined
+  const frames = canvas.frames.filter((f) => ids.has(f.id) || onPage?.has(f.id))
+  for (const batch of frameHtmlBatches(frames)) send(conn.ws, { type: 'frames:html', frames: batch })
 }
 
 wss.on('connection', (ws, upgradeReq) => {
@@ -2639,9 +2692,11 @@ wss.on('connection', (ws, upgradeReq) => {
         .filter((c) => c.ws !== ws && !c.silent)
         .map((c) => c.presence)
       const agents = [...(agentPresences.get(msg.canvasId)?.values() ?? [])]
+      const pageId = msg.deferHtml === true ? openingPageId(canvas, msg) : undefined
       send(ws, {
         type: 'init',
-        canvas: { ...canvas, role },
+        ...(pageId === undefined ? {} : { pageId }),
+        canvas: { ...(pageId === undefined ? canvas : canvasOpenedOn(canvas, pageId)), role },
         presences: [...others, ...agents],
         activity: actions.getActivity(msg.canvasId),
         tasks: actions.getTasks(msg.canvasId),
@@ -2671,6 +2726,11 @@ wss.on('connection', (ws, upgradeReq) => {
     }
 
     if (!conn) return
+    /* reading is not editing: a view-as connection may load HTML too */
+    if (msg.type === 'frames:load') {
+      sendFrameHtml(conn, msg)
+      return
+    }
     if (conn.silent) return // view-as connections receive updates but never emit
     const { canvasId, presence } = conn
     /* view and comment visitors share cursors and viewports; claiming a
