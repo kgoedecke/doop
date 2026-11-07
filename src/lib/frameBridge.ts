@@ -13,6 +13,8 @@ export interface LayoutDrop {
   styles: FlowPlacement
   container: ElementInfo['rect']
   line: ElementInfo['rect']
+  /** the drop leaves the element's parent: only then is the container marked */
+  reparent?: boolean
 }
 
 export async function elementMoveTarget(frameId: string, selector: string, x: number, y: number) {

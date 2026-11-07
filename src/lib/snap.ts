@@ -1,4 +1,4 @@
-import type { CanvasGuide, Frame } from '../../shared/types'
+import type { CanvasGuide } from '../../shared/types'
 import type { ResizeHandle } from './elementResize'
 import { MIN_FRAME_SIZE, movingEdges } from './frameResize'
 
@@ -7,7 +7,8 @@ import { MIN_FRAME_SIZE, movingEdges } from './frameResize'
  * pull onto the matching edges/centers of the other frames on the canvas,
  * and onto the page's ruler guides. Pure math — the Stage draws the returned
  * guides, FrameView applies the snapped rect. Elements and drawings snap to
- * the ruler guides through the same tolerance.
+ * their frame, their sibling elements and the ruler guides through the same
+ * tolerance.
  */
 
 /* how close (in screen px) an edge must be before it locks on */
@@ -21,7 +22,7 @@ export interface SnapGuide {
   to: number
 }
 
-interface Rect {
+export interface Rect {
   x: number
   y: number
   width: number
@@ -48,7 +49,7 @@ const lines = (pos: number, size: number) => [pos, pos + size / 2, pos + size]
 const edgeOffset = (edge: 'start' | 'end' | null, size: number) =>
   edge === 'start' ? [0] : edge === 'end' ? [size] : []
 
-function frameTargets(others: readonly Frame[], key: 'x' | 'y'): Target[] {
+function frameTargets(others: readonly Rect[], key: 'x' | 'y'): Target[] {
   return others.flatMap((o) =>
     lines(o[key], key === 'x' ? o.width : o.height).map((at) =>
       key === 'x' ? { at, from: o.y, to: o.y + o.height } : { at, from: o.x, to: o.x + o.width },
@@ -78,7 +79,7 @@ function closest(ownOffsets: number[], base: number, targets: readonly Target[],
 export function snapFrame(
   mode: 'move' | 'resize',
   rect: Rect,
-  others: readonly Frame[],
+  others: readonly Rect[],
   zoom: number,
   guides: readonly CanvasGuide[] = [],
   handle: ResizeHandle = 'se',
