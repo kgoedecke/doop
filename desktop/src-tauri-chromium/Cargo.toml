@@ -44,7 +44,10 @@ objc2-app-kit = { version = "0.3", features = ["NSButton", "NSControl", "NSRespo
 # reading the WebKit app's cookies and localStorage on the first launch (src/webkit_migration.rs)
 objc2 = "0.6"
 block2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSError", "NSGeometry", "NSHTTPCookie", "NSString", "NSURL", "block2"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDate", "NSError", "NSGeometry", "NSHTTPCookie", "NSString", "NSURL", "block2"] }
+# the migrated cookies go straight to Chromium's cookie manager, with their
+# expiry; pinned to the version tauri-runtime-cef uses
+cef = "=154.5.0"
 objc2-web-kit = { version = "0.3", features = ["WKHTTPCookieStore", "WKNavigation", "WKWebView", "WKWebViewConfiguration", "WKWebsiteDataStore", "block2", "objc2-app-kit"] }
 
 [profile.release]

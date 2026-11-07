@@ -1213,6 +1213,7 @@ name = "doop-desktop-chromium"
 version = "0.12.0"
 dependencies = [
  "block2",
+ "cef",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

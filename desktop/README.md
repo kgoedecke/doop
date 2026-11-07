@@ -277,9 +277,11 @@ app's permissions and keychain items. Chromium keeps its profile in
 On its first launch the app opens hidden on the app origin's `/favicon.ico`
 and moves the WebKit app's storage over (`src/webkit_migration.rs`): the
 cookies for the app's host from the shared WKWebsiteDataStore, and the
-origin's localStorage, read by a hidden WKWebView at that origin. Chromium
-gets the cookies, the page gets the entries, and the window shows itself as
-the app loads. A marker file in the app data directory makes it run once;
+origin's localStorage, read by a hidden WKWebView at that origin. The cookies
+go straight into the webview's Chromium cookie manager with their expiry and
+SameSite (Tauri's `set_cookie` drops both, and Chromium forgets a cookie
+without an expiry on restart) and are flushed to disk; the page gets the
+entries, and the window shows itself as the app loads. A marker file in the app data directory makes it run once;
 nothing is written to the WebKit store, so a rollback to a WebKit build
 starts from it as it was. A read that fails or takes over five seconds only
 means signing in again.

@@ -9,10 +9,12 @@
 //! loads a blank document at the app's origin and reads it there. Nothing is
 //! written to the WebKit store.
 //!
-//! Chromium takes cookies only for the URL its webview is on, so the window
-//! first opens hidden on the app's /favicon.ico (same origin, no scripts),
-//! gets the cookies, the localStorage entries, and then goes to the app,
-//! showing itself as it does. A marker file in the app data directory makes
+//! The window first opens hidden on the app's /favicon.ico (same origin, no
+//! scripts). The cookies go straight into the webview's Chromium cookie
+//! manager, with the expiry and SameSite WebKit had (Tauri's set_cookie drops
+//! both, and Chromium does not keep a cookie without an expiry across a
+//! restart), and are flushed to disk; the localStorage entries are written in
+//! that document; then the window goes to the app, showing itself as it does. A marker file in the app data directory makes
 //! this a first-launch-only step; a read that fails or outlasts READ_TIMEOUT
 //! only costs a sign-in.
 use std::cell::RefCell;
@@ -21,12 +23,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use block2::RcBlock;
+use cef::{ImplBrowser, ImplBrowserHost, ImplCookieManager, ImplRequestContext};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::MainThreadMarker;
-use objc2_foundation::{NSArray, NSError, NSHTTPCookie, NSString, NSURL};
+use objc2_foundation::{
+    NSArray, NSError, NSHTTPCookie, NSHTTPCookieSameSiteLax, NSHTTPCookieSameSiteStrict, NSString,
+    NSURL,
+};
 use objc2_web_kit::{WKWebView, WKWebViewConfiguration, WKWebsiteDataStore};
-use tauri::webview::cookie::Cookie;
 use tauri::{AppHandle, Manager, Url, WebviewWindow};
 
 /// The document the window waits on: the app's origin, no scripts.
@@ -38,16 +43,43 @@ const POLL: Duration = Duration::from_millis(100);
 /// anyway (setting them is fire-and-forget).
 const COOKIE_WAIT: Duration = Duration::from_secs(2);
 
+/// Seconds from the Windows epoch (1601), where Chromium's time starts, to
+/// the Unix one.
+const WINDOWS_TO_UNIX_EPOCH_SECS: f64 = 11_644_473_600.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SameSite {
+    Unspecified,
+    Lax,
+    Strict,
+}
+
+/// A WebKit cookie for the app's host, as Chromium should hold it.
+#[derive(Clone, Debug, PartialEq)]
+struct MigratedCookie {
+    name: String,
+    value: String,
+    /// Set for a domain cookie (".doop.design"); none keeps it host-only,
+    /// which `__Host-` cookies need.
+    domain: Option<String>,
+    path: String,
+    secure: bool,
+    http_only: bool,
+    /// Unix seconds; none for a session cookie.
+    expires: Option<f64>,
+    same_site: SameSite,
+}
+
 /// What the WebKit shell kept for the app's origin.
 #[derive(Default)]
 struct WebKitData {
-    cookies: Vec<Cookie<'static>>,
+    cookies: Vec<MigratedCookie>,
     storage: Vec<(String, String)>,
 }
 
 #[derive(Default)]
 struct Read {
-    cookies: Option<Vec<Cookie<'static>>>,
+    cookies: Option<Vec<MigratedCookie>>,
     storage: Option<Vec<(String, String)>>,
 }
 
@@ -132,10 +164,8 @@ fn apply_when_ready(app: &AppHandle) {
             progress.data.take().unwrap(),
         )
     };
-    for cookie in &data.cookies {
-        let _ = window.set_cookie(cookie.clone());
-    }
     let origin = state.origin.clone();
+    set_cookies(&window, &origin, data.cookies.clone());
     let entry = state.entry.clone();
     let app = app.clone();
     // cookies_for_url waits on the main thread, so the wait runs off it
@@ -156,10 +186,70 @@ fn apply_when_ready(app: &AppHandle) {
     });
 }
 
+/// Writes the cookies into the webview's own Chromium cookie manager, then
+/// flushes it, so even a quit right after the first launch keeps them.
+fn set_cookies(
+    window: &WebviewWindow<crate::ShellRuntime>,
+    origin: &Url,
+    cookies: Vec<MigratedCookie>,
+) {
+    if cookies.is_empty() {
+        return;
+    }
+    let url = origin.to_string();
+    let _ = window.with_webview(move |webview| {
+        let url = cef::CefString::from(url.as_str());
+        let Some(manager) = webview
+            .downcast_ref::<tauri_runtime_cef::Webview>()
+            .and_then(|webview| webview.browser().host())
+            .and_then(|host| host.request_context())
+            .and_then(|context| context.cookie_manager(None))
+        else {
+            eprintln!("WebKit migration: no Chromium cookie manager");
+            return;
+        };
+        for cookie in &cookies {
+            manager.set_cookie(Some(&url), Some(&cef_cookie(cookie)), None);
+        }
+        manager.flush_store(None);
+    });
+}
+
+fn cef_cookie(cookie: &MigratedCookie) -> cef::Cookie {
+    let mut cef_cookie = cef::Cookie {
+        name: cookie.name.as_str().into(),
+        value: cookie.value.as_str().into(),
+        path: cookie.path.as_str().into(),
+        secure: cookie.secure.into(),
+        httponly: cookie.http_only.into(),
+        same_site: match cookie.same_site {
+            SameSite::Unspecified => cef::CookieSameSite::UNSPECIFIED,
+            SameSite::Lax => cef::CookieSameSite::LAX_MODE,
+            SameSite::Strict => cef::CookieSameSite::STRICT_MODE,
+        },
+        ..Default::default()
+    };
+    if let Some(domain) = &cookie.domain {
+        cef_cookie.domain = domain.as_str().into();
+    }
+    if let Some(expires) = cookie.expires {
+        cef_cookie.has_expires = 1;
+        cef_cookie.expires = cef::Basetime {
+            val: chromium_time(expires),
+        };
+    }
+    cef_cookie
+}
+
+/// Unix seconds as Chromium's base::Time: microseconds since 1601.
+fn chromium_time(unix_secs: f64) -> i64 {
+    ((unix_secs + WINDOWS_TO_UNIX_EPOCH_SECS) * 1_000_000.0) as i64
+}
+
 fn wait_for_cookies(
     window: &WebviewWindow<crate::ShellRuntime>,
     origin: &Url,
-    wanted: &[Cookie<'static>],
+    wanted: &[MigratedCookie],
 ) {
     if wanted.is_empty() {
         return;
@@ -169,8 +259,8 @@ fn wait_for_cookies(
         let present = window.cookies_for_url(origin.clone()).unwrap_or_default();
         if wanted
             .iter()
-            .filter(|c| c.path().is_none_or(|p| p == "/"))
-            .all(|c| present.iter().any(|p| p.name() == c.name()))
+            .filter(|c| c.path == "/")
+            .all(|c| present.iter().any(|p| p.name() == c.name))
         {
             return;
         }
@@ -308,29 +398,35 @@ fn ask_storage(script: &str, read: Arc<Mutex<Read>>) {
 /// writes a host-only cookie's domain bare and a domain cookie's with a
 /// leading dot; a bare one goes to Chromium without a domain, which keeps it
 /// host-only (and keeps `__Host-` cookies valid).
-fn migrated_cookie(cookie: &NSHTTPCookie, host: &str) -> Option<Cookie<'static>> {
+fn migrated_cookie(cookie: &NSHTTPCookie, host: &str) -> Option<MigratedCookie> {
     let domain = cookie.domain().to_string();
-    let host_only = !domain.starts_with('.');
-    let bare = domain.trim_start_matches('.');
-    let applies = if host_only {
-        host == bare
-    } else {
-        host == bare || host.ends_with(&format!(".{bare}"))
-    };
-    if !applies {
+    if !applies_to(&domain, host) {
         return None;
     }
-    let mut migrated = Cookie::new(cookie.name().to_string(), cookie.value().to_string());
-    if !host_only {
-        migrated.set_domain(domain);
+    let same_site = match cookie.sameSitePolicy() {
+        Some(policy) if &*policy == unsafe { NSHTTPCookieSameSiteStrict } => SameSite::Strict,
+        Some(policy) if &*policy == unsafe { NSHTTPCookieSameSiteLax } => SameSite::Lax,
+        _ => SameSite::Unspecified,
+    };
+    Some(MigratedCookie {
+        name: cookie.name().to_string(),
+        value: cookie.value().to_string(),
+        domain: domain.starts_with('.').then_some(domain),
+        path: cookie.path().to_string(),
+        secure: cookie.isSecure(),
+        http_only: cookie.isHTTPOnly(),
+        expires: cookie
+            .expiresDate()
+            .map(|date| date.timeIntervalSince1970()),
+        same_site,
+    })
+}
+
+fn applies_to(domain: &str, host: &str) -> bool {
+    match domain.strip_prefix('.') {
+        Some(bare) => host == bare || host.ends_with(&format!(".{bare}")),
+        None => host == domain,
     }
-    migrated.set_path(cookie.path().to_string());
-    migrated.set_secure(cookie.isSecure());
-    migrated.set_http_only(cookie.isHTTPOnly());
-    // expiry and SameSite are not passed on: the CEF runtime's set_cookie
-    // drops both, persist_session_cookies keeps the cookie, and the server
-    // still expires the session it names
-    Some(migrated)
 }
 
 #[cfg(test)]
@@ -343,6 +439,22 @@ mod tests {
         let script = restore_script(&[("doop-theme".into(), "dark\"</script>".into())], &entry);
         assert!(script.contains(r#"[["doop-theme","dark\"</script>"]]"#));
         assert!(script.ends_with(r#"location.replace("https://doop.design/auth") })()"#));
+    }
+
+    #[test]
+    fn counts_chromium_time_from_1601() {
+        // 2026-01-01T00:00:00Z
+        assert_eq!(chromium_time(1_767_225_600.0), 13_411_699_200_000_000);
+    }
+
+    #[test]
+    fn keeps_host_only_cookies_to_their_host() {
+        assert!(applies_to("doop.design", "doop.design"));
+        assert!(!applies_to("doop.design", "www.doop.design"));
+        assert!(applies_to(".doop.design", "www.doop.design"));
+        assert!(applies_to(".doop.design", "doop.design"));
+        assert!(!applies_to(".evil.design", "doop.design"));
+        assert!(!applies_to("localhost", "doop.design"));
     }
 
     #[test]
