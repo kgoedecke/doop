@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot.ts'
 import { fixtureUrl, openBrowser, type TestBrowser } from './browser.ts'
-import { counterZoom, layoutZoomFor } from '../src/lib/layoutZoom.ts'
+import { counterZoom, layoutZoomFor, settledLayoutZoom } from '../src/lib/layoutZoom.ts'
 
 type Rect = { x: number; y: number; width: number; height: number }
 declare global {
@@ -54,6 +54,43 @@ describe('layout zoom', () => {
       expect(Number.isInteger(k)).toBe(true)
       expect(k).toBeGreaterThanOrEqual(zoom - 1e-3)
       expect(k).toBeLessThan(zoom + 1)
+    }
+  })
+})
+
+describe('settled layout zoom', () => {
+  it('goes up as soon as the zoom needs more', () => {
+    expect(settledLayoutZoom(1, 1.01, 16, true)).toBe(2)
+    expect(settledLayoutZoom(2, 5.5, 16, true)).toBe(6)
+    expect(settledLayoutZoom(2, 40, 16, true)).toBe(16)
+    expect(settledLayoutZoom(1, 2.5, 16, false)).toBe(layoutZoomFor(2.5, 16, false))
+  })
+
+  it('keeps the current k while it is enough and at most twice the zoom', () => {
+    /* back to 100% from just past it, or either side of 200%, re-lays out nothing */
+    expect(settledLayoutZoom(2, 1, 16, true)).toBe(2)
+    expect(settledLayoutZoom(3, 2.01, 16, true)).toBe(3)
+    expect(settledLayoutZoom(3, 1.9, 16, true)).toBe(3)
+    const k = layoutZoomFor(2.5, 16, false)
+    expect(settledLayoutZoom(k, 2.1, 16, false)).toBe(k)
+  })
+
+  it('comes back down once the zoom is well below k', () => {
+    expect(settledLayoutZoom(2, 0.9, 16, true)).toBe(1)
+    expect(settledLayoutZoom(16, 4, 16, true)).toBe(4)
+    expect(settledLayoutZoom(3, 0.5, 16, false)).toBe(1)
+  })
+
+  it('only ever returns a k layoutZoomFor could have given', () => {
+    for (const density of [true, false]) {
+      let k = 1
+      for (const zoom of [0.3, 1.2, 0.8, 2.7, 1.6, 3.1, 1.4, 9.2, 4.4, 0.1, 16, 7.9, 5.3]) {
+        k = settledLayoutZoom(k, zoom, 16, density)
+        expect(k).toBeGreaterThanOrEqual(layoutZoomFor(zoom, 16, density))
+        expect(k).toBeLessThanOrEqual(Math.max(layoutZoomFor(zoom, 16, density), 2 * zoom))
+        if (density) expect(Number.isInteger(k)).toBe(true)
+        else expect(Math.fround(Math.fround(k) * Math.fround(counterZoom(k)))).toBe(1)
+      }
     }
   })
 })
