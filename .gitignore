@@ -5,6 +5,8 @@ data
 data.*/
 desktop/src-tauri/target
 desktop/src-tauri/gen
+desktop/src-tauri-chromium/target
+desktop/src-tauri-chromium/gen
 .DS_Store
 .env*
 !.env.example

@@ -15,20 +15,22 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use tauri::menu::{CheckMenuItem, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::ShellRuntime;
 
 pub const EVENT: &str = "view-command";
 const PREFIX: &str = "view:";
 
 struct ViewMenu {
-    rulers: CheckMenuItem<Wry>,
-    ui: CheckMenuItem<Wry>,
-    layers: CheckMenuItem<Wry>,
-    agents: CheckMenuItem<Wry>,
+    rulers: CheckMenuItem<ShellRuntime>,
+    ui: CheckMenuItem<ShellRuntime>,
+    layers: CheckMenuItem<ShellRuntime>,
+    agents: CheckMenuItem<ShellRuntime>,
     /// enabled whenever a canvas is open
-    zoom: Vec<MenuItem<Wry>>,
+    zoom: Vec<MenuItem<ShellRuntime>>,
     /// enabled while something on the canvas is selected
-    selection: MenuItem<Wry>,
+    selection: MenuItem<ShellRuntime>,
 }
 
 fn check(
@@ -36,7 +38,7 @@ fn check(
     command: &str,
     label: &str,
     accelerator: Option<&str>,
-) -> tauri::Result<CheckMenuItem<Wry>> {
+) -> tauri::Result<CheckMenuItem<ShellRuntime>> {
     CheckMenuItem::with_id(
         app,
         format!("{PREFIX}{command}"),
@@ -52,13 +54,13 @@ fn item(
     command: &str,
     label: &str,
     accelerator: Option<&str>,
-) -> tauri::Result<MenuItem<Wry>> {
+) -> tauri::Result<MenuItem<ShellRuntime>> {
     MenuItem::with_id(app, format!("{PREFIX}{command}"), label, false, accelerator)
 }
 
 /// The View submenu. Everything starts unchecked and disabled until the
 /// page reports a canvas.
-pub fn submenu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
+pub fn submenu(app: &AppHandle) -> tauri::Result<Submenu<ShellRuntime>> {
     let menu = ViewMenu {
         rulers: check(app, "rulers", "Rulers", None)?,
         ui: check(app, "ui", "Show/Hide UI", Some("Cmd+."))?,

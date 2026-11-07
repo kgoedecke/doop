@@ -51,7 +51,8 @@ enum Trigger {
 
 /// Official installers point at doop.design. Replacing a self-hosted shell
 /// with one would silently change its server, and a debug build would be
-/// replaced by a release.
+/// replaced by a release. On macOS the feed names the Chromium build, so the
+/// WebKit app updates into it and the Chromium app keeps updating from it.
 fn updates_enabled() -> bool {
     !cfg!(debug_assertions)
         && matches!(
@@ -329,9 +330,9 @@ pub mod menu {
     pub const MENU_ID: &str = "check-for-updates";
     const LABEL: &str = "Check for Updates…";
 
-    struct UpdateMenu(MenuItem<tauri::Wry>);
+    struct UpdateMenu(MenuItem<crate::ShellRuntime>);
 
-    pub fn item(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
+    pub fn item(app: &AppHandle) -> tauri::Result<MenuItem<crate::ShellRuntime>> {
         let item = MenuItem::with_id(app, MENU_ID, LABEL, true, None::<&str>)?;
         app.manage(UpdateMenu(item.clone()));
         Ok(item)
