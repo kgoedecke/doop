@@ -6,6 +6,7 @@ import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as authSchema from './db/auth-schema.ts'
 import { store } from './store.ts'
+import { revokeActorAccess } from './actorFrames.ts'
 import * as billing from './billing.ts'
 import { mailerConfigured, sendMail } from './mailer.ts'
 import { dropWorkspaceFonts } from './fonts.ts'
@@ -368,6 +369,8 @@ export async function removeMember(workspaceId: string, userId: string): Promise
     .delete(t.workspaceMembers)
     .where(and(eq(t.workspaceMembers.workspaceId, workspaceId), eq(t.workspaceMembers.userId, userId)))
   map.delete(userId)
+  /* canvas-actors: the member's actor sockets on this workspace's canvases close */
+  for (const canvas of store.allCanvases()) if (canvas.workspaceId === workspaceId) revokeActorAccess(canvas.id)
   reconcileSeats(ws)
   notifyUsers([userId], { type: 'canvases' })
   return true

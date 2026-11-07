@@ -1,0 +1,10 @@
+import type { SocketProxy as ServerProxy } from "./proxy.js";
+import type { createActorSessionTransport as ServerSessionTransport } from "./session.js";
+import type { createActorStub as ServerStub, createActorTransport as ServerTransport } from "./stub.js";
+declare const createActorStub: typeof ServerStub;
+declare const createActorTransport: typeof ServerTransport;
+declare const createActorSessionTransport: typeof ServerSessionTransport;
+declare const SocketProxy: typeof ServerProxy;
+export { createActorStub, createActorTransport, createActorSessionTransport, SocketProxy };
+export { ActorInvocationError, ActorSessionRejectedError } from "./errors.js";
+export type { ActorSession, ActorSessionTransportOptions, ActorSessionTransport } from "./session.js";

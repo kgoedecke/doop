@@ -15,7 +15,10 @@
     "node_modules/",
     "desktop/src-tauri/target/",
     "public/figma-plugin/",
-    "storybook-static/"
+    "storybook-static/",
+    "generated/",
+    "src/actor-db/migrations/",
+    "data/"
   ],
   "rules": {
     "constructor-super": "error",
