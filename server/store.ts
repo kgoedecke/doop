@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
+import { placeCanvas } from './actorFrames.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
@@ -139,10 +140,23 @@ class Store {
     }
   }
 
+  /** canvas-actors: frames of a canvas whose actor answered only after boot. */
+  restoreFrames(canvasId: string, frames: Frame[]) {
+    const c = this.canvases.get(canvasId)
+    if (!c) return
+    for (const frame of frames) {
+      if (this.frameIndex.has(frame.id)) continue
+      c.frames.push(frame)
+      this.frameIndex.set(frame.id, canvasId)
+    }
+    c.frames.sort(byStack)
+  }
+
   createCanvas(name: string, ownerId?: string, workspaceId?: string): Canvas {
     const now = Date.now()
     const canvas: Canvas = { id: nanoid(10), name, ownerId, createdAt: now, updatedAt: now, frames: [] }
     if (workspaceId) canvas.workspaceId = workspaceId
+    placeCanvas(canvas) // canvas-actors: an owner with the flag gets an actor for its frames
     this.canvases.set(canvas.id, canvas)
     canvas.pages = canvasPages(canvas)
     persist.saveCanvas(canvas)
@@ -206,6 +220,7 @@ class Store {
       ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
+    placeCanvas(canvas) // canvas-actors: by the copier's flag
     await persist.saveCanvasCopy(canvas)
     this.canvases.set(canvas.id, canvas)
     for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
@@ -842,6 +857,9 @@ class Store {
       /** the html change only marks elements up (a `data-doop-id` stamp):
        *  nothing a reviewer signed off on moved, so sign-off stands */
       annotation?: boolean
+      /** canvas-actors: a browser already wrote this to the canvas's actor;
+       *  take the actor's stamp and save nothing (server/actorFrames.ts) */
+      adopted?: { updatedAt: number }
     } = {},
   ): Frame | undefined {
     const frame = this.getFrame(frameId)
@@ -865,10 +883,10 @@ class Store {
       frame.approval = { ...frame.approval, status: 'needs_review' }
     }
     // Also serves as the optimistic-save version, including writes in the same millisecond.
-    frame.updatedAt = Math.max(Date.now(), frame.updatedAt + 1)
+    frame.updatedAt = opts.adopted?.updatedAt ?? Math.max(Date.now(), frame.updatedAt + 1)
     frame.updatedBy = by
     c.updatedAt = frame.updatedAt
-    persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
+    if (!opts.adopted) persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
     persist.saveCanvas(c)
     return frame
   }

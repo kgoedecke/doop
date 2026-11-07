@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid'
 import { MAX_PAGES, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
+import { wireActorFrames } from './actorFrames.ts'
 import { colorFor } from '../shared/types.ts'
 import type { StackWrite } from '../shared/frameStack.ts'
 import { DEFAULT_ROLE_ID, mentionedRole, normalizePipeline, roleByAgentName, roleName } from '../shared/agents.ts'
@@ -1873,18 +1874,22 @@ export function updateFrame(
     Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z' | 'rotation'>
   >,
   actor: Actor,
-  opts: { replace?: boolean } = {},
+  opts: {
+    replace?: boolean
+    /** canvas-actors: the edit is already in the canvas's actor, as written (adoptActorEdit) */
+    adopted?: { updatedAt: number }
+  } = {},
 ): Frame | undefined {
   const before = store.getFrame(frameId)
   if (!before) return undefined
-  if (patch.html !== undefined)
+  if (patch.html !== undefined && !opts.adopted)
     patch = { ...patch, html: withLibraryFaces(before.canvasId, repairEscapedHtml(patch.html)) }
   const prevName = before.name
   const prevHtml = before.html
   const prevHidden = !!before.hidden
   const prevLocked = !!before.locked
   const prior = priorState(before)
-  const frame = store.updateFrame(frameId, patch, actor.name)
+  const frame = store.updateFrame(frameId, patch, actor.name, opts.adopted ? { adopted: opts.adopted } : {})
   if (!frame) return undefined
 
   const htmlChanged = patch.html !== undefined && patch.html !== prevHtml
@@ -1935,6 +1940,27 @@ export function updateFrame(
   touch(frame.canvasId, actor, frame.id)
   return frame
 }
+
+/** canvas-actors: a browser's edit, written straight to the canvas's actor,
+ *  taken in as if it had come through the API, so the room, design history
+ *  and activity see it. Nothing is saved back (server/actorFrames.ts). */
+export function adoptActorEdit(next: Frame, by: Actor) {
+  const before = store.getFrame(next.id)
+  if (!before) return
+  const patch: Partial<Pick<Frame, 'name' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z'>> = {}
+  if (next.name !== before.name) patch.name = next.name
+  if (next.x !== before.x) patch.x = next.x
+  if (next.y !== before.y) patch.y = next.y
+  if (next.width !== before.width) patch.width = next.width
+  if (next.height !== before.height) patch.height = next.height
+  if (next.html !== before.html) patch.html = next.html
+  if (!!next.hidden !== !!before.hidden) patch.hidden = !!next.hidden
+  if (!!next.locked !== !!before.locked) patch.locked = !!next.locked
+  if (next.z !== undefined && next.z !== before.z) patch.z = next.z
+  if (Object.keys(patch).length) updateFrame(next.id, patch, by, { adopted: { updatedAt: next.updatedAt } })
+}
+
+wireActorFrames({ adopt: adoptActorEdit, restore: (canvasId, frames) => store.restoreFrames(canvasId, frames) })
 
 /** Several frames' places in the stack at once (the Layers panel renumbering
  *  a page, or undoing that): every frame is checked before any is written,

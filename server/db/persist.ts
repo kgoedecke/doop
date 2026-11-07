@@ -3,6 +3,17 @@ import path from 'node:path'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from './index.ts'
+import {
+  deleteActorFrame,
+  destroyActorCanvas,
+  flushActorFrames,
+  insertActorFrames,
+  isActorCanvas,
+  isActorFrame,
+  loadActorCanvases,
+  saveActorFrame,
+  saveActorFrameNow,
+} from '../actorFrames.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
 import { roleByAgentName } from '../../shared/agents.ts'
@@ -54,6 +65,7 @@ function canvasColumns(c: Canvas) {
     category: c.category ?? null,
     copyCount: c.copyCount ?? 0,
     workspaceId: c.workspaceId ?? null,
+    frameStore: c.frameStore ?? null,
     updatedAt: c.updatedAt,
   }
 }
@@ -70,6 +82,8 @@ export function saveCanvas(c: Canvas) {
 /** Persist a newly duplicated canvas as one unit. Unlike ordinary live edits,
  * duplication must not report success until every copied row is durable. */
 export async function saveCanvasCopy(c: Canvas): Promise<void> {
+  /* canvas-actors: a copy on an actor keeps its frames there (server/actorFrames.ts) */
+  if (c.frameStore === 'actor') c = await withFramesOnActor(c)
   await db.transaction(async (tx) => {
     await tx.insert(t.canvases).values({ id: c.id, ...canvasColumns(c), createdAt: c.createdAt })
 
@@ -356,6 +370,7 @@ const FRAME_DEBOUNCE_MS = 400
  * every copied frame land together or not at all, so a copy is never half
  * there after a crash. Like saveCanvasCopy, success means durable. */
 export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
+  if (isActorCanvas(c.id)) frames = await framesOnActor(c.id, frames)
   await db.transaction(async (tx) => {
     await tx.update(t.canvases).set(canvasColumns(c)).where(eq(t.canvases.id, c.id))
     if (!frames.length) return
@@ -390,6 +405,7 @@ export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
 /** Write the frame now and resolve once it is on disk, for a caller that
  *  must write something naming the frame's content afterwards. */
 export async function saveFrameNow(f: Frame): Promise<void> {
+  if (isActorCanvas(f.canvasId)) return saveActorFrameNow(f)
   const existing = frameTimers.get(f.id)
   if (existing) clearTimeout(existing)
   frameTimers.delete(f.id)
@@ -397,6 +413,7 @@ export async function saveFrameNow(f: Frame): Promise<void> {
 }
 
 export function saveFrame(f: Frame, immediate = false) {
+  if (isActorCanvas(f.canvasId)) return saveActorFrame(f)
   const existing = frameTimers.get(f.id)
   if (existing) clearTimeout(existing)
   if (immediate) {
@@ -582,6 +599,7 @@ async function syncAssetRefs(frameId: string, html: string) {
 }
 
 export function deleteCanvas(canvasId: string) {
+  if (isActorCanvas(canvasId)) destroyActorCanvas(canvasId)
   /* refs must go before the frames rows the subquery reads */
   swallow(
     db
@@ -616,6 +634,7 @@ export function deleteCanvas(canvasId: string) {
 }
 
 export function deleteFrame(frameId: string) {
+  if (isActorFrame(frameId)) deleteActorFrame(frameId)
   const timer = frameTimers.get(frameId)
   if (timer) {
     clearTimeout(timer)
@@ -833,6 +852,7 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
 /** Flush pending debounced frame writes and queued version writes (called
  *  on shutdown): a design must not survive a restart without its history. */
 export async function flush(getFrame: (id: string) => Frame | undefined): Promise<void> {
+  await flushActorFrames()
   const ids = [...frameTimers.keys()]
   for (const [, timer] of frameTimers) clearTimeout(timer)
   frameTimers.clear()
@@ -907,6 +927,7 @@ export async function hydrate(): Promise<Hydrated> {
     ...(isCommunityCategory(c.category) ? { category: c.category } : {}),
     ...(c.copyCount ? { copyCount: c.copyCount } : {}),
     ...(c.workspaceId ? { workspaceId: c.workspaceId } : {}),
+    ...(c.frameStore === 'actor' ? { frameStore: 'actor' as const } : {}),
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     frames: [],
@@ -927,6 +948,7 @@ export async function hydrate(): Promise<Hydrated> {
       rotation: f.rotation ?? undefined,
     })
   for (const c of canvases) c.frames.sort(byStack)
+  await loadActorCanvases(canvases)
   for (const r of referenceRows) {
     const c = byId.get(r.canvasId)
     if (!c) continue
@@ -1164,4 +1186,16 @@ export async function importLegacyJson(): Promise<Canvas[] | null> {
   fs.renameSync(file, `${file}.imported`)
   console.log(`[db] imported ${parsed.length} canvas(es) from legacy store.json`)
   return parsed
+}
+
+/** A canvas copy whose frames went to its actor: the SQL write carries none. */
+async function withFramesOnActor(c: Canvas): Promise<Canvas> {
+  await insertActorFrames(c.id, c.frames)
+  return { ...c, frames: [] }
+}
+
+/** Page-copy frames sent to the canvas's actor: none are left for SQL. */
+async function framesOnActor(canvasId: string, frames: Frame[]): Promise<Frame[]> {
+  await insertActorFrames(canvasId, frames)
+  return []
 }

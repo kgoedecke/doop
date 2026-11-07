@@ -337,6 +337,13 @@
       "when": 1794104742941,
       "tag": "0048_frame_rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794186458238,
+      "tag": "0049_canvas_actor_flag",
+      "breakpoints": true
     }
   ]
 }

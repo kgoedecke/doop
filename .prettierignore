@@ -20,3 +20,7 @@ storybook-static/
 
 # agent worktrees (git worktrees under the repo)
 .claude/
+# Reproduced byte-for-byte by the actor generator.
+generated/
+# Written by drizzle-kit (bun run actors:migrations).
+src/actor-db/migrations/

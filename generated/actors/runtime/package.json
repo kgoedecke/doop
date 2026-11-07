@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "browser": {
+    "./index.js": "./index.browser.js"
+  }
+}

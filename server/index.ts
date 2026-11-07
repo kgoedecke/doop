@@ -87,6 +87,8 @@ import { modelCatalogFor } from './modelCatalog.ts'
 import { mentionedRole } from '../shared/agents.ts'
 import { activeAgentTasks } from '../shared/agentActivity.ts'
 import { colorFor } from '../shared/types.ts'
+import { actorFrameGrant, isActorCanvas, revokeActorAccess } from './actorFrames.ts'
+import { featureFlags } from './featureFlags.ts'
 import { isPeerViewport } from '../shared/viewport.ts'
 import { exportScaleSuffix, fitExportScale, parseExportScale } from '../shared/exportScale.ts'
 import { emailShare } from './canvasShares.ts'
@@ -115,6 +117,7 @@ await initDb()
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
+if (env.TERSE_ACTOR_URL) await featureFlags.start() // canvas-actors: who gets an actor for the canvases they make
 let data = await persist.hydrate()
 if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
@@ -249,6 +252,8 @@ function connRole(conn: Conn): CanvasRole | null {
    editor goes read-only, or back), and anyone left with no access at all is
    disconnected rather than kept on the live feed. */
 function refreshRoomRoles(canvasId: string) {
+  /* canvas-actors: actor sockets close too, and reconnect with the new role */
+  if (isActorCanvas(canvasId)) revokeActorAccess(canvasId)
   for (const conn of room(canvasId)) {
     const role = connRole(conn)
     if (!role) {
@@ -1247,6 +1252,26 @@ app.get('/api/canvases/:id', (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'view')
   /* the caller's own role rides along, so the editor knows to go read-only */
   if (c) res.json({ ...c, role: canvasRole(req.user!.id, c) })
+})
+
+/* canvas-actors: a short-lived ticket for the canvas's actor socket, where the
+   browser sends its frame edits (server/actorFrames.ts). Read only unless the
+   person may edit; only canvases on actors have one. */
+app.get('/api/canvases/:id/actor', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  if (!isActorCanvas(canvas.id)) return res.status(404).json({ error: 'this canvas has no actor' })
+  const clientId = typeof req.query.clientId === 'string' ? req.query.clientId.slice(0, 64) : undefined
+  actorFrameGrant(canvas.id, {
+    by: { name: req.user!.name, kind: 'user', color: colorFor(req.user!.name), ...(clientId ? { clientId } : {}) },
+    readOnly: !!req.impersonatedBy || !canEditCanvas(req.user!.id, canvas),
+  }).then(
+    (grant) => res.set('Cache-Control', 'no-store').json(grant),
+    (error: unknown) => {
+      console.error('[canvas actors] grant failed', canvas.id, error)
+      res.status(503).json({ error: 'canvas actor unavailable' })
+    },
+  )
 })
 
 /* Community gallery listing — the owner's call alone, like link access.
