@@ -42,6 +42,9 @@ export interface PanelResize {
   onResize: (width: number) => void
 }
 
+/** Panels whose edge is being dragged right now (see `data-panel-resizing`). */
+let resizingPanels = 0
+
 function Panel({
   className,
   surface,
@@ -58,9 +61,12 @@ function Panel({
      restyled the whole page on every DOM insertion anywhere (each pan tick) */
   React.useEffect(() => {
     if (!dragging) return
+    resizingPanels += 1
     document.body.toggleAttribute('data-panel-resizing', true)
     return () => {
-      document.body.toggleAttribute('data-panel-resizing', false)
+      resizingPanels -= 1
+      /* two edges can be dragged at once (two fingers); the last one clears it */
+      if (resizingPanels === 0) document.body.toggleAttribute('data-panel-resizing', false)
     }
   }, [dragging])
   const endDrag = () => {
