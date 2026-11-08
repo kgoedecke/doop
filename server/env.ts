@@ -116,6 +116,8 @@ const schema = {
   /* unset in production = user credentials stored unencrypted (boot warns) */
   SECRETS_ENCRYPTION_KEYS: secretKeys({ default: [], devDefault: DEV_SECRET_KEYS }),
   TRUSTED_ORIGINS: list({ default: [] }),
+  AUTH_IP_HEADERS: list({ default: [] }),
+  AUTH_TRUSTED_PROXIES: list({ default: [] }),
   SIGNUP_EMAIL_DOMAINS: list({ default: [] }),
   ADMIN_EMAILS: list({ default: [] }),
   REQUIRE_EMAIL_VERIFICATION: bool({ default: true }),
