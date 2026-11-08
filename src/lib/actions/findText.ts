@@ -43,14 +43,16 @@ function textNodes(doc: Document): Text[] {
 /* a locked layer, and everything inside it, takes no edits */
 const isLocked = (node: Text) => !!node.parentElement?.closest(`[${LOCK_ATTR}]`)
 
-/** Every offset of `query` in `text`, left to right, never overlapping. */
-function offsetsIn(text: string, query: string, matchCase: boolean): number[] {
+/** Every match of `query` in `text`, left to right, never overlapping, as
+ *  offsets and lengths in `text` itself. Matched by a case-insensitive
+ *  regular expression rather than by lower-casing both sides: lower-casing
+ *  can change a string's length (İ becomes i plus a dot), which would shift
+ *  every offset after it. */
+function matchesIn(text: string, query: string, matchCase: boolean): { at: number; length: number }[] {
   if (!query) return []
-  const hay = matchCase ? text : text.toLowerCase()
-  const needle = matchCase ? query : query.toLowerCase()
-  const out: number[] = []
-  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + needle.length)) out.push(at)
-  return out
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(escaped, matchCase ? 'gu' : 'giu')
+  return [...text.matchAll(pattern)].map((m) => ({ at: m.index, length: m[0].length }))
 }
 
 const CONTEXT = 24
@@ -63,12 +65,12 @@ export function findInHtml(html: string, query: string, { matchCase = false }: F
     const text = node.data
     const parent = node.parentElement
     if (!parent) continue
-    for (const at of offsetsIn(text, query, matchCase)) {
+    for (const { at, length } of matchesIn(text, query, matchCase)) {
       out.push({
         selector: elementPath(parent),
         before: text.slice(Math.max(0, at - CONTEXT), at).trimStart(),
-        text: text.slice(at, at + query.length),
-        after: text.slice(at + query.length, at + query.length + CONTEXT).trimEnd(),
+        text: text.slice(at, at + length),
+        after: text.slice(at + length, at + length + CONTEXT).trimEnd(),
         locked: isLocked(node),
       })
     }
@@ -91,11 +93,11 @@ export function replaceInHtml(
   let seen = 0
   let count = 0
   for (const node of textNodes(doc)) {
-    const offsets = offsetsIn(node.data, query, matchCase)
+    const offsets = matchesIn(node.data, query, matchCase)
     if (!offsets.length) continue
     /* right to left, so the earlier offsets still hold after each swap */
     const picked = offsets
-      .map((at, i) => ({ at, n: seen + i }))
+      .map(({ at, length }, i) => ({ at, length, n: seen + i }))
       .filter(({ n }) => only === undefined || n === only)
       .reverse()
     seen += offsets.length
@@ -103,8 +105,8 @@ export function replaceInHtml(
       if (only !== undefined && seen > only) break
       continue
     }
-    for (const { at } of picked) {
-      node.replaceData(at, query.length, replacement)
+    for (const { at, length } of picked) {
+      node.replaceData(at, length, replacement)
       count++
     }
     if (only !== undefined && seen > only) break

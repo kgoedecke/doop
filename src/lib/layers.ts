@@ -835,17 +835,39 @@ export function ungroupElements(html: string, selectors: string[]): { html: stri
   return { html: next, selectors: freed.map(elementPath) }
 }
 
-/** The frame's HTML with the element linked to `href`: a link gets the new
- *  target, anything else has its content wrapped in one. Null `href` takes a
- *  link off (the link element, or the one link wrapping the element's
- *  content, gives way to its content). Null when the selector no longer
- *  resolves or there is nothing to unlink. */
-export function setElementLink(html: string, selector: string, href: string | null): string | null {
+/* elements that hold no content of their own: a link goes around them, not inside */
+const LINK_WRAPPED = new Set(['IMG', 'PICTURE', 'VIDEO', 'CANVAS', 'IFRAME', 'INPUT', 'HR', 'BR', 'EMBED', 'OBJECT'])
+
+/** The link an element is, holds alone, or sits alone inside. */
+function linkOf(el: Element): Element | null {
+  if (el.tagName === 'A') return el
+  if (el.childNodes.length === 1 && el.firstElementChild?.tagName === 'A') return el.firstElementChild
+  const parent = el.parentElement
+  if (parent?.tagName === 'A' && parent.childNodes.length === 1) return parent
+  return null
+}
+
+/** The element's link target, or null when it has none. */
+export function elementLink(html: string, selector: string): string | null {
+  const el = find(parse(html), selector)
+  return el ? (linkOf(el)?.getAttribute('href') ?? null) : null
+}
+
+/** The frame's HTML with the element linked to `href`, and the element's
+ *  path afterwards: a link gets the new target, an image (or any element
+ *  with no content of its own, and SVG) is wrapped in one, anything else has
+ *  its content wrapped. Null `href` takes a link off (the link element, or the
+ *  one link wrapping the element or its content, gives way to its content).
+ *  Null when the selector no longer resolves or there is nothing to unlink. */
+export function setElementLink(
+  html: string,
+  selector: string,
+  href: string | null,
+): { html: string; selector: string } | null {
   const doc = parse(html)
   const el = find(doc, selector)
   if (!el || el === doc.body) return null
-  const only = el.childNodes.length === 1 && el.firstElementChild?.tagName === 'A' ? el.firstElementChild : null
-  const link = el.tagName === 'A' ? el : only
+  const link = linkOf(el)
   if (href === null) {
     if (!link) return null
     if (link === el) {
@@ -853,16 +875,22 @@ export function setElementLink(html: string, selector: string, href: string | nu
       el.removeAttribute('href')
       el.removeAttribute('target')
     } else link.replaceWith(...link.childNodes)
-    return serialize(doc)
+    return { html: serialize(doc), selector: elementPath(el) }
   }
   if (link) link.setAttribute('href', href)
   else {
     const a = doc.createElement('a')
     a.setAttribute('href', href)
-    a.append(...el.childNodes)
-    el.append(a)
+    if (LINK_WRAPPED.has(el.tagName) || el.namespaceURI === 'http://www.w3.org/2000/svg') {
+      if (el.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg') return null
+      el.replaceWith(a)
+      a.append(el)
+    } else {
+      a.append(...el.childNodes)
+      el.append(a)
+    }
   }
-  return serialize(doc)
+  return { html: serialize(doc), selector: elementPath(el) }
 }
 
 /** The frame's HTML with the elements swapped for the clipboard's layers,

@@ -53,4 +53,14 @@ describe('replaceInHtml', () => {
       '<p data-doop-locked="true">cat</p><p>dog</p>',
     )
   })
+
+  it('keeps offsets where lower-casing changes a string’s length', () => {
+    const html = doc('<p>İ cat!</p>')
+    expect(findInHtml(html, 'CAT')[0]).toMatchObject({ before: 'İ ', text: 'cat', after: '!' })
+    expect(bodyOf(replaceInHtml(html, 'CAT', 'dog')!.html)).toBe('<p>İ dog!</p>')
+  })
+
+  it('finds regular-expression characters literally', () => {
+    expect(bodyOf(replaceInHtml(doc('<p>a.b (c)</p>'), '(c)', '[d]')!.html)).toBe('<p>a.b [d]</p>')
+  })
 })

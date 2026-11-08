@@ -2,7 +2,7 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { recordCreates, replaceFramesTracked } from './history'
+import { historyEpoch, recordCreates, replaceFramesTracked } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
@@ -443,6 +443,9 @@ export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boole
   const frames = readClip()
   const replaceable = targets.filter((f) => !f.locked)
   if (!frames.length || !replaceable.length) return false
+  /* the canvas and history this replacement belongs to: left behind, it
+     must not land in another canvas's history */
+  const started = historyEpoch()
   void Promise.all(
     replaceable.map(async (target) => {
       const results = await Promise.allSettled(
@@ -470,6 +473,12 @@ export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boole
     const leftovers = outcomes.flatMap((o) => o.leftovers)
     const created = done.flatMap((o) => o.created)
     if (!created.length && !leftovers.length) return
+    if (useStore.getState().canvas?.id !== canvasId || historyEpoch() !== started) {
+      /* the person moved on (another canvas, history cleared): no undo step
+         could take this back, so the replacements go and the originals stay */
+      for (const f of created) api.deleteFrame(f.id).catch(console.error)
+      return
+    }
     replaceFramesTracked(done, leftovers)
     if (created.length) {
       useStore.getState().selectMany(created.map((f) => f.id))

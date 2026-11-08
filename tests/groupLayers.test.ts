@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { groupElements, replaceElementsWith, setElementLink, ungroupElements } from '../src/lib/layers'
+import { elementLink, groupElements, replaceElementsWith, setElementLink, ungroupElements } from '../src/lib/layers'
 
 const doc = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`
 const bodyOf = (html: string) => new DOMParser().parseFromString(html, 'text/html').body.innerHTML
@@ -76,17 +76,28 @@ describe('ungroupElements', () => {
 })
 
 describe('setElementLink', () => {
+  const P = 'body:nth-of-type(1) > p:nth-of-type(1)'
   it('wraps the content in a link, then retargets and removes it', () => {
-    const linked = setElementLink(doc('<p>Docs</p>'), 'body:nth-of-type(1) > p:nth-of-type(1)', 'https://a.test')!
-    expect(bodyOf(linked)).toBe('<p><a href="https://a.test">Docs</a></p>')
-    const moved = setElementLink(linked, 'body:nth-of-type(1) > p:nth-of-type(1)', 'https://b.test')!
-    expect(bodyOf(moved)).toBe('<p><a href="https://b.test">Docs</a></p>')
-    expect(bodyOf(setElementLink(moved, 'body:nth-of-type(1) > p:nth-of-type(1)', null)!)).toBe('<p>Docs</p>')
+    const linked = setElementLink(doc('<p>Docs</p>'), P, 'https://a.test')!
+    expect(bodyOf(linked.html)).toBe('<p><a href="https://a.test">Docs</a></p>')
+    const moved = setElementLink(linked.html, P, 'https://b.test')!
+    expect(bodyOf(moved.html)).toBe('<p><a href="https://b.test">Docs</a></p>')
+    expect(bodyOf(setElementLink(moved.html, P, null)!.html)).toBe('<p>Docs</p>')
   })
 
   it('retargets a picked link itself', () => {
     const html = doc('<a href="/x">Go</a>')
-    expect(bodyOf(setElementLink(html, 'body:nth-of-type(1) > a:nth-of-type(1)', '/y')!)).toBe('<a href="/y">Go</a>')
+    expect(bodyOf(setElementLink(html, 'body:nth-of-type(1) > a:nth-of-type(1)', '/y')!.html)).toBe(
+      '<a href="/y">Go</a>',
+    )
+  })
+
+  it('wraps an image in the link, follows it there, and unwraps it again', () => {
+    const img = 'body:nth-of-type(1) > p:nth-of-type(1) > img:nth-of-type(1)'
+    const linked = setElementLink(doc('<p><img src="x.png"></p>'), img, '/go')!
+    expect(bodyOf(linked.html)).toBe('<p><a href="/go"><img src="x.png"></a></p>')
+    expect(elementLink(linked.html, linked.selector)).toBe('/go')
+    expect(bodyOf(setElementLink(linked.html, linked.selector, null)!.html)).toBe('<p><img src="x.png"></p>')
   })
 })
 

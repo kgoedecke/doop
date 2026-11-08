@@ -30,6 +30,7 @@ import {
   groupElements,
   isElementHidden,
   setElementLink,
+  elementLink,
   ungroupElements,
   type LayerNode,
 } from '../layers'
@@ -385,7 +386,17 @@ export async function addAutoLayout(): Promise<boolean> {
       const { direction, gap } = flowOf(await rectsOf(frame.id, children.slice(0, 2)))
       const [lead, trail] = flowMargins(direction)
       await styleElement(frame.id, selector, { display: 'flex', 'flex-direction': direction, gap: `${gap}px` })
-      await Promise.all(children.map((child) => styleElement(frame.id, child, { [lead]: '0px', [trail]: '0px' })))
+      /* only the margins between children: the gap takes their place, and the
+         first child's leading and the last one's trailing margin stay */
+      const last = children.length - 1
+      await Promise.all(
+        children.map((child, i) => {
+          const patch: StylePatch = {}
+          if (i > 0) patch[lead] = '0px'
+          if (i < last) patch[trail] = '0px'
+          return Object.keys(patch).length ? styleElement(frame.id, child, patch) : null
+        }),
+      )
       return true
     }
   }
@@ -576,24 +587,11 @@ export async function pickColor(): Promise<void> {
 
 /* ---- links ---- */
 
-/** The primary picked layer's link target, if it is (or wraps) one. */
+/** The primary picked layer's link target, if it is, holds or sits in one. */
 export function pickedLink(): string | null {
   const p = pickedLayers()
   if (!p) return null
-  const doc = new DOMParser().parseFromString(p.frame.html, 'text/html')
-  let el: Element | null = null
-  try {
-    el = doc.querySelector(p.selectors[p.selectors.length - 1]!)
-  } catch {
-    return null
-  }
-  const a =
-    el?.tagName === 'A'
-      ? el
-      : el?.children.length === 1 && el.firstElementChild?.tagName === 'A'
-        ? el.firstElementChild
-        : null
-  return a?.getAttribute('href') ?? null
+  return elementLink(p.frame.html, p.selectors[p.selectors.length - 1]!)
 }
 
 /** ⇧⌘U: link the picked layers to `href`, or unlink them with null. */
@@ -601,13 +599,15 @@ export function linkSelection(href: string | null): boolean {
   const p = pickedLayers()
   if (!p || p.frame.locked) return false
   let html = p.frame.html
+  const picked: string[] = []
   for (const selector of p.selectors) {
-    if (isLayerLocked(p.frame, selector)) continue
-    html = setElementLink(html, selector, href) ?? html
+    const linked = isLayerLocked(p.frame, selector) ? null : setElementLink(html, selector, href)
+    if (linked) html = linked.html
+    picked.push(linked?.selector ?? selector)
   }
   if (html === p.frame.html) return false
   saveFrameHtml(p.frame, html)
-  pickAfterRewrite(p.frame, p.selectors)
+  pickAfterRewrite(p.frame, picked)
   return true
 }
 

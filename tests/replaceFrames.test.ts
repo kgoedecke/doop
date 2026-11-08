@@ -92,4 +92,23 @@ describe('paste to replace', () => {
     await undo()
     expect([...db.values()].map((f) => f.name).sort()).toEqual(['a', 'b', 'copied'])
   })
+
+  it('takes the replacements back when the canvas changed before they landed', async () => {
+    copyFrames([db.get('copied')!])
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const create = vi.mocked(api.createFrame).getMockImplementation()!
+    vi.mocked(api.createFrame).mockImplementation(async (...args) => {
+      await gate
+      return create(...args)
+    })
+    replaceFramesWithClip('c', [db.get('a')!])
+    clearHistory()
+    release()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(db.has('a')).toBe(true)
+    expect([...db.keys()].filter((id) => id.startsWith('new'))).toEqual([])
+    await undo()
+    expect(db.has('a')).toBe(true)
+  })
 })
