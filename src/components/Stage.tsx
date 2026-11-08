@@ -255,8 +255,8 @@ export function Stage({
   const setTool = useStore((s) => s.setTool)
   const [panning, setPanning] = useState(false)
   /* the selection rectangle being dragged out, in world coordinates */
-  /* Z held down: the tool to go back to on release, once a zoom was made */
-  const zoomHeld = useRef<{ previous: Tool; zoomed: boolean } | null>(null)
+  /* Z held down: the tool to go back to on release */
+  const zoomHeld = useRef<{ previous: Tool } | null>(null)
   const [altHeld, setAltHeld] = useState(false)
   const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   /* where the Comment tool was clicked on empty canvas: the composer opens there */
@@ -840,18 +840,21 @@ export function Stage({
   /* Bare shortcut keys pick a tool, Esc returns to Select — bare keys
      only (no modifiers), and never while typing in a field. Esc is the one
      exception for canvas composers: it drops their draft and returns to Select.
-     Other fields keep Escape for their own editing behavior. Z is spring-loaded
-     as in Figma: tapped, it stays; held while zooming, letting go returns to
-     the tool before it. */
+     Other fields keep Escape for their own editing behavior. Z is the Zoom
+     tool only while it is held, as in Figma: letting go returns to the tool
+     before it. The key-up is read by `code` too, since ⌥ held for a zoom-out
+     changes the typed character on macOS. */
   useEffect(() => {
-    function onKeyUp(e: KeyboardEvent) {
+    function release() {
       const held = zoomHeld.current
-      if (!held || e.key.toLowerCase() !== 'z') return
+      if (!held) return
       zoomHeld.current = null
       const s = useStore.getState()
-      if (held.zoomed && s.tool === 'zoom') s.setTool(held.previous)
+      if (s.tool === 'zoom') s.setTool(held.previous)
     }
-    const dropHold = () => (zoomHeld.current = null)
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'KeyZ' || e.key.toLowerCase() === 'z') release()
+    }
     function onKey(e: KeyboardEvent) {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return
       if (e.key === 'Escape') {
@@ -864,16 +867,17 @@ export function Stage({
       if (!next) return
       e.preventDefault()
       const previous = useStore.getState().tool
-      zoomHeld.current = next === 'zoom' && previous !== 'zoom' ? { previous, zoomed: false } : null
+      if (next === 'zoom') zoomHeld.current ??= { previous }
+      else zoomHeld.current = null
       useStore.getState().setTool(next)
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('keyup', onKeyUp)
-    window.addEventListener('blur', dropHold)
+    window.addEventListener('blur', release)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('blur', dropHold)
+      window.removeEventListener('blur', release)
     }
   }, [])
 
@@ -1032,7 +1036,6 @@ export function Stage({
             ? zoomToBox(vp, box, stage, insetsRef.current, limits)
             : zoomAtPoint(vp, origin, ev.altKey ? 1 / ZOOM_TOOL_STEP : ZOOM_TOOL_STEP, limits),
         )
-      if (zoomHeld.current) zoomHeld.current.zoomed = true
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)

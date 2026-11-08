@@ -349,8 +349,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   precedence over drawing.
 - Zoom tool (Z, keyboard only, as in Figma; math in `src/lib/zoomTool.ts`): a click doubles the
   zoom about the pointer, ⌥-click halves it (the cursor turns to zoom-out while ⌥ is down), and a
-  drag zooms onto the box it draws, filling the stage's open area. Z is spring-loaded: tapped it
-  stays until another tool or Esc; held while zooming, letting go returns to the previous tool.
+  drag zooms onto the box it draws, filling the stage's open area. Z is the tool only while held:
+  letting go returns to the previous tool, and the tool rail has no button for it.
   Tests: `zoomTool.test.ts`, the Zoom cases in `tools.test.ts`.
 - `src/lib/drawing.ts` creates rectangles, circles, straight and cubic Bézier SVG paths, text and empty
   frames through the existing frame API. Drawing inside a frame appends a positioned HTML/SVG
