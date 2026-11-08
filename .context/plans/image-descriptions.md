@@ -10,7 +10,7 @@ the tasks below: the preference lives in its own `image_description_prefs` table
 (`imageDescriptionsCard.test.tsx`) rather than a Chromium run.
 
 Review follow-up: billing now tries uploader → eligible owner → server. Either person's Off
-stops analysis, and an uploader's server-only choice bypasses both accounts. Migration 0045
+stops analysis, and an uploader's server-only choice bypasses both accounts. Migration 0049
 persists the selected payer/provider across retries. Storage errors retry within the deadline,
 deleted canvases are skipped, and only a standalone image layer is marked as a pasted reference.
 Regression tests cover routing, consent, fixed billing across retries, storage failure/timeout,
@@ -22,7 +22,7 @@ implementation; the spec above describes the current behavior.
 1. **Schema.** `tests/imageDescriptions.test.ts`: a stored image asset reads back with
    `description null`, `describeAttempts 0`. Add `description`, `described_at`, `described_by`,
    `describe_attempts` to `assets` and `image_descriptions` to `local_agent_preferences` in
-   `server/db/schema.ts`; `npx drizzle-kit generate` → `0044_image_descriptions.sql`.
+   `server/db/schema.ts`; `npx drizzle-kit generate` → `0049_image_descriptions.sql`.
 2. **Event.** Same test file: `storeAsset` of a png with a `canvasId` emits `asset.stored` on
    `server/events.ts`; a woff, an svg and an asset without a canvas emit nothing. Add the event
    to the `CanvasEvent` union and the emit after the row insert in `server/assets.ts`.

@@ -5,7 +5,6 @@ import { ModelAccountPanel } from '../components/ModelAccount'
 import { ImageModelCard } from '../components/ImageModelCard'
 import { ImageDescriptionsCard } from '../components/ImageDescriptionsCard'
 import { useAllowance } from '../components/TeamAllowance'
-import { ACCOUNT_KIND_LABELS } from '../../shared/modelMenu'
 import { AccountSettings } from '../components/AccountSettings'
 import { AppearanceSettings } from '../components/AppearanceSettings'
 import { GeneralSettings } from '../components/GeneralSettings'
@@ -26,7 +25,6 @@ import {
 } from '../components/ui/icons'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Button } from '../components/ui/button'
-import { CardDescription, CardHeader, CardTitle, SettingsCard } from '../components/ui/card'
 import { Progress } from '../components/ui/progress'
 import {
   DashContent,
@@ -85,15 +83,13 @@ export function Settings() {
   const from = new URLSearchParams(location.search).get('from')
   const back = from && /^\/c\/[A-Za-z0-9_-]+$/.test(from) ? from : '/'
 
+  /* with a connection of their own the table below says what runs; the
+     line only counts free tasks, or names the operator's pilot */
   const meter = allowance
     ? allowance.byoModel
       ? allowance.byoKind === 'gemini-cloud'
         ? t('settings.meterGeminiCloud')
-        : allowance.byoKind === 'claude-local'
-          ? t('settings.meterClaudeLocal')
-          : allowance.byoKind === 'chatgpt' || !allowance.byoKind
-            ? t('settings.meterChatgpt')
-            : t('settings.meterProviderKey', { provider: ACCOUNT_KIND_LABELS[allowance.byoKind] })
+        : null
       : allowance.limit <= 0
         ? t('settings.meterNoFreeTasks')
         : left === 0
@@ -225,26 +221,21 @@ export function Settings() {
             <GeneralSettings />
           ) : pane === 'agent' ? (
             <>
-              <SettingsCard>
-                <CardHeader>
-                  <CardTitle>{t('settings.agentTitle')}</CardTitle>
-                  <CardDescription>{t('settings.agentCardDescription')}</CardDescription>
-                  {meter && (
-                    <div className="mt-[11px] flex flex-col items-start gap-[7px] text-caption text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
-                      {allowance && allowance.limit > 0 && !allowance.byoModel && (
-                        <Progress
-                          className="w-[min(100%,240px)] sm:w-[180px]"
-                          value={left ?? 0}
-                          max={allowance.limit}
-                          aria-label={t('settings.freeTasksLeftLabel')}
-                        />
-                      )}
-                      <span>{meter}</span>
-                    </div>
+              {/* the free-task count, while no connection of the person's own carries the agent */}
+              {meter && (
+                <div className="mt-4 flex max-w-[1000px] flex-col items-start gap-[7px] text-caption text-ink-faint sm:flex-row sm:items-center sm:gap-2.5">
+                  {allowance && allowance.limit > 0 && !allowance.byoModel && (
+                    <Progress
+                      className="w-[min(100%,240px)] sm:w-[180px]"
+                      value={left ?? 0}
+                      max={allowance.limit}
+                      aria-label={t('settings.freeTasksLeftLabel')}
+                    />
                   )}
-                </CardHeader>
-                <ModelAccountPanel onChange={refresh} />
-              </SettingsCard>
+                  <span>{meter}</span>
+                </div>
+              )}
+              <ModelAccountPanel onChange={refresh} />
               <ImageModelCard />
               <ImageDescriptionsCard />
             </>

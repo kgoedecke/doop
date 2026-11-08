@@ -11,6 +11,8 @@ import { Tooltip } from './ui/tooltip'
 import { DoopMark } from './Logo'
 import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
+import { currentRunnerPick, useRunnerPick } from '../lib/runnerPick'
+import { resolveRunnerPick } from '../../shared/agentRunner'
 import { LayerKindIcon } from './LayerKindIcon'
 import { buildLayerTree, findLayer, layerName } from '../lib/layers'
 import type { CardScope } from '../../shared/types'
@@ -136,16 +138,21 @@ async function sendPrompt(args: {
        designing. Known-ids include them so the camera saves its flight for
        the agent's deliverable, not the user's own screenshots. */
     const refFrames = await uploadImageFrames(canvasId, files, { fallbackName: 'Attached image' })
+    /* the composer's pick rides on the card, so the task runs on what the
+       picker beside the send button shows */
+    const runner = currentRunnerPick()
     await api.addCard(
       canvasId,
       text,
       ['doop'],
       refFrames.map((f) => f.id),
       scope,
+      runner,
     )
     posthog.capture('prompt_bar_submitted', {
       attachments: refFrames.length,
       scope: scope ? (scope.selector ? 'element' : 'frame') : 'none',
+      runner: runner?.provider ?? 'default',
     })
     flyToNextFrame(
       canvasId,
@@ -203,6 +210,9 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const sent = send?.status === 'sent'
   const sendError = send?.status === 'error' ? send.message : null
   const { allowance } = useAllowance()
+  /* the meter names the connection the next task goes to: the composer's pick */
+  const runnerStore = useRunnerPick()
+  const pickedProvider = resolveRunnerPick(runnerStore.runners, runnerStore.stored)?.pick.provider
   /* the selection is the prompt's scope until the chip is dismissed — × or
      Esc drops it entirely, no stepping up to the frame. Keyed on the scope
      so a new selection brings the chip back. */
@@ -232,6 +242,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const t = useT()
+  const meter = meterText(allowance, t, pickedProvider)
 
   useLayoutEffect(() => {
     if (inputRef.current) autosize(inputRef.current)
@@ -437,13 +448,13 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           <ModelPicker disabled={busy} />
           {/* the meter rides on the send button; a disabled button takes no
               pointer events, so the span under it is what the tooltip hangs on */}
-          <Tooltip label={meterText(allowance, t) ?? t('panels.promptSendTooltip')} side="top" align="end">
+          <Tooltip label={meter ?? t('panels.promptSendTooltip')} side="top" align="end">
             <span
               className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
               /* while the button is disabled the wrapper takes its tab stop,
                  so the meter can be reached and read without a pointer */
               tabIndex={busy || !text.trim() ? 0 : -1}
-              aria-label={meterText(allowance, t) ?? undefined}
+              aria-label={meter ?? undefined}
             >
               <Button
                 variant="primary"

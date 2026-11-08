@@ -4,12 +4,21 @@ import { store } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief } from '../shared/fonts.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
+import {
+  TOKEN_TYPES,
+  describeTokens,
+  tokensBrief,
+  tokensCss,
+  tokensTailwind,
+  type TokenResult,
+} from '../shared/designTokens.ts'
 import { ModelAuthError, ModelConfigurationError, ModelUnavailableError, pickModel } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole } from '../shared/agents.ts'
+import { runnerKey } from '../shared/agentRunner.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
@@ -30,7 +39,8 @@ import {
   searchInspiration,
 } from './inspiration.ts'
 import type { Actor, AgentTask, Canvas, ElementComment, Frame } from '../shared/types.ts'
-import { canvasPages, framePageId, pageFrames } from '../shared/pages.ts'
+import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
+import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
@@ -138,7 +148,7 @@ Rules:
 - Call set_status when you start ("Fixing: …") and when your focus shifts. One line, under 80 chars, present tense. People watch this live.
 - Never leave a frame worse than you found it.
 - Reference sites: when a request names a site or URL — a redesign of it, or "like acme.com" — call import_webpage with as_reference=true FIRST so an editable HTML snapshot lands on the canvas, then call screenshot_frame on that imported source and design from what is actually there: its real copy, nav labels, product facts, and imagery direction. Leave the imported source unchanged and deliver your work in a separate frame. If importing or editing the snapshot itself is the requested deliverable, use as_reference=false. view_website is read-only; use it only when you need to inspect a live page without adding it to the canvas. A redesign that invents content is wrong even when it looks good. If automated access is blocked and there is no existing source frame or attached screenshot, stop and ask the user to attach screenshots; never approximate the site from guesses.
-- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. When the design needs a visual that stock cannot supply — a full-bleed hero background in the frame's exact palette (a monochrome mountain range behind the product window, say), brand-specific illustration, a product render, a mascot — or the card asks for a generated image, call generate_image with ONE considered prompt (subject, style, composition, palette hexes, lighting, exclusions; for a hero background: aspect landscape, low contrast, and name the empty region where the copy or product window will sit) and embed the returned url with object-fit: cover and a legibility scrim over the copy; it spends the requester's quota or money, so refine a near miss by prompt rather than regenerating blind. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
+- Real imagery: when a design calls for photography, use search_images (you see thumbnails — pick the one whose mood and palette fit) and embed its image_url with object-fit: cover and a real alt text. For a hero, section band or bento tile that wants atmosphere or a focal glow, list_backgrounds shows a page of the curated library as thumbnails (filter by tone; judge by eye which one fits the frame's style and palette, paste its css line, put copy in the text_zone); a quiet typographic design may be better on a flat surface, but never settle for a default two-stop gradient, and draw the background yourself when nothing in the library genuinely fits. For UI icons use search_icons and hotlink the SVG URL (or draw an inline SVG); never use emoji or Unicode symbols (✕ □ ▸ ⟶ ↗) as icons, since they depend on the viewer's fonts and render as empty boxes or colour emoji. For company logos (customer walls, integration rows, press bars, payment methods, testimonial cards) call search_logos once per brand BEFORE writing that section, and use real, recognizable brands — never a gray tile, "LOGO" text, initials or an invented wordmark. When the design needs a visual that stock cannot supply — a full-bleed hero background in the frame's exact palette (a monochrome mountain range behind the product window, say), brand-specific illustration, a product render, a mascot — or the card asks for a generated image, call generate_image with ONE considered prompt (subject, style, composition, palette hexes, lighting, exclusions; for a hero background: aspect landscape, low contrast, and name the empty region where the copy or product window will sit) and embed the returned url with object-fit: cover and a legibility scrim over the copy; it spends the requester's quota or money, so refine a near miss by prompt rather than regenerating blind. Never fake a photo with a gray box or a made-up URL; if search is unavailable, draw the visual as inline SVG/CSS.
 - If a request is unclear or impossible (missing frame, contradictory ask), do the closest reasonable thing and say what you did in your final message.
 - A comment is a conversation. Each comment in the request carries its id: when the ask needs a decision only the person can make, ask with reply_to_comment (awaiting_answer: true) in that thread instead of guessing, then finish without changing the frame — the thread is handed back to them and stays open for their answer; resolve_comment closes a thread you have fully dealt with. When you finish, your final message is posted into every thread you worked on as your reply, so write it to the person who asked — what you changed and where, in a sentence or two, plain prose and no @mentions.
 - Your final message should be one or two sentences: what you changed and where.
@@ -194,6 +204,13 @@ interface RunState {
   /** root ids of the threads where the agent asked something and stopped:
    *  handed back to the person instead of resolved when the run ends */
   awaitingThreads: Set<string>
+  /** token writes that took (a token created, changed or deleted, the theme
+   *  list set): work a card can ask for on its own, delivered without a frame */
+  tokenWrites: number
+  /** page and frame-arrangement writes that took (a page added, renamed,
+   *  reordered or deleted, a frame renamed or moved): work a card can ask
+   *  for on its own, delivered without a design change */
+  arrangeWrites: number
 }
 
 export interface FramePlacement {
@@ -259,6 +276,20 @@ const MAX_IMAGES_PER_RUN = 4
 
 function deliverableFrameIds(runState: RunState): string[] {
   return [...runState.mutatedFrames].filter((id) => !runState.sourceFrames.has(id))
+}
+
+/** Whether the run has delivered anything a card can ask for: a frame of its
+ *  own changed or created, or a token or arrangement write that took.
+ *  Exported for tests. */
+export function deliveredWork(
+  runState: Pick<RunState, 'mutatedFrames' | 'sourceFrames' | 'tokenWrites' | 'arrangeWrites'>,
+): boolean {
+  return deliverableFrameIds(runState as RunState).length > 0 || runState.tokenWrites > 0 || runState.arrangeWrites > 0
+}
+
+/** How many of a token call's results took. Exported for tests. */
+export function tokenWritesIn(results: readonly TokenResult[]): number {
+  return results.filter((r) => r.result !== 'error').length
 }
 
 function verificationFrameIds(runState: RunState): string[] {
@@ -344,14 +375,18 @@ function framesAround(frames: Frame[], x: number, y: number): Frame[] {
  */
 async function runAgent(canvasId: string, agentName: string, stalled: Set<string>): Promise<RunOutcome> {
   const role = roleByAgentName(agentName) ?? roleById(DEFAULT_ROLE_ID)!
-  const payer = actions.nextWorkPayer(canvasId, role.name, stalled)
-  if (payer === undefined) return 'idle'
+  const work = actions.nextWork(canvasId, role.name, stalled)
+  if (work === undefined) return 'idle'
+  const { payer, runner, key } = work
+  /* the run claims only work that agrees on the connection: a card sent to
+     the Claude Plan and one sent to ChatGPT are two runs */
+  const runnerFilter = runnerKey(runner)
   /* Only work that predates per-user attribution falls back to the canvas
      owner — a real requester never bills a collaborator or the owner. */
   const canvasOwner = store.getCanvas(canvasId)?.ownerId
-  const model = await pickModel(payer || canvasOwner)
+  const model = await pickModel(payer || canvasOwner, runner)
   if (!model) {
-    stalled.add(payer)
+    stalled.add(key)
     return 'no-model'
   }
   /* With no free tier, the server's key never pays for resident work. Work
@@ -362,21 +397,24 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
       'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini or Claude API key in Settings, then retry.'
-    for (const f of actions.takeFeedbackFor(canvasId, role.name, payer)) actions.failTaskFeedback(f.id, reason)
-    for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer)) actions.failComment(c.id, reason)
-    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer)) actions.failCard(canvasId, c.id, reason)
-    stalled.add(payer)
+    for (const f of actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter))
+      actions.failTaskFeedback(f.id, reason)
+    for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter))
+      actions.failComment(c.id, reason)
+    for (const c of actions.takeQueuedCardsFor(canvasId, role.name, payer, runnerFilter))
+      actions.failCard(canvasId, c.id, reason)
+    stalled.add(key)
     return 'no-model'
   }
   /* claim this agent's open work — the UI flips to "picked up" instantly.
      Claiming happens before the try so an agent with nothing to do never
      shows up in presence. */
-  const claimed = actions.takeFeedbackFor(canvasId, role.name, payer)
-  const comments = actions.takeAgentCommentsFor(canvasId, role.name, payer)
-  const allCards = actions.takeQueuedCardsFor(canvasId, role.name, payer)
+  const claimed = actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter)
+  const comments = actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter)
+  const allCards = actions.takeQueuedCardsFor(canvasId, role.name, payer, runnerFilter)
   if (claimed.length === 0 && comments.length === 0 && allCards.length === 0) {
     /* nothing actually claimable for this payer — do not re-pick them */
-    stalled.add(payer)
+    stalled.add(key)
     return 'no-model'
   }
   /* structured repo cards (the GitHub import) have their own runner with
@@ -434,7 +472,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        content, not user work — hidden so agents never mistake them for
        the canvas's established style */
     const visibleFrames = (canvas?.frames ?? []).filter((f) => !f.demo)
-    const frameList = describeFrameList(visibleFrames, await imagesForFrames(visibleFrames.map((f) => f.id)))
+    const pages = canvas ? pageList(canvas) : []
+    const frameList = describeFrameList(visibleFrames, await imagesForFrames(visibleFrames.map((f) => f.id)), canvas)
 
     const sections: string[] = []
     /* design-synced canvases: real navigation between the synced screens is
@@ -543,6 +582,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         : ''
     const kickoff =
       sections.join('\n\n') +
+      `\n\nPages, in order (pass this exact list as expectedPages to set_canvas_pages):\n${JSON.stringify(pages)}` +
       `\n\nFrames currently on the canvas:\n${frameList}` +
       referenceList +
       `\n\nExecution strategy selected by the harness:\n${strategyFor(workText, visibleFrames)}` +
@@ -574,6 +614,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       ...(comments[0] ? { placement: placementFor(comments[0], canvas) } : {}),
       repliedThreads: new Set(),
       awaitingThreads: new Set(),
+      tokenWrites: 0,
+      arrangeWrites: 0,
     }
     let refused = false
     let crashed = false
@@ -608,6 +650,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         .filter(Boolean)
         .join('\n\n')
       const fontsBlock = [{ text: `# Fonts\n${fontsText}` }]
+      /* the canvas's design tokens: which exist, and that var(--name) is how
+         a frame uses one (the server writes the values into the frame) */
+      const tokens = store.getTokens(canvasId)
+      const tokensBlock = tokens.length
+        ? [{ text: `# Design tokens\n${tokensBrief(tokens, store.getTokenThemes(canvasId))}` }]
+        : []
       /* a text-only model would otherwise chase tools whose whole value is
          pixels; steer its verification to the textual surfaces instead */
       const noVisionBlock = runState.vision
@@ -622,9 +670,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         const result = await model.runHarness({
           canvasId,
           prompt: kickoff,
-          system: [systemFor(role), ...guidelinesBlock.map((b) => b.text), ...fontsBlock.map((b) => b.text)].join(
-            '\n\n',
-          ),
+          system: [
+            systemFor(role),
+            ...guidelinesBlock.map((b) => b.text),
+            ...fontsBlock.map((b) => b.text),
+            ...tokensBlock.map((b) => b.text),
+          ].join('\n\n'),
           // Image generation uses a separate paid model account; the local CLI
           // connection must never imply that the user's subscription covers it.
           tools: TOOLS.filter((tool) => tool.name !== 'generate_image'),
@@ -664,7 +715,13 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             () =>
               model.run({
                 maxTokens: 16000,
-                system: [{ text: systemFor(role), cache: true }, ...guidelinesBlock, ...fontsBlock, ...noVisionBlock],
+                system: [
+                  { text: systemFor(role), cache: true },
+                  ...guidelinesBlock,
+                  ...fontsBlock,
+                  ...tokensBlock,
+                  ...noVisionBlock,
+                ],
                 tools: TOOLS,
                 messages,
                 signal: abort.signal,
@@ -759,12 +816,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             continue
           }
 
-          if (requireMutation && deliverableFrameIds(runState).length === 0 && !mutationNudgeSent) {
+          if (requireMutation && !deliveredWork(runState) && !mutationNudgeSent) {
             mutationNudgeSent = true
             messages.push({
               role: 'user',
               content:
-                'You have not changed or created a deliverable frame yet, so the queued design card is not complete. Imported source frames are reference material and do not count as the deliverable. Make the requested visual change now. For a full redesign, use begin_frame_rewrite, append_frame_rewrite chunks under 12,000 characters, and commit_frame_rewrite, then verify it with screenshot_frame.',
+                'You have not changed or created a deliverable frame, or saved a token change, yet, so the queued design card is not complete. Imported source frames are reference material and do not count as the deliverable. Make the requested change now. For a full redesign, use begin_frame_rewrite, append_frame_rewrite chunks under 12,000 characters, and commit_frame_rewrite, then verify it with screenshot_frame.',
             })
             continue
           }
@@ -815,7 +872,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        or out-of-turns runs pause so nothing gets a false Done or auto-retry */
     const deliverableFrames = deliverableFrameIds(runState)
     const blockedWebsiteAccess = runState.blockedWebsiteAccess
-    const noMutation = finished && requireMutation && deliverableFrames.length === 0 && !blockedWebsiteAccess
+    const noMutation = finished && requireMutation && !deliveredWork(runState) && !blockedWebsiteAccess
     const unverifiedMutation =
       finished &&
       runState.vision &&
@@ -827,10 +884,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (blockedWebsiteAccess && !staleAccount) {
       actions.setAgentStatus(canvasId, actor, 'Website blocked — needs screenshots')
     }
-    if (noMutation) actions.setAgentStatus(canvasId, actor, 'No frame changed — waiting for a retry')
+    if (noMutation) actions.setAgentStatus(canvasId, actor, 'Nothing changed — waiting for a retry')
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
@@ -869,7 +926,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       } else if (exhausted) {
         reason = `${role.name} ran out of turns before finishing. Retry when you are ready.`
       } else if (noMutation) {
-        reason = `${role.name} finished without changing a frame. Retry when you are ready.`
+        reason = `${role.name} finished without changing a frame or a token. Retry when you are ready.`
       } else {
         reason = `${role.name} changed a frame but could not verify it. Retry when you are ready.`
       }
@@ -1325,6 +1382,146 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_tokens',
+    description:
+      "This canvas's design tokens (CSS custom properties frames use as var(--name)), as JSON, a :root CSS block or a Tailwind v4 @theme block.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        types: { type: 'array', items: { type: 'string', enum: [...TOKEN_TYPES] } },
+        format: { type: 'string', enum: ['json', 'css', 'tailwind'] },
+      },
+    },
+  },
+  {
+    name: 'create_tokens',
+    description:
+      'Add design tokens to this canvas: each needs a CSS custom property name (--color-primary), a type and a value (a CSS value, or var(--other) to alias a token that exists or comes earlier in the batch). Names follow Tailwind v4 namespaces (--color-*, --spacing-*, --radius-*, --font-*, --text-*, --leading-*, --tracking-*, --container-*, --breakpoint-*). Reuse existing tokens before creating new ones. Use them in frames as var(--name), never the literal.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tokens: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              type: { type: 'string', enum: [...TOKEN_TYPES] },
+              value: { type: 'string' },
+              themes: {
+                type: 'object',
+                description:
+                  'The value under a theme where it differs, e.g. { "dark": "#fff" }; a new name declares the theme',
+                additionalProperties: { type: 'string' },
+              },
+              description: { type: 'string' },
+            },
+            required: ['name', 'type', 'value'],
+          },
+        },
+      },
+      required: ['tokens'],
+    },
+  },
+  {
+    name: 'set_tokens',
+    description:
+      'Change (value, type, description), rename (new_name) or delete (delete: true) design tokens by name. Every frame naming a changed token is restyled at once.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tokens: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              new_name: { type: 'string' },
+              type: { type: 'string', enum: [...TOKEN_TYPES] },
+              value: { type: 'string' },
+              themes: {
+                type: 'object',
+                description: "Theme values to set, merged in; null removes that theme's value",
+                additionalProperties: { type: ['string', 'null'] },
+              },
+              description: { type: 'string' },
+              delete: { type: 'boolean' },
+            },
+            required: ['name'],
+          },
+        },
+      },
+      required: ['tokens'],
+    },
+  },
+  {
+    name: 'set_token_themes',
+    description:
+      'Replace this canvas\'s token themes (light, dark, …) and their order. A frame switches theme with data-doop-theme="<theme>" on its <html> or on a subtree; a theme that leaves takes its values with it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        themes: { type: 'array', items: { type: 'string' } },
+        renames: {
+          type: 'array',
+          description: 'Themes to rename first; their values follow. List the new name in themes.',
+          items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } } },
+        },
+      },
+      required: ['themes'],
+    },
+  },
+  {
+    name: 'update_frame',
+    description:
+      "Change a frame's metadata in one call, without touching its design: rename it (name), move it on its page (x, y), resize it (width, height), lock or unlock it, or move it to another page (pageId; it keeps its x/y unless you pass new ones and lands in front of that page's frames). Pass only what changes. To reorganize a canvas, move frames with this and reorder pages with set_canvas_pages — never recreate a frame to move it.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        frame_id: { type: 'string' },
+        pageId: { type: 'string', description: 'The page to move the frame to, from the page list' },
+        name: { type: 'string' },
+        x: { type: 'number', description: 'Canvas position in px' },
+        y: { type: 'number', description: 'Canvas position in px' },
+        width: { type: 'number', description: 'px; the design is not rescaled' },
+        height: { type: 'number', description: 'px; the design is not rescaled' },
+        locked: { type: 'boolean', description: 'true keeps humans from selecting, moving or deleting it' },
+      },
+      required: ['frame_id'],
+    },
+  },
+  {
+    name: 'create_canvas_page',
+    description:
+      'Add a new, empty page at the end of this canvas and get its id back. Use a page when a body of work deserves its own board (a second product surface, web vs. mobile, a round of explorations) and a frame when it is one screen. Move frames onto it with update_frame, or reorder it with set_canvas_pages.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The page name shown in the Pages panel' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'set_canvas_pages',
+    description:
+      'Rename, reorder or delete pages by sending the complete ordered page list. expectedPages is the list as you last saw it (the kickoff, or the last page tool result); if a collaborator changed it since, the call is refused with the current list. A page that still holds frames cannot be deleted: move its frames with update_frame first. To add a page, use create_canvas_page.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        expectedPages: {
+          type: 'array',
+          description: 'The ordered pages as you last saw them',
+          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+        },
+        pages: {
+          type: 'array',
+          description: 'The new ordered list; keep each page id, change names and order, leave out a page to delete it',
+          items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+        },
+      },
+      required: ['expectedPages', 'pages'],
+    },
+  },
+  {
     name: 'get_prototype',
     description:
       'List the clickable-prototype wiring of this canvas: each page with its flow start frame, and every interaction (data-doop-on / data-doop-action attributes in frame HTML) with its trigger, action and target. Interactions whose target frame does not exist carry a problem; fix them with edit_frame_html. Call it after wiring a flow.',
@@ -1371,11 +1568,11 @@ const KICKOFF_IMAGE_CHARS = 300
  *  image the frame shows with the description the describer wrote
  *  (shared/imageDescriptions.ts), so a pasted screenshot reads as what it
  *  is rather than as a 600-byte frame named after a file. */
-export function describeFrameList(frames: Frame[], images: Map<string, FrameImage[]>): string {
+export function describeFrameList(frames: Frame[], images: Map<string, FrameImage[]>, canvas?: Canvas): string {
   const lines = frames.map((f, index) => {
     const shown = images.get(f.id) ?? []
     const pasted = shown.length === 1 && isStandaloneImage(f.html) ? ' (pasted image)' : ''
-    const head = `- Frame ${index + 1}: id=${f.id}, name="${f.name}"${pasted}, ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`
+    const head = `- Frame ${index + 1}: id=${f.id}, name="${f.name}"${pasted}, page=${canvas ? framePageId(canvas, f) : (f.pageId ?? '?')}, at (${Math.round(f.x)}, ${Math.round(f.y)}), ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`
     const pictures = shown.map(
       (image) =>
         `    image ${image.src}: ${image.description ? image.description.slice(0, KICKOFF_IMAGE_CHARS) : '(description pending)'}`,
@@ -1420,7 +1617,8 @@ async function frameImageBlocks(
   return blocks
 }
 
-async function execTool(
+/** Runs one tool call of the resident's loop. Exported for tests. */
+export async function execTool(
   block: Anthropic.ToolUseBlockParam,
   canvasId: string,
   actor: ReturnType<typeof actions.resolveActor>,
@@ -1930,6 +2128,123 @@ async function execTool(
             ? `saved design guide "${actions.guidelineTitle(doc)}" (${doc.name}, ${doc.markdown.length} chars) — every actor on this canvas now inherits it`
             : `deleted design guide ${raw.name.trim().toLowerCase()}`,
         )
+      }
+      case 'get_tokens': {
+        const raw = block.input as { types?: unknown; format?: unknown }
+        const types = Array.isArray(raw.types) ? raw.types.filter((t): t is string => typeof t === 'string') : []
+        let tokens = store.getTokens(canvasId)
+        const themes = store.getTokenThemes(canvasId)
+        if (types.length) tokens = tokens.filter((t) => types.includes(t.type))
+        if (!tokens.length) return ok('no design tokens on this canvas yet — add some with create_tokens')
+        if (raw.format === 'css') return ok(tokensCss(tokens, themes))
+        if (raw.format === 'tailwind') return ok(tokensTailwind(tokens, themes))
+        return ok(JSON.stringify({ tokens: describeTokens(tokens), ...(themes.length ? { themes } : {}) }))
+      }
+      case 'create_tokens': {
+        const raw = block.input as { tokens?: unknown }
+        if (!Array.isArray(raw.tokens) || !raw.tokens.length) return fail('tokens must be a non-empty array')
+        const results = actions.createTokens(canvasId, raw.tokens, actor)
+        if (!results) return fail('canvas not found')
+        runState.tokenWrites += tokenWritesIn(results)
+        return ok(JSON.stringify({ results }))
+      }
+      case 'set_tokens': {
+        const raw = block.input as { tokens?: unknown }
+        if (!Array.isArray(raw.tokens) || !raw.tokens.length) return fail('tokens must be a non-empty array')
+        const edits = raw.tokens.map((entry: unknown) => {
+          const e = typeof entry === 'object' && entry !== null ? (entry as Record<string, unknown>) : {}
+          return {
+            name: typeof e.name === 'string' ? e.name : '',
+            ...(typeof e.new_name === 'string' ? { newName: e.new_name } : {}),
+            ...(typeof e.type === 'string' ? { type: e.type as (typeof TOKEN_TYPES)[number] } : {}),
+            ...(typeof e.value === 'string' || typeof e.value === 'number' ? { value: e.value } : {}),
+            ...(typeof e.themes === 'object' && e.themes !== null
+              ? { themes: e.themes as Record<string, string | number | null> }
+              : {}),
+            ...(typeof e.description === 'string' ? { description: e.description } : {}),
+            ...(e.delete === true ? { delete: true } : {}),
+          }
+        })
+        const results = actions.setTokens(canvasId, edits, actor)
+        if (!results) return fail('canvas not found')
+        runState.tokenWrites += tokenWritesIn(results)
+        return ok(JSON.stringify({ results }))
+      }
+      case 'set_token_themes': {
+        const raw = block.input as { themes?: unknown; renames?: unknown }
+        try {
+          const themes = actions.setTokenThemes(canvasId, raw.themes, actor, raw.renames ?? [])
+          if (!themes) return fail('canvas not found')
+          runState.tokenWrites += 1
+          return ok(`token themes are now ${themes.length ? themes.join(', ') : 'none'}`)
+        } catch (e) {
+          return fail(e instanceof Error ? e.message : 'invalid themes')
+        }
+      }
+      case 'update_frame': {
+        const raw = block.input as Record<string, unknown>
+        const canvas = store.getCanvas(canvasId)
+        const f = store.getFrame(input.frame_id)
+        if (!canvas || !f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        /* the store updates the frame object in place, so what it was is read first */
+        const arrangement = (frame: typeof f) =>
+          [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
+            '\u0000',
+          )
+        const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
+        const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const updated = updateFrameMeta(
+          canvas,
+          f.id,
+          {
+            name: text(raw.name),
+            pageId: text(raw.pageId),
+            x: num(raw.x),
+            y: num(raw.y),
+            width: num(raw.width),
+            height: num(raw.height),
+            locked: typeof raw.locked === 'boolean' ? raw.locked : undefined,
+          },
+          actor,
+        )
+        if (!updated.ok) return fail(updated.error)
+        const frame = updated.value
+        /* a new size changes what renders, so it is a design change to verify */
+        if (frame.width !== before.width || frame.height !== before.height) {
+          runState.mutatedFrames.add(frame.id)
+          runState.verifiedFrames.delete(frame.id)
+        }
+        /* a save that changed nothing has not delivered anything */
+        if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
+        return ok(
+          `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}`,
+        )
+      }
+      case 'create_canvas_page': {
+        const name = typeof input.name === 'string' ? input.name.trim() : ''
+        if (!name || name.length > MAX_PAGE_NAME) return fail(`name must be 1-${MAX_PAGE_NAME} characters`)
+        const created = addPage(canvasId, name, actor)
+        if (!created.ok) return fail(created.error)
+        runState.arrangeWrites += 1
+        return ok(
+          JSON.stringify({
+            page: created.value.page,
+            pages: created.value.pages.map(({ id, name }) => ({ id, name })),
+          }),
+        )
+      }
+      case 'set_canvas_pages': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as { expectedPages?: unknown; pages?: unknown }
+        const pages = parsePageList(raw.pages)
+        if (typeof pages === 'string') return fail(pages)
+        const previous = pageList(canvas)
+        const saved = savePages(canvas, raw.expectedPages, pages, actor)
+        if (!saved.ok) return fail(saved.error)
+        if (!samePages(previous, saved.value)) runState.arrangeWrites += 1
+        return ok(JSON.stringify({ pages: saved.value.map(({ id, name }) => ({ id, name })) }))
       }
       case 'get_prototype': {
         const canvas = store.getCanvas(canvasId)

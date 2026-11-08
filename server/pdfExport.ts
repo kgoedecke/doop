@@ -1,4 +1,5 @@
 import { PDFDocument } from 'pdf-lib'
+import type { Frame as PageFrame } from 'puppeteer-core'
 import type { Canvas, Frame } from '../shared/types.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
@@ -53,16 +54,40 @@ export function pageSizeFor(frame: Pick<Frame, 'width' | 'height'>): PageSize {
   return { width: Math.round(width * scale), height: Math.round(height * scale), scale }
 }
 
-async function waitForFonts(page: Awaited<ReturnType<typeof loadFramePage>>['page']): Promise<void> {
+async function waitForFonts(frame: PageFrame): Promise<void> {
   const timeout = new Promise<void>((resolve) => setTimeout(resolve, FONT_WAIT_MS))
-  const ready = page.evaluate(() => document.fonts.ready.then(() => undefined)).catch(() => undefined)
+  const ready = frame.evaluate(() => document.fonts.ready.then(() => undefined)).catch(() => undefined)
   await Promise.race([ready, timeout])
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}
+
+/**
+ * The page Chrome prints: the frame in an iframe of the frame's size, as the
+ * canvas shows it. Printed bare, a document taller than the frame paginates,
+ * and Chrome moves a block that does not fit the sheet (a grid row, a card)
+ * whole onto the next sheet, leaving a hole where it stood; an iframe is
+ * never split, clips its content at the frame's edge, and keeps viewport
+ * units at the frame's size. Relative URLs resolve against the shell's
+ * `<base>`, which a srcdoc document inherits.
+ */
+function printShell(frame: Pick<Frame, 'width' | 'height' | 'html'>): string {
+  const width = Math.max(1, Math.round(frame.width))
+  const height = Math.max(1, Math.round(frame.height))
+  const html = frame.html || '<!doctype html><html><body></body></html>'
+  return (
+    '<!doctype html><html><head><style>html,body{margin:0;overflow:hidden}' +
+    `iframe{display:block;border:0;width:${width}px;height:${height}px}</style></head>` +
+    `<body><iframe srcdoc="${escapeAttribute(html)}"></iframe></body></html>`
+  )
 }
 
 /** One frame as a single-page PDF. */
 export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
   if (!pdfRendererAvailable()) throw new PdfRendererUnavailableError()
-  const loaded = await loadFramePage(frame)
+  const loaded = await loadFramePage({ ...frame, html: printShell(frame) })
   const { page } = loaded
   try {
     const size = pageSizeFor(frame)
@@ -72,7 +97,7 @@ export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
       deviceScaleFactor: 1,
     })
     await page.emulateMediaType('screen')
-    await waitForFonts(page)
+    await waitForFonts(page.mainFrame().childFrames()[0] ?? page.mainFrame())
     return await page.pdf({
       width: `${size.width}px`,
       height: `${size.height}px`,
@@ -80,8 +105,7 @@ export async function renderFramePdfPage(frame: Frame): Promise<Uint8Array> {
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
       printBackground: true,
       preferCSSPageSize: false,
-      /* content running past the frame's bottom edge would spill onto a
-         second sheet; the frame is the first one only */
+      /* the iframe fills the sheet exactly; a rounding spill makes no second page */
       pageRanges: '1',
       timeout: 30_000,
     })

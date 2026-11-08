@@ -24,8 +24,8 @@ needs a description so the agent knows what it shows and when to inspect the pix
   stays undescribed. No-model, disabled and budget-skipped images are not automatically
   requeued by a settings change or the next day; startup can reconsider them.
 - Success stores `description`, `described_at` and `described_by` on the asset and broadcasts
-  `asset:described`. Migration 0044 marks older assets out of attempts to avoid a historical
-  backfill. Migration 0045 adds the durable payer/provider selection for retries.
+  `asset:described`. Migration 0049 marks older assets out of attempts to avoid a historical
+  backfill. It also adds the durable payer/provider selection for retries.
 
 ## Which account pays
 
@@ -37,7 +37,9 @@ For a live canvas, resolve `image_description_prefs` for the uploader and canvas
 
 1. If either person's mode is `off`, stop analysis entirely.
 2. A `server` uploader explicitly uses server credentials only, bypassing both user accounts.
-3. Otherwise try the uploader's connected vision-capable account first.
+3. Otherwise try the uploader's enabled, vision-capable accounts first: their default
+   connection first, then the remaining accounts in connection order. Disabled connections
+   and local-only harnesses are excluded.
 4. If unavailable, try the canvas owner's account only when the owner's mode is `account`.
    The default `account` mode permits this owner fallback; `server` excludes their account.
 5. Finally try the configured server tier. If none is available, leave the image undescribed.
@@ -75,3 +77,9 @@ user without a specific canvas; another canvas owner's eligible account may prec
 
 Descriptions never modify frame HTML, alt text, versions or activity. Historical backfilling,
 frame summaries, human-facing descriptions and re-describing crops/recolours are out of scope.
+
+## Validation
+
+Routing and queue regressions are covered by `imageDescriptions.test.ts`; migration coverage in
+`imageDescriptionsMigration.test.ts` verifies that old assets cannot trigger billing while new
+uploads start eligible. MCP, settings and provider tests cover the model labels and agent context.

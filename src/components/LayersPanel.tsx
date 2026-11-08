@@ -26,6 +26,8 @@ import {
 } from '../lib/layers'
 import {
   deleteLayers,
+  renameFrame,
+  renameLayer,
   dropLayer,
   setFrameHidden,
   setFramesLocked,
@@ -33,6 +35,7 @@ import {
   setLayerLocked,
   detachLayer,
   isStackLocked,
+  isLayerLocked,
   restackFrame,
   stackRoom,
   shiftFrame,
@@ -46,7 +49,18 @@ import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
-import { Panel, PanelBody, PanelClose, PanelHeader, type PanelResize, type PanelSurface } from './ui/panel'
+import {
+  Panel,
+  PanelBody,
+  PanelClose,
+  PanelHeader,
+  PanelIconTab,
+  PanelTabs,
+  PanelTabsRoot,
+  type PanelResize,
+  type PanelSurface,
+} from './ui/panel'
+import { TokensSection } from './TokensPanel'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Tooltip } from './ui/tooltip'
@@ -61,7 +75,9 @@ import {
   EyeIcon,
   FrameIcon,
   LayersIcon,
+  BracesIcon,
   LockIcon,
+  LockOpenIcon,
   PanelCollapseIcon,
   PanelExpandIcon,
   PlusIcon,
@@ -214,6 +230,10 @@ export function LayersPanel({
 }) {
   /* a row's pointerleave never fires if the panel goes away under it */
   useEffect(() => () => useStore.getState().setHoveredLayer(null), [])
+  /* which of the panel's two faces shows: the layer tree, or the design
+     tokens; in the store so the collapsed rail can open straight onto one */
+  const tab = useStore((s) => s.layersTab)
+  const setTab = useStore((s) => s.setLayersTab)
   /* view and comment links browse the tree; nothing in it moves or changes */
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const pageCanvas = usePageCanvas()
@@ -507,124 +527,139 @@ export function LayersPanel({
         surface === 'docked' && 'left-0 w-[264px] border-r',
       )}
     >
-      {/* the panel's name with its icon, the collapse control at the far end */}
-      <PanelHeader className="h-10 pl-3.5">
-        <span className="flex items-center gap-2">
-          <LayersIcon className="size-3.5" />
-          {t('panels.layersTitle')}
-        </span>
-        {surface === 'inline' ? (
-          <PanelClose label={t('common.close')} onClick={onClose} />
-        ) : (
-          <Tooltip label={t('panels.layersCollapsePanel')} side="bottom" align="end">
-            <Button
-              variant="bare"
-              size="icon-sm"
-              className="size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
-              aria-label={t('panels.layersCollapsePanel')}
-              onClick={() => setLayersOpen(false)}
-            >
-              <PanelCollapseIcon className="size-3.5" />
-            </Button>
-          </Tooltip>
-        )}
-      </PanelHeader>
-      {/* Figma's order: the pages at the top, the frames of the active page
-          under them, the search at the bottom within thumb's reach */}
-      <PagesPanel />
-      <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
-        <span data-slot="frame-section-heading" className={sectionHeading}>
-          {t('panels.layersTitle')}
-        </span>
-        <span className="flex gap-1">
-          <Tooltip label={t('panels.layersCollapseAll')} side="bottom">
-            <Button
-              variant="bare"
-              size="icon-sm"
-              className={sectionBtn}
-              aria-label={t('panels.layersCollapseAll')}
-              onClick={() => setExpanded(new Set())}
-            >
-              <CollapseAllIcon className="size-3.5" />
-            </Button>
-          </Tooltip>
-          {!readOnly && (
-            <Tooltip label={t('panels.layersNewFrame')} side="bottom" align="end">
+      {/* the panel's two faces as icon tabs, the collapse control at the far end */}
+      <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)} className="flex-none">
+        <PanelHeader className="h-10 pl-2">
+          <PanelTabs aria-label={t('panels.layersTabsAria')}>
+            <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
+              {t('panels.layersTitle')}
+            </PanelIconTab>
+            <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
+              {t('panels.layersTabTokens')}
+            </PanelIconTab>
+          </PanelTabs>
+          {surface === 'inline' ? (
+            <PanelClose label={t('common.close')} onClick={onClose} />
+          ) : (
+            <Tooltip label={t('panels.layersCollapsePanel')} side="bottom" align="end">
               <Button
                 variant="bare"
                 size="icon-sm"
-                className={sectionBtn}
-                aria-label={t('panels.layersNewFrame')}
-                onClick={onAddFrame}
+                className="size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+                aria-label={t('panels.layersCollapsePanel')}
+                onClick={() => setLayersOpen(false)}
               >
-                <PlusIcon className="size-3.5" />
+                <PanelCollapseIcon className="size-3.5" />
               </Button>
             </Tooltip>
           )}
-        </span>
-      </div>
-      <PanelBody
-        className={cn('px-2 pb-2 outline-none', drag && 'cursor-grabbing')}
-        role="tree"
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        onClickCapture={(e) => {
-          if (!didDrag.current) return
-          didDrag.current = false
-          e.stopPropagation()
-        }}
-      >
-        {frames.length === 0 && (
-          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">{t('panels.layersEmpty')}</div>
-        )}
-        {frames.length > 0 && rows.length === 0 && (
-          <div className="px-3 py-6 text-center text-[12px] text-ink-faint">
-            {t('panels.layersNoMatch', { query: query.trim() })}
+        </PanelHeader>
+      </PanelTabsRoot>
+      {tab === 'tokens' && (
+        <PanelBody className="flex flex-col pb-2">
+          <TokensSection />
+        </PanelBody>
+      )}
+      {tab === 'layers' && (
+        <>
+          {/* Figma's order: the pages at the top, the frames of the active page
+          under them, the search at the bottom within thumb's reach */}
+          <PagesPanel />
+          <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
+            <span data-slot="frame-section-heading" className={sectionHeading}>
+              {t('panels.layersTitle')}
+            </span>
+            <span className="flex gap-1">
+              <Tooltip label={t('panels.layersCollapseAll')} side="bottom">
+                <Button
+                  variant="bare"
+                  size="icon-sm"
+                  className={sectionBtn}
+                  aria-label={t('panels.layersCollapseAll')}
+                  onClick={() => setExpanded(new Set())}
+                >
+                  <CollapseAllIcon className="size-3.5" />
+                </Button>
+              </Tooltip>
+              {!readOnly && (
+                <Tooltip label={t('panels.layersNewFrame')} side="bottom" align="end">
+                  <Button
+                    variant="bare"
+                    size="icon-sm"
+                    className={sectionBtn}
+                    aria-label={t('panels.layersNewFrame')}
+                    onClick={onAddFrame}
+                  >
+                    <PlusIcon className="size-3.5" />
+                  </Button>
+                </Tooltip>
+              )}
+            </span>
           </div>
-        )}
-        {rows.map((row) =>
-          row.kind === 'frame' ? (
-            <FrameRow
-              key={row.key}
-              row={row}
-              selected={row.frame.id === selectedId && !selectedElement}
-              current={row.frame.id === selectedId}
-              dragging={drag?.key === row.key}
-              drop={drop?.key === row.key ? drop.place : undefined}
-              onToggle={() => setOpen(row.key, !row.open)}
-              onActivate={() => activate(row)}
-              onPointerDown={(e) => onRowPointerDown(e, row)}
-            />
-          ) : (
-            <NodeRow
-              key={row.key}
-              row={row}
-              selected={pickedRows.has(row.key)}
-              dragging={drag?.key === row.key}
-              drop={drop?.key === row.key ? drop.place : undefined}
-              onToggle={() => setOpen(row.key, !row.open)}
-              onActivate={(toggle) => activate(row, toggle)}
-              onPointerDown={(e) => onRowPointerDown(e, row)}
-            />
-          ),
-        )}
-        {drop?.key === ROOT_KEY && (
-          <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
-        )}
-      </PanelBody>
-      <footer className="flex-none px-2.5 pt-1 pb-2.5">
-        <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
-          <SearchIcon className="size-3.5 flex-none" />
-          <Input
-            variant="bare"
-            inputSize="auto"
-            className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
-            placeholder={t('panels.layersSearch')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-      </footer>
+          <PanelBody
+            className={cn('px-2 pb-2 outline-none', drag && 'cursor-grabbing')}
+            role="tree"
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            onClickCapture={(e) => {
+              if (!didDrag.current) return
+              didDrag.current = false
+              e.stopPropagation()
+            }}
+          >
+            {frames.length === 0 && (
+              <div className="px-3 py-6 text-center text-[12px] text-ink-faint">{t('panels.layersEmpty')}</div>
+            )}
+            {frames.length > 0 && rows.length === 0 && (
+              <div className="px-3 py-6 text-center text-[12px] text-ink-faint">
+                {t('panels.layersNoMatch', { query: query.trim() })}
+              </div>
+            )}
+            {rows.map((row) =>
+              row.kind === 'frame' ? (
+                <FrameRow
+                  key={row.key}
+                  row={row}
+                  selected={row.frame.id === selectedId && !selectedElement}
+                  current={row.frame.id === selectedId}
+                  dragging={drag?.key === row.key}
+                  drop={drop?.key === row.key ? drop.place : undefined}
+                  onToggle={() => setOpen(row.key, !row.open)}
+                  onActivate={() => activate(row)}
+                  onPointerDown={(e) => onRowPointerDown(e, row)}
+                />
+              ) : (
+                <NodeRow
+                  key={row.key}
+                  row={row}
+                  selected={pickedRows.has(row.key)}
+                  dragging={drag?.key === row.key}
+                  drop={drop?.key === row.key ? drop.place : undefined}
+                  onToggle={() => setOpen(row.key, !row.open)}
+                  onActivate={(toggle) => activate(row, toggle)}
+                  onPointerDown={(e) => onRowPointerDown(e, row)}
+                />
+              ),
+            )}
+            {drop?.key === ROOT_KEY && (
+              <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
+            )}
+          </PanelBody>
+          <footer className="flex-none px-2.5 pt-1 pb-2.5">
+            <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
+              <SearchIcon className="size-3.5 flex-none" />
+              <Input
+                variant="bare"
+                inputSize="auto"
+                className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
+                placeholder={t('panels.layersSearch')}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+          </footer>
+        </>
+      )}
     </Panel>
   )
 }
@@ -649,11 +684,83 @@ export function LayersRailToggle({ docked = false }: { docked?: boolean }) {
       <ToolbarControl label={t('panels.layersExpandPanel')} side="right" onClick={() => setLayersOpen(true)}>
         <PanelExpandIcon />
       </ToolbarControl>
-      <ToolbarControl label={t('panels.layersRailCount', { count })} side="right" onClick={() => setLayersOpen(true)}>
+      <ToolbarControl
+        label={t('panels.layersRailCount', { count })}
+        side="right"
+        onClick={() => {
+          useStore.getState().setLayersTab('layers')
+          setLayersOpen(true)
+        }}
+      >
         <LayersIcon />
+      </ToolbarControl>
+      <ToolbarControl
+        label={t('panels.layersTabTokens')}
+        side="right"
+        onClick={() => {
+          useStore.getState().setLayersTab('tokens')
+          setLayersOpen(true)
+        }}
+      >
+        <BracesIcon />
       </ToolbarControl>
     </Toolbar>
   )
+}
+
+/** The editor owns its keys and pointer gestures while a name is being typed. */
+function ItemNameInput({
+  name,
+  onCommit,
+  onDone,
+}: {
+  name: string
+  onCommit: (value: string) => void
+  onDone: () => void
+}) {
+  const t = useT()
+  const finished = useRef(false)
+  function finish(input: HTMLInputElement, save: boolean) {
+    if (finished.current) return
+    finished.current = true
+    if (save && input.value.trim() !== name) onCommit(input.value)
+    onDone()
+  }
+  return (
+    <Input
+      autoFocus
+      aria-label={t('panels.layersName')}
+      variant="bare"
+      inputSize="auto"
+      className="h-5 w-full bg-surface px-1 text-ink shadow-elevation-1-focus md:text-body"
+      defaultValue={name}
+      onFocus={(e) => e.target.select()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onBlur={(e) => finish(e.currentTarget, true)}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.nativeEvent.isComposing || (e.key !== 'Enter' && e.key !== 'Escape')) return
+        e.preventDefault()
+        const tree = e.currentTarget.closest<HTMLElement>('[role="tree"]')
+        finish(e.currentTarget, e.key === 'Enter')
+        tree?.focus()
+      }}
+    />
+  )
+}
+
+function useItemRename(name: string, allowed: boolean, onCommit: (value: string) => void) {
+  const [renaming, setRenaming] = useState(false)
+  return {
+    label:
+      renaming && allowed ? <ItemNameInput name={name} onCommit={onCommit} onDone={() => setRenaming(false)} /> : name,
+    startRename: () => {
+      if (allowed) setRenaming(true)
+    },
+  }
 }
 
 function FrameRow({
@@ -678,6 +785,9 @@ function FrameRow({
 }) {
   const { frame } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
+  const { label, startRename } = useItemRename(frame.name, !readOnly && !frame.locked, (value) =>
+    renameFrame(frame.id, value),
+  )
   const stream = useStore((s) => s.streams[frame.id])
   const presences = useStore((s) => s.presences)
   const me = getIdentity().clientId
@@ -701,7 +811,7 @@ function FrameRow({
             caret={<Caret open={row.open} present />}
             onCaret={onToggle}
             icon={<FrameIcon className="size-3.5" />}
-            label={frame.name}
+            label={label}
             className={cn(current && !selected && 'text-ink', dragging && 'opacity-40')}
             selected={selected}
             hidden={!!frame.hidden}
@@ -710,7 +820,7 @@ function FrameRow({
             locked={!!frame.locked}
             onToggleLocked={readOnly ? undefined : () => setFramesLocked([frame], !frame.locked)}
             onClick={onActivate}
-            onDoubleClick={() => useStore.getState().requestFlyTo(frame.id)}
+            onDoubleClick={startRename}
             onContextMenu={() => {
               pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
               if (!useStore.getState().selectedIds.includes(frame.id)) onActivate()
@@ -739,7 +849,7 @@ function FrameRow({
             }
           />
         </ContextMenuTrigger>
-        <FrameContextMenu frame={frame} at={pasteAt} />
+        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
       </ContextMenu>
       {/* the caption stands in for the frame's body, so a layer dragged
           onto it lands in the frame as a drop on the frame row would; the
@@ -781,9 +891,14 @@ function NodeRow({
   const { frame, node } = row
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const hasChildren = node.children.length > 0
-  /* a standalone element is its frame: the eye, the lock and the menu are
-     the frame's, and a double-click flies to it */
+  /* a standalone element is its frame: its name, eye, lock and menu all
+     belong to the frame */
   const standalone = !!row.standalone
+  const { label, startRename } = useItemRename(
+    standalone ? frame.name : node.label,
+    !readOnly && !frame.locked && !node.locked,
+    (value) => (standalone ? renameFrame(frame.id, value) : renameLayer(frame.id, node.selector, value)),
+  )
   const pasteAt = useRef({ x: 0, y: 0 })
   return (
     <ContextMenu>
@@ -795,7 +910,7 @@ function NodeRow({
           caret={<Caret open={row.open} present={hasChildren} />}
           onCaret={hasChildren ? onToggle : undefined}
           icon={<LayerKindIcon kind={node.kind} />}
-          label={standalone ? frame.name : node.label}
+          label={label}
           detail={standalone ? undefined : node.detail}
           selected={selected}
           /* a standalone element is hidden by its frame or by its own
@@ -833,7 +948,9 @@ function NodeRow({
           }
           className={cn(dragging && 'opacity-40')}
           onClick={(e) => onActivate(e.shiftKey || e.metaKey || e.ctrlKey)}
-          onDoubleClick={standalone ? () => useStore.getState().requestFlyTo(frame.id) : undefined}
+          onDoubleClick={() => {
+            if (!isLayerLocked(frame, node.selector)) startRename()
+          }}
           onContextMenu={() => {
             pasteAt.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
             onActivate(false)
@@ -850,9 +967,9 @@ function NodeRow({
         />
       </ContextMenuTrigger>
       {standalone ? (
-        <FrameContextMenu frame={frame} at={pasteAt} />
+        <FrameContextMenu frame={frame} at={pasteAt} onRename={startRename} />
       ) : (
-        <ElementContextMenu frame={frame} selector={node.selector} />
+        <ElementContextMenu frame={frame} selector={node.selector} onRename={startRename} />
       )}
     </ContextMenu>
   )
@@ -866,7 +983,7 @@ type RowProps = Omit<HTMLAttributes<HTMLDivElement>, 'onClick'> & {
   caret: ReactNode
   onCaret?: () => void
   icon: ReactNode
-  label: string
+  label: ReactNode
   detail?: string
   selected: boolean
   /** where a dragged layer would land on this row; `root` is a line above
@@ -920,9 +1037,11 @@ function Row({
       className={cn(
         'group relative flex h-7 cursor-default select-none items-center gap-[5px] whitespace-nowrap rounded-[7px] pr-1.5 text-[12px] text-ink-soft hover:bg-sub',
         selected && 'bg-paper-deep font-medium text-ink hover:bg-paper-deep [&_[data-icon]]:text-ink',
-        /* room under the floating eye and lock, so the name never runs beneath them */
+        /* room under the floating eye and lock, the strip's whole width, so
+           neither the name nor a trailing badge runs beneath them: the strip
+           paints the row's own background over whatever it covers */
         (onToggleHidden || onToggleLocked) &&
-          (hidden || locked ? 'pr-[50px]' : 'focus-within:pr-[50px] hover:pr-[50px]'),
+          (hidden || locked ? 'pr-[56px]' : 'focus-within:pr-[56px] hover:pr-[56px]'),
         drop === 'inside' && 'shadow-[inset_0_0_0_1.5px_var(--brand)]',
         className,
       )}
@@ -942,6 +1061,7 @@ function Row({
       <span
         data-icon
         className={cn('grid size-3 flex-none place-items-center text-ink-faint', onCaret && 'cursor-pointer')}
+        onDoubleClick={(e) => e.stopPropagation()}
         onClick={(e) => {
           if (!onCaret) return
           e.stopPropagation()
@@ -969,7 +1089,8 @@ function Row({
            a hidden or locked row keeps its mark showing. */
         <span
           className={cn(
-            'absolute top-0 right-0 flex h-full flex-none items-center gap-0.5 rounded-r-[7px] bg-inherit pr-1.5 pl-1',
+            /* 56px: 8 + 20 + 2 + 20 + 6, the row's reserved padding above */
+            'absolute top-0 right-0 flex h-full flex-none items-center gap-0.5 rounded-r-[7px] bg-inherit pr-1.5 pl-2',
             !hidden && !locked && 'invisible group-focus-within:visible group-hover:visible',
           )}
         >
@@ -988,7 +1109,7 @@ function Row({
               on={!!locked}
               selected={selected}
               onToggle={onToggleLocked}
-              icon={<LockIcon className="size-3" />}
+              icon={locked ? <LockIcon className="size-3" /> : <LockOpenIcon className="size-3" />}
             />
           )}
         </span>

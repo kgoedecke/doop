@@ -7,12 +7,13 @@ export const connect: Catalog['connect'] = {
   blurbCodex: 'ChatGPT desktop e Codex CLI',
   blurbCursor: 'Adicione o Doop ao Cursor',
   otherClientName: 'Outro cliente MCP',
+  headlessName: 'Agente headless ou servidor',
+  blurbHeadless: 'n8n, Mastra, CI e scripts, com uma chave de agente',
   blurbOtherClient: 'Use uma conexão manual',
 
   chooseTitle: 'Escolha seu agente',
   chooseLede:
     'Deixe um agente que você já usa trabalhar neste canvas via MCP. Escolha o seu para ver as instruções de conexão.',
-  connectButton: 'Conectar',
 
   pointAtTitle: 'Aponte-o para este canvas',
   pointAtWithPrompt: 'Cole isto como sua primeira mensagem. Todo o resto de que o agente precisa vem do servidor.',
@@ -111,10 +112,18 @@ export const connect: Catalog['connect'] = {
   helpBefore:
     'Se o Claude pedir para você entrar primeiro, volte aqui e clique em Adicionar ao Claude de novo. Você também pode usar ',
   helpAfter: ' no Claude com este endereço:',
-  headlessBefore: 'Sem navegador para fazer login (n8n, Mastra, CI)? Gere uma chave de agente em ',
-  headlessLink: 'Configurações → Chaves de agente',
-  headlessMiddle: ' e envie-a como ',
-  headlessAfter: '. A chave age em seu nome, nos canvases a que você tem acesso.',
+  mcpMethodAria: 'Como o cliente faz login',
+  mcpBrowser: 'Login pelo navegador',
+  mcpAgentKey: 'Chave de agente (headless)',
+  agentKeyLede:
+    'Para agentes que rodam sem uma pessoa no navegador. A chave age em seu nome, nos canvases a que você tem acesso.',
+  agentKeyCreateTitle: 'Crie uma chave de agente',
+  agentKeyCreateBody:
+    'Dê a ela o nome do agente que vai usá-la. Copie a chave quando ela aparecer: ela só é mostrada uma vez, e você pode revogá-la lá a qualquer momento.',
+  agentKeyOpen: 'Abrir Configurações → Chaves de agente',
+  agentKeySendTitle: 'Envie-a em cada requisição',
+  agentKeySendBody:
+    'Adicione o servidor com sua chave como cabeçalho bearer, substituindo dpk_… por ela. O nó MCP Client do n8n, o MCPClient do Mastra e a maioria dos SDKs MCP aceitam cabeçalhos assim.',
   done: 'Concluído',
 
   arrived: '{name} chegou — funcionou',

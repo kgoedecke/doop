@@ -11,6 +11,9 @@ beforeAll(async () => {
 }, 60000)
 afterAll(() => server?.stop())
 
+type View = { accounts: { kind: string; enabled: boolean; model?: string }[]; default?: string }
+const accountIn = (view: View, kind: string) => view.accounts.find((a) => a.kind === kind)
+
 it('stores an OpenRouter key privately, validates its roster, and serves the per-kind menus', async () => {
   /* the menus ride every account response, keyed by kind, with vision flags */
   const before = await (await alice.get('/api/model-account')).json()
@@ -23,36 +26,39 @@ it('stores an OpenRouter key privately, validates its roster, and serves the per
   await alice.req('/api/local-agent', { method: 'PUT', body: JSON.stringify({ enabled: true, model: 'opus' }) })
   const response = await alice.post('/api/model-account/openrouter-key', { apiKey: key })
   expect(response.status).toBe(200)
-  const status = await response.json()
-  expect(status).toMatchObject({ connected: true, kind: 'openrouter-key', model: 'moonshotai/kimi-k2.6' })
-  expect(JSON.stringify(status)).not.toContain(key)
-  /* connecting a server-side account switches the local CLI preference off */
-  expect(await (await alice.get('/api/local-agent')).json()).toMatchObject({ enabled: false })
-  expect(await (await bob.get('/api/model-account')).json()).toMatchObject({ connected: false })
+  const view = (await response.json()) as View
+  expect(accountIn(view, 'openrouter-key')).toMatchObject({ enabled: true, model: 'moonshotai/kimi-k2.6' })
+  expect(JSON.stringify(view)).not.toContain(key)
+  /* connecting a server-side account leaves the local CLI on */
+  expect(await (await alice.get('/api/local-agent')).json()).toMatchObject({ enabled: true })
+  expect(await (await bob.get('/api/model-account')).json()).toMatchObject({ accounts: [] })
 
   /* the picker only accepts this kind's curated ids */
-  expect((await alice.patch('/api/model-account', { model: 'gpt-5.6-sol' })).status).toBe(400)
-  expect((await alice.patch('/api/model-account', { model: 'claude-opus-5' })).status).toBe(400)
-  expect((await alice.patch('/api/model-account', { model: 'z-ai/glm-5.3' })).status).toBe(200)
-  expect(await (await alice.get('/api/model-account')).json()).toMatchObject({ model: 'z-ai/glm-5.3' })
+  expect((await alice.patch('/api/model-account/openrouter-key', { model: 'gpt-5.6-sol' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/openrouter-key', { model: 'claude-opus-5' })).status).toBe(400)
+  expect((await alice.patch('/api/model-account/openrouter-key', { model: 'z-ai/glm-5.3' })).status).toBe(200)
+  expect(accountIn(await (await alice.get('/api/model-account')).json(), 'openrouter-key')).toMatchObject({
+    model: 'z-ai/glm-5.3',
+  })
 
   /* rotation keeps the chosen model; a failed rotation changes nothing */
   expect((await alice.post('/api/model-account/openrouter-key', { apiKey: 'nope' })).status).toBe(400)
   const rotated = await alice.post('/api/model-account/openrouter-key', { apiKey: 'sk-or-rotated-test-key' })
-  expect(await rotated.json()).toMatchObject({ connected: true, model: 'z-ai/glm-5.3' })
+  expect(accountIn(await rotated.json(), 'openrouter-key')).toMatchObject({ model: 'z-ai/glm-5.3' })
 })
 
-it('stores a Gemini key and resets the model on a provider switch', async () => {
+it('stores a Gemini key beside the OpenRouter one, each with its own model', async () => {
   expect((await alice.post('/api/model-account/gemini-key', { apiKey: 'has spaces' })).status).toBe(400)
   expect((await alice.post('/api/model-account/gemini-key', { apiKey: 'short' })).status).toBe(400)
   const response = await alice.post('/api/model-account/gemini-key', { apiKey: 'AIzaTestKeyLongEnoughToPass123456' })
   expect(response.status).toBe(200)
-  /* switching providers resets the model to the new kind's default */
-  const status = await response.json()
-  expect(status).toMatchObject({ connected: true, kind: 'gemini-key', model: 'gemini-3.7-flash' })
-  expect(JSON.stringify(status)).not.toContain('AIzaTestKeyLongEnoughToPass123456')
-  expect((await alice.patch('/api/model-account', { model: 'gemini-3.1-pro-preview' })).status).toBe(200)
-  expect((await alice.delete('/api/model-account')).status).toBe(200)
+  const view = (await response.json()) as View
+  expect(accountIn(view, 'gemini-key')).toMatchObject({ enabled: true, model: 'gemini-3.7-flash' })
+  expect(accountIn(view, 'openrouter-key')).toMatchObject({ model: 'z-ai/glm-5.3' })
+  expect(JSON.stringify(view)).not.toContain('AIzaTestKeyLongEnoughToPass123456')
+  expect((await alice.patch('/api/model-account/gemini-key', { model: 'gemini-3.1-pro-preview' })).status).toBe(200)
+  expect((await alice.delete('/api/model-account/gemini-key')).status).toBe(200)
+  expect(accountIn(await (await alice.get('/api/model-account')).json(), 'openrouter-key')).toBeTruthy()
 })
 
 it('validates image-model picks against the registry and this user’s credentials', async () => {

@@ -51,7 +51,13 @@ vi.mock('../server/storage.ts', () => ({
 }))
 vi.mock('../server/modelAccounts.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../server/modelAccounts.ts')>()
-  return { ...original, getAccount: mocks.account }
+  return {
+    ...original,
+    getAccounts: async (userId: string) => {
+      const value = await mocks.account(userId)
+      return Array.isArray(value) ? value : value ? [{ enabled: true, ...value }] : []
+    },
+  }
 })
 vi.mock('../server/agentModel.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../server/agentModel.ts')>()
@@ -514,5 +520,48 @@ describe('queue failure regressions', () => {
     } finally {
       read.mockRestore()
     }
+  })
+})
+
+describe('multiple connected accounts', () => {
+  it('uses an enabled account before falling back to a different payer', async () => {
+    mocks.account.mockImplementation(async (id: string) =>
+      id === 'multi'
+        ? [
+            { ...connected(id), enabled: false },
+            { ...connected(id), kind: 'gemini-key', enabled: true },
+          ]
+        : [],
+    )
+    mocks.own.mockImplementation((account: { kind: string }) => fake(account.kind))
+    expect(await describerFor('multi', 'owner')).toMatchObject({ payerId: 'multi', status: { label: 'gemini-key' } })
+    expect(mocks.own).toHaveBeenCalledTimes(1)
+    expect(mocks.account.mock.calls.map(([id]) => id)).toEqual(['multi'])
+  })
+
+  it('tries the preferred enabled provider first', async () => {
+    const { setStoredDefault } = await import('../server/agentDefaults.ts')
+    await setStoredDefault('multi-default', 'gemini-key')
+    mocks.account.mockResolvedValue([
+      { ...connected('multi-default'), enabled: true },
+      { ...connected('multi-default'), kind: 'gemini-key', enabled: true },
+    ])
+    mocks.own.mockImplementation((account: { kind: string }) => fake(account.kind))
+    expect(await describerFor('multi-default')).toMatchObject({ status: { label: 'gemini-key' } })
+    expect(mocks.own).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not switch providers when the selected connection is disabled before retry', async () => {
+    useAccounts(['multi-retry'])
+    const asset = await createAsset(png, { canvasId: canvas(), ownerId: 'multi-retry', uploadedBy: 'Alice' })
+    mocks.run.mockRejectedValueOnce(new Error('overloaded'))
+    expect(await describeAsset(asset.id)).toBe('failed')
+    mocks.account.mockResolvedValue([
+      { ...connected('multi-retry'), enabled: false },
+      { ...connected('multi-retry'), kind: 'gemini-key', enabled: true },
+    ])
+    expect(await describeAsset(asset.id)).toBe('skipped')
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    expect(mocks.server).not.toHaveBeenCalled()
   })
 })

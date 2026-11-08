@@ -8,7 +8,8 @@ import { env } from './env.ts'
 import type { CanvasEvent } from './events.ts'
 import { getAsset, isDescribableImage } from './assets.ts'
 import { accountDescriber, serverDescriber, type AgentModel } from './agentModel.ts'
-import { getAccount } from './modelAccounts.ts'
+import { getAccounts } from './modelAccounts.ts'
+import { getStoredDefault } from './agentDefaults.ts'
 import { getImageDescriptionMode, saveImageDescriptionMode } from './imageDescriptionPrefs.ts'
 import { store } from './store.ts'
 import { isImageDescriptionMode, type DescriberStatus } from '../shared/imageDescriptions.ts'
@@ -62,8 +63,10 @@ export async function describerFor(
       // Consent may be withdrawn while a retry is waiting. Never choose a new payer.
       if (uploaderMode === 'server' || (await getImageDescriptionMode(payerId)) !== 'account')
         return { model: null, status: { label: null, reason: 'off' } }
-      const account = await getAccount(payerId)
-      const model = account?.kind === selected.describeProvider ? accountDescriber(account) : null
+      const account = (await getAccounts(payerId)).find(
+        (account) => account.enabled && account.kind === selected.describeProvider,
+      )
+      const model = account ? accountDescriber(account) : null
       return model
         ? { model, payerId, status: { label: model.label } }
         : { model: null, status: { label: null, reason: 'no-model' } }
@@ -80,11 +83,17 @@ export async function describerFor(
     for (const payerId of new Set([uploaderId, ...(ownerMode === 'account' ? [ownerId] : [])])) {
       if (!payerId) continue
       // A failed account lookup is a retryable error, not permission to bill someone else.
-      const account = await getAccount(payerId)
-      if (!account) continue
-      const model = accountDescriber(account)
-      if (model) return { model, payerId, status: { label: model.label } }
-      textOnly = true
+      const accounts = (await getAccounts(payerId)).filter((account) => account.enabled)
+      const preferred = await getStoredDefault(payerId)
+      const ordered = [
+        ...accounts.filter((account) => account.kind === preferred),
+        ...accounts.filter((account) => account.kind !== preferred),
+      ]
+      for (const account of ordered) {
+        const model = accountDescriber(account)
+        if (model) return { model, payerId, status: { label: model.label } }
+        textOnly = true
+      }
     }
   }
   const model = serverDescriber()
@@ -291,7 +300,7 @@ export async function describeAsset(
 }
 
 /** Queue what an earlier process left undescribed. Rows from before
- *  descriptions existed were marked out of attempts by migration 0044, so
+ *  descriptions existed were marked out of attempts by migration 0049, so
  *  this never bills an owner for their history. */
 export async function enqueuePending(): Promise<number> {
   const rows = await db

@@ -34,6 +34,8 @@
     "allow-codex-add-mcp",
     "allow-fonts-choose-local",
     "allow-fonts-read-local",
-    "allow-view-menu-state"
+    "allow-view-menu-state",
+    "allow-update-card-ready",
+    "allow-update-restart"
   ]
 }

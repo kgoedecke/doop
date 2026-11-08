@@ -1,6 +1,6 @@
 {
-  "id": "c6ba66a6-022f-4cef-89b6-5ba0cc5e24be",
-  "prevId": "f9ba7269-6a7b-4ea6-906e-0b301cc1a87a",
+  "id": "8c643594-fc7d-47bc-ab1b-ff978c0b2d92",
+  "prevId": "842b8fa4-ee1e-44f9-b937-705235b11ef2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -359,43 +359,6 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "described_at": {
-          "name": "described_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "described_by": {
-          "name": "described_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "describe_attempts": {
-          "name": "describe_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "describe_payer_id": {
-          "name": "describe_payer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "describe_provider": {
-          "name": "describe_provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -846,6 +809,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "token_themes": {
+          "name": "token_themes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "id": {
           "name": "id",
           "type": "text",
@@ -1174,6 +1143,78 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.design_tokens": {
+      "name": "design_tokens",
+      "schema": "",
+      "columns": {
+        "canvas_id": {
+          "name": "canvas_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "themes": {
+          "name": "themes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order": {
+          "name": "order",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "design_tokens_canvas_id_name_pk": {
+          "name": "design_tokens_canvas_id_name_pk",
+          "columns": ["canvas_id", "name"]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1864,38 +1905,6 @@
           "columns": ["canvas_id", "name"]
         }
       },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.image_description_prefs": {
-      "name": "image_description_prefs",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'account'"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -3369,6 +3378,12 @@
         },
         "frame_ids": {
           "name": "frame_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "runner": {
+          "name": "runner",
           "type": "text",
           "primaryKey": false,
           "notNull": false

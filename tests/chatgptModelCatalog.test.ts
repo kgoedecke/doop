@@ -16,6 +16,7 @@ const CURATED = AGENT_MODELS.map((m) => ({ ...m, vision: true }))
 const account: ModelAccount = {
   userId: 'u1',
   kind: 'chatgpt',
+  enabled: true,
   accountId: 'acct_1',
   accessToken: 'tok-live',
   refreshToken: 'ref',

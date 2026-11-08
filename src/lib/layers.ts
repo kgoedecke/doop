@@ -1,4 +1,4 @@
-import { ELEMENT_ID_ATTR } from '../../shared/elementId'
+import { ELEMENT_ID_ATTR, newElementId } from '../../shared/elementId'
 
 /**
  * The Layers panel's view of a frame: the element tree of its HTML, parsed
@@ -28,6 +28,7 @@ export interface LayerNode {
 /** The attribute a locked layer carries in the frame's HTML. It travels with
  *  the markup, so every collaborator (and agent) sees the same lock. */
 export const LOCK_ATTR = 'data-doop-locked'
+export const NAME_ATTR = 'data-doop-name'
 
 /* markup that renders nothing of its own has no place in a layer list */
 const HIDDEN_TAGS = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'TITLE', 'NOSCRIPT', 'TEMPLATE', 'BR', 'WBR'])
@@ -142,6 +143,12 @@ function detailOf(el: Element): string {
 }
 
 function toNode(el: Element): LayerNode {
+  const node = defaultNode(el)
+  const name = el.getAttribute(NAME_ATTR)?.trim()
+  return name ? { ...node, label: name, detail: '' } : node
+}
+
+function defaultNode(el: Element): LayerNode {
   const tag = el.tagName.toLowerCase()
   const drawingName = el.hasAttribute('data-doop-drawing') ? el.getAttribute('data-name') : null
   const base = {
@@ -211,6 +218,55 @@ function find(doc: Document, selector: string): Element | null {
 
 export function elementHtml(html: string, selector: string): string | null {
   return find(parse(html), selector)?.outerHTML ?? null
+}
+
+export function elementName(html: string, selector: string): string | null {
+  return find(parse(html), selector)?.getAttribute(NAME_ATTR) ?? null
+}
+
+/** Compare a queued rename's document while allowing earlier renames to
+ *  finish or roll back (a rename stamps the element's id too). Any other
+ *  change can invalidate positional paths. */
+export function htmlWithoutLayerNames(html: string): string {
+  const doc = parse(html)
+  for (const el of doc.querySelectorAll(`[${NAME_ATTR}]`)) el.removeAttribute(NAME_ATTR)
+  for (const el of doc.querySelectorAll(`[${ELEMENT_ID_ATTR}]`)) el.removeAttribute(ELEMENT_ID_ATTR)
+  return serialize(doc)
+}
+
+/** The `data-doop-id` the element at `selector` carries, or null. */
+export function elementIdAt(html: string, selector: string): string | null {
+  return find(parse(html), selector)?.getAttribute(ELEMENT_ID_ATTR) ?? null
+}
+
+/** An element id no element in `html` carries yet. */
+export function freshElementId(html: string): string {
+  let id = newElementId()
+  while (html.includes(`${ELEMENT_ID_ATTR}="${id}"`)) id = newElementId()
+  return id
+}
+
+/** The frame's HTML with the element's `data-doop-id` taken off again: a
+ *  stamp rolled back with the write that made it. */
+export function clearElementId(html: string, selector: string): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  el.removeAttribute(ELEMENT_ID_ATTR)
+  return serialize(doc)
+}
+
+/** Store a layer caption without changing its text, alt text, id or styles.
+ *  `stamp` is the `data-doop-id` the element gets if it has none yet, so a
+ *  later undo or redo finds it by identity rather than by position. */
+export function setElementName(html: string, selector: string, name: string | null, stamp?: string): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el) return null
+  if (name === null) el.removeAttribute(NAME_ATTR)
+  else el.setAttribute(NAME_ATTR, name)
+  if (stamp && !el.hasAttribute(ELEMENT_ID_ATTR)) el.setAttribute(ELEMENT_ID_ATTR, stamp)
+  return serialize(doc)
 }
 
 /** True when the element, or anything above it, carries the lock — a lock

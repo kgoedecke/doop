@@ -2,7 +2,8 @@ import type { TextFormatCommand } from './richText'
 import type { Frame } from '../../shared/types'
 import type { ReorderMove } from './keys'
 import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
-import { pickedSelectors, useStore } from './store'
+import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
+import { t } from './i18n'
 import { api, ApiError, errorMessage } from './api'
 import { formatElementText, inspectElement, nudgeElements, requestFrame } from './frameBridge'
 import { isCanvasElement } from './drawing'
@@ -11,12 +12,15 @@ import { carriedCss, newScope, renameInCss, scopeMarkup, withCarriedCss } from '
 import {
   deleteFramesTracked,
   dropEntry,
+  historyEpoch,
   keepTransferDestination,
   recordDrawingTransfer,
+  recordLayerName,
   recordStack,
   recordUpdate,
   recordUpdates,
   saveStack,
+  saveLayerName,
   trackSave,
 } from './history'
 import {
@@ -24,6 +28,10 @@ import {
   duplicateElements,
   elementFate,
   elementHtml,
+  elementIdAt,
+  elementName,
+  freshElementId,
+  htmlWithoutLayerNames,
   isElementHidden,
   isElementLocked,
   moveElement,
@@ -40,6 +48,81 @@ import {
 } from './layers'
 
 /* ---- element edits shared by the Layers rail and the element panel ---- */
+
+/* Serializing renames gives each save a confirmed predecessor. A second
+   failed rename must never roll back to the first failed, optimistic name. */
+const pendingRenames = new Map<string, Promise<void>>()
+function queueRename(frameId: string, edit: (frame: Frame) => Promise<void>) {
+  const canvasId = useStore.getState().canvas?.id
+  const started = historyEpoch()
+  const run = async () => {
+    const s = useStore.getState()
+    if (s.canvas?.id !== canvasId || historyEpoch() !== started || !canEditOpenCanvas(s)) return
+    const frame = s.canvas?.frames.find((f) => f.id === frameId)
+    if (frame) await edit(frame)
+  }
+  const prior = pendingRenames.get(frameId)
+  const pending = (prior ? prior.then(run) : run()).finally(() => {
+    if (pendingRenames.get(frameId) === pending) pendingRenames.delete(frameId)
+  })
+  pendingRenames.set(frameId, pending)
+  trackSave(pending)
+}
+
+export function renameFrame(frameId: string, value: string) {
+  const name = value.trim()
+  if (!name) return
+  queueRename(frameId, async (frame) => {
+    if (isStackLocked(frame) || name === frame.name) return
+    const entry = recordUpdate(frame.id, { name: frame.name }, { name }, true)
+    const started = historyEpoch()
+    useStore.getState().patchFrameLocal(frame.id, { name })
+    try {
+      await api.updateFrame(frame.id, { name })
+    } catch (err) {
+      if (entry) dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id !== frame.canvasId || historyEpoch() !== started) return
+      // A failed save must not overwrite a newer name from another edit.
+      if (s.canvas.frames.find((f) => f.id === frame.id)?.name === name) {
+        s.patchFrameLocal(frame.id, { name: frame.name })
+      }
+      s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name: frame.name })))
+    }
+  })
+}
+
+export function renameLayer(frameId: string, selector: string, value: string) {
+  const name = value.trim()
+  const original = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
+  if (!name || !original) return
+  const expected = htmlWithoutLayerNames(original.html)
+  queueRename(frameId, async (frame) => {
+    // A positional selector can now name a different sibling. Fail closed
+    // when anything except another rename changed while this edit waited.
+    if (htmlWithoutLayerNames(frame.html) !== expected) {
+      useStore.getState().pushNotice(t('panels.layersRenameChanged'))
+      return
+    }
+    if (isLayerLocked(frame, selector)) return
+    const before = elementName(frame.html, selector)
+    if (before === name) return
+    /* the element's identity for undo and redo: the id it wears, else one
+       stamped with the name, so a sibling added later cannot shift the target */
+    const elementId = elementIdAt(frame.html, selector) ?? freshElementId(frame.html)
+    const entry = recordLayerName(frame.id, selector, before, name, elementId)
+    const started = historyEpoch()
+    try {
+      await saveLayerName(frame.id, selector, name, elementId)
+    } catch (err) {
+      dropEntry(entry)
+      const s = useStore.getState()
+      if (s.canvas?.id === frame.canvasId && historyEpoch() === started) {
+        s.pushNotice(errorMessage(err, t('panels.layersRenameFailed', { name })))
+      }
+    }
+  })
+}
 
 export function saveFrameHtml(frame: Frame, html: string) {
   // Layer commands each need their own undo step, even when invoked rapidly.

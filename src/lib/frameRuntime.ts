@@ -480,22 +480,49 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     return { x: r.left, y: r.top, width: r.width, height: r.height }
   }
 
+  /* The element's own turn, in degrees clockwise: its rotate property plus
+     the angle its transform carries, when that transform is a plain 2D turn
+     (a scale may ride along; a skew, a flip or a 3D turn makes it null). The
+     stage's grips and rotate zones follow this angle. */
+  function ownRotation(el) {
+    var cs = getComputedStyle(el)
+    if (cs.rotate !== 'none' && !/^-?[\\d.]+deg$/.test(cs.rotate)) return null
+    var turn = cs.rotate === 'none' ? 0 : parseFloat(cs.rotate)
+    if (cs.transform === 'none') return turn
+    var m = /^matrix\\(([^)]+)\\)$/.exec(cs.transform)
+    if (!m) return null
+    var p = m[1].split(',').map(parseFloat)
+    var a = p[0], b = p[1], c = p[2], d = p[3]
+    if (!(a * d - b * c > 0) || Math.abs(a * c + b * d) > 1e-6 * (a * a + b * b)) return null
+    return px(String(turn + Math.atan2(b, a) * 180 / Math.PI))
+  }
+
   /* Elements whose box takes a width/height: everything but inline text
      boxes. Replaced inline elements (an img) still size, so they count. */
   var REPLACED = ['img', 'video', 'canvas', 'svg', 'iframe', 'input', 'select', 'textarea', 'button', 'embed', 'object']
   function sizable(el) {
     var cs = getComputedStyle(el)
     if (cs.display === 'contents' || cs.display === 'none') return false
-    /* Screen deltas can only resize boxes whose axes still point right/down.
-       Individual transforms and every ancestor contribute to those axes. */
+    /* Screen deltas can only resize boxes whose axes the stage can follow:
+       the element's own turn it turns the deltas by, so a plain 2D turn of
+       its own is fine, but a turned, skewed or 3D ancestor is not.
+       Unequal ancestor scales also skew a turn: the rectangular grips and
+       rotate gesture cannot follow that affine transform, even if the
+       element starts straight. */
     for (var node = el; node; node = node.parentElement) {
       var transform = getComputedStyle(node)
-      if (transform.rotate !== 'none' && parseFloat(transform.rotate.split(/\\s+/).pop()) !== 0) return false
       if (transform.perspective !== 'none' || transform.transform.indexOf('matrix3d') === 0) return false
       if (transform.scale !== 'none') {
         var scales = transform.scale.split(/\\s+/).map(parseFloat)
         if (scales.length > 2 || scales.some(function (value) { return value <= 0 })) return false
       }
+      if (node === el) {
+        if (ownRotation(el) === null) return false
+        continue
+      }
+      var parentScale = ownScale(node)
+      if (Math.abs(parentScale.x - parentScale.y) > 1e-6 * Math.max(parentScale.x, parentScale.y)) return false
+      if (transform.rotate !== 'none' && parseFloat(transform.rotate.split(/\\s+/).pop()) !== 0) return false
       var m = /^matrix\\(([^)]+)\\)$/.exec(transform.transform)
       if (m) {
         var parts = m[1].split(',').map(parseFloat)
@@ -506,16 +533,56 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   }
 
   /* how far the rendered box is from the layout box: the element's own and
-     its ancestors' scale, which a drag's pointer delta has to be divided by */
+     its ancestors' scale, which a drag's pointer delta has to be divided by.
+     A turned element's bounds are wider than its box: the scale is read off
+     the width those bounds would have at this turn, as one factor both ways */
+  /* the element's own scale, each way: its scale property times the
+     length of its transform's columns (a turn-and-scale matrix keeps them
+     orthogonal, so each column is one axis's scale) */
+  function ownScale(el) {
+    var cs = getComputedStyle(el)
+    var scale = cs.scale === 'none' ? [1, 1] : cs.scale.split(/\\s+/).map(parseFloat)
+    var sx = scale[0], sy = scale[1] === undefined ? scale[0] : scale[1]
+    var m = /^matrix\\(([^)]+)\\)$/.exec(cs.transform)
+    if (m) {
+      var p = m[1].split(',').map(parseFloat)
+      sx *= Math.hypot(p[0], p[1])
+      sy *= Math.hypot(p[2], p[3])
+    }
+    return { x: sx, y: sy }
+  }
+
   function renderScale(el, rect) {
     var w = el.offsetWidth
     var h = el.offsetHeight
+    var turn = ownRotation(el) || 0
+    if (turn && w > 0) {
+      /* the bounds' width is the turned box's span: the element's own scale
+         each way, turned, times whatever its ancestors scale it by */
+      var own = ownScale(el)
+      var rad = turn * Math.PI / 180
+      var span = w * own.x * Math.abs(Math.cos(rad)) + h * own.y * Math.abs(Math.sin(rad))
+      var k = span > 0 && rect.width > 0 ? rect.width / span : 1
+      return { x: k * own.x, y: k * own.y }
+    }
     return { x: w > 0 && rect.width > 0 ? rect.width / w : 1, y: h > 0 && rect.height > 0 ? rect.height / h : 1 }
+  }
+
+  /* the element's rendered box before its own turn: what the selection
+     furniture is drawn around, turned by ownRotation about the centre of
+     rect (its rendered bounds) */
+  function renderedBox(el, rect) {
+    var w = el.offsetWidth
+    var h = el.offsetHeight
+    if (!(w > 0) || !(h > 0)) return { width: rect.width, height: rect.height }
+    var s = renderScale(el, rect)
+    return { width: w * s.x, height: h * s.y }
   }
 
   function hitInfo(el) {
     var snippet = el.outerHTML || ''
     if (snippet.length > 400) snippet = snippet.slice(0, 397) + '...'
+    var canSize = sizable(el)
     return {
       selector: cssPath(el),
       /* the stable id comments and links use, when something has stamped one */
@@ -525,9 +592,28 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       snippet: snippet,
       rect: designRect(el),
       /* the stage's resize grips: shown only where a drag can change the box */
-      sizable: sizable(el),
+      sizable: canSize,
+      /* Unsupported transforms use the axis-aligned bounds for selection. */
+      rotation: canSize ? ownRotation(el) || 0 : 0,
+      box: renderedBox(el, designRect(el)),
       locked: isLocked(el),
     }
+  }
+
+  /* what a moved element lines up with: its parent box and the visible
+     elements beside it (the frame itself is the stage's to add) */
+  function snapRects(el) {
+    var parent = el.parentElement
+    if (!parent) return []
+    var rects = parent === document.body || parent === document.documentElement ? [] : [designRect(parent)]
+    for (var i = 0; i < parent.children.length && rects.length < 80; i++) {
+      var sibling = parent.children[i]
+      if (sibling === el || sibling.hasAttribute('data-doop-defs')) continue
+      if (getComputedStyle(sibling).visibility !== 'visible') continue
+      var r = designRect(sibling)
+      if (r.width > 0 && r.height > 0) rects.push(r)
+    }
+    return rects
   }
 
   /* Ask the browser which element is actually on top, including stacking
@@ -560,19 +646,22 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       else el.setAttribute('style', originalStyle)
     }
     return {
-      selector: cssPath(el), rect: rect,
+      selector: cssPath(el), rect: rect, snapRects: snapRects(el),
       geometry: { width: width, height: height, offsetX: rect.x - untransformed.x,
         offsetY: rect.y - untransformed.y, styles: styles },
     }
   }
 
+  /* the path editor and a drawing being dragged out of place draw their own
+     copy over the canvas; the original stays laid out but unpainted */
   var pathEditingSelector = null
+  var movingDrawingSelector = null
   function syncPathVisibility() {
     document.querySelectorAll('[data-v-path-hidden]').forEach(function (el) { el.removeAttribute('data-v-path-hidden') })
-    if (pathEditingSelector) {
-      var pathSvg = document.querySelector(pathEditingSelector)
-      if (pathSvg) pathSvg.setAttribute('data-v-path-hidden', '')
-    }
+    ;[pathEditingSelector, movingDrawingSelector].forEach(function (selector) {
+      var hidden = selector && document.querySelector(selector)
+      if (hidden) hidden.setAttribute('data-v-path-hidden', '')
+    })
   }
   /* the topmost unlocked element under a point, a standalone's root included:
      a double-click on a shape inside an imported group edits that shape */
@@ -667,7 +756,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     // A selected group moves as a whole even when the press hits a child.
     if (el && picked && picked.contains(el) && !isLocked(picked)) el = picked
     while (el && el !== document.body && el !== document.documentElement) {
-      if (elementGeometry(el).enabled) return hitInfo(el)
+      if (elementGeometry(el).enabled) {
+        var info = hitInfo(el)
+        info.snapRects = snapRects(el)
+        return info
+      }
       // Inline text and SVG paths move with their containing box/SVG.
       el = el.parentElement
     }
@@ -920,6 +1013,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       var name = el.style[j]
       inline[name] = el.style.getPropertyValue(name)
     }
+    // The list enumerates longhands, so a shorthand holding a var() (a design
+    // token on border-radius) is only visible through the shorthand itself.
+    var shorthands = ['border-radius', 'border-color', 'border-width', 'padding', 'gap']
+    for (var sh = 0; sh < shorthands.length; sh++) {
+      var shorthandValue = el.style.getPropertyValue(shorthands[sh])
+      if (shorthandValue) inline[shorthands[sh]] = shorthandValue
+    }
     var classes = (el.getAttribute('class') || '').trim().split(/[ ]+/).filter(Boolean)
     var text = ''
     for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3) text += n.nodeValue
@@ -951,6 +1051,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       rect: designRect(el),
       geometry: elementGeometry(el),
       scale: renderScale(el, designRect(el)),
+      box: renderedBox(el, designRect(el)),
       position: cs.position,
       display: cs.display,
       flexDirection: cs.flexDirection,
@@ -1197,6 +1298,19 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         }
       }
     }
+    if (d.type === 'doop:rename') {
+      var namedEl = null
+      try { namedEl = d.selector ? document.querySelector(d.selector) : null } catch (e) { /* bad selector */ }
+      if (namedEl) {
+        if (typeof d.name === 'string') namedEl.setAttribute('data-doop-name', d.name)
+        else if (d.name === null) namedEl.removeAttribute('data-doop-name')
+        /* the saved document stamps the element's id with its name; the live
+           one follows, and a rolled-back stamp (null) comes off again */
+        if (typeof d.elementId === 'string' && !namedEl.hasAttribute('data-doop-id')) namedEl.setAttribute('data-doop-id', d.elementId)
+        else if (d.elementId === null) namedEl.removeAttribute('data-doop-id')
+      }
+      parent.postMessage({ type: 'doop:rename-result', reqId: d.reqId, ok: !!namedEl }, '*')
+    }
     // Mirror the Layers eye in the live document, including during text edits.
     if (d.type === 'doop:visibility') {
       var hideEl = null
@@ -1262,6 +1376,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       syncPathVisibility()
       parent.postMessage({ type: 'doop:path-editing-result', reqId: d.reqId }, '*')
     }
+    if (d.type === 'doop:drawing-moving') {
+      movingDrawingSelector = d.selector || null
+      syncPathVisibility()
+      parent.postMessage({ type: 'doop:drawing-moving-result', reqId: d.reqId }, '*')
+    }
     if (d.type === 'doop:hover') {
       parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y) }, '*')
     }
@@ -1289,7 +1408,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         var target = d.selector ? document.querySelector(d.selector) : null
         if (target) found = designRect(target)
       } catch (e) { /* bad selector -> null */ }
-      parent.postMessage({ type: 'doop:located', reqId: d.reqId, selector: d.selector, rect: found, sizable: !!target && sizable(target) }, '*')
+      var canSize = !!target && sizable(target)
+      parent.postMessage({
+        type: 'doop:located', reqId: d.reqId, selector: d.selector, rect: found,
+        sizable: canSize,
+        rotation: canSize ? ownRotation(target) || 0 : 0,
+        box: target && found ? renderedBox(target, found) : null,
+      }, '*')
     }
   })
   parent.postMessage({ type: 'doop:frame-ready' }, '*')

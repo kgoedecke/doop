@@ -34,13 +34,13 @@ function SelectionBar({ count, total, note, tone = 'default', actions, className
   )
 }
 
-/** A selection bar's text action: mono micro type, no chrome, red on hover. */
+/** A selection bar's text action: caption type, no chrome, ink on hover. */
 function SelectionBarAction({ className, ...props }: Omit<React.ComponentProps<typeof Button>, 'variant' | 'size'>) {
   return (
     <Button
       variant="bare"
       size="sm"
-      className={cn('p-0 font-mono text-micro hover:bg-transparent hover:text-accent-ink', className)}
+      className={cn('p-0 text-caption font-medium text-ink-soft hover:bg-transparent hover:text-ink', className)}
       {...props}
     />
   )

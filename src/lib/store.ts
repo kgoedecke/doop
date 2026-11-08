@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { sortByStack } from '../../shared/frameStack'
+import type { DesignToken } from '../../shared/designTokens'
 import type {
   ActivityItem,
   AgentTask,
@@ -102,6 +103,8 @@ interface State {
   elementPanelOpen: boolean
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
+  /** which face the Layers panel shows: the layer tree, or the design tokens */
+  layersTab: 'layers' | 'tokens'
   /** ⌘. — every panel and toolbar is off screen, leaving only the canvas.
    *  A plain overlay flag: the panels' own open/closed state is untouched
    *  underneath, so toggling back shows exactly what was open before */
@@ -121,6 +124,9 @@ interface State {
    *  or the id in the URL was never one) — CanvasPage shows a not-found
    *  screen instead of an unusable, unresponsive canvas UI */
   canvasNotFound: boolean
+  /** a signed-out guest's join was refused (a private canvas, or the owner
+   *  turned the link off mid-visit) — App shows the sign-in form instead */
+  signInRequired: boolean
   /** a reconnect revealed a newer client bundle on the server — offer a reload */
   updateReady: boolean
   /** frameId -> color, set briefly when a remote actor updates a frame */
@@ -163,6 +169,7 @@ interface State {
   setCanvas(c: Canvas | null): void
   setConnected(v: boolean): void
   setCanvasNotFound(v: boolean): void
+  setSignInRequired(v: boolean): void
   setUpdateReady(v: boolean): void
   setPresences(list: Presence[]): void
   upsertPresence(p: Presence): void
@@ -189,6 +196,8 @@ interface State {
   renameCanvasLocal(name: string): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
+  /** replace the open canvas's design tokens and themes (the room sends the whole list) */
+  setTokensLocal(tokens: DesignToken[], themes: string[]): void
   /** pin (reference set) or unpin (null) a Memory reference on the open canvas */
   setReferenceLocal(id: string, reference: MemoryReference | null): void
   setDecisions(decisions: DesignDecision[]): void
@@ -244,6 +253,7 @@ interface State {
   pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
+  setLayersTab(tab: 'layers' | 'tokens'): void
   toggleUiHidden(): void
   setPrototypeMode(on: boolean): void
   setViewport(v: Viewport): void
@@ -312,6 +322,7 @@ export const useStore = create<State>((set, get) => ({
   commentDrag: null,
   elementPanelOpen: false,
   layersOpen: readLayersOpen(),
+  layersTab: 'layers',
   uiHidden: false,
   prototypeMode: false,
   viewport: { x: 0, y: 0, zoom: 1 },
@@ -320,6 +331,7 @@ export const useStore = create<State>((set, get) => ({
   selectedGuideId: null,
   connected: false,
   canvasNotFound: false,
+  signInRequired: false,
   updateReady: false,
   notice: null,
   flashes: {},
@@ -395,6 +407,7 @@ export const useStore = create<State>((set, get) => ({
     }),
   setConnected: (connected) => set({ connected }),
   setCanvasNotFound: (canvasNotFound) => set({ canvasNotFound }),
+  setSignInRequired: (signInRequired) => set({ signInRequired }),
   setUpdateReady: (updateReady) => set({ updateReady }),
   setPresences: (list) =>
     set((s) => ({
@@ -521,6 +534,8 @@ export const useStore = create<State>((set, get) => ({
       }
       return { canvas: { ...s.canvas, guidelines: docs } }
     }),
+  setTokensLocal: (tokens, themes) =>
+    set((s) => (s.canvas ? { canvas: { ...s.canvas, tokens, tokenThemes: themes } } : {})),
   setReferenceLocal: (id, reference) =>
     set((s) => {
       if (!s.canvas) return {}
@@ -694,6 +709,7 @@ export const useStore = create<State>((set, get) => ({
     }
     set({ layersOpen })
   },
+  setLayersTab: (layersTab) => set({ layersTab }),
   /* hidden guides cannot stay selected: Delete would remove one unseen */
   toggleUiHidden: () => set((s) => ({ uiHidden: !s.uiHidden, ...(s.uiHidden ? {} : { selectedGuideId: null }) })),
   setPrototypeMode: (prototypeMode) => set({ prototypeMode }),

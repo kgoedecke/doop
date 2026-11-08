@@ -234,7 +234,81 @@ launch it writes `~/.local/share/applications/doop-desktop-appimage.desktop`
 data dir (`src-tauri/src/appimage.rs`); the .deb and .rpm install their own
 `doop-desktop.desktop` and remove the AppImage's entry when they launch.
 
-CI (`.github/workflows/desktop.yml`) builds an unsigned macOS .app, a Windows
+## Chromium shell (the macOS app)
+
+`src-tauri-chromium/` builds the same shell on Chromium instead of the system
+WebKit, through Tauri 3's CEF runtime (`tauri-runtime-cef`). The canvas runs
+every frame in a sandboxed iframe: WKWebView renders all of them in the
+editor's process, Chromium in a renderer process of their own, which is the
+difference between ~14 and ~58 fps when panning a 49-frame canvas (headless
+WebKit and Chromium under Playwright). On macOS it is the app that ships;
+Windows and Linux stay on the WebKit build in `src-tauri/`.
+
+There is no second copy of the code: the crate's `[[bin]]` and build script
+are `src-tauri/src/main.rs` and `src-tauri/build.rs`, and it reads the
+capabilities and icons from `src-tauri/`. Linking `tauri-runtime-cef` makes
+`build.rs` set `cfg(chromium)`, which picks the CEF runtime in `main()`.
+Everything else (menus, View-menu events, downloads, deep links, the desktop
+markers, the Claude / Codex / fonts commands, self-update) is shared.
+
+```sh
+brew install cmake ninja   # cef-dll-sys builds CEF's C++ wrapper
+bun run dev:chromium       # against localhost:4300
+bun run build:chromium     # src-tauri-chromium/target/release/bundle/{macos,dmg}
+```
+
+The first build downloads the CEF binary distribution (Chromium 154, about
+300 MB) into `~/Library/Caches/tauri-cef`. Both scripts run the Tauri 3 CLI
+(`@tauri-apps/cli@3.0.0-alpha.5`), which compiles the five helper apps and
+puts them, with `Chromium Embedded Framework.framework`, in
+`Contents/Frameworks`; `tauri dev` runs from that bundle too, since CEF finds
+its helpers by bundle path. Without `--target` the build is for the machine's
+own architecture. The CLI cannot bundle CEF universal (it ships one
+architecture's framework), so the release runs `scripts/macos-universal.sh`:
+both architectures built unsigned, merged with `@electron/universal`
+(`scripts/universal-app.mjs`), then signed with the CEF entitlements,
+notarized and packed (`brew install create-dmg` to run it locally).
+
+### Replacing the WebKit app
+
+The Chromium app is `doop` (`design.doop.desktop`) with the executable
+`doop-desktop`, exactly as the WebKit app was: the updater swaps the bundle in
+place and relaunches it by the old executable's path, and macOS keeps the
+app's permissions and keychain items. Chromium keeps its profile in
+`~/Library/Application Support/design.doop.desktop/cef` (debug builds use
+`cef-dev`, since they encrypt cookies with a mock keychain).
+
+On its first launch the app opens hidden on the app origin's `/favicon.ico`
+and moves the WebKit app's storage over (`src/webkit_migration.rs`): the
+cookies for the app's host from the shared WKWebsiteDataStore, and the
+origin's localStorage, read by a hidden WKWebView at that origin. The cookies
+go straight into the webview's Chromium cookie manager with their expiry and
+SameSite (Tauri's `set_cookie` drops both, and Chromium forgets a cookie
+without an expiry on restart) and are flushed to disk; the page gets the
+entries, and the window shows itself as the app loads. A `webkit-migrated` marker in the profile it filled makes it
+run once (a debug build's `cef-dev` has its own); nothing is written to the
+WebKit store, so a rollback to a WebKit build starts from it as it was. A
+read that fails or takes over five seconds only means signing in again, and a
+landing page that does not load within fifteen (offline) opens the app
+without migrating and leaves the next launch to try again.
+
+To test it on a machine with the WebKit app installed: quit the WebKit app
+(both share the bundle id, so a running one takes the launch over), build
+the Chromium app against the same server, and launch it. Delete
+`~/Library/Application Support/design.doop.desktop/cef` (`cef-dev` for a
+debug build) to run the migration again.
+
+`DOOP_CEF_DEBUG_PORT=9333 bun run dev:chromium` opens Chrome's remote
+debugging on that port in a debug build (never in a release), for
+`chrome://inspect` or a CDP client such as Playwright's `connectOverCDP`.
+
+Keep the shared dependencies in `src-tauri-chromium/Cargo.toml` in step with
+`src-tauri/Cargo.toml`. Code that names a runtime type uses `ShellRuntime`
+(`tauri::Wry` on Tauri 2, `tauri::DynRuntime` on Tauri 3), and
+`cargo build` in both directories is the check that a change still compiles
+on both.
+
+CI (`.github/workflows/desktop.yml`) builds an unsigned macOS .app (the Chromium crate), a Windows
 NSIS installer and the Linux packages on every PR that touches `desktop/`, on pushes to `main` (to
 keep the Rust build cache warm), and on manual dispatch. The toolchain setup
 shared by every desktop job lives in `.github/actions/setup-desktop`.

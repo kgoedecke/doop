@@ -7,8 +7,12 @@ lists every file in this folder.
 ## Active
 
 - [image-descriptions.md](image-descriptions.md) - Model-written descriptions of uploaded images,
-  stored once per asset, run on the canvas owner's connected account or the server tier behind an
+  stored once per asset, billed to the uploader, eligible owner or server behind an
   Agents setting, and surfaced to MCP and resident agents as `images` per frame.
+- [design-tokens.md](design-tokens.md) - Design tokens and themes: Paper's eleven token types as
+  CSS custom properties per canvas, the managed `<style data-doop-tokens>` block every frame
+  carries, propagation as annotation writes, modes via `data-doop-mode`, REST + MCP + the
+  styleguide export, and the Layers panel's Tokens tab.
 - [prototyping.md](prototyping.md) - Clickable prototypes: interaction data attributes in frame
   HTML (triggers, actions, transitions, canonical form), per-page flow start, the prototype player
   and `/c/<id>/proto`, the editor's Prototype mode and connectors, and the MCP tools.

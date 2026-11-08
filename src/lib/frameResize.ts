@@ -7,6 +7,7 @@
  */
 import { movesHeight, movesWidth, resizedSize, type ResizeDelta, type ResizeHandle } from './elementResize'
 import type { SnapGuide } from './snap'
+import { rotateVector } from '../../shared/frameRotation'
 
 export interface FrameRect {
   x: number
@@ -68,4 +69,22 @@ export function keepRatioAfterSnap(
     height,
     guides: snapped.guides.filter((g) => g.axis === (lead === 'width' ? 'v' : 'h')),
   }
+}
+
+/** A resize of a turned frame keeps the corner opposite the handle where
+ *  it was on the canvas, as Figma does: the box is turned about its centre,
+ *  so a change of size moves every corner, and `next` is shifted back by
+ *  how far the far corner travelled. Unturned, `next` comes back as it is. */
+export function keepAnchorTurned(handle: ResizeHandle, orig: FrameRect, next: FrameRect, rotation: number): FrameRect {
+  if (!rotation) return next
+  /* the far corner (or far edge's middle), as a fraction of the box */
+  const ax = handle.includes('w') ? 1 : handle.includes('e') ? 0 : 0.5
+  const ay = handle.includes('n') ? 1 : handle.includes('s') ? 0 : 0.5
+  const anchor = (r: FrameRect) => {
+    const turned = rotateVector({ x: (ax - 0.5) * r.width, y: (ay - 0.5) * r.height }, rotation)
+    return { x: r.x + r.width / 2 + turned.x, y: r.y + r.height / 2 + turned.y }
+  }
+  const was = anchor(orig)
+  const now = anchor(next)
+  return { ...next, x: Math.round(next.x + was.x - now.x), y: Math.round(next.y + was.y - now.y) }
 }

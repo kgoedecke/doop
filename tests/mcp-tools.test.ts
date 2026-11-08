@@ -337,12 +337,17 @@ describe('MCP ChatGPT app contract', () => {
       expect(html.text).toContain('var MAX_SHOWN = 6')
       /* an empty frame shows a placeholder, never a blank render */
       expect(html.text).toContain('Design in progress')
-      /* the retired v1 URI stays served for chats that still hold it */
-      expect(resources.map((r) => r.uri)).toContain('ui://doop/frame-preview-1.html')
+      /* retired URIs stay served for chats that still hold them */
+      expect(resources.map((r) => r.uri)).toEqual(
+        expect.arrayContaining(['ui://doop/frame-preview-1.html', 'ui://doop/frame-preview-2.html']),
+      )
       expect(html.text).toContain('class="retry"')
       const meta = html._meta as Record<string, unknown>
       expect(meta['openai/widgetCSP']).toMatchObject({ resource_domains: [expect.stringMatching(/^http/)] })
       expect(meta.ui).toMatchObject({ csp: { resourceDomains: [expect.stringMatching(/^http/)] } })
+      /* Claude refuses to render a card whose ui.domain is not its own sandbox origin */
+      expect(meta.ui).not.toHaveProperty('domain')
+      expect(meta['openai/widgetDomain']).toMatch(/^http/)
     } finally {
       await close()
     }
@@ -362,4 +367,39 @@ describe('MCP ChatGPT app contract', () => {
       await close()
     }
   })
+})
+
+it('update_frame normalizes and clears rotation while retaining page validation', async () => {
+  const canvasId = 'mcp-frame-rotation'
+  const { client, close, body } = await pagesClient({
+    id: canvasId,
+    ownerId: 'test-owner-id',
+    name: 'Rotation',
+    pages: [
+      { id: 'first', name: 'Main' },
+      { id: 'second', name: 'Mobile' },
+    ],
+    frames: [],
+  })
+  const { store } = await import('../server/store.ts')
+  const frame = store.createFrame(canvasId, { name: 'Turn', pageId: 'first', width: 100, height: 50 }, 'Agent')!
+  const update = (patch: Record<string, unknown>) =>
+    client.callTool({
+      name: 'update_frame',
+      arguments: { frame_id: frame.id, agent_name: 'Agent', ...patch },
+    })
+  try {
+    const moved = await update({ rotation: 630, pageId: 'second' })
+    expect(moved.isError).not.toBe(true)
+    expect(body(moved).frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const invalid = await update({ rotation: 45, pageId: 'missing' })
+    expect(invalid.isError).toBe(true)
+    expect(frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const straight = await update({ rotation: 0 })
+    expect(straight.isError).not.toBe(true)
+    expect(body(straight).frame).not.toHaveProperty('rotation')
+    expect(frame).toHaveProperty('rotation', undefined)
+  } finally {
+    await close()
+  }
 })

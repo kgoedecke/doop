@@ -37,7 +37,8 @@ interface ClientIntegrationBase {
   name: string
   /** the integration's mark on a paper tile (step chains, list rows) */
   Tile?: ComponentType<{ size?: number; className?: string }>
-  /** its card in the import modal's source picker (with `ImportSection`) */
+  /** its row in the import modal's source picker (with `ImportSection`);
+   *  `icon` is its `AppIcon` at the list's 32px */
   importSource?: { title: string; blurb: string; icon: ReactNode }
   /** body copy of the shared disconnect confirm dialog, translated where it shows */
   disconnectCopy: PlainMessageKey

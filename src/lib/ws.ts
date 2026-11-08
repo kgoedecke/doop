@@ -1,16 +1,20 @@
 import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
+import { roleAllows } from '../../shared/canvasRole'
 import { getIdentity } from './identity'
 import { useStore } from './store'
 
 let socket: WebSocket | null = null
 let currentCanvasId: string | null = null
+/* joined without a session, as a guest on a link-shared canvas */
+let joinedAsGuest = false
 let retryTimer: number | null = null
 /* the server build this page first connected under; survives reconnects */
 let loadedBuild: string | null = null
 
-export function connect(canvasId: string) {
+export function connect(canvasId: string, guest = false) {
   currentCanvasId = canvasId
+  joinedAsGuest = guest
   /* a fresh attempt for a (possibly different) id — any not-found from a
      previous canvas must not leak into this one */
   useStore.getState().setCanvasNotFound(false)
@@ -59,6 +63,13 @@ function open() {
     /* a superseded socket must not trigger reconnects */
     if (socket !== s) return
     useStore.getState().setConnected(false)
+    if (joinedAsGuest && (ev.code === 4401 || ev.code === 4403)) {
+      /* a guest may not look (any more): App swaps in the sign-in form at
+         this same URL, rather than reloading into the same refusal */
+      currentCanvasId = null
+      useStore.getState().setSignInRequired(true)
+      return
+    }
     if (ev.code === 4401) {
       /* session expired or missing — reload lands on the sign-in page */
       currentCanvasId = null
@@ -97,10 +108,16 @@ function handle(msg: ServerMessage) {
         if (loadedBuild === null) loadedBuild = msg.serverBuild
         else if (loadedBuild !== msg.serverBuild) s.setUpdateReady(true)
       }
-      s.setCanvas(msg.canvas)
-      /* drops a tool the role does not allow, e.g. on a rejoin after the
+      {
+        const firstJoin = s.canvas?.id !== msg.canvas.id
+        s.setCanvas(msg.canvas)
+        /* drops a tool the role does not allow, e.g. on a rejoin after the
          owner turned the link to view-only */
-      s.setRole(msg.canvas.role ?? 'edit')
+        s.setRole(msg.canvas.role ?? 'edit')
+        /* someone who cannot edit came to look: they start on the Hand tool,
+         the way Figma opens a file for a viewer. A reconnect keeps their pick. */
+        if (firstJoin && !roleAllows(msg.canvas.role ?? 'edit', 'edit')) s.setTool('hand')
+      }
       s.setPresences(msg.presences)
       s.setActivity(msg.activity)
       s.setTasks(msg.tasks)
@@ -140,7 +157,13 @@ function handle(msg: ServerMessage) {
       s.upsertComment(msg.comment)
       break
     case 'frame:drag':
-      s.patchFrameLocal(msg.frameId, { x: msg.x, y: msg.y, width: msg.width, height: msg.height })
+      s.patchFrameLocal(msg.frameId, {
+        x: msg.x,
+        y: msg.y,
+        width: msg.width,
+        height: msg.height,
+        ...(msg.rotation !== undefined ? { rotation: msg.rotation } : {}),
+      })
       break
     case 'frame:created':
       s.upsertFrame(msg.frame)
@@ -168,6 +191,9 @@ function handle(msg: ServerMessage) {
       break
     case 'guidelines':
       s.setGuidelineLocal(msg.name, msg.doc)
+      break
+    case 'tokens':
+      s.setTokensLocal(msg.tokens, msg.themes)
       break
     case 'reference':
       s.setReferenceLocal(msg.id, msg.reference)

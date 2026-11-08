@@ -6,6 +6,8 @@ import type { CustomFont } from '../shared/fonts'
    matters here. The stream idle sweep is a module-level interval, so the
    clock is faked before actions.ts loads. */
 vi.mock('../server/db/persist.ts', () => ({
+  saveToken: () => {},
+  deleteToken: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
   saveComment: () => {},
@@ -68,6 +70,25 @@ describe('library faces on frame writes', () => {
     expect(saved).toContain('family=Space+Grotesk:')
     /* an uploaded family is never also linked from Google Fonts */
     expect(saved).not.toContain('family=Brand+Sans')
+  })
+
+  it('finds a family named only through a font token', () => {
+    const canvasId = store.createCanvas('fonts', 'kevin').id
+    const human: Actor = { name: 'Kevin', kind: 'user', color: '#2743ee' }
+    actions.createTokens(
+      canvasId,
+      [{ name: '--font-body', type: 'fontFamily', value: '"Brand Sans", sans-serif' }],
+      human,
+    )
+    const frame = actions.createFrame(
+      canvasId,
+      { name: 'Hero', html: '<html><head></head><body style="font-family:var(--font-body)">Hi</body></html>' },
+      agent,
+    )!
+    expect(store.getFrame(frame.id)!.html).toContain(BRAND.url)
+    /* and a token change to a hosted family links it */
+    actions.setTokens(canvasId, [{ name: '--font-body', value: '"Space Grotesk", sans-serif' }], human)
+    expect(store.getFrame(frame.id)!.html).toContain('family=Space+Grotesk:')
   })
 
   it('adds them with the done chunk of a stream, not before', () => {

@@ -8,7 +8,8 @@ ALTER TABLE "assets" ADD COLUMN "description" text;--> statement-breakpoint
 ALTER TABLE "assets" ADD COLUMN "described_at" bigint;--> statement-breakpoint
 ALTER TABLE "assets" ADD COLUMN "described_by" text;--> statement-breakpoint
 ALTER TABLE "assets" ADD COLUMN "describe_attempts" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
--- Images stored before descriptions existed are not described on the first boot after this
--- migration (that would bill every owner for their history at once): they are marked as out of
--- attempts, the value a described-later backfill can reset.
+ALTER TABLE "assets" ADD COLUMN "describe_payer_id" text;--> statement-breakpoint
+ALTER TABLE "assets" ADD COLUMN "describe_provider" text;
+--> statement-breakpoint
+-- Do not bill people for images uploaded before descriptions shipped.
 UPDATE "assets" SET "describe_attempts" = 3;

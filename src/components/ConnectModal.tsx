@@ -6,19 +6,20 @@ import { roleByAgentName } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { useT, type PlainMessageKey, type Translate } from '../lib/i18n'
 import { canUseChatGPTPublicEndpoint, CHATGPT_CONNECTION_GUIDE, CHATGPT_PLUGINS_URL } from '../lib/chatgptConnection'
-import { AgentIcon } from './AgentIcon'
 import { ClaudeDesktopInstall } from './ClaudeDesktopInstall'
 import { canAddToClaudeDesktop, claudeConnectorInstallUrl } from '../lib/claudeConnection'
 import { CursorInstall } from './CursorInstall'
 import { CodexInstall } from './CodexInstall'
+import { AppIcon, type AppIconBrand } from './ui/brand-mark'
 import { Button } from './ui/button'
+import { ChoiceList, ChoiceRow } from './ui/choice-list'
 import { CodeBlock } from './ui/code-block'
 import { Disclosure } from './ui/collapsible'
 import { Dot } from './ui/dot'
-import { CheckIcon, ChevronLeftIcon, PuzzleIcon } from './ui/icons'
+import { CheckIcon, ChevronLeftIcon } from './ui/icons'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
-import { barPrimaryBtn } from './TopBar'
 import { cn } from '@/lib/utils'
+import { isDesktopShell } from '../lib/shell'
 
 /**
  * "Connect AI" is about agents that join the canvas from outside: Claude Code,
@@ -28,39 +29,28 @@ import { cn } from '@/lib/utils'
  * the prompt bar's allowance meter — not here.
  */
 
-type AgentId = 'claude-code' | 'claude' | 'chatgpt' | 'codex' | 'cursor' | 'mcp'
+type AgentId = 'claude-code' | 'claude' | 'chatgpt' | 'codex' | 'cursor' | 'mcp' | 'headless'
 type View = 'agents' | AgentId
 type ClaudeConnection = 'desktop' | 'web'
+/** how a generic MCP client signs in: a person approves it in a browser, or it sends an agent key */
+type McpConnection = 'browser' | 'key'
 
 /** a product's own name stays as it is; the generic client is named in the reader's language */
 type AgentOption = {
   id: AgentId
   blurb: PlainMessageKey
-  icon: ReactNode
+  /** its app icon, as Settings → Doop Agent shows the providers */
+  icon: AppIconBrand
 } & ({ name: string } | { nameKey: PlainMessageKey })
 
 const AGENTS: AgentOption[] = [
-  {
-    id: 'claude-code',
-    name: 'Claude Code',
-    blurb: 'connect.blurbClaudeCode',
-    icon: <AgentIcon name="claude" size={20} />,
-  },
-  { id: 'claude', name: 'Claude', blurb: 'connect.blurbClaude', icon: <AgentIcon name="claude" size={20} /> },
-  { id: 'chatgpt', name: 'ChatGPT', blurb: 'connect.blurbChatgpt', icon: <AgentIcon name="gpt" size={20} /> },
-  { id: 'codex', name: 'Codex', blurb: 'connect.blurbCodex', icon: <AgentIcon name="codex" size={20} /> },
-  {
-    id: 'cursor',
-    name: 'Cursor',
-    blurb: 'connect.blurbCursor',
-    icon: <AgentIcon name="cursor" size={20} />,
-  },
-  {
-    id: 'mcp',
-    nameKey: 'connect.otherClientName',
-    blurb: 'connect.blurbOtherClient',
-    icon: <PuzzleIcon width={20} height={20} />,
-  },
+  { id: 'claude-code', name: 'Claude Code', blurb: 'connect.blurbClaudeCode', icon: 'claude-code' },
+  { id: 'claude', name: 'Claude', blurb: 'connect.blurbClaude', icon: 'claude' },
+  { id: 'chatgpt', name: 'ChatGPT', blurb: 'connect.blurbChatgpt', icon: 'openai' },
+  { id: 'codex', name: 'Codex', blurb: 'connect.blurbCodex', icon: 'codex' },
+  { id: 'cursor', name: 'Cursor', blurb: 'connect.blurbCursor', icon: 'cursor' },
+  { id: 'mcp', nameKey: 'connect.otherClientName', blurb: 'connect.blurbOtherClient', icon: 'mcp' },
+  { id: 'headless', nameKey: 'connect.headlessName', blurb: 'connect.blurbHeadless', icon: 'headless' },
 ]
 
 const agentById = (id: AgentId): AgentOption => AGENTS.find((agent) => agent.id === id) ?? AGENTS[0]!
@@ -103,40 +93,25 @@ export function ConnectModal({
 
 function AgentPicker({ onPick }: { onPick: (agent: AgentId) => void }) {
   const t = useT()
-  const [agent, setAgent] = useState<AgentId>('claude-code')
   return (
-    <>
-      <div className={body}>
-        <ModalTitle>{t('connect.chooseTitle')}</ModalTitle>
-        <ModalLede>{t('connect.chooseLede')}</ModalLede>
-
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          {AGENTS.map((option) => (
-            <ChoiceCard
-              key={option.id}
-              selected={agent === option.id}
-              onClick={() => setAgent(option.id)}
-              icon={option.icon}
-              title={agentName(option, t)}
-              blurb={t(option.blurb)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <ModalActions className={footer}>
-        <Button
-          variant="primary"
-          className={barPrimaryBtn}
-          onClick={() => {
-            posthog.capture('connect_ai_agent_chosen', { agent })
-            onPick(agent)
-          }}
-        >
-          {t('connect.connectButton')}
-        </Button>
-      </ModalActions>
-    </>
+    <div className={body}>
+      <ModalTitle>{t('connect.chooseTitle')}</ModalTitle>
+      <ModalLede>{t('connect.chooseLede')}</ModalLede>
+      <ChoiceList className="mt-5">
+        {AGENTS.map((option) => (
+          <ChoiceRow
+            key={option.id}
+            icon={<AppIcon brand={option.icon} />}
+            title={agentName(option, t)}
+            description={t(option.blurb)}
+            onClick={() => {
+              posthog.capture('connect_ai_agent_chosen', { agent: option.id })
+              onPick(option.id)
+            }}
+          />
+        ))}
+      </ChoiceList>
+    </div>
   )
 }
 
@@ -147,13 +122,45 @@ interface Step {
   action?: ReactNode
 }
 
+interface StepOptions {
+  claudeConnection: ClaudeConnection
+  mcpConnection: McpConnection
+  canvasId?: string | undefined
+  /** opens Settings → Agent keys, coming back to this canvas */
+  openAgentKeys: () => void
+}
+
+/** An agent with no browser to sign in with: an agent key, sent as a bearer header. */
+function agentKeySteps(t: Translate, mcpUrl: string, pointAt: Step, openAgentKeys: () => void) {
+  const config = JSON.stringify(
+    { mcpServers: { doop: { type: 'http', url: mcpUrl, headers: { Authorization: 'Bearer dpk_…' } } } },
+    null,
+    2,
+  )
+  return {
+    lede: t('connect.agentKeyLede'),
+    steps: [
+      {
+        title: t('connect.agentKeyCreateTitle'),
+        body: t('connect.agentKeyCreateBody'),
+        action: (
+          <Button variant="solid" className="mt-2.5" onClick={openAgentKeys}>
+            {t('connect.agentKeyOpen')}
+          </Button>
+        ),
+      },
+      { title: t('connect.agentKeySendTitle'), body: t('connect.agentKeySendBody'), code: config },
+      pointAt,
+    ],
+  }
+}
+
 function agentSteps(
   t: Translate,
   agent: AgentId,
   mcpUrl: string,
   prompt: string,
-  claudeConnection: ClaudeConnection,
-  canvasId?: string,
+  { claudeConnection, mcpConnection, canvasId, openAgentKeys }: StepOptions,
 ): { lede: string; steps: Step[] } {
   const jsonConfig = JSON.stringify({ mcpServers: { doop: { type: 'http', url: mcpUrl } } }, null, 2)
   const pointAt: Step = {
@@ -362,7 +369,10 @@ function agentSteps(
           },
         ],
       }
+    case 'headless':
+      return agentKeySteps(t, mcpUrl, pointAt, openAgentKeys)
     case 'mcp':
+      if (mcpConnection === 'key') return agentKeySteps(t, mcpUrl, pointAt, openAgentKeys)
       return {
         lede: t('connect.mcpLede'),
         steps: [
@@ -413,14 +423,26 @@ function AgentSteps({
   const prompt = canvasId
     ? `Work on Doop canvas ${canvasId}. Start with get_guide({ topic: "doop-instructions" }) and follow it.`
     : ''
-  const { lede, steps } = agentSteps(t, agent, mcpUrl, prompt, claudeConnection, canvasId)
+  const [mcpConnection, setMcpConnection] = useState<McpConnection>('browser')
+  /* a browser keeps these steps open beside the new tab; the desktop shell's
+     tabs hold canvases only, and the system browser may not be signed in, so
+     there it goes in place and Settings' back link returns to the canvas */
+  const openAgentKeys = () => {
+    const from = canvasId ? `&from=${encodeURIComponent(`/c/${canvasId}`)}` : ''
+    if (isDesktopShell()) navigate(`/settings?pane=keys${from}`)
+    else window.open('/settings?pane=keys', '_blank', 'noopener')
+  }
+  const { lede, steps } = agentSteps(t, agent, mcpUrl, prompt, {
+    claudeConnection,
+    mcpConnection,
+    canvasId,
+    openAgentKeys,
+  })
   return (
     <>
       <div className={body}>
         <div className="flex items-center gap-3.5">
-          <span className="grid size-11 shrink-0 place-items-center rounded-[11px] border border-line-soft bg-paper">
-            {option.icon}
-          </span>
+          <AppIcon brand={option.icon} size={40} />
           <div>
             <ModalTitle>{t('connect.connectAgentTitle', { name })}</ModalTitle>
             <ModalLede className="mt-1">{lede}</ModalLede>
@@ -428,19 +450,26 @@ function AgentSteps({
         </div>
 
         {agent === 'claude' && (
-          <div className="mt-5 flex gap-2" role="group" aria-label={t('connect.claudeMethodAria')}>
-            {(['web', 'desktop'] as const).map((connection) => (
-              <Button
-                key={connection}
-                size="sm"
-                variant={claudeConnection === connection ? 'solid' : 'ghost'}
-                aria-pressed={claudeConnection === connection}
-                onClick={() => setClaudeConnection(connection)}
-              >
-                {connection === 'desktop' ? t('connect.desktopApp') : t('connect.connectOnline')}
-              </Button>
-            ))}
-          </div>
+          <MethodSwitch
+            label={t('connect.claudeMethodAria')}
+            value={claudeConnection}
+            onChange={setClaudeConnection}
+            options={[
+              { id: 'web', label: t('connect.connectOnline') },
+              { id: 'desktop', label: t('connect.desktopApp') },
+            ]}
+          />
+        )}
+        {agent === 'mcp' && (
+          <MethodSwitch
+            label={t('connect.mcpMethodAria')}
+            value={mcpConnection}
+            onChange={setMcpConnection}
+            options={[
+              { id: 'browser', label: t('connect.mcpBrowser') },
+              { id: 'key', label: t('connect.mcpAgentKey') },
+            ]}
+          />
         )}
 
         <ol className="mt-6">
@@ -449,7 +478,7 @@ function AgentSteps({
               key={step.title}
               className={cn('grid grid-cols-[28px_1fr] gap-3.5', i > 0 && 'mt-3.5 border-t border-line-soft pt-3.5')}
             >
-              <span className="mt-px grid size-[26px] place-items-center rounded-full bg-ink text-xs font-bold text-white">
+              <span className="mt-px grid size-[26px] place-items-center rounded-full bg-ink text-xs font-bold text-paper">
                 {i + 1}
               </span>
               <div>
@@ -474,24 +503,6 @@ function AgentSteps({
             </p>
             <CodeBlock text={mcpUrl} className="mt-2" />
           </Disclosure>
-        )}
-
-        {agent === 'mcp' && (
-          <p className="mt-4 text-xs leading-[1.5] text-ink-faint">
-            {t('connect.headlessBefore')}
-            <button
-              type="button"
-              className="font-medium text-accent-ink underline underline-offset-2"
-              onClick={() =>
-                navigate(`/settings?pane=keys${canvasId ? `&from=${encodeURIComponent(`/c/${canvasId}`)}` : ''}`)
-              }
-            >
-              {t('connect.headlessLink')}
-            </button>
-            {t('connect.headlessMiddle')}
-            <code>Authorization: Bearer dpk_…</code>
-            {t('connect.headlessAfter')}
-          </p>
         )}
       </div>
 
@@ -520,44 +531,33 @@ function AgentSteps({
 const body = 'min-h-0 flex-1 overflow-y-auto p-5'
 const footer = 'mt-0 shrink-0 items-center border-t border-line-soft bg-surface px-5 py-4'
 
-function ChoiceCard({
-  selected,
-  onClick,
-  icon,
-  title,
-  blurb,
+/** The pressed-button pair that picks how an agent connects (Claude's app
+ *  or online; a generic client's browser sign-in or agent key). */
+function MethodSwitch<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
 }: {
-  selected: boolean
-  onClick: () => void
-  icon: ReactNode
-  title: string
-  blurb: string
+  label: string
+  value: T
+  onChange: (value: T) => void
+  options: { id: T; label: string }[]
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      onClick={onClick}
-      className={cn(
-        'relative flex items-center gap-3 rounded-card border bg-surface py-3.5 pl-3.5 pr-9 text-left text-ink transition-colors',
-        selected ? 'border-brand' : 'border-line hover:border-ink-faint',
-      )}
-    >
-      <span className="grid size-9 shrink-0 place-items-center rounded-[9px] border border-line-soft bg-paper">
-        {icon}
-      </span>
-      <span className="block">
-        <span className="block text-copy font-semibold">{title}</span>
-        <span className="mt-0.5 block text-xs leading-[1.5] text-ink-soft">{blurb}</span>
-      </span>
-      <span
-        aria-hidden
-        className={cn(
-          'absolute right-4 top-1/2 size-4 -translate-y-1/2 rounded-full border',
-          selected ? 'border-[5px] border-brand' : 'border-line',
-        )}
-      />
-    </button>
+    <div className="mt-5 flex gap-2" role="group" aria-label={label}>
+      {options.map((option) => (
+        <Button
+          key={option.id}
+          size="sm"
+          variant={value === option.id ? 'solid' : 'ghost'}
+          aria-pressed={value === option.id}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
   )
 }
 

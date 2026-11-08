@@ -79,9 +79,13 @@ describe('sealed columns', () => {
   }, 60_000)
   afterAll(() => client.close())
 
-  const storedKey = async (userId: string) =>
-    (await client.query<{ api_key: string }>('select api_key from model_accounts where user_id = $1', [userId]))
-      .rows[0]!.api_key
+  const storedKey = async (userId: string, kind = 'openai-key') =>
+    (
+      await client.query<{ api_key: string }>('select api_key from model_accounts where user_id = $1 and kind = $2', [
+        userId,
+        kind,
+      ])
+    ).rows[0]!.api_key
 
   it('stores ciphertext and reads plaintext through drizzle', async () => {
     stubEnv('SECRETS_ENCRYPTION_KEYS', KEY_A)
@@ -92,7 +96,10 @@ describe('sealed columns', () => {
     await db
       .insert(schema.modelAccounts)
       .values({ userId: 'u1', kind: 'openai-key', apiKey: 'sk-two', connectedAt: 1, updatedAt: 2 })
-      .onConflictDoUpdate({ target: schema.modelAccounts.userId, set: { apiKey: 'sk-two', updatedAt: 2 } })
+      .onConflictDoUpdate({
+        target: [schema.modelAccounts.userId, schema.modelAccounts.kind],
+        set: { apiKey: 'sk-two', updatedAt: 2 },
+      })
     expect(await storedKey('u1')).not.toContain('sk-two')
     const [row] = await db.select().from(schema.modelAccounts).where(eq(schema.modelAccounts.userId, 'u1'))
     expect(row!.apiKey).toBe('sk-two')
@@ -101,18 +108,20 @@ describe('sealed columns', () => {
 
   it('seals legacy plaintext and re-seals rotated rows at boot', async () => {
     stubEnv('SECRETS_ENCRYPTION_KEYS', KEY_A)
+    /* one person, two legacy accounts: each row is sealed with its own value */
     await client.query(
-      `insert into model_accounts (user_id, kind, api_key, connected_at, updated_at) values ('legacy', 'openai-key', 'sk-legacy', 1, 1)`,
+      `insert into model_accounts (user_id, kind, api_key, connected_at, updated_at) values ('legacy', 'openai-key', 'sk-legacy', 1, 1), ('legacy', 'gemini-key', 'AIza-legacy', 1, 1)`,
     )
     stubEnv('SECRETS_ENCRYPTION_KEYS', `${KEY_B},${KEY_A}`)
     const { resealed, failed } = await resealSecrets(db)
     expect(failed).toBe(0)
-    expect(resealed).toBe(2) // the legacy row and u1, sealed under the retired key "a"
+    expect(resealed).toBe(3) // both legacy rows and u1, sealed under the retired key "a"
     expect(sealedKeyId(await storedKey('legacy'))).toBe('b')
+    expect(sealedKeyId(await storedKey('legacy', 'gemini-key'))).toBe('b')
     expect(sealedKeyId(await storedKey('u1'))).toBe('b')
     stubEnv('SECRETS_ENCRYPTION_KEYS', KEY_B)
     const rows = await db.select().from(schema.modelAccounts)
-    expect(rows.map((r) => r.apiKey).sort()).toEqual(['sk-legacy', 'sk-two'])
+    expect(rows.map((r) => r.apiKey).sort()).toEqual(['AIza-legacy', 'sk-legacy', 'sk-two'])
     expect(await resealSecrets(db)).toEqual({ resealed: 0, failed: 0 })
   })
 })

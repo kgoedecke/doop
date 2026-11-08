@@ -7,7 +7,7 @@ import { beginBrowserSignIn, supportsBrowserSignIn } from '../lib/desktop'
 import type { DesktopSignInProvider, ProviderRedirects } from '../lib/desktopAuth'
 import { safeRelativeTarget } from '../lib/safeTarget'
 import { CODEX_SETUP_PATH } from '../lib/codexConnection'
-import { FIRST_CANVAS_PATH, firstCanvasPathAfterSignup } from '../../shared/firstCanvas'
+import { signupLanding } from '../../shared/firstCanvas'
 import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
@@ -53,10 +53,11 @@ function interruptedTarget(): string | null {
 }
 
 /* Where the verification link lands a signup that had to confirm its email
-   first (SMTP on): the interrupted flow if there was one, else the first
-   canvas — the same landing an instantly signed-in signup gets below. */
+   first (SMTP on): the interrupted flow if there was one, else the shared
+   link the person opened, else the first canvas — the same landing an
+   instantly signed-in signup gets below. */
 function verifiedLanding(): string {
-  return interruptedTarget() ?? FIRST_CANVAS_PATH
+  return interruptedTarget() ?? signupLanding(location.pathname, location.search)
 }
 
 function resumeOAuthFlow(): boolean {
@@ -141,13 +142,17 @@ function ssoErrorFromUrl(): SsoError | null {
    carrying a session, so this component's own resumeOAuthFlow() never gets
    to run for this path; the equivalent logic has to travel with the
    request instead. An interrupted flow wins for everyone; otherwise a
-   returning user comes back to this page and a new account lands on its
-   first canvas, the same place the email signup goes, tagged with the
-   provider so the app can report the signup once it lands (App.tsx). */
+   returning user comes back to this page and a new account lands on the
+   shared link it opened or else its first canvas, the same place the email
+   signup goes, tagged with the provider so the app can report the signup
+   once it lands (App.tsx). */
 function ssoRedirects(provider: DesktopSignInProvider): ProviderRedirects {
   const target = interruptedTarget()
   if (target) return { callbackURL: target, newUserCallbackURL: target }
-  return { callbackURL: location.pathname + location.search, newUserCallbackURL: firstCanvasPathAfterSignup(provider) }
+  return {
+    callbackURL: location.pathname + location.search,
+    newUserCallbackURL: signupLanding(location.pathname, location.search, provider),
+  }
 }
 
 /** Matches server/auth.ts loginProvidersConfig's response shape. */
@@ -186,12 +191,14 @@ function useOidcConfig(): OidcClientConfig {
    gone before anyone read it. A page load (the sign-in landing) resets it. */
 let browserSignInNotice: string | null = null
 
-export function AuthPage() {
+/** `initialMode` opens the form on sign-up or sign-in, for a guest on a
+ *  shared canvas who pressed one of the two (src/components/AccessBanner.tsx). */
+export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } = {}) {
   const t = useT()
   const oidc = useOidcConfig()
   /* better-auth lands password-reset links on /auth/reset?token=… */
   const resetToken = location.pathname === '/auth/reset' ? new URLSearchParams(location.search).get('token') : null
-  const [mode, setMode] = useState<AuthMode>(resetToken ? 'reset' : 'signin')
+  const [mode, setMode] = useState<AuthMode>(resetToken ? 'reset' : (initialMode ?? 'signin'))
   const [name, setNameField] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -343,9 +350,10 @@ export function AuthPage() {
         if (mode === 'signup') posthog.capture('account_signed_up', { method: 'email' })
         else posthog.capture('account_signed_in')
         setName(res.data.user.name) // keep cursor/feed identity in sync with the account
-        /* land new users on their auto-created first canvas, where the
-           demo agent is waiting to perform */
-        if (!resumeOAuthFlow() && mode === 'signup') location.href = FIRST_CANVAS_PATH
+        /* land new users on the shared link they opened, else on their
+           auto-created first canvas, where the demo agent is waiting to
+           perform */
+        if (!resumeOAuthFlow() && mode === 'signup') location.href = verifiedLanding()
       }
     } catch {
       setError(t(NETWORK_ERROR))

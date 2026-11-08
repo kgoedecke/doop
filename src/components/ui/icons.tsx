@@ -76,6 +76,7 @@ import {
   LayoutTemplate,
   Link2,
   Lock,
+  LockOpen,
   LogOut,
   Menu,
   Minus,
@@ -118,14 +119,21 @@ import {
   Trash2,
   Type,
   Upload,
-  Unlink2,
+  Unlink,
   User,
   Users,
   Workflow,
+  Server,
   Flag,
   MousePointerClick,
   SquareMousePointer,
   X,
+  Braces,
+  ALargeSmall,
+  Blend,
+  Palette,
+  Ruler,
+  Space,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -197,13 +205,19 @@ export const FlipHorizontal2Icon = icon(FlipHorizontal2)
 export const FlipVertical2Icon = icon(FlipVertical2)
 export const CircleDashedIcon = icon(CircleDashed)
 export const DropletIcon = icon(Droplet)
+export const BracesIcon = icon(Braces)
+export const PaletteIcon = icon(Palette)
+export const BlendIcon = icon(Blend)
+export const RulerIcon = icon(Ruler)
+export const TextSizeIcon = icon(ALargeSmall)
+export const SpaceIcon = icon(Space)
 export const RadiusIcon = icon(Radius)
 export const AlignLeftIcon = icon(AlignLeft)
 export const AlignCenterIcon = icon(AlignCenter)
 export const AlignRightIcon = icon(AlignRight)
 export const AlignJustifyIcon = icon(AlignJustify)
 export const LinkIcon = icon(Link2)
-export const UnlinkIcon = icon(Unlink2)
+export const UnlinkIcon = icon(Unlink)
 /** Lucide dropped its brand marks; this is its last GitHub outline, kept on
  *  the same grid and stroke as the rest of the set. */
 export function GithubIcon(props: IconProps) {
@@ -271,6 +285,7 @@ export const BrainIcon = icon(Brain)
 export const BuildingIcon = icon(Building2)
 export const CreditCardIcon = icon(CreditCard)
 export const LockIcon = icon(Lock)
+export const LockOpenIcon = icon(LockOpen)
 export const DesktopIcon = icon(Monitor)
 export const DownloadIcon = icon(Download)
 export const PuzzleIcon = icon(Puzzle)
@@ -309,6 +324,7 @@ export const ShareUpIcon = icon(Share)
 export const FolderPlusIcon = icon(FolderPlus)
 /** automations: two linked steps */
 export const WorkflowIcon = icon(Workflow)
+export const ServerIcon = icon(Server)
 /** integrations: building blocks */
 export const BlocksIcon = icon(Blocks)
 /** connect an agent: a plus in a ring */

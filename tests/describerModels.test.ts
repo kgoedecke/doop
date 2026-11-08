@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { accountDescriber, serverDescriber } from '../server/agentModel.ts'
-import { withCredentialsOf, type ModelAccount } from '../server/modelAccounts.ts'
+import { type ModelAccount } from '../server/modelAccounts.ts'
 
 /**
  * The describer never runs on the model a person picked for design work: each
@@ -31,6 +31,7 @@ const account = (kind: ModelAccount['kind'], extra: Partial<ModelAccount> = {}):
   apiKey: 'sk-test',
   accessToken: 'tok',
   connectedAt: 0,
+  enabled: true,
   ...extra,
 })
 
@@ -67,21 +68,4 @@ it('is null for the server tier without a key, and Haiku on the Anthropic key', 
   expect(serverDescriber()).toBeNull()
   vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test')
   expect(serverDescriber()).toMatchObject({ provider: 'anthropic', label: 'Doop (claude-haiku-4-5-20251001)' })
-})
-
-it('a turn joining another’s token refresh takes the credentials, not the other’s model and effort', () => {
-  const design = account('chatgpt', { model: 'gpt-5.6-terra', effort: 'xhigh', accessToken: 'old', expiresAt: 1 })
-  const fresh = account('chatgpt', {
-    model: 'gpt-5.6-terra',
-    effort: 'low',
-    accessToken: 'new',
-    expiresAt: 99,
-    plan: 'pro',
-  })
-  expect(withCredentialsOf(design, fresh)).toMatchObject({
-    effort: 'xhigh',
-    accessToken: 'new',
-    expiresAt: 99,
-    plan: 'pro',
-  })
 })

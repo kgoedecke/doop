@@ -18,7 +18,7 @@
 - Zustand 4.5.4 - client-side state management.
 - Element ids (`shared/elementId.ts`): anything outside a frame that points at an element
   inside it uses the element's `data-doop-id` attribute, stamped into the frame HTML the first
-  time something needs it (a comment, an element link) and kept by agents like every other
+  time something needs it (a comment, an element link, a layer rename, whose undo and redo find the element by it) and kept by agents like every other
   `data-doop-*` attribute. The server stamps (`server/elementIds.ts`, parse5 by source offset,
   so nothing else is re-serialized; `actions.ensureElementId`, exposed as
   `POST /api/frames/:id/element-id` to the comment role) as an annotation: `store.updateFrame`'s
@@ -85,7 +85,7 @@
   its curated roster (the run-time vision check knows only the roster's flags).
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
-  high / xhigh), set through `PATCH /api/model-account { effort }`, read by `effortFor` in
+  high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
@@ -93,23 +93,60 @@
   `shared/imageDescriptions.ts`): raster uploads emit `asset.stored` and get an asynchronous
   description. Billing resolves uploader → eligible canvas owner → server; Off on either
   person stops analysis, and a server-only uploader bypasses both accounts. The stable uploader
-  ID is `assets.owner_id`; migration 0045 persists `describe_payer_id` and `describe_provider`
+  ID is `assets.owner_id`; migration 0049 persists `describe_payer_id` and `describe_provider`
   before work so retries never change payer. Runtime errors do not trigger billing fallback.
   The in-memory queue defaults to two concurrent jobs, three attempts 30s apart, and 200
   attempts per canvas per UTC day (counter resets on restart). A 20s deadline bounds storage,
   resizing and model work. Deleted canvases are skipped. Startup recovers unfinished assets;
-  migration 0044 excludes pre-feature history. Settings uses `image_description_prefs` and
+  migration 0049 excludes pre-feature history. Settings uses `image_description_prefs` and
   `GET`/`PUT /api/image-descriptions`. Agents read `images` on frame summaries and in resident
   kickoff; only standalone image layers are marked pasted references. Success broadcasts
   `asset:described` without changing frame HTML. Tests: `imageDescriptions.test.ts`,
   `describerModels.test.ts`, `imageDescriptionsMcp.test.ts`, `imageDescriptionsHttp.test.ts`,
   `imageDescriptionsCard.test.tsx`.
+- Connections and the default (`server/agentDefaults.ts`, `server/modelAccounts.ts`): a person can
+  connect every provider at once, one `model_accounts` row per user and kind (composite key and an
+  `enabled` flag, migration 0046), plus the Claude Plan on their desktop (`local_agent_preferences`,
+  whose `enabled` is the Plan's on/off). Settings → Doop Agent (`ConnectionTable.tsx`) is grouped
+  lists: "Connected" (provider tile, name with a Default or Off badge, a short line, then the model
+  dropdown with the effort as a `StepSlider`, the on/off switch and a "…" menu: Make default,
+  Replace key (a modal) or Claude Code settings (a modal: which CLI, a pinned model), Disconnect),
+  "Add an agent" (every provider not connected, each with Connect; the one being connected shows
+  its key field or sign-in under it) and "Image model" (`ImageModelCard.tsx`, a pickable list);
+  `agent_defaults`
+  stores the marked provider (`PUT /api/agent-runners/default`, connected and on only).
+  `resolveDefault` passes over a mark on a connection that is gone or off, then falls back to the
+  Plan while on, then the account
+  connected first that is on. Account routes are per kind (`/api/model-account/:kind` takes
+  `PATCH` and `DELETE`; `GET /api/model-account/models?kind=`) and every one answers with
+  the whole view (`accountsView`: every account on or off, the default, the menus). The meter
+  counts any connection that is on and names the default; image generation uses the enabled
+  account matching the image provider (ChatGPT before an OpenAI key), server keys only for
+  someone who connected none (switching every account off does not count). Tests: `anthropicAccount.test.ts` (end to end), `defaultRouting.test.ts`,
+  `agentRunners.test.ts`, `chatgptProviderSwitch.test.tsx`, `localClaudeConnection.test.tsx`.
+- Which connection runs a task (`shared/agentRunner.ts`, `server/agentRunners.ts`):
+  `GET /api/agent-runners` lists every connection that is on, with its menus, plus `default`.
+  The composer's `ModelPicker` offers each one and its models; the pick is this browser's
+  (`src/lib/runnerPick.ts`, `doop:agent-runner`), rides on the card as `runner` (a `RunnerPick`:
+  provider, model, effort; `tasks.runner` JSON, migration 0045) and the send button's meter names
+  it. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
+  model the provider does not know runs on the connection's configured one, and anything else
+  runs on the default. One resident run claims work that agrees on the pick (`actions.nextWork`,
+  the `runner` filter on the take functions): comments and automations carry none and run on
+  the default, feedback runs on what its task ran on (kept on the feedback, `feedback.runner`,
+  migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
+  `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
+  `localAgentRouting.test.ts`.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
   and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
-  rename, reorder and delete; `update_frame` moves a frame between pages. The guide's "Frames
-  and HTML" section says when a page beats a frame. Tests: the page cases in `mcp-tools.test.ts`.
+  rename, reorder and delete; `update_frame` moves a frame between pages (it keeps its x/y; an
+  unknown `pageId` is refused with the canvas's page list). The guide's "Frames and HTML" section says when a page beats a
+  frame. The resident agent has the same three tools under the same names; both surfaces run
+  `server/pageTools.ts`, its kickoff lists the pages and each frame's page and position, and a
+  run whose only work was arranging counts as delivered (`arrangeWrites`). Tests: the page cases
+  in `mcp-tools.test.ts`, `residentPageTools.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
@@ -133,6 +170,19 @@
   never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
   healed document, so a cut-off script never runs).
+- Design tokens (`shared/designTokens.ts`, spec `.context/specs/design-tokens.md`): a canvas's
+  typed design values (Paper's eleven types: colour, opacity, radius, spacing, container,
+  breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom
+  property frames use as `var(--name)`, with a value per theme (`canvas.tokenThemes`; a frame
+  switches with `data-doop-theme="dark"` on its `<html>`). `withTokenBlock` writes the values a
+  frame names into its own `<style data-doop-tokens>` block wherever `withFontFaces` runs, and a
+  token change rewrites that block in every frame naming it as an annotation (sign-off stands, no
+  version). Stored in `design_tokens` + `canvases.token_themes` (migration 0044); REST under
+  `/api/canvases/:id/tokens`, `/token-themes` and `/styleguide.md` (tokens + guidelines as one
+  markdown); MCP `get_tokens` (json / css / tailwind / markdown), `create_tokens`, `set_tokens`,
+  `set_token_themes`, mirrored on the resident agent; the Layers panel's Tokens tab
+  (`TokensPanel.tsx`) and token menus on the Design panel's colour, radius and font-size fields.
+  Tests: `designTokens.test.ts`, `designTokenWrites.test.ts`, `designTokensHttp.test.ts`.
 - Hosted fonts (`shared/webFonts.ts`): the Design panel's font menu offers the "Fonts" group, a
   curated roster of open families on Google Fonts (`WEB_FONTS`, each with its css2 axes), plus
   two "Device fonts" (system UI, system monospace) labelled as varying by viewer; the OS stacks
@@ -183,15 +233,39 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   does not answer within its 15s is unreadable, and the server renders), `inlineDocument` turns it
   into one SVG sized to the frame, every image, stylesheet (both `@import` forms, cycles cut)
   and font fetched and inlined as a data: URL (an SVG drawn as an image loads nothing itself;
-  scripts, nested documents and `srcset` are dropped, a link's `media` kept),
+  scripts and `srcset` are dropped, a link's `media` kept; a nested document (iframe, object, embed) sends
+  the frame to the server, since it would be a hole in the picture),
   and the SVG is drawn onto a canvas at 2x from a data: URL (a blob: URL taints the canvas in
   Chromium) and encoded. A resource the browser cannot fetch (an image host without CORS)
   rejects the whole render and the export falls back to `/i/<id>.<ext>` as before, so what the
-  person sees on the canvas is never the export's blocker. Tests: `frameRaster.test.ts`,
+  person sees on the canvas is never the export's blocker. An element inside a frame exports
+  too (the element menu's Export… dialog and Copy as PNG, `downloadElementExport` /
+  `copyElementPng`): the frame is rendered whole and cut to the element's live box
+  (`doop:inspect` rect, `clipToFrame`, the raster's `clip` option), so every style it inherits
+  and whatever paints behind it stay in the picture; a server render is cropped here the same
+  way (`cropRaster`), and a frame off screen says so. Tests: `frameRaster.test.ts`,
   `frameRasterBrowser.test.ts` (pixels in Chromium, the live runtime included),
-  `frameExport.test.ts`.
+  `frameExport.test.ts`. Scale and format (`shared/exportScale.ts`, `src/lib/exportSettings.ts`,
+  `ExportOptions.tsx`): the Inspector's Export group and the Export… dialog (frames, and elements
+  from their menu) pick 0.5x / 1x / 2x / 3x / 4x or a typed multiplier (0.1-4, two decimals) and
+  PNG / JPG / SVG, remembered per browser under `doop:export-settings` (2x PNG by default) and
+  named `Name@2x.png` as Figma does. Up to 2x a scale is honoured as before; above it,
+  `fitExportScale` brings a huge frame down to 16,384 px a side and 64 MP, the same limit
+  for the browser render, `/i/<id>.png?scale=` (any parsed scale, 1x when unreadable) and MCP
+  `export_frame`'s `scale`, and the toast says so. SVG is `frameSvg`: the inlined document
+  `inlineDocument` already builds, cropped by `viewBox` for an element, on white, settled for
+  a file opened as a page, where the viewer's window would be the viewport (`standalone`,
+  `FrameViewport`): viewport units become the frame's px, `@media` rules and `<style media>` are
+  kept or dropped by a hidden iframe of the frame's size, imported sheets included, and inline
+  handlers and `javascript:` URLs are stripped; HTML in a
+  `foreignObject`, so it opens in browsers but is not editable vector art, and it has no server
+  fallback. Tests: `exportScale.test.ts`, the scale and SVG cases in `frameExport.test.ts`,
+  `frameRasterBrowser.test.ts` (the SVG opened as a page in a wide window), `exportOptions.test.tsx`
+  and `mcpPdfExport.test.ts`.
 - `pdf-lib` 1.17.1 - joins the vector PDF export (`server/pdfExport.ts`): headless Chrome prints
-  each frame onto a page of its own size, pages in the order the frames are listed (a whole page
+  each frame onto a page of its own size (inside an iframe of the frame's size, as the canvas shows
+  it, so content taller than the frame is clipped rather than paginated: bare, Chrome moved a block
+  straddling the edge whole onto a dropped second sheet), pages in the order the frames are listed (a whole page
   in canvas reading order, `shared/frameOrder.ts`; the Export checklist sends its displayed
   order); render limits in `shared/pdfLimits.ts`, which also sizes the browser's download
   timeout; served by `GET /api/canvases/:id/export.pdf` and MCP `export_frame`.
@@ -330,7 +404,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Completed saves survive navigation; unfinished drafts are cancelled. Drawing shortcuts leave
   native fields and rich-text editors alone, except for the drawing textarea's keys: ⌘/Ctrl+Enter,
   Esc and a blur all commit the typed text (an empty draft is dropped).
-- `ElementMove.tsx` renders an unclipped drawing preview and highlights the destination frame.
+- `ElementMove.tsx` moves a drawing as an unclipped copy under the pointer and highlights the
+  destination frame; the original is hidden in its frame (`doop:drawing-moving`) once the copy
+  paints, and the copy stays until the frames show the save, so the shape itself follows the drag.
+  While anything moves (a drawing, a layer, a standalone shape) its outline, grips and size badge
+  stay hidden. Drawings and layers snap to their frame's edges and centre, their parent box and
+  their siblings (`snapRects` on the runtime's hit replies) as well as the ruler guides.
   Ordinary HTML/SVG layers move in place through the runtime's geometry/style gesture bridge,
   preserving layout and transforms and committing one undo step per drag.
   The iframe runtime hit-tests the pointer in browser paint order and measures CSS layout
@@ -360,6 +439,45 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   dragged edges snap to neighbours and guides (`snapFrame` takes the handle). Frames go down to
   1×1 (`MIN_FRAME_SIZE`, also the Inspector's floor). `tests/frameResize.test.ts` covers the
   geometry, `tests/frameResizeBrowser.test.ts` drags the grips in Chromium.
+  The frame Inspector's X / Y / W / H are the same `NumberField` the element panel uses
+  (`src/components/ui/property-field.tsx`): the `px` unit is the drag handle (`useValueScrub`,
+  Shift ×10, Alt ×0.1, Esc cancels) and ↑/↓ nudge. A drag previews every step through
+  `patchFrameLocal` and, through `PropertyScrubContext`, commits once on release as one discrete
+  undo step and one PATCH; Esc puts the frame's box back and saves nothing. Tests:
+  `inspectorScrub.test.tsx`.
+- Frame rotation (`shared/frameRotation.ts`, `src/lib/frameRotate.ts`): a selected frame wears a
+  zone just outside each corner (`data-frame-rotate-handle`, 18 screen px, clear of the corner
+  grip) that shows Figma's curved double-arrow cursor, turned to curve around its corner and with
+  the frame's own rotation (`rotateCursor`, tagged `data-cursor="rotate"`). A drag there turns the
+  frame about its centre with the pointer (`startRotate` in `FrameView.tsx`; Shift snaps to 15°,
+  Esc puts it back), broadcast live as `frame:drag`'s `rotation` and saved once on release as one
+  discrete undo step. `Frame.rotation` is degrees clockwise about the centre, stored in
+  `frames.rotation` (migration `0048_frame_rotation`) normalised to (-180, 180] with 0 unset;
+  `x`/`y`/`width`/`height` stay the unrotated box and the wrapper carries `rotate()`, so the
+  frame's name, grips and pins turn with it. The Inspector's Layout group has the `∠` field, the
+  size badge sits under the turned bounds, and a press inside a turned frame
+  is turned back into design px (`unrotatePoint`, `frameDesignPoint` for the element move hook and the
+  path editor's `frameTurnMatrix`) before the runtime is probed; the frame's own grips pull along
+  its axes with the far corner held still (`keepAnchorTurned`) and do not snap while turned. MCP `update_frame`
+  takes `rotation` through `server/pageTools.ts` (normalisation and page validation), and
+  `get_canvas` lists it when set; copy, paste and duplicate
+  (`frameClipboard.ts`) carry it. Not yet turned: marquee selection,
+  snapping and exports read the unrotated box. Tests: `frameRotation.test.ts`,
+  `frameRotationHttp.test.ts`, `frameRotateBrowser.test.ts`.
+- Element rotation (`src/lib/elementRotate.ts`): an element inside a frame wears the same rotate
+  zones (`data-rotate-handle` in `ElementResizeHandles.tsx`); a drag there turns it about its centre
+  through the runtime's `rotate` geometry edit inside a style gesture (preview per move, one
+  discrete save on release, Shift snaps to 15°, Esc cancels), the same way the Design panel's
+  Rotation field sets it. The runtime reports an element's own turn (`ownRotation`: its `rotate`
+  plus a plain 2D `transform` angle; skew, flip and 3D stay out) and its box before that turn
+  (`box`, via a uniform render scale read off the turned bounds) in hit info, `inspect` and
+  `doop:locate`; `selectionBox` draws the outline, grips and zones on that box, centred on the
+  bounds and turned with it, so a turned layer keeps its grips and resizes along its own axes
+  (`derotateDelta`; no guide snapping while turned). `sizable` now admits the element's own turn
+  and still refuses a turned, skewed, 3D or nonuniformly scaled ancestor; unsupported transforms
+  use the axis-aligned rendered bounds for the selection outline. The element toolbar lifts to 30px above a
+  selection wearing furniture, clear of the top zones. Tests: `elementRotate.test.ts`,
+  `elementRotateBrowser.test.ts`, the turned cases in `elementResizeBrowser.test.ts`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
   chrome step in by `RULER_PX`) (remembered under
@@ -569,6 +687,16 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
   utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
+- Chromium shell (the macOS app): `desktop/src-tauri-chromium` builds the same sources (its
+  `[[bin]]` and build script point into `desktop/src-tauri`) on Tauri 3.0.0-alpha.5 with
+  `tauri-runtime-cef` 3.0.0-alpha.6 (CEF 154, Chromium 154), so frame iframes render out of the
+  editor's process. Same name, bundle id and executable as the WebKit app it replaces, so the
+  WebKit app updates into it. Linking the CEF runtime makes `build.rs` set `cfg(chromium)`, which
+  selects the runtime in `main()`, keeps the profile in `Application Support/design.doop.desktop/cef`
+  (`cef-dev` for debug builds) and, on the first launch, moves the WebKit app's cookies and
+  localStorage over (`src/webkit_migration.rs`, read in-process through WebKit's own API); menu
+  types go through `ShellRuntime`. Run it with `bun run dev:chromium` or `build:chromium` in
+  `desktop/` (Tauri 3 CLI, needs cmake + ninja); see `desktop/README.md`.
 - Interface language (`src/lib/i18n/`, no library): English (`en/`, the source catalog, one
   `as const` namespace per area) and Brazilian Portuguese (`pt-BR/`, typed `Catalog`, so a missing
   key fails typecheck). Components call `useT()` and `t('namespace.key', vars)`; `{name}`
@@ -590,12 +718,18 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Import makes a canvas and opens it with `?import=1`, which `CanvasPage` turns into the import
   picker. `GET /api/canvases` adds `people` (owner, then members) for the tiles' avatar stacks.
   The rail is `src/components/AppRail.tsx`, mounted by Home, Automations, Integrations, Community,
-  Workspace and Admin alike (a page's own group, such as a workspace's panes, goes in as children;
+  Workspace and Admin alike (a page's own group, such as the admin indexes, goes in as children;
   Settings draws its own rail from the same `ui/dash.tsx` parts); it owns
   the ⌘K search palette (`CanvasSearchModal.tsx`), the connect-an-agent modal, the collapsed
   narrow state (remembered in `localStorage` under `doop-rail`) and the account face at the bottom.
   From another page the rail sends scope picks home as `/?scope=` and new workspaces as
-  `/?workspace=new`.
+  `/?workspace=new`. The workspace in view opens under its row: All canvases, People, Fonts, and
+  for its owner and admins Plan & billing and Settings (`workspacePanesFor`); on the Workspace page
+  they switch its pane in place, elsewhere they go to `/w/<id>?pane=…`, and the page keeps the
+  pane in its URL. The rail keeps the last lists it drew (`lastLists`), so a page change does not
+  blink its rows out, and fades only when collapsed or expanded. Home warms the Workspace page's
+  detail while a workspace's canvases are in view (`src/lib/workspaceCache.ts`), so its panes draw on
+  the first frame instead of a skeleton; the page refetches on arrival.
 
 ## 11. Developer Experience Tooling
 

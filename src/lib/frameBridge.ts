@@ -13,6 +13,8 @@ export interface LayoutDrop {
   styles: FlowPlacement
   container: ElementInfo['rect']
   line: ElementInfo['rect']
+  /** the drop leaves the element's parent: only then is the container marked */
+  reparent?: boolean
 }
 
 export async function elementMoveTarget(frameId: string, selector: string, x: number, y: number) {
@@ -55,6 +57,9 @@ export interface ElementInfo {
   }
   /** rendered box over layout box: the element's own and inherited scale */
   scale: { x: number; y: number }
+  /** the rendered box before the element's own turn, which `rect` (its
+   *  bounds) grows past; the selection furniture is drawn on this box */
+  box?: { width: number; height: number }
   position: string
   display: string
   flexDirection: string
