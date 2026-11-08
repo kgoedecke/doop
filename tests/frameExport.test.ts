@@ -8,7 +8,7 @@ import {
   downloadFrameExport,
   downloadFramesPdf,
 } from '../src/lib/frameExport'
-import { cropRaster, rasterizeFrame } from '../src/lib/frameRaster'
+import { cropRaster, frameSvg, rasterizeFrame } from '../src/lib/frameRaster'
 import { inspectElement } from '../src/lib/frameBridge'
 import { useStore } from '../src/lib/store'
 
@@ -18,6 +18,7 @@ vi.mock('../src/lib/frameRaster', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/frameRaster')>()),
   rasterizeFrame: vi.fn(async () => Promise.reject(new Error('no'))),
   cropRaster: vi.fn(async () => new Blob(['cropped'], { type: 'image/png' })),
+  frameSvg: vi.fn(async () => new Blob(['<svg/>'], { type: 'image/svg+xml' })),
 }))
 /* an element is measured by the live document; an unmounted frame answers null */
 vi.mock('../src/lib/frameBridge', () => ({ inspectElement: vi.fn(async () => null) }))
@@ -99,7 +100,7 @@ it('requests PNG and JPG at 2x', async () => {
     '/i/export-frame.png?scale=2&download',
     '/i/export-frame.jpg?scale=2&download',
   ])
-  expect(clicked.map((a) => a.download)).toEqual(['Poster.png', 'Poster.jpg'])
+  expect(clicked.map((a) => a.download)).toEqual(['Poster@2x.png', 'Poster@2x.jpg'])
 })
 
 it("saves the browser's own render without asking the server", async () => {
@@ -113,8 +114,8 @@ it("saves the browser's own render without asking the server", async () => {
     expect.objectContaining({ scale: 2, type: 'png' }),
   )
   expect(fetch).not.toHaveBeenCalled()
-  expect(clicked.map((a) => a.download)).toEqual(['Poster v2final.png'])
-  expect(useStore.getState().notice).toMatchObject({ text: '“Poster v2final.png” is ready', busy: false })
+  expect(clicked.map((a) => a.download)).toEqual(['Poster v2final@2x.png'])
+  expect(useStore.getState().notice).toMatchObject({ text: '“Poster v2final@2x.png” is ready', busy: false })
 })
 
 it("copies the browser's own render", async () => {
@@ -320,7 +321,7 @@ it('exports one element as the whole render clipped to its measured box', async 
     expect.objectContaining({ scale: 2, type: 'png', clip: { x: 10, y: 20, width: 41, height: 31 } }),
   )
   expect(fetch).not.toHaveBeenCalled()
-  expect(clicked.map((a) => a.download)).toEqual(['Poster - divhero.png'])
+  expect(clicked.map((a) => a.download)).toEqual(['Poster - divhero@2x.png'])
 })
 
 it("crops the server's render of the frame when the browser cannot draw it", async () => {
@@ -338,7 +339,7 @@ it("crops the server's render of the frame when the browser cannot draw it", asy
     { x: 0, y: 0, width: 50, height: 50 },
     expect.objectContaining({ scale: 2, type: 'jpeg' }),
   )
-  expect(clicked.map((a) => a.download)).toEqual(['Poster - divhero.jpg'])
+  expect(clicked.map((a) => a.download)).toEqual(['Poster - divhero@2x.jpg'])
 })
 
 it('says when the element cannot be measured instead of exporting the frame', async () => {
@@ -377,4 +378,91 @@ it('copies one element as a PNG, measured after the clipboard write has started'
     expect.objectContaining({ type: 'png', clip: { x: 5, y: 5, width: 10, height: 10 } }),
   )
   expect(useStore.getState().notice).toMatchObject({ text: 'PNG copied', busy: false })
+})
+
+it('renders at the picked scale and names the file by it', async () => {
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['png'], { type: 'image/png' }))
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadFrameExport(frame, 'png', 3)
+  await downloadFrameExport(frame, 'jpg', 1)
+  await downloadFrameExport(frame, 'png', 0.5)
+
+  expect(vi.mocked(rasterizeFrame).mock.calls.map(([, opts]) => opts.scale)).toEqual([3, 1, 0.5])
+  expect(clicked.map((a) => a.download)).toEqual(['Poster@3x.png', 'Poster.jpg', 'Poster@0.5x.png'])
+})
+
+it('asks the server for the picked scale when the browser cannot draw the frame', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('img')),
+  )
+  await downloadFrameExport(frame, 'png', 4)
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(['/i/export-frame.png?scale=4&download'])
+})
+
+it('brings a scale the frame is too big for down to the largest it allows, and says so', async () => {
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['png'], { type: 'image/png' }))
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadFrameExport({ ...frame, width: 1440, height: 6000 }, 'png', 4)
+
+  const scale = vi.mocked(rasterizeFrame).mock.calls[0]![1].scale
+  expect(scale).toBeGreaterThan(2)
+  expect(scale).toBeLessThan(4)
+  expect(clicked.map((a) => a.download)).toEqual([`Poster@${scale}x.png`])
+  expect(useStore.getState().notice?.text).toBe(
+    `“Poster@${scale}x.png” is ready · exported at ${scale}x, the largest this frame allows`,
+  )
+})
+
+it('copies the PNG at the picked scale', async () => {
+  vi.mocked(rasterizeFrame).mockResolvedValue(new Blob(['png'], { type: 'image/png' }))
+  const { written } = stubClipboard()
+
+  await copyFramePng(frame, 3)
+
+  expect(rasterizeFrame).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'export-frame' }),
+    expect.objectContaining({ scale: 3, type: 'png' }),
+  )
+  expect(written).toHaveLength(1)
+  expect(useStore.getState().notice?.text).toBe('PNG copied')
+})
+
+it('saves an SVG drawn here, with no scale in its name and no server fallback', async () => {
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadFrameExport(frame, 'svg', 3)
+
+  expect(frameSvg).toHaveBeenCalledWith(expect.objectContaining({ id: 'export-frame' }), expect.anything())
+  expect(rasterizeFrame).not.toHaveBeenCalled()
+  expect(fetch).not.toHaveBeenCalled()
+  expect(clicked.map((a) => a.download)).toEqual(['Poster.svg'])
+})
+
+it('crops an element SVG to its measured box', async () => {
+  measured({ x: 10.5, y: 20, width: 40, height: 30.2 })
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadElementExport(frame, hero, 'svg')
+
+  expect(frameSvg).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'export-frame' }),
+    expect.objectContaining({ clip: { x: 10, y: 20, width: 41, height: 31 } }),
+  )
+  expect(clicked.map((a) => a.download)).toEqual(['Poster - divhero.svg'])
+})
+
+it('says why an SVG could not be made instead of asking the server', async () => {
+  vi.mocked(frameSvg).mockRejectedValueOnce(new Error('404 fetching https://elsewhere/pic.png'))
+  vi.stubGlobal('fetch', vi.fn())
+
+  await downloadFrameExport(frame, 'svg')
+
+  expect(fetch).not.toHaveBeenCalled()
+  expect(clicked).toEqual([])
+  expect(useStore.getState().notice?.text).toBe(
+    'Couldn’t export the SVG — an image or embed in this frame can’t be read here. Try PNG.',
+  )
 })

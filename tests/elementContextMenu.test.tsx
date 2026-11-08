@@ -45,7 +45,7 @@ it('does not parse frame HTML for closed menus, including after a frame update',
     const items = [...document.querySelectorAll('[role="menuitem"]')]
     expect(items.some((item) => item.textContent?.startsWith('Unlock'))).toBe(true)
     /* an element exports on its own, as a frame does */
-    for (const label of ['Export as PNG', 'Export as JPG', 'Copy as PNG']) {
+    for (const label of ['Export…', 'Copy as PNG']) {
       expect(items.some((item) => item.textContent === label)).toBe(true)
     }
     expect(items.find((item) => item.textContent?.startsWith('Delete element'))?.getAttribute('aria-disabled')).toBe(
@@ -104,5 +104,53 @@ it('pastes a copied standalone shape as a new element on the canvas', async () =
     await act(async () => root.unmount())
     container.remove()
     localStorage.clear()
+  }
+})
+
+it('opens the export dialog for the element, which outlives the menu', async () => {
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const frame = {
+    id: 'f',
+    canvasId: 'c',
+    name: 'Poster',
+    width: 100,
+    height: 100,
+    html: '<body><div id="layer">Layer</div></body>',
+  } as Frame
+  try {
+    await act(async () =>
+      root.render(
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div data-layer>Layer</div>
+          </ContextMenuTrigger>
+          <ElementContextMenu frame={frame} selector="#layer" />
+        </ContextMenu>,
+      ),
+    )
+    await act(async () => {
+      container
+        .querySelector('[data-layer]')!
+        .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))
+    })
+    const exportItem = [...document.querySelectorAll('[role="menuitem"]')].find(
+      (item) => item.textContent === 'Export…',
+    )
+    await act(async () => {
+      exportItem!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+      exportItem!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+      ;(exportItem as HTMLElement).click()
+    })
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    const dialog = document.querySelector('[role="dialog"]')!
+    expect(dialog.textContent).toContain('Export “Layer”')
+    expect(dialog.textContent).toContain('Download PNG')
+    /* an element is no PDF page */
+    expect(dialog.textContent).not.toContain('PDF')
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
   }
 })

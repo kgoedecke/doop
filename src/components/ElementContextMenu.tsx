@@ -1,7 +1,8 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { Frame } from '../../shared/types'
 import { copyElementLink } from '../lib/elementLink'
-import { copyElementPng, downloadElementExport, type ElementTarget } from '../lib/frameExport'
+import { copyElementPng, type ElementTarget } from '../lib/frameExport'
+import { useExportSettings } from '../lib/exportSettings'
 import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
 import { writeCanvasClipboard } from '../lib/canvasClipboard'
 import { hasFrameClip, pasteFrameCentered } from '../lib/frameClipboard'
@@ -11,6 +12,7 @@ import { MOD_KEY } from '../lib/keys'
 import { useT } from '../lib/i18n'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 import { MenuHint } from './ui/menu'
+import { FrameExportModal } from './FrameExportModal'
 
 /** What the live document said about a right-clicked element; a Layers row
  *  has none, its selector comes from the saved HTML itself. */
@@ -28,41 +30,52 @@ function exportTarget(frame: Frame, selector: string): ElementTarget {
 /** Shared by a layer row and the element under a canvas right-click. */
 type ElementMenuProps = { frame: Frame; selector: string | null; hit?: LiveHit; onRename?: () => void }
 
+/** The items also ask for the export dialog, which outlives the menu. */
+type ElementItemsProps = ElementMenuProps & { onExport: (target: ElementTarget) => void }
+
 export function ElementContextMenu({ frame, selector, hit, onRename }: ElementMenuProps) {
   const renameRequested = useRef(false)
+  const [exporting, setExporting] = useState<ElementTarget | null>(null)
   return (
-    <ContextMenuContent
-      onCloseAutoFocus={(event) => {
-        if (!renameRequested.current) return
-        event.preventDefault()
-        renameRequested.current = false
-        onRename?.()
-      }}
-    >
-      <ElementMenuItems
-        frame={frame}
-        selector={selector}
-        hit={hit}
-        onRename={
-          onRename
-            ? () => {
-                renameRequested.current = true
-              }
-            : undefined
-        }
-      />
-    </ContextMenuContent>
+    <>
+      <ContextMenuContent
+        onCloseAutoFocus={(event) => {
+          // The export dialog owns focus once the menu closes.
+          if (exporting) return event.preventDefault()
+          if (!renameRequested.current) return
+          event.preventDefault()
+          renameRequested.current = false
+          onRename?.()
+        }}
+      >
+        <ElementMenuItems
+          frame={frame}
+          selector={selector}
+          hit={hit}
+          onExport={setExporting}
+          onRename={
+            onRename
+              ? () => {
+                  renameRequested.current = true
+                }
+              : undefined
+          }
+        />
+      </ContextMenuContent>
+      {exporting && <FrameExportModal frame={frame} element={exporting} onClose={() => setExporting(null)} />}
+    </>
   )
 }
 
 /** Radix mounts these children only while the menu is open. Closed layer
  *  rows must not parse their frame HTML just to render a dormant menu. */
-function ElementMenuItems({ frame, selector, hit, onRename }: ElementMenuProps) {
+function ElementMenuItems({ frame, selector, hit, onRename, onExport }: ElementItemsProps) {
   const hidden = selector ? isElementHidden(frame.html, selector) : null
   const exists = hidden !== null
   const ownLock = selector ? isElementLocked(frame.html, selector, true) : false
   const locked = !!frame.locked || (selector ? isElementLocked(frame.html, selector) : false)
   const t = useT()
+  const { scale } = useExportSettings()
   /* a copied standalone shape is a frame on the clipboard: its paste lands
      a second element on the canvas, as ⌘V does, not a layer in this frame */
   const frameClip = hasFrameClip()
@@ -118,13 +131,10 @@ function ElementMenuItems({ frame, selector, hit, onRename }: ElementMenuProps) 
             {t('stage.copyLinkToElement')}
           </ContextMenuItem>
           <ContextMenuSeparator />
-          <ContextMenuItem onSelect={() => void downloadElementExport(frame, exportTarget(frame, selector), 'png')}>
-            {t('stage.exportPng')}
+          <ContextMenuItem onSelect={() => onExport(exportTarget(frame, selector))}>
+            {t('stage.exportEllipsis')}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => void downloadElementExport(frame, exportTarget(frame, selector), 'jpg')}>
-            {t('stage.exportJpg')}
-          </ContextMenuItem>
-          <ContextMenuItem onSelect={() => void copyElementPng(frame, exportTarget(frame, selector))}>
+          <ContextMenuItem onSelect={() => void copyElementPng(frame, exportTarget(frame, selector), scale)}>
             {t('stage.copyAsPng')}
           </ContextMenuItem>
           <ContextMenuSeparator />

@@ -9,9 +9,8 @@ export const inspector: Catalog['inspector'] = {
   groupDevelopment: 'Desenvolvimento',
   groupExport: 'Exportar',
   groupMemory: 'Memória',
-  downloadPng: 'Baixar como PNG (2×)',
-  downloadJpg: 'Baixar como JPG (2×)',
-  copyPngTitle: 'Copiar a imagem (2×) para colar em qualquer lugar',
+  exportImageTitle: 'Baixar o frame na escala e no formato escolhidos acima',
+  copyPngTitle: 'Copiar a imagem ({scale}) para colar em qualquer lugar',
   copyPng: 'Copiar como PNG',
   copyImageUrlTitle:
     'URL pública da imagem — sempre mostra o design atual; cole como og:image ou imagem de destaque de um blog',
