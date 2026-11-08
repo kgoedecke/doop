@@ -49,6 +49,7 @@ import { FrameLabelLayer } from './FrameLabelLayer'
 import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
+import { spaceWouldScroll } from '../lib/spaceScroll'
 
 const MIN_ZOOM = 0.08
 /* The settled world is laid out at up to this zoom too (layoutZoomFor), so
@@ -94,6 +95,31 @@ function linkedCanvasComment(id: string | null): CanvasComment | null {
   if (!id) return null
   const c = useStore.getState().comments.find((x) => x.id === id)
   return c && isCanvasComment(c) && !c.parentId ? c : null
+}
+
+/* controls that space presses natively */
+const PRESSABLE = 'button, [role="button"], [role="switch"], [role="checkbox"], [role="tab"]'
+
+/* a drag that starts on the stage (pan, marquee) keeps the browser from
+   selecting text in the chrome it passes over: pointer capture redirects the
+   events, not the selection. Counted, since two fingers can pan at once.
+   Returns the release for when the drag ends. */
+let selectionLocks = 0
+function lockTextSelection(): () => void {
+  const root = document.documentElement
+  if (selectionLocks++ === 0) {
+    root.style.userSelect = 'none'
+    root.style.webkitUserSelect = 'none'
+    window.getSelection()?.removeAllRanges()
+  }
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    if (--selectionLocks > 0) return
+    root.style.removeProperty('user-select')
+    root.style.removeProperty('-webkit-user-select')
+  }
 }
 
 /* zoom to an absolute level pivoting on the view center — the world point in
@@ -739,19 +765,60 @@ export function Stage({
       const t = e.target as HTMLElement
       return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
     }
+    /* WebKit hides the pointer after every key the page handles, held-space
+       repeats included (spaceScroll.ts), so with nothing focused the key is
+       cancelled only when it would scroll. Anything focused keeps it cancelled:
+       space is that element's own press (a <select> opens). */
+    function startPan(e: KeyboardEvent) {
+      const focused = document.activeElement && document.activeElement !== document.body
+      if (focused || spaceWouldScroll(lastPressed, e.shiftKey)) e.preventDefault()
+      if (!useStore.getState().panMode) useStore.getState().setPanMode(true)
+    }
+    /* a chrome button keeps focus after a click (a layer's eye), and space
+       would press it again on keyup. Clicked there, space is still the pan, as
+       in Figma: the button lets go of focus before its own handlers run, since
+       some (the layer row's eye) keep space from bubbling. Reached by the
+       keyboard, space is the keyboard's press and no pan. `:focus-visible`
+       cannot tell the two apart: Chromium turns it on at the keydown itself,
+       so the last input is tracked instead. Only controls are caught this
+       early: Radix menus skip their own space once it is default-prevented. */
+    let byPointer = false
+    let lastPressed: Element | null = null
+    function onPointerDownCapture(e: PointerEvent) {
+      byPointer = true
+      lastPressed = e.target instanceof Element ? e.target : null
+    }
+    function onDownCapture(e: KeyboardEvent) {
+      if (e.key !== ' ') {
+        byPointer = false
+        return
+      }
+      if (isTyping(e) || !byPointer) return
+      const control = (e.target as HTMLElement).closest<HTMLElement>(PRESSABLE)
+      if (!control) return
+      control.blur()
+      /* this keydown still reaches the control (a Radix trigger would reopen
+         its menu), so it is always cancelled; the repeats land on the body */
+      e.preventDefault()
+      startPan(e)
+    }
     function onDown(e: KeyboardEvent) {
       if (e.key !== ' ' || isTyping(e)) return
-      e.preventDefault()
-      if (!useStore.getState().panMode) useStore.getState().setPanMode(true)
+      if (!byPointer && (e.target as HTMLElement).closest(PRESSABLE)) return
+      startPan(e)
     }
     function onUp(e: KeyboardEvent) {
       if (e.key === ' ') useStore.getState().setPanMode(false)
     }
     const reset = () => useStore.getState().setPanMode(false)
+    window.addEventListener('pointerdown', onPointerDownCapture, true)
+    window.addEventListener('keydown', onDownCapture, true)
     window.addEventListener('keydown', onDown)
     window.addEventListener('keyup', onUp)
     window.addEventListener('blur', reset)
     return () => {
+      window.removeEventListener('pointerdown', onPointerDownCapture, true)
+      window.removeEventListener('keydown', onDownCapture, true)
       window.removeEventListener('keydown', onDown)
       window.removeEventListener('keyup', onUp)
       window.removeEventListener('blur', reset)
@@ -830,6 +897,7 @@ export function Stage({
   function startPan(e: React.PointerEvent, isBackground: boolean) {
     e.currentTarget.setPointerCapture(e.pointerId)
     setPanning(true)
+    const unlockSelection = lockTextSelection()
     let last = { x: e.clientX, y: e.clientY }
     let moved = false
 
@@ -845,14 +913,25 @@ export function Stage({
       const vp = useStore.getState().viewport
       useStore.getState().setViewport({ ...vp, x: vp.x + dx, y: vp.y + dy })
     }
-    function onUp() {
+    /* a cancelled pointer (touch or pen taken by the system) ends the pan
+       too, but is not a click */
+    function onCancel(ev: PointerEvent) {
+      if (ev.pointerId === e.pointerId) end()
+    }
+    function end() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
       setPanning(false)
+      unlockSelection()
+    }
+    function onUp() {
+      end()
       if (!moved && isBackground) select(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   function startMarquee(e: React.PointerEvent) {
@@ -860,6 +939,7 @@ export function Stage({
     const origin = toWorld(e.clientX, e.clientY)
     /* ⇧-marquee adds to what is already selected */
     const keep = e.shiftKey ? useStore.getState().selectedIds : []
+    const unlockSelection = lockTextSelection()
     let moved = false
 
     function onMove(ev: PointerEvent) {
@@ -890,15 +970,24 @@ export function Stage({
         .map((f) => f.id)
       useStore.getState().selectMany([...keep, ...hits.filter((id) => !keep.includes(id))])
     }
-    function onUp() {
+    function onCancel(ev: PointerEvent) {
+      if (ev.pointerId === e.pointerId) end()
+    }
+    function end() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
       setMarquee(null)
+      unlockSelection()
+    }
+    function onUp() {
+      end()
       /* a plain click on empty canvas clears the selection */
       if (!moved && !e.shiftKey) select(null)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   function onPointerMove(e: React.PointerEvent) {

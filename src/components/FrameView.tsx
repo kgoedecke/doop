@@ -51,6 +51,7 @@ import { pointerAngle, rotateVector, rotatedBounds, rotatedBy, unrotatePoint } f
 import { sizeLabel, type ResizeHandle } from '../lib/elementResize'
 import { withFontFaces } from '../../shared/fonts'
 import { withWebFontLinks } from '../../shared/webFonts'
+import { withTokenBlock } from '../../shared/designTokens'
 import { canvasFonts } from '../lib/customFonts'
 import { t as translate, useT } from '../lib/i18n'
 
@@ -274,6 +275,9 @@ export const FrameView = memo(function FrameView({
   const me = getIdentity().clientId
   const editors = Object.values(presences).filter((p) => p.activeFrameId === frame.id && p.clientId !== me)
   const [dragging, setDragging] = useState(false)
+  /* a standalone shape on its way across the canvas shows as itself alone:
+     no ring, grips or size badge until it is let go */
+  const [shapeMoving, setShapeMoving] = useState(false)
   /* a standalone element dragged over a frame: the frame it would go into,
      highlighted in the world the way a drawing's drop target is */
   const [dropTarget, setDropTarget] = useState<{ frame: Frame; world: Element } | null>(null)
@@ -471,6 +475,7 @@ export const FrameView = memo(function FrameView({
         void api.deleteFrame(copy.id).catch(console.error)
       }
       setDragging(false)
+      setShapeMoving(false)
       if (duplicating) setDuping(false)
       useStore.getState().setSnapGuides([])
       setDropTarget(null)
@@ -495,6 +500,7 @@ export const FrameView = memo(function FrameView({
         return
       }
       if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 4) moved = true
+      if (standaloneMove && moved) setShapeMoving(true)
       last = { x: ev.clientX, y: ev.clientY }
       if (duplicating && moved && !dupDropped) {
         dupDropped = true
@@ -580,6 +586,7 @@ export const FrameView = memo(function FrameView({
       unsubscribe()
       setDropTarget(null)
       setDragging(false)
+      setShapeMoving(false)
       if (duplicating) setDuping(false)
       useStore.getState().setSnapGuides([])
       const live = useStore.getState().canvas?.frames ?? []
@@ -1363,7 +1370,10 @@ export const FrameView = memo(function FrameView({
            document then differs from the runtime's, so the post effect sends
            it back in and the face loads at once */
         const library = canvasFonts()
-        const html = withWebFontLinks(withFontFaces(ev.data.html, library), library)
+        const canvas = useStore.getState().canvas
+        /* tokens first, so a family named through a font token is seen by the font scan */
+        const withTokens = withTokenBlock(ev.data.html, canvas?.tokens ?? [], canvas?.tokenThemes ?? [])
+        const html = withWebFontLinks(withFontFaces(withTokens, library), library)
         const before = useStore.getState().canvas?.frames.find((f) => f.id === frame.id)?.html
         useStore.getState().patchFrameLocal(frame.id, { html })
         trackSave(api.updateFrame(frame.id, { html }).catch(console.error))
@@ -1497,6 +1507,7 @@ export const FrameView = memo(function FrameView({
         >
           {labelLayer &&
             selected &&
+            !shapeMoving &&
             !editing &&
             !pathEdit &&
             (!wantedSel || shellPicked) &&
@@ -1624,18 +1635,25 @@ export const FrameView = memo(function FrameView({
             ref={surfaceRef}
             className={cn(
               'absolute inset-0 overflow-hidden',
-              isCanvasElement(frame.html) ? 'bg-transparent' : 'border border-line bg-white',
+              isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white',
               /* Select keeps the arrow, like Figma: the frame is a thing to
                  point at, not a handle. The Hand tool's grab and the Comment
                  tool's bubble come from the Stage, which overrides every
                  cursor under it. */
               elementMove.moving ? 'cursor-move' : 'cursor-default',
-              !isCanvasElement(frame.html) && (dragging ? 'shadow-pop' : 'shadow-card'),
+              /* no edge at rest, as in Figma: the artwork meets the canvas
+                 directly. A hovered frame wears a soft one-screen-pixel brand ring
+                 (the selected one has its own), a dragged one lifts */
+              !isCanvasElement(frame.html) &&
+                (dragging
+                  ? 'shadow-pop'
+                  : !selected &&
+                    'hover:shadow-[0_0_0_calc(1px/var(--zoom,1))_color-mix(in_srgb,var(--brand)_55%,transparent)]'),
               editing && 'cursor-text',
               !stream &&
                 remoteEditor &&
                 'outline-2 outline-offset-1 outline-solid outline-[var(--editing-color,var(--brand))]',
-              stream && 'border-transparent outline-none',
+              stream && 'outline-none',
             )}
             /* a remote editor's ring has the selection ring's geometry: two
                screen pixels straddling the frame's edge at every zoom */
@@ -1728,7 +1746,9 @@ export const FrameView = memo(function FrameView({
             {/* the frame's selection ring (not over an agent's stream, which has
               its own): two screen pixels straddling its edge, so on the pixel
               grid it runs down the middle of the edge's line */}
-            {selected && !pathEdit && !stream && (
+            {/* a picked element inside the frame is the selection: the frame
+              keeps no ring of its own then, as its grips go too */}
+            {selected && (!wantedSel || shellPicked) && !pathEdit && !stream && !shapeMoving && (
               <div
                 data-frame-selection=""
                 className="pointer-events-none absolute inset-0 outline-solid outline-brand"
@@ -1738,13 +1758,10 @@ export const FrameView = memo(function FrameView({
             {/* the element's hover and selection furniture: outlines, grips and
               the size badge sit outside the surface, whose overflow clips the
               document to the frame, so a layer wider or taller than its frame
-              is outlined in full while its content stays clipped. The layer is
-              inset by the surface's border, where the document starts, so a
-              rect in design px lands on the element it measures */}
-            <div
-              data-element-furniture=""
-              className={cn('pointer-events-none absolute', isCanvasElement(frame.html) ? 'inset-0' : 'inset-px')}
-            >
+              is outlined in full while its content stays clipped. The layer
+              covers the surface, where the document starts, so a rect in
+              design px lands on the element it measures */}
+            <div data-element-furniture="" className="pointer-events-none absolute inset-0">
               {/* above the selection outline (z-[3]), or that outline covers the
               hovered element's tag */}
               {hover && !hoverOnSelected && !editing && !pathEdit && !dragging && !elementMove.moving && !resizing && (
@@ -1795,7 +1812,8 @@ export const FrameView = memo(function FrameView({
                 selected &&
                 !editing &&
                 !pathEdit &&
-                !dragging && (
+                !dragging &&
+                !elementMove.moving && (
                   <div
                     data-element-outline=""
                     /* a one-pixel hairline, the way Paper outlines a selection */
@@ -1822,6 +1840,7 @@ export const FrameView = memo(function FrameView({
                 !editing &&
                 !pathEdit &&
                 !dragging &&
+                !elementMove.moving &&
                 picked
                   .filter((selector) => selector !== probe?.selector)
                   .map((selector) => {
@@ -2059,6 +2078,7 @@ export const FrameView = memo(function FrameView({
               tool === 'select' &&
               (!wantedSel || shellPicked) &&
               !elementMove.moving &&
+              !shapeMoving &&
               !frame.locked &&
               !shellLocked &&
               !readOnly &&

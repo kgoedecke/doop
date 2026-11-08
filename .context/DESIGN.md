@@ -9,8 +9,11 @@ rather than hand-rolling primitives; it writes into `src/components/ui` per the 
 
 White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no warm cream.
 
-- `--paper` `#fdfdfd` (canvas) / `--paper-deep` `#f0f0f0` (pressed or selected row fill) / `--sub`
+- `--paper` `#fdfdfd` (page ground) / `--paper-deep` `#f0f0f0` (pressed or selected row fill) / `--sub`
   `#f7f7f7` (filled field wells) - background layers.
+- `--canvas` `#f5f5f5` (`bg-canvas`) - the editor stage behind the frames, a step below white so a
+  white frame reads on it without a border (frames wear no resting edge, only a soft brand ring on
+  hover); in dark it is `--paper`.
 - `--surface` `#ffffff` - card/panel surfaces.
 - `--ink` `#111`, `--ink-soft` `#5f5e5b`, `--ink-faint` `#9c9b99`, `--ink-ghost` `#b8b8b8` - text, in
   descending emphasis (ghost: placeholders, unit letters).
@@ -126,6 +129,8 @@ Each has a story.
   (`ring` 30px pill, `bar` the palette's 48px top line; `size="header"` puts the ring on its own
   40px row on a phone and caps it at 320px from md) wrapping a bare Input, with a `trailing` slot
   for a `Kbd`; `Kbd` - a 20px key cap in mono micro type with an inset hairline.
+  `StepSlider` - one pick from a short ordered scale (reasoning effort): the level named above a
+  pill track filled to a round thumb, a dot per step, a native range input underneath.
 - `Card` (`tone` default/flat/raised/dashed, `shape` hero for the 18px empty-state corner),
   `SettingsCard` - one section of a settings pane (Settings, Workspace): a `Card` at the 1000px
   settings width with the section spacing, any `tone`; `CardRow` - its labelled row, whose
@@ -140,7 +145,7 @@ Each has a story.
   caption, `tone` done/muted: the "connected / not connected" line), `Progress`, `Skeleton` (`shape="tile"` takes the
   Tile's `aspect` and matches its footprint, `row` a 56px list row, `card` a 150px card),
   `CodeBlock`, `List` (`PersonRow` is one person on a line: `avatar`, `name`, `detail`,
-  `trailing`), `SelectionBar` (`count`, `total`, `actions` of `SelectionBarAction`s: the "N of M
+  `trailing`), `ChoiceList` / `ChoiceRow` (a ringed panel of rows to go to, as Settings → Doop Agent lists its connections: `icon` an `AppIcon`, `title`, `description`, a chevron unless `trailing`; the import picker's sources, a frame's export formats), `SelectionBar` (`count`, `total`, `actions` of `SelectionBarAction`s: the "N of M
   selected · Clear" line over a checklist), `Steps` / `Step` (a numbered how-to, numbered by a CSS
   counter), `Tabs` (`TabsList variant="card"` is the phone's full-width pane
   switcher), `Dash*` (the dashboard frame; on a phone `DashHeader` draws the
@@ -177,7 +182,11 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   component under the canvas chrome's name. `AvatarStack` (the first `max` people plus a "+N"
   disc), `tone="ink"` (the account's own face: initials on an ink disc, no collar), `initials()`
   (the one first-and-last-letter rule), `BrandMark` - every third-party logo (`<BrandMark brand="figma" size={16} />`; figma, github,
-  canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear),
+  canva, photoshop, meta, claude, openai, cursor, gemini, google, apple, microsoft, slack, linear, openrouter);
+  `AppIcon` is a model provider, import source or export format as doop.design's "Works with" row draws it:
+  the brand tile (23% corners, inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`,
+  `gemini`, `openrouter`, `seedream`, `codex`, `cursor`, `mcp`, `headless`, `github`, `figma`, `photoshop`, `canva`, `website`, `live-app`, `pdf`, `png`, `svg`,
+  `jpg`), 32px in a list row and 40px beside a modal title,
   `Wordmark`, `Logo` / `DoopMark` (the bare Disc-D; `animated` hops its dot, as the home greeting
   wears it), `icons.tsx` - identity. Feature tiles (`FigmaTile`, `MetaTile`, the integrations'
   `Tile`s, `AgentIcon`) compose a `BrandMark`; nothing else inlines a logo path.

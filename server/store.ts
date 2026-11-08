@@ -5,6 +5,7 @@ import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
 import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
+import type { DesignToken } from '../shared/designTokens.ts'
 import type {
   Canvas,
   CanvasGuide,
@@ -179,6 +180,7 @@ class Store {
       updatedBy: by,
     }))
     const guidelines = source.guidelines?.map((doc) => ({ ...doc, updatedAt: now, updatedBy: by }))
+    const tokens = source.tokens?.map((token) => ({ ...token, updatedAt: now, updatedBy: by }))
     const references = source.references?.map((ref) => ({
       ...ref,
       id: nanoid(10),
@@ -200,6 +202,8 @@ class Store {
       ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
+      ...(tokens?.length ? { tokens } : {}),
+      ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
     }
     await persist.saveCanvasCopy(canvas)
@@ -588,6 +592,128 @@ class Store {
     c.guidelines!.splice(idx, 1)
     c.updatedAt = Date.now()
     persist.deleteGuideline(canvasId, name)
+    persist.saveCanvas(c)
+    return true
+  }
+
+  getTokens(canvasId: string): DesignToken[] {
+    return this.canvases.get(canvasId)?.tokens ?? []
+  }
+
+  /** Upsert tokens by name: a new one lands at the end of its canvas's
+   *  order, an existing one keeps its place unless the patch moves it. */
+  setTokens(
+    canvasId: string,
+    inputs: (Pick<DesignToken, 'name' | 'type' | 'value'> & {
+      themes?: Record<string, string>
+      description?: string
+      order?: number
+    })[],
+    by: string,
+  ): DesignToken[] | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    const tokens = (c.tokens ??= [])
+    const now = Date.now()
+    const written: DesignToken[] = []
+    for (const input of inputs) {
+      let token = tokens.find((t) => t.name === input.name)
+      if (token) {
+        token.type = input.type
+        token.value = input.value
+        token.themes = input.themes && Object.keys(input.themes).length ? input.themes : undefined
+        token.description = input.description || undefined
+        if (input.order !== undefined) token.order = input.order
+        token.updatedAt = now
+        token.updatedBy = by
+      } else {
+        const last = tokens.reduce((max, t) => Math.max(max, t.order), 0)
+        token = {
+          name: input.name,
+          type: input.type,
+          value: input.value,
+          ...(input.themes && Object.keys(input.themes).length ? { themes: input.themes } : {}),
+          ...(input.description ? { description: input.description } : {}),
+          order: input.order ?? last + 1,
+          updatedAt: now,
+          updatedBy: by,
+        }
+        tokens.push(token)
+      }
+      persist.saveToken(canvasId, token)
+      written.push(token)
+    }
+    tokens.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return written
+  }
+
+  /** Rename a token in place: its order and description ride along. */
+  renameToken(canvasId: string, name: string, newName: string, by: string): DesignToken | undefined {
+    const c = this.canvases.get(canvasId)
+    const token = c?.tokens?.find((t) => t.name === name)
+    if (!c || !token) return undefined
+    persist.deleteToken(canvasId, name)
+    token.name = newName
+    token.updatedAt = Date.now()
+    token.updatedBy = by
+    persist.saveToken(canvasId, token)
+    c.updatedAt = token.updatedAt
+    persist.saveCanvas(c)
+    return token
+  }
+
+  getTokenThemes(canvasId: string): string[] {
+    return this.canvases.get(canvasId)?.tokenThemes ?? []
+  }
+
+  /** Replace the theme list; tokens drop the values of themes that left. */
+  setTokenThemes(canvasId: string, themes: string[], by: string): string[] | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    c.tokenThemes = themes.length ? [...themes] : undefined
+    const now = Date.now()
+    for (const token of c.tokens ?? []) {
+      if (!token.themes) continue
+      const kept = Object.fromEntries(Object.entries(token.themes).filter(([theme]) => themes.includes(theme)))
+      if (Object.keys(kept).length === Object.keys(token.themes).length) continue
+      token.themes = Object.keys(kept).length ? kept : undefined
+      token.updatedAt = now
+      token.updatedBy = by
+      persist.saveToken(canvasId, token)
+    }
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return themes
+  }
+
+  /** Rename a theme: the list entry and every token's value under it. */
+  renameTokenTheme(canvasId: string, from: string, to: string, by: string): boolean {
+    const c = this.canvases.get(canvasId)
+    if (!c || !c.tokenThemes?.includes(from)) return false
+    c.tokenThemes = c.tokenThemes.map((theme) => (theme === from ? to : theme))
+    const now = Date.now()
+    for (const token of c.tokens ?? []) {
+      if (!token.themes || !(from in token.themes)) continue
+      const { [from]: moved, ...rest } = token.themes
+      token.themes = { ...rest, ...(moved === undefined ? {} : { [to]: moved }) }
+      token.updatedAt = now
+      token.updatedBy = by
+      persist.saveToken(canvasId, token)
+    }
+    c.updatedAt = now
+    persist.saveCanvas(c)
+    return true
+  }
+
+  deleteToken(canvasId: string, name: string): boolean {
+    const c = this.canvases.get(canvasId)
+    const idx = c?.tokens?.findIndex((t) => t.name === name) ?? -1
+    if (!c || idx === -1) return false
+    c.tokens!.splice(idx, 1)
+    c.updatedAt = Date.now()
+    persist.deleteToken(canvasId, name)
     persist.saveCanvas(c)
     return true
   }

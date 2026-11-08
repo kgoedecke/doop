@@ -1,5 +1,6 @@
-import type { JSX } from 'react'
+import { useId, type JSX } from 'react'
 import { cn } from '@/lib/utils'
+import { ImageIcon, PdfIcon, PuzzleIcon, RadioTowerIcon, ServerIcon, VectorIcon, WebIcon } from './icons'
 import canvaLogo from './brand/canva.svg'
 import linearLogo from './brand/linear.svg'
 import slackLogo from './brand/slack.svg'
@@ -7,9 +8,9 @@ import slackLogo from './brand/slack.svg'
 /**
  * Every third-party logo the product wears, from one place. A mark is a
  * square `size` px box with the brand's glyph centred in it, drawn in the
- * brand's own colours where it has them (Figma, Google, Meta, Photoshop,
- * Canva, Slack, Linear, Microsoft) and in `currentColor` where the brand
- * itself asks for the text colour (GitHub, OpenAI, Cursor, Gemini, Apple).
+ * brand's own colours where it has them (Figma, Google, Gemini, Meta,
+ * Photoshop, Canva, Slack, Linear, Microsoft) and in `currentColor` where the brand
+ * itself asks for the text colour (GitHub, OpenAI, Cursor, OpenRouter, Apple).
  * Claude's default is Anthropic's terracotta; `color` overrides any of the
  * single-colour marks.
  *
@@ -29,6 +30,7 @@ export type Brand =
   | 'openai'
   | 'cursor'
   | 'gemini'
+  | 'openrouter'
   | 'google'
   | 'apple'
   | 'microsoft'
@@ -53,6 +55,14 @@ const CLAUDE_PATH =
 const OPENAI_PATH =
   'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z'
 
+/** OpenRouter's "OR" mark, the one its site and app icon wear (Iconify logos, MIT). */
+const OPENROUTER_PATH =
+  'M198.973 0c29.97 0 54.265 24.296 54.265 54.265s-24.294 54.266-54.265 54.266l53.826 53.826c6.838 6.837 1.995 18.528-7.673 18.528H90.442C40.492 180.885 0 140.392 0 90.442S40.492 0 90.442 0zM90.443 36.177c-29.97 0-54.266 24.295-54.266 54.265s24.295 54.265 54.265 54.265s54.265-24.295 54.265-54.265s-24.295-54.265-54.265-54.265'
+
+/** ByteDance's four bars, which its Seed lab (Seedream) wears in a blue-teal blend. */
+const BYTEDANCE_PATH =
+  'M19.877 1.469L24 2.532v18.942l-4.123 1.056zM6.53 10.897l4.115 1.064v8.978L6.53 22.003zM0 2.572l4.115 1.064v16.736L0 21.428zm17.455 5.62V19.3l-4.122-1.065V9.257z'
+
 const CURSOR_PATH =
   'M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23'
 
@@ -70,8 +80,12 @@ const APPLE_PATH =
 const META_PATH =
   'M6.915 4.03c-1.968 0-3.683 1.28-4.871 3.113C.704 9.208 0 11.883 0 14.449c0 .706.07 1.369.21 1.973a6.624 6.624 0 0 0 .265.86 5.297 5.297 0 0 0 .371.761c.696 1.159 1.818 1.927 3.593 1.927 1.497 0 2.633-.671 3.965-2.444.76-1.012 1.144-1.626 2.663-4.32l.756-1.339.186-.325c.061.1.121.196.183.3l2.152 3.595c.724 1.21 1.665 2.556 2.47 3.314 1.046.987 1.992 1.22 3.06 1.22 1.075 0 1.876-.355 2.455-.843a3.743 3.743 0 0 0 .81-.973c.542-.939.861-2.127.861-3.745 0-2.72-.681-5.357-2.084-7.45-1.282-1.912-2.957-2.93-4.716-2.93-1.047 0-2.088.467-3.053 1.308-.652.57-1.257 1.29-1.82 2.05-.69-.875-1.335-1.547-1.958-2.056-1.182-.966-2.315-1.303-3.454-1.303zm10.16 2.053c1.147 0 2.188.758 2.992 1.999 1.132 1.748 1.647 4.195 1.647 6.4 0 1.548-.368 2.9-1.839 2.9-.58 0-1.027-.23-1.664-1.004-.496-.601-1.343-1.878-2.832-4.358l-.617-1.028a44.908 44.908 0 0 0-1.255-1.98c.07-.109.141-.224.211-.327 1.12-1.667 2.118-2.602 3.358-2.602zm-10.201.553c1.265 0 2.058.791 2.675 1.446.307.327.737.871 1.234 1.579l-1.02 1.566c-.757 1.163-1.882 3.017-2.837 4.338-1.191 1.649-1.81 1.817-2.486 1.817-.524 0-1.038-.237-1.383-.794-.263-.426-.464-1.13-.464-2.046 0-2.221.63-4.535 1.66-6.088.454-.687.964-1.226 1.499-1.584.325-.217.65-.234.972-.234z'
 
-const PHOTOSHOP_PATH =
-  'M57.644 175.035V65.297q0-1.201 1.031-1.202l1.087-.003l1.858-.02l2.582-.051l8.65-.183l9.275-.172q4.893-.085 9.702-.086q13.05 0 21.982 3.263a38.1 38.1 0 0 1 14.34 8.758a33.6 33.6 0 0 1 7.814 12.108a40.2 40.2 0 0 1 2.405 13.824q0 13.741-6.355 22.669a35.9 35.9 0 0 1-16.6 12.756l-.573.21c-6.973 2.601-14.695 3.541-23.164 3.6l-1.316.004l-1.953-.01l-.985-.014l-1.098-.026l-.662-.026l-.402-.021l-.989-.036l-1.209-.025l-1.82-.013l-.405-.001v34.263a1.366 1.366 0 0 1-1.546 1.546H58.847q-1.204.001-1.203-1.374M80.84 84.703v35.792q2.23.173 4.12.172h5.668a40.3 40.3 0 0 0 11.533-1.727l.746-.233a18.5 18.5 0 0 0 8.759-5.668q3.228-3.807 3.344-10.492l.005-.499c.09-3.322-.774-6.6-2.491-9.445a16 16 0 0 0-7.47-6.097a31.8 31.8 0 0 0-12.537-2.146l-2.178.006l-1.374.012l-1.311.017l-1.85.036l-1.35.038l-.701.026l-.937.044l-.798.049l-.455.036l-.393.038l-.173.02zm123.93 29.284a40.2 40.2 0 0 0-9.458-3.442l-.76-.164a54.3 54.3 0 0 0-11.009-1.363l-.926-.011a22.2 22.2 0 0 0-6.44.773a5.8 5.8 0 0 0-3.35 2.146a5.4 5.4 0 0 0-.858 2.92a4.56 4.56 0 0 0 1.03 2.747a11.7 11.7 0 0 0 3.235 2.637l.372.197a72 72 0 0 0 7.556 3.52a75 75 0 0 1 16.4 7.814a24.94 24.94 0 0 1 8.416 8.845a23.6 23.6 0 0 1 2.49 10.99a24.7 24.7 0 0 1-4.122 14.169a27.1 27.1 0 0 1-11.936 9.53q-7.556 3.32-18.557 3.432l-.762.004a70 70 0 0 1-13.556-1.188l-.956-.186a46.3 46.3 0 0 1-10.905-3.435a2.22 2.22 0 0 1-1.202-1.89v-18.718a1.01 1.01 0 0 1 .43-.945a.83.83 0 0 1 .944.086a45.9 45.9 0 0 0 13.223 5.238a54.5 54.5 0 0 0 12.537 1.632q6.009 0 8.844-1.546a4.86 4.86 0 0 0 2.834-4.465q0-2.23-2.576-4.293q-1.08-.864-3.097-1.88l-.643-.316l-.686-.323l-.36-.164l-.754-.334l-.393-.17l-.82-.344l-.427-.175l-.886-.355l-.46-.18l-.953-.367l-.997-.373a63 63 0 0 1-15.199-7.728a26.2 26.2 0 0 1-8.071-9.016a23.7 23.7 0 0 1-2.49-10.905a24.6 24.6 0 0 1 3.606-12.88c2.7-4.27 6.576-7.67 11.163-9.788q7.555-3.776 18.89-3.779a83.6 83.6 0 0 1 13.224.945a34.7 34.7 0 0 1 9.206 2.49c.473.136.854.485 1.03.945c.117.419.174.852.172 1.288v17.345c.025.41-.172.803-.515 1.03a1.66 1.66 0 0 1-1.478 0'
+const PHOTOSHOP_TILE =
+  'M34.4678 0H7.53225C3.3723 0 0 3.3723 0 7.53225V34.4678C0 38.6277 3.3723 42 7.53225 42H34.4678C38.6277 42 42 38.6277 42 34.4678V7.53225C42 3.3723 38.6277 0 34.4678 0Z'
+const PHOTOSHOP_P =
+  'M14.6661 11.1485C20.1565 11.1485 23.2484 13.7203 23.2484 18.0259C23.2484 23.0539 19.0584 25.0767 15.1284 25.0767H12.47V30.5093H7.09517V11.1485H14.6661ZM12.47 15.7431V20.4821H14.8395C16.4866 20.4821 17.6425 19.8175 17.6425 18.1415C17.6425 16.61 16.66 15.7431 14.9551 15.7431H12.47Z'
+const PHOTOSHOP_S =
+  'M24.3408 29.5557L24.3698 25.0767C25.9013 26.0881 28.0396 26.7238 29.5134 26.7238C30.5247 26.7238 30.9871 26.4348 30.9871 25.9147C30.9871 25.3368 30.3514 25.1056 29.1377 24.7299C26.797 24.0364 24.2253 23.0828 24.2253 20.0198C24.2253 16.8989 26.797 15.1652 30.5247 15.1652C32.2874 15.1652 33.7323 15.4252 35.0037 15.9743L34.9748 20.251C33.9634 19.6441 31.9696 19.0951 30.6692 19.0951C29.7156 19.0951 29.34 19.3841 29.34 19.8175C29.34 20.3376 29.8023 20.4821 31.1894 20.9156C33.8768 21.7247 36.1307 22.5916 36.1307 25.7413C36.1307 28.7465 33.6745 30.7693 29.8312 30.7693C27.8084 30.7693 25.9013 30.4226 24.3408 29.5557Z'
 
 interface GlyphProps {
   size: number
@@ -167,12 +181,48 @@ function Microsoft({ size, className }: GlyphProps) {
   )
 }
 
-/** Adobe's Ps app mark: the dark tile with the two letters as a vector. */
+/** Gemini's star in its gradient, blue through violet to rose, as doop.design
+ *  draws it. The gradient needs an id of its own, so two marks on one page do
+ *  not share one. */
+function Gemini({ size, className }: GlyphProps) {
+  const id = useId()
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={cn('flex-none', className)} aria-hidden>
+      <GeminiGradient id={id} />
+      <path fill={`url(#${id})`} d={GEMINI_PATH} />
+    </svg>
+  )
+}
+
+function GeminiGradient({ id }: { id: string }) {
+  return (
+    <defs>
+      <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#4F8BFF" />
+        <stop offset="0.6" stopColor="#9B72F6" />
+        <stop offset="1" stopColor="#D96570" />
+      </linearGradient>
+    </defs>
+  )
+}
+
+/** OpenRouter's OR in the text colour; its black tile is the AppIcon's. */
+function OpenRouter({ size, color = 'currentColor', className }: GlyphProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={cn('flex-none', className)} aria-hidden>
+      <path fill={color} transform="translate(0 3.52) scale(0.09375)" d={OPENROUTER_PATH} />
+    </svg>
+  )
+}
+
+/** Adobe's Ps app mark (the 2025 icon from adobe.com): the dark tile with
+ *  the two letters as a vector. */
 function Photoshop({ size, className }: GlyphProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 256 256" className={cn('flex-none', className)} aria-hidden>
-      <rect width="256" height="256" fill="#001e36" rx="44" />
-      <path fill="#31a8ff" transform="translate(0,3)" d={PHOTOSHOP_PATH} />
+    <svg width={size} height={size} viewBox="0 0 42 42" className={cn('flex-none', className)} aria-hidden>
+      <path fill="#001e36" d={PHOTOSHOP_TILE} />
+      <path fill="#31a8ff" d={PHOTOSHOP_P} />
+      <path fill="#31a8ff" d={PHOTOSHOP_S} />
     </svg>
   )
 }
@@ -186,7 +236,8 @@ const MARKS: Record<Brand, (props: GlyphProps) => JSX.Element> = {
   claude: path(CLAUDE_PATH, CLAUDE_COLOR),
   openai: path(OPENAI_PATH),
   cursor: path(CURSOR_PATH),
-  gemini: path(GEMINI_PATH),
+  gemini: Gemini,
+  openrouter: OpenRouter,
   google: Google,
   apple: path(APPLE_PATH),
   microsoft: Microsoft,
@@ -199,4 +250,135 @@ export const BRANDS = Object.keys(MARKS) as Brand[]
 export function BrandMark({ brand, size = 16, color, className }: BrandMarkProps) {
   const Glyph = MARKS[brand]
   return <Glyph size={size} color={color} className={className} />
+}
+
+/** The providers an agent can run on, and the places a design comes from or
+ *  goes to (import sources, export formats), as app icons. */
+export type AppIconBrand =
+  | 'claude'
+  | 'claude-code'
+  | 'openai'
+  | 'gemini'
+  | 'openrouter'
+  | 'seedream'
+  | 'codex'
+  | 'cursor'
+  | 'mcp'
+  | 'headless'
+  | 'github'
+  | 'figma'
+  | 'photoshop'
+  | 'canva'
+  | 'website'
+  | 'live-app'
+  | 'pdf'
+  | 'png'
+  | 'jpg'
+  | 'svg'
+
+/* the tile's light: a hairline edge, a highlight along the top, a soft drop */
+const APP_TILE_SHADOW =
+  'inset 0 0 0 0.5px rgba(0,0,0,.1), inset 0 1px 0 rgba(255,255,255,.28), 0 1px 2px rgba(0,0,0,.12), 0 4px 10px -4px rgba(0,0,0,.22)'
+
+/** A tile's fill and what it carries: a `glyph` drawn on the 24 grid at 56%
+ *  of the side, or `art` that sizes itself (a chrome glyph, a full-bleed mark). */
+type AppTile =
+  { tile: string; glyph: (gradientId: string) => JSX.Element } | { tile: string; art: (side: number) => JSX.Element }
+
+/** A chrome glyph on a tile (white unless told), at the chrome's own hairline. */
+function chromeGlyph(Glyph: typeof WebIcon, color = '#fff') {
+  return (side: number) => <Glyph size={Math.round(side * 0.56)} style={{ color }} />
+}
+
+/** Each tile's fill and the glyph it carries, after doop.design's "Works with" row. */
+const APP_TILES: Record<AppIconBrand, AppTile> = {
+  claude: { tile: CLAUDE_COLOR, glyph: () => <path fill="#fff" d={CLAUDE_PATH} /> },
+  'claude-code': { tile: '#262624', glyph: () => <path fill={CLAUDE_COLOR} d={CLAUDE_PATH} /> },
+  openai: { tile: '#fff', glyph: () => <path fill="#111" d={OPENAI_PATH} /> },
+  gemini: {
+    tile: '#fff',
+    glyph: (id) => (
+      <>
+        <GeminiGradient id={id} />
+        <path fill={`url(#${id})`} d={GEMINI_PATH} />
+      </>
+    ),
+  },
+  seedream: {
+    tile: '#fff',
+    glyph: (id) => (
+      <>
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#3C8CFF" />
+            <stop offset="1" stopColor="#2BC4C9" />
+          </linearGradient>
+        </defs>
+        <path fill={`url(#${id})`} d={BYTEDANCE_PATH} />
+      </>
+    ),
+  },
+  /* the OR is wider than tall: scaled into the 24 box and centred */
+  openrouter: {
+    tile: '#111',
+    glyph: () => <path fill="#fff" transform="translate(0 3.52) scale(0.09375)" d={OPENROUTER_PATH} />,
+  },
+  /* the knot reversed out of black, beside ChatGPT's black on white */
+  codex: { tile: '#111', glyph: () => <path fill="#fff" d={OPENAI_PATH} /> },
+  cursor: { tile: '#14120b', glyph: () => <path fill="#fff" d={CURSOR_PATH} /> },
+  /* any other MCP client: no brand of its own, so a plain tile */
+  mcp: { tile: '#fff', art: chromeGlyph(PuzzleIcon, '#111') },
+  /* a headless agent or server: a plain tile, like any other MCP client */
+  headless: { tile: '#fff', art: chromeGlyph(ServerIcon, '#111') },
+  github: { tile: '#111', glyph: () => <path fill="#fff" d={GITHUB_PATH} /> },
+  /* Figma's own app icon: the five colours on near-black */
+  figma: { tile: '#1e1e1e', art: (side) => <Figma size={Math.round(side * 0.56)} /> },
+  /* the letters alone on Adobe's tile, at the size the app icon draws them */
+  photoshop: {
+    tile: '#001e36',
+    art: (side) => (
+      <svg width={side} height={side} viewBox="0 0 42 42" aria-hidden>
+        <path fill="#31a8ff" d={PHOTOSHOP_P} />
+        <path fill="#31a8ff" d={PHOTOSHOP_S} />
+      </svg>
+    ),
+  },
+  canva: {
+    tile: '#fff',
+    art: (side) => <img src={canvaLogo} alt="" width={Math.round(side * 0.7)} height={Math.round(side * 0.7)} />,
+  },
+  website: { tile: '#0177d3', art: chromeGlyph(WebIcon) },
+  'live-app': { tile: '#1f9d55', art: chromeGlyph(RadioTowerIcon) },
+  pdf: { tile: '#e5322d', art: chromeGlyph(PdfIcon) },
+  png: { tile: '#6e56cf', art: chromeGlyph(ImageIcon) },
+  jpg: { tile: '#0891b2', art: chromeGlyph(ImageIcon) },
+  svg: { tile: '#d97706', art: chromeGlyph(VectorIcon) },
+}
+
+export const APP_ICON_BRANDS = Object.keys(APP_TILES) as AppIconBrand[]
+
+/**
+ * A provider, source or format as an app icon, the way doop.design shows the
+ * agents it works with: the brand's tile (corners at 23% of the side) with its
+ * glyph at 56%. 32px in a list row, 40px beside a modal title.
+ */
+export function AppIcon({ brand, size = 32, className }: { brand: AppIconBrand; size?: number; className?: string }) {
+  const id = useId()
+  const tile = APP_TILES[brand]
+  const inner = Math.round(size * 0.56)
+  return (
+    <span
+      aria-hidden
+      className={cn('grid flex-none place-items-center overflow-hidden', className)}
+      style={{ width: size, height: size, borderRadius: '23%', background: tile.tile, boxShadow: APP_TILE_SHADOW }}
+    >
+      {'art' in tile ? (
+        tile.art(size)
+      ) : (
+        <svg width={inner} height={inner} viewBox="0 0 24 24">
+          {tile.glyph(id)}
+        </svg>
+      )}
+    </span>
+  )
 }

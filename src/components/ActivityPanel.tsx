@@ -68,9 +68,10 @@ export function ActivityPanel({
   style?: CSSProperties
   resize?: PanelResize
 }) {
-  const tab = useStore((s) => s.panelTab)
   const setTab = useStore((s) => s.setPanelTab)
   const canEdit = useStore(canEditOpenCanvas)
+  /* someone who cannot edit sees the comments only (PanelTabButtons) */
+  const tab = useStore((s) => (canEdit ? s.panelTab : 'comments'))
   const [, tick] = useState(0)
   const openThreads = useOpenThreadCount()
   const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
@@ -96,10 +97,14 @@ export function ActivityPanel({
       <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)}>
         <PanelHeader className="pl-2">
           <PanelTabs aria-label={t('panels.activityPanelAria')}>
-            <PanelIconTab value="tasks" icon={<SparkIcon />} title={t('panels.activityAgents')}>
-              {t('panels.activityAgents')}
-              {working > 0 && <em className="ml-[7px] text-[11px] font-normal not-italic text-ink-faint">{working}</em>}
-            </PanelIconTab>
+            {canEdit && (
+              <PanelIconTab value="tasks" icon={<SparkIcon />} title={t('panels.activityAgents')}>
+                {t('panels.activityAgents')}
+                {working > 0 && (
+                  <em className="ml-[7px] text-[11px] font-normal not-italic text-ink-faint">{working}</em>
+                )}
+              </PanelIconTab>
+            )}
             <PanelIconTab
               value="comments"
               icon={<CommentIcon />}
@@ -119,12 +124,16 @@ export function ActivityPanel({
             >
               {t('panels.activityComments')}
             </PanelIconTab>
-            <PanelIconTab value="activity" icon={<PulseIcon />} title={t('panels.activityActivity')}>
-              {t('panels.activityActivity')}
-            </PanelIconTab>
-            <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
-              {t('panels.activityMemory')}
-            </PanelIconTab>
+            {canEdit && (
+              <>
+                <PanelIconTab value="activity" icon={<PulseIcon />} title={t('panels.activityActivity')}>
+                  {t('panels.activityActivity')}
+                </PanelIconTab>
+                <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
+                  {t('panels.activityMemory')}
+                </PanelIconTab>
+              </>
+            )}
           </PanelTabs>
           <PanelClose label={t('panels.activityClosePanel')} onClick={onClose} />
         </PanelHeader>

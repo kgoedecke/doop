@@ -31,7 +31,9 @@
       "skip-github-release": true,
       "extra-files": [
         { "type": "json", "path": "src-tauri/tauri.conf.json", "jsonpath": "$.version" },
-        { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" }
+        { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" },
+        { "type": "json", "path": "src-tauri-chromium/tauri.conf.json", "jsonpath": "$.version" },
+        { "type": "toml", "path": "src-tauri-chromium/Cargo.toml", "jsonpath": "$.package.version" }
       ]
     }
   }

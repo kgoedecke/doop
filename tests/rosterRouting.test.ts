@@ -7,10 +7,20 @@ import { afterEach, expect, it, vi } from 'vitest'
  */
 
 const mocks = vi.hoisted(() => ({ account: vi.fn() }))
+/* no default marked: the fallback order decides */
+vi.mock('../server/db/index.ts', () => ({ db: { select: () => ({ from: () => ({ where: async () => [] }) }) } }))
 vi.mock('../server/localAgentPreferences.ts', () => ({ getLocalAgentPreference: async () => ({ enabled: false }) }))
 vi.mock('../server/modelAccounts.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../server/modelAccounts.ts')>()
-  return { ...original, getAccount: mocks.account }
+  return {
+    ...original,
+    getAccount: mocks.account,
+    /* the routing reads every account; a test connects one (or none) */
+    getAccounts: async (userId: string) => {
+      const account = (await mocks.account(userId)) as Record<string, unknown> | null | undefined
+      return account ? [{ enabled: true, connectedAt: 1, ...account }] : []
+    },
+  }
 })
 
 import { pickModel } from '../server/agentModel'

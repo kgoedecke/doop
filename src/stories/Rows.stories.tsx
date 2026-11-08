@@ -4,6 +4,8 @@ import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { AppIcon } from '@/components/ui/brand-mark'
+import { ChoiceList, ChoiceRow } from '@/components/ui/choice-list'
 import { BuildingIcon } from '@/components/ui/icons'
 import { PersonRow } from '@/components/ui/list'
 import { SelectionBar, SelectionBarAction } from '@/components/ui/selection-bar'
@@ -113,5 +115,33 @@ export const HowTo: Story = {
       <Step>In Figma, run Plugins → “Doop — Editable import”.</Step>
       <Step>Paste, then add to your current page.</Step>
     </Steps>
+  ),
+}
+
+/** The import picker's sources and a frame's export formats: one ringed
+ *  panel, an app icon per row, a chevron unless the row brings its own. */
+export const Choices: Story = {
+  name: 'ChoiceList',
+  render: () => (
+    <ChoiceList className="max-w-[560px]">
+      <ChoiceRow icon={<AppIcon brand="website" />} title="Website" description="One page, or discover a whole site." />
+      <ChoiceRow
+        icon={<AppIcon brand="figma" />}
+        title="Figma file"
+        description="Paste a file link. Frames stay editable."
+      />
+      <ChoiceRow
+        icon={<AppIcon brand="github" />}
+        title="GitHub repo"
+        description="Screens read from the repo’s routes."
+      />
+      <ChoiceRow
+        icon={<AppIcon brand="canva" />}
+        title="Canva design"
+        description="Paste a design link. Pages become frames."
+        disabled
+        trailing={<span className="text-caption">Soon</span>}
+      />
+    </ChoiceList>
   ),
 }

@@ -1,5 +1,7 @@
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
+import type { DesignToken } from './designTokens.ts'
+import type { RunnerPick } from './agentRunner.ts'
 
 export interface Frame {
   id: string
@@ -183,6 +185,10 @@ export interface Canvas {
   guides?: CanvasGuide[]
   /** named design docs (brand rules, style recipes) every actor on the canvas follows */
   guidelines?: GuidelineDoc[]
+  /** design tokens (shared/designTokens.ts): the CSS custom properties frames use as var(--name) */
+  tokens?: DesignToken[]
+  /** the token themes (light, dark, …) in display order; a token may carry a value per theme */
+  tokenThemes?: string[]
   /** frames pinned to Memory as style exemplars — HTML snapshotted at pin time */
   references?: MemoryReference[]
 }
@@ -403,6 +409,9 @@ export interface AgentTask {
    *  handing the title to the chat agent. Absent on prompt cards. */
   kind?: RepoCardKind
   payload?: RepoCardPayload
+  /** board cards: the connection and model the composer picked for this
+   *  card; absent runs on the requester's Settings default */
+  runner?: RunnerPick
 }
 
 export interface CardScope {
@@ -447,6 +456,9 @@ export interface TaskFeedback {
   from: string
   /** account id of the human who left it — decides which model credential runs it */
   fromUserId?: string
+  /** the connection the task it answers ran on, kept from when it was left,
+   *  so the reply runs there even after the task leaves the history */
+  runner?: RunnerPick
   text: string
   at: number
   /** set once the feedback has been included in some agent's tool result */
@@ -582,6 +594,8 @@ export type ServerMessage =
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
+  /** the canvas's design tokens changed: the whole list after the change */
+  | { type: 'tokens'; tokens: DesignToken[]; themes: string[]; actor: Actor }
   /** a frame was pinned to (reference set) or unpinned from (null) Memory */
   | { type: 'reference'; id: string; reference: MemoryReference | null; actor: Actor }
   /** a design decision was captured into Memory */

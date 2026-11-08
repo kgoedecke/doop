@@ -19,9 +19,12 @@ import type { Frame } from '../shared/types.ts'
    below must bump the version or linked users keep the old card. A chat
    that holds a retired URI fails with "Failed to fetch template", so a
    bumped version is ADDED to RETIRED_PREVIEW_URIS, never replaced. */
-const PREVIEW_VERSION = 2
+const PREVIEW_VERSION = 3
 export const FRAME_PREVIEW_URI = `ui://doop/frame-preview-${PREVIEW_VERSION}.html`
-export const RETIRED_PREVIEW_URIS: readonly string[] = ['ui://doop/frame-preview-1.html']
+export const RETIRED_PREVIEW_URIS: readonly string[] = [
+  'ui://doop/frame-preview-1.html',
+  'ui://doop/frame-preview-2.html',
+]
 const PREVIEW_MIME = 'text/html;profile=mcp-app'
 
 export type FramePreview = {
@@ -96,10 +99,13 @@ function registerPreviewResource(server: McpServer, uri: string): void {
           uri,
           mimeType: PREVIEW_MIME,
           text: framePreviewHtml(),
+          /* No `ui.domain`: Claude only accepts its own
+             `<hash>.claudemcpcontent.com` there and shows "There was a problem
+             displaying content" for anything else, so the host picks the
+             sandbox origin. ChatGPT keeps its own `openai/widgetDomain`. */
           _meta: {
             ui: {
               prefersBorder: true,
-              domain: origin(),
               csp: { connectDomains: [], resourceDomains: [origin()] },
             },
             'openai/widgetDescription': WIDGET_DESCRIPTION,

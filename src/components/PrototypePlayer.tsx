@@ -19,7 +19,7 @@ import {
 } from '../lib/prototypePlayer'
 import { prototypePath } from '../lib/prototype'
 import { IconButton } from './ui/icon-button'
-import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, SlidersIcon, XIcon } from './ui/icons'
+import { ArrowLeftIcon, ExportIcon, HistoryIcon, HotspotIcon, ScalingIcon, XIcon } from './ui/icons'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -550,7 +550,7 @@ function ScalingMenu({ scaling, onChange }: { scaling: ProtoScaling; onChange: (
     <DropdownMenu>
       <DropdownMenuTrigger asChild data-proto-menu-trigger="" onKeyDown={(e) => e.stopPropagation()}>
         <IconButton size="sm" className={playerBtn} aria-label={t('panels.protoScaling')}>
-          <SlidersIcon size="rail" />
+          <ScalingIcon size="rail" />
         </IconButton>
       </DropdownMenuTrigger>
       {/* above the player, which sits over every other layer of the editor */}

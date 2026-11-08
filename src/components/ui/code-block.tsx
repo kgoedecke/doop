@@ -12,7 +12,7 @@ import { CheckIcon } from './icons'
 const codeBlockVariants = cva('relative rounded-[10px] bg-code font-mono text-code-ink', {
   variants: {
     density: {
-      default: 'py-[13px] pl-3.5 pr-11 text-xs leading-[1.55] whitespace-pre-wrap break-all',
+      default: 'py-[13px] pl-3.5 pr-16 text-xs leading-[1.55] whitespace-pre-wrap break-all',
       rail: 'overflow-hidden text-ellipsis whitespace-nowrap py-2 pl-[9px] pr-[46px] text-[10.5px] leading-[1.55]',
     },
   },

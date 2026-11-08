@@ -8,10 +8,11 @@ import { ImportStepHeader } from './ImportSources'
 import { Button } from './ui/button'
 import { FrameThumb } from './FramePreview'
 import { Checkbox } from './ui/checkbox'
-import { PdfIcon } from './ui/icons'
+import { AppIcon } from './ui/brand-mark'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { SelectionBar, SelectionBarAction } from './ui/selection-bar'
 import { useT } from '@/lib/i18n'
+import { cn } from '@/lib/utils'
 
 /**
  * The top bar's Export: the page's frames as a checklist (the canvas
@@ -75,9 +76,12 @@ export function ExportModal({
   }
 
   return (
-    <Modal size="xl" className="sm:max-w-[820px]" onClose={onClose}>
-      <ImportStepHeader icon={<PdfIcon size={22} />} title={t('panels.exportPdfTitle')} />
-      <ModalLede>{t('panels.exportPdfLede')}</ModalLede>
+    <Modal size="lg" onClose={onClose}>
+      <ImportStepHeader
+        icon={<AppIcon brand="pdf" size={40} />}
+        title={t('panels.exportPdfTitle')}
+        lede={t('panels.exportPdfLede')}
+      />
       <SelectionBar
         className="mt-5"
         count={chosen.length}
@@ -92,36 +96,35 @@ export function ExportModal({
         }
       />
       <div
-        className="max-h-[calc(100dvh-390px)] overflow-y-auto rounded-[11px] border border-line bg-paper sm:max-h-[min(350px,calc(100vh-390px))]"
+        className="max-h-[calc(100dvh-390px)] overflow-y-auto rounded-panel bg-surface shadow-ring sm:max-h-[min(350px,calc(100vh-390px))]"
         role="group"
         aria-label={t('panels.exportFramesAria')}
       >
-        {listed.map((frame, index) => (
+        {listed.map((frame) => (
           <label
             key={frame.id}
-            className="relative grid min-h-[58px] cursor-pointer grid-cols-[20px_24px_64px_minmax(0,1fr)] items-center gap-2.5 border-b border-line bg-surface px-3 py-[9px] first:rounded-t-[10px] last:rounded-t-none last:rounded-b-[10px] last:border-b-0 hover:bg-paper"
+            className="relative grid min-h-[60px] cursor-pointer grid-cols-[20px_64px_minmax(0,1fr)] items-center gap-3 border-b border-line-soft px-4 py-2.5 transition-colors last:border-b-0 hover:bg-sub"
           >
             <Checkbox checked={selected.has(frame.id)} onChange={() => toggle(frame.id)} />
-            <span className="font-mono text-[9.5px] text-ink-faint">{String(index + 1).padStart(2, '0')}</span>
             <FrameThumb frameId={frame.id} />
             <span className="min-w-0">
-              <b className="block overflow-hidden whitespace-nowrap text-ellipsis text-[12.5px] text-ink">
+              <span className="block truncate text-copy font-medium text-ink">
                 {frame.name || t('panels.exportUntitled')}
-              </b>
-              <span className="mt-[3px] block font-mono text-[10px] text-ink-faint">
+              </span>
+              <span className="block font-mono text-caption text-ink-faint">
                 {Math.round(frame.width)} × {Math.round(frame.height)}
               </span>
             </span>
           </label>
         ))}
       </div>
-      <div className="mt-6 flex items-center gap-2.5 border-t border-line-soft pt-[18px]">
-        <span className="mr-auto min-w-0 text-label leading-[1.4] text-ink-faint">
-          {overPdfLimit
-            ? `${t('panels.exportPdfMax', { count: MAX_PDF_FRAMES })} ${t('panels.exportUncheck', { count: extra })}`
-            : t('panels.exportPdfHint')}
-        </span>
-        <Button variant="ghost" className="flex-none" onClick={onClose}>
+      <p className={cn('mt-2 px-0.5 text-caption', overPdfLimit ? 'text-accent-ink' : 'text-ink-faint')}>
+        {overPdfLimit
+          ? `${t('panels.exportPdfMax', { count: MAX_PDF_FRAMES })} ${t('panels.exportUncheck', { count: extra })}`
+          : t('panels.exportPdfHint')}
+      </p>
+      <ModalActions>
+        <Button variant="ghost" onClick={onClose}>
           {t('common.cancel')}
         </Button>
         <Button variant="primary" disabled={!chosen.length || overPdfLimit} onClick={run}>
@@ -129,7 +132,7 @@ export function ExportModal({
             ? t('panels.exportDownloadPdfPages', { count: chosen.length })
             : t('panels.exportDownloadPdf')}
         </Button>
-      </div>
+      </ModalActions>
     </Modal>
   )
 }

@@ -81,15 +81,16 @@ it('keeps the guide fallback for older shells', async () => {
 const render = async (native: Record<string, unknown>) => {
   mocks.native = native
   await act(async () => root.render(<LocalClaudeRow />))
+  /* a Claude Code that is ready keeps its details folded until asked */
+  const disclosure = container.querySelector<HTMLElement>('[aria-label="Show Claude Plan details"]')
+  if (disclosure) await act(async () => disclosure.click())
 }
 const found = { installed: true, connected: true, enabled: false, cliVersion: '2.1.281' }
 
 it('says which Claude Code runs and lets a person choose another', async () => {
   await render({ ...found, cliPath: '/Users/me/.claude/local/claude', cliSource: 'shell' })
-  expect(container.textContent).toContain(
-    'Using Claude Code 2.1.281 at /Users/me/.claude/local/claude, the one your terminal runs.',
-  )
-  expect(button('Use default')).toBeUndefined()
+  expect(container.textContent).toContain('Claude Code 2.1.281the one your terminal runs/Users/me/.claude/local/claude')
+  expect(button('Use the default')).toBeUndefined()
   mocks.invoke.mockResolvedValue(true)
   await act(async () => button('Choose…')!.click())
   expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('claude_choose_cli')
@@ -105,13 +106,13 @@ it('leaves the status alone when the file panel is cancelled', async () => {
 
 it('offers the default back once a Claude Code is chosen, or when the chosen one is gone', async () => {
   await render({ ...found, cliPath: '/opt/claude', cliSource: 'chosen' })
-  expect(container.textContent).toContain('/opt/claude, chosen by you.')
-  await act(async () => button('Use default')!.click())
+  expect(container.textContent).toContain('chosen by you/opt/claude')
+  await act(async () => button('Use the default')!.click())
   expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('claude_reset_cli')
   expect(mocks.refresh).toHaveBeenLastCalledWith('tester')
   await render({ ...found, cliPath: '/opt/claude', cliSource: 'found', chosenMissing: '/gone/claude' })
   expect(container.textContent).toContain('The Claude Code you chose at /gone/claude is gone.')
-  expect(button('Use default')).toBeDefined()
+  expect(button('Use the default')).toBeDefined()
 })
 
 it('asks the login shell again on Refresh', async () => {
@@ -123,7 +124,7 @@ it('asks the login shell again on Refresh', async () => {
     cliPath: '/opt/homebrew/bin/claude',
   })
   expect(container.textContent).toContain('choose another install')
-  expect(container.textContent).not.toContain('Using Claude Code')
+  expect(container.textContent).not.toContain('Claude Code 2.1')
   await act(async () => button('Refresh')!.click())
   expect(mocks.refresh).toHaveBeenLastCalledWith('tester', true)
 })
@@ -132,13 +133,13 @@ it('hides the choice from desktop shells that cannot make it', async () => {
   mocks.canChoose = false
   await render({ ...found, cliPath: '/opt/claude', cliSource: 'found' })
   expect(button('Choose…')).toBeUndefined()
-  expect(container.textContent).not.toContain('Using Claude Code')
+  expect(container.textContent).not.toContain('Claude Code 2.1')
 })
 
 it('lets a person choose an install Doop did not find', async () => {
   await render({ installed: false, connected: false, enabled: false })
   expect(container.textContent).toContain('Installed somewhere Doop did not look?')
-  expect(container.textContent).not.toContain('Using Claude Code')
+  expect(container.textContent).not.toContain('Claude Code 2.1')
   mocks.invoke.mockResolvedValue(true)
   await act(async () => button('Choose…')!.click())
   expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('claude_choose_cli')

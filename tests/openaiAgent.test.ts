@@ -222,7 +222,7 @@ describe('OpenAI API-key transport', () => {
     messages: [{ role: 'user' as const, content: 'hi' }],
     maxTokens: 4096,
   }
-  const account = { userId: 'u', kind: 'openai-key' as const, apiKey: 'sk-test', connectedAt: 0 }
+  const account = { userId: 'u', kind: 'openai-key' as const, apiKey: 'sk-test', enabled: true, connectedAt: 0 }
 
   it('thinks as hard as the account asks, and at the server default until it does', async () => {
     const bodies: Record<string, unknown>[] = []

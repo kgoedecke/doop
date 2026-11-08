@@ -3,8 +3,10 @@ import { frameDesignPoint, frameWorldPoint, rotateVector } from '../../shared/fr
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
+import { elementPath } from '../lib/layers'
 import {
   drawingDropFrame,
+  drawingPreview,
   movableDrawing,
   moveDrawing,
   placeDrawing,
@@ -33,6 +35,10 @@ interface Preview {
   html: string
   target: Frame | null
   world: Element
+  /** the gesture drawing it, so a finished drag cannot clear the next one's */
+  owner: object
+  /** the drawing in its frame, hidden once this copy has painted */
+  selector: string
 }
 
 type Press = ReactPointerEvent<HTMLDivElement>
@@ -46,6 +52,8 @@ export interface ElementMoveHit {
   rect: DrawingRect
   sizable?: boolean
   locked?: boolean
+  /** the parent box and siblings, in design px, for snapping */
+  snapRects?: DrawingRect[]
 }
 
 /** Hit testing happens inside the iframe. Buffer pointer events while it
@@ -53,16 +61,36 @@ export interface ElementMoveHit {
 export function useElementMove(frame: Frame, layoutZoom: number) {
   const t = useT()
   const [preview, setPreview] = useState<Preview | null>(null)
-  const [moving, setMoving] = useState(false)
+  /* the gesture under way: its element's outline, grips and size badge stay
+     hidden until it lands, so only the element itself shows */
+  const [movingOwner, setMovingOwner] = useState<object | null>(null)
   const [layoutDrop, setLayoutDrop] = useState<{
     drop: LayoutDrop
     world: Element
     origin: { x: number; y: number }
   } | null>(null)
   const cleanup = useRef<(() => void) | null>(null)
+  const hiddenBy = useRef<object | null>(null)
+  const ended = useRef(new WeakSet<object>())
   const finishing = useRef<Promise<void>>(Promise.resolve())
   const lastClick = useRef<{ selector: string; at: number; x: number; y: number } | null>(null)
   useEffect(() => () => cleanup.current?.(), [])
+
+  /* the drawing follows the pointer as a copy over the canvas (it may leave
+     its frame, which clips), so the original is hidden while the copy shows */
+  function hideDrawing(owner: object, selector: string) {
+    if (ended.current.has(owner)) return
+    hiddenBy.current = owner
+    void requestFrame(frame.id, 'doop:drawing-moving', { selector })
+  }
+  function endPreview(owner: object) {
+    ended.current.add(owner)
+    setPreview((current) => (current?.owner === owner ? null : current))
+    setMovingOwner((current) => (current === owner ? null : current))
+    if (hiddenBy.current !== owner) return
+    hiddenBy.current = null
+    void requestFrame(frame.id, 'doop:drawing-moving', { selector: null })
+  }
 
   function start(
     e: Press,
@@ -111,6 +139,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     e.stopPropagation()
     cleanup.current?.()
     const pageId = s.activePageId
+    const owner = {}
     const pointerId = e.pointerId
     const startX = e.clientX
     const startY = e.clientY
@@ -129,6 +158,13 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     let layerWork: Promise<void> = Promise.resolve()
     let inFlight = false
     let picked = false
+    /* the frame and, once the hit test names the element, its parent and
+       siblings, in world px */
+    let snapTargets: DrawingRect[] = [frame]
+    const toSnapTargets = (rects: DrawingRect[] | undefined) => [
+      frame,
+      ...(rects ?? []).map((r) => ({ ...r, x: frame.x + r.x, y: frame.y + r.y })),
+    ]
 
     function pickHit() {
       if (picked) return
@@ -167,7 +203,6 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
     function previewLayer() {
       if (closed || !layer || !layerPoint || inFlight) return
       if (!layerReady) {
-        setMoving(true)
         const selector = layer.selector
         layerReady = finishing.current.then(() =>
           sourceUnchanged() ? styleGesture(frame.id, selector, 'begin') : null,
@@ -190,7 +225,8 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       })
     }
 
-    function cancel(commit = false) {
+    /** `landed` holds the moved copy in place until the save it waits on shows */
+    function cancel(commit = false, landed?: Promise<void>) {
       if (closed) return
       closed = true
       unsubscribe()
@@ -202,9 +238,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       surface.removeEventListener('lostpointercapture', onLostCapture)
       if (surface.hasPointerCapture(pointerId)) surface.releasePointerCapture(pointerId)
       cleanup.current = null
-      setPreview(null)
+      if (landed) void landed.then(() => endPreview(owner))
+      else endPreview(owner)
       setLayoutDrop(null)
-      setMoving(false)
       useStore.getState().setSnapGuides([])
       // Finish after the asynchronous begin, even if a flick or Escape beat it.
       if (layerReady && layer) {
@@ -242,6 +278,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       moved = true
       if (!bounds) return
       pickHit()
+      setMovingOwner(owner)
       const point = toWorld(ev.clientX, ev.clientY)
       let locked: 'x' | 'y' | null = null
       if (ev.shiftKey) {
@@ -251,7 +288,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       rect = { ...bounds, x: bounds.x + point.x - origin.x, y: bounds.y + point.y - origin.y }
       /* edges and center pull onto the ruler guides (⌥ moves freely); an
          axis Shift holds still stays held */
-      const snapped = ev.altKey ? null : snapFrame('move', rect, [], useStore.getState().viewport.zoom, visibleGuides())
+      const snapped = ev.altKey
+        ? null
+        : snapFrame('move', rect, snapTargets, useStore.getState().viewport.zoom, visibleGuides())
       if (snapped) {
         rect = { ...rect, x: locked === 'x' ? rect.x : snapped.x, y: locked === 'y' ? rect.y : snapped.y }
         useStore.getState().setSnapGuides(snapped.guides.filter((g) => (g.axis === 'v' ? 'x' : 'y') !== locked))
@@ -271,7 +310,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         return
       }
       target = drawingDropFrame(point, standalone ? frame.id : undefined)
-      setPreview({ rect, html, target, world: world! })
+      /* staying in its own frame is a plain move: only a new frame is marked */
+      const into = target?.id === frame.id ? null : target
+      setPreview({ rect, html, target: into, world: world!, owner, selector: hit!.selector })
     }
     function onUp(ev: PointerEvent) {
       if (ev.pointerId !== pointerId || closed) return
@@ -280,7 +321,9 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (closed) return
       if (!hit && !layer) return
       const complete = moved && !gesture.pinching && !closed
-      cancel(complete && !!layer)
+      const landed =
+        !layer && hit && complete && rect ? moveDrawing(frame, hit.selector, rect, target?.id, hit) : undefined
+      cancel(complete && !!layer, landed?.then(shown))
       // A Shift press remains a selection toggle until it actually drags.
       if (!complete && press.shiftKey) {
         lastClick.current = null
@@ -293,7 +336,6 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         return
       }
       if (!hit) return
-      if (complete && rect) void moveDrawing(frame, standalone ? undefined : hit.selector, rect, target?.id, hit)
       const previous = lastClick.current
       lastClick.current = complete ? null : { selector: hit.selector, at: ev.timeStamp, x: ev.clientX, y: ev.clientY }
       if (
@@ -306,6 +348,16 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         lastClick.current = null
         onDoubleClick?.(hit.selector)
       }
+    }
+    /** until the source, and the frame it went into, show what was saved */
+    async function shown(into: string | undefined) {
+      const frames = useStore.getState().canvas?.frames ?? []
+      await Promise.all(
+        [frame.id, into].map((id) => {
+          const live = id ? frames.find((f) => f.id === id) : undefined
+          return live ? frameShows(live.id, live.html) : undefined
+        }),
+      )
     }
     function onCancel(ev: PointerEvent) {
       if (ev.pointerId === pointerId) cancel()
@@ -359,6 +411,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         layer = (response?.hit ?? null) as ElementMoveHit | null
         if (layer) {
           bounds = { ...layer.rect, x: frame.x + layer.rect.x, y: frame.y + layer.rect.y }
+          snapTargets = toSnapTargets(layer.snapRects)
           if (!press.shiftKey) pickHit()
           if (lastMove) onMove(lastMove)
           if (released) onUp(released)
@@ -372,9 +425,11 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       const el = live?.html === frame.html ? movableDrawing(live, standalone ? undefined : hit.selector) : null
       if (!el) return cancel()
       bounds = { ...hit.rect, x: frame.x + hit.rect.x, y: frame.y + hit.rect.y }
+      snapTargets = toSnapTargets(hit.snapRects)
       rect = bounds
+      const path = elementPath(el)
       placeDrawing(el, bounds, undefined, hit.geometry)
-      html = `<!doctype html><html><body style="margin:0">${el.outerHTML}</body></html>`
+      html = drawingPreview(live!.html, path, el)
       if (!press.shiftKey) pickHit()
       if (lastMove) onMove(lastMove)
       if (released) onUp(released)
@@ -384,7 +439,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
 
   return {
     start,
-    moving,
+    moving: movingOwner !== null,
     preview: (
       <>
         {layoutDrop &&
@@ -393,16 +448,18 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
               className="pointer-events-none absolute inset-0 z-40"
               style={{ left: layoutDrop.origin.x, top: layoutDrop.origin.y }}
             >
-              <div
-                data-element-drop-target
-                className="absolute bg-brand/10 [box-shadow:0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
-                style={{
-                  left: layoutDrop.drop.container.x,
-                  top: layoutDrop.drop.container.y,
-                  width: layoutDrop.drop.container.width,
-                  height: layoutDrop.drop.container.height,
-                }}
-              />
+              {layoutDrop.drop.reparent && (
+                <div
+                  data-element-drop-target
+                  className="absolute bg-brand/10 [box-shadow:0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
+                  style={{
+                    left: layoutDrop.drop.container.x,
+                    top: layoutDrop.drop.container.y,
+                    width: layoutDrop.drop.container.width,
+                    height: layoutDrop.drop.container.height,
+                  }}
+                />
+              )}
               <div
                 data-element-drop-indicator
                 className="absolute bg-brand"
@@ -432,7 +489,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
                 />
               )}
               <div
-                className="absolute opacity-80 [box-shadow:0_0_0_calc(1px/var(--zoom,1))_var(--brand)]"
+                className="absolute"
                 style={{
                   left: preview.rect.x,
                   top: preview.rect.y,
@@ -447,6 +504,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
                   title={t('stage.movingDrawing')}
                   sandbox=""
                   srcDoc={preview.html}
+                  onLoad={() => hideDrawing(preview.owner, preview.selector)}
                   className="block border-0 bg-transparent"
                   style={{
                     width: preview.rect.width,

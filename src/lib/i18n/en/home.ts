@@ -1,7 +1,6 @@
 /** Home: the hero and composer, the canvas list, the workspace dialogs and the agent allowance. */
 export const home = {
   /* header */
-  manage: 'Manage',
   import: 'Import',
   newCanvas: 'New canvas',
   newShort: 'New',

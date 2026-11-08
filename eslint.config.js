@@ -128,15 +128,34 @@ const COMPONENT_LAYER_SELECTORS = [
    JavaScript that no type check sees (oxlint's is still a nursery rule).
    No type information is loaded, so this run is cheap. */
 export default tseslint.config(
-  { ignores: ['dist/', 'node_modules/', 'desktop/src-tauri/target/', 'storybook-static/'] },
+  {
+    ignores: [
+      'dist/',
+      'node_modules/',
+      'desktop/src-tauri/target/',
+      'desktop/src-tauri-chromium/target/',
+      'storybook-static/',
+    ],
+  },
   {
     files: ['**/*.{js,mjs,cjs}'],
     rules: { 'no-undef': 'error' },
   },
   {
-    /* repo maintenance scripts and the iOS dev helpers: plain ESM run directly
-       by node, so they get node globals rather than the browser set */
-    files: ['scripts/**/*.{js,mjs}', 'ios/scripts/**/*.{js,mjs}'],
+    files: ['chrome-extension/**/*.js'],
+    languageOptions: {
+      globals: Object.fromEntries(
+        'chrome window document navigator Node Element getComputedStyle HTMLImageElement HTMLInputElement HTMLTextAreaElement TextEncoder'
+          .split(' ')
+          .map((g) => [g, 'readonly']),
+      ),
+    },
+  },
+  {
+    /* repo maintenance scripts, the iOS dev helpers and the desktop release
+       scripts: plain ESM run directly by node or bun, so they get node globals
+       rather than the browser set */
+    files: ['scripts/**/*.{js,mjs}', 'ios/scripts/**/*.{js,mjs}', 'desktop/scripts/**/*.{js,mjs}'],
     languageOptions: {
       globals: Object.fromEntries(
         'process console Buffer URL fetch setTimeout clearTimeout setInterval clearInterval'

@@ -61,6 +61,8 @@ export const canvases = pgTable('canvases', {
   pages: jsonb('pages').$type<CanvasPageInfo[]>(),
   /** ruler guides of every page; null = none */
   guides: jsonb('guides').$type<CanvasGuide[]>(),
+  /** design token themes (light, dark, …) in display order; null = none */
+  tokenThemes: jsonb('token_themes').$type<string[]>(),
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerId: text('owner_id'),
@@ -351,6 +353,8 @@ export const tasks = pgTable(
     scope: text('scope'),
     /** comma-joined ids of the frames edited while the task was open, most recent last */
     frameIds: text('frame_ids'),
+    /** JSON RunnerPick: the connection and model the composer picked for a card */
+    runner: text('runner'),
   },
   (t) => [index('tasks_canvas_idx').on(t.canvasId)],
 )
@@ -372,6 +376,8 @@ export const feedback = pgTable(
     completedAt: bigint('completed_at', { mode: 'number' }),
     failedAt: bigint('failed_at', { mode: 'number' }),
     failureReason: text('failure_reason'),
+    /** JSON RunnerPick of the task it answers, kept from when it was left */
+    runner: text('runner'),
   },
   (t) => [index('feedback_canvas_idx').on(t.canvasId)],
 )
@@ -505,6 +511,29 @@ export const guidelineVersions = pgTable(
   (t) => [index('guideline_versions_doc_idx').on(t.canvasId, t.name)],
 )
 
+/** Design tokens (shared/designTokens.ts): a canvas's named design values,
+ *  each a CSS custom property frames use as `var(--name)`. Small and read on
+ *  every frame write; hydrated with the canvas. */
+export const designTokens = pgTable(
+  'design_tokens',
+  {
+    canvasId: text('canvas_id').notNull(),
+    /** the CSS custom property name, `--color-primary` */
+    name: text('name').notNull(),
+    /** one of TOKEN_TYPES */
+    type: text('type').notNull(),
+    value: text('value').notNull(),
+    /** the value under each of the canvas's token themes that overrides `value` */
+    themes: jsonb('themes').$type<Record<string, string>>(),
+    description: text('description'),
+    /** display order within the canvas */
+    order: doublePrecision('order').notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.name] })],
+)
+
 /** Frames pinned to Memory as style exemplars: the HTML is a snapshot taken
  *  at pin time, deliberately decoupled from the (mutable, deletable) frame. */
 export const memoryReferences = pgTable(
@@ -589,25 +618,43 @@ export const residentUsage = pgTable('resident_usage', {
  *  auth.openai.com, refreshed here) or a plain OpenAI API key — `kind` says
  *  which, and the token columns are empty for the key path. Secrets: these
  *  rows are as sensitive as a password, and never leave the server. */
-export const modelAccounts = pgTable('model_accounts', {
+/** A person's model accounts, one per provider kind: several can be connected
+ *  at once, each switched on or off, and `agent_defaults` names the one work
+ *  without a pick runs on. */
+export const modelAccounts = pgTable(
+  'model_accounts',
+  {
+    userId: text('user_id').notNull(),
+    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' */
+    kind: text('kind').notNull(),
+    /** off keeps the credential but takes the account out of the composer and the default */
+    enabled: boolean('enabled').notNull().default(true),
+    /** chatgpt: the ChatGPT account the tokens are scoped to */
+    accountId: text('account_id'),
+    /** display only — whose subscription this is, and which plan */
+    email: text('email'),
+    plan: text('plan'),
+    accessToken: sealedText('access_token'),
+    refreshToken: sealedText('refresh_token'),
+    /** epoch ms the access token expires; refreshed ahead of this */
+    expiresAt: bigint('expires_at', { mode: 'number' }),
+    apiKey: sealedText('api_key'),
+    /** the model tier this user picked; null = the server default */
+    model: text('model'),
+    /** OpenAI reasoning effort this user picked; null = the server default */
+    reasoningEffort: text('reasoning_effort'),
+    connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.kind] })],
+)
+
+/** Which connection work without a pick (comments, @mentions, automations)
+ *  runs on: an account kind or 'claude-local'. A provider that is no longer
+ *  connected or switched on is skipped, and the fallback order applies. */
+export const agentDefaults = pgTable('agent_defaults', {
   userId: text('user_id').primaryKey(),
-  /** 'chatgpt' (subscription, OAuth) | 'openai-key' (pay-as-you-go API key) */
-  kind: text('kind').notNull(),
-  /** chatgpt: the ChatGPT account the tokens are scoped to */
-  accountId: text('account_id'),
-  /** display only — whose subscription this is, and which plan */
-  email: text('email'),
-  plan: text('plan'),
-  accessToken: sealedText('access_token'),
-  refreshToken: sealedText('refresh_token'),
-  /** epoch ms the access token expires; refreshed ahead of this */
-  expiresAt: bigint('expires_at', { mode: 'number' }),
-  apiKey: sealedText('api_key'),
-  /** the model tier this user picked; null = the server default */
-  model: text('model'),
-  /** OpenAI reasoning effort this user picked; null = the server default */
-  reasoningEffort: text('reasoning_effort'),
-  connectedAt: bigint('connected_at', { mode: 'number' }).notNull(),
+  provider: text('provider').notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
 })
 

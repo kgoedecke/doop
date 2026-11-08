@@ -594,6 +594,22 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
   }
 
+  /* what a moved element lines up with: its parent box and the visible
+     elements beside it (the frame itself is the stage's to add) */
+  function snapRects(el) {
+    var parent = el.parentElement
+    if (!parent) return []
+    var rects = parent === document.body || parent === document.documentElement ? [] : [designRect(parent)]
+    for (var i = 0; i < parent.children.length && rects.length < 80; i++) {
+      var sibling = parent.children[i]
+      if (sibling === el || sibling.hasAttribute('data-doop-defs')) continue
+      if (getComputedStyle(sibling).visibility !== 'visible') continue
+      var r = designRect(sibling)
+      if (r.width > 0 && r.height > 0) rects.push(r)
+    }
+    return rects
+  }
+
   /* Ask the browser which element is actually on top, including stacking
      contexts, clipping, and transformed hit regions. Keep layout dimensions
      separate from the rendered rectangle so a move does not apply scale twice. */
@@ -624,19 +640,22 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       else el.setAttribute('style', originalStyle)
     }
     return {
-      selector: cssPath(el), rect: rect,
+      selector: cssPath(el), rect: rect, snapRects: snapRects(el),
       geometry: { width: width, height: height, offsetX: rect.x - untransformed.x,
         offsetY: rect.y - untransformed.y, styles: styles },
     }
   }
 
+  /* the path editor and a drawing being dragged out of place draw their own
+     copy over the canvas; the original stays laid out but unpainted */
   var pathEditingSelector = null
+  var movingDrawingSelector = null
   function syncPathVisibility() {
     document.querySelectorAll('[data-v-path-hidden]').forEach(function (el) { el.removeAttribute('data-v-path-hidden') })
-    if (pathEditingSelector) {
-      var pathSvg = document.querySelector(pathEditingSelector)
-      if (pathSvg) pathSvg.setAttribute('data-v-path-hidden', '')
-    }
+    ;[pathEditingSelector, movingDrawingSelector].forEach(function (selector) {
+      var hidden = selector && document.querySelector(selector)
+      if (hidden) hidden.setAttribute('data-v-path-hidden', '')
+    })
   }
   /* the topmost unlocked element under a point, a standalone's root included:
      a double-click on a shape inside an imported group edits that shape */
@@ -731,7 +750,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     // A selected group moves as a whole even when the press hits a child.
     if (el && picked && picked.contains(el) && !isLocked(picked)) el = picked
     while (el && el !== document.body && el !== document.documentElement) {
-      if (elementGeometry(el).enabled) return hitInfo(el)
+      if (elementGeometry(el).enabled) {
+        var info = hitInfo(el)
+        info.snapRects = snapRects(el)
+        return info
+      }
       // Inline text and SVG paths move with their containing box/SVG.
       el = el.parentElement
     }
@@ -983,6 +1006,13 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     for (var j = 0; j < el.style.length; j++) {
       var name = el.style[j]
       inline[name] = el.style.getPropertyValue(name)
+    }
+    // The list enumerates longhands, so a shorthand holding a var() (a design
+    // token on border-radius) is only visible through the shorthand itself.
+    var shorthands = ['border-radius', 'border-color', 'border-width', 'padding', 'gap']
+    for (var sh = 0; sh < shorthands.length; sh++) {
+      var shorthandValue = el.style.getPropertyValue(shorthands[sh])
+      if (shorthandValue) inline[shorthands[sh]] = shorthandValue
     }
     var classes = (el.getAttribute('class') || '').trim().split(/[ ]+/).filter(Boolean)
     var text = ''
@@ -1262,6 +1292,19 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         }
       }
     }
+    if (d.type === 'doop:rename') {
+      var namedEl = null
+      try { namedEl = d.selector ? document.querySelector(d.selector) : null } catch (e) { /* bad selector */ }
+      if (namedEl) {
+        if (typeof d.name === 'string') namedEl.setAttribute('data-doop-name', d.name)
+        else if (d.name === null) namedEl.removeAttribute('data-doop-name')
+        /* the saved document stamps the element's id with its name; the live
+           one follows, and a rolled-back stamp (null) comes off again */
+        if (typeof d.elementId === 'string' && !namedEl.hasAttribute('data-doop-id')) namedEl.setAttribute('data-doop-id', d.elementId)
+        else if (d.elementId === null) namedEl.removeAttribute('data-doop-id')
+      }
+      parent.postMessage({ type: 'doop:rename-result', reqId: d.reqId, ok: !!namedEl }, '*')
+    }
     // Mirror the Layers eye in the live document, including during text edits.
     if (d.type === 'doop:visibility') {
       var hideEl = null
@@ -1326,6 +1369,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       pathEditingSelector = d.selector || null
       syncPathVisibility()
       parent.postMessage({ type: 'doop:path-editing-result', reqId: d.reqId }, '*')
+    }
+    if (d.type === 'doop:drawing-moving') {
+      movingDrawingSelector = d.selector || null
+      syncPathVisibility()
+      parent.postMessage({ type: 'doop:drawing-moving-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:hover') {
       parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y) }, '*')

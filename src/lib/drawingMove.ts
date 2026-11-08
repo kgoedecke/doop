@@ -26,6 +26,8 @@ export interface DrawingHit {
   selector: string
   rect: DrawingRect
   geometry: DrawingGeometry
+  /** the parent box and siblings, in design px, for snapping */
+  snapRects?: DrawingRect[]
 }
 
 const parse = (html: string) => new DOMParser().parseFromString(html, 'text/html')
@@ -90,13 +92,32 @@ export function placeDrawing(
 
 /** Save the destination before removing the source. A failed source save
  *  rolls the destination back; an unsuccessful rollback keeps both copies. */
+/** The page a drag shows a drawing on: the drawing alone, with the CSS it
+ *  relies on in its frame (scoped as a move carries it) and the frame's
+ *  stylesheet links, so the copy looks like the original it stands in for. */
+export function drawingPreview(sourceHtml: string, path: string, el: Element): string {
+  const scope = newScope()
+  const css = carriedCss(sourceHtml, path, scope)
+  el.setAttribute(SCOPE_ATTR, scope)
+  const links = [...parse(sourceHtml).querySelectorAll('link[rel~="stylesheet"]')].map((link) => link.outerHTML)
+  return withCarriedCss(
+    `<!doctype html><html><head>${links.join('')}</head><body style="margin:0">${el.outerHTML}</body></html>`,
+    css,
+    scope,
+  )
+}
+
+/** Resolves with the frame the drawing landed in (its source, the frame it
+ *  went into, or the one made for it on the canvas), or undefined when the
+ *  move did not happen. */
 export function moveDrawing(
   pressed: Frame,
   selector: string | undefined,
   rect: DrawingRect,
   targetId?: string,
   hit?: DrawingHit,
-): Promise<void> {
+): Promise<string | undefined> {
+  let landed: string | undefined
   const save = async () => {
     const s = useStore.getState()
     const canvas = s.canvas?.id === pressed.canvasId ? s.canvas : await api.getCanvas(pressed.canvasId)
@@ -157,6 +178,7 @@ export function moveDrawing(
         : rect
       const saved = await conditional(source, api.updateFrame(source.id, position, source.updatedAt))
       updateLocal(saved)
+      landed = saved.id
       if (active()) recordUpdates([{ frameId: source.id, before: source, after: position }])
       select(saved)
       return
@@ -173,6 +195,7 @@ export function moveDrawing(
       const html = serialize(sourceDoc)
       const saved = await conditional(source, api.updateFrame(source.id, { html }, source.updatedAt))
       updateLocal(saved)
+      landed = saved.id
       if (active()) recordUpdates([{ frameId: source.id, before: { html: source.html }, after: { html } }])
       return
     }
@@ -269,6 +292,7 @@ export function moveDrawing(
     if (active())
       recordDrawingTransfer({ before: target ?? null, after: destination }, { before: source, after: remaining })
     select(destination, target ? el.id : undefined)
+    landed = destination.id
   }
-  return queueDrawingSave(save, 'Couldn’t move the drawing. Please try again.')
+  return queueDrawingSave(save, 'Couldn’t move the drawing. Please try again.').then(() => landed)
 }

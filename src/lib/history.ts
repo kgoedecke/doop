@@ -3,7 +3,9 @@ import { applyPageChanges, canvasPages, samePages } from '../../shared/pages'
 import { pageBackground } from '../../shared/pageBackground'
 import type { Canvas, CanvasGuide, CanvasPageInfo, Frame } from '../../shared/types'
 import { api } from './api'
-import { settleFrames } from './frameBridge'
+import { requestFrame, settleFrames } from './frameBridge'
+import { clearElementId, elementIdAt, elementName, setElementName } from './layers'
+import { elementIdSelector } from '../../shared/elementId'
 import { useStore } from './store'
 import { posthog } from './posthog'
 
@@ -32,6 +34,16 @@ type Entry =
       guides?: CanvasGuide[]
     }
   | { type: 'update'; frameId: string; before: Patch; after: Patch; at: number; discrete?: boolean }
+  /* a layer's caption: `elementId` is the `data-doop-id` the rename stamped,
+     what undo and redo find the element by once a sibling moves it */
+  | {
+      type: 'layer-name'
+      frameId: string
+      selector: string
+      elementId?: string
+      before: string | null
+      after: string | null
+    }
   | { type: 'create'; frameId: string; snapshot: Snapshot }
   /* frames restacked together (the Layers panel renumbering a page): saved
      as one request, so undo and redo change the order whole or not at all */
@@ -137,9 +149,62 @@ export function recordUpdate(frameId: string, before: Patch, after: Patch, discr
     top.after = { ...top.after, ...entry.after }
     top.at = Date.now()
     redoStack = []
-    return
+    return top
   }
   push(entry)
+  return entry
+}
+
+export function recordLayerName(
+  frameId: string,
+  selector: string,
+  before: string | null,
+  after: string,
+  elementId?: string,
+): HistoryEntry {
+  const entry: Entry = { type: 'layer-name', frameId, selector, before, after, ...(elementId ? { elementId } : {}) }
+  push(entry)
+  return entry
+}
+
+/** A name is metadata, not an HTML snapshot. Undo and rollback must update
+ *  the live attribute even while the frame is being text-edited.
+ *  `stamp` is the `data-doop-id` the first rename gives the element it
+ *  reaches by position; undo and redo pass the id's own selector and no
+ *  stamp, so a layer whose id is gone is refused, never a neighbour renamed. */
+export async function saveLayerName(frameId: string, selector: string, name: string | null, stamp?: string) {
+  const store = useStore.getState()
+  const frame = store.canvas?.frames.find((f) => f.id === frameId)
+  if (!frame) throw new Error('Frame removed')
+  const before = elementName(frame.html, selector)
+  const stamping = !!stamp && elementIdAt(frame.html, selector) === null
+  const html = setElementName(frame.html, selector, name, stamp)
+  if (html === null) throw new Error('Layer removed')
+  const started = epoch
+  store.patchFrameLocal(frameId, { html })
+  const mirrored = requestFrame(frameId, 'doop:rename', { selector, name, ...(stamping ? { elementId: stamp } : {}) })
+  try {
+    await api.updateFrame(frameId, { html })
+    await mirrored
+  } catch (err) {
+    const s = useStore.getState()
+    const current = s.canvas?.frames.find((f) => f.id === frameId)
+    if (
+      s.canvas?.id === frame.canvasId &&
+      epoch === started &&
+      current &&
+      elementName(current.html, selector) === name
+    ) {
+      /* a stamp this write made goes with it, in the saved and the live document */
+      const named = setElementName(current.html, selector, before)
+      const rollback = named !== null && stamping ? clearElementId(named, selector) : named
+      if (rollback !== null) {
+        s.patchFrameLocal(frameId, { html: rollback })
+        await requestFrame(frameId, 'doop:rename', { selector, name: before, ...(stamping ? { elementId: null } : {}) })
+      }
+    }
+    throw err
+  }
 }
 
 /** Frames restacked together: one undo step, saved as one request. */
@@ -547,6 +612,12 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
   } else if (e.type === 'stack') {
     if (useStore.getState().canvas?.id !== e.canvasId) throw new Error('Canvas changed')
     await saveStack(e.canvasId, forward ? e.before : e.after, forward ? e.after : e.before)
+  } else if (e.type === 'layer-name') {
+    await saveLayerName(
+      e.frameId,
+      e.elementId ? elementIdSelector(e.elementId) : e.selector,
+      forward ? e.after : e.before,
+    )
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
     /* a frame that was straight has no rotation to go back to: JSON drops

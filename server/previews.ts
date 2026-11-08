@@ -33,7 +33,8 @@ const RENDERS_PER_MIN = env.PREVIEW_RENDERS_PER_MIN
 
 export interface ImageRequest {
   ext: 'png' | 'jpg'
-  scale: 1 | 2
+  /** output density, already parsed and fitted (shared/exportScale.ts) */
+  scale: number
   quality: number
   /** dashboard-card variant: small, clipped, jpeg, persisted. Only
    *  meaningful for jpg — a png?preview would serve jpeg bytes under an
@@ -79,7 +80,7 @@ export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageRe
   return { status: 'ok', buf: await pending }
 }
 
-function imageKey(id: string, ext: 'png' | 'jpg', scale: 1 | 2, quality: number | '', preview: boolean): string {
+function imageKey(id: string, ext: 'png' | 'jpg', scale: number, quality: number | '', preview: boolean): string {
   return `${id}:${ext}:${scale}:${quality}:${preview ? 'p' : ''}`
 }
 
@@ -88,7 +89,7 @@ function imageKey(id: string, ext: 'png' | 'jpg', scale: 1 | 2, quality: number 
  *  preview card loads `/i/<id>.png` right after it from a cookie-less sandbox
  *  iframe — anonymous, so metered. Priming turns that load into a free
  *  cached serve instead of a second render against the per-IP budget. */
-export function primeImage(frame: Frame, scale: 1 | 2, png: Buffer): void {
+export function primeImage(frame: Frame, scale: number, png: Buffer): void {
   remember(imageKey(frame.id, 'png', scale, '', false), Promise.resolve(png), frame.updatedAt)
 }
 
