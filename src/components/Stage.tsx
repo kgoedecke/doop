@@ -257,6 +257,9 @@ export function Stage({
   /* the selection rectangle being dragged out, in world coordinates */
   /* Z held down: the tool to go back to on release */
   const zoomHeld = useRef<{ previous: Tool } | null>(null)
+  /* a zoom drag under way, ended without zooming if the stage goes away */
+  const endZoomGesture = useRef<(() => void) | null>(null)
+  useEffect(() => () => endZoomGesture.current?.(), [])
   const [altHeld, setAltHeld] = useState(false)
   const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
   /* where the Comment tool was clicked on empty canvas: the composer opens there */
@@ -987,6 +990,8 @@ export function Stage({
   /* the Zoom tool: a click zooms in on the point (⌥ out), a drag draws a box
      (shown as the marquee) and zooms onto it on release */
   function startZoom(e: React.PointerEvent) {
+    /* a second finger is a pinch, which zooms on its own */
+    if (!e.isPrimary || gesture.pinching) return
     const el = e.currentTarget as HTMLElement
     el.setPointerCapture(e.pointerId)
     const unlockSelection = lockTextSelection()
@@ -996,6 +1001,9 @@ export function Stage({
 
     function onMove(ev: PointerEvent) {
       if (ev.pointerId !== e.pointerId) return
+      /* a pinch took over: it owns the camera, and lifting a finger after
+         it must not zoom again */
+      if (gesture.pinching) return end()
       const x = ev.clientX - rect.left
       const y = ev.clientY - rect.top
       const width = Math.abs(x - origin.x)
@@ -1016,16 +1024,23 @@ export function Stage({
     function onCancel(ev: PointerEvent) {
       if (ev.pointerId === e.pointerId) end()
     }
+    /* Esc drops the box without zooming */
+    function onKey(ev: KeyboardEvent) {
+      if (ev.key === 'Escape') end()
+    }
     function end() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKey)
+      endZoomGesture.current = null
       setMarquee(null)
       unlockSelection()
     }
     function onUp(ev: PointerEvent) {
       if (ev.pointerId !== e.pointerId) return
       end()
+      if (gesture.pinching) return
       const vp = useStore.getState().viewport
       const limits = { min: MIN_ZOOM, max: MAX_ZOOM }
       const stage = { width: el.clientWidth, height: el.clientHeight }
@@ -1040,6 +1055,8 @@ export function Stage({
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('keydown', onKey)
+    endZoomGesture.current = end
   }
 
   function startMarquee(e: React.PointerEvent) {
