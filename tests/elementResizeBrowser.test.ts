@@ -530,7 +530,7 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     await page.evaluate(() => window.elementPanelHarness.setTool('select'))
   }, 20_000)
 
-  it("divides the drag by a scaled element's render scale, and skips a rotated one", async () => {
+  it("divides the drag by a scaled element's render scale, and turns the grips with a rotated one", async () => {
     await reset()
     await select('#scaled')
     expect(await page.$eval('[data-element-size]', (el) => el.textContent)).toBe('200 × 100')
@@ -538,11 +538,19 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     const frame = (await frameDoc())!
     await frame.waitForFunction(() => getComputedStyle(document.querySelector('#scaled')!).width === '120px')
     await page.waitForFunction(() => document.querySelector('[data-element-size]')?.textContent === '240 × 100')
+    /* a turned element keeps its grips: the furniture turns with it, on its
+       own box rather than its bounds */
     await page.evaluate((s) => window.elementPanelHarness.select(s), '#turned')
-    await page.waitForFunction(() => !document.querySelector('[data-resize-handles]'))
+    await page.waitForFunction(
+      () => document.querySelector('[data-resize-handles]')?.getAttribute('data-element-rotation') === '30',
+    )
+    expect(await page.$eval('[data-resize-handles]', (el) => (el as HTMLElement).style.transform)).toBe(
+      'translate(-50%, -50%) rotate(30deg)',
+    )
+    expect(await page.$eval('[data-element-size]', (el) => el.textContent)).toBe('100 × 50')
   }, 20_000)
 
-  it.each(['individual-rotate', 'ancestor-rotate', 'ancestor-skew', 'ancestor-half-turn', 'ancestor-3d'])(
+  it.each(['ancestor-rotate', 'ancestor-skew', 'ancestor-half-turn', 'ancestor-3d'])(
     'offers no resize handles on #%s',
     async (id) => {
       await reset()
@@ -554,14 +562,18 @@ describe.skipIf(!findBrowserPath())('element resize handles', () => {
     20_000,
   )
 
-  it('removes handles after the Rotation control rotates an element', async () => {
+  it('turns the handles after the Rotation control rotates an element, and back on undo', async () => {
     await reset()
     await select('#box')
     await page.evaluate(() => window.elementPanelHarness.geometry('#box', { kind: 'rotate', value: 30 }))
-    await page.waitForFunction(() => !document.querySelector('[data-resize-handles]'))
+    await page.waitForFunction(
+      () => document.querySelector('[data-resize-handles]')?.getAttribute('data-element-rotation') === '30',
+    )
     await expect.poll(() => saved.html).toContain('rotate: 30deg')
     await page.evaluate(() => window.elementPanelHarness.undo())
-    await page.waitForSelector('[data-resize-handles]')
+    await page.waitForFunction(
+      () => document.querySelector('[data-resize-handles]') && !document.querySelector('[data-element-rotation]'),
+    )
   }, 20_000)
 
   it('still resizes through positive ancestor scales and a zero individual rotation', async () => {

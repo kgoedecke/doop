@@ -30,6 +30,9 @@ export interface Frame {
   /** Stacking order on its page (back to front; see shared/frameStack.ts).
    *  Unset on frames made before stacking existed: they stack by createdAt. */
   z?: number
+  /** Degrees clockwise about the frame's centre (shared/frameRotation.ts);
+   *  `x`/`y`/`width`/`height` stay the unrotated box. Unset is 0. */
+  rotation?: number
   /** Human sign-off for implementation. Missing/null means draft. Design
    * edits retain the attribution but change the status to needs_review. */
   approval?: FrameApproval | null
@@ -543,7 +546,7 @@ export type ClientMessage =
   | { type: 'cursor'; x: number; y: number }
   | { type: 'viewport'; viewport: PeerViewport }
   | { type: 'editing'; frameId: string | null }
-  | { type: 'frame:drag'; frameId: string; x: number; y: number; width: number; height: number }
+  | { type: 'frame:drag'; frameId: string; x: number; y: number; width: number; height: number; rotation?: number }
 
 export type ServerMessage =
   | {
@@ -571,7 +574,16 @@ export type ServerMessage =
   | { type: 'task'; task: AgentTask }
   | { type: 'feedback'; feedback: TaskFeedback }
   | { type: 'comment'; comment: ElementComment }
-  | { type: 'frame:drag'; clientId: string; frameId: string; x: number; y: number; width: number; height: number }
+  | {
+      type: 'frame:drag'
+      clientId: string
+      frameId: string
+      x: number
+      y: number
+      width: number
+      height: number
+      rotation?: number
+    }
   | { type: 'frame:created'; frame: Frame; actor: Actor }
   | { type: 'frame:updated'; frame: Frame; actor: Actor }
   | { type: 'frame:deleted'; frameId: string; actor: Actor }

@@ -352,6 +352,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
+- Zoom tool (Z, keyboard only; math in `src/lib/zoomTool.ts`): a click doubles the
+  zoom about the pointer, ⌥-click halves it (the cursor turns to zoom-out while ⌥ is down), and a
+  drag zooms onto the box it draws, filling the stage's open area. Z is the tool only while held:
+  letting go returns to the previous tool, and the tool rail has no button for it.
+  Tests: `zoomTool.test.ts`, the Zoom cases in `tools.test.ts`.
 - `src/lib/drawing.ts` creates rectangles, circles, straight and cubic Bézier SVG paths, text and empty
   frames through the existing frame API. Drawing inside a frame appends a positioned HTML/SVG
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker
@@ -435,6 +440,39 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `patchFrameLocal` and, through `PropertyScrubContext`, commits once on release as one discrete
   undo step and one PATCH; Esc puts the frame's box back and saves nothing. Tests:
   `inspectorScrub.test.tsx`.
+- Frame rotation (`shared/frameRotation.ts`, `src/lib/frameRotate.ts`): a selected frame wears a
+  zone just outside each corner (`data-frame-rotate-handle`, 18 screen px, clear of the corner
+  grip) that shows Figma's curved double-arrow cursor, turned to curve around its corner and with
+  the frame's own rotation (`rotateCursor`, tagged `data-cursor="rotate"`). A drag there turns the
+  frame about its centre with the pointer (`startRotate` in `FrameView.tsx`; Shift snaps to 15°,
+  Esc puts it back), broadcast live as `frame:drag`'s `rotation` and saved once on release as one
+  discrete undo step. `Frame.rotation` is degrees clockwise about the centre, stored in
+  `frames.rotation` (migration `0048_frame_rotation`) normalised to (-180, 180] with 0 unset;
+  `x`/`y`/`width`/`height` stay the unrotated box and the wrapper carries `rotate()`, so the
+  frame's name, grips and pins turn with it. The Inspector's Layout group has the `∠` field, the
+  size badge sits under the turned bounds, and a press inside a turned frame
+  is turned back into design px (`unrotatePoint`, `frameDesignPoint` for the element move hook and the
+  path editor's `frameTurnMatrix`) before the runtime is probed; the frame's own grips pull along
+  its axes with the far corner held still (`keepAnchorTurned`) and do not snap while turned. MCP `update_frame`
+  takes `rotation` through `server/pageTools.ts` (normalisation and page validation), and
+  `get_canvas` lists it when set; copy, paste and duplicate
+  (`frameClipboard.ts`) carry it. Not yet turned: marquee selection,
+  snapping and exports read the unrotated box. Tests: `frameRotation.test.ts`,
+  `frameRotationHttp.test.ts`, `frameRotateBrowser.test.ts`.
+- Element rotation (`src/lib/elementRotate.ts`): an element inside a frame wears the same rotate
+  zones (`data-rotate-handle` in `ElementResizeHandles.tsx`); a drag there turns it about its centre
+  through the runtime's `rotate` geometry edit inside a style gesture (preview per move, one
+  discrete save on release, Shift snaps to 15°, Esc cancels), the same way the Design panel's
+  Rotation field sets it. The runtime reports an element's own turn (`ownRotation`: its `rotate`
+  plus a plain 2D `transform` angle; skew, flip and 3D stay out) and its box before that turn
+  (`box`, via a uniform render scale read off the turned bounds) in hit info, `inspect` and
+  `doop:locate`; `selectionBox` draws the outline, grips and zones on that box, centred on the
+  bounds and turned with it, so a turned layer keeps its grips and resizes along its own axes
+  (`derotateDelta`; no guide snapping while turned). `sizable` now admits the element's own turn
+  and still refuses a turned, skewed, 3D or nonuniformly scaled ancestor; unsupported transforms
+  use the axis-aligned rendered bounds for the selection outline. The element toolbar lifts to 30px above a
+  selection wearing furniture, clear of the top zones. Tests: `elementRotate.test.ts`,
+  `elementRotateBrowser.test.ts`, the turned cases in `elementResizeBrowser.test.ts`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu
   toggles `<canvas>` rulers docked on the stage's top and left edges (the top bar and the floating
   chrome step in by `RULER_PX`) (remembered under

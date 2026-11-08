@@ -202,3 +202,27 @@ it('keeps a typed width at the frame floor and commits it at once', () => {
   expect(stored().width).toBe(1)
   expect(update).toHaveBeenCalledWith('f', { width: 1 })
 })
+
+it('scrubs rotation as one save, undoes to zero, and cancels without saving', async () => {
+  const update = vi.spyOn(api, 'updateFrame').mockImplementation(async (id, patch) => ({ ...stored(), ...patch, id }))
+  const unit = unitOf('Rotation')
+  act(() => {
+    unit.dispatchEvent(pointer('pointerdown', 100))
+    unit.dispatchEvent(pointer('pointermove', 130))
+  })
+  expect(stored().rotation).toBe(30)
+  expect(update).not.toHaveBeenCalled()
+  act(() => unit.dispatchEvent(pointer('pointerup', 130)))
+  expect(update).toHaveBeenCalledExactlyOnceWith('f', { rotation: 30 })
+  await act(() => undo())
+  expect(update).toHaveBeenLastCalledWith('f', { rotation: 0 })
+  expect(stored().rotation).toBe(0)
+  update.mockClear()
+  act(() => {
+    unit.dispatchEvent(pointer('pointerdown', 100))
+    unit.dispatchEvent(pointer('pointermove', 145))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  })
+  expect(stored().rotation).toBe(0)
+  expect(update).not.toHaveBeenCalled()
+})

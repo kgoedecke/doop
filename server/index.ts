@@ -2,6 +2,7 @@ import { env } from './env.ts'
 import { canvasPages, framePageId, samePages } from '../shared/pages.ts'
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
+import { normalizeRotation } from '../shared/frameRotation.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
@@ -1976,7 +1977,7 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
 
 app.post('/api/canvases/:id/frames', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  const { name, pageId, x, y, width, height, html, hidden, locked, z } = req.body ?? {}
+  const { name, pageId, x, y, width, height, html, hidden, locked, z, rotation } = req.body ?? {}
   if (pageId !== undefined && !store.getCanvas(req.params.id)?.pages?.some((p) => p.id === pageId))
     return res.status(400).json({ error: 'page not found' })
   const actor = userActor(req)
@@ -1994,6 +1995,7 @@ app.post('/api/canvases/:id/frames', (req, res) => {
       hidden: hidden === true,
       locked: locked === true,
       z: Number.isFinite(z) ? z : undefined,
+      rotation: normalizeRotation(rotation),
     },
     actor,
   )
@@ -2042,6 +2044,12 @@ app.patch('/api/frames/:id', (req, res) => {
   if (patch.z !== undefined) {
     if (!Number.isFinite(patch.z)) return res.status(400).json({ error: 'z must be a finite number' })
     clean.z = patch.z
+  }
+  /* a turn about the centre, stored in (-180, 180]; null or 0 straightens */
+  if (patch.rotation !== undefined) {
+    if (patch.rotation !== null && !Number.isFinite(patch.rotation))
+      return res.status(400).json({ error: 'rotation must be a finite number of degrees' })
+    clean.rotation = normalizeRotation(patch.rotation)
   }
   const frame = actions.updateFrame(req.params.id, clean, actor)
   if (!frame) return res.status(404).json({ error: 'frame not found' })
@@ -2715,6 +2723,7 @@ wss.on('connection', (ws, upgradeReq) => {
             y: msg.y,
             width: msg.width,
             height: msg.height,
+            ...(msg.rotation !== undefined ? { rotation: msg.rotation } : {}),
           },
           presence.clientId,
         )

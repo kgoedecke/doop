@@ -772,6 +772,7 @@ class Store {
       /** where it stacks (undo brings a deleted frame back to its place);
        *  in front of everything on the page when unset */
       z?: number
+      rotation?: number
     },
     by: string,
   ): Frame | undefined {
@@ -807,6 +808,7 @@ class Store {
     if (input.demo) frame.demo = true
     if (input.hidden) frame.hidden = true
     if (input.locked) frame.locked = true
+    if (input.rotation) frame.rotation = input.rotation
     c.frames.push(frame)
     c.frames.sort(byStack)
     c.updatedAt = now
@@ -819,7 +821,21 @@ class Store {
   updateFrame(
     frameId: string,
     patch: Partial<
-      Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'html' | 'hidden' | 'locked' | 'z' | 'approval'>
+      Pick<
+        Frame,
+        | 'name'
+        | 'pageId'
+        | 'x'
+        | 'y'
+        | 'width'
+        | 'height'
+        | 'html'
+        | 'hidden'
+        | 'locked'
+        | 'z'
+        | 'rotation'
+        | 'approval'
+      >
     >,
     by: string,
     opts: {

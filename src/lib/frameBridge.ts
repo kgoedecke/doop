@@ -57,6 +57,9 @@ export interface ElementInfo {
   }
   /** rendered box over layout box: the element's own and inherited scale */
   scale: { x: number; y: number }
+  /** the rendered box before the element's own turn, which `rect` (its
+   *  bounds) grows past; the selection furniture is drawn on this box */
+  box?: { width: number; height: number }
   position: string
   display: string
   flexDirection: string

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { frameDesignPoint, frameWorldPoint, rotateVector } from '../../shared/frameRotation'
 import { createPortal } from 'react-dom'
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from '../lib/drawing'
@@ -116,8 +117,18 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       return { x: (clientX - box.left - vp.x) / vp.zoom, y: (clientY - box.top - vp.y) / vp.zoom }
     }
     const origin = toWorld(e.clientX, e.clientY)
-    const contentBox = surface.querySelector('iframe')?.getBoundingClientRect()
-    const contentOrigin = contentBox ? toWorld(contentBox.left, contentBox.top) : { x: frame.x, y: frame.y }
+    /* where the document sits inside the frame, in design px: the frame's
+       border. Read off the iframe's centre, which a turned frame's bounds
+       still share, rather than its top-left, which a turn moves */
+    const iframe = surface.querySelector('iframe')
+    const contentOffset = (() => {
+      if (!iframe) return { x: 0, y: 0 }
+      const b = iframe.getBoundingClientRect()
+      const centre = frameDesignPoint(toWorld(b.left + b.width / 2, b.top + b.height / 2), frame)
+      return { x: centre.x - iframe.offsetWidth / 2, y: centre.y - iframe.offsetHeight / 2 }
+    })()
+    /* the document's top-left corner on the canvas, for the layout drop marks */
+    const contentOrigin = frameWorldPoint(contentOffset, frame)
     const press: Press = {
       ...e,
       currentTarget: surface,
@@ -285,11 +296,15 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
         useStore.getState().setSnapGuides(snapped.guides.filter((g) => (g.axis === 'v' ? 'x' : 'y') !== locked))
       } else useStore.getState().setSnapGuides([])
       if (layer) {
+        /* the layer's place in its document: where it was, plus the drag's
+           travel turned back by the frame's rotation; the pointer likewise */
+        const travel = rotateVector({ x: rect.x - bounds.x, y: rect.y - bounds.y }, -(frame.rotation ?? 0))
+        const pointer = frameDesignPoint(point, frame)
         layerPoint = {
-          x: rect.x - frame.x,
-          y: rect.y - frame.y,
-          pointerX: point.x - contentOrigin.x,
-          pointerY: point.y - contentOrigin.y,
+          x: layer.rect.x + travel.x,
+          y: layer.rect.y + travel.y,
+          pointerX: pointer.x - contentOffset.x,
+          pointerY: pointer.y - contentOffset.y,
         }
         previewLayer()
         return
@@ -377,8 +392,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       if (!(await frameShows(frame.id, frame.html))) return undefined
       return frame.html.includes('data-doop-drawing')
         ? requestFrame(frame.id, 'doop:drawing-hit', {
-            x: origin.x - frame.x,
-            y: origin.y - frame.y,
+            ...frameDesignPoint(origin, frame),
             standalone,
             selected,
           })
@@ -390,8 +404,7 @@ export function useElementMove(frame: Frame, layoutZoom: number) {
       hit = (reply?.hit ?? null) as DrawingHit | null
       if (!hit) {
         const response = await requestFrame(frame.id, 'doop:move-hit', {
-          x: origin.x - frame.x,
-          y: origin.y - frame.y,
+          ...frameDesignPoint(origin, frame),
           selected,
         })
         if (closed) return

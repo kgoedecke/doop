@@ -1,3 +1,4 @@
+import { normalizeRotation } from '../shared/frameRotation.ts'
 import * as actions from './actions.ts'
 import { MAX_PAGES, PageLimitError } from './store.ts'
 import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
@@ -12,7 +13,9 @@ import type { Actor, Canvas, CanvasPageInfo, Frame } from '../shared/types.ts'
 
 export type PageToolResult<T> = { ok: true; value: T } | { ok: false; error: string }
 
-export type FrameMetaPatch = Partial<Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'locked'>>
+export type FrameMetaPatch = Partial<
+  Pick<Frame, 'name' | 'pageId' | 'x' | 'y' | 'width' | 'height' | 'locked' | 'rotation'>
+>
 
 const MAX_PAGE_ID = 100
 
@@ -91,6 +94,10 @@ export function updateFrameMeta(
   if (!Object.keys(clean).length) return { ok: false, error: 'nothing to update' }
   if (clean.pageId !== undefined && !canvasPages(canvas).some((p) => p.id === clean.pageId))
     return { ok: false, error: `no page ${clean.pageId} on this canvas — the pages are: ${pageListText(canvas)}` }
+  if (clean.rotation !== undefined) {
+    if (!Number.isFinite(clean.rotation)) return { ok: false, error: 'rotation must be a finite number of degrees' }
+    clean.rotation = normalizeRotation(clean.rotation)
+  }
   const frame = actions.updateFrame(frameId, clean, actor)
   return frame ? { ok: true, value: frame } : { ok: false, error: `frame ${frameId} not found` }
 }

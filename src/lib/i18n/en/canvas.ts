@@ -9,6 +9,7 @@ export const canvas = {
   toolPath: 'Vector path',
   toolText: 'Text',
   toolComment: 'Comment',
+  toolZoom: 'Zoom',
 
   /* top bar */
   untitled: 'Untitled',

@@ -982,6 +982,26 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(saved[0]!.html).toContain('transform: rotate(10deg)')
   })
 
+  it("drags a layer inside a turned frame along the document's own axes, picking the layer under the pointer", async () => {
+    const source = { ...layerFrame(rectangle), rotation: 90 }
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    const iframe = (await (await page.waitForSelector('iframe[title="Layers"]'))!.contentFrame())!
+    await iframe.waitForSelector('#rect')
+    /* the 700×500 frame at (70,50) turned a quarter has its centre at (420,300)
+       in the world; the layer's design centre (100,100) lands at (570,50),
+       which the viewport's offset puts at (610,70) on screen */
+    await drag([610, 70], [610, 130])
+    await expect.poll(() => patchRequests).toBe(1)
+    /* 60px down the screen is 60px along the turned document's x: the layer
+       itself moved, not the frame, and only along that axis */
+    expect(saved[0]).toMatchObject({ x: 70, y: 50 })
+    expect(saved[0]!.html).toMatch(/translate: 60px (0|[0-9.e-]+)px/)
+    const moved = await iframe.$eval('#rect', (el) => el.getBoundingClientRect().toJSON() as DOMRect)
+    expect(moved.x).toBeCloseTo(110, 0)
+    expect(moved.y).toBeCloseTo(60, 0)
+  })
+
   it.each(['escape', 'pointer', 'blur', 'page', 'remote'])(
     'cancels an HTML layer drag on %s without saving',
     async (reason) => {
