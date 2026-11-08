@@ -341,4 +341,36 @@ describe('AutomationEditor Run shortcut integration tests', () => {
     })
     expect(mocks.runAutomation).toHaveBeenCalledTimes(1)
   })
+
+  it('11. Shortcut saves dirty drafts before executing the run', async () => {
+    const auto = sampleAutomation()
+    mocks.updateAutomation.mockImplementation(async (_id, patch) => ({
+      ...auto,
+      ...patch,
+      updatedAt: Date.now(),
+    }))
+
+    await renderEditor(auto)
+
+    const textarea = document.querySelector<HTMLTextAreaElement>('textarea')
+    expect(textarea).not.toBeNull()
+
+    // Modify prompt to make draft dirty using prototype setter for React controlled component
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
+    await act(async () => {
+      nativeSetter?.call(textarea, 'Updated prompt text')
+      textarea!.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    // Blur textarea so focus is not on a typing target
+    textarea!.blur()
+
+    await act(async () => {
+      dispatchKeydown({ metaKey: true }, window)
+    })
+
+    // Should have saved the draft first, then run
+    expect(mocks.updateAutomation).toHaveBeenCalledTimes(1)
+    expect(mocks.runAutomation).toHaveBeenCalledTimes(1)
+  })
 })
