@@ -750,7 +750,16 @@ export const FrameView = memo(function FrameView({
     /* the old outline's key must match no answer, not even "nothing here",
        so the reply always redraws */
     hoverKey.current = 'stale'
-    if (editing || pathEdit || dragging || elementMove.moving || resizing || frame.locked || tool === 'hand') {
+    if (
+      editing ||
+      pathEdit ||
+      dragging ||
+      elementMove.moving ||
+      resizing ||
+      frame.locked ||
+      tool === 'hand' ||
+      tool === 'zoom'
+    ) {
       clearHover()
       return
     }
@@ -1522,7 +1531,7 @@ export const FrameView = memo(function FrameView({
                  at the pointer's spot, which the gesture has moved */
               const at = designPoint(e, e.currentTarget)
               hoverAt.current = at
-              /* the Hand only pans, and a locked frame has nothing to pick: no
+              /* the Hand only pans, the Zoom only zooms, and a locked frame has nothing to pick: no
                  element outlines in either case */
               if (
                 editing ||
@@ -1533,7 +1542,8 @@ export const FrameView = memo(function FrameView({
                 frame.locked ||
                 !frame.html ||
                 !runtimeReady ||
-                tool === 'hand'
+                tool === 'hand' ||
+                tool === 'zoom'
               )
                 return
               sendHover(at.x, at.y)

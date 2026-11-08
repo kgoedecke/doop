@@ -9,6 +9,7 @@ export const canvas: Catalog['canvas'] = {
   toolPath: 'Caminho vetorial',
   toolText: 'Texto',
   toolComment: 'Comentário',
+  toolZoom: 'Zoom',
 
   untitled: 'Sem título',
   allCanvases: 'Todos os canvases',

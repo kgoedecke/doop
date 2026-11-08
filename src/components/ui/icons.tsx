@@ -134,6 +134,7 @@ import {
   Palette,
   Ruler,
   Space,
+  ZoomIn,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -301,6 +302,7 @@ export const SlidersIcon = icon(SlidersHorizontal)
 export const ScalingIcon = icon(Scaling)
 export const PointerIcon = icon(MousePointer2)
 export const HandIcon = icon(Hand)
+export const ZoomInIcon = icon(ZoomIn)
 /** the select tool's arrow — the same glyph as PointerIcon */
 export const CursorIcon = icon(MousePointer2)
 /** comments: the round bubble, as on the side panel's Comments tab in the design */
