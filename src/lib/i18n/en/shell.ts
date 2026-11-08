@@ -9,7 +9,6 @@ export const shell = {
   desktopApp: 'Get desktop app',
   website: 'Doop website',
   appearance: 'Appearance',
-  language: 'Language',
   logOut: 'Log out',
   updateTitle: 'Update available',
   updateBody: 'Doop {version} is ready. Restart to apply the update.',
