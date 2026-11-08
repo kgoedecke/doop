@@ -10,7 +10,6 @@ export const shell: Catalog['shell'] = {
   desktopApp: 'Baixar o app para desktop',
   website: 'Site do Doop',
   appearance: 'Aparência',
-  language: 'Idioma',
   logOut: 'Sair',
   updateTitle: 'Atualização disponível',
   updateBody: 'O Doop {version} está pronto. Reinicie para aplicar a atualização.',

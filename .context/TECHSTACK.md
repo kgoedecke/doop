@@ -697,7 +697,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   key fails typecheck). Components call `useT()` and `t('namespace.key', vars)`; `{name}`
   placeholders are type-checked, `{ one, other }` values pick a plural by `{count}`, and a key kept
   in a table is a `PlainMessageKey` translated at render. The active language is this browser's pick
-  (`doop-locale` in `localStorage`, Settings -> Appearance or the account menu), else the server's
+  (`doop-locale` in `localStorage`, Settings -> General), else the server's
   `DEFAULT_LOCALE` (`GET /api/locale-config`, asked once before React mounts), else `en`; the list
   lives in `shared/locales.ts`. `tests/i18n.test.ts` checks every catalog against English. Screens
   not yet converted still render English.

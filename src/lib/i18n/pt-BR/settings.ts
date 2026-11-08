@@ -26,7 +26,7 @@ export const settings: Catalog['settings'] = {
   accountBlurb: 'Quem você é em cada canvas — e como voltar a entrar neste.',
   appearanceTitle: 'Aparência',
   appearanceBlurb:
-    'Como o Doop aparece neste navegador: claro ou escuro, o idioma em que ele fala e como o editor do canvas organiza seus painéis.',
+    'Como o Doop aparece neste navegador: claro ou escuro e como o editor do canvas organiza seus painéis.',
 
   freeTasksLeftLabel: 'Tarefas gratuitas restantes do Doop Agent',
   meterGeminiCloud: 'Piloto do Gemini na nuvem selecionado — conexão gerenciada pelo seu operador.',
