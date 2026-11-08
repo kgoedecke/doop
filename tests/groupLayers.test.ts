@@ -109,6 +109,17 @@ describe('setElementLink', () => {
 })
 
 describe('setElementsLink', () => {
+  it('keeps an inner link’s looks and id when its box is linked, and follows it when picked', () => {
+    const div = 'body:nth-of-type(1) > div:nth-of-type(1)'
+    const cta = `${div} > a:nth-of-type(1)`
+    const html = doc('<div><a class="button" id="cta" href="/old" target="_blank">Buy</a><span>Details</span></div>')
+    const linked = setElementsLink(html, [div, cta], '/go')!
+    expect(bodyOf(linked.html)).toBe(
+      '<div><a href="/go"><span class="button" id="cta">Buy</span><span>Details</span></a></div>',
+    )
+    expect(linked.selectors[1]).toBe('#cta')
+  })
+
   it('links a picked parent and child once, never one link inside another', () => {
     const div = 'body:nth-of-type(1) > div:nth-of-type(1)'
     const p = `${div} > p:nth-of-type(1)`

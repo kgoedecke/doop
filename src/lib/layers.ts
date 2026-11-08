@@ -855,7 +855,22 @@ export function elementLink(html: string, selector: string): string | null {
 
 /** Link `el` to `href` (null unlinks) in its document; false when there is
  *  nothing to unlink or the element cannot take a link. */
-function linkElement(doc: Document, el: Element, href: string | null): boolean {
+/* what makes an element a link; everything else an inner link wears stays */
+const LINK_ONLY_ATTRS = ['href', 'target', 'rel', 'download', 'hreflang', 'ping', 'referrerpolicy', 'type']
+
+/** A span in the link's place: its content, and every attribute but the
+ *  ones that make it a link (its class, style and id stay). */
+function demoteLink(doc: Document, link: Element): Element {
+  const span = doc.createElement('span')
+  for (const { name, value } of [...link.attributes]) {
+    if (!LINK_ONLY_ATTRS.includes(name)) span.setAttribute(name, value)
+  }
+  span.append(...link.childNodes)
+  link.replaceWith(span)
+  return span
+}
+
+function linkElement(doc: Document, el: Element, href: string | null, swaps: Map<Element, Element>): boolean {
   const link = linkOf(el)
   if (href === null) {
     if (!link) return false
@@ -884,8 +899,9 @@ function linkElement(doc: Document, el: Element, href: string | null): boolean {
     el.replaceWith(a)
     a.append(el)
   } else {
-    /* the links inside give way to the one around them */
-    for (const inner of [...el.querySelectorAll('a')]) inner.replaceWith(...inner.childNodes)
+    /* the links inside become plain spans under the one around them (a link
+       inside a link is split apart on load), keeping their looks and ids */
+    for (const inner of [...el.querySelectorAll('a')]) swaps.set(inner, demoteLink(doc, inner))
     a.append(...el.childNodes)
     el.append(a)
   }
@@ -910,9 +926,12 @@ export function setElementsLink(
   if (els.some((el) => !el || el === doc.body)) return null
   /* outermost first, so a picked child finds its picked parent's new link */
   const order = [...els].sort((a, b) => (a!.compareDocumentPosition(b!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
-  const changed = order.map((el) => linkElement(doc, el!, href))
+  /* inner links a wrap turned into spans: a picked one is followed there */
+  const swaps = new Map<Element, Element>()
+  const current = (el: Element) => swaps.get(el) ?? el
+  const changed = order.map((el) => linkElement(doc, current(el!), href, swaps))
   if (!changed.includes(true)) return null
-  return { html: serialize(doc), selectors: els.map((el) => elementPath(el!)) }
+  return { html: serialize(doc), selectors: els.map((el) => elementPath(current(el!))) }
 }
 
 /** One element's `setElementsLink`. */
