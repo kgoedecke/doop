@@ -505,7 +505,10 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (cs.display === 'contents' || cs.display === 'none') return false
     /* Screen deltas can only resize boxes whose axes the stage can follow:
        the element's own turn it turns the deltas by, so a plain 2D turn of
-       its own is fine, but a turned, skewed or 3D ancestor is not. */
+       its own is fine, but a turned, skewed or 3D ancestor is not.
+       Unequal ancestor scales also skew a turn: the rectangular grips and
+       rotate gesture cannot follow that affine transform, even if the
+       element starts straight. */
     for (var node = el; node; node = node.parentElement) {
       var transform = getComputedStyle(node)
       if (transform.perspective !== 'none' || transform.transform.indexOf('matrix3d') === 0) return false
@@ -517,6 +520,8 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         if (ownRotation(el) === null) return false
         continue
       }
+      var parentScale = ownScale(node)
+      if (Math.abs(parentScale.x - parentScale.y) > 1e-6 * Math.max(parentScale.x, parentScale.y)) return false
       if (transform.rotate !== 'none' && parseFloat(transform.rotate.split(/\\s+/).pop()) !== 0) return false
       var m = /^matrix\\(([^)]+)\\)$/.exec(transform.transform)
       if (m) {
@@ -577,6 +582,7 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
   function hitInfo(el) {
     var snippet = el.outerHTML || ''
     if (snippet.length > 400) snippet = snippet.slice(0, 397) + '...'
+    var canSize = sizable(el)
     return {
       selector: cssPath(el),
       /* the stable id comments and links use, when something has stamped one */
@@ -586,9 +592,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       snippet: snippet,
       rect: designRect(el),
       /* the stage's resize grips: shown only where a drag can change the box */
-      sizable: sizable(el),
-      /* the element's own turn and its box before it, for the grips to follow */
-      rotation: ownRotation(el) || 0,
+      sizable: canSize,
+      /* Unsupported transforms use the axis-aligned bounds for selection. */
+      rotation: canSize ? ownRotation(el) || 0 : 0,
       box: renderedBox(el, designRect(el)),
       locked: isLocked(el),
     }
@@ -1402,10 +1408,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
         var target = d.selector ? document.querySelector(d.selector) : null
         if (target) found = designRect(target)
       } catch (e) { /* bad selector -> null */ }
+      var canSize = !!target && sizable(target)
       parent.postMessage({
         type: 'doop:located', reqId: d.reqId, selector: d.selector, rect: found,
-        sizable: !!target && sizable(target),
-        rotation: target ? ownRotation(target) || 0 : 0,
+        sizable: canSize,
+        rotation: canSize ? ownRotation(target) || 0 : 0,
         box: target && found ? renderedBox(target, found) : null,
       }, '*')
     }

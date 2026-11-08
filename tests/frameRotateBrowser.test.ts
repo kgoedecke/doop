@@ -41,6 +41,7 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
   let page: Page
   let saved: Frame
   let saves = 0
+  const copies: Frame[] = []
   const errors: string[] = []
 
   const box = (selector: string) =>
@@ -104,6 +105,10 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
         saves += 1
         saved = { ...saved, ...JSON.parse(request.postData()!) }
         await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(saved) })
+      } else if (new URL(request.url()).pathname === '/api/canvases/c/frames' && request.method() === 'POST') {
+        const copy = { ...saved, rotation: undefined, ...JSON.parse(request.postData()!), id: `copy-${copies.length}` }
+        copies.push(copy)
+        await request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(copy) })
       } else await request.continue()
     })
     await page.goto(fixtureUrl('elementPanel.html'))
@@ -236,5 +241,26 @@ describe.skipIf(!findBrowserPath())('frame rotate zones', () => {
     await new Promise((r) => setTimeout(r, 100))
     expect(saves).toBe(before)
     expect(saved.rotation).toBeUndefined()
+  })
+  it('keeps the rotation on the copy left behind by Alt+Shift-drag', async () => {
+    await reset()
+    saved = { ...saved, rotation: 30, updatedAt: saved.updatedAt + 1 }
+    await page.evaluate((frame) => window.elementPanelHarness.seed(frame), saved)
+    await page.evaluate(() => window.elementPanelHarness.selectFrame())
+    const title = await box('[data-frame-title]')
+    const from = { x: title.left + title.width / 2, y: title.top + title.height / 2 }
+    const before = copies.length
+    await page.mouse.move(from.x, from.y)
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await page.mouse.down()
+    await page.mouse.move(from.x + 80, from.y + 40, { steps: 4 })
+    await page.mouse.up()
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => copies.length).toBe(before + 1)
+    expect(copies[before]).toMatchObject({ rotation: 30, x: 40, y: 60, width: 600, height: 500 })
+    await expect.poll(() => saved.x).not.toBe(40)
+    expect(saved.rotation).toBe(30)
   })
 })

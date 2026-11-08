@@ -459,7 +459,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `doop:locate`; `selectionBox` draws the outline, grips and zones on that box, centred on the
   bounds and turned with it, so a turned layer keeps its grips and resizes along its own axes
   (`derotateDelta`; no guide snapping while turned). `sizable` now admits the element's own turn
-  and still refuses a turned, skewed or 3D ancestor. The element toolbar lifts to 30px above a
+  and still refuses a turned, skewed, 3D or nonuniformly scaled ancestor; unsupported transforms
+  use the axis-aligned rendered bounds for the selection outline. The element toolbar lifts to 30px above a
   selection wearing furniture, clear of the top zones. Tests: `elementRotate.test.ts`,
   `elementRotateBrowser.test.ts`, the turned cases in `elementResizeBrowser.test.ts`.
 - Rulers and guides (`src/components/Rulers.tsx`, math in `src/lib/rulers.ts`): ⇧R or the zoom menu

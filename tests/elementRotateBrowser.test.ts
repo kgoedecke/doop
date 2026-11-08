@@ -235,4 +235,33 @@ describe.skipIf(!findBrowserPath())('element rotate zones', () => {
     await expect.poll(() => saved.html).toContain('width: 140px')
     expect(await page.$eval('[data-element-size]', (el) => el.textContent)).toBe('140 × 50')
   }, 20_000)
+  it.each(['transform: scale(2, 1)', 'scale: 2 1'])(
+    'uses bounds without invalid grips under a nonuniform ancestor (%s)',
+    async (parentStyle) => {
+      await reset()
+      const doc = (await frameDoc())!
+      await doc.$eval(
+        '#turned',
+        (el, style) => {
+          const parent = document.createElement('div')
+          parent.setAttribute('style', style)
+          el.parentElement!.insertBefore(parent, el)
+          parent.appendChild(el)
+        },
+        parentStyle,
+      )
+      await page.evaluate(() => window.elementPanelHarness.select('#turned'))
+      await page.waitForSelector('[data-element-outline]')
+      expect(await page.$('[data-resize-handles]')).toBeNull()
+      expect(await page.$('[data-rotate-handle]')).toBeNull()
+      const actual = await doc.$eval('#turned', (el) => {
+        const r = el.getBoundingClientRect()
+        return { width: r.width, height: r.height }
+      })
+      const outline = await box('[data-element-outline]')
+      expect(outline.width).toBeCloseTo(actual.width, 0)
+      expect(outline.height).toBeCloseTo(actual.height, 0)
+    },
+    20_000,
+  )
 })

@@ -508,7 +508,7 @@ export const FrameView = memo(function FrameView({
           const src = frames.find((f) => f.id === g.id)
           if (!src) continue
           api
-            .createFrame(src.canvasId, { name: src.name, html: src.html, ...g.orig })
+            .createFrame(src.canvasId, { name: src.name, html: src.html, rotation: src.rotation, ...g.orig })
             .then((f) => {
               /* a gesture called off takes its copy back, however late the
                  copy arrives; one that finished keeps it, as an undo step */
