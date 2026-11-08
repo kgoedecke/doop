@@ -81,4 +81,15 @@ describe('paste to replace', () => {
     await undo()
     expect(db.has('new-1')).toBe(true)
   })
+
+  it('keeps every replacement, retryable, when one of several originals cannot come back', async () => {
+    copyFrames([db.get('copied')!])
+    replaceFramesWithClip('c', [db.get('a')!, db.get('b')!])
+    await vi.waitFor(() => expect(db.has('a') || db.has('b')).toBe(false))
+    failCreates = 1
+    await undo()
+    expect(db.has('new-1') && db.has('new-2')).toBe(true)
+    await undo()
+    expect([...db.values()].map((f) => f.name).sort()).toEqual(['a', 'b', 'copied'])
+  })
 })

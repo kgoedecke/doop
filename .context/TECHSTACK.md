@@ -364,7 +364,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   between the layers into `gap` and dropping their flow margins so nothing moves; ⌥⌘C / ⌥⌘V copy
   and paste computed looks (`doop:computed`), text styles only between text layers; ⇧⌘V / ⇧⌘R
   paste over or replace the selection from the canvas clip (a frame goes only once all its
-  replacements land; one undo step of `transfer`s, `replaceFramesTracked`, so undo never removes a
+  replacements land; one undo step, a single `transfer` (`replaceFramesTracked`), so undo never removes a
   replacement before its original is back; tests in `replaceFrames.test.ts`); ⇧⌘U links (`setElementLink`); ⌃C is
   the EyeDropper. ⌘F / ⌥⌘F is the find bar (`FindBar.tsx`, `findText.ts`: text nodes only, locked layers found but never replaced,
   replace-all is one undo step across frames). View toggles live in the store: ⇧C hides comment

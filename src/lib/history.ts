@@ -439,27 +439,26 @@ export function recordCreates(frames: Frame[]) {
   push(entries.length === 1 && first ? first : { type: 'group', entries })
 }
 
-/** Paste to replace, as one undo step: each target's replacements, already
- *  created, and the target, deleted now, as a transfer. A transfer runs its
- *  halves in turn and stops where one fails, staying retryable, so undo
- *  never removes a replacement before its original is back. `leftovers` are
- *  copies a failed replacement could not take back: undo removes them too. */
+/** Paste to replace, as one undo step: the replacements, already created,
+ *  then the targets, deleted now, as a single transfer. A transfer runs its
+ *  members in turn and stops where one fails, keeping the rest on the stack
+ *  to retry, so undo brings every original back before it removes any
+ *  replacement, however many frames were replaced. `leftovers` are copies a
+ *  failed replacement could not take back: undo removes them last. */
 export function replaceFramesTracked(replacements: { target: Frame; created: Frame[] }[], leftovers: Frame[] = []) {
-  const entries: Entry[] = [
-    ...replacements.map(({ target, created }): Entry => ({
-      type: 'transfer',
-      canvasId: target.canvasId,
-      entries: [
-        ...created.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
-        { type: 'delete', frameId: target.id, snapshot: snapshot(target) },
-      ],
-    })),
-    ...leftovers.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
-  ]
-  const entry = groupOf(entries, false)
-  if (!entry) return
-  push(entry)
-  for (const { target } of replacements) api.deleteFrame(target.id).catch(console.error)
+  const created = [...leftovers, ...replacements.flatMap((r) => r.created)]
+  const removed = replacements.map((r) => r.target)
+  const first = removed[0] ?? created[0]
+  if (!first) return
+  push({
+    type: 'transfer',
+    canvasId: first.canvasId,
+    entries: [
+      ...created.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
+      ...removed.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
+    ],
+  })
+  for (const f of removed) api.deleteFrame(f.id).catch(console.error)
 }
 
 /** Delete a frame through the API, remembering enough to bring it back. */
