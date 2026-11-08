@@ -439,6 +439,23 @@ export function recordCreates(frames: Frame[]) {
   push(entries.length === 1 && first ? first : { type: 'group', entries })
 }
 
+/** Paste to replace: the replacements already created, the frames they
+ *  replace deleted now, both as one undo step. Ordered: undo brings the
+ *  originals back before it removes their replacements, so a failed request
+ *  never leaves the canvas with neither. */
+export function replaceFramesTracked(created: Frame[], removed: Frame[]) {
+  if (!created.length || !removed.length) return
+  push({
+    type: 'group',
+    ordered: true,
+    entries: [
+      ...created.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
+      ...removed.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
+    ],
+  })
+  for (const f of removed) api.deleteFrame(f.id).catch(console.error)
+}
+
 /** Delete a frame through the API, remembering enough to bring it back. */
 export function deleteFrameTracked(frame: Frame) {
   deleteFramesTracked([frame])

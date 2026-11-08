@@ -90,7 +90,7 @@ export function FindBar({
 
   function replaceOne() {
     const hit = hits[active]
-    if (!hit || hit.frame.locked) return
+    if (!hit || hit.frame.locked || hit.match.locked) return
     const replaced = replaceInHtml(hit.frame.html, query, replacement, { matchCase, only: hit.n })
     if (replaced) saveFrameHtml(hit.frame, replaced.html)
   }
@@ -196,7 +196,7 @@ export function FindBar({
             placeholder={t('actions.replacePlaceholder')}
             aria-label={t('actions.replacePlaceholder')}
           />
-          <Button size="sm" disabled={active === -1} onClick={replaceOne}>
+          <Button size="sm" disabled={active === -1 || !!hits[active]?.match.locked} onClick={replaceOne}>
             {t('actions.replaceOne')}
           </Button>
           <Button size="sm" disabled={!hits.length} onClick={replaceAll}>

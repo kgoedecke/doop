@@ -144,11 +144,8 @@ async function arrangeLayers(p: Picked, place: (boxes: Box[]) => Spot[], min = 2
       const dx = spots[i]!.x - info.rect.x
       const dy = spots[i]!.y - info.rect.y
       if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return null
-      return editElementGeometry(p.frame.id, selector, {
-        kind: 'move',
-        x: info.geometry.x + dx,
-        y: info.geometry.y + dy,
-      })
+      /* `move` places the layer's box in frame px, the space the boxes were read in */
+      return editElementGeometry(p.frame.id, selector, { kind: 'move', x: spots[i]!.x, y: spots[i]!.y })
     }),
   )
   return true
@@ -267,15 +264,58 @@ export function groupSelection(kind: 'group' | 'frame'): boolean {
   const p = pickedLayers()
   if (!p || p.standalone || p.frame.locked) return false
   if (p.selectors.some((s) => isLayerLocked(p.frame, s))) return false
-  const name = kind === 'group' ? t('actions.groupName') : t('actions.frameName')
-  const grouped = groupElements(p.frame.html, p.selectors, { name })
+  void groupKeepingLayout(p, kind === 'group' ? t('actions.groupName') : t('actions.frameName'))
+  return true
+}
+
+/* The path of the box around `selector`, or null for a root it has none for. */
+function parentPath(selector: string): string | null {
+  const at = selector.lastIndexOf(' > ')
+  return at === -1 ? null : selector.slice(0, at)
+}
+
+/** How a new box must lay out what it takes from `parent` so nothing moves:
+ *  a flex parent's flow, carried onto the box (the box itself becomes one
+ *  flex item); none for a parent in normal flow. Null for a grid, whose
+ *  tracks a wrapper cannot keep. */
+async function inheritedLayout(frameId: string, parent: string | null): Promise<string | null | undefined> {
+  if (!parent) return undefined
+  const cs = await computedStyles(frameId, parent, [
+    'display',
+    'flex-direction',
+    'flex-wrap',
+    'align-items',
+    'justify-content',
+    'row-gap',
+    'column-gap',
+  ])
+  if (!cs) return undefined
+  if (/grid/.test(cs.display ?? '')) return null
+  if (!/flex/.test(cs.display ?? '')) return undefined
+  return [
+    'display: flex',
+    `flex-direction: ${cs['flex-direction']}`,
+    `flex-wrap: ${cs['flex-wrap']}`,
+    `align-items: ${cs['align-items']}`,
+    `justify-content: ${cs['justify-content']}`,
+    `gap: ${cs['row-gap']} ${cs['column-gap']}`,
+  ].join('; ')
+}
+
+async function groupKeepingLayout(p: Picked, name: string) {
+  const style = await inheritedLayout(p.frame.id, parentPath(p.selectors[0]!))
+  if (style === null) {
+    notice(t('actions.groupGridFailed'))
+    return
+  }
+  const live = useStore.getState().canvas?.frames.find((f) => f.id === p.frame.id) ?? p.frame
+  const grouped = groupElements(live.html, p.selectors, { name, style })
   if (!grouped) {
     notice(t('actions.groupFailed'))
-    return true
+    return
   }
-  saveFrameHtml(p.frame, grouped.html)
-  pickAfterRewrite(p.frame, [grouped.selector])
-  return true
+  saveFrameHtml(live, grouped.html)
+  pickAfterRewrite(live, [grouped.selector])
 }
 
 /** ⇧⌘G / ⌘⌫: each picked box gives way to what it holds. */
@@ -368,7 +408,12 @@ export async function addAutoLayout(): Promise<boolean> {
 
 /** ⌥⇧A: the picked boxes stop being flex containers. */
 export function removeAutoLayout(): boolean {
-  return styleEach({ display: null, 'flex-direction': null, gap: null })
+  /* an explicit display, since a class may be what makes the box flex */
+  return styleEach((info) =>
+    /flex|grid/.test(info.display)
+      ? { display: info.display.startsWith('inline') ? 'inline-block' : 'block', 'flex-direction': null, gap: null }
+      : null,
+  )
 }
 
 /* ---- styles on the picked layers ---- */
@@ -567,20 +612,21 @@ export function selectInverse(): boolean {
     const parentPath = primary.includes(' > ') ? primary.slice(0, primary.lastIndexOf(' > ')) : null
     const siblings = parentPath ? (findLayer(tree, parentPath)?.children ?? tree) : tree
     const others = siblings.filter((n) => !n.locked && !p.selectors.includes(n.selector)).map((n) => n.selector)
-    if (!others.length) return false
-    s.pickElements(p.frame.id, others)
+    /* everything was picked: its inverse is nothing */
+    if (!others.length) s.select(null)
+    else s.pickElements(p.frame.id, others)
     return true
   }
   const frames = currentPageCanvas()?.frames ?? []
   const others = frames.filter((f) => !s.selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
-  if (!others.length) return false
   s.pickElement(null)
-  s.selectMany(others)
+  if (!others.length) s.select(null)
+  else s.selectMany(others)
   return true
 }
 
-/** ⌥⌘A: every layer in the frame shaped like the picked one — the same tag
- *  and the same classes — the matching layers. */
+/** ⌥⌘A: every layer in the frame shaped like the picked one: the same tag
+ *  and the same classes. */
 export function selectMatching(): boolean {
   const s = useStore.getState()
   const p = pickedLayers()

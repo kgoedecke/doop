@@ -76,6 +76,7 @@ export const actions: Catalog['actions'] = {
   groupName: 'Grupo',
   frameName: 'Frame',
   groupFailed: 'Só é possível agrupar camadas lado a lado na mesma caixa',
+  groupGridFailed: 'Ainda não é possível agrupar camadas de um grid: elas perderiam suas posições',
   ungroupFailed: 'Nada a desagrupar: escolha uma caixa que contenha camadas',
   addAutoLayout: 'Adicionar auto layout',
   removeAutoLayout: 'Remover auto layout',

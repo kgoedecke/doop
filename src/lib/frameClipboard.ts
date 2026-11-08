@@ -2,7 +2,7 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { deleteFramesTracked, recordCreates } from './history'
+import { recordCreates, replaceFramesTracked } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
@@ -435,28 +435,44 @@ export function pasteFramesOver(canvasId: string, over: Frame[]): boolean {
 }
 
 /** ⇧⌘R on frames: the copied frames land at each selected frame's top-left,
- *  and the selected frames go once they have. */
+ *  and each selected frame goes once all of its replacements have landed;
+ *  one whose replacements did not all land stays, and the ones that did are
+ *  taken back. One undo step puts everything back. */
 export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boolean {
   const frames = readClip()
   const replaceable = targets.filter((f) => !f.locked)
   if (!frames.length || !replaceable.length) return false
-  void createFrames(
-    replaceable.flatMap((target) =>
-      frames.map((f) => ({
-        canvasId,
-        frame: {
-          name: f.name,
-          html: f.html,
-          width: f.width,
-          height: f.height,
-          x: Math.round(target.x + f.x),
-          y: Math.round(target.y + f.y),
-          ...(f.rotation ? { rotation: f.rotation } : {}),
-        },
-      })),
-    ),
-  ).then((created) => {
-    if (created.length) deleteFramesTracked(replaceable)
+  void Promise.all(
+    replaceable.map(async (target) => {
+      const results = await Promise.allSettled(
+        frames.map((f) =>
+          api.createFrame(canvasId, {
+            name: f.name,
+            html: f.html,
+            width: f.width,
+            height: f.height,
+            x: Math.round(target.x + f.x),
+            y: Math.round(target.y + f.y),
+            ...(f.rotation ? { rotation: f.rotation } : {}),
+          }),
+        ),
+      )
+      const created = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+      if (created.length === frames.length) return { target, created }
+      console.error(`replacing ${target.id}: ${frames.length - created.length} frame(s) failed`)
+      for (const f of created) api.deleteFrame(f.id).catch(console.error)
+      return null
+    }),
+  ).then((outcomes) => {
+    const done = outcomes.filter((o): o is { target: Frame; created: Frame[] } => !!o)
+    const created = done.flatMap((o) => o.created)
+    if (!created.length) return
+    replaceFramesTracked(
+      created,
+      done.map((o) => o.target),
+    )
+    useStore.getState().selectMany(created.map((f) => f.id))
+    posthog.capture('frame_pasted', { count: created.length })
   })
   return true
 }

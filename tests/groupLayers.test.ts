@@ -25,6 +25,18 @@ describe('groupElements', () => {
     expect(bodyOf(grouped!.html)).toBe('<div data-doop-name="Frame" style="display: flex; gap: 8px"><p>b</p></div>')
   })
 
+  it('carries a flex parent’s flow onto the wrapper and nothing onto a plain group', () => {
+    const html = doc('<div style="display:flex"><p>a</p><p>b</p></div>')
+    const paths = [
+      'body:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)',
+      'body:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(2)',
+    ]
+    const grouped = groupElements(html, paths, { name: 'Group', style: 'display: flex; gap: 8px' })
+    expect(bodyOf(grouped!.html)).toContain(
+      '<div data-doop-name="Group" style="display: flex; gap: 8px"><p>a</p><p>b</p></div>',
+    )
+  })
+
   it('refuses layers in different boxes', () => {
     const html = doc('<div><p>a</p></div><p>b</p>')
     expect(

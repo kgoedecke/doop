@@ -3,7 +3,7 @@
    find does it across a styled run, it is two matches here, which is what a
    replace can change safely). Pure: HTML in, matches or HTML out. */
 
-import { elementPath } from '../layers'
+import { elementPath, LOCK_ATTR } from '../layers'
 
 const SKIPPED = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TITLE', 'TEXTAREA'])
 
@@ -18,6 +18,8 @@ export interface TextMatch {
   before: string
   text: string
   after: string
+  /** inside a locked layer: found, never replaced */
+  locked: boolean
 }
 
 function parse(html: string): Document {
@@ -37,6 +39,9 @@ function textNodes(doc: Document): Text[] {
   for (let n = walker.nextNode(); n; n = walker.nextNode()) out.push(n as Text)
   return out
 }
+
+/* a locked layer, and everything inside it, takes no edits */
+const isLocked = (node: Text) => !!node.parentElement?.closest(`[${LOCK_ATTR}]`)
 
 /** Every offset of `query` in `text`, left to right, never overlapping. */
 function offsetsIn(text: string, query: string, matchCase: boolean): number[] {
@@ -64,6 +69,7 @@ export function findInHtml(html: string, query: string, { matchCase = false }: F
         before: text.slice(Math.max(0, at - CONTEXT), at).trimStart(),
         text: text.slice(at, at + query.length),
         after: text.slice(at + query.length, at + query.length + CONTEXT).trimEnd(),
+        locked: isLocked(node),
       })
     }
   }
@@ -71,8 +77,9 @@ export function findInHtml(html: string, query: string, { matchCase = false }: F
 }
 
 /** The frame's HTML with `query` replaced: every match, or only the
- *  `only`-th (0-based, in the order `findInHtml` lists them). Null when
- *  nothing was replaced. */
+ *  `only`-th (0-based, in the order `findInHtml` lists them). Matches in
+ *  locked layers are counted, so the numbering agrees with the search, and
+ *  left as they are. Null when nothing was replaced. */
 export function replaceInHtml(
   html: string,
   query: string,
@@ -92,6 +99,10 @@ export function replaceInHtml(
       .filter(({ n }) => only === undefined || n === only)
       .reverse()
     seen += offsets.length
+    if (isLocked(node)) {
+      if (only !== undefined && seen > only) break
+      continue
+    }
     for (const { at } of picked) {
       node.replaceData(at, query.length, replacement)
       count++
