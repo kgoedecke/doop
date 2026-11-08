@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt } from 'drizzle-orm'
+import { and, eq, isNull, lt, sql } from 'drizzle-orm'
 import sharp from 'sharp'
 import { Router } from 'express'
 import { z } from 'zod'
@@ -113,11 +113,17 @@ export async function describeImage(
 ): Promise<string> {
   signal.throwIfAborted()
   const jpeg = await withinSignal(
-    sharp(bytes, { animated: false })
-      .resize({ width: DESCRIBE_LONG_EDGE_PX, height: DESCRIBE_LONG_EDGE_PX, fit: 'inside', withoutEnlargement: true })
-      .flatten({ background: '#ffffff' })
-      .jpeg({ quality: 80 })
-      .toBuffer(),
+    () =>
+      sharp(bytes, { animated: false })
+        .resize({
+          width: DESCRIBE_LONG_EDGE_PX,
+          height: DESCRIBE_LONG_EDGE_PX,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality: 80 })
+        .toBuffer(),
     signal,
   )
   signal.throwIfAborted()
@@ -125,21 +131,22 @@ export async function describeImage(
      ChatGPT token refresh, say) — so the whole turn is raced against it, and
      the worker's slot comes back on time whatever stalled */
   const result = await withinSignal(
-    model.run({
-      system: [{ text: PROMPT }],
-      tools: [],
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
-            { type: 'text', text: 'Describe this image.' },
-          ],
-        },
-      ],
-      maxTokens: 400,
-      signal,
-    }),
+    () =>
+      model.run({
+        system: [{ text: PROMPT }],
+        tools: [],
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } },
+              { type: 'text', text: 'Describe this image.' },
+            ],
+          },
+        ],
+        maxTokens: 400,
+        signal,
+      }),
     signal,
   )
   const text = result.content
@@ -150,13 +157,32 @@ export async function describeImage(
   return text.slice(0, MAX_DESCRIPTION_CHARS)
 }
 
-/** Settle with `promise`, or reject the moment `signal` aborts. */
-function withinSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+/** Bound every operation by the job deadline, without starting work after expiry.
+ * A query already sent may still settle later; always consume its rejection. */
+function withinSignal<T>(work: () => PromiseLike<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'))
   return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(signal.reason ?? new Error('aborted'))
+    const cleanup = () => signal.removeEventListener('abort', abort)
+    const abort = () => {
+      cleanup()
+      reject(signal.reason ?? new Error('aborted'))
+    }
     signal.addEventListener('abort', abort, { once: true })
-    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted()
+        return work()
+      })
+      .then(
+        (result) => {
+          cleanup()
+          resolve(result)
+        },
+        (error: unknown) => {
+          cleanup()
+          reject(error)
+        },
+      )
   })
 }
 
@@ -173,6 +199,9 @@ let inFlight = 0
 /** a failed asset waits here for its next attempt */
 const retries = new Map<string, ReturnType<typeof setTimeout>>()
 const idleWaiters: (() => void)[] = []
+/** Keep the retry cap even when the database cannot record a failure. A later
+ * successful lookup flushes this count before any more model work. */
+const failureCounts = new Map<string, number>()
 
 /** a day's budget per canvas, counted in memory (resets with the process) */
 const spent = new Map<string, { day: string; count: number }>()
@@ -245,15 +274,30 @@ export async function describeAsset(
   assetId: string,
   signal: AbortSignal = AbortSignal.timeout(DESCRIBE_TIMEOUT_MS),
 ): Promise<DescribeOutcome> {
-  const [row] = await withinSignal(db.select().from(t.assets).where(eq(t.assets.id, assetId)), signal)
-  if (!row || !row.canvasId || row.description !== null || row.describeAttempts >= MAX_DESCRIBE_ATTEMPTS)
-    return 'skipped'
-  if (!isDescribableImage(row.mime)) return 'skipped'
-  const canvas = store.getCanvas(row.canvasId)
-  if (!canvas) return 'skipped'
+  let attempts = failureCounts.get(assetId) ?? 0
   try {
+    const [row] = await withinSignal(() => db.select().from(t.assets).where(eq(t.assets.id, assetId)), signal)
+    if (!row || !row.canvasId || row.description !== null || !isDescribableImage(row.mime)) {
+      failureCounts.delete(assetId)
+      return 'skipped'
+    }
+    attempts = Math.max(attempts, row.describeAttempts)
+    if (attempts > row.describeAttempts) {
+      await withinSignal(
+        () =>
+          db
+            .update(t.assets)
+            .set({ describeAttempts: sql`greatest(${t.assets.describeAttempts}, ${attempts})` })
+            .where(eq(t.assets.id, assetId)),
+        signal,
+      )
+    }
+    failureCounts.delete(assetId)
+    if (attempts >= MAX_DESCRIBE_ATTEMPTS) return 'skipped'
+    const canvas = store.getCanvas(row.canvasId)
+    if (!canvas) return 'skipped'
     // assets.ownerId is the authenticated uploader, not the canvas owner.
-    const resolved = await withinSignal(describerFor(row.ownerId ?? undefined, canvas.ownerId, row), signal)
+    const resolved = await withinSignal(() => describerFor(row.ownerId ?? undefined, canvas.ownerId, row), signal)
     if (!resolved.model) {
       if (resolved.status.reason !== 'off')
         console.log(`[describe] ${assetId} left undescribed: ${resolved.status.reason}`)
@@ -267,29 +311,55 @@ export async function describeAsset(
     // Persist before any storage/model work, so even a failed read pins the payer.
     if (!row.describeProvider) {
       await withinSignal(
-        db
-          .update(t.assets)
-          .set({ describePayerId: payerId, describeProvider: model.provider })
-          .where(eq(t.assets.id, assetId)),
+        () =>
+          db
+            .update(t.assets)
+            .set({ describePayerId: payerId, describeProvider: model.provider })
+            .where(eq(t.assets.id, assetId)),
         signal,
       )
     }
-    const asset = await withinSignal(getAsset(assetId, signal), signal)
+    const asset = await withinSignal(() => getAsset(assetId, signal), signal)
     if (!asset) return 'skipped'
     signal.throwIfAborted()
     if (!store.getCanvas(row.canvasId)) return 'skipped'
     const description = await describeImage(model, asset.buf, signal)
     signal.throwIfAborted()
     if (!store.getCanvas(row.canvasId)) return 'skipped'
-    await db
-      .update(t.assets)
-      .set({ description, describedAt: Date.now(), describedBy: model.label })
-      .where(eq(t.assets.id, assetId))
+    await withinSignal(
+      () =>
+        db
+          .update(t.assets)
+          .set({ description, describedAt: Date.now(), describedBy: model.label })
+          .where(eq(t.assets.id, assetId)),
+      signal,
+    )
+    signal.throwIfAborted()
     broadcast(row.canvasId, { type: 'asset:described', assetId, description })
     return 'described'
   } catch (err) {
-    const attempts = row.describeAttempts + 1
-    await db.update(t.assets).set({ describeAttempts: attempts }).where(eq(t.assets.id, assetId))
+    attempts++
+    failureCounts.set(assetId, attempts)
+    // The deadline covers failure bookkeeping too. If it expired, retain the
+    // count in memory instead of starting a write that could hold the slot.
+    if (!signal.aborted) {
+      try {
+        const [saved] = await withinSignal(
+          () =>
+            db
+              .update(t.assets)
+              .set({ describeAttempts: sql`greatest(${t.assets.describeAttempts}, ${attempts})` })
+              .where(eq(t.assets.id, assetId))
+              .returning({ attempts: t.assets.describeAttempts }),
+          signal,
+        )
+        attempts = Math.max(attempts, saved?.attempts ?? 0)
+        if (!saved || attempts >= MAX_DESCRIBE_ATTEMPTS) failureCounts.delete(assetId)
+        else failureCounts.set(assetId, attempts)
+      } catch (writeError) {
+        console.error(`[describe] ${assetId} could not save failure count; retaining it until retry`, writeError)
+      }
+    }
     const last = attempts >= MAX_DESCRIBE_ATTEMPTS
     console.error(
       `[describe] ${assetId} attempt ${attempts} of ${MAX_DESCRIBE_ATTEMPTS} failed${last ? '; giving up' : ''}`,

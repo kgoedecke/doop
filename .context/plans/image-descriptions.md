@@ -14,7 +14,9 @@ stops analysis, and an uploader's server-only choice bypasses both accounts. Mig
 persists the selected payer/provider across retries. Storage errors retry within the deadline,
 deleted canvases are skipped, and only a standalone image layer is marked as a pasted reference.
 Regression tests cover routing, consent, fixed billing across retries, storage failure/timeout,
-canvas deletion and detached designs. The original phase checklist below records the initial
+canvas deletion and detached designs. Greptile follow-up also covers failed initial lookups,
+stalled result/failure writes releasing both worker slots, and retry caps while persistence is
+down. The deadline now covers every awaited operation, with unsaved failure counts kept in memory. The original phase checklist below records the initial
 implementation; the spec above describes the current behavior.
 
 ## Phase 1 — storage and the describer

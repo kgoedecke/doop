@@ -14,11 +14,16 @@ needs a description so the agent knows what it shows and when to inspect the pix
 - Images are resized to a maximum 1500px long edge and flattened to JPEG. A single model turn
   with no tools asks for under 120 words describing the content, layout, copy and palette.
   The request asks for 400 output tokens; the ChatGPT transport does not support that cap.
-- A 20s deadline bounds model selection, asset loading, resizing and the model request,
-  including token refresh. The signal reaches disk/S3 reads and the model transport. A late
-  storage result cannot start a model request after the deadline. Failures during asset loading
-  or model work increment `describe_attempts` and retry after `DESCRIBE_RETRY_MS` (default 30s),
-  up to three failed attempts. A deleted canvas is skipped, including after a pending read.
+- A 20s deadline bounds every awaited operation: the first asset lookup, model selection,
+  asset loading, resizing, model request (including token refresh), result writes and failure
+  bookkeeping. The signal reaches disk/S3 reads and the model transport. No new operation
+  starts after expiry; late query rejections are consumed. SQL already sent may still finish,
+  but cannot hold a worker slot past the deadline.
+- Lookup, storage, model and write failures retry after `DESCRIBE_RETRY_MS` (default 30s), up
+  to three failed attempts. If failure bookkeeping is unavailable or out of time, an in-memory
+  count keeps the retry cap and is flushed before subsequent model work. Writes never lower
+  the persisted count, even if an older query settles late. A restart cannot recover counts
+  that the database never saved. A deleted canvas is skipped, including after a pending read.
 - `DESCRIBE_PER_CANVAS_PER_DAY` defaults to 200 attempts per canvas per UTC day. It is an
   in-memory counter, reset on restart; failed storage/model work counts. An over-budget image
   stays undescribed. No-model, disabled and budget-skipped images are not automatically

@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
+import type { PGlite, QueryOptions, Results } from '@electric-sql/pglite'
 import type { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite'
 import { eq } from 'drizzle-orm'
 import { db } from '../server/db/index.ts'
@@ -8,6 +9,7 @@ import { emitCanvasEvent, onCanvasEvent, type CanvasEvent } from '../server/even
 import { createAsset, imagesForFrames, storeAsset } from '../server/assets.ts'
 import {
   DESCRIBE_LONG_EDGE_PX,
+  DESCRIBE_TIMEOUT_MS,
   MAX_DESCRIBE_ATTEMPTS,
   describeAsset,
   describeIdle,
@@ -564,4 +566,125 @@ describe('multiple connected accounts', () => {
     expect(mocks.run).toHaveBeenCalledTimes(1)
     expect(mocks.server).not.toHaveBeenCalled()
   })
+})
+
+/** Fault the database boundary, leaving Drizzle queries and queue execution real. */
+function interceptAssetQueries(fault: (query: string, params: unknown[]) => Promise<never> | undefined) {
+  const client = (db as unknown as { $client: PGlite }).$client
+  const query = client.query.bind(client)
+  return vi
+    .spyOn(client, 'query')
+    .mockImplementation(
+      <T>(text: string, params?: unknown[], options?: QueryOptions): Promise<Results<T>> =>
+        fault(text, params ?? []) ?? query<T>(text, params, options),
+    )
+}
+
+describe('database failure regressions', () => {
+  it('retries a failed first lookup through the queue without a restart', async () => {
+    const asset = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+    let failed = false
+    const query = interceptAssetQueries((text, params) => {
+      if (!failed && text.startsWith('select') && params.includes(asset.id)) {
+        failed = true
+        return Promise.reject(new Error('temporary lookup failure'))
+      }
+    })
+    try {
+      enqueueDescription(asset.id)
+      await describeIdle()
+      await vi.waitFor(async () => expect((await row(asset.id)).description).toBeTruthy())
+      await describeIdle()
+      expect(await row(asset.id)).toMatchObject({ describeAttempts: 1 })
+      expect(mocks.run).toHaveBeenCalledTimes(1)
+    } finally {
+      query.mockRestore()
+    }
+  })
+
+  it('caps retries when both lookups and failure-count writes are unavailable', async () => {
+    const asset = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+    let lookups = 0
+    const query = interceptAssetQueries((text, params) => {
+      if (params.includes(asset.id)) {
+        if (text.startsWith('select')) lookups++
+        return Promise.reject(new Error('database unavailable'))
+      }
+    })
+    try {
+      enqueueDescription(asset.id)
+      await vi.waitFor(() => expect(lookups).toBe(MAX_DESCRIBE_ATTEMPTS))
+      await describeIdle()
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      expect(lookups).toBe(MAX_DESCRIBE_ATTEMPTS)
+      expect(mocks.run).not.toHaveBeenCalled()
+    } finally {
+      query.mockRestore()
+    }
+    // Recovery flushes the remembered cap before any paid work can start.
+    expect(await describeAsset(asset.id)).toBe('skipped')
+    expect((await row(asset.id)).describeAttempts).toBe(MAX_DESCRIBE_ATTEMPTS)
+    expect(mocks.run).not.toHaveBeenCalled()
+  })
+
+  it.each(['lookup', 'description', 'failure count'] as const)(
+    'releases both slots at the deadline when the %s query stalls',
+    async (phase) => {
+      const first = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+      const second = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+      const next = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+      const stalled = new Set<string>()
+      const lateErrors: ((error: Error) => void)[] = []
+      const controllers: AbortController[] = []
+      const timeout = AbortSignal.timeout.bind(AbortSignal)
+      const deadline = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+        if (ms !== DESCRIBE_TIMEOUT_MS) return timeout(ms)
+        const controller = new AbortController()
+        controllers.push(controller)
+        return controller.signal
+      })
+      if (phase === 'failure count') {
+        mocks.run.mockRejectedValueOnce(new Error('provider down')).mockRejectedValueOnce(new Error('provider down'))
+      }
+      const query = interceptAssetQueries((text, params) => {
+        const target = [first.id, second.id].find((id) => params.includes(id))
+        const matches =
+          phase === 'lookup'
+            ? text.startsWith('select')
+            : text.startsWith(
+                phase === 'description'
+                  ? 'update "assets" set "description"'
+                  : 'update "assets" set "describe_attempts"',
+              )
+        if (target && !stalled.has(target) && matches) {
+          stalled.add(target)
+          return new Promise<never>((_resolve, reject) => lateErrors.push(reject))
+        }
+      })
+      try {
+        enqueueDescription(first.id)
+        enqueueDescription(second.id)
+        enqueueDescription(next.id)
+        await vi.waitFor(() => expect(stalled.size).toBe(2))
+        expect(controllers).toHaveLength(2)
+        controllers.forEach((controller) => controller.abort(new Error('job deadline')))
+        // The third job completes even though both earlier SQL promises remain pending.
+        await vi.waitFor(async () => expect((await row(next.id)).description).toBeTruthy())
+        await vi.waitFor(async () => {
+          expect((await row(first.id)).description).toBeTruthy()
+          expect((await row(second.id)).description).toBeTruthy()
+        })
+        await describeIdle()
+        expect((await row(first.id)).describeAttempts).toBe(1)
+        expect((await row(second.id)).describeAttempts).toBe(1)
+        // Late failures are observed, not emitted as unhandled rejections.
+        lateErrors.forEach((reject) => reject(new Error('late query failure')))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      } finally {
+        query.mockRestore()
+        deadline.mockRestore()
+        controllers.forEach((controller) => controller.abort())
+      }
+    },
+  )
 })
