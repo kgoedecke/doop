@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { elementLink, groupElements, replaceElementsWith, setElementLink, ungroupElements } from '../src/lib/layers'
+import {
+  elementLink,
+  groupElements,
+  replaceElementsWith,
+  setElementLink,
+  setElementsLink,
+  ungroupElements,
+} from '../src/lib/layers'
 
 const doc = (body: string) => `<!doctype html><html><head></head><body>${body}</body></html>`
 const bodyOf = (html: string) => new DOMParser().parseFromString(html, 'text/html').body.innerHTML
@@ -98,6 +105,18 @@ describe('setElementLink', () => {
     expect(bodyOf(linked.html)).toBe('<p><a href="/go"><img src="x.png"></a></p>')
     expect(elementLink(linked.html, linked.selector)).toBe('/go')
     expect(bodyOf(setElementLink(linked.html, linked.selector, null)!.html)).toBe('<p><img src="x.png"></p>')
+  })
+})
+
+describe('setElementsLink', () => {
+  it('links the picked images, never a sibling the first wrap shifted into place', () => {
+    const img = (n: number) => `body:nth-of-type(1) > img:nth-of-type(${n})`
+    const html = doc('<img src="1.png"><img src="2.png"><img src="3.png">')
+    const linked = setElementsLink(html, [img(1), img(2)], '/go')!
+    expect(bodyOf(linked.html)).toBe(
+      '<a href="/go"><img src="1.png"></a><a href="/go"><img src="2.png"></a><img src="3.png">',
+    )
+    expect(linked.selectors.map((s) => elementLink(linked.html, s))).toEqual(['/go', '/go'])
   })
 })
 

@@ -10,8 +10,11 @@ const { useStore } = await import('../src/lib/store')
 type ActionHost = import('../src/lib/actions/registry').ActionHost
 type Chord = import('../src/lib/actions/chords').Chord
 
-function chordId(c: Chord) {
-  return [c.ctrl && 'ctrl', c.alt && 'alt', c.shift && 'shift', c.mod && 'mod', c.code ?? c.key?.toLowerCase()]
+/* off a Mac, Ctrl and the mod key are one key */
+function chordId(c: Chord, mac: boolean) {
+  const ctrl = mac ? c.ctrl : false
+  const mod = mac ? c.mod : c.mod || c.ctrl
+  return [ctrl && 'ctrl', c.alt && 'alt', c.shift && 'shift', mod && 'mod', c.code ?? c.key?.toLowerCase()]
     .filter(Boolean)
     .join('+')
 }
@@ -66,7 +69,7 @@ describe('the action list', () => {
     for (const tool of TOOLS) seen.set(tool.key.toLowerCase(), `tool ${tool.id}`)
     for (const action of ACTIONS) {
       for (const chord of (action.keys ?? []).filter((c) => boundOn(c, mac))) {
-        const id = chordId(chord)
+        const id = chordId(chord, mac)
         expect(seen.get(id), `${action.id} takes ${id}`).toBeUndefined()
         seen.set(id, action.id)
       }

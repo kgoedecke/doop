@@ -29,7 +29,7 @@ import {
   findLayer,
   groupElements,
   isElementHidden,
-  setElementLink,
+  setElementsLink,
   elementLink,
   ungroupElements,
   type LayerNode,
@@ -598,16 +598,11 @@ export function pickedLink(): string | null {
 export function linkSelection(href: string | null): boolean {
   const p = pickedLayers()
   if (!p || p.frame.locked) return false
-  let html = p.frame.html
-  const picked: string[] = []
-  for (const selector of p.selectors) {
-    const linked = isLayerLocked(p.frame, selector) ? null : setElementLink(html, selector, href)
-    if (linked) html = linked.html
-    picked.push(linked?.selector ?? selector)
-  }
-  if (html === p.frame.html) return false
-  saveFrameHtml(p.frame, html)
-  pickAfterRewrite(p.frame, picked)
+  const open = p.selectors.filter((selector) => !isLayerLocked(p.frame, selector))
+  const linked = setElementsLink(p.frame.html, open, href)
+  if (!linked) return false
+  saveFrameHtml(p.frame, linked.html)
+  pickAfterRewrite(p.frame, linked.selectors)
   return true
 }
 

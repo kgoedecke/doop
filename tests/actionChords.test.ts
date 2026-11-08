@@ -11,6 +11,11 @@ describe('matchesChord', () => {
     expect(matchesChord(key('k', { ctrlKey: true }), { key: 'k', mod: true }, false)).toBe(true)
   })
 
+  it('takes the Meta key as mod off a Mac too, and nothing for a bare chord', () => {
+    expect(matchesChord(key('z', { metaKey: true }), { key: 'z', mod: true }, false)).toBe(true)
+    expect(matchesChord(key('n', { metaKey: true }), { key: 'n' }, false)).toBe(false)
+  })
+
   it('wants the modifiers exactly', () => {
     expect(matchesChord(key('g', { metaKey: true, shiftKey: true }), { key: 'g', mod: true }, true)).toBe(false)
     expect(matchesChord(key('G', { metaKey: true, shiftKey: true }), { key: 'g', mod: true, shift: true }, true)).toBe(

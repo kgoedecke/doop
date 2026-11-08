@@ -28,9 +28,13 @@ export const IS_MAC = typeof navigator !== 'undefined' && /mac/i.test(navigator.
 /** Whether the event is this chord, modifiers exactly. */
 export function matchesChord(e: KeyInput, chord: Chord, mac = IS_MAC): boolean {
   if ((chord.macOnly && !mac) || (chord.notMac && mac)) return false
-  const wantMeta = mac ? !!chord.mod : false
-  const wantCtrl = mac ? !!chord.ctrl : !!chord.mod || !!chord.ctrl
-  if (e.metaKey !== wantMeta || e.ctrlKey !== wantCtrl) return false
+  if (mac) {
+    if (e.metaKey !== !!chord.mod || e.ctrlKey !== !!chord.ctrl) return false
+  } else if ((e.ctrlKey || e.metaKey) !== (!!chord.mod || !!chord.ctrl)) {
+    /* off a Mac either key is the modifier, as the canvas always read it:
+       Ctrl for people, the Meta key for a keyboard (or a driver) that sends it */
+    return false
+  }
   if (e.altKey !== !!chord.alt || e.shiftKey !== !!chord.shift) return false
   if (chord.code) return e.code === chord.code
   return !!chord.key && e.key.toLowerCase() === chord.key.toLowerCase()

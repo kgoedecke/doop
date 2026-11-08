@@ -853,44 +853,65 @@ export function elementLink(html: string, selector: string): string | null {
   return el ? (linkOf(el)?.getAttribute('href') ?? null) : null
 }
 
-/** The frame's HTML with the element linked to `href`, and the element's
- *  path afterwards: a link gets the new target, an image (or any element
- *  with no content of its own, and SVG) is wrapped in one, anything else has
- *  its content wrapped. Null `href` takes a link off (the link element, or the
- *  one link wrapping the element or its content, gives way to its content).
- *  Null when the selector no longer resolves or there is nothing to unlink. */
-export function setElementLink(
-  html: string,
-  selector: string,
-  href: string | null,
-): { html: string; selector: string } | null {
-  const doc = parse(html)
-  const el = find(doc, selector)
-  if (!el || el === doc.body) return null
+/** Link `el` to `href` (null unlinks) in its document; false when there is
+ *  nothing to unlink or the element cannot take a link. */
+function linkElement(doc: Document, el: Element, href: string | null): boolean {
   const link = linkOf(el)
   if (href === null) {
-    if (!link) return null
+    if (!link) return false
     if (link === el) {
       /* the link itself picked: keep the element, drop what made it a link */
       el.removeAttribute('href')
       el.removeAttribute('target')
     } else link.replaceWith(...link.childNodes)
-    return { html: serialize(doc), selector: elementPath(el) }
+    return true
   }
-  if (link) link.setAttribute('href', href)
-  else {
-    const a = doc.createElement('a')
-    a.setAttribute('href', href)
-    if (LINK_WRAPPED.has(el.tagName) || el.namespaceURI === 'http://www.w3.org/2000/svg') {
-      if (el.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg') return null
-      el.replaceWith(a)
-      a.append(el)
-    } else {
-      a.append(...el.childNodes)
-      el.append(a)
-    }
+  if (link) {
+    link.setAttribute('href', href)
+    return true
   }
-  return { html: serialize(doc), selector: elementPath(el) }
+  const a = doc.createElement('a')
+  a.setAttribute('href', href)
+  if (LINK_WRAPPED.has(el.tagName) || el.namespaceURI === 'http://www.w3.org/2000/svg') {
+    if (el.parentElement?.namespaceURI === 'http://www.w3.org/2000/svg') return false
+    el.replaceWith(a)
+    a.append(el)
+  } else {
+    a.append(...el.childNodes)
+    el.append(a)
+  }
+  return true
+}
+
+/** The frame's HTML with each element linked to `href`, and every element's
+ *  path afterwards, in the order given: a link gets the new target, an image
+ *  (or any element with no content of its own, and SVG) is wrapped in one,
+ *  anything else has its content wrapped. Null `href` takes links off (the
+ *  link element, or the one link wrapping the element or its content, gives
+ *  way to its content). Every element is found before any changes, since
+ *  wrapping one shifts its siblings' positions. Null when an element no
+ *  longer resolves or none of them changed. */
+export function setElementsLink(
+  html: string,
+  selectors: string[],
+  href: string | null,
+): { html: string; selectors: string[] } | null {
+  const doc = parse(html)
+  const els = selectors.map((selector) => find(doc, selector))
+  if (els.some((el) => !el || el === doc.body)) return null
+  const changed = els.map((el) => linkElement(doc, el!, href))
+  if (!changed.includes(true)) return null
+  return { html: serialize(doc), selectors: els.map((el) => elementPath(el!)) }
+}
+
+/** One element's `setElementsLink`. */
+export function setElementLink(
+  html: string,
+  selector: string,
+  href: string | null,
+): { html: string; selector: string } | null {
+  const linked = setElementsLink(html, [selector], href)
+  return linked ? { html: linked.html, selector: linked.selectors[0]! } : null
 }
 
 /** The frame's HTML with the elements swapped for the clipboard's layers,
