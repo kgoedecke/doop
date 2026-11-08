@@ -1,8 +1,9 @@
 import { getIp } from 'better-auth/api'
 import { getIPFromHeader } from '@better-auth/core/utils/ip'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { loadIpAddressConfig } from '../server/auth.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
+import { startServer, type Server } from './harness.ts'
 
 afterEach(unstubAllEnvs)
 
@@ -227,4 +228,70 @@ describe('Better Auth client IP resolution with loaded configuration', () => {
     expect(ipB).toBe('203.0.113.20')
     expect(ipA).not.toBe(ipB)
   })
+
+  it('wires advanced.ipAddress into the auth instance created by initAuth', async () => {
+    stubEnv('AUTH_IP_HEADERS', 'fly-client-ip')
+    stubEnv('AUTH_TRUSTED_PROXIES', '10.0.0.0/8')
+    const authMod = await import('../server/auth.ts')
+    authMod.initAuth()
+    expect(authMod.auth.options.advanced?.ipAddress).toEqual({
+      ipAddressHeaders: ['fly-client-ip'],
+      trustedProxies: ['10.0.0.0/8'],
+    })
+  })
+})
+
+describe('End-to-end auth rate limiting on booted server', () => {
+  let server: Server
+
+  afterAll(() => {
+    server?.stop()
+  })
+
+  it('boots server with AUTH_IP_HEADERS, exhausts one client limit, and confirms another client is not blocked', async () => {
+    server = await startServer({
+      AUTH_IP_HEADERS: 'fly-client-ip',
+      NODE_ENV: 'production',
+      BETTER_AUTH_SECRET: 'test-secret-at-least-32-chars-long-1234',
+    })
+
+    const client1Ip = '203.0.113.10'
+    const client2Ip = '203.0.113.20'
+    const proxyHop = '10.0.0.1'
+
+    // Client 1 sends sign-in requests until rate-limited (default special rule for /sign-in is max 3 per 10s)
+    let client1RateLimited = false
+    for (let i = 0; i < 5; i++) {
+      const res = await fetch(`${server.base}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: server.base,
+          'fly-client-ip': client1Ip,
+          'x-forwarded-for': `${client1Ip}, ${proxyHop}`,
+        },
+        body: JSON.stringify({ email: 'client1@example.com', password: 'wrongpassword' }),
+      })
+      if (res.status === 429) {
+        client1RateLimited = true
+        break
+      }
+    }
+    expect(client1RateLimited).toBe(true)
+
+    // Client 2 with a different IP should NOT be blocked by client 1's exhausted rate limit
+    const resClient2 = await fetch(`${server.base}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: server.base,
+        'fly-client-ip': client2Ip,
+        'x-forwarded-for': `${client2Ip}, ${proxyHop}`,
+      },
+      body: JSON.stringify({ email: 'client2@example.com', password: 'wrongpassword' }),
+    })
+
+    // Client 2 is not rate-limited (returns 400 invalid credentials, not 429 Too Many Requests)
+    expect(resClient2.status).not.toBe(429)
+  }, 70_000)
 })
