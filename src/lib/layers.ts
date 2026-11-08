@@ -870,6 +870,13 @@ function linkElement(doc: Document, el: Element, href: string | null): boolean {
     link.setAttribute('href', href)
     return true
   }
+  /* already inside a link (a picked parent linked a moment ago): retarget
+     that one, since a link inside a link is split apart on load */
+  const around = el.parentElement?.closest('a')
+  if (around) {
+    around.setAttribute('href', href)
+    return true
+  }
   const a = doc.createElement('a')
   a.setAttribute('href', href)
   if (LINK_WRAPPED.has(el.tagName) || el.namespaceURI === 'http://www.w3.org/2000/svg') {
@@ -877,6 +884,8 @@ function linkElement(doc: Document, el: Element, href: string | null): boolean {
     el.replaceWith(a)
     a.append(el)
   } else {
+    /* the links inside give way to the one around them */
+    for (const inner of [...el.querySelectorAll('a')]) inner.replaceWith(...inner.childNodes)
     a.append(...el.childNodes)
     el.append(a)
   }
@@ -899,7 +908,9 @@ export function setElementsLink(
   const doc = parse(html)
   const els = selectors.map((selector) => find(doc, selector))
   if (els.some((el) => !el || el === doc.body)) return null
-  const changed = els.map((el) => linkElement(doc, el!, href))
+  /* outermost first, so a picked child finds its picked parent's new link */
+  const order = [...els].sort((a, b) => (a!.compareDocumentPosition(b!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+  const changed = order.map((el) => linkElement(doc, el!, href))
   if (!changed.includes(true)) return null
   return { html: serialize(doc), selectors: els.map((el) => elementPath(el!)) }
 }

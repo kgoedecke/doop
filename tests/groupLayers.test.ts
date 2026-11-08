@@ -109,6 +109,18 @@ describe('setElementLink', () => {
 })
 
 describe('setElementsLink', () => {
+  it('links a picked parent and child once, never one link inside another', () => {
+    const div = 'body:nth-of-type(1) > div:nth-of-type(1)'
+    const p = `${div} > p:nth-of-type(1)`
+    for (const order of [
+      [div, p],
+      [p, div],
+    ]) {
+      const linked = setElementsLink(doc('<div><p>a</p><span>b</span></div>'), order, '/go')!
+      expect(bodyOf(linked.html)).toBe('<div><a href="/go"><p>a</p><span>b</span></a></div>')
+    }
+  })
+
   it('links the picked images, never a sibling the first wrap shifted into place', () => {
     const img = (n: number) => `body:nth-of-type(1) > img:nth-of-type(${n})`
     const html = doc('<img src="1.png"><img src="2.png"><img src="3.png">')
