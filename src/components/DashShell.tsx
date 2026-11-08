@@ -147,7 +147,6 @@ export function AccountMenu({
           ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuSeparator />
         <DropdownMenuItem
           tone="danger"
           onSelect={() =>
