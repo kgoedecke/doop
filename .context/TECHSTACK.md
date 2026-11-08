@@ -358,12 +358,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `CanvasPage`'s own handler (their rules are shown, `hintOnly`). What the commands do lives in
   `edits.ts`: align / distribute / tidy / pack (`arrange.ts`, pure geometry) move frames as one
   undo step (`patchFrames`) and layers through the runtime's `move` geometry edit; ⌘G / ⌥⌘G wrap
-  sibling layers in a `div` (carrying a flex parent's flow; grid children are refused) and ⇧⌘G / ⌘⌫ unwrap (`groupElements` / `ungroupElements` in
+  sibling layers in a `div` (carrying a flex parent's flow; grid children are refused; a frame edited while its layout is
+  read is left alone) and ⇧⌘G / ⌘⌫ unwrap (`groupElements` / `ungroupElements` in
   `layers.ts`); ⇧A makes a box a flex container, or wraps the pick in one, turning the space
   between the layers into `gap` and dropping their flow margins so nothing moves; ⌥⌘C / ⌥⌘V copy
   and paste computed looks (`doop:computed`), text styles only between text layers; ⇧⌘V / ⇧⌘R
   paste over or replace the selection from the canvas clip (a frame goes only once all its
-  replacements land, one ordered undo step, `replaceFramesTracked`); ⇧⌘U links (`setElementLink`); ⌃C is
+  replacements land; one undo step of `transfer`s, `replaceFramesTracked`, so undo never removes a
+  replacement before its original is back; tests in `replaceFrames.test.ts`); ⇧⌘U links (`setElementLink`); ⌃C is
   the EyeDropper. ⌘F / ⌥⌘F is the find bar (`FindBar.tsx`, `findText.ts`: text nodes only, locked layers found but never replaced,
   replace-all is one undo step across frames). View toggles live in the store: ⇧C hides comment
   pins, ⌥⌘\ other people's cursors, ⌘Y outline mode (an adopted sheet in each frame's runtime,

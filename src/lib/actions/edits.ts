@@ -268,6 +268,16 @@ export function groupSelection(kind: 'group' | 'frame'): boolean {
   return true
 }
 
+/** The frame as it is now, when it is still the document the pick was made
+ *  in; null (with a notice) when an edit landed meanwhile, since positional
+ *  layer paths may then name other layers. */
+function unchangedFrame(picked: Frame): Frame | null {
+  const live = useStore.getState().canvas?.frames.find((f) => f.id === picked.id)
+  if (live && live.html === picked.html && !live.locked) return live
+  notice(t('actions.frameChanged'))
+  return null
+}
+
 /* The path of the box around `selector`, or null for a root it has none for. */
 function parentPath(selector: string): string | null {
   const at = selector.lastIndexOf(' > ')
@@ -308,7 +318,10 @@ async function groupKeepingLayout(p: Picked, name: string) {
     notice(t('actions.groupGridFailed'))
     return
   }
-  const live = useStore.getState().canvas?.frames.find((f) => f.id === p.frame.id) ?? p.frame
+  /* the picked paths are positions: if the frame changed while its layout
+     was read, they may name other layers now */
+  const live = unchangedFrame(p.frame)
+  if (!live) return
   const grouped = groupElements(live.html, p.selectors, { name, style })
   if (!grouped) {
     notice(t('actions.groupFailed'))
@@ -385,7 +398,8 @@ export async function addAutoLayout(): Promise<boolean> {
     computedStyles(frame.id, first, [lead]),
     computedStyles(frame.id, last, [trail]),
   ])
-  const live = useStore.getState().canvas?.frames.find((f) => f.id === frame.id) ?? frame
+  const live = unchangedFrame(frame)
+  if (!live) return true
   const grouped = groupElements(live.html, selectors, {
     name: t('actions.frameName'),
     style: [

@@ -435,9 +435,10 @@ export function pasteFramesOver(canvasId: string, over: Frame[]): boolean {
 }
 
 /** ⇧⌘R on frames: the copied frames land at each selected frame's top-left,
- *  and each selected frame goes once all of its replacements have landed;
- *  one whose replacements did not all land stays, and the ones that did are
- *  taken back. One undo step puts everything back. */
+ *  and each selected frame goes once all of its replacements have landed.
+ *  One whose replacements did not all land stays, and the copies that did
+ *  are taken back; any that cannot be taken back stay in the undo step, so
+ *  Undo still removes them. */
 export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boolean {
   const frames = readClip()
   const replaceable = targets.filter((f) => !f.locked)
@@ -458,21 +459,22 @@ export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boole
         ),
       )
       const created = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
-      if (created.length === frames.length) return { target, created }
+      if (created.length === frames.length) return { target, created, leftovers: [] }
       console.error(`replacing ${target.id}: ${frames.length - created.length} frame(s) failed`)
-      for (const f of created) api.deleteFrame(f.id).catch(console.error)
-      return null
+      const removed = await Promise.allSettled(created.map((f) => api.deleteFrame(f.id)))
+      const leftovers = created.filter((_, i) => removed[i]?.status === 'rejected')
+      return { target, created: null, leftovers }
     }),
   ).then((outcomes) => {
-    const done = outcomes.filter((o): o is { target: Frame; created: Frame[] } => !!o)
+    const done = outcomes.flatMap((o) => (o.created ? [{ target: o.target, created: o.created }] : []))
+    const leftovers = outcomes.flatMap((o) => o.leftovers)
     const created = done.flatMap((o) => o.created)
-    if (!created.length) return
-    replaceFramesTracked(
-      created,
-      done.map((o) => o.target),
-    )
-    useStore.getState().selectMany(created.map((f) => f.id))
-    posthog.capture('frame_pasted', { count: created.length })
+    if (!created.length && !leftovers.length) return
+    replaceFramesTracked(done, leftovers)
+    if (created.length) {
+      useStore.getState().selectMany(created.map((f) => f.id))
+      posthog.capture('frame_pasted', { count: created.length })
+    }
   })
   return true
 }

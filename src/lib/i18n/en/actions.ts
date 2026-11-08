@@ -77,6 +77,7 @@ export const actions = {
   frameName: 'Frame',
   groupFailed: 'Only layers side by side in one box can be grouped',
   groupGridFailed: 'Layers in a grid can’t be grouped yet: the grid would lose their places',
+  frameChanged: 'The frame changed meanwhile. Pick the layers again and retry.',
   ungroupFailed: 'Nothing to ungroup: pick a box that holds layers',
   addAutoLayout: 'Add auto layout',
   removeAutoLayout: 'Remove auto layout',

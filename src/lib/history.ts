@@ -439,21 +439,27 @@ export function recordCreates(frames: Frame[]) {
   push(entries.length === 1 && first ? first : { type: 'group', entries })
 }
 
-/** Paste to replace: the replacements already created, the frames they
- *  replace deleted now, both as one undo step. Ordered: undo brings the
- *  originals back before it removes their replacements, so a failed request
- *  never leaves the canvas with neither. */
-export function replaceFramesTracked(created: Frame[], removed: Frame[]) {
-  if (!created.length || !removed.length) return
-  push({
-    type: 'group',
-    ordered: true,
-    entries: [
-      ...created.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
-      ...removed.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
-    ],
-  })
-  for (const f of removed) api.deleteFrame(f.id).catch(console.error)
+/** Paste to replace, as one undo step: each target's replacements, already
+ *  created, and the target, deleted now, as a transfer. A transfer runs its
+ *  halves in turn and stops where one fails, staying retryable, so undo
+ *  never removes a replacement before its original is back. `leftovers` are
+ *  copies a failed replacement could not take back: undo removes them too. */
+export function replaceFramesTracked(replacements: { target: Frame; created: Frame[] }[], leftovers: Frame[] = []) {
+  const entries: Entry[] = [
+    ...replacements.map(({ target, created }): Entry => ({
+      type: 'transfer',
+      canvasId: target.canvasId,
+      entries: [
+        ...created.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
+        { type: 'delete', frameId: target.id, snapshot: snapshot(target) },
+      ],
+    })),
+    ...leftovers.map((f): Entry => ({ type: 'create', frameId: f.id, snapshot: snapshot(f) })),
+  ]
+  const entry = groupOf(entries, false)
+  if (!entry) return
+  push(entry)
+  for (const { target } of replacements) api.deleteFrame(target.id).catch(console.error)
 }
 
 /** Delete a frame through the API, remembering enough to bring it back. */
