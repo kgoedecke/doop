@@ -27,6 +27,10 @@ rfd = "0.16"
 # only for the timer between scheduled checks.
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["time"] }
+# The check that a server picked in the app is a Doop server (src/server.rs);
+# the same reqwest and ring-backed rustls the updater already links.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 # Repositioning the traffic lights over the web app's tab strip (main.rs);
 # AppKit resets them on window events, so the shell moves them itself.
