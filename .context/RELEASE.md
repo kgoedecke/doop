@@ -85,8 +85,8 @@ in `.github/actions/setup-desktop`:
   off a canvas. Only ⌘ shortcuts are bound in the menu; ⇧R / ⇧1 / ⇧2 stay with the page.
 - Server choice (`desktop/src-tauri/src/server.rs`, `src/components/ServerSettings.tsx`): the
   sign-in screen's cog (shells advertising `__DOOP_SERVER_CHOOSE__`) points an official build at a
-  self-hosted server. `server_choose` normalizes the address to an origin, checks
-  `/api/locale-config` answers, confirms natively, writes `server.json` in the app data dir and
+  self-hosted server. `server_choose` normalizes the address to an origin (https, or http on loopback only),
+  checks `/api/locale-config` answers and takes the origin any redirect lands on, confirms natively, writes `server.json` in the app data dir and
   restarts; at launch the chosen origin gets `capabilities/default.json` as a runtime capability
   and the navigation allowlist. A chosen server that does not answer at launch gets a native Try Again / Use doop.design dialog
   (`check_on_launch`, every platform); macOS also has "Use doop.design…" in the app menu. Official builds

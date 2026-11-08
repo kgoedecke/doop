@@ -9,7 +9,8 @@ The released installers (macOS DMG, Windows NSIS setup, and the Linux AppImage,
 .deb and .rpm) talk to the hosted
 service at doop.design. Self-hosting your own doop instance? The cog on the
 sign-in screen points the same app at it: the shell checks that the address
-answers as a Doop server (`/api/locale-config`), asks for confirmation in a
+answers as a Doop server (`/api/locale-config`, following redirects to where
+the pages really load; https only, plain http only on this computer), asks for confirmation in a
 native dialog (the server gets the app's IPC, Claude Code included), saves it
 as `server.json` in the app's data directory and restarts onto it
 (`src-tauri/src/server.rs`). The server gets `capabilities/default.json` for

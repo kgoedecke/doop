@@ -106,8 +106,39 @@ fn save(app: &AppHandle, url: Option<&str>) -> Result<(), String> {
 
 /// A typed address as the origin it names: `doop.example.com`,
 /// `https://doop.example.com/c/abc` and `HTTPS://Doop.Example.com/` are all
-/// `https://doop.example.com`. Only http(s) with a host and no credentials.
+/// `https://doop.example.com`. Only a server it is safe to hand the shell's
+/// IPC to: https, or http on this computer (see `secure`).
 pub fn normalize(input: &str) -> Result<String, String> {
+    let origin = parse_origin(input)?;
+    secure(&origin)?;
+    Ok(origin.origin().ascii_serialization())
+}
+
+/// Plain http is only for this computer. Anyone on the path of an http
+/// connection to another machine can replace its pages, and a page from the
+/// chosen server gets the shell's IPC (Claude Code, the Codex and Claude
+/// settings) with no further question.
+fn secure(url: &Url) -> Result<(), String> {
+    let host = url.host_str().unwrap_or_default();
+    let loopback = host == "localhost"
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if url.scheme() == "https" || loopback {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} is not secure. Use an https:// address; plain http:// only works for a server on this computer.",
+            url.origin().ascii_serialization()
+        ))
+    }
+}
+
+/// The typed address as a parsed http(s) URL with a host and no
+/// credentials; whether it is safe to use is `secure`'s call.
+fn parse_origin(input: &str) -> Result<Url, String> {
     let input = input.trim();
     if input.is_empty() {
         return Err("Enter the address of a Doop server.".into());
@@ -127,7 +158,7 @@ pub fn normalize(input: &str) -> Result<String, String> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err("The address must not contain a user name or password.".into());
     }
-    Ok(url.origin().ascii_serialization())
+    Ok(url)
 }
 
 /// doop.design and www.doop.design are one server.
@@ -173,8 +204,11 @@ pub fn grant(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Every Doop server answers this public route, so a typo or another site
-/// is caught before the app restarts onto it.
-async fn probe(server: &str) -> Result<(), String> {
+/// is caught before the app restarts onto it. Resolves to the origin that
+/// answered: an address that redirects (http to https, the bare host to
+/// `www.`) is saved and granted as where the pages actually load, and that
+/// one has to be secure too.
+async fn probe(server: &str) -> Result<String, String> {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
@@ -192,11 +226,13 @@ async fn probe(server: &str) -> Result<(), String> {
     if !response.status().is_success() {
         return Err(unreachable());
     }
+    let answered = response.url().clone();
     let body: Value = response.json().await.map_err(|_| unreachable())?;
-    match body.get("defaultLocale") {
-        Some(Value::String(_)) => Ok(()),
-        _ => Err(unreachable()),
+    if !matches!(body.get("defaultLocale"), Some(Value::String(_))) {
+        return Err(unreachable());
     }
+    secure(&answered)?;
+    Ok(answered.origin().ascii_serialization())
 }
 
 /// Windows shows custom labels only with comctl v6 and otherwise answers
@@ -336,12 +372,15 @@ pub fn server_status(app: AppHandle) -> Value {
 /// Resolves false when nothing changed: the same server, or a cancel.
 #[tauri::command]
 pub async fn server_choose(app: AppHandle, url: String) -> Result<bool, String> {
-    let server = normalize(&url)?;
+    // the default needs no check: the bundled grant already covers it
+    let typed = parse_origin(&url)?.origin().ascii_serialization();
+    let server = if same_server(&typed, &default_url()) {
+        default_url()
+    } else {
+        probe(&normalize(&url)?).await?
+    };
     if same_server(&server, active(&app)) {
         return Ok(false);
-    }
-    if !same_server(&server, &default_url()) {
-        probe(&server).await?;
     }
     switch(&app, server).await
 }
@@ -396,6 +435,11 @@ mod tests {
             "http://localhost:4400"
         );
         assert_eq!(
+            normalize("http://127.0.0.1:4400").unwrap(),
+            "http://127.0.0.1:4400"
+        );
+        assert_eq!(normalize("http://[::1]:4400").unwrap(), "http://[::1]:4400");
+        assert_eq!(
             normalize("https://doop.example.com:443").unwrap(),
             "https://doop.example.com"
         );
@@ -408,6 +452,61 @@ mod tests {
         assert!(normalize("javascript://alert(1)").is_err());
         assert!(normalize("https://user:pass@doop.example.com").is_err());
         assert!(normalize("https://").is_err());
+    }
+
+    #[test]
+    fn keeps_plain_http_to_this_computer() {
+        for remote in [
+            "http://doop.example.com",
+            "http://192.168.1.20:4400",
+            "http://localhost.example.com",
+        ] {
+            assert!(
+                normalize(remote).unwrap_err().contains("not secure"),
+                "{remote}"
+            );
+        }
+    }
+
+    /// Answers every request on a loopback port with `response`, once per
+    /// connection, until the test ends.
+    fn serve(response: String) -> u16 {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut request = [0u8; 2048];
+                let _ = stream.read(&mut request);
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        port
+    }
+
+    fn json_response(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    #[test]
+    fn saves_the_origin_a_redirect_lands_on() {
+        let doop = serve(json_response(r#"{"defaultLocale":"en"}"#));
+        let redirect = serve(format!(
+            "HTTP/1.1 302 Found\r\nLocation: http://localhost:{doop}/api/locale-config\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ));
+        let answered =
+            tauri::async_runtime::block_on(probe(&format!("http://127.0.0.1:{redirect}")));
+        assert_eq!(answered.unwrap(), format!("http://localhost:{doop}"));
+    }
+
+    #[test]
+    fn refuses_a_server_that_is_not_doop() {
+        let other = serve(json_response(r#"{"hello":"world"}"#));
+        let answered = tauri::async_runtime::block_on(probe(&format!("http://127.0.0.1:{other}")));
+        assert!(answered.unwrap_err().contains("No Doop server answered"));
     }
 
     #[test]
