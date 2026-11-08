@@ -14,11 +14,11 @@ import { posthog } from './posthog'
  *  remote actors' work is never undone from here. */
 
 type Patch = Partial<
-  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'>
+  Pick<Frame, 'name' | 'pageId' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z' | 'rotation'>
 >
 type Snapshot = Pick<
   Frame,
-  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z'
+  'canvasId' | 'pageId' | 'name' | 'html' | 'x' | 'y' | 'width' | 'height' | 'hidden' | 'locked' | 'z' | 'rotation'
 >
 
 type Entry =
@@ -111,6 +111,7 @@ function snapshot(f: Frame): Snapshot {
     /* a hidden or locked frame comes back as it was when its deletion is undone */
     hidden: f.hidden,
     locked: f.locked,
+    rotation: f.rotation,
     /* and back to its place in the stack */
     z: stackOf(f),
   }
@@ -619,6 +620,9 @@ async function apply(e: Entry, direction: 'undo' | 'redo'): Promise<Entry | null
     )
   } else if (e.type === 'update') {
     const patch = { ...(forward ? e.after : e.before) }
+    /* a frame that was straight has no rotation to go back to: JSON drops
+       an undefined field, so the server is told 0 to clear the turn */
+    if ('rotation' in patch && patch.rotation === undefined) patch.rotation = 0
     const canvas = useStore.getState().canvas
     if (patch.pageId !== undefined && canvas) {
       const pages = canvasPages(canvas)

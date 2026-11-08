@@ -167,3 +167,17 @@ describe('review follow-ups', () => {
     expect(api.updateFrame).toHaveBeenLastCalledWith('b', { x: 0 })
   })
 })
+
+describe('rotation history', () => {
+  it('undoes the first turn of a straight frame by telling the server 0, not nothing', async () => {
+    /* the Inspector records the whole frame as "before", where a straight
+       frame has no rotation at all; JSON would drop an undefined field */
+    const straight = useStore.getState().canvas!.frames.find((f) => f.id === 'a')!
+    history.recordUpdate('a', straight, { rotation: 30 })
+    await history.undo()
+    expect(api.updateFrame).toHaveBeenCalledWith('a', { rotation: 0 })
+    expect(useStore.getState().canvas!.frames.find((f) => f.id === 'a')!.rotation).toBe(0)
+    await history.redo()
+    expect(api.updateFrame).toHaveBeenLastCalledWith('a', { rotation: 30 })
+  })
+})

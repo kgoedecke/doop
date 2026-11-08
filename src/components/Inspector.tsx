@@ -19,6 +19,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
 import { NumberField, PropertyScrubContext } from './ui/property-field'
+import { normalizeRotation } from '../../shared/frameRotation'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
 import { t as translate, useT } from '../lib/i18n'
 
@@ -29,12 +30,12 @@ const fillBtn = 'h-7 rounded-[7px] bg-sub px-2 text-[12px] font-normal text-ink 
 /* the position and size fields, tall enough to hit on a phone */
 const boxField = 'max-md:h-10 max-md:min-h-10'
 
-type BoxKey = 'x' | 'y' | 'width' | 'height'
+type BoxKey = 'x' | 'y' | 'width' | 'height' | 'rotation'
 type FrameBox = Pick<Frame, BoxKey>
-const BOX_KEYS: readonly BoxKey[] = ['x', 'y', 'width', 'height']
+const BOX_KEYS: readonly BoxKey[] = ['x', 'y', 'width', 'height', 'rotation']
 
 function boxOf(frame: Frame): FrameBox {
-  return { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+  return { x: frame.x, y: frame.y, width: frame.width, height: frame.height, rotation: frame.rotation ?? 0 }
 }
 
 export function Inspector({
@@ -272,6 +273,15 @@ export function Inspector({
                 value={frame.height}
                 className={boxField}
                 onCommit={(height) => editBox({ height })}
+              />
+              <NumberField
+                label={t('inspector.rotation')}
+                prefix="∠"
+                unit="°"
+                min={-Infinity}
+                value={frame.rotation ?? 0}
+                className={boxField}
+                onCommit={(rotation) => editBox({ rotation: normalizeRotation(rotation) ?? 0 })}
               />
             </div>
           </InspectorGroup>

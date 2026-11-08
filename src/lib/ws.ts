@@ -157,7 +157,13 @@ function handle(msg: ServerMessage) {
       s.upsertComment(msg.comment)
       break
     case 'frame:drag':
-      s.patchFrameLocal(msg.frameId, { x: msg.x, y: msg.y, width: msg.width, height: msg.height })
+      s.patchFrameLocal(msg.frameId, {
+        x: msg.x,
+        y: msg.y,
+        width: msg.width,
+        height: msg.height,
+        ...(msg.rotation !== undefined ? { rotation: msg.rotation } : {}),
+      })
       break
     case 'frame:created':
       s.upsertFrame(msg.frame)

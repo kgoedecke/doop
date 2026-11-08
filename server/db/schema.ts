@@ -186,6 +186,8 @@ export const frames = pgTable(
     locked: boolean('locked'),
     /** stacking order on the page (shared/frameStack.ts); null = by created_at */
     z: doublePrecision('z'),
+    /** degrees clockwise about the centre (shared/frameRotation.ts); null = 0 */
+    rotation: doublePrecision('rotation'),
     approval: jsonb('approval').$type<FrameApproval>(),
   },
   (t) => [index('frames_canvas_idx').on(t.canvasId)],

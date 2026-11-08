@@ -368,3 +368,38 @@ describe('MCP ChatGPT app contract', () => {
     }
   })
 })
+
+it('update_frame normalizes and clears rotation while retaining page validation', async () => {
+  const canvasId = 'mcp-frame-rotation'
+  const { client, close, body } = await pagesClient({
+    id: canvasId,
+    ownerId: 'test-owner-id',
+    name: 'Rotation',
+    pages: [
+      { id: 'first', name: 'Main' },
+      { id: 'second', name: 'Mobile' },
+    ],
+    frames: [],
+  })
+  const { store } = await import('../server/store.ts')
+  const frame = store.createFrame(canvasId, { name: 'Turn', pageId: 'first', width: 100, height: 50 }, 'Agent')!
+  const update = (patch: Record<string, unknown>) =>
+    client.callTool({
+      name: 'update_frame',
+      arguments: { frame_id: frame.id, agent_name: 'Agent', ...patch },
+    })
+  try {
+    const moved = await update({ rotation: 630, pageId: 'second' })
+    expect(moved.isError).not.toBe(true)
+    expect(body(moved).frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const invalid = await update({ rotation: 45, pageId: 'missing' })
+    expect(invalid.isError).toBe(true)
+    expect(frame).toMatchObject({ rotation: -90, pageId: 'second' })
+    const straight = await update({ rotation: 0 })
+    expect(straight.isError).not.toBe(true)
+    expect(body(straight).frame).not.toHaveProperty('rotation')
+    expect(frame).toHaveProperty('rotation', undefined)
+  } finally {
+    await close()
+  }
+})
