@@ -856,18 +856,30 @@ export function elementLink(html: string, selector: string): string | null {
 /** Link `el` to `href` (null unlinks) in its document; false when there is
  *  nothing to unlink or the element cannot take a link. */
 /* what makes an element a link; everything else an inner link wears stays */
-const LINK_ONLY_ATTRS = ['href', 'target', 'rel', 'download', 'hreflang', 'ping', 'referrerpolicy', 'type']
+const LINK_ONLY_ATTRS = [
+  'href',
+  'xlink:href',
+  'target',
+  'rel',
+  'download',
+  'hreflang',
+  'ping',
+  'referrerpolicy',
+  'type',
+]
+const SVG_NS = 'http://www.w3.org/2000/svg'
 
-/** A span in the link's place: its content, and every attribute but the
- *  ones that make it a link (its class, style and id stay). */
+/** A plain box in the link's place: a span (a `g` for a link inside SVG,
+ *  which an HTML span would be thrown out of on load), with its content and
+ *  every attribute but the ones that make it a link (class, style, id stay). */
 function demoteLink(doc: Document, link: Element): Element {
-  const span = doc.createElement('span')
+  const box = link.namespaceURI === SVG_NS ? doc.createElementNS(SVG_NS, 'g') : doc.createElement('span')
   for (const { name, value } of [...link.attributes]) {
-    if (!LINK_ONLY_ATTRS.includes(name)) span.setAttribute(name, value)
+    if (!LINK_ONLY_ATTRS.includes(name)) box.setAttribute(name, value)
   }
-  span.append(...link.childNodes)
-  link.replaceWith(span)
-  return span
+  box.append(...link.childNodes)
+  link.replaceWith(box)
+  return box
 }
 
 function linkElement(doc: Document, el: Element, href: string | null, swaps: Map<Element, Element>): boolean {

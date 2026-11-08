@@ -109,6 +109,16 @@ describe('setElementLink', () => {
 })
 
 describe('setElementsLink', () => {
+  it('turns a link inside SVG artwork into a group, so the drawing survives a reload', () => {
+    const div = 'body:nth-of-type(1) > div:nth-of-type(1)'
+    const html = doc('<div><svg><a href="/x" class="hit"><rect width="4" height="4"></rect></a></svg></div>')
+    const linked = setElementsLink(html, [div], '/go')!
+    expect(bodyOf(linked.html)).toBe(
+      '<div><a href="/go"><svg><g class="hit"><rect width="4" height="4"></rect></g></svg></a></div>',
+    )
+    expect(bodyOf(linked.html)).toBe(bodyOf(doc(bodyOf(linked.html))))
+  })
+
   it('keeps an inner link’s looks and id when its box is linked, and follows it when picked', () => {
     const div = 'body:nth-of-type(1) > div:nth-of-type(1)'
     const cta = `${div} > a:nth-of-type(1)`
