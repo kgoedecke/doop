@@ -299,6 +299,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
   `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
   Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
+- View options (`src/lib/viewOptions.ts`, per browser under `doop:view-options`): the zoom pill's
+  menu opens on a field for a typed level (`150`, `150%`; `parseZoomPercent`) and switches the
+  pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
+  by `code` (`viewOptionForKey`). Hidden pins still show under the Comment tool and for a thread
+  that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
