@@ -841,7 +841,7 @@ export function Stage({
      only (no modifiers), and never while typing in a field. Esc is the one
      exception for canvas composers: it drops their draft and returns to Select.
      Other fields keep Escape for their own editing behavior. Z is the Zoom
-     tool only while it is held, as in Figma: letting go returns to the tool
+     tool only while it is held: letting go returns to the tool
      before it. The key-up is read by `code` too, since ⌥ held for a zoom-out
      changes the typed character on macOS. */
   useEffect(() => {

@@ -1,4 +1,4 @@
-/* The Zoom tool (Z), as Figma has it: a click zooms in on the point under the
+/* The Zoom tool (Z held): a click zooms in on the point under the
    pointer, an ⌥-click zooms out from it, and a drag zooms onto the box it
    draws. Points here are stage px (the stage's top-left is 0, 0). */
 

@@ -21,7 +21,7 @@ export const TOOLS: { id: Tool; label: PlainMessageKey; key: string }[] = [
   { id: 'path', label: 'canvas.toolPath', key: 'P' },
   { id: 'text', label: 'canvas.toolText', key: 'T' },
   { id: 'comment', label: 'canvas.toolComment', key: 'C' },
-  /* Figma's Zoom: only while Z is held, no rail button (Stage.tsx) */
+  /* only while Z is held, no rail button (Stage.tsx) */
   { id: 'zoom', label: 'canvas.toolZoom', key: 'Z' },
 ]
 

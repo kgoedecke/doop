@@ -347,7 +347,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
-- Zoom tool (Z, keyboard only, as in Figma; math in `src/lib/zoomTool.ts`): a click doubles the
+- Zoom tool (Z, keyboard only; math in `src/lib/zoomTool.ts`): a click doubles the
   zoom about the pointer, ⌥-click halves it (the cursor turns to zoom-out while ⌥ is down), and a
   drag zooms onto the box it draws, filling the stage's open area. Z is the tool only while held:
   letting go returns to the previous tool, and the tool rail has no button for it.
