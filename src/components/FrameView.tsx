@@ -252,6 +252,9 @@ export const FrameView = memo(function FrameView({
   const me = getIdentity().clientId
   const editors = Object.values(presences).filter((p) => p.activeFrameId === frame.id && p.clientId !== me)
   const [dragging, setDragging] = useState(false)
+  /* a standalone shape on its way across the canvas shows as itself alone:
+     no ring, grips or size badge until it is let go */
+  const [shapeMoving, setShapeMoving] = useState(false)
   /* a standalone element dragged over a frame: the frame it would go into,
      highlighted in the world the way a drawing's drop target is */
   const [dropTarget, setDropTarget] = useState<{ frame: Frame; world: Element } | null>(null)
@@ -441,6 +444,7 @@ export const FrameView = memo(function FrameView({
         void api.deleteFrame(copy.id).catch(console.error)
       }
       setDragging(false)
+      setShapeMoving(false)
       if (duplicating) setDuping(false)
       useStore.getState().setSnapGuides([])
       setDropTarget(null)
@@ -465,6 +469,7 @@ export const FrameView = memo(function FrameView({
         return
       }
       if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 4) moved = true
+      if (standaloneMove && moved) setShapeMoving(true)
       last = { x: ev.clientX, y: ev.clientY }
       if (duplicating && moved && !dupDropped) {
         dupDropped = true
@@ -540,6 +545,7 @@ export const FrameView = memo(function FrameView({
       unsubscribe()
       setDropTarget(null)
       setDragging(false)
+      setShapeMoving(false)
       if (duplicating) setDuping(false)
       useStore.getState().setSnapGuides([])
       const live = useStore.getState().canvas?.frames ?? []
@@ -1356,6 +1362,7 @@ export const FrameView = memo(function FrameView({
         >
           {labelLayer &&
             selected &&
+            !shapeMoving &&
             !editing &&
             !pathEdit &&
             (!wantedSel || shellPicked) &&
@@ -1592,7 +1599,9 @@ export const FrameView = memo(function FrameView({
             {/* the frame's selection ring (not over an agent's stream, which has
               its own): two screen pixels straddling its edge, so on the pixel
               grid it runs down the middle of the edge's line */}
-            {selected && !pathEdit && !stream && (
+            {/* a picked element inside the frame is the selection: the frame
+              keeps no ring of its own then, as its grips go too */}
+            {selected && (!wantedSel || shellPicked) && !pathEdit && !stream && !shapeMoving && (
               <div
                 data-frame-selection=""
                 className="pointer-events-none absolute inset-0 outline-solid outline-brand"
@@ -1656,7 +1665,8 @@ export const FrameView = memo(function FrameView({
                 selected &&
                 !editing &&
                 !pathEdit &&
-                !dragging && (
+                !dragging &&
+                !elementMove.moving && (
                   <div
                     data-element-outline=""
                     /* a one-pixel hairline, the way Paper outlines a selection */
@@ -1687,6 +1697,7 @@ export const FrameView = memo(function FrameView({
                 !editing &&
                 !pathEdit &&
                 !dragging &&
+                !elementMove.moving &&
                 picked
                   .filter((selector) => selector !== probe?.selector)
                   .map((selector) => {
@@ -1931,6 +1942,7 @@ export const FrameView = memo(function FrameView({
               tool === 'select' &&
               (!wantedSel || shellPicked) &&
               !elementMove.moving &&
+              !shapeMoving &&
               !frame.locked &&
               !shellLocked &&
               !readOnly &&

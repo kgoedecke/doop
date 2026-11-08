@@ -530,6 +530,22 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     }
   }
 
+  /* what a moved element lines up with: its parent box and the visible
+     elements beside it (the frame itself is the stage's to add) */
+  function snapRects(el) {
+    var parent = el.parentElement
+    if (!parent) return []
+    var rects = parent === document.body || parent === document.documentElement ? [] : [designRect(parent)]
+    for (var i = 0; i < parent.children.length && rects.length < 80; i++) {
+      var sibling = parent.children[i]
+      if (sibling === el || sibling.hasAttribute('data-doop-defs')) continue
+      if (getComputedStyle(sibling).visibility !== 'visible') continue
+      var r = designRect(sibling)
+      if (r.width > 0 && r.height > 0) rects.push(r)
+    }
+    return rects
+  }
+
   /* Ask the browser which element is actually on top, including stacking
      contexts, clipping, and transformed hit regions. Keep layout dimensions
      separate from the rendered rectangle so a move does not apply scale twice. */
@@ -560,19 +576,22 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       else el.setAttribute('style', originalStyle)
     }
     return {
-      selector: cssPath(el), rect: rect,
+      selector: cssPath(el), rect: rect, snapRects: snapRects(el),
       geometry: { width: width, height: height, offsetX: rect.x - untransformed.x,
         offsetY: rect.y - untransformed.y, styles: styles },
     }
   }
 
+  /* the path editor and a drawing being dragged out of place draw their own
+     copy over the canvas; the original stays laid out but unpainted */
   var pathEditingSelector = null
+  var movingDrawingSelector = null
   function syncPathVisibility() {
     document.querySelectorAll('[data-v-path-hidden]').forEach(function (el) { el.removeAttribute('data-v-path-hidden') })
-    if (pathEditingSelector) {
-      var pathSvg = document.querySelector(pathEditingSelector)
-      if (pathSvg) pathSvg.setAttribute('data-v-path-hidden', '')
-    }
+    ;[pathEditingSelector, movingDrawingSelector].forEach(function (selector) {
+      var hidden = selector && document.querySelector(selector)
+      if (hidden) hidden.setAttribute('data-v-path-hidden', '')
+    })
   }
   /* the topmost unlocked element under a point, a standalone's root included:
      a double-click on a shape inside an imported group edits that shape */
@@ -667,7 +686,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     // A selected group moves as a whole even when the press hits a child.
     if (el && picked && picked.contains(el) && !isLocked(picked)) el = picked
     while (el && el !== document.body && el !== document.documentElement) {
-      if (elementGeometry(el).enabled) return hitInfo(el)
+      if (elementGeometry(el).enabled) {
+        var info = hitInfo(el)
+        info.snapRects = snapRects(el)
+        return info
+      }
       // Inline text and SVG paths move with their containing box/SVG.
       el = el.parentElement
     }
@@ -1281,6 +1304,11 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
       pathEditingSelector = d.selector || null
       syncPathVisibility()
       parent.postMessage({ type: 'doop:path-editing-result', reqId: d.reqId }, '*')
+    }
+    if (d.type === 'doop:drawing-moving') {
+      movingDrawingSelector = d.selector || null
+      syncPathVisibility()
+      parent.postMessage({ type: 'doop:drawing-moving-result', reqId: d.reqId }, '*')
     }
     if (d.type === 'doop:hover') {
       parent.postMessage({ type: 'doop:hover-result', reqId: d.reqId, hit: hoverProbe(d.x, d.y) }, '*')

@@ -966,10 +966,13 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
     const before = await visibleDrawing('Layers', '#rect')
     const sibling = await visibleDrawing('Layers', '#sibling')
-    await drag(
-      [before.x + before.width / 2, before.y + before.height / 2],
-      [before.x + before.width / 2 + 60, before.y + before.height / 2 + 35],
-    )
+    // ⌥ once the drag is under way: the exact delta, with no snap to the sibling
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2)
+    await page.mouse.down()
+    await page.keyboard.down('Alt')
+    await page.mouse.move(before.x + before.width / 2 + 60, before.y + before.height / 2 + 35, { steps: 5 })
+    await page.mouse.up()
+    await page.keyboard.up('Alt')
     await expect.poll(() => patchRequests).toBe(1)
     const after = await visibleDrawing('Layers', '#rect')
     expect(after.x - before.x).toBeCloseTo(60, 0)
@@ -1614,12 +1617,67 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await preview.waitForSelector('[data-doop-drawing]')
     const inside = await preview.evaluate(() => ({ width: innerWidth, dpr: devicePixelRatio }))
     const moving = await visibleDrawing('Moving drawing')
+    // the shape itself moves: its original is unpainted while the copy follows
+    const original = (await (await page.waitForSelector('iframe[title="Source"]'))!.contentFrame())!
+    const visibility = () => original.$eval('[data-doop-drawing]', (el) => getComputedStyle(el).visibility)
+    await expect.poll(visibility).toBe('hidden')
     await page.keyboard.press('Escape')
     await page.mouse.up()
+    await expect.poll(visibility).toBe('visible')
     // Chromium takes the world's 2x layout zoom as the preview's pixel density,
     // as it does for frames, so the drawing keeps its design width and sharpness
     expect(inside).toEqual({ width: 60, dpr: 2 })
     expect(moving.width).toBeCloseTo(drawing.width, 1)
+  })
+
+  it('shows only the dragged drawing and snaps it to its frame and siblings', async () => {
+    const source: Frame = {
+      id: 'source',
+      updatedBy: 'User',
+      canvasId: 'c',
+      pageId: 'first',
+      name: 'Source',
+      x: 20,
+      y: 20,
+      width: 250,
+      height: 250,
+      createdAt: 0,
+      updatedAt: 0,
+      html:
+        '<style>.tinted{background:rgb(0, 128, 0)}</style>' +
+        '<div class="tinted" data-doop-drawing="rectangle" data-name="Rectangle" style="position:absolute;left:40px;top:40px;width:60px;height:40px"></div>' +
+        '<div data-doop-drawing="rectangle" data-name="Sibling" style="position:absolute;left:150px;top:180px;width:50px;height:50px;background:blue"></div>' +
+        // nearer on both axes than what it snaps to, but nobody sees it
+        '<div data-doop-drawing="rectangle" data-name="Hidden" style="position:absolute;left:152px;top:178px;width:50px;height:50px;visibility:hidden"></div>',
+    }
+    await seedFrames([source])
+    await page.evaluate(async () => {
+      window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 })
+      const world = document.querySelector<HTMLElement>('.world')!
+      while (world.style.zoom !== '1') await new Promise((r) => requestAnimationFrame(r))
+    })
+    const drawing = await visibleDrawing('Source')
+    const from = { x: drawing.x + 30, y: drawing.y + 20 }
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    /* the centre lands 2px short of the frame's (125) and the top 3px short
+       of the sibling's (180): both pull on */
+    await page.mouse.move(from.x + 53, from.y + 137, { steps: 6 })
+    const moving = (await (await page.waitForSelector('iframe[title="Moving drawing"]'))!.contentFrame())!
+    // the copy keeps the look its frame's stylesheet gives it
+    await expect
+      .poll(() => moving.$eval('[data-doop-drawing]', (el) => getComputedStyle(el).backgroundColor))
+      .toBe('rgb(0, 128, 0)')
+    expect(await page.$('[data-element-outline]')).toBeNull()
+    expect(await page.$('[data-resize-handles]')).toBeNull()
+    expect(await page.$('[data-element-size]')).toBeNull()
+    // a move inside its own frame marks no drop target
+    expect(await page.$('[data-drawing-drop-target]')).toBeNull()
+    await page.mouse.up()
+    await expect.poll(() => saved.find((f) => f.id === 'source')?.html ?? '').toContain('left: 95px; top: 180px;')
+    // the picked shape is the selection: its frame wears no ring of its own
+    await page.waitForSelector('[data-element-outline]')
+    expect(await page.$('[data-frame-selection]')).toBeNull()
   })
 
   it('keeps a peer cursor on its spot while the world switches layout zoom', async () => {
