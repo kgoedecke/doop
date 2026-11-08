@@ -2,7 +2,7 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { recordCreates } from './history'
+import { deleteFramesTracked, recordCreates } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
@@ -419,4 +419,44 @@ export function duplicateFrames(frames: Frame[]) {
   ).then((created) => {
     if (created.length) posthog.capture('frame_duplicated', { count: created.length })
   })
+}
+
+/** ⇧⌘V on frames: the copied frames centred over the selected ones. */
+export function pasteFramesOver(canvasId: string, over: Frame[]): boolean {
+  const frames = readClip()
+  if (!frames.length || !over.length) return false
+  const { width, height } = clipBounds(frames)
+  const left = Math.min(...over.map((f) => f.x))
+  const top = Math.min(...over.map((f) => f.y))
+  const right = Math.max(...over.map((f) => f.x + f.width))
+  const bottom = Math.max(...over.map((f) => f.y + f.height))
+  createFromClip(canvasId, (left + right) / 2 - width / 2, (top + bottom) / 2 - height / 2)
+  return true
+}
+
+/** ⇧⌘R on frames: the copied frames land at each selected frame's top-left,
+ *  and the selected frames go once they have. */
+export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boolean {
+  const frames = readClip()
+  const replaceable = targets.filter((f) => !f.locked)
+  if (!frames.length || !replaceable.length) return false
+  void createFrames(
+    replaceable.flatMap((target) =>
+      frames.map((f) => ({
+        canvasId,
+        frame: {
+          name: f.name,
+          html: f.html,
+          width: f.width,
+          height: f.height,
+          x: Math.round(target.x + f.x),
+          y: Math.round(target.y + f.y),
+          ...(f.rotation ? { rotation: f.rotation } : {}),
+        },
+      })),
+    ),
+  ).then((created) => {
+    if (created.length) deleteFramesTracked(replaceable)
+  })
+  return true
 }

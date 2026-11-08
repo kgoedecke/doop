@@ -36,7 +36,7 @@ const MAX_ATTACHMENTS = 4
 const MAX_SCOPE_LABEL = 24
 /** the field grows with the draft up to this many lines, then scrolls */
 const MAX_COMPOSER_LINES = 6
-/** a ⌘K older than this is ignored by a composer that mounts later */
+/** a ⌘/ older than this is ignored by a composer that mounts later */
 const FOCUS_REQUEST_TTL_MS = 2000
 
 interface ScopeChip {
@@ -248,7 +248,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
     if (inputRef.current) autosize(inputRef.current)
   }, [text])
 
-  /* ⌘K: the page has opened the panel on this tab — take the keyboard. The
+  /* ⌘/: the page has opened the panel on this tab — take the keyboard. The
      request is a timestamp so a composer mounted later (a tab switch some
      minutes on) does not re-run an old one. */
   useEffect(() => {

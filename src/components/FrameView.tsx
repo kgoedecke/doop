@@ -783,6 +783,8 @@ export const FrameView = memo(function FrameView({
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
+  /* ⇧C hides the pins; an open thread stays */
+  const commentsHidden = useStore((s) => s.commentsHidden)
   /* only thread roots get a pin; replies live inside the root's popover */
   const comments = frameComments.filter((c) => !c.parentId && !c.resolvedAt)
   const [probe, setProbe] = useState<ProbeHit | null>(null)
@@ -1904,6 +1906,7 @@ export const FrameView = memo(function FrameView({
                     const pos = isFrameComment(c) ? { x: c.x, y: c.y } : elementCommentPosition(c, pinPos[c.id])
                     if (!pos) return null
                     const open = openThread === c.id
+                    if (commentsHidden && !open) return null
                     const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
                     const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
                     return (

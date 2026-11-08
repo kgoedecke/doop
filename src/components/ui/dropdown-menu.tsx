@@ -3,7 +3,7 @@ import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
 import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
-import { CheckIcon } from './icons'
+import { CheckIcon, ChevronRightIcon } from './icons'
 import { menuItemVariants } from './menu'
 
 /* A menu hanging off a button. Radix handles what the hand-rolled version
@@ -151,6 +151,64 @@ function DropdownMenuCaption({ className, ...props }: React.ComponentProps<typeo
   )
 }
 
+/** A row that is on or off (a View toggle): the check sits before its label. */
+function DropdownMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
+  return (
+    <DropdownMenuPrimitive.CheckboxItem
+      data-slot="dropdown-menu-checkbox-item"
+      className={cn(menuItemVariants(), itemClass, 'relative pl-7', className)}
+      {...props}
+    >
+      <DropdownMenuPrimitive.ItemIndicator className="absolute left-2 flex text-ink">
+        <CheckIcon width={14} height={14} aria-hidden />
+      </DropdownMenuPrimitive.ItemIndicator>
+      {children}
+    </DropdownMenuPrimitive.CheckboxItem>
+  )
+}
+
+const DropdownMenuSub = DropdownMenuPrimitive.Sub
+
+/** A row opening a menu of its own beside it (File, Edit…), with a chevron. */
+function DropdownMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger>) {
+  return (
+    <DropdownMenuPrimitive.SubTrigger
+      data-slot="dropdown-menu-sub-trigger"
+      className={cn(menuItemVariants(), itemClass, 'data-[state=open]:bg-sub', className)}
+      {...props}
+    >
+      {children}
+      <ChevronRightIcon width={14} height={14} aria-hidden className="ml-auto text-ink-faint" />
+    </DropdownMenuPrimitive.SubTrigger>
+  )
+}
+
+function DropdownMenuSubContent({
+  className,
+  width,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent> & VariantProps<typeof dropdownMenuContentVariants>) {
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        data-slot="dropdown-menu-sub-content"
+        sideOffset={6}
+        collisionPadding={12}
+        className={cn(dropdownMenuContentVariants({ width }), className)}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
+  )
+}
+
 export {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -161,4 +219,8 @@ export {
   DropdownMenuCaption,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 }

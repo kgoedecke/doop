@@ -745,3 +745,152 @@ function renameIds(doc: Document, copies: Element[], clashesOnly = false): Recor
   }
   return Object.fromEntries(renamed)
 }
+
+/* ---- grouping: ⌘G, ⌥⌘G and ⇧⌘G as markup ---- */
+
+/* containers a wrapper may not go inside, nor be: their children are rows,
+   cells or options the parser keeps only directly under them */
+const UNWRAPPABLE_PARENTS = new Set([
+  'TABLE',
+  'THEAD',
+  'TBODY',
+  'TFOOT',
+  'TR',
+  'SELECT',
+  'OPTGROUP',
+  'DATALIST',
+  'UL',
+  'OL',
+])
+
+export interface GroupOptions {
+  /** the wrapper's layer name, as the Layers panel shows it */
+  name: string
+  /** inline styles for the wrapper (auto layout's flex), none for a plain group */
+  style?: string
+  /** inline styles each wrapped element takes on (auto layout drops their margins) */
+  childStyle?: Record<string, string>
+}
+
+/** The frame's HTML with the elements wrapped in one new `div`, placed where
+ *  the first of them was, and the wrapper's path. The elements must share a
+ *  parent (a group holds siblings); a wrapper in normal flow is static, so
+ *  absolutely positioned children keep the box they were placed in. Null when
+ *  they do not share one, sit in a table or list, or are locked. */
+export function groupElements(
+  html: string,
+  selectors: string[],
+  { name, style, childStyle }: GroupOptions,
+): { html: string; selector: string } | null {
+  const doc = parse(html)
+  const found = findAll(doc, selectors)
+  if (!found?.length) return null
+  const els = inDocumentOrder(found)
+  const parent = els[0]!.parentElement
+  if (!parent || els.some((el) => el.parentElement !== parent)) return null
+  if (UNWRAPPABLE_PARENTS.has(parent.tagName) || parent.closest(`[${LOCK_ATTR}]`)) return null
+  if (els.some((el) => el.hasAttribute(LOCK_ATTR))) return null
+  const svg = parent.namespaceURI === 'http://www.w3.org/2000/svg'
+  const wrapper = svg ? doc.createElementNS(parent.namespaceURI, 'g') : doc.createElement('div')
+  wrapper.setAttribute(NAME_ATTR, name)
+  if (style && !svg) wrapper.setAttribute('style', style)
+  els[0]!.before(wrapper)
+  for (const el of els) {
+    wrapper.append(el)
+    if (!childStyle || svg) continue
+    for (const [prop, value] of Object.entries(childStyle)) (el as HTMLElement).style.setProperty(prop, value)
+  }
+  const next = serialize(doc)
+  const selector = elementPath(wrapper)
+  if (find(parse(next), selector)?.outerHTML !== wrapper.outerHTML) return null
+  return { html: next, selector }
+}
+
+/** The frame's HTML with each element swapped for its children, and the
+ *  children's paths: the group goes, what it held stays where it was. Only
+ *  boxes holding elements unwrap (text would lose the box that styled it);
+ *  null when none of them can. */
+export function ungroupElements(html: string, selectors: string[]): { html: string; selectors: string[] } | null {
+  const doc = parse(html)
+  const found = findAll(doc, selectors)
+  if (!found?.length) return null
+  const groups = outermost(found).filter(
+    (el) =>
+      el !== doc.body &&
+      el.children.length > 0 &&
+      !ownText(el) &&
+      !IMAGE_TAGS.has(el.tagName) &&
+      !el.closest(`[${LOCK_ATTR}]`) &&
+      !el.hasAttribute('data-doop-drawing') &&
+      !(el.parentElement && UNWRAPPABLE_PARENTS.has(el.parentElement.tagName)),
+  )
+  if (!groups.length) return null
+  const freed: Element[] = []
+  for (const group of groups) {
+    const children = [...group.children]
+    group.replaceWith(...group.childNodes)
+    freed.push(...children)
+  }
+  const next = serialize(doc)
+  return { html: next, selectors: freed.map(elementPath) }
+}
+
+/** The frame's HTML with the element linked to `href`: a link gets the new
+ *  target, anything else has its content wrapped in one. Null `href` takes a
+ *  link off (the link element, or the one link wrapping the element's
+ *  content, gives way to its content). Null when the selector no longer
+ *  resolves or there is nothing to unlink. */
+export function setElementLink(html: string, selector: string, href: string | null): string | null {
+  const doc = parse(html)
+  const el = find(doc, selector)
+  if (!el || el === doc.body) return null
+  const only = el.childNodes.length === 1 && el.firstElementChild?.tagName === 'A' ? el.firstElementChild : null
+  const link = el.tagName === 'A' ? el : only
+  if (href === null) {
+    if (!link) return null
+    if (link === el) {
+      /* the link itself picked: keep the element, drop what made it a link */
+      el.removeAttribute('href')
+      el.removeAttribute('target')
+    } else link.replaceWith(...link.childNodes)
+    return serialize(doc)
+  }
+  if (link) link.setAttribute('href', href)
+  else {
+    const a = doc.createElement('a')
+    a.setAttribute('href', href)
+    a.append(...el.childNodes)
+    el.append(a)
+  }
+  return serialize(doc)
+}
+
+/** The frame's HTML with the elements swapped for the clipboard's layers,
+ *  which land where the first of them was (paste to replace), and
+ *  the pasted layers' paths. Null when an element is gone or locked, or the
+ *  markup does not survive a round trip. */
+export function replaceElementsWith(
+  html: string,
+  selectors: string[],
+  outerHtml: string,
+): { html: string; selectors: string[]; renamed: Record<string, string> } | null {
+  const doc = parse(html)
+  const found = findAll(doc, selectors)
+  if (!found?.length) return null
+  const els = inDocumentOrder(found)
+  const first = els[0]!
+  if (els.some((el) => el === doc.body || el.closest(`[${LOCK_ATTR}]`))) return null
+  const source = (first.parentElement ?? doc.body).cloneNode(false) as Element
+  source.innerHTML = outerHtml
+  if (!source.children.length) return null
+  if ([...source.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim())) return null
+  const copies = [...source.children]
+  const renamed = renameIds(doc, copies)
+  first.before(...copies)
+  for (const el of els) el.remove()
+  const next = serialize(doc)
+  const paths = copies.map(elementPath)
+  const reparsed = parse(next)
+  if (copies.some((copy, i) => find(reparsed, paths[i]!)?.outerHTML !== copy.outerHTML)) return null
+  return { html: next, selectors: paths, renamed }
+}

@@ -52,6 +52,8 @@ export function CanvasComments({
   const canvasId = useStore((s) => s.canvas?.id)
   const pageId = useStore((s) => (s.canvas ? (s.activePageId ?? canvasPages(s.canvas)[0]!.id) : null))
   const all = useStore((s) => s.comments)
+  /* ⇧C hides the pins; an open thread stays */
+  const commentsHidden = useStore((s) => s.commentsHidden)
   /* only thread roots get a pin; replies live inside the root's popover */
   const roots = all.filter(
     (c): c is CanvasComment => isCanvasComment(c) && c.pageId === pageId && !c.parentId && !c.resolvedAt,
@@ -126,6 +128,7 @@ export function CanvasComments({
         const replies = all.filter((r) => r.parentId === c.id).sort((a, b) => a.at - b.at)
         const thread: [ElementComment, ...ElementComment[]] = [c, ...replies]
         const open = openThread === c.id
+        if (commentsHidden && !open) return null
         return (
           <CommentPin
             key={c.id}

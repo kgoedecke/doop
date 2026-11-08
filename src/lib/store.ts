@@ -20,6 +20,7 @@ import type {
 import { roleAllows, type CanvasRole } from '../../shared/canvasRole'
 import type { SnapGuide } from './snap'
 import { isDrawingTool, type Tool } from './tools'
+import { setOutlines } from './frameBridge'
 
 export interface Viewport {
   x: number
@@ -119,6 +120,14 @@ interface State {
   rulers: boolean
   /** the ruler guide clicked last, which Delete removes */
   selectedGuideId: string | null
+  /** ⇧C — comment pins hidden on the canvas (the Comments tab still lists them) */
+  commentsHidden: boolean
+  /** ⌥⌘\ — other people's cursors hidden */
+  cursorsHidden: boolean
+  /** ⌘Y — frames drawn as outlines, fills off; nothing is saved */
+  outlines: boolean
+  /** ⌥L asks the Layers panel to fold every row; it watches the stamp */
+  layersCollapseAt: number
   connected: boolean
   /** the join for the current canvasId was refused: no such canvas (deleted,
    *  or the id in the URL was never one) — CanvasPage shows a not-found
@@ -150,7 +159,7 @@ interface State {
    *  the Comments panel raises it; the FrameView that owns the root consumes it */
   threadRequest: { id: string; at: number } | null
   /** when the "Design it" composer in the Agents tab was last asked to take
-   *  focus (⌘K) — a timestamp, so a composer that mounts long after an old
+   *  focus (⌘/) — a timestamp, so a composer that mounts long after an old
    *  request does not grab the keyboard */
   composerFocusAt: number
   /** the composer's unsent text per canvas — collapsing the panel or
@@ -259,6 +268,10 @@ interface State {
   setViewport(v: Viewport): void
   setSnapGuides(guides: SnapGuide[]): void
   toggleRulers(): void
+  toggleCommentsHidden(): void
+  toggleCursorsHidden(): void
+  toggleOutlines(): void
+  requestCollapseLayers(): void
   selectGuide(id: string | null): void
   /** add or move (guide set) or remove (null) a ruler guide on the open canvas */
   setGuideLocal(id: string, guide: CanvasGuide | null): void
@@ -329,6 +342,10 @@ export const useStore = create<State>((set, get) => ({
   snapGuides: [],
   rulers: readRulers(),
   selectedGuideId: null,
+  commentsHidden: false,
+  cursorsHidden: false,
+  outlines: false,
+  layersCollapseAt: 0,
   connected: false,
   canvasNotFound: false,
   signInRequired: false,
@@ -728,6 +745,14 @@ export const useStore = create<State>((set, get) => ({
       }
       return { rulers: !s.rulers, ...(s.rulers ? { selectedGuideId: null } : {}) }
     }),
+  toggleCommentsHidden: () => set((s) => ({ commentsHidden: !s.commentsHidden })),
+  toggleCursorsHidden: () => set((s) => ({ cursorsHidden: !s.cursorsHidden })),
+  toggleOutlines: () =>
+    set((s) => {
+      setOutlines(!s.outlines)
+      return { outlines: !s.outlines }
+    }),
+  requestCollapseLayers: () => set({ layersCollapseAt: Date.now() }),
   selectGuide: (selectedGuideId) => set((s) => (s.selectedGuideId === selectedGuideId ? s : { selectedGuideId })),
   setGuideLocal: (id, guide) =>
     set((s) => {
