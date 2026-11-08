@@ -13,7 +13,7 @@ declare global {
     stopReplay: () => void
     snapshot: () => void
     renderReplay: (events: ReplayEvent[]) => void
-    addFrame: () => void
+    addFrame: (attribute?: string) => void
   }
 }
 
@@ -159,6 +159,18 @@ describe.skipIf(!findBrowserPath())('sandboxed frame replay', () => {
     await page.waitForFunction(() => window.messages.filter((m) => m.type === 'doop:frame-ready').length === 2)
     await render('<h1>Presentation frame</h1>', 1)
     await captured('Presentation frame')
+  })
+
+  it('records prototype player screens', async () => {
+    await page.evaluate(() => window.addFrame('data-doop-proto-frame'))
+    await page.waitForFunction(() => window.messages.filter((m) => m.type === 'doop:frame-ready').length === 3)
+    await render('<h1>Prototype screen</h1>', 2)
+    await captured('Prototype screen')
+    const frame = await page.evaluate(
+      () => JSON.stringify(window.events).match(/"data-doop-proto-frame":""[^}]*}/)?.[0],
+    )
+    expect(frame).toContain('"sandbox":"allow-same-origin"')
+    expect(frame).not.toContain('srcdoc')
   })
 
   it('stops child recording, resumes with current content, and applies updated privacy settings', async () => {
