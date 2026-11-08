@@ -50,6 +50,7 @@ import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 import { spaceWouldScroll } from '../lib/spaceScroll'
+import { viewOptionForKey } from '../lib/viewOptions'
 
 const MIN_ZOOM = 0.08
 /* The settled world is laid out at up to this zoom too (layoutZoomFor), so
@@ -234,6 +235,7 @@ export function Stage({
   const paper = usePaper()
   const select = useStore((s) => s.select)
   const panMode = useStore((s) => s.panMode)
+  const showCursors = useStore((s) => s.viewOptions.cursors)
   /* ⌘. — the tool pill and the zoom pill go with the rest of the chrome */
   const uiHidden = useStore((s) => s.uiHidden)
   /* ⇧R — phones have no room for rulers (nor a keyboard to ask for them) */
@@ -299,7 +301,7 @@ export function Stage({
       grid.style.transform = `translate(${gx}px, ${gy}px)`
       const pixels = pixelGridRef.current
       if (pixels) {
-        const opacity = pixelGridOpacity(vp.zoom)
+        const opacity = useStore.getState().viewOptions.pixelGrid ? pixelGridOpacity(vp.zoom) : 0
         pixels.hidden = opacity === 0
         pixels.style.opacity = String(opacity)
         pixels.style.backgroundSize = `${vp.zoom}px ${vp.zoom}px`
@@ -315,6 +317,7 @@ export function Stage({
       /* a (re)connect needs the camera announced afresh — the server only
          knows what this socket has sent */
       if (s.connected && !prev.connected && ref.current) sendViewport(s.viewport, ref.current)
+      if (s.viewOptions.pixelGrid !== prev.viewOptions.pixelGrid) apply(s.viewport)
       if (s.viewport === prev.viewport) return
       apply(s.viewport)
       if (ref.current) sendViewport(s.viewport, ref.current)
@@ -698,11 +701,19 @@ export function Stage({
 
   /* ⌘0 → 100%, ⌘+ / ⌘− → step zoom, all pivoting on the view center —
      preventDefault keeps the browser's own page zoom out of it. ⇧1 / ⇧2 fit
-     everything / the selection and ⇧R shows or hides the rulers, as in Figma. */
+     everything / the selection and ⇧R shows or hides the rulers, as in Figma.
+     ⇧' / ⇧C / ⌘⌥\ switch the pixel grid, the comment pins and other people's
+     cursors (src/lib/viewOptions.ts). */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
+      const option = viewOptionForKey(e)
+      if (option) {
+        e.preventDefault()
+        if (!e.repeat) useStore.getState().toggleViewOption(option)
+        return
+      }
       if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (e.key.toLowerCase() === 'r') {
           e.preventDefault()
@@ -1063,7 +1074,7 @@ export function Stage({
               <PrototypeOverlay />
               <SnapGuides />
               <CanvasComments composeAt={composeAt} onComposeDone={dismissCompose} />
-              <Cursors />
+              {showCursors && <Cursors />}
               {drawing.preview}
               {marquee && (
                 <div

@@ -108,6 +108,12 @@ export const canvas = {
   zoomTo: 'Zoom to {percent}%',
   showRulers: 'Show rulers',
   hideRulers: 'Hide rulers',
+  showPixelGrid: 'Show pixel grid',
+  hidePixelGrid: 'Hide pixel grid',
+  showCursors: 'Show multiplayer cursors',
+  hideCursors: 'Hide multiplayer cursors',
+  showComments: 'Show comments',
+  hideComments: 'Hide comments',
 
   /* onboarding */
   gettingStarted: 'Getting started',

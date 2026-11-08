@@ -106,6 +106,12 @@ export const canvas: Catalog['canvas'] = {
   zoomTo: 'Zoom em {percent}%',
   showRulers: 'Mostrar réguas',
   hideRulers: 'Ocultar réguas',
+  showPixelGrid: 'Mostrar grade de pixels',
+  hidePixelGrid: 'Ocultar grade de pixels',
+  showCursors: 'Mostrar cursores dos colaboradores',
+  hideCursors: 'Ocultar cursores dos colaboradores',
+  showComments: 'Mostrar comentários',
+  hideComments: 'Ocultar comentários',
 
   gettingStarted: 'Primeiros passos',
   gettingStartedDescription: 'Dois passos para trazer seu próprio agente para o canvas.',
