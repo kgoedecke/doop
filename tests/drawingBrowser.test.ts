@@ -1947,6 +1947,44 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(await page.evaluate(() => window.drawingHarness.state().selectedElement?.selector)).toBe('#a')
   })
 
+  it("comments on a frame filled by its layers from the frame's name", async () => {
+    await seedFrames([
+      {
+        id: 'full',
+        updatedBy: 'User',
+        canvasId: 'c',
+        pageId: 'first',
+        name: 'Full',
+        x: 30,
+        y: 30,
+        width: 400,
+        height: 300,
+        createdAt: 0,
+        updatedAt: 0,
+        html: '<body style="margin:0"><div id="hero" style="width:400px;height:300px;background:#eee"></div></body>',
+      },
+    ])
+    await page.waitForSelector('iframe[title="Full"]')
+    await page.keyboard.press('c')
+    const title = (await (await page.waitForSelector('[data-frame-title]'))!.boundingBox())!
+    /* hovering the name outlines the whole frame */
+    await page.mouse.move(title.x + 4, title.y + title.height / 2)
+    await page.waitForSelector('[data-frame-comment-hover]')
+    await page.mouse.down()
+    await page.mouse.up()
+    await page.waitForSelector('textarea[placeholder="Leave a comment on this frame…"]')
+    expect(await page.evaluate(() => window.drawingHarness.state().selectedElement)).toBeNull()
+    const posted = page.waitForRequest((req) => req.url().endsWith('/api/frames/full/comments'))
+    await page.keyboard.type('The whole hero')
+    await page.keyboard.down('Control')
+    await page.keyboard.press('Enter')
+    await page.keyboard.up('Control')
+    expect(JSON.parse((await posted).postData()!)).toMatchObject({ selector: 'body', x: 12, y: 12 })
+    /* leaving the name takes the outline away */
+    await page.mouse.move(title.x + 4, title.y - 40)
+    await page.waitForFunction(() => !document.querySelector('[data-frame-comment-hover]'))
+  })
+
   it('drags a comment pin off its element onto the canvas, onto the frame, and back onto an element', async () => {
     await seedFrames([
       {

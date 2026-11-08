@@ -558,7 +558,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 - Comment anchors (`shared/comments.ts`): an element comment is `frameId` + `elementId` (the
   element's `data-doop-id`) + `snippet`; a frame comment is `frameId` + design-px `x`/`y` and no
-  `elementId`; a canvas comment is `pageId` + world `x`/`y`. One whose element is gone keeps the
+  `elementId` (the Comment tool makes one on the frame's background, or from its name, which
+  outlines the whole frame on hover and pins the comment just inside its top-left corner); a canvas comment is `pageId` + world `x`/`y`. One whose element is gone keeps the
   frame and snippet only and is listed without a pin. The browser still sends the runtime's
   positional selector (plus `elementId` when the element already wears one, and always the
   point); the server stamps and stores the id. `FrameView` places pins by
