@@ -670,6 +670,8 @@ export const FrameView = memo(function FrameView({
   const comments = frameComments.filter((c) => !c.parentId && !c.resolvedAt)
   /* ⇧C hides the pins (an open thread stays); the Comment tool shows them */
   const pinsShown = useStore((s) => s.viewOptions.comments || s.tool === 'comment')
+  /* a pin being dragged stays mounted: its release listeners live on it */
+  const draggedPin = useStore((s) => s.commentDrag?.id)
   const [probe, setProbe] = useState<ProbeHit | null>(null)
   useEffect(() => {
     // The request also distinguishes a return to previously rendered HTML
@@ -1772,7 +1774,7 @@ export const FrameView = memo(function FrameView({
                   {comments.map((c) => {
                     const pos = isFrameComment(c) ? { x: c.x, y: c.y } : elementCommentPosition(c, pinPos[c.id])
                     const open = openThread === c.id
-                    if (!pos || (!pinsShown && !open)) return null
+                    if (!pos || (!pinsShown && !open && draggedPin !== c.id)) return null
                     const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
                     const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
                     return (

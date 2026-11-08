@@ -52,6 +52,10 @@ export function CommentPin({
   const dragged = useStore((s) => s.commentDrag?.id === root.id)
   /* the click after a drag's release must not toggle the thread */
   const suppressClick = useRef(false)
+  /* a press under way, dropped if the pin goes away first (resolved by
+     someone else, hidden with ⇧C): its listeners would outlive it */
+  const abandonPress = useRef<(() => void) | null>(null)
+  useEffect(() => () => abandonPress.current?.(), [])
   const t = useT()
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -69,6 +73,7 @@ export function CommentPin({
       pin.removeEventListener('pointercancel', onCancel)
       window.removeEventListener('keydown', onKey, true)
       document.body.style.cursor = ''
+      abandonPress.current = null
     }
     const onMove = (ev: PointerEvent) => {
       if (!moving) {
@@ -110,6 +115,10 @@ export function CommentPin({
     pin.addEventListener('pointerup', onUp)
     pin.addEventListener('pointercancel', onCancel)
     window.addEventListener('keydown', onKey, true)
+    abandonPress.current = () => {
+      stop()
+      if (moving) useStore.getState().setCommentDrag(null)
+    }
   }
 
   return (

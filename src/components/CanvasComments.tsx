@@ -128,7 +128,8 @@ export function CanvasComments({
         const replies = all.filter((r) => r.parentId === c.id).sort((a, b) => a.at - b.at)
         const thread: [ElementComment, ...ElementComment[]] = [c, ...replies]
         const open = openThread === c.id
-        if (!pinsShown && !open) return null
+        /* a pin being dragged stays mounted: its release listeners live on it */
+        if (!pinsShown && !open && drag?.id !== c.id) return null
         return (
           <CommentPin
             key={c.id}
