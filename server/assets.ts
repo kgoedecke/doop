@@ -1,3 +1,4 @@
+import { parse, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { nanoid } from 'nanoid'
 import { eq, inArray } from 'drizzle-orm'
 import { db } from './db/index.ts'
@@ -134,6 +135,7 @@ export async function storeAsset(
   await db.insert(t.assets).values({
     id,
     canvasId: meta.canvasId ?? null,
+    /* Stable authenticated uploader ID; uploadedBy is only a display name. */
     ownerId: meta.ownerId ?? null,
     mime,
     ext,
@@ -145,6 +147,27 @@ export async function storeAsset(
   if (meta.canvasId && isDescribableImage(mime))
     emitCanvasEvent(meta.canvasId, { type: 'asset.stored', asset: { ...asset, canvasId: meta.canvasId } })
   return asset
+}
+
+/** Only a standalone image layer is reference material; detached designs also
+ * carry data-doop-canvas-element, so the marker alone is not enough. */
+export function isStandaloneImage(html: string): boolean {
+  const isElement = (node: Tree.ChildNode): node is Tree.Element => 'tagName' in node
+  const doc = parse(html)
+  const root = doc.childNodes.filter(isElement).find((node) => node.tagName === 'html')
+  const body = root?.childNodes.filter(isElement).find((node) => node.tagName === 'body')
+  if (!body?.attrs.some((attr) => attr.name === 'data-doop-canvas-element')) return false
+  const content = body.childNodes.filter(
+    (node) => node.nodeName !== '#comment' && !(node.nodeName === '#text' && 'value' in node && !node.value.trim()),
+  )
+  const image = content[0]
+  return (
+    content.length === 1 &&
+    !!image &&
+    isElement(image) &&
+    image.tagName === 'img' &&
+    image.attrs.some((attr) => attr.name === 'data-doop-drawing' && attr.value === 'image')
+  )
 }
 
 /** The images each frame references, with their descriptions, for agents
@@ -180,10 +203,10 @@ export async function imagesForFrames(frameIds: string[]): Promise<Map<string, F
   return images
 }
 
-export async function getAsset(id: string): Promise<{ meta: AssetMeta; buf: Buffer } | null> {
+export async function getAsset(id: string, signal?: AbortSignal): Promise<{ meta: AssetMeta; buf: Buffer } | null> {
   const [row] = await db.select().from(t.assets).where(eq(t.assets.id, id))
   if (!row) return null
-  const buf = await storage.getObject(`${row.id}.${row.ext}`)
+  const buf = await storage.getObject(`${row.id}.${row.ext}`, signal)
   if (!buf) return null
   return { meta: { id: row.id, mime: row.mime, ext: row.ext, size: row.size }, buf }
 }

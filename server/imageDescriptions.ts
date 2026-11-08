@@ -11,7 +11,7 @@ import { accountDescriber, serverDescriber, type AgentModel } from './agentModel
 import { getAccount } from './modelAccounts.ts'
 import { getImageDescriptionMode, saveImageDescriptionMode } from './imageDescriptionPrefs.ts'
 import { store } from './store.ts'
-import { isImageDescriptionMode, type DescriberStatus, type ImageDescriptionMode } from '../shared/imageDescriptions.ts'
+import { isImageDescriptionMode, type DescriberStatus } from '../shared/imageDescriptions.ts'
 import type { ServerMessage } from '../shared/types.ts'
 
 /**
@@ -22,11 +22,10 @@ import type { ServerMessage } from '../shared/types.ts'
  * queues the id, a worker drains the queue a few at a time, and boot
  * re-queues whatever an earlier process left undescribed.
  *
- * Whose model: the canvas owner's preference (off / their connected account
- * / this server's tier). The owner pays, as for automations and resident
- * runs on their canvas. A text-only account, a harness-only pick (local
- * Claude, the Gemini pilot) or a missing account falls through to the server
- * tier; with no key anywhere the image stays undescribed and nothing retries.
+ * Whose model: uploader first, canvas owner second, server last. Off on
+ * either user stops analysis. A server-only uploader bypasses both accounts.
+ * The selected payer/provider is saved before work starts and stays fixed
+ * across retries, including restarts; runtime errors never change who pays.
  */
 
 export const MAX_DESCRIBE_ATTEMPTS = 3
@@ -42,31 +41,54 @@ const PROMPT = `You describe one image for a designer who cannot see it, in unde
 /* ---------------------------------------------------------------- */
 
 export type Describer =
-  | { model: AgentModel; status: DescriberStatus & { label: string } }
+  | { model: AgentModel; payerId: string | null; status: DescriberStatus & { label: string } }
   | { model: null; status: DescriberStatus & { label: null } }
 
-/** The model that would describe the next image on this user's canvases. */
-export async function describerFor(ownerId: string | undefined): Promise<Describer> {
-  const mode: ImageDescriptionMode = ownerId ? await getImageDescriptionMode(ownerId) : 'account'
-  return describerForMode(ownerId, mode)
-}
+type SelectedPayer = Pick<typeof t.assets.$inferSelect, 'describePayerId' | 'describeProvider'>
 
-async function describerForMode(ownerId: string | undefined, mode: ImageDescriptionMode): Promise<Describer> {
-  if (mode === 'off') return { model: null, status: { label: null, reason: 'off' } }
+/** Resolve upload billing, or reload exactly the payer selected on an earlier attempt. */
+export async function describerFor(
+  uploaderId: string | undefined,
+  ownerId?: string,
+  selected?: SelectedPayer,
+): Promise<Describer> {
+  const uploaderMode = uploaderId ? await getImageDescriptionMode(uploaderId) : 'account'
+  const ownerMode = ownerId === uploaderId ? uploaderMode : ownerId ? await getImageDescriptionMode(ownerId) : 'account'
+  if (uploaderMode === 'off' || ownerMode === 'off') return { model: null, status: { label: null, reason: 'off' } }
+
+  if (selected?.describeProvider) {
+    if (selected.describePayerId) {
+      const payerId = selected.describePayerId
+      // Consent may be withdrawn while a retry is waiting. Never choose a new payer.
+      if (uploaderMode === 'server' || (await getImageDescriptionMode(payerId)) !== 'account')
+        return { model: null, status: { label: null, reason: 'off' } }
+      const account = await getAccount(payerId)
+      const model = account?.kind === selected.describeProvider ? accountDescriber(account) : null
+      return model
+        ? { model, payerId, status: { label: model.label } }
+        : { model: null, status: { label: null, reason: 'no-model' } }
+    }
+    const provider = selected.describeProvider
+    const model = provider === 'anthropic' || provider === 'azure' ? serverDescriber(provider) : null
+    return model
+      ? { model, payerId: null, status: { label: model.label } }
+      : { model: null, status: { label: null, reason: 'no-model' } }
+  }
+
   let textOnly = false
-  if (mode === 'account' && ownerId) {
-    const account = await getAccount(ownerId).catch((err: unknown) => {
-      console.error('[describe] could not read the connected model account', err)
-      return null
-    })
-    if (account) {
-      const own = accountDescriber(account)
-      if (own) return { model: own, status: { label: own.label } }
+  if (uploaderMode === 'account') {
+    for (const payerId of new Set([uploaderId, ...(ownerMode === 'account' ? [ownerId] : [])])) {
+      if (!payerId) continue
+      // A failed account lookup is a retryable error, not permission to bill someone else.
+      const account = await getAccount(payerId)
+      if (!account) continue
+      const model = accountDescriber(account)
+      if (model) return { model, payerId, status: { label: model.label } }
       textOnly = true
     }
   }
-  const server = serverDescriber()
-  if (server) return { model: server, status: { label: server.label } }
+  const model = serverDescriber()
+  if (model) return { model, payerId: null, status: { label: model.label } }
   return { model: null, status: { label: null, reason: textOnly ? 'text-only' : 'no-model' } }
 }
 
@@ -80,11 +102,16 @@ export async function describeImage(
   bytes: Buffer,
   signal: AbortSignal = AbortSignal.timeout(DESCRIBE_TIMEOUT_MS),
 ): Promise<string> {
-  const jpeg = await sharp(bytes, { animated: false })
-    .resize({ width: DESCRIBE_LONG_EDGE_PX, height: DESCRIBE_LONG_EDGE_PX, fit: 'inside', withoutEnlargement: true })
-    .flatten({ background: '#ffffff' })
-    .jpeg({ quality: 80 })
-    .toBuffer()
+  signal.throwIfAborted()
+  const jpeg = await withinSignal(
+    sharp(bytes, { animated: false })
+      .resize({ width: DESCRIBE_LONG_EDGE_PX, height: DESCRIBE_LONG_EDGE_PX, fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#ffffff' })
+      .jpeg({ quality: 80 })
+      .toBuffer(),
+    signal,
+  )
+  signal.throwIfAborted()
   /* the signal reaches the model request, but not every step before it (a
      ChatGPT token refresh, say) — so the whole turn is raced against it, and
      the worker's slot comes back on time whatever stalled */
@@ -205,25 +232,46 @@ export type DescribeOutcome =
 
 /** Describe one stored asset: skipped when already described, out of
  *  attempts, over budget, not an image, or its owner has it off. */
-export async function describeAsset(assetId: string): Promise<DescribeOutcome> {
-  const [row] = await db.select().from(t.assets).where(eq(t.assets.id, assetId))
+export async function describeAsset(
+  assetId: string,
+  signal: AbortSignal = AbortSignal.timeout(DESCRIBE_TIMEOUT_MS),
+): Promise<DescribeOutcome> {
+  const [row] = await withinSignal(db.select().from(t.assets).where(eq(t.assets.id, assetId)), signal)
   if (!row || !row.canvasId || row.description !== null || row.describeAttempts >= MAX_DESCRIBE_ATTEMPTS)
     return 'skipped'
   if (!isDescribableImage(row.mime)) return 'skipped'
   const canvas = store.getCanvas(row.canvasId)
-  const { model, status } = await describerFor(canvas?.ownerId ?? row.ownerId ?? undefined)
-  if (!model) {
-    if (status.reason !== 'off') console.log(`[describe] ${assetId} left undescribed: ${status.reason}`)
-    return 'skipped'
-  }
-  if (!withinBudget(row.canvasId)) {
-    console.log(`[describe] canvas ${row.canvasId} is over today's budget of ${env.DESCRIBE_PER_CANVAS_PER_DAY}`)
-    return 'skipped'
-  }
-  const asset = await getAsset(assetId)
-  if (!asset) return 'skipped'
+  if (!canvas) return 'skipped'
   try {
-    const description = await describeImage(model, asset.buf)
+    // assets.ownerId is the authenticated uploader, not the canvas owner.
+    const resolved = await withinSignal(describerFor(row.ownerId ?? undefined, canvas.ownerId, row), signal)
+    if (!resolved.model) {
+      if (resolved.status.reason !== 'off')
+        console.log(`[describe] ${assetId} left undescribed: ${resolved.status.reason}`)
+      return 'skipped'
+    }
+    const { model, payerId } = resolved
+    if (!withinBudget(row.canvasId)) {
+      console.log(`[describe] canvas ${row.canvasId} is over today's budget of ${env.DESCRIBE_PER_CANVAS_PER_DAY}`)
+      return 'skipped'
+    }
+    // Persist before any storage/model work, so even a failed read pins the payer.
+    if (!row.describeProvider) {
+      await withinSignal(
+        db
+          .update(t.assets)
+          .set({ describePayerId: payerId, describeProvider: model.provider })
+          .where(eq(t.assets.id, assetId)),
+        signal,
+      )
+    }
+    const asset = await withinSignal(getAsset(assetId, signal), signal)
+    if (!asset) return 'skipped'
+    signal.throwIfAborted()
+    if (!store.getCanvas(row.canvasId)) return 'skipped'
+    const description = await describeImage(model, asset.buf, signal)
+    signal.throwIfAborted()
+    if (!store.getCanvas(row.canvasId)) return 'skipped'
     await db
       .update(t.assets)
       .set({ description, describedAt: Date.now(), describedBy: model.label })
@@ -275,7 +323,7 @@ export const imageDescriptionsRouter = Router()
 
 async function preference(userId: string) {
   const mode = await getImageDescriptionMode(userId)
-  const { status } = await describerForMode(userId, mode)
+  const { status } = await describerFor(userId)
   return { mode, describer: status }
 }
 

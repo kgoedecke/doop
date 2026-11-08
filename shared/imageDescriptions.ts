@@ -2,7 +2,8 @@
  * Image descriptions: a small vision model writes, once per uploaded image,
  * what the picture shows, so an agent reading the canvas later knows a frame
  * holds a checkout screenshot rather than "Screenshot 2026-11-03.png". The
- * canvas owner's preference says whether it runs and on whose model.
+ * uploader's account pays first, then an eligible canvas owner, then the
+ * server. Off on either person stops analysis; retries retain their payer.
  */
 
 export const IMAGE_DESCRIPTION_MODES = ['off', 'account', 'server'] as const
@@ -15,7 +16,7 @@ export function isImageDescriptionMode(value: unknown): value is ImageDescriptio
 /** Why no model would describe an image right now. */
 export type DescriberReason = 'off' | 'text-only' | 'no-model'
 
-/** What would describe the next image on this user's canvases. */
+/** Preview for this user's uploads; another canvas owner's fallback is context-dependent. */
 export type DescriberStatus = { label: string; reason?: undefined } | { label: null; reason: DescriberReason }
 
 export interface ImageDescriptionPreference {

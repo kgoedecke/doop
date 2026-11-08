@@ -432,6 +432,9 @@ export const assets = pgTable(
     /** the model label that wrote it */
     describedBy: text('described_by'),
     describeAttempts: integer('describe_attempts').notNull().default(0),
+    /** Fixed before the first attempt; null payer means server credentials. */
+    describePayerId: text('describe_payer_id'),
+    describeProvider: text('describe_provider'),
   },
   (t) => [index('assets_canvas_idx').on(t.canvasId)],
 )

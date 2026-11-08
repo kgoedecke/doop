@@ -7,7 +7,15 @@ Status: all three phases shipped together in one PR (`feat/image-descriptions`).
 the tasks below: the preference lives in its own `image_description_prefs` table and
 `/api/image-descriptions` rather than on the local-agent row; the model-tier tests are
 `describerModels.test.ts`; the Settings card is covered by a component test
-(`imageDescriptionsCard.test.tsx`) rather than a Chromium run; the 20s timeout is not unit-tested.
+(`imageDescriptionsCard.test.tsx`) rather than a Chromium run.
+
+Review follow-up: billing now tries uploader → eligible owner → server. Either person's Off
+stops analysis, and an uploader's server-only choice bypasses both accounts. Migration 0045
+persists the selected payer/provider across retries. Storage errors retry within the deadline,
+deleted canvases are skipped, and only a standalone image layer is marked as a pasted reference.
+Regression tests cover routing, consent, fixed billing across retries, storage failure/timeout,
+canvas deletion and detached designs. The original phase checklist below records the initial
+implementation; the spec above describes the current behavior.
 
 ## Phase 1 — storage and the describer
 

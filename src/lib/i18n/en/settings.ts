@@ -40,17 +40,17 @@ export const settings = {
 
   imageDescriptionsTitle: 'Image descriptions',
   imageDescriptionsDescription:
-    'When an image is pasted or uploaded on a canvas you own, a small vision model writes a short description of what it shows, so agents reading the canvas know what the picture is. It runs on your connected account when it has one that can see images, otherwise on this server’s model. Your provider’s charges apply.',
+    'A short description helps agents understand uploaded images. My account uses your account for your uploads, then the canvas owner’s eligible account, then this server. It also allows your account to cover uploads on canvases you own when the uploader has no eligible model. This server uses only server credentials for your uploads and excludes your account from fallback. Off stops descriptions for your uploads and canvases. Your provider’s charges apply.',
   imageDescriptionsAria: 'Image descriptions',
   imageDescriptionsOff: 'Off',
   imageDescriptionsAccount: 'My account',
   imageDescriptionsServer: 'This server',
-  imageDescriptionsRunsOn: 'Images are described by {label}.',
-  imageDescriptionsReasonOff: 'Images on your canvases are not described.',
+  imageDescriptionsRunsOn: 'Available model: {label}. Retries keep the original payer.',
+  imageDescriptionsReasonOff: 'Your uploads and images on canvases you own are not described.',
   imageDescriptionsReasonTextOnly:
-    'Your connected model cannot see images, and this server has no model of its own — images stay undescribed.',
+    'Your account has no eligible vision model and this server has no model. Another canvas owner’s eligible account can describe your uploads; otherwise they stay undescribed.',
   imageDescriptionsReasonNoModel:
-    'This server has no model for descriptions — connect an account, or ask your operator.',
+    'No upload model is available here. In My account mode, another canvas owner’s eligible account can still describe your uploads.',
 
   themeTitle: 'Theme',
   themeDescription:

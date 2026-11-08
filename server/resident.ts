@@ -13,7 +13,7 @@ import type { AgentRole } from '../shared/agents.ts'
 import * as imageSearch from './imageSearch.ts'
 import * as imageGen from './imageGen.ts'
 import * as assets from './assets.ts'
-import { imagesForFrames } from './assets.ts'
+import { imagesForFrames, isStandaloneImage } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
 import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
@@ -1374,7 +1374,7 @@ const KICKOFF_IMAGE_CHARS = 300
 export function describeFrameList(frames: Frame[], images: Map<string, FrameImage[]>): string {
   const lines = frames.map((f, index) => {
     const shown = images.get(f.id) ?? []
-    const pasted = shown.length > 0 && /data-doop-canvas-element/.test(f.html) ? ' (pasted image)' : ''
+    const pasted = shown.length === 1 && isStandaloneImage(f.html) ? ' (pasted image)' : ''
     const head = `- Frame ${index + 1}: id=${f.id}, name="${f.name}"${pasted}, ${Math.round(f.width)}x${Math.round(f.height)} (last edit: ${f.updatedBy}, ${f.html.length} bytes${f.html.length > LARGE_HTML_CHARS ? '; large document — avoid a full read for visual-reference work' : ''}); approval=${JSON.stringify(f.approval ?? { status: 'draft' })}`
     const pictures = shown.map(
       (image) =>

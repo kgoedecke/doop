@@ -309,6 +309,13 @@
       "when": 1793820127846,
       "tag": "0044_image_descriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794106188326,
+      "tag": "0045_image_description_payer",
+      "breakpoints": true
     }
   ]
 }

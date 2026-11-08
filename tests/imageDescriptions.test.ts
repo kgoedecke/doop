@@ -295,3 +295,224 @@ describe('what agents read', () => {
     expect(seen).toEqual(['asset.stored'])
   })
 })
+
+const connected = (userId: string) => ({ userId, kind: 'anthropic-key' as const, apiKey: 'test', connectedAt: 0 })
+function useAccounts(ids: string[]) {
+  mocks.account.mockImplementation(async (id: string) => (ids.includes(id) ? connected(id) : null))
+  mocks.own.mockImplementation((account: { userId: string }) => ({
+    ...fake(`Account ${account.userId}`),
+    provider: 'anthropic-key' as const,
+    userId: account.userId,
+  }))
+}
+
+describe('uploader billing and consent', () => {
+  it('uses the stable uploader ID before the owner, regardless of the display name', async () => {
+    useAccounts(['uploader', 'owner'])
+    const asset = await createAsset(png, { canvasId: canvas(), ownerId: 'uploader', uploadedBy: 'Owner display name' })
+    expect(await describeAsset(asset.id)).toBe('described')
+    expect(await row(asset.id)).toMatchObject({
+      ownerId: 'uploader',
+      describePayerId: 'uploader',
+      describeProvider: 'anthropic-key',
+      describedBy: 'Account uploader',
+    })
+    expect(mocks.account.mock.calls.map(([id]) => id)).toEqual(['uploader'])
+  })
+
+  it('falls back to the owner before the server when the uploader has no account', async () => {
+    useAccounts(['owner'])
+    expect(await describerFor('missing', 'owner')).toMatchObject({
+      payerId: 'owner',
+      status: { label: 'Account owner' },
+    })
+    expect(mocks.server).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the owner when the uploader has no eligible vision model', async () => {
+    useAccounts(['uploader', 'owner'])
+    mocks.own.mockImplementation((account: { userId: string }) =>
+      account.userId === 'uploader' ? null : fake('Owner vision'),
+    )
+    expect(await describerFor('uploader', 'owner')).toMatchObject({
+      payerId: 'owner',
+      status: { label: 'Owner vision' },
+    })
+  })
+
+  it('uses the server when neither account is available, or leaves the image undescribed without it', async () => {
+    expect(await describerFor('missing', 'owner')).toMatchObject({ payerId: null, status: { label: 'Doop (haiku)' } })
+    mocks.server.mockReturnValue(null)
+    const asset = await createAsset(png, { canvasId: canvas(), ownerId: 'missing', uploadedBy: 'Alice' })
+    expect(await describeAsset(asset.id)).toBe('skipped')
+    expect(await row(asset.id)).toMatchObject({ description: null, describeProvider: null, describeAttempts: 0 })
+    expect(mocks.run).not.toHaveBeenCalled()
+  })
+
+  it.each(['uploader-off', 'owner-off'])('off stops all analysis: %s', async (who) => {
+    useAccounts(['uploader-off', 'owner-off'])
+    await saveImageDescriptionMode('uploader-off', 'account')
+    await saveImageDescriptionMode('owner-off', 'account')
+    await saveImageDescriptionMode(who, 'off')
+    expect(await describerFor('uploader-off', 'owner-off')).toEqual({
+      model: null,
+      status: { label: null, reason: 'off' },
+    })
+    expect(mocks.account).not.toHaveBeenCalled()
+    expect(mocks.server).not.toHaveBeenCalled()
+  })
+
+  it('server-only uploads bypass both accounts', async () => {
+    useAccounts(['server-uploader', 'owner'])
+    await saveImageDescriptionMode('server-uploader', 'server')
+    expect(await describerFor('server-uploader', 'owner')).toMatchObject({ payerId: null })
+    expect(mocks.account).not.toHaveBeenCalled()
+  })
+
+  it('a server-only owner does not pay for fallback', async () => {
+    useAccounts(['server-owner'])
+    await saveImageDescriptionMode('server-owner', 'server')
+    expect(await describerFor('missing', 'server-owner')).toMatchObject({ payerId: null })
+    expect(mocks.account.mock.calls.map(([id]) => id)).toEqual(['missing'])
+  })
+
+  it('does not look up the same person twice when uploader and owner match', async () => {
+    await describerFor('same', 'same')
+    expect(mocks.account).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not change payers when account lookup fails', async () => {
+    mocks.account.mockRejectedValue(new Error('DB unavailable'))
+    const asset = await createAsset(png, { canvasId: canvas(), ownerId: 'uploader', uploadedBy: 'Alice' })
+    expect(await describeAsset(asset.id)).toBe('failed')
+    expect(mocks.server).not.toHaveBeenCalled()
+    expect(mocks.run).not.toHaveBeenCalled()
+  })
+
+  it('retains the selected owner on subsequent attempts even if the uploader connects', async () => {
+    useAccounts(['owner'])
+    const asset = await createAsset(png, { canvasId: canvas(), ownerId: 'new-uploader', uploadedBy: 'Alice' })
+    mocks.run.mockRejectedValueOnce(new Error('overloaded'))
+    expect(await describeAsset(asset.id)).toBe('failed')
+    expect(await row(asset.id)).toMatchObject({ describePayerId: 'owner', describeProvider: 'anthropic-key' })
+    useAccounts(['new-uploader', 'owner'])
+    mocks.account.mockClear()
+    enqueueDescription(asset.id)
+    await describeIdle()
+    expect(await row(asset.id)).toMatchObject({ describedBy: 'Account owner', describeAttempts: 1 })
+    expect(mocks.account.mock.calls.map(([id]) => id)).toEqual(['owner'])
+  })
+
+  it('never falls back after the selected uploader fails and disconnects', async () => {
+    useAccounts(['uploader', 'owner'])
+    const asset = await createAsset(png, { canvasId: canvas(), ownerId: 'uploader', uploadedBy: 'Alice' })
+    mocks.run.mockRejectedValueOnce(new Error('quota exhausted'))
+    expect(await describeAsset(asset.id)).toBe('failed')
+    useAccounts(['owner'])
+    expect(await describeAsset(asset.id)).toBe('skipped')
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+    expect(mocks.server).not.toHaveBeenCalled()
+  })
+
+  it('honors withdrawal of owner fallback before a retry', async () => {
+    useAccounts(['withdrawing-owner'])
+    const asset = await createAsset(png, {
+      canvasId: canvas('withdrawing-owner'),
+      ownerId: 'missing',
+      uploadedBy: 'Alice',
+    })
+    mocks.run.mockRejectedValueOnce(new Error('overloaded'))
+    expect(await describeAsset(asset.id)).toBe('failed')
+    await saveImageDescriptionMode('withdrawing-owner', 'server')
+    expect(await describeAsset(asset.id)).toBe('skipped')
+    expect(mocks.run).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains the server payer when the uploader connects before a retry', async () => {
+    const asset = await createAsset(png, { canvasId: canvas(), ownerId: 'new-uploader', uploadedBy: 'Alice' })
+    mocks.run.mockRejectedValueOnce(new Error('overloaded'))
+    expect(await describeAsset(asset.id)).toBe('failed')
+    useAccounts(['new-uploader', 'owner'])
+    mocks.account.mockClear()
+    expect(await describeAsset(asset.id)).toBe('described')
+    expect(mocks.account).not.toHaveBeenCalled()
+    expect(mocks.server).toHaveBeenLastCalledWith('anthropic')
+    expect(await row(asset.id)).toMatchObject({ describePayerId: null, describedBy: 'Doop (haiku)' })
+  })
+})
+
+describe('queue failure regressions', () => {
+  it('retries a transient object-storage read failure through the queue', async () => {
+    const storage = await import('../server/storage.ts')
+    const read = vi.spyOn(storage, 'getObject').mockRejectedValueOnce(new Error('temporary S3 failure'))
+    try {
+      const asset = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+      enqueueDescription(asset.id)
+      await describeIdle()
+      expect((await row(asset.id)).describeAttempts).toBe(1)
+      const deadline = Date.now() + 2000
+      while ((await row(asset.id)).description === null && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 15))
+        await describeIdle()
+      }
+      expect((await row(asset.id)).description).toBeTruthy()
+      expect(mocks.run).toHaveBeenCalledTimes(1)
+    } finally {
+      read.mockRestore()
+    }
+  })
+
+  it('bounds storage reads and never invokes the model when a timed-out read eventually resolves', async () => {
+    const storage = await import('../server/storage.ts')
+    let finish!: (bytes: Buffer) => void
+    const read = vi.spyOn(storage, 'getObject').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    try {
+      const asset = await createAsset(png, { canvasId: canvas(), uploadedBy: 'alice' })
+      const signal = AbortSignal.timeout(100)
+      const started = Date.now()
+      expect(await describeAsset(asset.id, signal)).toBe('failed')
+      expect(Date.now() - started).toBeLessThan(1500)
+      expect(read).toHaveBeenCalledWith(expect.any(String), signal)
+      finish(png)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(mocks.run).not.toHaveBeenCalled()
+      expect(await describeAsset(asset.id)).toBe('described')
+    } finally {
+      read.mockRestore()
+    }
+  })
+
+  it('skips assets whose canvas was deleted, even when the uploader has an account', async () => {
+    useAccounts(['uploader'])
+    const canvasId = canvas('deleted-owner')
+    await saveImageDescriptionMode('deleted-owner', 'off')
+    const asset = await createAsset(png, { canvasId, ownerId: 'uploader', uploadedBy: 'alice' })
+    store.canvases.delete(canvasId)
+    enqueueDescription(asset.id)
+    await describeIdle()
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.account).not.toHaveBeenCalled()
+    expect((await row(asset.id)).description).toBeNull()
+  })
+
+  it('checks for canvas deletion again after loading the image', async () => {
+    const storage = await import('../server/storage.ts')
+    const canvasId = canvas()
+    const asset = await createAsset(png, { canvasId, uploadedBy: 'alice' })
+    const read = vi.spyOn(storage, 'getObject').mockImplementationOnce(async () => {
+      store.canvases.delete(canvasId)
+      return png
+    })
+    try {
+      expect(await describeAsset(asset.id)).toBe('skipped')
+      expect(mocks.run).not.toHaveBeenCalled()
+    } finally {
+      read.mockRestore()
+    }
+  })
+})

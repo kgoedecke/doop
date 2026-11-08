@@ -1,95 +1,77 @@
 # Image descriptions
 
-Why: an agent arriving on a canvas sees each frame as a name, a size and a byte count
-(`frameSummary` in `server/mcp.ts`, the frame list in the resident kickoff). A pasted screenshot
-is a 600-byte frame called "Screenshot 2026-11-03 at 10.12.41" holding one `<img>` whose only
-text is the filename, and nothing tells the agent to look at it. Users report agents that are
-"not aware of what is on the canvas". This spec gives every uploaded image a stored, model-written
-description once, and puts it in front of every agent that reads the canvas, so a text-only model
-knows what the picture is and a vision model knows which frames are worth a screenshot.
+An agent arriving on a canvas sees frame names, sizes and byte counts. A pasted screenshot
+needs a description so the agent knows what it shows and when to inspect the pixels.
 
 ## Describing (`server/imageDescriptions.ts`)
 
-- **Trigger**: `storeAsset` (`server/assets.ts`) emits `asset.stored` on the canvas event bus
-  (`server/events.ts`) for image mimes (png, jpg, webp, gif) with a `canvasId`. Fonts, avatars and
-  svg are not described. Every entry point passes through it: browser paste and drop, MCP
-  `upload_asset`, PDF import, `generate_image`.
-- **Queue**: in-memory, drained by one worker loop (the pattern of the reveal loop in
-  `server/actions.ts`), at most `DESCRIBE_CONCURRENCY` (2) calls in flight. At boot the worker
-  also picks up rows with `described_at IS NULL AND describe_attempts < 3` so a restart loses
-  nothing. The upload request never waits.
-- **One call per asset**, ever: assets are immutable. The image is downscaled to a 1500px long
-  edge JPEG first (the `frameImageBlocks` approach in `server/resident.ts`), and the prompt asks
-  for a description a designer who cannot see the image could work from: kind (app screenshot,
-  photo, logo, chart, sketch), visible UI and content, headings and copy, palette, layout, under
-  120 words. One `AgentTurnRequest` with no tools, `maxTokens` 400.
-- **Result** lands on the asset row: `description`, `described_at`, `described_by` (the model
-  label), `describe_attempts`. A failed call bumps `describe_attempts` and comes back through the queue
-  after `DESCRIBE_RETRY_MS` (30s); after three it is left alone. A 20s timeout bounds the whole
-  turn, a ChatGPT token refresh included, so a stalled provider never holds a worker slot.
-- **Caps**: `DESCRIBE_PER_CANVAS_PER_DAY` (200, env-overridable; a failed call counts, since it
-  may have cost something) and `DESCRIBE_CONCURRENCY` (2). Over the cap, the asset stays
-  undescribed and a log line says so.
-- **Broadcast**: a finished description is sent to the room as `asset:described { assetId,
-description }` so an agent already in a run can be told (future) and the browser can show it as
-  the image layer's tooltip (not in scope here).
+- `storeAsset` emits `asset.stored` for PNG, JPEG, WebP and GIF assets with a canvas.
+  Browser paste/drop, MCP uploads and generated images share this pipeline. SVG, fonts and
+  assets without a canvas are excluded. The upload never waits for analysis.
+- An in-memory FIFO runs at most `DESCRIBE_CONCURRENCY` (default 2) jobs at a time. The asset
+  row is the recovery record: startup requeues undescribed rows with fewer than three failed
+  attempts. There is no distributed claim or exactly-once guarantee across processes.
+- Images are resized to a maximum 1500px long edge and flattened to JPEG. A single model turn
+  with no tools asks for under 120 words describing the content, layout, copy and palette.
+  The request asks for 400 output tokens; the ChatGPT transport does not support that cap.
+- A 20s deadline bounds model selection, asset loading, resizing and the model request,
+  including token refresh. The signal reaches disk/S3 reads and the model transport. A late
+  storage result cannot start a model request after the deadline. Failures during asset loading
+  or model work increment `describe_attempts` and retry after `DESCRIBE_RETRY_MS` (default 30s),
+  up to three failed attempts. A deleted canvas is skipped, including after a pending read.
+- `DESCRIBE_PER_CANVAS_PER_DAY` defaults to 200 attempts per canvas per UTC day. It is an
+  in-memory counter, reset on restart; failed storage/model work counts. An over-budget image
+  stays undescribed. No-model, disabled and budget-skipped images are not automatically
+  requeued by a settings change or the next day; startup can reconsider them.
+- Success stores `description`, `described_at` and `described_by` on the asset and broadcasts
+  `asset:described`. Migration 0044 marks older assets out of attempts to avoid a historical
+  backfill. Migration 0045 adds the durable payer/provider selection for retries.
 
-## Which model, whose bill (`describerFor(canvas)`)
+## Which account pays
 
-Resolved per asset from the canvas owner's preference and account, in this order:
+`assets.owner_id` records the authenticated uploader's stable user ID at upload time. It is
+not the canvas owner; `uploaded_by` is only a display name. Automated uploads without an
+identified uploader start with the canvas owner's account. Never infer a payer from a name.
 
-1. Owner's preference `imageDescriptions` is `off`: nothing runs.
-2. `account` (the default): the owner's connected model account (`getAccount`) when it exists and
-   `accountVisionFor` is true. Routed through the account's provider (`byoModel`), but with that
-   provider's small tier (`DESCRIBER_MODELS` in `shared/modelMenu.ts`: Haiku 4.5, the mini tier on
-   OpenAI and ChatGPT, flash on Gemini, a fixed OpenRouter pick) and low effort, never the model
-   or effort the owner picked for design work. ChatGPT accounts go through `withFreshToken` first.
-   Local Claude and the Gemini cloud pilot are harness-only and are skipped.
-3. Otherwise the server tier (`serverTiers`, `ANTHROPIC_API_KEY` or Azure) on the small model.
-   Not counted against the free-task allowance. With no server key the asset stays undescribed.
-4. `server` preference: step 3 only, for an owner who does not want pastes on their subscription.
+For a live canvas, resolve `image_description_prefs` for the uploader and canvas owner:
 
-The owner pays, not the uploader: it is their canvas, and it is the one rule automations and
-resident runs already use. Settings says so next to the switch.
+1. If either person's mode is `off`, stop analysis entirely.
+2. A `server` uploader explicitly uses server credentials only, bypassing both user accounts.
+3. Otherwise try the uploader's connected vision-capable account first.
+4. If unavailable, try the canvas owner's account only when the owner's mode is `account`.
+   The default `account` mode permits this owner fallback; `server` excludes their account.
+5. Finally try the configured server tier. If none is available, leave the image undescribed.
 
-## Preference (`server/agentPreferences.ts`, column on `local_agent_preferences` → renamed
+Account lookup errors are failures, not permission to charge someone else. Missing accounts
+or an ineligible vision model allow fallback; runtime errors, exhausted credits and timeouts
+do not. Before storage/model work, save `describe_payer_id` and `describe_provider`; a null
+payer with a selected provider means server billing. Subsequent attempts, including restart
+recovery, reload only that payer/provider. Connecting a new account or changing server provider
+does not move an existing job to it. Disconnecting the selected account or withdrawing consent
+stops the job without choosing another payer. Fresh credentials are still read on each attempt.
 
-`agent_preferences`)
+`accountDescriber` uses Haiku for Anthropic, Flash for Gemini and OpenRouter, and the selected
+ChatGPT/OpenAI model at low effort. A text-only OpenRouter design model is replaced by the
+vision-capable Flash tier for this job. Local Claude and the Gemini pilot are not describers.
+The server uses Haiku on its Anthropic key or its configured Azure deployment. Descriptions
+do not consume the free-task allowance.
 
-`image_descriptions text not null default 'account'` (`off` | `account` | `server`), per user,
-read and written by `GET`/`PUT /api/agent-preferences` alongside the local-agent fields that table
-already holds. Shared shape and the three values in `shared/agentPreferences.ts`.
+## Settings
 
-Settings → Agents gets a `SettingsCard` "Image descriptions" (`ImageDescriptionsCard.tsx`): a
-`Segmented` with the three options and a `StatusLabel` saying which model would run right now
-(`describer` from the GET), so a text-only account or an instance without a server key explains
-itself.
+`GET`/`PUT /api/image-descriptions` reads and writes the per-user `image_description_prefs`
+mode (`off`, `account`, `server`), defaulting to `account`. Settings → Agents explains upload
+billing, owner fallback and the scope of Off. Its status previews an available model for the
+user without a specific canvas; another canvas owner's eligible account may precede the server.
 
 ## What agents receive
 
-- `get_canvas`: each frame summary gains `images: [{ src, description }]` for the assets
-  `asset_refs` links to it (undescribed ones carry `description: null`). The note gains: "Frames
-  whose `images` carry descriptions are pictures people put on the canvas, often reference
-  screenshots: read the descriptions, and screenshot the relevant ones before designing."
-- `get_frame`: the same `images` field beside the HTML.
-- Resident kickoff (`server/resident.ts`): under each frame line, one indented line per image
-  `image: <description>` (first 300 chars), and the same sentence as above once at the end of the
-  list. A frame that is only a standalone image (`data-doop-canvas-element` body with one image
-  layer) is labelled `(pasted image)`.
-- `get_frame_screenshot` and `screenshot_frame` are unchanged: a vision model still sees the
-  pixels.
+- `get_canvas` and `get_frame` include `images: [{ src, description }]` from `asset_refs`.
+  Descriptions are null while pending, disabled, unavailable or exhausted.
+- Resident kickoff quotes the first 300 characters under each frame. Only a canvas-element
+  body containing one image layer, no other content, and one referenced raster asset is marked
+  `(pasted image)`. A detached card containing an image remains an editable design.
+- Agents are told to inspect relevant screenshots. The broadcast does not yet update an
+  already-running agent's context or show a description tooltip in the editor.
 
-Descriptions are never written into frame HTML. The `alt` the paste wrote stays the filename, so
-no user document changes, no version is cut and no activity line appears.
-
-## Non-goals
-
-- Model-written frame summaries: frames change on every save; a later spec, if at all, for
-  signed-off frames. A no-model text summary (headings, visible copy, layer names) is tracked
-  separately.
-- Describing images already on the canvas before this ships: migration 0044 marks them out of
-  attempts, so the first boot never bills every owner for their history; a one-off backfill
-  command resetting `describe_attempts` may follow.
-- Showing the description to humans in the editor (Inspector, Layers tooltip): follows once the
-  data exists.
-- Re-describing an image when a frame crops or recolours it: the description is of the asset.
+Descriptions never modify frame HTML, alt text, versions or activity. Historical backfilling,
+frame summaries, human-facing descriptions and re-describing crops/recolours are out of scope.

@@ -90,23 +90,18 @@
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
 - Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
-  `shared/imageDescriptions.ts`): every raster image stored for a canvas (`storeAsset` emits
-  `asset.stored`) is described once by a small vision model and the paragraph lands on its
-  `assets` row (`description`, `described_at`, `described_by`, `describe_attempts`, migration
-  0044). The upload never waits: a queue drains `DESCRIBE_CONCURRENCY` at a time, three attempts
-  per asset `DESCRIBE_RETRY_MS` apart, 20s each (the whole turn, a ChatGPT token refresh
-  included), `DESCRIBE_PER_CANVAS_PER_DAY` per canvas (failed calls count), and boot re-queues
-  the backlog; rows from before the migration are marked out of attempts, so history is never
-  billed. The canvas owner's mode (`image_description_prefs`: `off` / `account` /
-  `server`, `GET`/`PUT /api/image-descriptions`, Settings → Agents → Image descriptions) picks the
-  model: `accountDescriber` is the owner's account on the provider's small tier
-  (`DESCRIBER_MODELS`; the OpenAI kinds keep their model at low effort), a text-only pick or a
-  harness-only one falls through to `serverDescriber` (Haiku on `ANTHROPIC_API_KEY`, the Azure
-  deployment), and with no key the image stays undescribed. Agents read it as `images:
-[{ src, description }]` on each frame of `get_canvas` and `get_frame` (`imagesForFrames`, one
-  query over `asset_refs`, with a note once) and under each frame line of the resident kickoff
-  (`describeFrameList`, a standalone image frame labelled `(pasted image)`); the room gets
-  `asset:described`. Frame HTML is never written. Tests: `imageDescriptions.test.ts`,
+  `shared/imageDescriptions.ts`): raster uploads emit `asset.stored` and get an asynchronous
+  description. Billing resolves uploader → eligible canvas owner → server; Off on either
+  person stops analysis, and a server-only uploader bypasses both accounts. The stable uploader
+  ID is `assets.owner_id`; migration 0045 persists `describe_payer_id` and `describe_provider`
+  before work so retries never change payer. Runtime errors do not trigger billing fallback.
+  The in-memory queue defaults to two concurrent jobs, three attempts 30s apart, and 200
+  attempts per canvas per UTC day (counter resets on restart). A 20s deadline bounds storage,
+  resizing and model work. Deleted canvases are skipped. Startup recovers unfinished assets;
+  migration 0044 excludes pre-feature history. Settings uses `image_description_prefs` and
+  `GET`/`PUT /api/image-descriptions`. Agents read `images` on frame summaries and in resident
+  kickoff; only standalone image layers are marked pasted references. Success broadcasts
+  `asset:described` without changing frame HTML. Tests: `imageDescriptions.test.ts`,
   `describerModels.test.ts`, `imageDescriptionsMcp.test.ts`, `imageDescriptionsHttp.test.ts`,
   `imageDescriptionsCard.test.tsx`.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and

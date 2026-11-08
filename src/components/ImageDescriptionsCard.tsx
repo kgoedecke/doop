@@ -25,10 +25,9 @@ const REASONS: Record<DescriberReason, PlainMessageKey> = {
 }
 
 /**
- * Whether, and on whose model, the images uploaded to this person's canvases
- * get a description for agents (shared/imageDescriptions.ts). The server
- * answers with the model that would run right now, so a text-only account
- * or an instance without a key explains itself under the switch.
+ * Upload billing and consent to owner fallback. The status previews the
+ * user's own uploads; a different canvas owner's eligible account can
+ * precede the displayed server fallback.
  */
 export function ImageDescriptionsCard() {
   const t = useT()

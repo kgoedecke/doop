@@ -357,6 +357,6 @@ export function accountDescriber(account: ModelAccount): AgentModel | null {
 
 /** The server tier's describer: Haiku on the Anthropic key, the one
  *  deployment on Azure. Null when the free tier is off. */
-export function serverDescriber(): AgentModel | null {
-  return serverProvider() === 'anthropic' ? anthropicTier(DESCRIBER_ANTHROPIC_MODEL) : azureTier()
+export function serverDescriber(provider: ServerProvider = serverProvider()): AgentModel | null {
+  return provider === 'anthropic' ? anthropicTier(DESCRIBER_ANTHROPIC_MODEL) : azureTier()
 }

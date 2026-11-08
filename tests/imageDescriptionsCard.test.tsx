@@ -32,17 +32,17 @@ afterEach(() => {
 it('shows the mode and the model that would run, and saves a pick', async () => {
   await act(async () => root.render(<ImageDescriptionsCard />))
   expect(button('My account').getAttribute('data-state')).toBe('on')
-  expect(container.textContent).toContain('Images are described by Claude API (claude-haiku-4-5-20251001).')
+  expect(container.textContent).toContain('Available model: Claude API (claude-haiku-4-5-20251001).')
   mocks.write.mockResolvedValue({ mode: 'server', describer: { label: null, reason: 'no-model' } })
   await act(async () => button('This server').click())
   expect(mocks.write).toHaveBeenCalledWith('server')
   expect(button('This server').getAttribute('data-state')).toBe('on')
-  expect(container.textContent).toContain('This server has no model for descriptions')
+  expect(container.textContent).toContain('No upload model is available here')
 })
 
 it('explains an off switch', async () => {
   mocks.read.mockResolvedValue({ mode: 'off', describer: { label: null, reason: 'off' } })
   await act(async () => root.render(<ImageDescriptionsCard />))
   expect(button('Off').getAttribute('data-state')).toBe('on')
-  expect(container.textContent).toContain('Images on your canvases are not described.')
+  expect(container.textContent).toContain('Your uploads and images on canvases you own are not described.')
 })

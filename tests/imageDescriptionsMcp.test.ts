@@ -106,22 +106,23 @@ it('get_frame carries the same images beside the HTML', async () => {
 })
 
 it('the kickoff quotes each image under its frame and labels a pasted image', () => {
-  const images = new Map([
-    [
-      'shot',
-      [
-        { src: '/a/pic1.png', description: 'A checkout page with a blue Pay button.' },
-        { src: '/a/pic2.jpg', description: null },
-      ],
-    ],
-  ])
+  const images = new Map([['shot', [{ src: '/a/pic1.png', description: 'A checkout page with a blue Pay button.' }]]])
   const text = describeFrameList([shot, design], images)
   expect(text).toContain('name="Screenshot 2026-11-03.png" (pasted image)')
   expect(text).toContain('    image /a/pic1.png: A checkout page with a blue Pay button.')
-  expect(text).toContain('    image /a/pic2.jpg: (description pending)')
   expect(text).toContain('name="Hero", 400x300')
   expect(text).toMatch(
     /A frame marked \(pasted image\) is a reference .* A design that uses images is an ordinary frame\.$/,
   )
   expect(describeFrameList([design], new Map())).not.toContain('screenshot_frame')
+})
+
+it.each([
+  '<article><h1>Buy now</h1><img src="/a/pic1.png"></article>',
+  '<img data-doop-drawing="image" src="/a/pic1.png"><h1>Buy now</h1>',
+  'Buy now<img data-doop-drawing="image" src="/a/pic1.png">',
+])('does not mark an editable design as a pasted reference: %s', (content) => {
+  const card = frame('card', 'Product card', `<html><body data-doop-canvas-element="true">${content}</body></html>`)
+  const text = describeFrameList([card], new Map([['card', [{ src: '/a/pic1.png', description: 'A product photo.' }]]]))
+  expect(text).not.toContain('name="Product card" (pasted image)')
 })

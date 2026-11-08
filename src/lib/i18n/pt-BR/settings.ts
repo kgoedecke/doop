@@ -44,17 +44,17 @@ export const settings: Catalog['settings'] = {
 
   imageDescriptionsTitle: 'Descrições de imagens',
   imageDescriptionsDescription:
-    'Quando uma imagem é colada ou enviada em um canvas seu, um modelo de visão pequeno escreve uma descrição curta do que ela mostra, para que os agentes que leem o canvas saibam o que é a imagem. Roda na sua conta conectada quando ela tem um modelo que enxerga imagens; senão, no modelo deste servidor. As cobranças do seu provedor se aplicam.',
+    'Uma descrição curta ajuda os agentes a entender imagens enviadas. Minha conta usa sua conta para seus envios, depois uma conta elegível do dono do canvas e, por último, este servidor. Também permite que sua conta cubra envios nos seus canvases quando quem enviou não tem um modelo elegível. Este servidor usa apenas as credenciais do servidor para seus envios e exclui sua conta das alternativas. Desligado impede descrições dos seus envios e dos seus canvases. As cobranças do seu provedor se aplicam.',
   imageDescriptionsAria: 'Descrições de imagens',
   imageDescriptionsOff: 'Desligado',
   imageDescriptionsAccount: 'Minha conta',
   imageDescriptionsServer: 'Este servidor',
-  imageDescriptionsRunsOn: 'As imagens são descritas por {label}.',
-  imageDescriptionsReasonOff: 'As imagens dos seus canvases não são descritas.',
+  imageDescriptionsRunsOn: 'Modelo disponível: {label}. Novas tentativas mantêm o pagador original.',
+  imageDescriptionsReasonOff: 'Seus envios e as imagens dos seus canvases não são descritos.',
   imageDescriptionsReasonTextOnly:
-    'Seu modelo conectado não enxerga imagens, e este servidor não tem um modelo próprio — as imagens ficam sem descrição.',
+    'Sua conta não tem um modelo de visão elegível e este servidor não tem um modelo. Uma conta elegível do dono de outro canvas pode descrever seus envios; caso contrário, ficam sem descrição.',
   imageDescriptionsReasonNoModel:
-    'Este servidor não tem um modelo para descrições — conecte uma conta ou fale com seu operador.',
+    'Nenhum modelo para envios está disponível aqui. No modo Minha conta, uma conta elegível do dono de outro canvas ainda pode descrever seus envios.',
 
   themeTitle: 'Tema',
   themeDescription:
