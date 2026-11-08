@@ -52,13 +52,13 @@ export function CanvasComments({
   const canvasId = useStore((s) => s.canvas?.id)
   const pageId = useStore((s) => (s.canvas ? (s.activePageId ?? canvasPages(s.canvas)[0]!.id) : null))
   const all = useStore((s) => s.comments)
-  /* ⇧C hides the pins; an open thread stays */
-  const commentsHidden = useStore((s) => s.commentsHidden)
   /* only thread roots get a pin; replies live inside the root's popover */
   const roots = all.filter(
     (c): c is CanvasComment => isCanvasComment(c) && c.pageId === pageId && !c.parentId && !c.resolvedAt,
   )
   const [openThread, setOpenThread] = useState<string | null>(null)
+  /* ⇧C hides the pins (an open thread stays); the Comment tool shows them */
+  const pinsShown = useStore((s) => s.viewOptions.comments || s.tool === 'comment')
   const rootRef = useRef<HTMLDivElement>(null)
   /* a pin being dragged, from this layer or out of a frame: its ghost rides
      the pointer here, above every frame, where no frame surface clips it */
@@ -128,7 +128,8 @@ export function CanvasComments({
         const replies = all.filter((r) => r.parentId === c.id).sort((a, b) => a.at - b.at)
         const thread: [ElementComment, ...ElementComment[]] = [c, ...replies]
         const open = openThread === c.id
-        if (commentsHidden && !open) return null
+        /* a pin being dragged stays mounted: its release listeners live on it */
+        if (!pinsShown && !open && drag?.id !== c.id) return null
         return (
           <CommentPin
             key={c.id}

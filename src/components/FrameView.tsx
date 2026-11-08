@@ -783,10 +783,12 @@ export const FrameView = memo(function FrameView({
 
   /* ---- element comments ---- */
   const frameComments = useStore((s) => s.comments).filter((c) => c.frameId === frame.id)
-  /* ⇧C hides the pins; an open thread stays */
-  const commentsHidden = useStore((s) => s.commentsHidden)
   /* only thread roots get a pin; replies live inside the root's popover */
   const comments = frameComments.filter((c) => !c.parentId && !c.resolvedAt)
+  /* ⇧C hides the pins (an open thread stays); the Comment tool shows them */
+  const pinsShown = useStore((s) => s.viewOptions.comments || s.tool === 'comment')
+  /* a pin being dragged stays mounted: its release listeners live on it */
+  const draggedPin = useStore((s) => s.commentDrag?.id)
   const [probe, setProbe] = useState<ProbeHit | null>(null)
   useEffect(() => {
     // The request also distinguishes a return to previously rendered HTML
@@ -875,7 +877,16 @@ export const FrameView = memo(function FrameView({
     /* the old outline's key must match no answer, not even "nothing here",
        so the reply always redraws */
     hoverKey.current = 'stale'
-    if (editing || pathEdit || dragging || elementMove.moving || resizing || frame.locked || tool === 'hand') {
+    if (
+      editing ||
+      pathEdit ||
+      dragging ||
+      elementMove.moving ||
+      resizing ||
+      frame.locked ||
+      tool === 'hand' ||
+      tool === 'zoom'
+    ) {
       clearHover()
       return
     }
@@ -1678,7 +1689,7 @@ export const FrameView = memo(function FrameView({
                  at the pointer's spot, which the gesture has moved */
               const at = designPoint(e, e.currentTarget, frame.rotation)
               hoverAt.current = at
-              /* the Hand only pans, and a locked frame has nothing to pick: no
+              /* the Hand only pans, the Zoom only zooms, and a locked frame has nothing to pick: no
                  element outlines in either case */
               if (
                 editing ||
@@ -1689,7 +1700,8 @@ export const FrameView = memo(function FrameView({
                 frame.locked ||
                 !frame.html ||
                 !runtimeReady ||
-                tool === 'hand'
+                tool === 'hand' ||
+                tool === 'zoom'
               )
                 return
               sendHover(at.x, at.y)
@@ -1904,9 +1916,8 @@ export const FrameView = memo(function FrameView({
                 <div data-comment-ui className="pointer-events-none absolute inset-0">
                   {comments.map((c) => {
                     const pos = isFrameComment(c) ? { x: c.x, y: c.y } : elementCommentPosition(c, pinPos[c.id])
-                    if (!pos) return null
                     const open = openThread === c.id
-                    if (commentsHidden && !open) return null
+                    if (!pos || (!pinsShown && !open && draggedPin !== c.id)) return null
                     const replies = frameComments.filter((r) => r.parentId === c.id).reverse() // store is newest-first
                     const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
                     return (

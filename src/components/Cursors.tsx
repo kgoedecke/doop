@@ -11,9 +11,6 @@ export const Cursors = memo(function Cursors() {
   const peerViewports = useStore((s) => s.peerViewports)
   const activePageId = useStore((s) => s.activePageId)
   const me = getIdentity().clientId
-  /* ⌥⌘\ hides everyone else's pointer */
-  const hidden = useStore((s) => s.cursorsHidden)
-  if (hidden) return null
 
   return (
     <>

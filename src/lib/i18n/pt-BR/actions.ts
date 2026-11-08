@@ -50,6 +50,7 @@ export const actions: Catalog['actions'] = {
 
   /* View */
   rulers: 'Réguas',
+  pixelGrid: 'Grade de pixels',
   comments: 'Comentários',
   outlines: 'Contornos',
   showUi: 'Mostrar/ocultar interface',

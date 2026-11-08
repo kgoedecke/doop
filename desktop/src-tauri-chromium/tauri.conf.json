@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "doop",
   "mainBinaryName": "doop-desktop",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "identifier": "design.doop.desktop",
   "build": {
     "devUrl": "http://localhost:4300",
@@ -11,12 +11,16 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["doop"]
+        "schemes": [
+          "doop"
+        ]
       }
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDMTFCREY0MzhGNkM1NjkKUldScHhmWTQ5TDBSdkJBV0Zaa3MvY01HWWRIaHhTd1NQazRlMERpUFBSLy95eU5EdEFCRmRPOE8K",
-      "endpoints": ["https://doop.design/desktop/latest.json"]
+      "endpoints": [
+        "https://doop.design/desktop/latest.json"
+      ]
     }
   },
   "app": {
@@ -28,7 +32,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "Productivity",
     "icon": [
       "../src-tauri/icons/32x32.png",

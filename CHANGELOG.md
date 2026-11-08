@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.14.0](https://github.com/kgoedecke/doop/compare/v0.13.0...v0.14.0) (2026-11-08)
+
+
+### Features
+
+* add Doop Cature extension and canvas paste import ([#454](https://github.com/kgoedecke/doop/issues/454)) ([#405](https://github.com/kgoedecke/doop/issues/405)) ([f404915](https://github.com/kgoedecke/doop/commit/f404915523a1142fd7d41f16579980bd5285f8a1))
+* **agent:** connect every model provider at once and pick one per task ([#413](https://github.com/kgoedecke/doop/issues/413)) ([62ee341](https://github.com/kgoedecke/doop/commit/62ee341b2404f07066818c1cf8c6f242f30a8f36))
+* **agent:** let the Doop Agent add, reorder and move pages and frames ([#428](https://github.com/kgoedecke/doop/issues/428)) ([d6c26bb](https://github.com/kgoedecke/doop/commit/d6c26bb519193f04160fa7755d3a57499dbcf64f))
+* **brand:** use Adobe's 2025 Photoshop app icon ([#407](https://github.com/kgoedecke/doop/issues/407)) ([58ce5cd](https://github.com/kgoedecke/doop/commit/58ce5cdec13b8b6c6ded6042eaaef0eaed93879e))
+* **canvas:** add a hold-Z Zoom tool ([#441](https://github.com/kgoedecke/doop/issues/441)) ([6801c71](https://github.com/kgoedecke/doop/commit/6801c7142122e7b85df88d571e38568a11507547))
+* **canvas:** rotate frames and elements from zones outside their corners ([#379](https://github.com/kgoedecke/doop/issues/379)) ([1d3e4b1](https://github.com/kgoedecke/doop/commit/1d3e4b1f0880905789e93653be8fc20a2cb16b7a))
+* **canvas:** type a zoom level and switch the pixel grid, cursors and comment pins ([#442](https://github.com/kgoedecke/doop/issues/442)) ([70330c9](https://github.com/kgoedecke/doop/commit/70330c9488016502a2310920fa938ad1c4c7f3a5))
+* **desktop:** offer downloaded updates in an in-app card ([#297](https://github.com/kgoedecke/doop/issues/297)) ([c089fd6](https://github.com/kgoedecke/doop/commit/c089fd61b4bb2bc2cfb013c2f950050010d60b05))
+* **desktop:** ship the macOS app on Chromium (CEF), replacing the WebKit app in place ([#423](https://github.com/kgoedecke/doop/issues/423)) ([ddea86b](https://github.com/kgoedecke/doop/commit/ddea86b528b585246000ca1b9cae8ce16635afcd))
+* **export:** pick a scale and SVG for frame and element exports ([#418](https://github.com/kgoedecke/doop/issues/418)) ([4033455](https://github.com/kgoedecke/doop/commit/403345504e467f0a034bd3839603fce30c217e9f))
+* **rail:** open workspace settings under the workspace row ([#421](https://github.com/kgoedecke/doop/issues/421)) ([01584b3](https://github.com/kgoedecke/doop/commit/01584b34f6cadcf21767127280cc6e320a6d748a))
+* **settings:** move the language picker to Settings → General ([#443](https://github.com/kgoedecke/doop/issues/443)) ([8bb5c51](https://github.com/kgoedecke/doop/commit/8bb5c518ef7d872ca0d566c49040db37904e2d7d))
+* **share:** let signed-out visitors view link-shared canvases ([#416](https://github.com/kgoedecke/doop/issues/416)) ([5bc5b75](https://github.com/kgoedecke/doop/commit/5bc5b75cdee536b1c179d839ea6779d023a546ac))
+* **ui:** redesign import, export and Connect AI modals as app-icon lists ([#417](https://github.com/kgoedecke/doop/issues/417)) ([d9e6ee0](https://github.com/kgoedecke/doop/commit/d9e6ee00b5d6db04e0d6ad2dc5fbe2268ab7d803))
+
+
+### Bug Fixes
+
+* **canvas:** drag the element itself and snap inside frames ([#422](https://github.com/kgoedecke/doop/issues/422)) ([abaa951](https://github.com/kgoedecke/doop/commit/abaa951b662e99250fcfd8663514c3ad7199b717))
+* **canvas:** drop the frame border, soft hover ring and canvas grey ([#415](https://github.com/kgoedecke/doop/issues/415)) ([86d12a7](https://github.com/kgoedecke/doop/commit/86d12a7b62215c1d6673a5163464a94709a9a30f))
+* **canvas:** keep the pointer visible while space pans in Safari ([#420](https://github.com/kgoedecke/doop/issues/420)) ([801e536](https://github.com/kgoedecke/doop/commit/801e5366bb62077ec6fbb863755899019a095dac))
+* **canvas:** pan without selecting or pressing panel UI, and an open lock on unlocked layers ([#411](https://github.com/kgoedecke/doop/issues/411)) ([5b55c12](https://github.com/kgoedecke/doop/commit/5b55c12954526e0fa95060f833e4cab512320f1f))
+* **desktop:** keep Prettier off the Chromium shell's tauri.conf.json ([#445](https://github.com/kgoedecke/doop/issues/445)) ([b8008d4](https://github.com/kgoedecke/doop/commit/b8008d411eaa4a3348006d2e94b0a13be9bbb62b))
+* **mcp:** let Claude pick the preview card's sandbox origin ([#419](https://github.com/kgoedecke/doop/issues/419)) ([8ceb812](https://github.com/kgoedecke/doop/commit/8ceb81216ba7c8ae694767861e59fc4911dd0655))
+* **pdf:** print each frame in a frame-sized iframe so no content is dropped ([#409](https://github.com/kgoedecke/doop/issues/409)) ([4358fb6](https://github.com/kgoedecke/doop/commit/4358fb66a9445422e17f154b99366f0617b9e087))
+* **render:** install DejaVu so screenshots draw Unicode symbols ([ef81765](https://github.com/kgoedecke/doop/commit/ef817658d0abc8b64a7b78cd53689403d7a57d5f))
+* **test:** click a frame's name clear of a picked element's toolbar ([#444](https://github.com/kgoedecke/doop/issues/444)) ([cb65535](https://github.com/kgoedecke/doop/commit/cb6553516fce472125eae923f12493b6e743744a))
+
+
+### Documentation
+
+* **agents:** cover report_issue and share_feedback in the MCP guide ([#438](https://github.com/kgoedecke/doop/issues/438)) ([82cdd5a](https://github.com/kgoedecke/doop/commit/82cdd5a4e65aff789f105e3be2f8e343b1102cfd))
+* **agents:** tell agents not to use Unicode symbols as icons ([13b09e7](https://github.com/kgoedecke/doop/commit/13b09e7f1cf94a9690458d29e922f3defc4be516))
+
 ## [0.13.0](https://github.com/kgoedecke/doop/compare/v0.12.0...v0.13.0) (2026-11-04)
 
 

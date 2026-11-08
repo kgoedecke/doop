@@ -5,7 +5,7 @@
 import type { PlainMessageKey } from './i18n'
 
 export type DrawingTool = 'rectangle' | 'circle' | 'path' | 'text' | 'frame'
-export type Tool = 'select' | 'hand' | 'comment' | DrawingTool
+export type Tool = 'select' | 'hand' | 'zoom' | 'comment' | DrawingTool
 
 export function isDrawingTool(tool: Tool): tool is DrawingTool {
   return tool === 'rectangle' || tool === 'circle' || tool === 'path' || tool === 'text' || tool === 'frame'
@@ -21,6 +21,8 @@ export const TOOLS: { id: Tool; label: PlainMessageKey; key: string }[] = [
   { id: 'path', label: 'canvas.toolPath', key: 'P' },
   { id: 'text', label: 'canvas.toolText', key: 'T' },
   { id: 'comment', label: 'canvas.toolComment', key: 'C' },
+  /* only while Z is held, no rail button (Stage.tsx) */
+  { id: 'zoom', label: 'canvas.toolZoom', key: 'Z' },
 ]
 
 export type PointerAction =
@@ -34,6 +36,8 @@ export type PointerAction =
   | 'comment'
   /** start a comment pinned to the canvas at the pointer */
   | 'comment-canvas'
+  /** zoom in on a click (out with ⌥), or onto the box a drag draws */
+  | 'zoom'
   /** draw an element, on the background or inside a frame */
   | 'draw'
   /** nothing — the press is not ours */
@@ -54,6 +58,7 @@ export function resolvePointerAction({ tool, target, button, pointerType, spaceH
   if (button === 1) return 'pan'
   if (button !== 0) return 'none'
   if (tool === 'hand' || spaceHeld) return 'pan'
+  if (tool === 'zoom') return 'zoom'
   if (isDrawingTool(tool)) return 'draw'
   /* a finger on the background pans: touch has no space bar, and one-finger
      pan is how phones move around. The Comment tool is the exception — a tap

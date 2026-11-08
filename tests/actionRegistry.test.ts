@@ -104,10 +104,16 @@ describe('dispatchActionKey', () => {
     expect(dispatchActionKey(keyEvent('n'), true, true)).toBe(false)
   })
 
+  it("toggles the pixel grid on ⇧' by code", () => {
+    const before = useStore.getState().viewOptions.pixelGrid
+    dispatchActionKey(keyEvent('"', { shiftKey: true }, 'Quote'), false, true)
+    expect(useStore.getState().viewOptions.pixelGrid).toBe(!before)
+  })
+
   it('toggles the view on ⇧C and ⌘Y', () => {
-    const before = useStore.getState().commentsHidden
+    const before = useStore.getState().viewOptions.comments
     dispatchActionKey(keyEvent('C', { shiftKey: true }), false, true)
-    expect(useStore.getState().commentsHidden).toBe(!before)
+    expect(useStore.getState().viewOptions.comments).toBe(!before)
     dispatchActionKey(keyEvent('y', { metaKey: true }), false, true)
     expect(useStore.getState().outlines).toBe(true)
   })

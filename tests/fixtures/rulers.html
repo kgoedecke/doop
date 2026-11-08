@@ -14,33 +14,9 @@
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import '/src/styles.css'
-      import { dispatchActionKey, setActionHost } from '/src/lib/actions/registry.ts'
-      import { isTypingTarget } from '/src/lib/keys.ts'
+      import { installActionKeys } from '/tests/fixtures/actionKeys.ts'
       /* the canvas page dispatches the registry's chords (⇧R among them) */
-      const noop = () => {}
-      setActionHost({
-        canvasId: 'c1',
-        guest: false,
-        presenting: false,
-        hideUiActive: true,
-        agentsOpen: false,
-        openPalette: noop,
-        openAgent: noop,
-        openShortcuts: noop,
-        openFind: noop,
-        findStep: noop,
-        openExport: noop,
-        openImport: noop,
-        openVersionHistory: noop,
-        openLink: noop,
-        placeImage: noop,
-        newCanvas: noop,
-        duplicateCanvas: noop,
-        present: noop,
-        toggleHideUi: noop,
-        toggleAgents: noop,
-      })
-      window.addEventListener('keydown', (e) => dispatchActionKey(e, isTypingTarget(e.target)))
+      installActionKeys()
       window.rulersHarness = {
         seed: (canvas) => {
           clearHistory()

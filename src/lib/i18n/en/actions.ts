@@ -50,6 +50,7 @@ export const actions = {
 
   /* View */
   rulers: 'Rulers',
+  pixelGrid: 'Pixel grid',
   comments: 'Comments',
   outlines: 'Outlines',
   showUi: 'Show/Hide UI',

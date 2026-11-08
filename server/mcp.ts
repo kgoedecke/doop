@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
@@ -385,7 +386,7 @@ export function buildMcpServer(
   const arrive = (canvasId: string, agent_name?: string) => {
     if (agent_name) actions.heartbeatAgent(canvasId, actorFrom(agent_name))
   }
-  const server = new McpServer({ name: 'doop-canvas', version: '0.1.0' }, { instructions: INSTRUCTIONS })
+  const server = new McpServer({ name: 'doop-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
   registerFramePreview(server)
 
   server.registerTool(

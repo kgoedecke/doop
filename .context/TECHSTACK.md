@@ -299,6 +299,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
   `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
   Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
+- View options (`src/lib/viewOptions.ts`, per browser under `doop:view-options`): the zoom pill's
+  menu opens on a field for a typed level (`150`, `150%`; `parseZoomPercent`) and switches the
+  pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
+  by `code` (registry actions `pixel-grid`, `comments`, `cursors`). Hidden pins still show under
+  the Comment tool and for a thread that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
@@ -367,8 +372,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   replacements land; one undo step, a single `transfer` (`replaceFramesTracked`), so undo never removes a
   replacement before its original is back; tests in `replaceFrames.test.ts`); ⇧⌘U links (`setElementLink`); ⌃C is
   the EyeDropper. ⌘F / ⌥⌘F is the find bar (`FindBar.tsx`, `findText.ts`: text nodes only, locked layers found but never replaced,
-  replace-all is one undo step across frames). View toggles live in the store: ⇧C hides comment
-  pins, ⌥⌘\ other people's cursors, ⌘Y outline mode (an adopted sheet in each frame's runtime,
+  replace-all is one undo step across frames). View toggles: ⇧' / ⇧C / ⌥⌘\ switch the view options (pixel grid,
+  comment pins, cursors), ⌘Y outline mode (an adopted sheet in each frame's runtime,
   never saved or exported), ⌥L collapses the Layers tree. N / ⇧N zoom to the next frame in reading
   order, Home / End bring it into view, PgUp / PgDn change page. Tests: `actionRegistry.test.ts`
   (no chord bound twice per platform, nor over a tool key), `actionChords.test.ts`,
@@ -376,6 +381,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
+- Zoom tool (Z, keyboard only; math in `src/lib/zoomTool.ts`): a click doubles the
+  zoom about the pointer, ⌥-click halves it (the cursor turns to zoom-out while ⌥ is down), and a
+  drag zooms onto the box it draws, filling the stage's open area. Z is the tool only while held:
+  letting go returns to the previous tool, and the tool rail has no button for it.
+  Tests: `zoomTool.test.ts`, the Zoom cases in `tools.test.ts`.
 - `src/lib/drawing.ts` creates rectangles, circles, straight and cubic Bézier SVG paths, text and empty
   frames through the existing frame API. Drawing inside a frame appends a positioned HTML/SVG
   layer. Standalone elements use frame persistence with a `data-doop-canvas-element` body marker
@@ -716,7 +726,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   key fails typecheck). Components call `useT()` and `t('namespace.key', vars)`; `{name}`
   placeholders are type-checked, `{ one, other }` values pick a plural by `{count}`, and a key kept
   in a table is a `PlainMessageKey` translated at render. The active language is this browser's pick
-  (`doop-locale` in `localStorage`, Settings -> Appearance or the account menu), else the server's
+  (`doop-locale` in `localStorage`, Settings -> General), else the server's
   `DEFAULT_LOCALE` (`GET /api/locale-config`, asked once before React mounts), else `en`; the list
   lives in `shared/locales.ts`. `tests/i18n.test.ts` checks every catalog against English. Screens
   not yet converted still render English.

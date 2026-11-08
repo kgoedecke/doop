@@ -24,8 +24,7 @@ export const settings = {
   accountTab: 'Account',
   accountBlurb: 'Who you are on every canvas — and how you get back into this one.',
   appearanceTitle: 'Appearance',
-  appearanceBlurb:
-    'How Doop looks in this browser: light or dark, the language it speaks, and how the canvas editor lays out its panels.',
+  appearanceBlurb: 'How Doop looks in this browser: light or dark, and how the canvas editor lays out its panels.',
 
   freeTasksLeftLabel: 'Free Doop Agent tasks left',
   meterGeminiCloud: 'Gemini cloud pilot selected — connection managed by your operator.',

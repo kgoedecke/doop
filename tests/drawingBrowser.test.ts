@@ -2075,6 +2075,25 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.waitForSelector('textarea[placeholder="Reply… (@doop to ask the agent)"]')
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('textarea[placeholder="Reply… (@doop to ask the agent)"]'))
+
+    /* ⇧C mid-drag hides the pins, but the one in hand finishes its move and
+       leaves no ghost behind; ⇧C again brings the pins back */
+    const toggleComments = async () => {
+      await page.keyboard.down('Shift')
+      await page.keyboard.press('KeyC')
+      await page.keyboard.up('Shift')
+    }
+    await page.mouse.move(pin.x + pin.width / 2, pin.y + pin.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width + 100, box.y + 100, { steps: 4 })
+    await page.waitForSelector('[data-comment-drag]')
+    await toggleComments()
+    await page.mouse.up()
+    await page.waitForFunction(() => !document.querySelector('[data-comment-drag]'))
+    expect(commentMoves).toHaveLength(4)
+    await page.waitForFunction(() => !document.querySelector('[title="Alice: Move me"]'))
+    await toggleComments()
+    await page.waitForSelector('[title="Alice: Move me"]')
   })
 
   it('keeps all tools reachable on phones, clear of zoom, and accepts touch drawing', async () => {
