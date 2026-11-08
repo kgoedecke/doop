@@ -134,6 +134,22 @@
   in `mcp-tools.test.ts`, `residentPageTools.test.ts`.
 - `ws` 8.18.0 - WebSocket server for realtime multiplayer (cursors, presence, frame edits,
   activity feed) over one room per canvas.
+- Big canvases (`shared/frameHtml.ts`, `server/index.ts`, `src/lib/ws.ts`): a canvas opens on one
+  page. The web client's `join` carries `deferHtml: true` plus the page it is on (a reconnect) or
+  the `?page=` / `?frame=` its link names, and `init` answers with `pageId` and the HTML of that
+  page's frames only; every other frame arrives with `html: ''` and `htmlDeferred: true` (a
+  client that does not ask, such as the iOS app, still gets every frame whole). The client asks
+  for the rest with `frames:load` (`pageId` and/or `frameIds`, at most `MAX_LOAD_FRAME_IDS`),
+  answered by `frames:html` batches of about 1M characters, and `store.mergeFrameHtml` fills in
+  the frames still deferred. `ws.ts` loads the open page's deferred frames whenever the canvas or
+  the page changes, so everything off the stage may assume the open page is complete; what reads
+  another page's HTML (the prototype player) calls `requestFrameHtml`. Live `frame:created` /
+  `frame:updated` always carry their HTML, for any page. `GET /api/canvases/:id` stays whole
+  unless `?pageId=` opens it on one page, and `GET /api/frames/:id` returns one frame with its
+  HTML. The room socket negotiates `permessage-deflate` (1 KB threshold, no context takeover),
+  and `/api` responses go through `compression` (gzip/brotli; the SSE stream asks for
+  `no-transform`). Tests: `deferredHtml.test.ts`, `deferredHtmlRoom.test.ts`,
+  `wsDeferredHtml.test.ts`.
 - Custom fonts (`shared/fonts.ts`, `server/fonts.ts`, `server/fontFile.ts`): font libraries, one
   per workspace (used on its canvases) and one per person (used on their personal canvases),
   managed in Settings → Fonts and Workspace → Fonts (`FontLibrary.tsx`, strings in the `fonts`
@@ -299,6 +315,15 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fly-tos fit into the stage area the top bar and floating panels leave open: `CanvasPage` passes
   `Stage` the `insets` its chrome covers and `fitBox` (`src/lib/viewFit.ts`) centres there.
   Tests: `viewFit.test.ts`, `fitSelectionBrowser.test.ts`.
+- Live frames (`src/lib/frameCulling.ts`): every frame is an iframe, so `Stage` mounts one only
+  for frames within half a stage of the viewport (kept until a full stage away) and, once zoomed
+  out below 25%, only for those over 160px on screen; a hatched placeholder of the same box
+  stands in for the rest. Selected, streamed-into, peer-edited and context-menu frames, the frame
+  of a picked element and every frame in prototype mode stay live, and standalone drawings are never culled
+  for size. `FrameView`'s `live` prop swaps the iframe for the placeholder and resets its
+  runtime state; `hasFrameWindow` is false for a frame without a document, so a press on one
+  selects the frame rather than waiting on an element hit-test. A frame still `htmlDeferred`
+  shows the placeholder too. Tests: `frameCulling.test.ts`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /

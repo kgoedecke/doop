@@ -172,6 +172,12 @@ export function registerFrameWindow(frameId: string, win: Window) {
   changeListeners.get(frameId)?.forEach((cb) => cb())
 }
 
+/** Whether the frame has a live document to ask: a frame off screen has none
+ *  (`lib/frameCulling.ts`), nor does one whose runtime has not reported ready. */
+export function hasFrameWindow(frameId: string): boolean {
+  return windows.has(frameId)
+}
+
 export function unregisterFrameWindow(frameId: string, win: Window) {
   if (windows.get(frameId) !== win) return
   windows.delete(frameId)
