@@ -1815,23 +1815,29 @@ export function buildMcpServer(
           })
         type ResultBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
         const content: ResultBlock[] = [{ type: 'text' as const, text: `Logo results for "${query}":` }]
+        const brandBlocks: ResultBlock[] = []
         if (brands.length > 0) {
-          const thumbs = await Promise.all(brands.map((b) => imageSearch.fetchThumb(b.thumb_url)))
+          const thumbs = await Promise.all(brands.map((b) => b.thumb ?? imageSearch.fetchThumb(b.thumb_url)))
           brands.forEach((b, i) => {
             const thumb = thumbs[i]
-            if (thumb) content.push({ type: 'image' as const, data: thumb.data, mimeType: thumb.mime })
-            content.push({
+            if (thumb) brandBlocks.push({ type: 'image' as const, data: thumb.data, mimeType: thumb.mime })
+            brandBlocks.push({
               type: 'text' as const,
-              text: `#${i + 1} — ${b.name} (${b.domain})\nlogo_url: ${b.logo_url}`,
+              text: `#${i + 1} — ${b.name} (${b.domain})${b.source === 'favicon' ? ' · favicon' : ''}\nlogo_url: ${b.logo_url}`,
             })
           })
         }
-        if (vector.length > 0) {
-          content.push({
-            type: 'text' as const,
-            text: `Open-source vector marks:\n${vector.map((v) => `${v.id} → ${v.svg_url}`).join('\n')}`,
-          })
-        }
+        const vectorBlocks: ResultBlock[] =
+          vector.length > 0
+            ? [
+                {
+                  type: 'text' as const,
+                  text: `Open-source vector marks:\n${vector.map((v) => `${v.id} → ${v.svg_url}`).join('\n')}`,
+                },
+              ]
+            : []
+        if (imageSearch.vectorFirst(brands, vector)) content.push(...vectorBlocks, ...brandBlocks)
+        else content.push(...brandBlocks, ...vectorBlocks)
         content.push({ type: 'text' as const, text: imageSearch.LOGO_USAGE_NOTE })
         const result = { content }
         return canvas_id ? withFeedbackNotice(result, canvas_id, actorFrom(agent_name)) : result
