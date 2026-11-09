@@ -6,10 +6,13 @@ import { and, asc, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { modelAccounts } from './db/schema.ts'
 import {
+  DEEPSEEK_MODELS,
   DEFAULT_ANTHROPIC_MODEL,
   GEMINI_MODELS,
+  KIMI_MODELS,
   OPENROUTER_MODELS,
   isReasoningEffort,
+  type ModelOption,
   type ReasoningEffort,
 } from '../shared/modelMenu.ts'
 import { CLAUDE_API_MODEL, GEMINI_API_MODEL, OPENAI_API_MODEL } from './modelCatalog.ts'
@@ -57,7 +60,8 @@ const REDIRECT_URI = env.CHATGPT_OAUTH_REDIRECT_URI
    fetch — an ordinary product User-Agent passes where no header at all does */
 const AUTH_USER_AGENT = env.CHATGPT_AUTH_USER_AGENT
 
-export type AccountKind = 'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key'
+export type AccountKind =
+  'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key'
 
 const ACCOUNT_KINDS: readonly string[] = [
   'chatgpt',
@@ -65,6 +69,8 @@ const ACCOUNT_KINDS: readonly string[] = [
   'anthropic-key',
   'openrouter-key',
   'gemini-key',
+  'deepseek-key',
+  'kimi-key',
 ] satisfies AccountKind[]
 
 export interface ModelAccount {
@@ -175,6 +181,23 @@ export function statusOf(account: ModelAccount): AccountStatus {
 
 const DEFAULT_OPENROUTER = env.DOOP_AGENT_OPENROUTER_MODEL
 const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
+const DEFAULT_DEEPSEEK = env.DOOP_AGENT_DEEPSEEK_MODEL
+const DEFAULT_KIMI = env.DOOP_AGENT_KIMI_MODEL
+
+/* the kinds whose menu is a hand-checked roster and nothing else: the roster's
+   vision flags are all the run-time check knows about their models */
+const ROSTERS: Partial<Record<AccountKind, ModelOption[]>> = {
+  'openrouter-key': OPENROUTER_MODELS,
+  'deepseek-key': DEEPSEEK_MODELS,
+  'kimi-key': KIMI_MODELS,
+}
+
+function rosterPolicy(roster: ModelOption[], fallback: string) {
+  return {
+    resolve: (model?: string) => model || fallback,
+    isKnown: (model: string) => roster.some((option) => option.id === model),
+  }
+}
 
 /* per-kind model policy: how a stored (possibly unset or stale) model id
    resolves to the one that will run, and which ids the picker may set */
@@ -193,14 +216,14 @@ const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKno
   },
   /* OpenRouter keeps its curated roster: the roster's vision flags are what
      the run-time check knows, and its catalog mixes in text-only models */
-  'openrouter-key': {
-    resolve: (model) => model || DEFAULT_OPENROUTER,
-    isKnown: (model) => OPENROUTER_MODELS.some((option) => option.id === model),
-  },
+  'openrouter-key': rosterPolicy(OPENROUTER_MODELS, DEFAULT_OPENROUTER),
   'gemini-key': {
     resolve: (model) => model || DEFAULT_GEMINI,
     isKnown: (model) => GEMINI_API_MODEL.test(model),
   },
+  /* DeepSeek and Kimi too: their catalogs list ids without saying which see images */
+  'deepseek-key': rosterPolicy(DEEPSEEK_MODELS, DEFAULT_DEEPSEEK),
+  'kimi-key': rosterPolicy(KIMI_MODELS, DEFAULT_KIMI),
 }
 
 export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
@@ -226,16 +249,17 @@ export function accountWithPick(account: ModelAccount, pick: RunnerPick | undefi
 
 /** Whether the model this account resolves to can see images. An id off the
  *  curated menu (a server env override) is trusted to have vision except on
- *  OpenRouter, whose roster mixes text-only models — there the conservative
- *  answer is a degraded run rather than a 400 on the first screenshot. */
+ *  the roster kinds, whose rosters mix text-only models — there the
+ *  conservative answer is a degraded run rather than a 400 on the first
+ *  screenshot. */
 export function accountVisionFor(account: Pick<ModelAccount, 'kind' | 'model'>): boolean {
   const model = accountModelFor(account)
-  const menu =
-    account.kind === 'openrouter-key' ? OPENROUTER_MODELS : account.kind === 'gemini-key' ? GEMINI_MODELS : null
+  const roster = ROSTERS[account.kind]
+  const menu = roster ?? (account.kind === 'gemini-key' ? GEMINI_MODELS : null)
   if (!menu) return true
   const option = menu.find((entry) => entry.id === model)
   if (option) return option.vision
-  return account.kind !== 'openrouter-key'
+  return !roster
 }
 
 /** Change which model tier one account runs on. */
@@ -827,6 +851,14 @@ const KEY_SHAPES: Partial<Record<AccountKind, { test(key: string): boolean; hint
     test: (key) => key.length >= 30 && !/\s/.test(key),
     hint: 'That does not look like a Gemini API key (a long single token, usually starting with "AIza")',
   },
+  'deepseek-key': {
+    test: (key) => key.startsWith('sk-') && key.length >= 20 && !/\s/.test(key),
+    hint: 'That does not look like a DeepSeek API key (they start with "sk-")',
+  },
+  'kimi-key': {
+    test: (key) => key.startsWith('sk-') && key.length >= 20 && !/\s/.test(key),
+    hint: 'That does not look like a Kimi API key (they start with "sk-")',
+  },
 }
 
 async function connectKey(userId: string, kind: AccountKind, apiKey: string): Promise<void> {
@@ -858,6 +890,14 @@ export function connectOpenRouterKey(userId: string, apiKey: string): Promise<vo
 
 export function connectGeminiKey(userId: string, apiKey: string): Promise<void> {
   return connectKey(userId, 'gemini-key', apiKey)
+}
+
+export function connectDeepSeekKey(userId: string, apiKey: string): Promise<void> {
+  return connectKey(userId, 'deepseek-key', apiKey)
+}
+
+export function connectKimiKey(userId: string, apiKey: string): Promise<void> {
+  return connectKey(userId, 'kimi-key', apiKey)
 }
 
 /* refreshes are per-user serialized: two runs starting together must not both

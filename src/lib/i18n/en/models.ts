@@ -19,6 +19,8 @@ export const models = {
   openaiKeyShort: 'Pay per token',
   openrouterKeyShort: 'Kimi, Qwen, GLM, DeepSeek and more',
   geminiKeyShort: 'Gemini, plus Nano Banana images',
+  deepseekKeyShort: 'DeepSeek V4, with your own key',
+  kimiKeyShort: 'Kimi K3, with your own key',
   claudeKeyShort: 'Pay per token, runs on Doop’s server',
   claudePlanShort: 'Your Claude subscription, on this Mac',
   downloadShort: 'Get the app',
@@ -81,6 +83,8 @@ export const models = {
   openaiKeyTitle: 'OpenAI API key',
   openrouterKeyTitle: 'OpenRouter API key',
   geminiKeyTitle: 'Gemini API key',
+  deepseekKeyTitle: 'DeepSeek API key',
+  kimiKeyTitle: 'Kimi API key',
   claudeKeyTitle: 'Claude API key',
 
   /* LocalClaude */

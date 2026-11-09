@@ -72,3 +72,30 @@ it('routes a Gemini account with its default model and vision intact', async () 
   expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
   expect(String(fetchSpy.mock.calls[0]![0])).toContain('generativelanguage.googleapis.com')
 })
+
+it('routes a DeepSeek account to DeepSeek, Pro as text-only', async () => {
+  mocks.account.mockResolvedValue({ kind: 'deepseek-key', userId: 'c', apiKey: 'sk-deepseek-test-key-0123' })
+  const fetchSpy = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }), { status: 200 }))
+  const model = await pickModel('c')
+  expect(model).toMatchObject({ provider: 'deepseek-key', vision: true, label: 'DeepSeek (deepseek-flash)' })
+  expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
+  expect(String(fetchSpy.mock.calls[0]![0])).toContain('api.deepseek.com')
+
+  mocks.account.mockResolvedValue({ kind: 'deepseek-key', userId: 'c', apiKey: 'sk-d', model: 'deepseek-v4-pro' })
+  expect(await pickModel('c')).toMatchObject({ vision: false })
+  mocks.account.mockResolvedValue({ kind: 'deepseek-key', userId: 'c', apiKey: 'sk-d', model: 'deepseek-v9' })
+  expect(await pickModel('c')).toMatchObject({ vision: false })
+})
+
+it('routes a Kimi account to Moonshot with vision', async () => {
+  mocks.account.mockResolvedValue({ kind: 'kimi-key', userId: 'd', apiKey: 'sk-kimi-test-key-0123456' })
+  const fetchSpy = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: 'Done' } }] }), { status: 200 }))
+  const model = await pickModel('d')
+  expect(model).toMatchObject({ provider: 'kimi-key', vision: true, label: 'Kimi (kimi-k3.1-pro)' })
+  expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
+  expect(String(fetchSpy.mock.calls[0]![0])).toContain('api.moonshot.ai')
+})

@@ -12,7 +12,15 @@ const claudeView = {
   accounts: [{ kind: 'anthropic-key', enabled: true, model: 'claude-opus-5', connectedAt: 1 }],
   default: 'anthropic-key',
   chatgptEnabled: true,
-  menus: { chatgpt: [], 'openai-key': [], 'anthropic-key': [], 'openrouter-key': [], 'gemini-key': [] },
+  menus: {
+    chatgpt: [],
+    'openai-key': [],
+    'anthropic-key': [],
+    'openrouter-key': [],
+    'gemini-key': [],
+    'deepseek-key': [],
+    'kimi-key': [],
+  },
 }
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))
 vi.mock('../src/lib/api', () => ({
