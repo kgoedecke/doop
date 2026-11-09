@@ -287,6 +287,8 @@ public struct CanvasPresence: Codable, Identifiable {
     public var kind: String
     public var cursor: CanvasPoint?
     public var viewport: CanvasViewport?
+    /// The frame this collaborator has open; for an agent, the one it last worked on.
+    public var activeFrameId: String? = nil
     public var id: String { clientId }
 }
 
@@ -330,6 +332,16 @@ public struct CanvasEvent: Decodable {
     public var y: Double?
     public var width: Double?
     public var height: Double?
+    /// `frame:streaming`: whether the actor started or stopped streaming.
+    public var active: Bool?
+    public var actor: CanvasActor?
+}
+
+/// Who caused a room event (a frame write, a stream).
+public struct CanvasActor: Decodable {
+    public var name: String
+    public var color: String
+    public var kind: String?
 }
 
 public struct WorkspaceList: Decodable {
