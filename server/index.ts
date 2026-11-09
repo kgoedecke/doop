@@ -1093,6 +1093,9 @@ const KEY_CONNECTS = {
   'anthropic-key': modelAccounts.connectAnthropicKey,
   'openrouter-key': modelAccounts.connectOpenRouterKey,
   'gemini-key': modelAccounts.connectGeminiKey,
+  'deepseek-key': modelAccounts.connectDeepSeekKey,
+  'kimi-key': modelAccounts.connectKimiKey,
+  'kimi-code': modelAccounts.connectKimiCodeKey,
 } as const
 for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {

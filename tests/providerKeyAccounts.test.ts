@@ -61,6 +61,30 @@ it('stores a Gemini key beside the OpenRouter one, each with its own model', asy
   expect(accountIn(await (await alice.get('/api/model-account')).json(), 'openrouter-key')).toBeTruthy()
 })
 
+it('stores DeepSeek and Kimi keys, each held to its own roster', async () => {
+  for (const [kind, key, model, other] of [
+    ['deepseek-key', 'sk-deepseekTestKeyLongEnough01', 'deepseek-flash', 'deepseek-v4-pro'],
+    ['kimi-key', 'sk-kimiTestKeyLongEnoughToPass01', 'kimi-k3.1-pro', 'kimi-k3'],
+    ['kimi-code', 'sk-kimiCodeTestKeyLongEnough0001', 'k3.1-pro', 'k3'],
+  ] as const) {
+    expect((await alice.post(`/api/model-account/${kind}`, { apiKey: 'has spaces in it, long enough' })).status).toBe(
+      400,
+    )
+    expect((await alice.post(`/api/model-account/${kind}`, { apiKey: 'sk-short' })).status).toBe(400)
+    const response = await alice.post(`/api/model-account/${kind}`, { apiKey: key })
+    expect(response.status).toBe(200)
+    const view = (await response.json()) as View
+    expect(accountIn(view, kind)).toMatchObject({ enabled: true, model })
+    expect(JSON.stringify(view)).not.toContain(key)
+    expect((await alice.patch(`/api/model-account/${kind}`, { model: 'moonshotai/kimi-k3' })).status).toBe(400)
+    expect((await alice.patch(`/api/model-account/${kind}`, { model: other })).status).toBe(200)
+    expect((await alice.delete(`/api/model-account/${kind}`)).status).toBe(200)
+  }
+  const { menus } = await (await alice.get('/api/model-account')).json()
+  expect(menus['deepseek-key'].map((m: { id: string }) => m.id)).toContain('deepseek-flash')
+  expect(menus['kimi-key'].every((m: { vision: boolean }) => m.vision)).toBe(true)
+})
+
 it('validates image-model picks against the registry and this user’s credentials', async () => {
   /* nothing connected, no server keys in this harness: every entry is
      visible but unavailable, and picking one is refused */
