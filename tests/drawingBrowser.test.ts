@@ -2324,6 +2324,53 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     await page.waitForSelector('[title="Alice: Move me"]')
   })
 
+  it('pivots a ctrl+wheel zoom on the pointer, wherever the stage sits', async () => {
+    /* the world point under (clientX, clientY) after a burst of ctrl+wheel
+       events there, flushed in one animation frame like a trackpad's */
+    const zoomAt = (clientX: number, clientY: number) =>
+      page.evaluate(
+        async (cx, cy) => {
+          const stage = document.querySelector('.world')!.parentElement!
+          const under = () => {
+            const rect = stage.getBoundingClientRect()
+            const vp = window.drawingHarness.camera()
+            return { x: (cx - rect.left - vp.x) / vp.zoom, y: (cy - rect.top - vp.y) / vp.zoom, zoom: vp.zoom }
+          }
+          const before = under()
+          for (let i = 0; i < 4; i++)
+            stage.dispatchEvent(
+              new WheelEvent('wheel', {
+                deltaY: -10,
+                ctrlKey: true,
+                clientX: cx,
+                clientY: cy,
+                bubbles: true,
+                cancelable: true,
+              }),
+            )
+          await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+          return { before, after: under() }
+        },
+        clientX,
+        clientY,
+      )
+    const first = await zoomAt(300, 240)
+    expect(first.after.zoom).toBeGreaterThan(first.before.zoom)
+    expect(first.after.x).toBeCloseTo(first.before.x, 6)
+    expect(first.after.y).toBeCloseTo(first.before.y, 6)
+
+    /* the stage moves (a docked panel, the rulers): the pivot follows its new box */
+    await page.evaluate(() => {
+      const root = document.getElementById('root')!
+      root.style.left = '120px'
+      root.style.top = '90px'
+    })
+    const moved = await zoomAt(500, 400)
+    expect(moved.after.zoom).toBeGreaterThan(moved.before.zoom)
+    expect(moved.after.x).toBeCloseTo(moved.before.x, 6)
+    expect(moved.after.y).toBeCloseTo(moved.before.y, 6)
+  })
+
   it('keeps all tools reachable on phones, clear of zoom, and accepts touch drawing', async () => {
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true })
     // Changing mobile emulation reloads the page in Chromium.

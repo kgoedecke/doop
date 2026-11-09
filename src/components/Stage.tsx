@@ -598,14 +598,19 @@ export function Stage({
     let panX = 0
     let panY = 0
     let zoomDelta = 0
-    let pivotX = 0
-    let pivotY = 0
+    /* the latest zoom event's pointer, in client px: it becomes stage px in
+       flush, which reads the stage's box once per frame, not once per event */
+    let pivotClientX = 0
+    let pivotClientY = 0
 
     function flush() {
       raf = 0
       const vp = useStore.getState().viewport
       let { x, y, zoom } = vp
       if (zoomDelta !== 0) {
+        const rect = el!.getBoundingClientRect()
+        const pivotX = pivotClientX - rect.left
+        const pivotY = pivotClientY - rect.top
         /* exp(-deltaY/100) is the browser's own pinch↔wheel mapping, so the
            zoom tracks the finger spread 1:1 like Figma; per-event clamping
            (below) keeps discrete mouse-wheel notches from over-jumping */
@@ -628,9 +633,8 @@ export function Stage({
       if ((e.target as Element | null)?.closest('[data-stage-scroll]')) return
       e.preventDefault()
       if (e.ctrlKey || e.metaKey) {
-        const rect = el!.getBoundingClientRect()
-        pivotX = e.clientX - rect.left
-        pivotY = e.clientY - rect.top
+        pivotClientX = e.clientX
+        pivotClientY = e.clientY
         zoomDelta += Math.max(-40, Math.min(40, e.deltaY))
       } else if (e.shiftKey && e.deltaX === 0) {
         panX += e.deltaY
