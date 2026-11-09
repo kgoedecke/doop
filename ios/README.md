@@ -33,6 +33,12 @@ HTML/CSS engine (Stylo + Taffy + Parley), compiled into the app as a static libr
   Labels, selection outlines and collaborator
   cursors are native layers, so a board with many frames costs one small bitmap per
   frame instead of one web document per frame.
+  Agents at work show on their frame as on the web (`Blitz/FrameWorkBadge.swift`, who from
+  `Core/FrameWorkers.swift`): an agent streaming a design (`frame:streaming`) gets a dashed ring
+  pulsing in its colour and a "Claude is designing…" chip in the title row; an agent with the
+  frame open (`editing`) gets a solid ring and its name. A chip moves above the title when both
+  do not fit, and says less (name, then mark) on a frame narrower than its words. Like the web,
+  a stream that began before the app joined shows as an open frame.
 - **Blitz engine** (`Doop/Blitz/BlitzDocument.swift` over `BlitzKit/`): each frame's
   HTML is parsed once into a Blitz document. The canvas asks for a bitmap at the
   density the current zoom needs (up to 3 bitmap pixels per CSS pixel, 4096 px max

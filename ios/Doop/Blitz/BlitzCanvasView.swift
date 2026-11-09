@@ -25,6 +25,7 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
     private var frames: [String: FrameLayer] = [:]
     private var labels: [String: CATextLayer] = [:]
     private var cursors: [String: CursorLayer] = [:]
+    private var workBadges: [String: FrameWorkBadge] = [:]
     private var zoom: CGFloat = 1
     private var offset = CGPoint(x: 40, y: 80)
     private var fitted = false
@@ -159,6 +160,8 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             frame.layer.removeFromSuperlayer()
             labels[id]?.removeFromSuperlayer()
             labels[id] = nil
+            workBadges[id]?.remove()
+            workBadges[id] = nil
             frames[id] = nil
         }
         // Fit before creating layers so the first bitmaps are requested at the
@@ -242,7 +245,32 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         }
         for frame in frames.values { frame.selected = frame.id == model.selectedID }
         syncCursors()
+        syncWorkBadges()
         drawChrome()
+    }
+
+    /// One badge per frame on this page with an agent at work on it.
+    private func syncWorkBadges() {
+        // New chips appear where they belong, not faded or slid in by implicit actions.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        let workers = model.frameWorkers.filter { frames[$0.key] != nil && !$0.value.isEmpty }
+        for (id, badge) in workBadges where workers[id] == nil {
+            badge.remove()
+            workBadges[id] = nil
+        }
+        for (id, list) in workers {
+            let badge = workBadges[id] ?? {
+                let badge = FrameWorkBadge()
+                // Under the selection outline and cursors, over the titles.
+                chrome.insertSublayer(badge.ring, below: selectionOutline)
+                chrome.insertSublayer(badge.chips, below: selectionOutline)
+                workBadges[id] = badge
+                return badge
+            }()
+            badge.update(list)
+        }
     }
 
     private func syncCursors() {
@@ -356,10 +384,12 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
         applyTransform()
     }
 
-    /// Keep fitted designs clear of the right rail and bottom prompt.
+    /// Keep fitted designs clear of the right rail and bottom prompt, with room
+    /// at the top for a title and an agent chip row stacked above it.
     private var unobscuredViewport: CGRect {
-        CGRect(x: 24, y: 24, width: max(1, bounds.width - 100),
-               height: max(1, bounds.height - safeAreaInsets.bottom - model.composerHeight - 100))
+        let top = 24 + FrameWorkBadge.rowHeight
+        return CGRect(x: 24, y: top, width: max(1, bounds.width - 100),
+                      height: max(1, bounds.height - safeAreaInsets.bottom - model.composerHeight - 76 - top))
     }
 
     /// After a zoom change settles, re-render visible frames at the new density.
@@ -414,13 +444,16 @@ final class CanvasView: UIView, UIGestureRecognizerDelegate {
             guard let frame = frames[id] else { continue }
             let origin = toScreen(frame.rect.origin)
             let width = frame.rect.width * zoom
+            // Agents at work take the right end of the title row.
+            let screenRect = CGRect(origin: origin, size: CGSize(width: width, height: frame.rect.height * zoom))
+            let chipsWidth = workBadges[id]?.layout(around: screenRect, titleRow: 20, minTitle: 44) ?? 0
             // Like Figma, titles disappear when a frame is too small to read.
-            label.isHidden = width < 44
+            label.isHidden = width - chipsWidth < 44
             guard !label.isHidden else { continue }
             let selected = id == model.selectedID
             label.string = frame.name
             label.foregroundColor = (selected ? UIColor.tintColor : UIColor.secondaryLabel).cgColor
-            label.frame = CGRect(x: origin.x, y: origin.y - 20, width: width, height: 16)
+            label.frame = CGRect(x: origin.x, y: origin.y - 20, width: width - chipsWidth, height: 16)
         }
         if let id = model.selectedID, let frame = frames[id] {
             let rect = CGRect(origin: toScreen(frame.rect.origin), size: CGSize(width: frame.rect.width * zoom, height: frame.rect.height * zoom)).insetBy(dx: -1.5, dy: -1.5)

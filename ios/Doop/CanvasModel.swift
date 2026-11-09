@@ -19,6 +19,8 @@ final class CanvasModel: ObservableObject {
     @Published var tasks: [CanvasTask] = []
     @Published var comments: [CanvasComment] = []
     @Published var presences: [CanvasPresence] = []
+    /// Frames an agent is streaming a design into right now, by frame id.
+    @Published var streams: [String: FrameStream] = [:]
     @Published var selectedID: String?
     @Published private(set) var activePageID: String
     @Published var connected = false
@@ -65,6 +67,10 @@ final class CanvasModel: ObservableObject {
     }
     var pagePresences: [CanvasPresence] {
         presences.filter { $0.viewport?.pageId == nil || $0.viewport?.pageId == activePageID }
+    }
+    /// The agents at work on each frame of the active page, as its title shows them.
+    var frameWorkers: [String: [FrameWorker]] {
+        FrameWorkers.byFrame(streams: streams, presences: presences)
     }
     var selected: DesignFrame? { pageFrames.first { $0.id == selectedID } }
     var canEdit: Bool { connected && pendingEdits == 0 && !undoing }
@@ -191,6 +197,8 @@ final class CanvasModel: ObservableObject {
             tasks = event.tasks ?? []
             comments = event.comments ?? []
             presences = event.presences ?? []
+            // A stream that ended while we were away sent its end to nobody.
+            streams = [:]
             connected = true
             connecting = false
             connectionError = nil
@@ -198,6 +206,7 @@ final class CanvasModel: ObservableObject {
             if let frame = event.frame, canvas != nil { upsert(frame, into: &canvas!.frames) }
         case "frame:deleted":
             canvas?.frames.removeAll { $0.id == event.frameId }
+            if let frameID = event.frameId { streams[frameID] = nil }
             if selectedID == event.frameId { selectedID = nil; selectedElement = nil }
         case "frame:drag":
             if let index = canvas?.frames.firstIndex(where: { $0.id == event.frameId }) {
@@ -224,6 +233,17 @@ final class CanvasModel: ObservableObject {
         case "comment": if let comment = event.comment { upsert(comment, into: &comments) }
         case "presence:join": if let person = event.presence { upsert(person, into: &presences) }
         case "presence:leave": presences.removeAll { $0.clientId == event.clientId }
+        case "editing":
+            if let index = presences.firstIndex(where: { $0.clientId == event.clientId }) {
+                presences[index].activeFrameId = event.frameId
+            }
+        case "frame:streaming":
+            guard let frameID = event.frameId else { break }
+            if event.active == true, let actor = event.actor {
+                streams[frameID] = FrameStream(name: actor.name, color: actor.color)
+            } else {
+                streams[frameID] = nil
+            }
         case "viewport":
             if let index = presences.firstIndex(where: { $0.clientId == event.clientId }), let viewport = event.viewport {
                 presences[index].viewport = viewport
