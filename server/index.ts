@@ -120,19 +120,6 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
 }
 store.init(data.canvases)
-/* frame HTML is loaded per canvas; a canvas nobody has used for
-   CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it */
-store.setInUse(
-  (canvasId) =>
-    room(canvasId).length > 0 || (agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId),
-)
-setInterval(
-  () => {
-    const dropped = store.evictIdle(env.CANVAS_IDLE_MS)
-    if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
-  },
-  Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
-).unref()
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
@@ -759,27 +746,31 @@ app.use('/api', async (req, res, next) => {
 
 /* Every route naming a canvas, frame or comment gets that canvas's frame
    HTML loaded before its handler runs (store.load), so handlers keep
-   reading the store synchronously. Behind the session gate, so only a
-   signed-in request can bring a canvas into memory. */
-function loadFirst(load: (id: string) => Promise<unknown>): express.RequestHandler {
-  return (req, _res, next) => {
-    load(String(req.params.id)).then(() => next(), next)
+   reading the store synchronously, and held until the response is done, so
+   a handler awaiting something slow (an import, a render) keeps it.
+   Behind the session gate, so only a signed-in request can bring a canvas
+   into memory. */
+function loadFirst(canvasOf: (id: string) => string | undefined): express.RequestHandler {
+  return (req, res, next) => {
+    const canvasId = canvasOf(String(req.params.id))
+    if (!canvasId) return next()
+    store.load(canvasId).then(() => {
+      res.once('close', store.hold(canvasId))
+      next()
+    }, next)
   }
 }
 app.use(
   '/api/canvases/:id',
-  loadFirst((id) => store.load(id)),
+  loadFirst((id) => id),
 )
 app.use(
   '/api/frames/:id',
-  loadFirst((id) => store.loadFrame(id)),
+  loadFirst((id) => store.getFrame(id)?.canvasId),
 )
 app.use(
   '/api/comments/:id',
-  loadFirst(async (id) => {
-    const comment = actions.findComment(id)
-    if (comment) await store.load(comment.canvasId)
-  }),
+  loadFirst((id) => actions.findComment(id)?.canvasId),
 )
 
 /* Home's push channel: tells an open dashboard its canvas list changed */
@@ -2806,6 +2797,20 @@ wss.on('connection', (ws, upgradeReq) => {
 
 server.listen(PORT, () => {
   console.log(`⟡ doop server     http://localhost:${PORT}`)
+  /* frame HTML is loaded per canvas; a canvas nobody has used for
+     CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
+     Started here, once the room state it asks about exists. */
+  store.setInUse(
+    (canvasId) =>
+      room(canvasId).length > 0 || (agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId),
+  )
+  setInterval(
+    () => {
+      const dropped = store.evictIdle(env.CANVAS_IDLE_MS)
+      if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
+    },
+    Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
+  ).unref()
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */
   if (data.legacyCommentSelectors.size > 0) {

@@ -115,3 +115,31 @@ it('loads the source canvas of a copy', async () => {
   expect(copy!.frames.map((frame) => frame.html).sort()).toEqual(['<p>first</p>', '<p>second</p>'])
   expect(store.isLoaded(copy!.id)).toBe(true)
 })
+
+it('keeps a canvas while a frame write is in flight, and drops it once the write lands', async () => {
+  const { canvasId, firstId } = await bootedCanvas('In flight')
+  await store.load(canvasId)
+  const later = Date.now() + HOUR
+  store.getFrame(firstId)!.html = '<p>unsaved</p>'
+  const writing = persist.saveFrameNow(store.getFrame(firstId)!)
+  store.evictIdle(HOUR / 2, later)
+  expect(store.isLoaded(canvasId)).toBe(true)
+  await writing
+  store.evictIdle(HOUR / 2, later)
+  expect(store.isLoaded(canvasId)).toBe(false)
+  await store.load(canvasId)
+  expect(store.getFrame(firstId)!.html).toBe('<p>unsaved</p>')
+})
+
+it('holds the canvases a tool call names until the tool returns', async () => {
+  const { withArgsCanvases } = await import('../server/toolLoads.ts')
+  const { canvasId, firstId } = await bootedCanvas('Tool hold')
+  const later = Date.now() + HOUR
+  const html = await withArgsCanvases({ frame_id: firstId }, async () => {
+    store.evictIdle(HOUR / 2, later)
+    return store.getFrame(firstId)!.html
+  })
+  expect(html).toBe('<p>first</p>')
+  store.evictIdle(HOUR / 2, later + HOUR)
+  expect(store.isLoaded(canvasId)).toBe(false)
+})

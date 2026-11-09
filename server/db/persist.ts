@@ -390,7 +390,23 @@ export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
 
 /** Write the frame now and resolve once it is on disk, for a caller that
  *  must write something naming the frame's content afterwards. */
+/* Frames whose latest state is not yet in the database, by write
+   generation: marked on every save, cleared only once a write that started
+   at the latest generation succeeds. A frame stays dirty through its
+   debounce, its write in flight and a failed write, and a dirty frame keeps
+   its canvas loaded (store.evictIdle) — dropping it would lose the only
+   copy, or reload the stored row over a newer one still being written. */
+const dirtyFrames = new Map<string, number>()
+
+/** writes of a frame on their way to the database, counted */
+const writesInFlight = new Map<string, number>()
+
+function markDirty(frameId: string) {
+  dirtyFrames.set(frameId, (dirtyFrames.get(frameId) ?? 0) + 1)
+}
+
 export async function saveFrameNow(f: Frame): Promise<void> {
+  markDirty(f.id)
   const existing = frameTimers.get(f.id)
   if (existing) clearTimeout(existing)
   frameTimers.delete(f.id)
@@ -398,6 +414,7 @@ export async function saveFrameNow(f: Frame): Promise<void> {
 }
 
 export function saveFrame(f: Frame, immediate = false) {
+  markDirty(f.id)
   const existing = frameTimers.get(f.id)
   if (existing) clearTimeout(existing)
   if (immediate) {
@@ -415,6 +432,18 @@ export function saveFrame(f: Frame, immediate = false) {
 }
 
 async function writeFrame(f: Frame) {
+  writesInFlight.set(f.id, (writesInFlight.get(f.id) ?? 0) + 1)
+  try {
+    await writeFrameRow(f)
+  } finally {
+    const left = (writesInFlight.get(f.id) ?? 1) - 1
+    if (left > 0) writesInFlight.set(f.id, left)
+    else writesInFlight.delete(f.id)
+  }
+}
+
+async function writeFrameRow(f: Frame) {
+  const generation = dirtyFrames.get(f.id)
   const html = f.html
   const row = {
     id: f.id,
@@ -438,13 +467,22 @@ async function writeFrame(f: Frame) {
   }
   const { id, createdAt, ...set } = row
   await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
+  /* a save made while this one was in flight keeps the frame dirty */
+  if (dirtyFrames.get(f.id) === generation) dirtyFrames.delete(f.id)
   await syncAssetRefs(f.id, html)
 }
 
-/** A frame write still waiting on its debounce: its canvas must stay loaded
- *  until it lands, since the write reads the frame's html when it fires. */
+/** A frame whose latest state is not yet stored: waiting on its debounce,
+ *  its write in flight, or its write failed. Its canvas must stay loaded. */
 export function frameWritePending(frameId: string): boolean {
-  return frameTimers.has(frameId)
+  return dirtyFrames.has(frameId)
+}
+
+/** Write again a dirty frame with nothing scheduled or in flight: one whose
+ *  write failed. The idle sweep calls this for the frames that keep their
+ *  canvas from being dropped. */
+export function retryFrameWrite(f: Frame) {
+  if (dirtyFrames.has(f.id) && !frameTimers.has(f.id) && !writesInFlight.has(f.id)) saveFrame(f)
 }
 
 /** Move a frame to another page without touching its html, for a frame
@@ -665,6 +703,7 @@ export function deleteCanvas(canvasId: string) {
 }
 
 export function deleteFrame(frameId: string) {
+  dirtyFrames.delete(frameId)
   const timer = frameTimers.get(frameId)
   if (timer) {
     clearTimeout(timer)
@@ -882,7 +921,8 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
 /** Flush pending debounced frame writes and queued version writes (called
  *  on shutdown): a design must not survive a restart without its history. */
 export async function flush(getFrame: (id: string) => Frame | undefined): Promise<void> {
-  const ids = [...frameTimers.keys()]
+  /* every dirty frame, a failed write included, not only the debounced ones */
+  const ids = [...dirtyFrames.keys()]
   for (const [, timer] of frameTimers) clearTimeout(timer)
   frameTimers.clear()
   await Promise.allSettled(

@@ -187,7 +187,12 @@ class Store {
         continue
       }
       const canvas = this.canvases.get(canvasId)
-      if (canvas?.frames.some((frame) => persist.frameWritePending(frame.id))) continue
+      const unsaved = canvas?.frames.filter((frame) => persist.frameWritePending(frame.id)) ?? []
+      if (unsaved.length) {
+        /* idle with unsaved frames means a write failed: try it again */
+        for (const frame of unsaved) persist.retryFrameWrite(frame)
+        continue
+      }
       for (const frame of canvas?.frames ?? []) unloadHtml(frame)
       this.loaded.delete(canvasId)
       evicted++
