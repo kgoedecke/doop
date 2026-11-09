@@ -1,6 +1,39 @@
 /** ⌘ on Mac, Ctrl elsewhere — for the shortcut hints in menus. */
 export const MOD_KEY = /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
+/** The ⌘ / Ctrl chords the canvas page acts on, as `[shift+]key` (key
+ *  lowercased; a shifted digit by its `code`, as ⌘⇧7 types & on US keyboards). A frame document with the focus keeps them from its browser
+ *  defaults (Ctrl+D bookmarking, Ctrl+K the search bar, Ctrl+± page zoom)
+ *  before relaying them, since the page's own preventDefault arrives too
+ *  late to reach that document. ⌘[ / ⌘] would otherwise take the frame's
+ *  document back and forward in its history; `+` is listed shifted and bare,
+ *  since a number pad types it without ⇧. ⌘C and ⌘X are not relayed at all:
+ *  the clipboard is the frame's when text is selected in it. */
+export const CANVAS_MOD_CHORDS = [
+  'z',
+  'shift+z',
+  'y',
+  'k',
+  'd',
+  'a',
+  '.',
+  'shift+h',
+  'shift+l',
+  '0',
+  '=',
+  '-',
+  '+',
+  'shift++',
+  '[',
+  ']',
+  'b',
+  'i',
+  'u',
+  'shift+x',
+  'shift+7',
+  'shift+8',
+]
+
 /** Canvas shortcuts must leave native fields and rich-text editors alone. */
 export function isTypingTarget(target: EventTarget | null): target is HTMLElement {
   return target instanceof HTMLElement && (target.matches('input, textarea, select') || target.isContentEditable)

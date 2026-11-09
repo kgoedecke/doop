@@ -216,6 +216,18 @@ interface ProbeHit {
 /* what a surface click's probe is for; see `probeIntent` */
 type ProbeIntent = 'toolbar' | 'comment' | 'toggle'
 
+/* a key the frame runtime relays from its own document, over its port */
+interface KeyRelay {
+  event: 'keydown' | 'keyup'
+  key: string
+  code: string
+  ctrlKey: boolean
+  metaKey: boolean
+  shiftKey: boolean
+  altKey: boolean
+  repeat: boolean
+}
+
 /* a comment on the frame as a whole, anchored at the point clicked */
 function frameCommentHit(x: number, y: number): ProbeHit {
   return { selector: FRAME_COMMENT_SELECTOR, tag: 'frame', text: '', snippet: '', rect: { x, y, width: 0, height: 0 } }
@@ -666,6 +678,11 @@ export const FrameView = memo(function FrameView({
       /* a click (no drag) on the frame surface targets the element under
          the cursor: probe it and show the element toolbar */
       if (!moved && probeOnClick) probeAt(off.x, off.y, togglesElement ? 'toggle' : 'toolbar')
+      /* a moved frame carries its picked element along, so the pick (and
+         the panel showing it) stays; a press on a layer that cannot move
+         lands here too, and must not close the panel it was meant for. A
+         resize reflows the document under the outline, so it lets go. */
+      else if (moved && mode === 'move') closeElementPopovers()
       else if (moved) closePopovers()
       /* a click (no drag) on the frame name opens the details panel */
       if (!moved && panelOnClick) useStore.getState().setInspectorOpen(true)
@@ -786,14 +803,57 @@ export const FrameView = memo(function FrameView({
      flipped or shifted it away from a viewport edge */
   const menuAt = useRef({ x: 0, y: 0 })
   const [runtimeReady, setRuntimeReady] = useState(false)
+  /* the port the runtime relays keys over; see `replayKey` */
+  const keyPort = useRef<MessagePort | null>(null)
   useEffect(() => {
+    /* a key pressed while the focus sits in this frame's document: replay
+       it on the iframe, where it bubbles to the canvas shortcuts as if the
+       page had the focus. Keys arrive over a private port handed to the
+       runtime before any design script runs, so a script in the frame
+       cannot forge one; a frame without the focus is not heard anyway, and
+       the keys that remove things (⌫, Delete) never travel */
+    function replayKey(ev: MessageEvent) {
+      const iframe = iframeRef.current
+      if (!iframe || document.activeElement !== iframe || !document.hasFocus()) return
+      const relay = ev.data as Partial<KeyRelay> | undefined
+      if (!relay || (relay.event !== 'keydown' && relay.event !== 'keyup')) return
+      if (typeof relay.key !== 'string' || typeof relay.code !== 'string') return
+      const { event, key, code } = relay
+      if (key === 'Backspace' || key === 'Delete') return
+      iframe.dispatchEvent(
+        new KeyboardEvent(event, {
+          key,
+          code,
+          ctrlKey: relay.ctrlKey === true,
+          metaKey: relay.metaKey === true,
+          shiftKey: relay.shiftKey === true,
+          altKey: relay.altKey === true,
+          repeat: relay.repeat === true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    }
     function onMsg(ev: MessageEvent) {
-      if (ev.data?.type === 'doop:frame-ready' && ev.source === iframeRef.current?.contentWindow) {
+      const win = iframeRef.current?.contentWindow
+      if (ev.data?.type === 'doop:frame-ready' && win && ev.source === win) {
+        /* once per document: the ready signal arrives before the design's
+           HTML, so only the runtime can be listening for the port */
+        if (!keyPort.current) {
+          const channel = new MessageChannel()
+          channel.port1.onmessage = replayKey
+          keyPort.current = channel.port1
+          win.postMessage({ type: 'doop:key-port' }, '*', [channel.port2])
+        }
         setRuntimeReady(true)
       }
     }
     window.addEventListener('message', onMsg)
-    return () => window.removeEventListener('message', onMsg)
+    return () => {
+      window.removeEventListener('message', onMsg)
+      keyPort.current?.close()
+      keyPort.current = null
+    }
   }, [])
   /* once the runtime answers, the element panel may talk to this document */
   useEffect(() => {

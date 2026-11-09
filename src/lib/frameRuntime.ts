@@ -2,6 +2,7 @@ import { FRAME_REPLAY_RUNTIME } from './frameReplayRuntime'
 import { FRAME_DROP_RUNTIME } from './frameDropRuntime'
 import { FRAME_PROTO_RUNTIME } from './frameProtoRuntime'
 import { FRAME_TEXT_RUNTIME } from './frameTextRuntime'
+import { CANVAS_MOD_CHORDS } from './keys'
 
 /**
  * Bootstrap document loaded once per frame iframe. The parent posts HTML in
@@ -451,6 +452,85 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     parent.postMessage({ type: 'doop:edit-esc' }, '*')
     parent.postMessage({ type: 'doop:context-menu', x: ev.clientX, y: ev.clientY }, '*')
   }, true)
+
+  /* Focus stays in the frame after text editing ends, and the canvas page
+     never sees a key pressed in here: relay every key, so its shortcuts
+     (undo, delete, tools, Space to pan) keep working. Not while editing
+     text, not in a field of the design, not while a prototype plays, and
+     added ahead of the Escape listener below, which ends editing on the
+     very key it would otherwise see as a canvas Escape. */
+  var CANVAS_MOD_CHORDS = ${JSON.stringify(CANVAS_MOD_CHORDS)}
+  /* keys travel over a MessagePort the parent hands this runtime once, so a
+     design's own script, which shares the window, has nothing to post a
+     forged key through: not the port (it lives in this closure), not
+     postMessage (the parent takes keys from the port alone), and no
+     synthetic event (only trusted ones are relayed). Everything the relay
+     touches is pinned here, before any design script runs: the port's send,
+     Reflect.apply (so no patched Function.prototype.call ever sees the port)
+     and the event's own getters (so a patched prototype cannot turn the key
+     the person pressed into another). */
+  var keyPort = null
+  var portSend = MessagePort.prototype.postMessage
+  var apply = Reflect.apply
+  function getter(proto, name) {
+    var d = Object.getOwnPropertyDescriptor(proto, name)
+    return d && d.get
+  }
+  var readType = getter(Event.prototype, 'type')
+  var readTarget = getter(Event.prototype, 'target')
+  var readTrusted = getter(Event.prototype, 'isTrusted')
+  var readNodeType = getter(Node.prototype, 'nodeType')
+  var readEditable = getter(HTMLElement.prototype, 'isContentEditable')
+  var elementMatches = Element.prototype.matches
+  var keyGetters = {}
+  var KEY_FIELDS = ['key', 'code', 'ctrlKey', 'metaKey', 'shiftKey', 'altKey', 'repeat']
+  for (var kf = 0; kf < KEY_FIELDS.length; kf++) keyGetters[KEY_FIELDS[kf]] = getter(KeyboardEvent.prototype, KEY_FIELDS[kf])
+  function relayKey(ev) {
+    if (!keyPort || editing || protoOn) return
+    /* isTrusted is the event's own, unforgeable property; it is read through
+       the prototype getter only where an engine puts it there */
+    if (!(readTrusted ? apply(readTrusted, ev, []) : ev.isTrusted)) return
+    var t = apply(readTarget, ev, [])
+    if (t && apply(readNodeType, t, []) === 1) {
+      if (apply(elementMatches, t, ['input, textarea, select'])) return
+      if (t instanceof HTMLElement && apply(readEditable, t, [])) return
+    }
+    var k = {}
+    for (var f = 0; f < KEY_FIELDS.length; f++) k[KEY_FIELDS[f]] = apply(keyGetters[KEY_FIELDS[f]], ev, [])
+    var type = apply(readType, ev, [])
+    var mod = (k.metaKey || k.ctrlKey) && !k.altKey
+    var letter = String(k.key).toLowerCase()
+    /* ⌘C / ⌘X stay this document's: the page cannot see text selected in
+       here, and would take the chord for its own selection instead */
+    if (mod && !k.shiftKey && (letter === 'c' || letter === 'x')) return
+    /* ⌫ and Delete are never relayed: the page removes what is selected on them */
+    if (k.key === 'Backspace' || k.key === 'Delete') return
+    var digit = k.shiftKey && /^Digit[0-9]$/.test(k.code) ? k.code.slice(5) : ''
+    var chord = (k.shiftKey ? 'shift+' : '') + letter
+    var byCode = digit ? 'shift+' + digit : chord
+    /* Space would scroll this document while the page pans on it */
+    if (type === 'keydown' && k.key === ' ' && !mod) ev.preventDefault()
+    if (
+      type === 'keydown' &&
+      mod &&
+      (CANVAS_MOD_CHORDS.indexOf(chord) >= 0 || CANVAS_MOD_CHORDS.indexOf(byCode) >= 0)
+    )
+      ev.preventDefault()
+    apply(portSend, keyPort, [
+      {
+        event: type,
+        key: k.key,
+        code: k.code,
+        ctrlKey: k.ctrlKey,
+        metaKey: k.metaKey,
+        shiftKey: k.shiftKey,
+        altKey: k.altKey,
+        repeat: k.repeat,
+      },
+    ])
+  }
+  document.addEventListener('keydown', relayKey)
+  document.addEventListener('keyup', relayKey)
 
   /* Escape pressed with focus inside the frame: the parent never sees the
      key event itself, so relay it (present mode closes on it) */
@@ -1392,6 +1472,9 @@ export const FRAME_BOOTSTRAP = `<!doctype html>
     if (ev.source !== parent) return
     var d = ev.data
     if (!d) return
+    /* the first port offered is the one for life: a later message carrying
+       one could be answering a design script's forged ready signal */
+    if (d.type === 'doop:key-port' && !keyPort && ev.ports && ev.ports[0]) keyPort = ev.ports[0]
     if (d.type === 'doop:inspect') {
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
