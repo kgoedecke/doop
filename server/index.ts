@@ -369,6 +369,11 @@ app.set('trust proxy', 1)
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
 
+/* how many canvases have their frame HTML in memory (store.load / evictIdle) */
+app.get('/healthz/store', (_req, res) => {
+  res.json(store.stats())
+})
+
 /* ------------------------------------------------------------------ */
 /* PostHog relay: the client sends analytics + session-replay traffic  */
 /* to this origin (/relay/...) and we forward it, so ad blockers that  */
@@ -437,8 +442,9 @@ app.use('/relay', async (req, res) => {
 app.get('/i/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }
   if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
-  /* a render needs this frame's html, not its whole canvas */
-  const frame = await store.renderableFrame(id)
+  /* metadata only: a cached image needs no html, and a render reads the
+     one frame's html when it starts (store.renderableFrame) */
+  const frame = store.getFrame(id)
   if (!frame) return res.status(404).end()
 
   /* any multiplier the export picker offers; a missing or unreadable one
@@ -2657,8 +2663,11 @@ wss.on('connection', (ws, upgradeReq) => {
 
     if (msg.type === 'join') {
       const session = await sessionPromise
-      const canvas = await store.load(msg.canvasId)
+      let canvas = store.getCanvas(msg.canvasId)
       if (!session) {
+        /* only a canvas the guest may open is loaded for them */
+        if (canvas && guestCanvasRole(canvas)) canvas = await store.load(msg.canvasId)
+        if (ws.readyState !== WebSocket.OPEN) return
         joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
         return
       }
@@ -2673,6 +2682,14 @@ wss.on('connection', (ws, upgradeReq) => {
       const role = canvasRole(session.user.id, canvas)
       if (!role) {
         ws.close(4403, 'no access')
+        return
+      }
+      await store.load(msg.canvasId)
+      /* a socket that closed while it waited must not join: its close
+         already ran, so it would sit in the room and pin the canvas */
+      if (ws.readyState !== WebSocket.OPEN) return
+      if (!store.getCanvas(msg.canvasId)) {
+        ws.close(4404, 'not found')
         return
       }
       const presence: Presence = {

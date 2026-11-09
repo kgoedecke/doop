@@ -195,16 +195,37 @@ class Store {
     return evicted
   }
 
-  /** A frame with its HTML for a render: the live frame when its canvas is
-   *  loaded, else a copy read from the database, so one thumbnail never
-   *  pulls a whole canvas into memory. */
+  /** A standalone copy of a frame with its HTML, for a render: from memory
+   *  when its canvas is loaded, else read from the database, so one
+   *  thumbnail never pulls a whole canvas into memory. A copy, so a canvas
+   *  dropped while the render waits for a slot cannot take the html away. */
   async renderableFrame(frameId: string): Promise<Frame | undefined> {
     const frame = this.getFrame(frameId)
-    if (!frame || htmlLoaded(frame)) return frame
+    if (!frame) return undefined
+    if (htmlLoaded(frame)) return withHtml(frame, frame.html)
     const html = await persist.loadOneFrameHtml(frameId)
     const current = this.getFrame(frameId)
-    if (!current || htmlLoaded(current)) return current
-    return withHtml(current, html ?? '')
+    if (!current) return undefined
+    return withHtml(current, htmlLoaded(current) ? current.html : (html ?? ''))
+  }
+
+  /** The renderable copy of `frame`, for a render that was handed the
+   *  frame's metadata. A frame the store no longer holds renders as given
+   *  when it carries its html; otherwise this rejects. */
+  async renderSource(frame: Frame): Promise<Frame> {
+    const source = await this.renderableFrame(frame.id)
+    if (source) return source
+    if (htmlLoaded(frame)) return frame
+    throw new Error(`frame ${frame.id} no longer exists`)
+  }
+
+  stats() {
+    return {
+      canvases: this.canvases.size,
+      loaded: this.loaded.size,
+      loading: this.loading.size,
+      held: this.holds.size,
+    }
   }
 
   /** The dashboard row for one canvas. `viewerId` decides only whether the

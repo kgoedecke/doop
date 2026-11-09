@@ -46,6 +46,20 @@ it('sends frame html in the room init after a restart', async () => {
   expect(await owner.joinWs(canvas.id)).toEqual({ kind: 'init' })
 })
 
+/** canvases with frame HTML in memory, as /healthz/store reports it */
+async function loadedCanvases(): Promise<number> {
+  return ((await (await fetch(`${server.base}/healthz/store`)).json()) as { loaded: number }).loaded
+}
+
+/* before the MCP test: an agent's presence keeps its canvas loaded */
+it('drops an idle canvas and loads it again on the next visit', async () => {
+  await expect.poll(loadedCanvases, { timeout: 10_000, interval: 250 }).toBe(0)
+  expect(await storedHtml()).toBe('<p>stored card</p>')
+  expect(await loadedCanvases()).toBe(1)
+  expect((await owner.patch(`/api/frames/${frame.id}`, { html: '<p>after idle</p>' })).status).toBe(200)
+  expect(await storedHtml()).toBe('<p>after idle</p>')
+}, 20_000)
+
 it('reads and edits frame html over MCP', async () => {
   const { secret } = await (await owner.post('/api/agent-keys', { name: 'Lazy agent' })).json()
   const agent = new McpClient({ name: 'lazy-client', version: '1.0.0' })
@@ -57,10 +71,10 @@ it('reads and edits frame html over MCP', async () => {
   try {
     const read = await agent.callTool({ name: 'get_frame', arguments: { frame_id: frame.id, agent_name: 'Lazy' } })
     expect(read.isError).toBeFalsy()
-    expect(JSON.stringify(read.content)).toContain('stored card')
+    expect(JSON.stringify(read.content)).toContain('after idle')
     const edit = await agent.callTool({
       name: 'edit_frame_html',
-      arguments: { frame_id: frame.id, old_str: 'stored card', new_str: 'edited card', agent_name: 'Lazy' },
+      arguments: { frame_id: frame.id, old_str: 'after idle', new_str: 'edited card', agent_name: 'Lazy' },
     })
     expect(edit.isError, JSON.stringify(edit.content)).toBeFalsy()
   } finally {
@@ -68,10 +82,3 @@ it('reads and edits frame html over MCP', async () => {
   }
   expect(await storedHtml()).toBe('<p>edited card</p>')
 })
-
-it('loads an idle canvas again after the sweep dropped it', async () => {
-  await new Promise((resolve) => setTimeout(resolve, 4_000))
-  expect(await storedHtml()).toBe('<p>edited card</p>')
-  expect((await owner.patch(`/api/frames/${frame.id}`, { html: '<p>after idle</p>' })).status).toBe(200)
-  expect(await storedHtml()).toBe('<p>after idle</p>')
-}, 20_000)

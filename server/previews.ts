@@ -1,6 +1,7 @@
 import { env } from './env.ts'
 import type { Frame } from '../shared/types.ts'
 import * as thumbs from './thumbs.ts'
+import { store } from './store.ts'
 
 /**
  * Everything behind GET /i/<frameId>.<ext> except HTTP: the in-process
@@ -71,8 +72,11 @@ export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageRe
     pending = preview
       ? /* renders AND persists — the next cold start serves from storage */
         thumbs.create(frame)
-      : loadScreenshot().then(({ renderFrame }) =>
-          renderFrame(frame, req.scale, { type: req.ext === 'jpg' ? 'jpeg' : 'png', quality: req.quality }),
+      : loadScreenshot().then(async ({ renderFrame }) =>
+          renderFrame(await store.renderSource(frame), req.scale, {
+            type: req.ext === 'jpg' ? 'jpeg' : 'png',
+            quality: req.quality,
+          }),
         )
     remember(key, pending, frame.updatedAt)
   }
