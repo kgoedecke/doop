@@ -11,6 +11,7 @@ import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { byStack } from '../../shared/frameStack.ts'
+import { unloadHtml } from '../frameHtml.ts'
 import type {
   ActivityItem,
   ActorKind,
@@ -414,6 +415,7 @@ export function saveFrame(f: Frame, immediate = false) {
 }
 
 async function writeFrame(f: Frame) {
+  const html = f.html
   const row = {
     id: f.id,
     canvasId: f.canvasId,
@@ -423,7 +425,7 @@ async function writeFrame(f: Frame) {
     y: f.y,
     width: f.width,
     height: f.height,
-    html: f.html,
+    html,
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
     updatedBy: f.updatedBy,
@@ -436,7 +438,54 @@ async function writeFrame(f: Frame) {
   }
   const { id, createdAt, ...set } = row
   await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
-  await syncAssetRefs(f.id, f.html)
+  await syncAssetRefs(f.id, html)
+}
+
+/** A frame write still waiting on its debounce: its canvas must stay loaded
+ *  until it lands, since the write reads the frame's html when it fires. */
+export function frameWritePending(frameId: string): boolean {
+  return frameTimers.has(frameId)
+}
+
+/** Move a frame to another page without touching its html, for a frame
+ *  whose canvas is not loaded (store.init's repair of an orphaned frame). */
+export function saveFramePage(frameId: string, pageId: string) {
+  swallow(writeFramePage(frameId, pageId))
+}
+
+async function writeFramePage(frameId: string, pageId: string) {
+  await db.update(t.frames).set({ pageId }).where(eq(t.frames.id, frameId))
+}
+
+/** The html of every frame on a canvas, for store.load. */
+export function loadFrameHtml(canvasId: string): Promise<{ id: string; html: string }[]> {
+  return db.select({ id: t.frames.id, html: t.frames.html }).from(t.frames).where(eq(t.frames.canvasId, canvasId))
+}
+
+/** One frame's html, for a render of a frame whose canvas is not loaded. */
+export async function loadOneFrameHtml(frameId: string): Promise<string | undefined> {
+  const [row] = await db.select({ html: t.frames.html }).from(t.frames).where(eq(t.frames.id, frameId))
+  return row?.html
+}
+
+const frameMetaColumns = {
+  id: t.frames.id,
+  canvasId: t.frames.canvasId,
+  pageId: t.frames.pageId,
+  name: t.frames.name,
+  x: t.frames.x,
+  y: t.frames.y,
+  width: t.frames.width,
+  height: t.frames.height,
+  createdAt: t.frames.createdAt,
+  updatedAt: t.frames.updatedAt,
+  updatedBy: t.frames.updatedBy,
+  demo: t.frames.demo,
+  hidden: t.frames.hidden,
+  locked: t.frames.locked,
+  z: t.frames.z,
+  rotation: t.frames.rotation,
+  approval: t.frames.approval,
 }
 
 /* Frame design history: one row per burst boundary (see actions.ts), newest
@@ -880,7 +929,9 @@ export async function hydrate(): Promise<Hydrated> {
     memberRows,
   ] = await Promise.all([
     db.select().from(t.canvases),
-    db.select().from(t.frames),
+    /* every column but html: frame HTML is most of the database and loads
+       per canvas when something needs it (store.load) */
+    db.select(frameMetaColumns).from(t.frames),
     db.select().from(t.tasks).orderBy(desc(t.tasks.startedAt)),
     db.select().from(t.feedback).orderBy(desc(t.feedback.at)),
     db.select().from(t.comments).orderBy(desc(t.comments.at)),
@@ -916,8 +967,8 @@ export async function hydrate(): Promise<Hydrated> {
     const c = byId.get(m.canvasId)
     if (c) (c.memberIds ??= []).push(m.userId)
   }
-  for (const f of frameRows)
-    byId.get(f.canvasId)?.frames.push({
+  for (const f of frameRows) {
+    const frame = {
       ...f,
       pageId: f.pageId ?? undefined,
       demo: f.demo ?? undefined,
@@ -925,7 +976,10 @@ export async function hydrate(): Promise<Hydrated> {
       locked: f.locked ?? undefined,
       z: f.z ?? undefined,
       rotation: f.rotation ?? undefined,
-    })
+    } as Frame
+    unloadHtml(frame)
+    byId.get(f.canvasId)?.frames.push(frame)
+  }
   for (const c of canvases) c.frames.sort(byStack)
   for (const r of referenceRows) {
     const c = byId.get(r.canvasId)

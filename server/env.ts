@@ -265,6 +265,8 @@ const schema = {
   MCP_IMPORTS_PER_MIN: perMinute({ default: 5 }),
   SYNC_INGESTS_PER_MIN: perMinute({ default: 30 }),
   PREVIEW_RENDERS_PER_MIN: perMinute({ default: 12 }),
+  /* how long a canvas nobody uses keeps its frame HTML in memory (store.ts) */
+  CANVAS_IDLE_MS: nonNegativeInt({ default: 10 * 60_000 }),
   SYNC_PAGE_INTERVAL_MS: nonNegativeInt({ default: 30_000 }),
   SYNC_FREEZE_MS: nonNegativeInt({ default: 15 * 60_000 }),
 

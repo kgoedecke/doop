@@ -120,6 +120,19 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
   data = await persist.hydrate()
 }
 store.init(data.canvases)
+/* frame HTML is loaded per canvas; a canvas nobody has used for
+   CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it */
+store.setInUse(
+  (canvasId) =>
+    room(canvasId).length > 0 || (agentPresences.get(canvasId)?.size ?? 0) > 0 || actions.isCanvasStreaming(canvasId),
+)
+setInterval(
+  () => {
+    const dropped = store.evictIdle(env.CANVAS_IDLE_MS)
+    if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
+  },
+  Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
+).unref()
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
@@ -147,15 +160,12 @@ seed()
 
 /* asset bookkeeping (no deletion): every upload records its canvas, and
    asset_refs tracks which frames reference which assets — kept in sync on
-   every durable frame write, rebuilt here from the frames hydrate just
-   loaded. Nothing is ever deleted; asset_refs is the ledger any future
-   cleanup would be built on. */
-{
-  const frames = data.canvases.flatMap((c) => c.frames)
-  reconcileAssetRefs(frames)
-    .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
-    .catch((e) => console.error('[assets] reconcile failed', e))
-}
+   every durable frame write, rebuilt here from the stored frames. Nothing
+   is ever deleted; asset_refs is the ledger any future cleanup would be
+   built on. */
+reconcileAssetRefs()
+  .then((n) => n && console.log(`[assets] reconciled ${n} asset ref(s)`))
+  .catch((e) => console.error('[assets] reconcile failed', e))
 
 /* One stray rejection must never take down the multiplayer server: Node's
    default is to exit, which turned a single aborted analytics upload into
@@ -427,7 +437,8 @@ app.use('/relay', async (req, res) => {
 app.get('/i/:id.:ext', async (req, res) => {
   const { id, ext } = req.params as { id: string; ext: string }
   if (ext !== 'png' && ext !== 'jpg') return res.status(404).end()
-  const frame = store.getFrame(id)
+  /* a render needs this frame's html, not its whole canvas */
+  const frame = await store.renderableFrame(id)
   if (!frame) return res.status(404).end()
 
   /* any multiplier the export picker offers; a missing or unreadable one
@@ -739,6 +750,31 @@ app.use('/api', async (req, res, next) => {
     next(err)
   }
 })
+
+/* Every route naming a canvas, frame or comment gets that canvas's frame
+   HTML loaded before its handler runs (store.load), so handlers keep
+   reading the store synchronously. Behind the session gate, so only a
+   signed-in request can bring a canvas into memory. */
+function loadFirst(load: (id: string) => Promise<unknown>): express.RequestHandler {
+  return (req, _res, next) => {
+    load(String(req.params.id)).then(() => next(), next)
+  }
+}
+app.use(
+  '/api/canvases/:id',
+  loadFirst((id) => store.load(id)),
+)
+app.use(
+  '/api/frames/:id',
+  loadFirst((id) => store.loadFrame(id)),
+)
+app.use(
+  '/api/comments/:id',
+  loadFirst(async (id) => {
+    const comment = actions.findComment(id)
+    if (comment) await store.load(comment.canvasId)
+  }),
+)
 
 /* Home's push channel: tells an open dashboard its canvas list changed */
 app.get('/api/me/events', userEvents.subscribe)
@@ -2621,7 +2657,7 @@ wss.on('connection', (ws, upgradeReq) => {
 
     if (msg.type === 'join') {
       const session = await sessionPromise
-      const canvas = store.getCanvas(msg.canvasId)
+      const canvas = await store.load(msg.canvasId)
       if (!session) {
         joinAsGuest(ws, msg.canvasId, msg.clientId, canvas)
         return

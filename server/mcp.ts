@@ -137,6 +137,7 @@ const REVIEW_NUDGE =
   'You have not seen this design yet. Call get_frame_screenshot on it now, judge it against the review checkpoints (fit, spacing, hierarchy, contrast, alignment, realism), and fix any issues before moving on.'
 
 import type { Actor, Frame } from '../shared/types.ts'
+import { loadToolTargets } from './toolLoads.ts'
 
 /** Reaches agents whose session predates set_status (or who skipped the guide). */
 type ToolContent = { content: { type: 'text' | 'image'; [k: string]: unknown }[] }
@@ -387,6 +388,7 @@ export function buildMcpServer(
     if (agent_name) actions.heartbeatAgent(canvasId, actorFrom(agent_name))
   }
   const server = new McpServer({ name: 'doop-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
+  loadToolTargets(server)
   registerFramePreview(server)
 
   server.registerTool(

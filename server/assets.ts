@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { eq } from 'drizzle-orm'
+import { asc, eq, gt } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import * as storage from './storage.ts'
@@ -181,13 +181,28 @@ export async function fetchRemote(rawUrl: string): Promise<Buffer> {
   throw new Error('too many redirects')
 }
 
-/** Rebuild the asset_refs projection from a full set of frames — called at
- *  boot with the frames hydrate just loaded (no extra I/O), which both
- *  backfills pre-existing content and heals any drift from failed
- *  write-through. Incremental upkeep afterwards lives in db/persist.ts. */
-export async function reconcileAssetRefs(frames: { id: string; html: string }[]): Promise<number> {
+const RECONCILE_PAGE = 500
+
+/** Rebuild the asset_refs projection from every stored frame — called at
+ *  boot, which both backfills pre-existing content and heals any drift from
+ *  failed write-through. Frame HTML is read a page at a time, since the
+ *  server no longer holds it all (store.ts). Incremental upkeep afterwards
+ *  lives in db/persist.ts. */
+export async function reconcileAssetRefs(): Promise<number> {
   const rows: { assetId: string; frameId: string }[] = []
-  for (const f of frames) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })
+  let after = ''
+  for (;;) {
+    const page = await db
+      .select({ id: t.frames.id, html: t.frames.html })
+      .from(t.frames)
+      .where(gt(t.frames.id, after))
+      .orderBy(asc(t.frames.id))
+      .limit(RECONCILE_PAGE)
+    for (const f of page) for (const assetId of extractAssetIds(f.html)) rows.push({ assetId, frameId: f.id })
+    const last = page.at(-1)
+    if (!last || page.length < RECONCILE_PAGE) break
+    after = last.id
+  }
   await db.delete(t.assetRefs)
   for (let i = 0; i < rows.length; i += 1000) {
     await db
