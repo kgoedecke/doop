@@ -35,6 +35,8 @@
     "allow-fonts-choose-local",
     "allow-fonts-read-local",
     "allow-view-menu-state",
+    "allow-app-menu-set",
+    "allow-app-menu-state",
     "allow-update-card-ready",
     "allow-update-restart"
   ]

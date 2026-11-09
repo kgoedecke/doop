@@ -42,9 +42,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(target_os = "macos")]
-use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{AboutMetadata, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+mod app_menu;
 #[cfg(target_os = "linux")]
 mod appimage;
 mod claude;
@@ -159,16 +160,36 @@ const CLOSE_TAB: &str = "close-tab";
 /// by "Close Tab" in the File menu. Everything else stays: the app menu
 /// (with Check for Updates added below About), Edit (the predefined items
 /// are what make Cmd+C/V/Z reach the webview at all), View (the canvas's
-/// view toggles and zoom, src/view_menu.rs) and Window.
+/// view toggles and zoom, src/view_menu.rs) and Window. This is the bar until
+/// the page builds its own from the action registry (src/app_menu.rs); a page
+/// older than that keeps it.
 #[cfg(target_os = "macos")]
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<ShellRuntime>> {
+    let file = Submenu::with_items(app, "File", true, &[&close_tab_item(app)?])?;
+    let edit = Submenu::with_items(app, "Edit", true, &text_edit_items(app)?.each())?;
+    let view = view_menu::submenu(app)?;
+    Menu::with_items(
+        app,
+        &[
+            &app_submenu(app)?,
+            &file,
+            &edit,
+            &view,
+            &window_submenu(app)?,
+        ],
+    )
+}
+
+/// The app menu: About, Check for Updates, Services, Hide and Quit.
+#[cfg(target_os = "macos")]
+fn app_submenu(app: &AppHandle) -> tauri::Result<Submenu<ShellRuntime>> {
     let pkg = app.package_info();
     let about = AboutMetadata {
         name: Some(pkg.name.clone()),
         version: Some(pkg.version.to_string()),
         ..Default::default()
     };
-    let app_menu = Submenu::with_items(
+    Submenu::with_items(
         app,
         pkg.name.clone(),
         true,
@@ -183,34 +204,33 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<ShellRuntime>> {
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::quit(app, None)?,
         ],
-    )?;
-    let file = Submenu::with_items(
-        app,
-        "File",
-        true,
-        &[&MenuItem::with_id(
-            app,
-            CLOSE_TAB,
-            "Close Tab",
-            true,
-            Some("Cmd+W"),
-        )?],
-    )?;
-    let edit = Submenu::with_items(
-        app,
-        "Edit",
-        true,
-        &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, None)?,
-            &PredefinedMenuItem::copy(app, None)?,
-            &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?,
-        ],
-    )?;
-    let view = view_menu::submenu(app)?;
+    )
+}
+
+/// File's Close Tab (Cmd+W), relayed to the page as `close-tab`.
+#[cfg(target_os = "macos")]
+fn close_tab_item(app: &AppHandle) -> tauri::Result<MenuItem<ShellRuntime>> {
+    MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("Cmd+W"))
+}
+
+/// The system's text editing commands: AppKit sends them to the focused
+/// field, which is how Cmd+Z / X / C / V / A reach an input in the webview.
+#[cfg(target_os = "macos")]
+fn text_edit_items(app: &AppHandle) -> tauri::Result<MenuEntries> {
+    Ok(MenuEntries(vec![
+        Box::new(PredefinedMenuItem::undo(app, None)?),
+        Box::new(PredefinedMenuItem::redo(app, None)?),
+        Box::new(PredefinedMenuItem::separator(app)?),
+        Box::new(PredefinedMenuItem::cut(app, None)?),
+        Box::new(PredefinedMenuItem::copy(app, None)?),
+        Box::new(PredefinedMenuItem::paste(app, None)?),
+        Box::new(PredefinedMenuItem::select_all(app, None)?),
+    ]))
+}
+
+/// The Window menu, which AppKit fills with the open windows.
+#[cfg(target_os = "macos")]
+fn window_submenu(app: &AppHandle) -> tauri::Result<Submenu<ShellRuntime>> {
     let window = Submenu::with_items(
         app,
         "Window",
@@ -220,7 +240,19 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<ShellRuntime>> {
             &PredefinedMenuItem::maximize(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])
+    window.set_as_windows_menu_for_nsapp()?;
+    Ok(window)
+}
+
+/// A submenu's rows, built in pieces and handed to `Submenu::with_items`.
+#[cfg(target_os = "macos")]
+struct MenuEntries(Vec<Box<dyn IsMenuItem<ShellRuntime>>>);
+
+#[cfg(target_os = "macos")]
+impl MenuEntries {
+    fn each(&self) -> Vec<&dyn IsMenuItem<ShellRuntime>> {
+        self.0.iter().map(|entry| entry.as_ref()).collect()
+    }
 }
 
 /// The Chromium shell's runtime settings. Session cookies outlive a restart
@@ -284,6 +316,7 @@ fn main() {
     let builder = builder
         .manage(claude::ClaudeState::default())
         .manage(fonts::LocalFonts::default())
+        .manage(app_menu::AppMenu::default())
         .invoke_handler(tauri::generate_handler![
             claude::claude_status,
             claude::claude_connect,
@@ -298,6 +331,8 @@ fn main() {
             fonts::fonts_choose_local,
             fonts::fonts_read_local,
             view_menu::view_menu_state,
+            app_menu::app_menu_set,
+            app_menu::app_menu_state,
             updates::update_card_ready,
             updates::update_restart
         ])
@@ -315,6 +350,7 @@ fn main() {
             updates::menu::check(app);
         } else {
             view_menu::relay(app, event.id().as_ref());
+            app_menu::relay(app, event.id().as_ref());
         }
     });
     builder
@@ -387,10 +423,12 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_UPDATE_CARD__ = true;",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_UPDATE_CARD__ = true;",
                 app.package_info().version,
                 std::env::consts::OS,
-                cfg!(any(target_os = "macos", target_os = "windows"))
+                cfg!(any(target_os = "macos", target_os = "windows")),
+                // only macOS has a menu bar for the page to build (app_menu.rs)
+                cfg!(target_os = "macos")
             );
             // macOS never reports the saved path on `Finished`, so remember
             // the destinations chosen on `Requested`, keyed by URL. The same

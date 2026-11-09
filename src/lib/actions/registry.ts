@@ -83,10 +83,19 @@ export interface ActionHost {
 }
 
 let host: ActionHost | null = null
+const hostListeners = new Set<() => void>()
 
 /** The canvas page installs itself as the host while it is mounted. */
 export function setActionHost(next: ActionHost | null) {
   host = next
+  for (const listener of hostListeners) listener()
+}
+
+/** Called whenever the host is installed, replaced or removed (the desktop
+ *  menu bar re-reads what is enabled then); returns the unsubscribe. */
+export function onActionHostChange(listener: () => void): () => void {
+  hostListeners.add(listener)
+  return () => hostListeners.delete(listener)
 }
 
 export type MenuId = 'general' | 'file' | 'edit' | 'view' | 'object' | 'text' | 'arrange' | 'help'
@@ -1015,6 +1024,15 @@ export function isEnabled(action: CanvasAction): boolean {
 /** Run the action from a menu or the palette. */
 export function runAction(action: CanvasAction) {
   if (isEnabled(action)) action.run()
+}
+
+/** Whether one of the action's chords, pressed with the focus in a field
+ *  (`typing`) or not, is the canvas keyboard's to run: the rules
+ *  `dispatchActionKey` applies, for a key that reached the desktop menu bar
+ *  instead of the page. */
+export function takesKey(action: CanvasAction, typing: boolean): boolean {
+  if (!host || host.presenting || action.hintOnly) return false
+  return !typing || !!action.keys?.some((chord) => chord.global)
 }
 
 type KeyEventLike = Pick<
