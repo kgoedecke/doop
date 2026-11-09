@@ -75,6 +75,8 @@ tasks. **Connect AI** in the top bar walks you through each one.
 | Codex (CLI and desktop)                      | `codex mcp add`, OAuth in the browser ([setup](#connect-an-ai-agent))           |
 | ChatGPT                                      | A custom MCP server in ChatGPT, guided by **Connect AI → ChatGPT**              |
 | Cursor                                       | **Add to Cursor** in Connect AI                                                 |
+| Kimi Code                                    | `~/.kimi-code/mcp.json`, then `/mcp-config login doop` (OAuth in the browser)   |
+| DeepSeek Harness (`dsh`)                     | A Streamable HTTP server with an agent key as a bearer header                   |
 | OpenCode, VS Code Copilot, OpenClaw and more | Any MCP client, over OAuth or with an agent key ([setup](#connect-an-ai-agent)) |
 | Headless agents (n8n, Mastra, CI)            | An agent key as a bearer header ([setup](#headless-agents-agent-keys))          |
 

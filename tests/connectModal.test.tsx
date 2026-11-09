@@ -70,7 +70,7 @@ it('opens on the agent picker and walks to an agent’s own steps and back', asy
   await mount('c1')
   expect(text()).toContain('Choose your agent')
   expect(text()).not.toContain('Connect your plan')
-  expect(buttons().filter((b) => b.dataset.slot === 'choice-row')).toHaveLength(7)
+  expect(buttons().filter((b) => b.dataset.slot === 'choice-row')).toHaveLength(9)
 
   await pickAgent('Codex')
   expect(mocks.capture).toHaveBeenCalledWith('connect_ai_agent_chosen', { agent: 'codex' })
@@ -219,3 +219,25 @@ it.each(['https://doop.design', 'http://localhost:4301'])(
     expect(document.querySelector('a[download]')).toBeNull()
   },
 )
+
+it('connects Kimi Code over OAuth, through its mcp.json and /mcp-config login', async () => {
+  await mount('c1')
+  await pickAgent('Kimi Code')
+  expect(mocks.capture).toHaveBeenCalledWith('connect_ai_agent_chosen', { agent: 'kimi-code' })
+  expect(text()).toContain('Connect Kimi Code')
+  expect(text()).toContain('~/.kimi-code/mcp.json')
+  expect(text()).toContain(`"url": "${location.origin}/mcp"`)
+  expect(text()).toContain('/mcp-config login doop')
+  expect(text()).toContain('Work on Doop canvas c1.')
+})
+
+it('connects DeepSeek Harness with an agent key as a bearer header', async () => {
+  await mount('c1')
+  await pickAgent('DeepSeek Harness')
+  expect(text()).toContain('Connect DeepSeek Harness')
+  expect(text()).toContain('transport: streamable-http')
+  expect(text()).toContain(`url: ${location.origin}/mcp`)
+  expect(text()).toContain('Authorization: Bearer dpk_…')
+  await click('Open Settings → Agent keys')
+  expect(text()).toContain('Work on Doop canvas c1.')
+})
