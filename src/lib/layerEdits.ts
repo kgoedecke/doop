@@ -1,5 +1,6 @@
 import type { TextFormatCommand } from './richText'
 import type { Frame } from '../../shared/types'
+import { ELEMENT_ID_ATTR } from '../../shared/elementId'
 import type { ReorderMove } from './keys'
 import { restack, roomAt, stackOf, type StackWrite } from '../../shared/frameStack'
 import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
@@ -14,6 +15,7 @@ import {
   dropEntry,
   historyEpoch,
   keepTransferDestination,
+  recordCreate,
   recordDrawingTransfer,
   recordLayerName,
   recordStack,
@@ -30,6 +32,7 @@ import {
   elementHtml,
   elementIdAt,
   elementName,
+  elementPath,
   freshElementId,
   htmlWithoutLayerNames,
   isElementHidden,
@@ -42,6 +45,7 @@ import {
   setElementsHidden,
   reorderElements,
   shiftElement,
+  uniqueIdsIn,
   type DropTarget,
   type FlowPlacement,
   type MovedElement,
@@ -485,6 +489,153 @@ export function dropLayer(pressed: Frame, selector: string, target: DropTarget, 
   const frame = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
   if (!frame || frame.html !== pressed.html) return false
   return moveLayer(frame, selector, target, flow)
+}
+
+/** Finish an ⌥⇧ drag that began on `pressed`: a copy of the element lands
+ *  next to, or into, the target and the original stays, one undo step. The
+ *  target was found in the document holding the copy right after the
+ *  original, which is the one the copy is moved in. */
+export function dropLayerCopy(pressed: Frame, selector: string, target: DropTarget, flow?: FlowPlacement): boolean {
+  const frame = useStore.getState().canvas?.frames.find((f) => f.id === pressed.id)
+  if (!frame || frame.html !== pressed.html || isLayerLocked(frame, selector)) return false
+  const duplicated = duplicateElements(frame.html, [selector])
+  const copy = duplicated?.selectors[0]
+  if (!duplicated || !copy) return false
+  /* the copy takes room in the flow right after the original, so a drag
+     that ends on that room is no move: the copy stays there */
+  const moved =
+    moveElement(duplicated.html, copy, target, flow) ??
+    (inOwnSlot(duplicated.html, copy, target) ? { html: duplicated.html, selector: copy } : null)
+  return commitMove(frame, moved)
+}
+
+/* a drop that would put the element where it already is */
+function inOwnSlot(html: string, selector: string, target: DropTarget): boolean {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  let el: Element | null
+  let at: Element | null
+  try {
+    el = doc.querySelector(selector)
+    at = doc.querySelector(target.selector)
+  } catch {
+    return false
+  }
+  if (!el || !at) return false
+  if (target.place === 'before') return at === el || el.nextElementSibling === at
+  if (target.place === 'after') return at === el || el.previousElementSibling === at
+  return false
+}
+
+/** A box on the canvas, in world px. */
+export interface WorldRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** The page a copy of the layer shows on by itself: a standalone element's
+ *  document, the layer filling it with the CSS it relies on in its frame.
+ *  Null when the selector no longer resolves. */
+export function layerCopyDocument(html: string, selector: string): string | null {
+  const markup = elementHtml(html, selector)
+  if (!markup) return null
+  const scope = newScope()
+  const doc = standaloneDocument(scopeMarkup(withoutElementIds(markup), scope))
+  return doc ? withCarriedCss(doc, carriedCss(html, selector, scope), scope) : null
+}
+
+/** Finish an ⌥⇧ drag let go off its frame: a copy of the layer lands at
+ *  `rect`, inside `into` when it was let go over a frame, else on the canvas
+ *  as a standalone element of its own. One undo step; the source keeps its
+ *  layer. False when the source or destination changed during the gesture,
+ *  either is locked, or the copy could not be made. */
+export async function copyLayerOut(pressed: Frame, selector: string, rect: WorldRect, into?: Frame): Promise<boolean> {
+  const frames = useStore.getState().canvas?.frames ?? []
+  const source = frames.find((f) => f.id === pressed.id)
+  if (!source || source.html !== pressed.html || isLayerLocked(source, selector)) return false
+  const box = {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.max(1, Math.round(rect.width)),
+    height: Math.max(1, Math.round(rect.height)),
+  }
+  if (into) {
+    const dest = frames.find((f) => f.id === into.id)
+    if (!dest || dest.html !== into.html || dest.locked) return false
+    const placed = placedCopy(source.html, selector, dest, box)
+    if (!placed) return false
+    saveFrameHtml(dest, placed.html)
+    const store = useStore.getState()
+    store.select(dest.id)
+    store.setSelectedElement({ frameId: dest.id, selector: placed.selector })
+    return true
+  }
+  const html = layerCopyDocument(source.html, selector)
+  if (!html) return false
+  const [node] = buildLayerTree(`<body>${elementHtml(source.html, selector) ?? ''}</body>`)
+  let created: Frame
+  try {
+    created = await api.createFrame(source.canvasId, {
+      name: node?.label ?? 'Layer',
+      pageId: source.pageId,
+      ...box,
+      html,
+    })
+  } catch (err) {
+    useStore.getState().pushNotice(errorMessage(err, 'Couldn’t copy the layer onto the canvas'))
+    return false
+  }
+  const store = useStore.getState()
+  if (store.canvas?.id !== source.canvasId) return true
+  store.upsertFrame(created)
+  recordCreate(created)
+  store.select(created.id)
+  const [shape] = buildLayerTree(created.html)
+  if (shape) store.setSelectedElement({ frameId: created.id, selector: shape.selector })
+  return true
+}
+
+/* the destination's HTML with a copy of the layer placed at `box`, the
+   rendered box the drag measured (transforms are baked into it), and the
+   copy's selector there */
+function placedCopy(
+  sourceHtml: string,
+  selector: string,
+  dest: Frame,
+  box: WorldRect,
+): { html: string; selector: string } | null {
+  const markup = elementHtml(sourceHtml, selector)
+  if (!markup) return null
+  const scope = newScope()
+  const doc = new DOMParser().parseFromString(dest.html, 'text/html')
+  const tpl = doc.createElement('template')
+  tpl.innerHTML = scopeMarkup(withoutElementIds(markup), scope)
+  const el = tpl.content.firstElementChild as HTMLElement | SVGElement | null
+  if (!el) return null
+  for (const name of ['transform', 'translate', 'scale', 'rotate']) el.style.setProperty(name, 'none', 'important')
+  for (const [name, value] of [
+    ['position', 'absolute'],
+    ['left', `${box.x - dest.x}px`],
+    ['top', `${box.y - dest.y}px`],
+    ['width', `${box.width}px`],
+    ['height', `${box.height}px`],
+    ['margin', '0'],
+    ['box-sizing', 'border-box'],
+  ] as const)
+    el.style.setProperty(name, value)
+  const css = renameInCss(carriedCss(sourceHtml, selector, scope), uniqueIdsIn(doc, el))
+  doc.body.append(el)
+  const html = withCarriedCss('<!doctype html>\n' + doc.documentElement.outerHTML, css, scope)
+  return html ? { html, selector: elementPath(el) } : null
+}
+
+/* a copy is a new element: comments and links stay on the original */
+function withoutElementIds(markup: string): string {
+  const tpl = document.createElement('template')
+  tpl.innerHTML = markup
+  for (const el of tpl.content.querySelectorAll(`[${ELEMENT_ID_ATTR}]`)) el.removeAttribute(ELEMENT_ID_ATTR)
+  return tpl.innerHTML
 }
 
 /** Whether a layer from another frame may be dropped into `frame`: not a

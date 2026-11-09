@@ -982,6 +982,142 @@ describe.skipIf(!findBrowserPath())('drawing on the canvas', { timeout: 30_000 }
     expect(saved[0]!.html).toContain('transform: rotate(10deg)')
   })
 
+  it('⌥⇧-drags a copy of the picked layer, leaving the original, as one undo step', async () => {
+    const source = layerFrame(
+      '<div id="rect" data-doop-id="keep" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
+    )
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    const before = await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    // 2px short of the frame's centre line: the copy snaps onto it, ⌥ held or not
+    await drag([before.x + 50, before.y + 40], [before.x + 308, before.y + 140])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    expect(saved).toHaveLength(1)
+    const [original, copy] = await page.evaluate((html) => {
+      const divs = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('div')]
+      return divs.map((el) => ({ id: el.id, doopId: el.getAttribute('data-doop-id'), style: el.getAttribute('style') }))
+    }, saved[0]!.html)
+    expect(original).toMatchObject({ id: 'rect', doopId: 'keep' })
+    expect(original!.style).toContain('left:40px')
+    expect(copy).toMatchObject({ id: 'rect-copy', doopId: null })
+    const moved = await visibleDrawing('Layers', '#rect-copy')
+    expect(moved.x - before.x).toBeCloseTo(260, 0)
+    expect(moved.y - before.y).toBeCloseTo(100, 0)
+    expect(await visibleDrawing('Layers', '#rect')).toEqual(before)
+    const state = await page.evaluate(() => window.drawingHarness.state())
+    expect(state.frames).toHaveLength(1)
+    expect(state.selectedElement?.selector).not.toBe('#rect')
+    await page.evaluate(() => window.drawingHarness.undo())
+    await expect.poll(() => saved[0]!.html).toBe(source.html)
+  })
+
+  it.each(['canvas', 'frame'])('⌥⇧-drags a copy of the picked layer off its frame onto the %s', async (onto) => {
+    const source = layerFrame(
+      '<div id="rect" data-doop-id="keep" style="position:absolute;left:40px;top:40px;width:100px;height:80px;background:coral"></div>',
+    )
+    const other: Frame = {
+      ...layerFrame('<p style="margin:0">Other</p>'),
+      id: 'other',
+      name: 'Other',
+      x: 900,
+      y: 50,
+      width: 250,
+      height: 300,
+    }
+    await seedFrames(onto === 'frame' ? [source, other] : [source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#rect' }))
+    const before = await visibleDrawing('Layers', '#rect')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await page.mouse.move(before.x + 50, before.y + 40)
+    await page.mouse.down()
+    // world x 110 → 863: clear of every edge, so nothing snaps
+    await page.mouse.move(before.x + 803, before.y + 70, { steps: 8 })
+    await page.waitForSelector(
+      onto === 'frame' ? '[data-drawing-drop-target="other"]' : 'iframe[title="Moving drawing"]',
+    )
+    await page.mouse.up()
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    if (onto === 'canvas') {
+      await expect.poll(() => saved.length).toBe(2)
+      const copy = saved[1]!
+      expect(copy).toMatchObject({ x: 863, y: 120, width: 100, height: 80, pageId: 'first' })
+      expect(copy.html).toContain('data-doop-canvas-element')
+      expect(copy.html).not.toContain('data-doop-id')
+    } else {
+      await expect.poll(() => patchRequests).toBe(1)
+      const html = saved.find((f) => f.id === 'other')!.html
+      expect(html).toContain('left: -37px')
+      expect(html).toContain('top: 70px')
+      expect(html).not.toContain('data-doop-id')
+    }
+    /* the source never changed: the original is still there, in its place */
+    expect(saved.find((f) => f.id === 'layers')!.html).toBe(source.html)
+    expect(await visibleDrawing('Layers', '#rect')).toEqual(before)
+    expect(await (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!.$$('#rect-copy')).toHaveLength(0)
+    await page.evaluate(() => window.drawingHarness.undo())
+    if (onto === 'canvas') await expect.poll(() => saved.length).toBe(1)
+    else await expect.poll(() => saved.find((f) => f.id === 'other')!.html).toBe(other.html)
+  })
+
+  it('⌥⇧-drags a copy of a flow layer onto the room it takes below the original', async () => {
+    const source = layerFrame(`<style>body { display:flex; flex-direction:column; padding:40px }</style>
+      <h1 data-doop-id="keep" style="margin:0;font-size:40px">Title</h1><p style="margin:0">Lede</p>`)
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 40, y: 20, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: 'body > h1' }))
+    const title = await visibleDrawing('Layers', 'body > h1')
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await drag([title.x + 20, title.y + 10], [title.x + 20, title.y + 10 + title.height])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    const [original, copy] = await page.evaluate((html) => {
+      const h1s = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('h1')]
+      return h1s.map((el) => ({ doopId: el.getAttribute('data-doop-id'), next: el.nextElementSibling?.tagName }))
+    }, saved[0]!.html)
+    expect(original).toEqual({ doopId: 'keep', next: 'H1' })
+    expect(copy).toEqual({ doopId: null, next: 'P' })
+    expect((await page.evaluate(() => window.drawingHarness.state())).selectedElement?.selector).toMatch(
+      /h1:nth-of-type\(2\)$/,
+    )
+  })
+
+  it('⌥⇧-drags a copy of a flow layer into another box, and Escape leaves nothing behind', async () => {
+    const source = layerFrame(flowBoxes)
+    await seedFrames([source])
+    await page.evaluate(() => window.drawingHarness.viewport({ x: 0, y: 0, zoom: 1 }))
+    await page.evaluate(() => window.drawingHarness.pick({ frameId: 'layers', selector: '#photo' }))
+    const photo = await visibleDrawing('Layers', '#photo')
+    const into = await visibleDrawing('Layers', '#into')
+    const iframe = (await (await page.$('iframe[title="Layers"]'))!.contentFrame())!
+    await page.keyboard.down('Alt')
+    await page.keyboard.down('Shift')
+    await page.mouse.move(photo.x + 30, photo.y + 20)
+    await page.mouse.down()
+    await page.mouse.move(into.x + 50, into.y + 40, { steps: 5 })
+    await page.waitForSelector('[data-element-drop-indicator]')
+    await page.keyboard.press('Escape')
+    await page.mouse.up()
+    await expect.poll(() => iframe.$$eval('img', (imgs) => imgs.length)).toBe(1)
+    expect(patchRequests).toBe(0)
+    await drag([photo.x + 30, photo.y + 20], [into.x + 50, into.y + 40])
+    await page.keyboard.up('Shift')
+    await page.keyboard.up('Alt')
+    await expect.poll(() => patchRequests).toBe(1)
+    await iframe.waitForSelector('#into > img')
+    expect(await iframe.$$eval('#from > img#photo', (imgs) => imgs.length)).toBe(1)
+    expect(saved).toHaveLength(1)
+  })
+
   it("drags a layer inside a turned frame along the document's own axes, picking the layer under the pointer", async () => {
     const source = { ...layerFrame(rectangle), rotation: 90 }
     await seedFrames([source])
