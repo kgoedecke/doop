@@ -43,11 +43,35 @@ fn base_font_context() -> FontContext {
                 collection: Collection::new(CollectionOptions { shared: false, system_fonts: true }),
             };
             ctx.collection.register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
+            add_symbol_fallbacks(&mut ctx.collection);
             Mutex::new(ctx)
         })
         .lock()
         .unwrap()
         .clone()
+}
+
+/// System families that carry the symbols pages use as text (★ ✓ → ● ⌘ ✦), first match wins.
+/// System Font and Apple Symbols come first, as WebKit's cascade picks them; a family the
+/// device lacks is skipped.
+const SYMBOL_FAMILIES: &[&str] =
+    &["System Font", "Apple Symbols", "Hiragino Sans", "Menlo", "Zapf Dingbats", "STIX Two Math"];
+
+/// Fontique finds a fallback per script from one sample letter, and symbols belong to no
+/// script of their own: a ★ in a Latin run only gets the Latin fallback (Helvetica), and a
+/// run of symbols and digits gets none. On macOS Helvetica happens to carry ★; on iOS it
+/// does not, so the glyph came from LastResort. Append the symbol families after the
+/// system's own fallback for Latin and for the common, inherited and unknown scripts.
+fn add_symbol_fallbacks(collection: &mut parley::fontique::Collection) {
+    use parley::fontique::{FallbackKey, Script};
+    let symbols: Vec<_> = SYMBOL_FAMILIES.iter().filter_map(|name| collection.family_id(name)).collect();
+    for script in [*b"Latn", *b"Zyyy", *b"Zinh", *b"Zzzz"] {
+        let key = FallbackKey::new(Script::from_bytes(script), None);
+        // Asking first records the system's own choice, which appending would otherwise replace.
+        let system: Vec<_> = collection.fallback_families(key).collect();
+        let extra = symbols.iter().copied().filter(|id| !system.contains(id));
+        collection.append_fallbacks(key, extra);
+    }
 }
 
 fn runtime() -> &'static tokio::runtime::Runtime {
