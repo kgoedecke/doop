@@ -20,6 +20,7 @@
           useStore.getState().setCanvas(canvas)
         },
         viewport: (viewport) => useStore.getState().setViewport(viewport),
+        comments: (comments) => useStore.getState().setComments(comments),
         select: (ids) => useStore.getState().selectMany(ids),
         state: () => ({
           rulers: useStore.getState().rulers,

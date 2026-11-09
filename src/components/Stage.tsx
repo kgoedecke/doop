@@ -47,6 +47,7 @@ import {
 import { TOOLS, isDrawingTool, resolvePointerAction, toolForKey, type Tool } from '../lib/tools'
 import { useCanvasDrawing } from './CanvasDrawing'
 import { FrameLabelLayer } from './FrameLabelLayer'
+import { pixelGridLines } from './PixelGrid'
 import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
@@ -318,6 +319,8 @@ export function Stage({
         const opacity = useStore.getState().viewOptions.pixelGrid ? pixelGridOpacity(vp.zoom) : 0
         pixels.hidden = opacity === 0
         pixels.style.opacity = String(opacity)
+        /* the frames' own grids read the same fade */
+        stage.style.setProperty('--pixel-grid', String(opacity))
         pixels.style.backgroundSize = `${vp.zoom}px ${vp.zoom}px`
         const px = (((vp.x % vp.zoom) + vp.zoom) % vp.zoom) - vp.zoom
         const py = (((vp.y % vp.zoom) + vp.zoom) % vp.zoom) - vp.zoom
@@ -1184,6 +1187,17 @@ export function Stage({
               className="pointer-events-none absolute left-0 top-0 origin-top-left will-change-transform [background-image:radial-gradient(circle,var(--dot)_1.2px,transparent_1.2px)]"
               ref={gridRef}
             />
+            {/* the pixel grid over the bare paper. Each frame draws its own over
+                its document (FrameView's PixelGrid), under its pins, threads and
+                grips, so nothing the canvas puts over the frames is gridded;
+                it never takes the pointer */}
+            <div
+              hidden
+              data-pixel-grid="paper"
+              className="pointer-events-none absolute left-0 top-0 h-[calc(100%+16px)] w-[calc(100%+16px)] origin-top-left will-change-transform"
+              style={pixelGridLines(1)}
+              ref={pixelGridRef}
+            />
             {/* `world` is likewise a behaviour hook: pan hit-testing checks
             classList.contains('world') to tell background from frame */}
             <div
@@ -1208,13 +1222,6 @@ export function Stage({
                 />
               )}
             </div>
-            {/* the pixel grid lies over the frames, not under them, so it lines
-                up their content; it never takes the pointer */}
-            <div
-              hidden
-              className="pointer-events-none absolute left-0 top-0 h-[calc(100%+16px)] w-[calc(100%+16px)] origin-top-left will-change-transform [--pixel-line:rgb(128_128_128/0.16)] [background-image:linear-gradient(to_right,var(--pixel-line)_1px,transparent_1px),linear-gradient(to_bottom,var(--pixel-line)_1px,transparent_1px)]"
-              ref={pixelGridRef}
-            />
             {/* the selected frame's size badge, in screen px (FrameLabelLayer); after
                 the world so no frame, however it stacks, covers it */}
             <div className="pointer-events-none absolute inset-0" ref={setLabelLayer} />

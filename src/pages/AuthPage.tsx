@@ -11,6 +11,7 @@ import { signupLanding } from '../../shared/firstCanvas'
 import { isDesktopShell } from '../lib/shell'
 import { posthog } from '../lib/posthog'
 import { AuthCard, AuthCardText, AuthScreen } from '../components/ui/screen'
+import { ServerSettings } from '../components/ServerSettings'
 import { Button } from '../components/ui/button'
 import { ArrowRightIcon } from '../components/ui/icons'
 import { Input } from '../components/ui/input'
@@ -364,6 +365,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
 
   return (
     <AuthScreen>
+      <ServerSettings />
       <AuthCard as="form" title={t(TITLES[mode])} onSubmit={submit}>
         <AuthCardText className="mb-2">
           {mode === 'forgot' ? (

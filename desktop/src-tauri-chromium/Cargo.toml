@@ -38,6 +38,10 @@ toml_edit = "0.25"
 tempfile = "3"
 rfd = "0.16"
 tokio = { version = "1", features = ["time"] }
+# The check that a server picked in the app is a Doop server (src/server.rs);
+# the same reqwest and ring-backed rustls the updater already links.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }

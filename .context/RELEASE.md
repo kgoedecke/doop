@@ -83,6 +83,15 @@ in `.github/actions/setup-desktop`:
   events; the page mirrors its state back through `view_menu_state` (`src/lib/viewMenu.ts`,
   gated on `window.__DOOP_VIEW_MENU__`), so checkmarks follow it and canvas items are disabled
   off a canvas. Only ⌘ shortcuts are bound in the menu; ⇧R / ⇧1 / ⇧2 stay with the page.
+- Server choice (`desktop/src-tauri/src/server.rs`, `src/components/ServerSettings.tsx`): the
+  sign-in screen's cog (shells advertising `__DOOP_SERVER_CHOOSE__`) points an official build at a
+  self-hosted server. `server_choose` normalizes the address to an origin (https, or http on loopback only),
+  checks `/api/locale-config` answers and takes the origin any redirect lands on, confirms natively, writes `server.json` in the app data dir and
+  restarts; at launch the chosen origin gets `capabilities/default.json` as a runtime capability
+  and the navigation allowlist. A chosen server that does not answer at launch gets a native Try Again / Use doop.design dialog
+  (`check_on_launch`, every platform); macOS also has "Use doop.design…" in the app menu. Official builds
+  keep updating from the doop.design feed whatever server is chosen. Tests: the Rust unit tests in
+  `server.rs`, `serverSettings.test.tsx`.
 - The shell tells the page its platform via `window.__DOOP_DESKTOP_PLATFORM__` (read in
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
 - Desktop app version is tracked separately from the root `package.json` and bumped by

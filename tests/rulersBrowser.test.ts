@@ -2,13 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { HTTPRequest, Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { fixtureUrl, openBrowser, type TestBrowser } from './browser'
-import type { Canvas, CanvasGuide, Frame } from '../shared/types'
+import type { Canvas, CanvasGuide, ElementComment, Frame } from '../shared/types'
 
 declare global {
   interface Window {
     rulersHarness: {
       seed: (canvas: Canvas) => void
       viewport: (viewport: { x: number; y: number; zoom: number }) => void
+      comments: (comments: ElementComment[]) => void
       select: (ids: string[]) => void
       state: () => { rulers: boolean; frames: Frame[]; guides: CanvasGuide[]; selectedGuideId: string | null }
       undo: () => Promise<void>

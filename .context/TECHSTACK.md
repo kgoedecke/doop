@@ -81,8 +81,15 @@
   catalog, `CHATGPT_MODELS_URL`, asked with the account's token as Codex CLI
   `CHATGPT_CODEX_CLIENT_VERSION`; the route refreshes the token first) have loaders, each with a
   family filter for reasoning chat models with tools, images and a 16k output window; a picked id
-  only has to be shaped like the provider's, and the run is the final check. OpenRouter stays on
-  its curated roster (the run-time vision check knows only the roster's flags).
+  only has to be shaped like the provider's, and the run is the final check. OpenRouter, DeepSeek,
+  Kimi and Kimi Code stay on their curated rosters (the run-time vision check knows only the roster's flags).
+- DeepSeek and Kimi keys (`deepseek-key`, `kimi-key`) and the Kimi Code plan (`kimi-code`, a
+  Kimi membership's key, sent with a `Doop/<version>` User-Agent as Kimi Code's terms require)
+  run on the Chat Completions transport (`server/chatCompletionsAgent.ts`) against fixed URLs
+  (`DEEPSEEK_CHAT_URL`, `KIMI_CHAT_URL`, `KIMI_CODE_CHAT_URL`, an operator's override only). Both refuse a tool-calling conversation that drops an earlier turn's
+  `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
+  sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
+  `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
 - Reasoning effort on a user's OpenAI account (ChatGPT subscription or OpenAI key): the pick lives
   in `model_accounts.reasoning_effort` (`REASONING_EFFORTS` in `shared/modelMenu.ts`: low / medium /
   high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
@@ -291,7 +298,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   float32 whose inverse multiplies back to exactly 1, since engines multiply zoom in float32.
   WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
   scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the
-  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%). Frame
+  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%): the
+  Stage draws it over the bare paper, under the world, and each frame draws its own over its
+  document and under its chrome (`PixelGrid.tsx`, faded by `--pixel-grid`), so pins, threads,
+  grips, cursors and guides stay above it. Tests: `pixelGridBrowser.test.ts`. Frame
   names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every
   zoom and stack with their own frame (a later frame covers an earlier frame's name, never the
   reverse). The selected frame's size badge lives in a screen-space layer (`FrameLabelLayer`),
