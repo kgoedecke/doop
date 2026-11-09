@@ -34,7 +34,7 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
   numbers, key caps, code); the mono-uppercase caption voice is retired, captions and field labels
   are `text-caption` / `text-label` in sentence case. `--font-hero`: `'Hanken Grotesk'` Light - the
   home greeting, and nothing else (loaded in `index.html`). Every font stack lists `'Doop Keys'`
-  after its face: a 5 KB cut of the full Inter (`src/assets/fonts/inter-keys.woff2`) carrying only
+  after its face: a 5 KB cut of the full Inter, inlined in `src/styles.css`, carrying only
   the key symbols (⌘ ⌥ ⇧ ⌃ ⌫ ↩ ⇥ ⎋, arrows) the Google Fonts builds of Inter and Geist Mono drop, so
   shortcut hints never fall back to the OS font's undersized glyphs. A new symbol in a hint goes
   into its `unicode-range` and the subset (rebuild steps in `src/styles.css`). There is no
