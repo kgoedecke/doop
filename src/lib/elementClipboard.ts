@@ -1,8 +1,9 @@
 import type { Frame } from '../../shared/types'
 import { elementsHtml, insertElements, isElementLocked } from './layers'
-import { isStandalonePick, saveFrameHtml } from './layerEdits'
+import { deleteSelection, isStandalonePick, saveFrameHtml } from './layerEdits'
 import { copyFrames } from './frameClipboard'
-import { useStore } from './store'
+import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
+import { writeCanvasClipboard } from './canvasClipboard'
 import { ELEMENT_CLIP_KEY, ELEMENT_CLIP_STYLE_KEY, FRAME_CLIP_KEY } from './clipboardKeys'
 import { carriedCss, newScope, renameInCss, SCOPE_ATTR, withCarriedCss } from './styleCarry'
 
@@ -20,6 +21,40 @@ export function copyPicked(frame: Frame, selectors: string[]): boolean {
     return true
   }
   return copyLayers(frame, selectors)
+}
+
+/** What ⌘C copies now: the picked elements, else the selected frames;
+ *  null when nothing is selected. */
+function selectionCopy(): (() => boolean | void) | null {
+  const state = useStore.getState()
+  const picked = state.selectedElement
+  if (picked) {
+    const frame = state.canvas?.frames.find((f) => f.id === picked.frameId)
+    if (!frame) return null
+    const selectors = pickedSelectors(state)
+    return () => copyPicked(frame, selectors)
+  }
+  const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
+  return frames.length ? () => copyFrames(frames) : null
+}
+
+/** ⌘C: put the selection on the clipboard. False when there was nothing to copy. */
+export function copySelection(data?: DataTransfer): boolean {
+  const copy = selectionCopy()
+  return !!copy && writeCanvasClipboard(copy, data)
+}
+
+/** ⌘X: copy the selection, then remove it the way ⌫ does (one undo step;
+ *  locked frames and layers stay, copied). Editors only, and nothing is
+ *  removed unless the copy landed. */
+export function cutSelection(data?: DataTransfer): boolean {
+  if (!canEditOpenCanvas(useStore.getState())) return false
+  const copy = selectionCopy()
+  if (!copy) return false
+  return writeCanvasClipboard(() => {
+    if (copy() === false) return false
+    deleteSelection()
+  }, data)
 }
 
 /** Copy the elements in document order; a paste lands them together. */

@@ -110,6 +110,20 @@ export function FrameContextMenu({
         </ContextMenuItem>
         {!readOnly && (
           <>
+            <ContextMenuItem
+              disabled={allLocked}
+              onSelect={() => {
+                const frames = groupFrames()
+                if (!frames.length) return
+                writeCanvasClipboard(() => {
+                  copyFrames(frames)
+                  deleteSelection()
+                })
+              }}
+            >
+              {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
+              <MenuHint>{MOD_KEY}X</MenuHint>
+            </ContextMenuItem>
             {onRename && (
               <ContextMenuItem disabled={isStackLocked(frame)} onSelect={() => (renameRequested.current = true)}>
                 {t('panels.layersRename')}

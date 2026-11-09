@@ -76,6 +76,7 @@ export const stage: Catalog['stage'] = {
   deleteElement: 'Excluir elemento',
   deleteFrame: 'Excluir frame',
   copyFrames: 'Copiar {count} frames',
+  cutFrames: 'Recortar {count} frames',
   duplicateFrames: 'Duplicar {count} frames',
   showFrames: 'Mostrar {count} frames',
   hideFrames: 'Ocultar {count} frames',

@@ -62,7 +62,6 @@ import { importSources } from '../components/importSourceList'
 import { PresentMode } from '../components/PresentMode'
 import { getIdentity, setName } from '../lib/identity'
 import {
-  copyFrames,
   dropFiles,
   duplicateFrames,
   hasFrameClip,
@@ -82,8 +81,8 @@ import {
   formatSelectionText,
 } from '../lib/layerEdits'
 import type { TextFormatCommand } from '../lib/richText'
-import { copyPicked, hasElementClip, pasteLayer } from '../lib/elementClipboard'
-import { isCanvasClipboard, writeCanvasClipboard } from '../lib/canvasClipboard'
+import { copySelection, cutSelection, hasElementClip, pasteLayer } from '../lib/elementClipboard'
+import { isCanvasClipboard } from '../lib/canvasClipboard'
 import { authClient } from '../lib/auth'
 import { avatarUrl } from '../../shared/avatar'
 import { posthog } from '../lib/posthog'
@@ -519,25 +518,22 @@ export function CanvasPage({
     return () => window.removeEventListener('keydown', onKey)
   }, [canvasId, guest, hideUiActive, presenting]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Native copy/paste events let us write the selection's token and read
+  /* Native copy/cut/paste events let us write the selection's token and read
      clipboard images without asking for clipboard-read permission. */
   useEffect(() => {
+    /* a ClipboardEvent carries no repeat flag, so the keydown behind it is
+       remembered: a held ⌘X must not cut the element and then the frame
+       under it, as a held ⌫ must not delete them */
+    let held = false
+    const onKeyDown = (e: KeyboardEvent) => void (held = e.repeat)
+    const ours = (e: ClipboardEvent) =>
+      !isTypingTarget(e.target) && !window.getSelection()?.toString() && !!e.clipboardData
     function onCopy(e: ClipboardEvent) {
-      if (isTypingTarget(e.target) || window.getSelection()?.toString() || !e.clipboardData) return
-      const state = useStore.getState()
-      const picked = state.selectedElement
-      const frame = state.canvas?.frames.find((f) => f.id === picked?.frameId)
-      let copy: () => boolean | void
-      if (picked) {
-        if (!frame) return
-        const selectors = pickedSelectors(state)
-        copy = () => copyPicked(frame, selectors)
-      } else {
-        const frames = state.canvas?.frames.filter((f) => state.selectedIds.includes(f.id)) ?? []
-        if (!frames.length) return
-        copy = () => copyFrames(frames)
-      }
-      if (writeCanvasClipboard(copy, e.clipboardData)) e.preventDefault()
+      if (ours(e) && copySelection(e.clipboardData!)) e.preventDefault()
+    }
+    function onCut(e: ClipboardEvent) {
+      if (!ours(e)) return
+      if (held || cutSelection(e.clipboardData!)) e.preventDefault()
     }
     function onPaste(e: ClipboardEvent) {
       if (isTypingTarget(e.target)) return
@@ -571,10 +567,14 @@ export function CanvasPage({
         pasteFrameCentered(canvasId)
       }
     }
+    window.addEventListener('keydown', onKeyDown, true)
     window.addEventListener('copy', onCopy)
+    window.addEventListener('cut', onCut)
     window.addEventListener('paste', onPaste)
     return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
       window.removeEventListener('copy', onCopy)
+      window.removeEventListener('cut', onCut)
       window.removeEventListener('paste', onPaste)
     }
   }, [canvasId])
