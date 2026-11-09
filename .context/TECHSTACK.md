@@ -349,6 +349,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
   something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
   read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
+- Cut (`cutSelection` in `src/lib/elementClipboard.ts`): ⌘X and the frame and element menus' Cut
+  copy the selection, then remove it the way ⌫ does (one undo step, locked frames and layers stay),
+  editors only and only once the copy landed. Tests: `cutSelection.test.ts`, the cut cases in
+  `elementContextMenuBrowser.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.
