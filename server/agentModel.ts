@@ -12,6 +12,7 @@ import type { StopReason, TurnBlock } from './openaiAgent.ts'
 import {
   deepseekConfig,
   geminiConfig,
+  kimiCodeConfig,
   kimiConfig,
   openrouterConfig,
   runChatCompletionsTurn,
@@ -212,6 +213,7 @@ const BYO_LABELS: Record<AccountKind, string> = {
   'gemini-key': 'Gemini',
   'deepseek-key': 'DeepSeek',
   'kimi-key': 'Kimi',
+  'kimi-code': 'Kimi Code',
 }
 
 /* the account kinds that run on the Chat Completions transport */
@@ -222,6 +224,7 @@ const CHAT_COMPLETIONS_CONFIGS: Partial<
   'gemini-key': geminiConfig,
   'deepseek-key': deepseekConfig,
   'kimi-key': kimiConfig,
+  'kimi-code': kimiCodeConfig,
 }
 
 /* the OpenAI-shaped transports take one system string; cache breakpoints are

@@ -215,7 +215,10 @@ describe('the request', () => {
       .mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] })))
     await runChatCompletionsTurn(deepseekConfig('sk-deep', 'deepseek-flash', true), req)
     await runChatCompletionsTurn(kimiConfig('sk-kimi', 'kimi-k3.1-pro', true), req)
-    const [[deepUrl, deepInit], [kimiUrl, kimiInit]] = fetchSpy.mock.calls as [string, RequestInit][]
+    const [[deepUrl, deepInit], [kimiUrl, kimiInit]] = fetchSpy.mock.calls as [
+      [string, RequestInit],
+      [string, RequestInit],
+    ]
     expect(String(deepUrl)).toBe('https://api.deepseek.com/chat/completions')
     expect((deepInit.headers as Record<string, string>).Authorization).toBe('Bearer sk-deep')
     expect(String(kimiUrl)).toBe('https://api.moonshot.ai/v1/chat/completions')

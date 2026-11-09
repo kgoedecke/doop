@@ -31,6 +31,7 @@ const PROVIDER_MARK: Partial<Record<RunnerProvider, Brand>> = {
   'openrouter-key': 'openrouter',
   'deepseek-key': 'deepseek',
   'kimi-key': 'kimi',
+  'kimi-code': 'kimi',
 }
 
 /* the effort ids stay as sent to the server; only their names are translated */

@@ -143,6 +143,27 @@ export const KIMI_MODELS: ModelOption[] = [
 
 export const DEFAULT_KIMI_MODEL = 'kimi-k3.1-pro'
 
+/** Kimi Code (a key from a Kimi membership's Kimi Code console, billed to the
+ *  membership). Its own endpoint and ids, per kimi.com/code/docs; the K3
+ *  tiers are the platform's, which see images. */
+export const KIMI_CODE_MODELS: ModelOption[] = [
+  {
+    id: 'k3.1-pro',
+    name: 'Kimi K3.1 Pro',
+    blurb: 'Moonshot’s flagship, on your membership.',
+    vision: true,
+  },
+  {
+    id: 'k3.1-pro-highspeed',
+    name: 'Kimi K3.1 Pro Highspeed',
+    blurb: 'The flagship, faster; uses the plan’s quota quicker.',
+    vision: true,
+  },
+  { id: 'k3', name: 'Kimi K3', blurb: 'The previous flagship, still dependable.', vision: true },
+]
+
+export const DEFAULT_KIMI_CODE_MODEL = 'k3.1-pro'
+
 /**
  * The image-model registry. `provider` names the credential family that can
  * run it — imageGen resolves a generator per provider (user account first,
@@ -243,6 +264,7 @@ export const ACCOUNT_KIND_LABELS = {
   'gemini-key': 'Gemini',
   'deepseek-key': 'DeepSeek',
   'kimi-key': 'Kimi',
+  'kimi-code': 'Kimi Code',
 } as const
 
 export type AccountKindName = keyof typeof ACCOUNT_KIND_LABELS

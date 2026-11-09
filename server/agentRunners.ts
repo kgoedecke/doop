@@ -22,6 +22,7 @@ import {
   ANTHROPIC_MODELS,
   DEEPSEEK_MODELS,
   GEMINI_MODELS,
+  KIMI_CODE_MODELS,
   KIMI_MODELS,
   OPENROUTER_MODELS,
   reasoningEffortOptions,
@@ -38,6 +39,7 @@ export const MODEL_MENUS: Record<AccountKind, ModelOption[]> = {
   'gemini-key': GEMINI_MODELS,
   'deepseek-key': DEEPSEEK_MODELS,
   'kimi-key': KIMI_MODELS,
+  'kimi-code': KIMI_CODE_MODELS,
 }
 
 export async function listRunners(userId: string): Promise<AgentRunners> {

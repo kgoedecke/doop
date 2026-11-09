@@ -9,6 +9,7 @@ import {
   DEEPSEEK_MODELS,
   DEFAULT_ANTHROPIC_MODEL,
   GEMINI_MODELS,
+  KIMI_CODE_MODELS,
   KIMI_MODELS,
   OPENROUTER_MODELS,
   isReasoningEffort,
@@ -61,7 +62,14 @@ const REDIRECT_URI = env.CHATGPT_OAUTH_REDIRECT_URI
 const AUTH_USER_AGENT = env.CHATGPT_AUTH_USER_AGENT
 
 export type AccountKind =
-  'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key'
+  | 'chatgpt'
+  | 'openai-key'
+  | 'anthropic-key'
+  | 'openrouter-key'
+  | 'gemini-key'
+  | 'deepseek-key'
+  | 'kimi-key'
+  | 'kimi-code'
 
 const ACCOUNT_KINDS: readonly string[] = [
   'chatgpt',
@@ -71,6 +79,7 @@ const ACCOUNT_KINDS: readonly string[] = [
   'gemini-key',
   'deepseek-key',
   'kimi-key',
+  'kimi-code',
 ] satisfies AccountKind[]
 
 export interface ModelAccount {
@@ -183,6 +192,7 @@ const DEFAULT_OPENROUTER = env.DOOP_AGENT_OPENROUTER_MODEL
 const DEFAULT_GEMINI = env.DOOP_AGENT_GEMINI_MODEL
 const DEFAULT_DEEPSEEK = env.DOOP_AGENT_DEEPSEEK_MODEL
 const DEFAULT_KIMI = env.DOOP_AGENT_KIMI_MODEL
+const DEFAULT_KIMI_CODE = env.DOOP_AGENT_KIMI_CODE_MODEL
 
 /* the kinds whose menu is a hand-checked roster and nothing else: the roster's
    vision flags are all the run-time check knows about their models */
@@ -190,6 +200,7 @@ const ROSTERS: Partial<Record<AccountKind, ModelOption[]>> = {
   'openrouter-key': OPENROUTER_MODELS,
   'deepseek-key': DEEPSEEK_MODELS,
   'kimi-key': KIMI_MODELS,
+  'kimi-code': KIMI_CODE_MODELS,
 }
 
 function rosterPolicy(roster: ModelOption[], fallback: string) {
@@ -224,6 +235,7 @@ const MODEL_POLICY: Record<AccountKind, { resolve(model?: string): string; isKno
   /* DeepSeek and Kimi too: their catalogs list ids without saying which see images */
   'deepseek-key': rosterPolicy(DEEPSEEK_MODELS, DEFAULT_DEEPSEEK),
   'kimi-key': rosterPolicy(KIMI_MODELS, DEFAULT_KIMI),
+  'kimi-code': rosterPolicy(KIMI_CODE_MODELS, DEFAULT_KIMI_CODE),
 }
 
 export function accountModelFor(account: Pick<ModelAccount, 'kind' | 'model'>): string {
@@ -859,6 +871,11 @@ const KEY_SHAPES: Partial<Record<AccountKind, { test(key: string): boolean; hint
     test: (key) => key.startsWith('sk-') && key.length >= 20 && !/\s/.test(key),
     hint: 'That does not look like a Kimi API key (they start with "sk-")',
   },
+  'kimi-code': {
+    /* the Kimi Code console's format is not documented: one long token */
+    test: (key) => key.length >= 20 && !/\s/.test(key),
+    hint: 'That does not look like a Kimi Code key (copy it from the Kimi Code console)',
+  },
 }
 
 async function connectKey(userId: string, kind: AccountKind, apiKey: string): Promise<void> {
@@ -898,6 +915,10 @@ export function connectDeepSeekKey(userId: string, apiKey: string): Promise<void
 
 export function connectKimiKey(userId: string, apiKey: string): Promise<void> {
   return connectKey(userId, 'kimi-key', apiKey)
+}
+
+export function connectKimiCodeKey(userId: string, apiKey: string): Promise<void> {
+  return connectKey(userId, 'kimi-code', apiKey)
 }
 
 /* refreshes are per-user serialized: two runs starting together must not both

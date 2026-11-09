@@ -396,7 +396,7 @@ from the very next task: the free tier is a trial that gets people here, not a b
 first, and connecting stops costing the server anything from that moment. The connection is
 account-level, so it lives at **/settings** (Home → Settings); the free-tier wall links there rather
 than carrying its own copy, and "Connect an AI agent" on a canvas stays about MCP clients only. A
-user can connect seven kinds of account; the Gemini cloud pilot and Claude Plan appear only where
+user can connect eight kinds of account; the Gemini cloud pilot and Claude Plan appear only where
 the operator or the desktop app provides them:
 
 - **ChatGPT subscription** — OAuth against `auth.openai.com`, then inference through the Codex
@@ -415,6 +415,10 @@ the operator or the desktop app provides them:
 - **Kimi API key** — Moonshot's Kimi K3 models, all with vision, on the user's own
   platform.moonshot.ai account. A key from Moonshot's China platform needs an operator to point
   `KIMI_CHAT_URL` at `https://api.moonshot.cn/v1/chat/completions`.
+- **Kimi Code plan** — a Kimi membership (Plus and up) through a key from the Kimi Code console,
+  billed to the membership rather than per token. Its own endpoint (`KIMI_CODE_CHAT_URL`,
+  `api.kimi.ai/coding/v1` overseas) and ids (`k3.1-pro`, `k3.1-pro-highspeed`, `k3`); requests
+  name Doop in their `User-Agent`, as Kimi Code's terms ask of every third-party tool.
 - **Gemini cloud pilot** — an operator-managed prototype running the official Gemini CLI in an
   isolated worker using Google sign-in. Disabled by default; see the
   [pilot setup and verification guide](docs/gemini-cloud-pilot.md).
@@ -430,7 +434,7 @@ same list the Codex CLI reads, asked as `CHATGPT_CODEX_CLIENT_VERSION`), OpenAI'
 Anthropic's `/v1/models`, Gemini's `/v1beta/models`. A newly released model is on the menu
 without an upgrade; the curated entries above sit on top as recommendations, a curated tier the
 account cannot run is left off, and the curated menu alone is served if the provider cannot be
-reached. OpenRouter, DeepSeek and Kimi stay on their curated rosters, whose hand-checked vision
+reached. OpenRouter, DeepSeek, Kimi and Kimi Code stay on their curated rosters, whose hand-checked vision
 flags are what the run relies on. DeepSeek and Kimi return their reasoning as `reasoning_content`
 and refuse a tool-calling conversation that leaves it out, so the transport keeps it in the run's
 history and sends it back on every turn.
@@ -444,7 +448,7 @@ OpenAI, `gpt-6-astra` (the newest flagship; on a ChatGPT subscription it needs P
 OpenAI is still rolling it out per account), `gpt-5.6-sol` (flagship), `gpt-5.6-terra` (the default
 workhorse) or `gpt-5.6-luna` (cheap and fast). They are paying for it, so the choice is theirs;
 `DOOP_AGENT_OPENAI_MODEL`, `DOOP_AGENT_OPENROUTER_MODEL`, `DOOP_AGENT_GEMINI_MODEL`,
-`DOOP_AGENT_DEEPSEEK_MODEL` and `DOOP_AGENT_KIMI_MODEL` only set the default they start on. Note that
+`DOOP_AGENT_DEEPSEEK_MODEL`, `DOOP_AGENT_KIMI_MODEL` and `DOOP_AGENT_KIMI_CODE_MODEL` only set the default they start on. Note that
 `gpt-5.4` and `gpt-5.4-mini` retire from ChatGPT-authenticated Codex on **31 August 2026**, so
 pinning a 5.4 id via that env var will break the subscription path after that date.
 
@@ -499,6 +503,7 @@ own agent over MCP.
 | `DOOP_AGENT_GEMINI_MODEL`       | `gemini-3.7-flash`          | Default model on a connected Gemini key                                              |
 | `DOOP_AGENT_DEEPSEEK_MODEL`     | `deepseek-flash`            | Default model on a connected DeepSeek key                                            |
 | `DOOP_AGENT_KIMI_MODEL`         | `kimi-k3.1-pro`             | Default model on a connected Kimi key                                                |
+| `DOOP_AGENT_KIMI_CODE_MODEL`    | `k3.1-pro`                  | Default model on a connected Kimi Code plan                                          |
 | `CHATGPT_CONNECT_DISABLED`      | _unset_                     | `1` hides the ChatGPT flow, leaving the API-key path                                 |
 | `DOOP_DISTILL_MODEL`            | `claude-haiku-4-5-20251001` | Model for the guideline distiller                                                    |
 

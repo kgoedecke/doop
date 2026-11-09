@@ -21,6 +21,7 @@ export const models = {
   geminiKeyShort: 'Gemini, plus Nano Banana images',
   deepseekKeyShort: 'DeepSeek V4, with your own key',
   kimiKeyShort: 'Kimi K3, with your own key',
+  kimiCodeShort: 'Your Kimi membership, through a Kimi Code key',
   claudeKeyShort: 'Pay per token, runs on Doop’s server',
   claudePlanShort: 'Your Claude subscription, on this Mac',
   downloadShort: 'Get the app',
@@ -85,6 +86,8 @@ export const models = {
   geminiKeyTitle: 'Gemini API key',
   deepseekKeyTitle: 'DeepSeek API key',
   kimiKeyTitle: 'Kimi API key',
+  kimiCodeTitle: 'Kimi Code plan',
+  kimiCodePlaceholder: 'Key from the Kimi Code console',
   claudeKeyTitle: 'Claude API key',
 
   /* LocalClaude */

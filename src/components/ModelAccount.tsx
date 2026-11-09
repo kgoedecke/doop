@@ -126,6 +126,7 @@ const KEY_CONNECTS: Partial<Record<ModelAccountKind, (apiKey: string) => Promise
   'gemini-key': api.connectGeminiKey,
   'deepseek-key': api.connectDeepSeekKey,
   'kimi-key': api.connectKimiKey,
+  'kimi-code': api.connectKimiCodeKey,
 }
 
 const PLAN_NAMES: Record<string, string> = {
@@ -745,6 +746,13 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
       short: t('models.kimiKeyShort'),
       mark: <AppIcon brand="kimi" />,
       placeholder: 'sk-…',
+    }),
+    keyRow({
+      kind: 'kimi-code',
+      title: t('models.kimiCodeTitle'),
+      short: t('models.kimiCodeShort'),
+      mark: <AppIcon brand="kimi" />,
+      placeholder: t('models.kimiCodePlaceholder'),
     }),
     /* the Plan's row decides for itself whether it is a row or a card; the
        pane only needs to know which part it belongs in */

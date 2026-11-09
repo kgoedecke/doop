@@ -20,6 +20,7 @@ const claudeView = {
     'gemini-key': [],
     'deepseek-key': [],
     'kimi-key': [],
+    'kimi-code': [],
   },
 }
 vi.mock('../src/lib/auth', () => ({ authClient: { useSession: () => ({ data: { user: { id: 'alice' } } }) } }))

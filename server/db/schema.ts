@@ -625,7 +625,7 @@ export const modelAccounts = pgTable(
   'model_accounts',
   {
     userId: text('user_id').notNull(),
-    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' */
+    /** 'chatgpt' (subscription, OAuth) | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key' | 'kimi-code' */
     kind: text('kind').notNull(),
     /** off keeps the credential but takes the account out of the composer and the default */
     enabled: boolean('enabled').notNull().default(true),

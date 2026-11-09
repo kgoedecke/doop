@@ -150,7 +150,14 @@ export interface Allowance {
 }
 
 export type ModelAccountKind =
-  'chatgpt' | 'openai-key' | 'anthropic-key' | 'openrouter-key' | 'gemini-key' | 'deepseek-key' | 'kimi-key'
+  | 'chatgpt'
+  | 'openai-key'
+  | 'anthropic-key'
+  | 'openrouter-key'
+  | 'gemini-key'
+  | 'deepseek-key'
+  | 'kimi-key'
+  | 'kimi-code'
 
 /** An in-flight device sign-in: the user types `userCode` at `verificationUrl`
  *  and the server polls OpenAI until they approve. */
@@ -580,6 +587,8 @@ export const api = {
     req<ModelAccounts>('/api/model-account/deepseek-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   connectKimiKey: (apiKey: string) =>
     req<ModelAccounts>('/api/model-account/kimi-key', { method: 'POST', body: JSON.stringify({ apiKey }) }),
+  connectKimiCodeKey: (apiKey: string) =>
+    req<ModelAccounts>('/api/model-account/kimi-code', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   disconnectModelAccount: (kind: ModelAccountKind) =>
     req<ModelAccounts>(`/api/model-account/${kind}`, { method: 'DELETE' }),
   setAgentModel: (kind: ModelAccountKind, model: string) =>

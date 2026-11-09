@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import packageJson from '../package.json' with { type: 'json' }
 import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
@@ -19,7 +20,8 @@ import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAge
  *  - OpenRouter (a user's `sk-or-` key) — one key, many vendors' models;
  *  - Google Gemini (a user's AI Studio key), through Google's own
  *    OpenAI-compatibility endpoint;
- *  - DeepSeek and Kimi (Moonshot), whose own APIs speak Chat Completions.
+ *  - DeepSeek and Kimi (Moonshot), whose own APIs speak Chat Completions,
+ *    and Kimi Code, a Kimi membership's coding quota.
  *
  * Every URL is a fixed constant. Like the Azure transport, this module never
  * takes a user-supplied endpoint: a configurable base URL would be a
@@ -44,6 +46,7 @@ export const OPENROUTER_URL = env.OPENROUTER_CHAT_URL
 export const GEMINI_OPENAI_URL = env.GEMINI_OPENAI_CHAT_URL
 export const DEEPSEEK_URL = env.DEEPSEEK_CHAT_URL
 export const KIMI_URL = env.KIMI_CHAT_URL
+export const KIMI_CODE_URL = env.KIMI_CODE_CHAT_URL
 
 export const IMAGE_OMITTED_NOTE = '[image omitted — the selected model cannot view images]'
 
@@ -100,6 +103,19 @@ export function kimiConfig(apiKey: string, model: string, vision: boolean): Chat
     headers: { Authorization: `Bearer ${apiKey}` },
     model,
     label: 'Kimi',
+    vision,
+    echoReasoning: true,
+  }
+}
+
+export function kimiCodeConfig(apiKey: string, model: string, vision: boolean): ChatCompletionsConfig {
+  return {
+    url: KIMI_CODE_URL,
+    /* Kimi Code's terms ask every tool to name itself truthfully; a disguised
+       client can cost the member their plan */
+    headers: { Authorization: `Bearer ${apiKey}`, 'User-Agent': `Doop/${packageJson.version}` },
+    model,
+    label: 'Kimi Code',
     vision,
     echoReasoning: true,
   }

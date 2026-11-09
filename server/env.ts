@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import {
   DEFAULT_DEEPSEEK_MODEL,
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_KIMI_CODE_MODEL,
   DEFAULT_KIMI_MODEL,
   DEFAULT_OPENROUTER_MODEL,
 } from '../shared/modelMenu.ts'
@@ -167,6 +168,7 @@ const schema = {
   DOOP_AGENT_GEMINI_MODEL: str({ default: DEFAULT_GEMINI_MODEL }),
   DOOP_AGENT_DEEPSEEK_MODEL: str({ default: DEFAULT_DEEPSEEK_MODEL }),
   DOOP_AGENT_KIMI_MODEL: str({ default: DEFAULT_KIMI_MODEL }),
+  DOOP_AGENT_KIMI_CODE_MODEL: str({ default: DEFAULT_KIMI_CODE_MODEL }),
   /* JSON; parsed and shape-checked where it is used so a parse error never
      echoes the worker secrets it contains */
   DOOP_GEMINI_CLOUD_WORKERS: str({ default: undefined }),
@@ -193,6 +195,9 @@ const schema = {
   /* Moonshot's international platform; keys from platform.moonshot.cn need
      https://api.moonshot.cn/v1/chat/completions */
   KIMI_CHAT_URL: str({ default: 'https://api.moonshot.ai/v1/chat/completions' }),
+  /* Kimi Code, a membership's coding quota; China's is
+     https://api.kimi.com/coding/v1/chat/completions */
+  KIMI_CODE_CHAT_URL: str({ default: 'https://api.kimi.ai/coding/v1/chat/completions' }),
 
   /* ------------------------------------------------ image generation */
   OPENAI_API_KEY: str({ default: undefined }),

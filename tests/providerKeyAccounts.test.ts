@@ -65,10 +65,11 @@ it('stores DeepSeek and Kimi keys, each held to its own roster', async () => {
   for (const [kind, key, model, other] of [
     ['deepseek-key', 'sk-deepseekTestKeyLongEnough01', 'deepseek-flash', 'deepseek-v4-pro'],
     ['kimi-key', 'sk-kimiTestKeyLongEnoughToPass01', 'kimi-k3.1-pro', 'kimi-k3'],
+    ['kimi-code', 'sk-kimiCodeTestKeyLongEnough0001', 'k3.1-pro', 'k3'],
   ] as const) {
-    expect(
-      (await alice.post(`/api/model-account/${kind}`, { apiKey: 'AIzaNotThisProvidersKeyShape0123' })).status,
-    ).toBe(400)
+    expect((await alice.post(`/api/model-account/${kind}`, { apiKey: 'has spaces in it, long enough' })).status).toBe(
+      400,
+    )
     expect((await alice.post(`/api/model-account/${kind}`, { apiKey: 'sk-short' })).status).toBe(400)
     const response = await alice.post(`/api/model-account/${kind}`, { apiKey: key })
     expect(response.status).toBe(200)

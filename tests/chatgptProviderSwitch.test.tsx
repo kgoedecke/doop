@@ -47,6 +47,7 @@ const view = (accounts: { kind: string; enabled: boolean; plan?: string }[]) => 
     'gemini-key': [],
     'deepseek-key': [],
     'kimi-key': [],
+    'kimi-code': [],
   },
 })
 const keyOnly = view([{ kind: 'openai-key', enabled: true }])

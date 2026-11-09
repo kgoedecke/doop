@@ -81,11 +81,12 @@
   catalog, `CHATGPT_MODELS_URL`, asked with the account's token as Codex CLI
   `CHATGPT_CODEX_CLIENT_VERSION`; the route refreshes the token first) have loaders, each with a
   family filter for reasoning chat models with tools, images and a 16k output window; a picked id
-  only has to be shaped like the provider's, and the run is the final check. OpenRouter, DeepSeek
-  and Kimi stay on their curated rosters (the run-time vision check knows only the roster's flags).
-- DeepSeek and Kimi keys (`deepseek-key`, `kimi-key`) run on the Chat Completions transport
-  (`server/chatCompletionsAgent.ts`) against fixed URLs (`DEEPSEEK_CHAT_URL`, `KIMI_CHAT_URL`, an
-  operator's override only). Both refuse a tool-calling conversation that drops an earlier turn's
+  only has to be shaped like the provider's, and the run is the final check. OpenRouter, DeepSeek,
+  Kimi and Kimi Code stay on their curated rosters (the run-time vision check knows only the roster's flags).
+- DeepSeek and Kimi keys (`deepseek-key`, `kimi-key`) and the Kimi Code plan (`kimi-code`, a
+  Kimi membership's key, sent with a `Doop/<version>` User-Agent as Kimi Code's terms require)
+  run on the Chat Completions transport (`server/chatCompletionsAgent.ts`) against fixed URLs
+  (`DEEPSEEK_CHAT_URL`, `KIMI_CHAT_URL`, `KIMI_CODE_CHAT_URL`, an operator's override only). Both refuse a tool-calling conversation that drops an earlier turn's
   `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
   sends it back where the config sets `echoReasoning`. Tests: the `reasoning_content` cases in
   `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
