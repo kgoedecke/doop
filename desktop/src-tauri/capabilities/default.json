@@ -37,6 +37,8 @@
     "allow-server-status",
     "allow-server-choose",
     "allow-view-menu-state",
+    "allow-app-menu-set",
+    "allow-app-menu-state",
     "allow-update-card-ready",
     "allow-update-restart"
   ]

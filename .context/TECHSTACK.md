@@ -312,8 +312,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - View options (`src/lib/viewOptions.ts`, per browser under `doop:view-options`): the zoom pill's
   menu opens on a field for a typed level (`150`, `150%`; `parseZoomPercent`) and switches the
   pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
-  by `code` (`viewOptionForKey`). Hidden pins still show under the Comment tool and for a thread
-  that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
+  by `code` (registry actions `pixel-grid`, `comments`, `cursors`). Hidden pins still show under
+  the Comment tool and for a thread that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
@@ -359,6 +359,36 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   the brackets treat it as a frame, and ⌘A skips stack-locked shapes (`isStackLocked`). ↩ and Tab act only when no control has the keyboard (`isControlTarget`) and
   something is selected, so buttons, menus and the Layers tree keep theirs. The bracket chords are
   read by `code` too, since ⌥ changes the typed character on macOS. Tests: `selectionKeys.test.ts`.
+- Canvas commands (`src/lib/actions/`): every editor command is one entry in `registry.ts` (id,
+  label key in the `actions` catalog, menu and section, chords, `edit`, `enabled`, `checked`,
+  `run`), and the keyboard (`dispatchActionKey`, called first by `CanvasPage`'s keydown), the ⌘K
+  palette (`CommandPalette.tsx`, cmdk through `ui/command.tsx`; text that names no command goes to
+  the agent's composer as a prompt), the main menu off the bar's Doop mark (`MainMenu.tsx`: File,
+  Edit, View, Object, Text, Arrange, Help) and the ⌃⇧? sheet (`ShortcutsSheet.tsx`) all read it.
+  `CanvasPage` lends the registry its modals and panels as the `ActionHost`. Chords (`chords.ts`)
+  are `mod` (⌘ on a Mac, Ctrl elsewhere), ⌥ chords by `code`, `macOnly` / `notMac` per platform (⌘Y
+  is outlines on a Mac, redo elsewhere), `global` for the two that act from fields (⌘K palette, ⌘/
+  agent; a bare `/` opens the agent outside fields). A chord whose command is disabled or finds
+  nothing falls through to the browser. ⌫, Esc, ↩/Tab and the arrows stay in `CanvasPage`'s own
+  handler (their rules are shown, `hintOnly`). What the commands do lives in `edits.ts`: align /
+  distribute / tidy / pack (`arrange.ts`, pure geometry) move frames as one undo step
+  (`patchFrames`) and layers through the runtime's `move` geometry edit; ⌘G / ⌥⌘G wrap sibling
+  layers in a `div` (carrying a flex parent's flow; grid children are refused; a frame edited while
+  its layout is read is left alone) and ⇧⌘G / ⌘⌫ unwrap (`groupElements` / `ungroupElements` in
+  `layers.ts`); ⇧A makes a box a flex container, or wraps the pick in one, turning the space between
+  the layers into `gap` and dropping their flow margins so nothing moves; ⌥⌘C / ⌥⌘V copy and paste
+  computed looks (`doop:computed`), text styles only between text layers; ⇧⌘V / ⇧⌘R paste over or
+  replace the selection from the canvas clip (a frame goes only once all its replacements land; one
+  undo step, a single `transfer` (`replaceFramesTracked`), so undo never removes a replacement
+  before its original is back; tests in `replaceFrames.test.ts`); ⇧⌘U links (`setElementLink`: an
+  image or SVG is wrapped in the link, other layers' content is); ⌃C is the EyeDropper. ⌘F / ⌥⌘F is
+  the find bar (`FindBar.tsx`, `findText.ts`: text nodes only, locked layers found but never
+  replaced, replace-all is one undo step across frames). View toggles: ⇧' / ⇧C / ⌥⌘\ switch the view
+  options (pixel grid, comment pins, cursors), ⌘Y outline mode (an adopted sheet in each frame's
+  runtime, never saved or exported), ⌥L collapses the Layers tree. N / ⇧N zoom to the next frame in
+  reading order, Home / End bring it into view, PgUp / PgDn change page. Tests:
+  `actionRegistry.test.ts` (no chord bound twice per platform, nor over a tool key),
+  `actionChords.test.ts`, `arrange.test.ts`, `groupLayers.test.ts`, `findText.test.ts`.
 - `src/lib/tools.ts` defines bottom-toolbar tools and shortcuts. `Stage.tsx` delegates drawing
   gestures and world-space previews to `CanvasDrawing.tsx`; Space/middle-button panning takes
   precedence over drawing.

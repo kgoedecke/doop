@@ -14,6 +14,9 @@
       import { clearHistory, undo, redo } from '/src/lib/history.ts'
       import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
       import '/src/styles.css'
+      import { installActionKeys } from '/tests/fixtures/actionKeys.ts'
+      /* the canvas page dispatches the registry's chords (⇧R among them) */
+      installActionKeys()
       window.rulersHarness = {
         seed: (canvas) => {
           clearHistory()

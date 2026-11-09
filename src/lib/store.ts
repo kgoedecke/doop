@@ -20,6 +20,7 @@ import type {
 import { roleAllows, type CanvasRole } from '../../shared/canvasRole'
 import type { SnapGuide } from './snap'
 import { isDrawingTool, type Tool } from './tools'
+import { setOutlines } from './frameBridge'
 import { readViewOptions, writeViewOptions, type ViewOption, type ViewOptions } from './viewOptions'
 
 export interface Viewport {
@@ -122,6 +123,10 @@ interface State {
   viewOptions: ViewOptions
   /** the ruler guide clicked last, which Delete removes */
   selectedGuideId: string | null
+  /** ⌘Y — frames drawn as outlines, fills off; nothing is saved */
+  outlines: boolean
+  /** ⌥L asks the Layers panel to fold every row; it watches the stamp */
+  layersCollapseAt: number
   connected: boolean
   /** the join for the current canvasId was refused: no such canvas (deleted,
    *  or the id in the URL was never one) — CanvasPage shows a not-found
@@ -153,7 +158,7 @@ interface State {
    *  the Comments panel raises it; the FrameView that owns the root consumes it */
   threadRequest: { id: string; at: number } | null
   /** when the "Design it" composer in the Agents tab was last asked to take
-   *  focus (⌘K) — a timestamp, so a composer that mounts long after an old
+   *  focus (⌘/) — a timestamp, so a composer that mounts long after an old
    *  request does not grab the keyboard */
   composerFocusAt: number
   /** the composer's unsent text per canvas — collapsing the panel or
@@ -263,6 +268,8 @@ interface State {
   setSnapGuides(guides: SnapGuide[]): void
   toggleRulers(): void
   toggleViewOption(name: ViewOption): void
+  toggleOutlines(): void
+  requestCollapseLayers(): void
   selectGuide(id: string | null): void
   /** add or move (guide set) or remove (null) a ruler guide on the open canvas */
   setGuideLocal(id: string, guide: CanvasGuide | null): void
@@ -334,6 +341,8 @@ export const useStore = create<State>((set, get) => ({
   rulers: readRulers(),
   viewOptions: readViewOptions(),
   selectedGuideId: null,
+  outlines: false,
+  layersCollapseAt: 0,
   connected: false,
   canvasNotFound: false,
   signInRequired: false,
@@ -733,6 +742,12 @@ export const useStore = create<State>((set, get) => ({
       }
       return { rulers: !s.rulers, ...(s.rulers ? { selectedGuideId: null } : {}) }
     }),
+  toggleOutlines: () =>
+    set((s) => {
+      setOutlines(!s.outlines)
+      return { outlines: !s.outlines }
+    }),
+  requestCollapseLayers: () => set({ layersCollapseAt: Date.now() }),
   toggleViewOption: (name) =>
     set((s) => {
       const viewOptions = { ...s.viewOptions, [name]: !s.viewOptions[name] }

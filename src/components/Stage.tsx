@@ -52,7 +52,6 @@ import { layoutZoomFor } from '../lib/layoutZoom'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 import { NO_INSETS, fitBox, type StageInsets } from '../lib/viewFit'
 import { spaceWouldScroll } from '../lib/spaceScroll'
-import { viewOptionForKey } from '../lib/viewOptions'
 import { ZOOM_DRAG_MIN, ZOOM_TOOL_STEP, zoomAtPoint, zoomToBox } from '../lib/zoomTool'
 
 const MIN_ZOOM = 0.08
@@ -716,51 +715,11 @@ export function Stage({
     }
   }, [])
 
-  /* ⌘0 → 100%, ⌘+ / ⌘− → step zoom, all pivoting on the view center —
-     preventDefault keeps the browser's own page zoom out of it. ⇧1 / ⇧2 fit
-     everything / the selection and ⇧R shows or hides the rulers, as in Figma.
-     ⇧' / ⇧C / ⌘⌥\ switch the pixel grid, the comment pins and other people's
-     cursors (src/lib/viewOptions.ts). */
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const t = e.target as HTMLElement
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
-      const option = viewOptionForKey(e)
-      if (option) {
-        e.preventDefault()
-        if (!e.repeat) useStore.getState().toggleViewOption(option)
-        return
-      }
-      if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (e.key.toLowerCase() === 'r') {
-          e.preventDefault()
-          if (!e.repeat) useStore.getState().toggleRulers()
-          return
-        }
-        /* by code: ⇧1 types '!' on most layouts, so the key name is no use */
-        if (e.code !== 'Digit1' && e.code !== 'Digit2') return
-        e.preventDefault()
-        if (e.code === 'Digit1') fit()
-        else fitSelection()
-        return
-      }
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
-      if (e.key !== '0' && e.key !== '=' && e.key !== '+' && e.key !== '-') return
-      /* '+' arrives as ⇧= on most layouts; any other shifted combo isn't ours */
-      if (e.shiftKey && e.key !== '+') return
-      const el = ref.current
-      if (!el) return
-      e.preventDefault()
-      const zoom = useStore.getState().viewport.zoom
-      if (e.key === '0') zoomCentered(el, 1)
-      else if (e.key === '-') zoomCentered(el, zoom / 1.25)
-      else zoomCentered(el, zoom * 1.25)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [fit, fitSelection])
-
-  /* the same zooms from the desktop shell's View menu */
+  /* zooms by command: ⌘0 → 100%, ⌘+ / ⌘− step, ⇧1 / ⇧2 fit everything / the
+     selection, all pivoting on the view centre. (⇧R, ⇧' / ⇧C / ⌘⌥\ and the
+     other canvas chords live in the action registry.) The action registry sends the
+     keyboard's here (⌘ chords claimed so the browser's own page zoom stays out
+     of it), and the desktop shell's View menu its menu items. */
   useEffect(
     () =>
       onViewCommand((command) => {

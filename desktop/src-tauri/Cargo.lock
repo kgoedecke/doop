@@ -936,10 +936,12 @@ dependencies = [
 name = "doop-desktop"
 version = "0.13.0"
 dependencies = [
+ "objc2",
  "objc2-app-kit",
  "reqwest",
  "rfd",
  "rustls",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",

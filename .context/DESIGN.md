@@ -33,7 +33,11 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
   aliases). `--font-mono`: `'Geist Mono', ui-monospace, monospace` - values only (ids, sizes,
   numbers, key caps, code); the mono-uppercase caption voice is retired, captions and field labels
   are `text-caption` / `text-label` in sentence case. `--font-hero`: `'Hanken Grotesk'` Light - the
-  home greeting, and nothing else (loaded in `index.html`). There is no
+  home greeting, and nothing else (loaded in `index.html`). Every font stack lists `'Doop Keys'`
+  after its face: a 5 KB cut of the full Inter, inlined in `src/styles.css`, carrying only
+  the key symbols (⌘ ⌥ ⇧ ⌃ ⌫ ↩ ⇥ ⎋, arrows) the Google Fonts builds of Inter and Geist Mono drop, so
+  shortcut hints never fall back to the OS font's undersized glyphs. A new symbol in a hint goes
+  into its `unicode-range` and the subset (rebuild steps in `src/styles.css`). There is no
   serif: Instrument Serif was retired, and page-level headings outside the dashboard (sign-in,
   not-found, the desktop handoff) use `DashTitle` like every other page title.
 - **The scale** is named by role, as `--text-*` tokens in `src/styles.css` (each carries its line

@@ -2,7 +2,7 @@ import type { Frame } from '../../shared/types'
 import { api } from './api'
 import { useStore } from './store'
 import { posthog } from './posthog'
-import { recordCreates } from './history'
+import { historyEpoch, recordCreates, replaceFramesTracked } from './history'
 import { ELEMENT_CLIP_KEY, FRAME_CLIP_KEY as CLIP_KEY } from './clipboardKeys'
 import { stageViewportSize } from './framePlacement'
 import { importSvgInBrowser, looksLikeSvg } from './svgImport'
@@ -419,4 +419,95 @@ export function duplicateFrames(frames: Frame[]) {
   ).then((created) => {
     if (created.length) posthog.capture('frame_duplicated', { count: created.length })
   })
+}
+
+/** ⇧⌘V on frames: the copied frames centred over the selected ones. */
+export function pasteFramesOver(canvasId: string, over: Frame[]): boolean {
+  const frames = readClip()
+  if (!frames.length || !over.length) return false
+  const { width, height } = clipBounds(frames)
+  const left = Math.min(...over.map((f) => f.x))
+  const top = Math.min(...over.map((f) => f.y))
+  const right = Math.max(...over.map((f) => f.x + f.width))
+  const bottom = Math.max(...over.map((f) => f.y + f.height))
+  createFromClip(canvasId, (left + right) / 2 - width / 2, (top + bottom) / 2 - height / 2)
+  return true
+}
+
+/* the frame as the canvas holds it now */
+function liveFrame(id: string): Frame | undefined {
+  return useStore.getState().canvas?.frames.find((f) => f.id === id)
+}
+
+/** ⇧⌘R on frames: the copied frames land at each selected frame's top-left,
+ *  and each selected frame goes once all of its replacements have landed.
+ *  One whose replacements did not all land stays, and the copies that did
+ *  are taken back; any that cannot be taken back stay in the undo step, so
+ *  Undo still removes them. */
+export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boolean {
+  const frames = readClip()
+  const replaceable = targets.filter((f) => !f.locked)
+  if (!frames.length || !replaceable.length) return false
+  /* the canvas and history this replacement belongs to: left behind, it
+     must not land in another canvas's history */
+  const started = historyEpoch()
+  void Promise.all(
+    replaceable.map(async (target) => {
+      const results = await Promise.allSettled(
+        frames.map((f) =>
+          api.createFrame(canvasId, {
+            name: f.name,
+            html: f.html,
+            width: f.width,
+            height: f.height,
+            x: Math.round(target.x + f.x),
+            y: Math.round(target.y + f.y),
+            ...(f.rotation ? { rotation: f.rotation } : {}),
+          }),
+        ),
+      )
+      const created = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+      if (created.length === frames.length) return { target, created, leftovers: [] }
+      console.error(`replacing ${target.id}: ${frames.length - created.length} frame(s) failed`)
+      const removed = await Promise.allSettled(created.map((f) => api.deleteFrame(f.id)))
+      const leftovers = created.filter((_, i) => removed[i]?.status === 'rejected')
+      return { target, created: null, leftovers }
+    }),
+  ).then(async (outcomes) => {
+    const finished = outcomes.flatMap((o) => (o.created ? [{ target: o.target, created: o.created }] : []))
+    const leftovers = outcomes.flatMap((o) => o.leftovers)
+    if (!finished.length && !leftovers.length) return
+    const movedOn = () => useStore.getState().canvas?.id !== canvasId || historyEpoch() !== started
+    /* the person moved on (another canvas, history cleared): no undo step
+       could take this back, so the replacements go and the originals stay */
+    const dropAll = () => {
+      for (const f of finished.flatMap((o) => o.created)) api.deleteFrame(f.id).catch(console.error)
+    }
+    if (movedOn()) return dropAll()
+    /* a target a teammate edited while its replacements were made keeps that
+       edit, and its replacements go; a copy that cannot go stays in the undo
+       step, so Undo still takes it back */
+    const stale = finished.filter(({ target }) => liveFrame(target.id)?.updatedAt !== target.updatedAt)
+    const ready = finished.filter((o) => !stale.includes(o))
+    const staleCopies = stale.filter(({ target }) => liveFrame(target.id)).flatMap((o) => o.created)
+    const cleanup = await Promise.allSettled(staleCopies.map((f) => api.deleteFrame(f.id)))
+    leftovers.push(...staleCopies.filter((_, i) => cleanup[i]?.status === 'rejected'))
+    /* one deleted meanwhile has nothing left to remove: its copies stay */
+    leftovers.push(...stale.filter(({ target }) => !liveFrame(target.id)).flatMap((o) => o.created))
+    if (movedOn()) return dropAll()
+    /* read once more after the cleanup: a target edited during it keeps its
+       edit too, and its copies stay as plain copies */
+    const done: { target: Frame; created: Frame[] }[] = []
+    for (const { target, created } of ready) {
+      const now = liveFrame(target.id)
+      if (now?.updatedAt === target.updatedAt) done.push({ target: now, created })
+      else leftovers.push(...created)
+    }
+    const created = [...done.flatMap((o) => o.created), ...leftovers]
+    if (!created.length) return
+    replaceFramesTracked(done, leftovers)
+    useStore.getState().selectMany(created.map((f) => f.id))
+    posthog.capture('frame_pasted', { count: created.length })
+  })
+  return true
 }

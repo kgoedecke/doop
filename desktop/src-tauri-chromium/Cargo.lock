@@ -1221,6 +1221,7 @@ dependencies = [
  "reqwest",
  "rfd",
  "rustls",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",

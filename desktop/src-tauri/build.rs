@@ -25,6 +25,8 @@ fn main() {
             "server_status",
             "server_choose",
             "view_menu_state",
+            "app_menu_set",
+            "app_menu_state",
             "update_card_ready",
             "update_restart",
         ]));
