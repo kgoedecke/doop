@@ -70,7 +70,7 @@ it('opens on the agent picker and walks to an agent’s own steps and back', asy
   await mount('c1')
   expect(text()).toContain('Choose your agent')
   expect(text()).not.toContain('Connect your plan')
-  expect(buttons().filter((b) => b.dataset.slot === 'choice-row')).toHaveLength(7)
+  expect(buttons().filter((b) => b.dataset.slot === 'choice-row')).toHaveLength(8)
 
   await pickAgent('Codex')
   expect(mocks.capture).toHaveBeenCalledWith('connect_ai_agent_chosen', { agent: 'codex' })
@@ -219,3 +219,14 @@ it.each(['https://doop.design', 'http://localhost:4301'])(
     expect(document.querySelector('a[download]')).toBeNull()
   },
 )
+
+it('connects OpenCode over OAuth, through opencode.jsonc and opencode mcp auth', async () => {
+  await mount('c1')
+  await pickAgent('OpenCode')
+  expect(mocks.capture).toHaveBeenCalledWith('connect_ai_agent_chosen', { agent: 'opencode' })
+  expect(text()).toContain('Connect OpenCode')
+  expect(text()).toContain('"type": "remote"')
+  expect(text()).toContain(`"url": "${location.origin}/mcp"`)
+  expect(text()).toContain('opencode mcp auth doop')
+  expect(text()).toContain('Work on Doop canvas c1.')
+})

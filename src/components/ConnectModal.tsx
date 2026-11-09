@@ -23,13 +23,13 @@ import { isDesktopShell } from '../lib/shell'
 
 /**
  * "Connect AI" is about agents that join the canvas from outside: Claude Code,
- * Codex, Cursor, the Claude or ChatGPT apps, or any MCP client. Pick the agent,
+ * Codex, Cursor, OpenCode, the Claude or ChatGPT apps, or any MCP client. Pick the agent,
  * then follow its own three steps. Running the built-in Doop Agent on your own
  * ChatGPT or Claude plan is an account setting and lives in Settings, next to
  * the prompt bar's allowance meter — not here.
  */
 
-type AgentId = 'claude-code' | 'claude' | 'chatgpt' | 'codex' | 'cursor' | 'mcp' | 'headless'
+type AgentId = 'claude-code' | 'claude' | 'chatgpt' | 'codex' | 'cursor' | 'opencode' | 'mcp' | 'headless'
 type View = 'agents' | AgentId
 type ClaudeConnection = 'desktop' | 'web'
 /** how a generic MCP client signs in: a person approves it in a browser, or it sends an agent key */
@@ -49,6 +49,7 @@ const AGENTS: AgentOption[] = [
   { id: 'chatgpt', name: 'ChatGPT', blurb: 'connect.blurbChatgpt', icon: 'openai' },
   { id: 'codex', name: 'Codex', blurb: 'connect.blurbCodex', icon: 'codex' },
   { id: 'cursor', name: 'Cursor', blurb: 'connect.blurbCursor', icon: 'cursor' },
+  { id: 'opencode', name: 'OpenCode', blurb: 'connect.blurbOpencode', icon: 'opencode' },
   { id: 'mcp', nameKey: 'connect.otherClientName', blurb: 'connect.blurbOtherClient', icon: 'mcp' },
   { id: 'headless', nameKey: 'connect.headlessName', blurb: 'connect.blurbHeadless', icon: 'headless' },
 ]
@@ -367,6 +368,29 @@ function agentSteps(
             ...pointAt,
             body: prompt ? t('connect.cursorPointWithPrompt') : t('connect.cursorPointNoPrompt'),
           },
+        ],
+      }
+    case 'opencode':
+      return {
+        lede: t('connect.opencodeLede'),
+        steps: [
+          {
+            title: t('connect.claudeCodeAddTitle'),
+            body: (
+              <>
+                {t('connect.opencodeAddBefore')}
+                <code>opencode.jsonc</code>
+                {t('connect.opencodeAddAfter')}
+              </>
+            ),
+            code: JSON.stringify({ mcp: { servers: { doop: { type: 'remote', url: mcpUrl } } } }, null, 2),
+          },
+          {
+            title: t('connect.opencodeSignInTitle'),
+            body: t('connect.opencodeSignInBody'),
+            code: 'opencode mcp auth doop',
+          },
+          pointAt,
         ],
       }
     case 'headless':

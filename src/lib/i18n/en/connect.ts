@@ -5,6 +5,7 @@ export const connect = {
   blurbChatgpt: 'Connect in your browser',
   blurbCodex: 'ChatGPT desktop and Codex CLI',
   blurbCursor: 'Add Doop to Cursor',
+  blurbOpencode: 'Connect from your terminal',
   otherClientName: 'Other MCP client',
   headlessName: 'Headless agent or server',
   blurbHeadless: 'n8n, Mastra, CI and scripts, with an agent key',
@@ -90,6 +91,12 @@ export const connect = {
     'Enable the doop server in Cursor and complete its browser sign-in. Your agent can then work on the canvases you can access.',
   cursorPointWithPrompt: 'Open the Agent chat and send this as your first message.',
   cursorPointNoPrompt: 'Open the Agent chat and tell it which canvas to work on.',
+
+  opencodeLede: 'Three steps, about a minute. OpenCode then designs on this canvas as you.',
+  opencodeAddBefore: 'Add this to your ',
+  opencodeAddAfter: ' (the project’s, or the global one in ~/.config/opencode).',
+  opencodeSignInTitle: 'Sign in from your terminal',
+  opencodeSignInBody: 'Run this once. A browser tab opens so you can approve the connection.',
 
   mcpLede: 'Doop is a streamable-HTTP MCP server with OAuth. Any client that supports that can design here.',
   mcpConfigTitle: "Add this server to your client's MCP config",

@@ -75,7 +75,8 @@ tasks. **Connect AI** in the top bar walks you through each one.
 | Codex (CLI and desktop)                      | `codex mcp add`, OAuth in the browser ([setup](#connect-an-ai-agent))           |
 | ChatGPT                                      | A custom MCP server in ChatGPT, guided by **Connect AI → ChatGPT**              |
 | Cursor                                       | **Add to Cursor** in Connect AI                                                 |
-| OpenCode, VS Code Copilot, OpenClaw and more | Any MCP client, over OAuth or with an agent key ([setup](#connect-an-ai-agent)) |
+| OpenCode                                     | `opencode.jsonc`, then `opencode mcp auth doop` (OAuth in the browser)          |
+| VS Code Copilot, OpenClaw, Windsurf and more | Any MCP client, over OAuth or with an agent key ([setup](#connect-an-ai-agent)) |
 | Headless agents (n8n, Mastra, CI)            | An agent key as a bearer header ([setup](#headless-agents-agent-keys))          |
 
 No agent of your own? The built-in [Doop Agent](#the-doop-agent) runs on the model account you
