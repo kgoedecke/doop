@@ -24,6 +24,7 @@ import {
   type StylePatch,
 } from '../frameBridge'
 import {
+  ancestorsOf,
   buildLayerTree,
   elementPath,
   findLayer,
@@ -279,10 +280,15 @@ function unchangedFrame(picked: Frame): Frame | null {
   return null
 }
 
-/* The path of the box around `selector`, or null for a root it has none for. */
-function parentPath(selector: string): string | null {
-  const at = selector.lastIndexOf(' > ')
-  return at === -1 ? null : selector.slice(0, at)
+/* Where the layer at `selector` sits: the row holding it (null for a root
+   layer) and the rows beside it, itself included. Walked on the tree rather
+   than read off the selector, since a path anchored on an #id says nothing
+   about the elements above that id. Null when the selector is not a layer. */
+function placeOf(tree: LayerNode[], selector: string): { parent: LayerNode | null; siblings: LayerNode[] } | null {
+  const above = ancestorsOf(tree, selector)
+  if (!above) return null
+  const parent = above.at(-1) ?? null
+  return { parent, siblings: parent ? parent.children : tree }
 }
 
 /** How a new box must lay out what it takes from `parent` so nothing moves:
@@ -314,7 +320,8 @@ async function inheritedLayout(frameId: string, parent: string | null): Promise<
 }
 
 async function groupKeepingLayout(p: Picked, name: string) {
-  const style = await inheritedLayout(p.frame.id, parentPath(p.selectors[0]!))
+  const parent = placeOf(buildLayerTree(p.frame.html), p.selectors[0]!)?.parent
+  const style = await inheritedLayout(p.frame.id, parent?.selector ?? null)
   if (style === null) {
     notice(t('actions.groupGridFailed'))
     return
@@ -615,12 +622,9 @@ export function selectInverse(): boolean {
   const p = pickedLayers()
   if (p && !p.standalone) {
     const primary = s.selectedElement!.selector
-    const tree = buildLayerTree(p.frame.html)
-    const node = findLayer(tree, primary)
-    if (!node) return false
-    const parentPath = primary.includes(' > ') ? primary.slice(0, primary.lastIndexOf(' > ')) : null
-    const siblings = parentPath ? (findLayer(tree, parentPath)?.children ?? tree) : tree
-    const others = siblings.filter((n) => !n.locked && !p.selectors.includes(n.selector)).map((n) => n.selector)
+    const place = placeOf(buildLayerTree(p.frame.html), primary)
+    if (!place) return false
+    const others = place.siblings.filter((n) => !n.locked && !p.selectors.includes(n.selector)).map((n) => n.selector)
     /* everything was picked: its inverse is nothing */
     if (!others.length) s.select(null)
     else s.pickElements(p.frame.id, others)
@@ -662,11 +666,9 @@ export function hideOthers(): boolean {
   const s = useStore.getState()
   const p = pickedLayers()
   if (p && !p.standalone) {
-    const tree = buildLayerTree(p.frame.html)
-    const primary = s.selectedElement!.selector
-    const parentPath = primary.includes(' > ') ? primary.slice(0, primary.lastIndexOf(' > ')) : null
-    const siblings = parentPath ? (findLayer(tree, parentPath)?.children ?? tree) : tree
-    const others = siblings
+    const place = placeOf(buildLayerTree(p.frame.html), s.selectedElement!.selector)
+    if (!place) return false
+    const others = place.siblings
       .filter((n) => !p.selectors.includes(n.selector) && isElementHidden(p.frame.html, n.selector) === false)
       .map((n) => n.selector)
     return others.length > 0 && setLayersHidden(p.frame, others, true)

@@ -349,7 +349,16 @@ export const ACTIONS: readonly CanvasAction[] = [
     enabled: canPickColor,
     run: () => void pickColor(),
   },
-  { id: 'select-all', label: 'actions.selectAll', menu: 'edit', section: 5, keys: [mod('a')], run: () => selectAll() },
+  {
+    id: 'select-all',
+    label: 'actions.selectAll',
+    menu: 'edit',
+    section: 5,
+    keys: [mod('a')],
+    /* claimed even when everything is already selected: left to the browser,
+       a second ⌘A would select the editor's own text and controls */
+    run: () => void selectAll(),
+  },
   {
     id: 'select-none',
     label: 'actions.selectNone',

@@ -127,6 +127,14 @@ describe('dispatchActionKey', () => {
     expect(host.openPalette).not.toHaveBeenCalled()
   })
 
+  it('keeps ⌘A from the browser when everything is already selected', () => {
+    for (let i = 0; i < 2; i++) {
+      const e = keyEvent('a', { metaKey: true })
+      expect(dispatchActionKey(e, false, true)).toBe(true)
+      expect(e.preventDefault).toHaveBeenCalled()
+    }
+  })
+
   it('leaves a chord to the browser when its command has nothing to act on', () => {
     /* ⌘G with nothing picked: the group command is disabled */
     const e = keyEvent('g', { metaKey: true }, 'KeyG')

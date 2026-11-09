@@ -469,16 +469,28 @@ export function replaceFramesWithClip(canvasId: string, targets: Frame[]): boole
       return { target, created: null, leftovers }
     }),
   ).then((outcomes) => {
-    const done = outcomes.flatMap((o) => (o.created ? [{ target: o.target, created: o.created }] : []))
+    const finished = outcomes.flatMap((o) => (o.created ? [{ target: o.target, created: o.created }] : []))
     const leftovers = outcomes.flatMap((o) => o.leftovers)
-    const created = done.flatMap((o) => o.created)
-    if (!created.length && !leftovers.length) return
+    if (!finished.length && !leftovers.length) return
     if (useStore.getState().canvas?.id !== canvasId || historyEpoch() !== started) {
       /* the person moved on (another canvas, history cleared): no undo step
          could take this back, so the replacements go and the originals stay */
-      for (const f of created) api.deleteFrame(f.id).catch(console.error)
+      for (const f of finished.flatMap((o) => o.created)) api.deleteFrame(f.id).catch(console.error)
       return
     }
+    /* each target as it is now: one edited while its replacements were made
+       keeps that edit, and its replacements go; one deleted meanwhile has
+       nothing left to remove, so its replacements stay as plain copies */
+    const live = new Map((useStore.getState().canvas?.frames ?? []).map((f) => [f.id, f]))
+    const done: { target: Frame; created: Frame[] }[] = []
+    for (const { target, created } of finished) {
+      const now = live.get(target.id)
+      if (!now) leftovers.push(...created)
+      else if (now.updatedAt === target.updatedAt) done.push({ target: now, created })
+      else for (const f of created) api.deleteFrame(f.id).catch(console.error)
+    }
+    const created = [...done.flatMap((o) => o.created), ...leftovers]
+    if (!created.length) return
     replaceFramesTracked(done, leftovers)
     if (created.length) {
       useStore.getState().selectMany(created.map((f) => f.id))
