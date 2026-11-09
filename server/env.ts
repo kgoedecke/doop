@@ -110,6 +110,13 @@ const schema = {
   /* unset = embedded Postgres (PGlite) under ./data/pg */
   DATABASE_URL: str({ default: undefined }),
 
+  /* ------------------------------------------------- canvas actors */
+  /* the Terse actor API for canvases made by owners with the canvas-actors
+     feature flag (server/actorFrames.ts). Unset, no canvas uses an actor and
+     the flag does nothing. The generated client (generated/actors) reads both. */
+  TERSE_ACTOR_URL: str({ default: undefined }),
+  TERSE_API_KEY: str({ default: undefined }),
+
   /* ---------------------------------------------------------- auth */
   BETTER_AUTH_SECRET: str({
     devDefault: 'doop-dev-secret-not-for-production',

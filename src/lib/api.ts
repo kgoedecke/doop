@@ -1,4 +1,5 @@
 import { useStore } from './store'
+import { actorTakes, editOnActor } from './actorFrames'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
@@ -514,6 +515,16 @@ export const api = {
   updateFrame: async (frameId: string, patch: Partial<Frame>, expectedUpdatedAt?: number) => {
     const finish = ['html', 'width', 'height'].some((key) => key in patch) ? beginFrameSave(frameId) : () => {}
     try {
+      /* canvas-actors: on a canvas on an actor the edit goes straight there;
+         if that fails, the app API below saves it the usual way */
+      const canvas = useStore.getState().canvas
+      if (canvas?.frameStore === 'actor' && actorTakes(patch, expectedUpdatedAt)) {
+        try {
+          return await editOnActor(canvas.id, frameId, patch)
+        } catch (error) {
+          console.warn('[canvas actors] direct edit failed; saving through the app', error)
+        }
+      }
       return await req<Frame>('/api/frames/' + frameId, {
         method: 'PATCH',
         body: JSON.stringify({ ...patch, expectedUpdatedAt, actor: actor() }),
