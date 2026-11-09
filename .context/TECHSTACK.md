@@ -298,7 +298,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   float32 whose inverse multiplies back to exactly 1, since engines multiply zoom in float32.
   WebKit (the desktop app) rasterizes a composited layer at its CSS size, so a transform-only
   scale went soft past 100%. Both engines tile what is on screen, so backing memory follows the
-  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%). Frame
+  viewport, not k. From 300% a 1px pixel grid fades in over the frames (full at 500%): the
+  Stage draws it over the bare paper, under the world, and each frame draws its own over its
+  document and under its chrome (`PixelGrid.tsx`, faded by `--pixel-grid`), so pins, threads,
+  grips, cursors and guides stay above it. Tests: `pixelGridBrowser.test.ts`. Frame
   names sit inside their frame, counter-scaled by `--zoom`, so they keep size and gap at every
   zoom and stack with their own frame (a later frame covers an earlier frame's name, never the
   reverse). The selected frame's size badge lives in a screen-space layer (`FrameLabelLayer`),
